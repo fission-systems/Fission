@@ -113,7 +113,9 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         // shape, not before.
         changed |= switch_recovery::recover_switch_from_select_decision_tree(&mut func.body);
         // `if (c) { return a; } return b;` → `return c ? a : b` (pure values).
-        changed |= fold_if_return_fallthrough_return(&mut func.body);
+        let mut fallthrough_goto_targets = HashSet::new();
+        goto_recovery::collect_goto_targets(&func.body, &mut fallthrough_goto_targets);
+        changed |= fold_if_return_fallthrough_return(&mut func.body, &fallthrough_goto_targets);
         // `x = seed; if (c) { x = a; }` → `x = c ? a : seed` (pure; empty else).
         changed |= fold_seed_if_overwrite_assign(&mut func.body);
         // Drop empty `else {}` arms after other folds.
@@ -1287,7 +1289,10 @@ fn fold_if_else_pure_same_var_assign(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 /// `if (c) { return a; } return b;` → `return c ? a : b` when operands are pure.
-fn fold_if_return_fallthrough_return(stmts: &mut Vec<HirStmt>) -> bool {
+fn fold_if_return_fallthrough_return(
+    stmts: &mut Vec<HirStmt>,
+    goto_targets: &HashSet<String>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -1295,21 +1300,21 @@ fn fold_if_return_fallthrough_return(stmts: &mut Vec<HirStmt>) -> bool {
             | HirStmt::While { body: b, .. }
             | HirStmt::DoWhile { body: b, .. }
             | HirStmt::For { body: b, .. } => {
-                changed |= fold_if_return_fallthrough_return(b);
+                changed |= fold_if_return_fallthrough_return(b, goto_targets);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= fold_if_return_fallthrough_return(then_body);
-                changed |= fold_if_return_fallthrough_return(else_body);
+                changed |= fold_if_return_fallthrough_return(then_body, goto_targets);
+                changed |= fold_if_return_fallthrough_return(else_body, goto_targets);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= fold_if_return_fallthrough_return(&mut case.body);
+                    changed |= fold_if_return_fallthrough_return(&mut case.body, goto_targets);
                 }
-                changed |= fold_if_return_fallthrough_return(default);
+                changed |= fold_if_return_fallthrough_return(default, goto_targets);
             }
             _ => {}
         }
@@ -1343,8 +1348,19 @@ fn fold_if_return_fallthrough_return(stmts: &mut Vec<HirStmt>) -> bool {
             continue;
         }
         let mut j = i + 1;
-        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
+        let mut skips_goto_target = false;
+        while j < stmts.len() {
+            let HirStmt::Label(label) = &stmts[j] else {
+                break;
+            };
+            skips_goto_target |= goto_targets.contains(label);
             j += 1;
+        }
+        // The fold drops these labels; a `goto` elsewhere in the function that
+        // still targets one of them would be left dangling.
+        if skips_goto_target {
+            i += 1;
+            continue;
         }
         let Some(HirStmt::Return(Some(else_ret))) = stmts.get(j) else {
             i += 1;
@@ -3637,6 +3653,54 @@ mod tests {
         assert!(
             code.contains("switch (param_1)"),
             "a break captured by a nested loop must not block recovery:\n{code}"
+        );
+    }
+
+    #[test]
+    fn hir_presentation_keeps_a_label_that_a_goto_outside_its_block_still_targets() {
+        // `L` sits in the `then` arm next to its `return`; the second `goto L`
+        // is outside that arm. Rewriting the in-arm `goto` must not delete `L`,
+        // or the outer `goto` has nowhere to go. The pass-end invariant check
+        // would then catch the dangling `goto` and throw the whole function's
+        // polish away (restoring the pre-polish tree), so the observable
+        // difference is whether the in-arm `goto` was rewritten at all.
+        let mut func = HirFunction {
+            name: "outer_goto".into(),
+            params: vec![param("param_1"), param("param_2")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![
+                HirStmt::If {
+                    cond: eq_const("param_1", 1),
+                    then_body: vec![
+                        HirStmt::If {
+                            cond: eq_const("param_2", 2),
+                            then_body: vec![HirStmt::Goto("L".into())],
+                            else_body: vec![],
+                        },
+                        HirStmt::Label("L".into()),
+                        HirStmt::Return(Some(HirExpr::Var("param_2".into()))),
+                    ],
+                    else_body: vec![],
+                },
+                HirStmt::If {
+                    cond: eq_const("param_1", 3),
+                    then_body: vec![HirStmt::Goto("L".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true)))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            !code.contains("goto L") || code.contains("L:"),
+            "a goto to L survives but the label was deleted:\n{code}"
+        );
+        assert!(
+            !code.contains("if (param_2 == 2) goto L"),
+            "the in-arm goto should have become a return; the polish was discarded:\n{code}"
         );
     }
 

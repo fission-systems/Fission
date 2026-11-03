@@ -177,6 +177,80 @@ fn collapse_loop_exit_alias_return_rejects_rhs_mutated_after_copy() {
     assert!(!collapse_loop_exit_alias_returns(&mut stmts));
 }
 
+fn exit_alias_loop(prefix: Vec<PreHirStmt>, suffix: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+    // do { <prefix>; exit_sum = sum; <suffix> } while (keep_going); return exit_sum;
+    let mut body = prefix;
+    body.push(PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("exit_sum".to_string()),
+        rhs: PreHirExpr::Var("sum".to_string()),
+    });
+    body.extend(suffix);
+    vec![
+        PreHirStmt::DoWhile {
+            body: body.into(),
+            cond: PreHirExpr::Var("keep_going".to_string()),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("exit_sum".to_string()))),
+    ]
+}
+
+fn bump_sum() -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("sum".to_string()),
+        rhs: PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("sum".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, int(32))),
+            ty: int(32),
+        },
+    }
+}
+
+fn early_exit_before_copy(exit: PreHirStmt) -> PreHirStmt {
+    // if (done) <exit>;
+    PreHirStmt::If {
+        cond: PreHirExpr::Var("done".to_string()),
+        then_body: vec![exit].into(),
+        else_body: vec![].into(),
+    }
+}
+
+#[test]
+fn collapse_loop_exit_alias_return_rejects_an_exit_before_the_copy() {
+    // `sum` changes, then `break` leaves before `exit_sum = sum` ran: exit_sum
+    // still holds the previous iteration's `sum`, so `return sum` is wrong.
+    for exit in [
+        PreHirStmt::Break,
+        PreHirStmt::Continue,
+        PreHirStmt::Goto("elsewhere".to_string()),
+    ] {
+        let mut stmts = exit_alias_loop(vec![bump_sum(), early_exit_before_copy(exit)], vec![]);
+        let before = stmts.clone();
+        assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+        assert_eq!(stmts, before);
+    }
+}
+
+#[test]
+fn collapse_loop_exit_alias_return_rejects_a_label_that_can_skip_the_copy() {
+    // A `goto` from outside to `entry` lands after the copy.
+    let mut stmts = exit_alias_loop(vec![], vec![PreHirStmt::Label("entry".to_string())]);
+    assert!(!collapse_loop_exit_alias_returns(&mut stmts));
+}
+
+#[test]
+fn collapse_loop_exit_alias_return_allows_a_return_before_the_copy() {
+    // `return` leaves the function; it never reaches the `return exit_sum`.
+    let mut stmts = exit_alias_loop(
+        vec![
+            bump_sum(),
+            early_exit_before_copy(PreHirStmt::Return(Some(PreHirExpr::Const(0, int(32))))),
+        ],
+        vec![],
+    );
+    assert!(collapse_loop_exit_alias_returns(&mut stmts));
+}
+
 #[test]
 fn eliminate_redundant_var_assigns_removes_adjacent_duplicate_assign() {
     let mut stmts = vec![
