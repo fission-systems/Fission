@@ -195,6 +195,10 @@ impl<'a> Evaluator<'a> {
                     | Op::IntSExt
                     | Op::SubPiece
                     | Op::Piece
+                    | Op::IntCarry
+                    | Op::IntSCarry
+                    | Op::IntSBorrow
+                    | Op::LzCount
             )
     }
 
@@ -270,8 +274,61 @@ impl<'a> Evaluator<'a> {
         }
 
         match op.opcode {
-            Op::IntAdd | Op::PtrAdd => binary!(|a, b| a.wrapping_add(b)),
-            Op::IntSub | Op::PtrSub => binary!(|a, b| a.wrapping_sub(b)),
+            Op::IntAdd => binary!(|a, b| a.wrapping_add(b)),
+            Op::IntSub => binary!(|a, b| a.wrapping_sub(b)),
+            // `PTRADD ptr, index, element_size` is `ptr + index * element_size`.
+            Op::PtrAdd => {
+                let ptr = input(self, 0)?;
+                let index = input(self, 1)?;
+                let element_size = input(self, 2)?;
+                self.write_varnode_u128(&out, ptr.wrapping_add(index.wrapping_mul(element_size)))?;
+            }
+            // `PTRSUB` is an *addition* (a field offset into a structure), as it
+            // is in the `u64` arm; only the name says "sub".
+            Op::PtrSub => binary!(|a, b| a.wrapping_add(b)),
+
+            // Carry / signed overflow, judged at the first operand's width.
+            Op::LzCount => {
+                let size = op.inputs[0].size;
+                let bits = size.saturating_mul(8).min(128);
+                let a = truncate_u128(input(self, 0)?, size);
+                let lz = if a == 0 {
+                    bits
+                } else {
+                    a.leading_zeros() - (128 - bits)
+                };
+                self.write_varnode_u128(&out, u128::from(lz))?;
+            }
+            Op::IntCarry => {
+                let size = op.inputs[0].size;
+                let a = truncate_u128(input(self, 0)?, size);
+                let b = truncate_u128(input(self, 1)?, size);
+                let carry = match a.checked_add(b) {
+                    None => true,
+                    Some(sum) => size < 16 && sum > size_max_u128(size),
+                };
+                self.write_varnode_u128(&out, u128::from(carry))?;
+            }
+            Op::IntSCarry | Op::IntSBorrow => {
+                let size = op.inputs[0].size;
+                let a = signed(input(self, 0)?, size);
+                let b = signed(input(self, 1)?, size);
+                let result = if op.opcode == Op::IntSCarry {
+                    a.checked_add(b)
+                } else {
+                    a.checked_sub(b)
+                };
+                let bits = size.saturating_mul(8).min(128);
+                let overflow = match result {
+                    None => true,
+                    Some(v) => {
+                        bits != 0
+                            && bits < 128
+                            && (v < -(1i128 << (bits - 1)) || v > (1i128 << (bits - 1)) - 1)
+                    }
+                };
+                self.write_varnode_u128(&out, u128::from(overflow))?;
+            }
             Op::IntMult => binary!(|a, b| a.wrapping_mul(b)),
             Op::IntAnd => binary!(|a, b| a & b),
             Op::IntOr => binary!(|a, b| a | b),
@@ -785,9 +842,12 @@ impl<'a> Evaluator<'a> {
                 let b = sign_extend(b_raw, sz) as i128;
                 let sum = a + b;
                 let bits = sz * 8;
-                let min = -(1i128 << (bits - 1));
-                let max = (1i128 << (bits - 1)) - 1;
-                let overflow = sum < min || sum > max;
+                // A zero-width operand has no sign bit to overflow into.
+                let overflow = bits != 0 && {
+                    let min = -(1i128 << (bits - 1));
+                    let max = (1i128 << (bits - 1)) - 1;
+                    sum < min || sum > max
+                };
                 self.write_varnode_u64(out, bool_u64(overflow))?;
             }
             PcodeOpcode::IntSBorrow => {
@@ -800,9 +860,11 @@ impl<'a> Evaluator<'a> {
                 let b = sign_extend(b_raw, sz) as i128;
                 let diff = a - b;
                 let bits = sz * 8;
-                let min = -(1i128 << (bits - 1));
-                let max = (1i128 << (bits - 1)) - 1;
-                let borrow = diff < min || diff > max;
+                let borrow = bits != 0 && {
+                    let min = -(1i128 << (bits - 1));
+                    let max = (1i128 << (bits - 1)) - 1;
+                    diff < min || diff > max
+                };
                 self.write_varnode_u64(out, bool_u64(borrow))?;
             }
 
@@ -831,7 +893,13 @@ impl<'a> Evaluator<'a> {
                 let lo = self.read_varnode_u64(&op.inputs[1])?;
                 let lo_bits = (op.inputs[1].size * 8) as u64;
                 let out = op.output.as_ref().expect("PIECE must have output");
-                let res = (hi << lo_bits) | lo;
+                // Eight low bytes leave no room for the high half in a `u64`;
+                // a wider output is the 128-bit path's. `<<` by 64 would panic.
+                let res = if lo_bits >= 64 {
+                    lo
+                } else {
+                    (hi << lo_bits) | lo
+                };
                 self.write_varnode_u64(out, res)?;
             }
             // EXTRACT: `size` bits of input[0] starting at bit `input[1]`.
@@ -886,7 +954,7 @@ impl<'a> Evaluator<'a> {
                 // Count leading zeros within the input bitwidth
                 let val = self.read_varnode_u64(&op.inputs[0])?;
                 let out = op.output.as_ref().expect("LZCOUNT must have output");
-                let bits = (op.inputs[0].size * 8) as u32;
+                let bits = ((op.inputs[0].size * 8) as u32).min(64);
                 let lz = if val == 0 {
                     bits
                 } else {
@@ -1176,7 +1244,13 @@ impl<'a> Evaluator<'a> {
 // ── Free functions ────────────────────────────────────────────────────────────
 
 fn sign_extend(val: u64, size: u32) -> i64 {
-    let shift = 64 - (size * 8);
+    // A zero-sized or full-width varnode has nothing to extend. `64 - size * 8`
+    // would be 64 (a shift overflow) for the first and wrap for a wider one.
+    let bits = size.saturating_mul(8);
+    if bits == 0 || bits >= 64 {
+        return val as i64;
+    }
+    let shift = 64 - bits;
     ((val as i64) << shift) >> shift
 }
 
