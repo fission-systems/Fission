@@ -7,6 +7,7 @@ mod conditional_move;
 mod div_mod;
 mod double_precision;
 mod flags_cond;
+pub mod magic_div;
 mod simplify_algebraic;
 mod subfloat;
 mod three_way;
