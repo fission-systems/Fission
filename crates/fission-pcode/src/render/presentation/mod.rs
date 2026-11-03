@@ -3502,6 +3502,94 @@ mod tests {
         );
     }
 
+    fn break_if_chain_func(break_arm: usize) -> HirFunction {
+        // while (1) { if (p==1) A else if (p==2) B else if (p==3) C else D }
+        // with `break;` placed in the chosen arm (0..=2 = case arms, 3 = else tail).
+        let ret = |v: i64| HirStmt::Return(Some(HirExpr::Const(v, int_ty(32, true))));
+        let arm = |idx: usize, v: i64| {
+            if idx == break_arm {
+                vec![HirStmt::Break]
+            } else {
+                vec![ret(v)]
+            }
+        };
+        HirFunction {
+            name: "loop_with_break".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::While {
+                cond: HirExpr::Const(1, int_ty(32, true)),
+                body: vec![HirStmt::If {
+                    cond: eq_const("param_1", 1),
+                    then_body: arm(0, 10),
+                    else_body: vec![HirStmt::If {
+                        cond: eq_const("param_1", 2),
+                        then_body: arm(1, 20),
+                        else_body: vec![HirStmt::If {
+                            cond: eq_const("param_1", 3),
+                            then_body: arm(2, 30),
+                            else_body: arm(3, -1),
+                        }],
+                    }],
+                }],
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn hir_presentation_keeps_if_chain_when_arm_breaks_out_of_loop() {
+        // A `break` inside a `switch` leaves the switch, not the loop, so the
+        // loop-exiting `break` must stay in an `if` chain.
+        for break_arm in 0..4 {
+            let mut func = break_if_chain_func(break_arm);
+            apply_hir_presentation(&mut func);
+            let code = crate::midend::print_hir_function(&func);
+            assert!(
+                !code.contains("switch ("),
+                "break in arm {break_arm} must not be captured by a switch:\n{code}"
+            );
+            assert!(code.contains("break;"), "break must survive:\n{code}");
+        }
+    }
+
+    #[test]
+    fn hir_presentation_recovers_switch_when_break_is_inside_a_nested_loop() {
+        // The nested loop captures its own `break`, so nothing leaves the chain.
+        let ret = |v: i64| HirStmt::Return(Some(HirExpr::Const(v, int_ty(32, true))));
+        let inner = vec![HirStmt::While {
+            cond: HirExpr::Const(1, int_ty(32, true)),
+            body: vec![HirStmt::Break],
+        }];
+        let mut func = HirFunction {
+            name: "nested_loop_break".into(),
+            params: vec![param("param_1")],
+            locals: vec![],
+            return_type: int_ty(32, true),
+            body: vec![HirStmt::If {
+                cond: eq_const("param_1", 1),
+                then_body: inner,
+                else_body: vec![HirStmt::If {
+                    cond: eq_const("param_1", 2),
+                    then_body: vec![ret(20)],
+                    else_body: vec![HirStmt::If {
+                        cond: eq_const("param_1", 3),
+                        then_body: vec![ret(30)],
+                        else_body: vec![ret(-1)],
+                    }],
+                }],
+            }],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        let code = crate::midend::print_hir_function(&func);
+        assert!(
+            code.contains("switch (param_1)"),
+            "a break captured by a nested loop must not block recovery:\n{code}"
+        );
+    }
+
     #[test]
     fn hir_presentation_keeps_two_arm_if_chain_as_if_else() {
         // Below MIN_LOWERED_SWITCH_CASES: two arms read fine as if/else,
