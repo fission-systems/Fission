@@ -156,10 +156,50 @@ fn try_build_switch_from_if_chain(stmt: &HirStmt) -> Option<HirStmt> {
     if cases.len() < MIN_LOWERED_SWITCH_CASES {
         return None;
     }
+    // `break` binds to the innermost loop *or switch*. Wrapping the arms in a
+    // new `switch` would retarget a `break` that used to leave the enclosing
+    // loop so that it only leaves the switch, and the loop would keep running.
+    if cases
+        .iter()
+        .any(|case| has_break_to_enclosing_construct(&case.body))
+        || has_break_to_enclosing_construct(tail)
+    {
+        return None;
+    }
     Some(HirStmt::Switch {
         expr: switch_expr.clone(),
         cases,
         default: tail.clone(),
+    })
+}
+
+/// Whether `stmts` holds a `break` that leaves the construct *around* them,
+/// i.e. one not captured by a loop or `switch` nested inside `stmts`.
+/// `continue` is not counted: a `switch` does not capture it.
+fn has_break_to_enclosing_construct(stmts: &[HirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        HirStmt::Break => true,
+        HirStmt::Block(body) => has_break_to_enclosing_construct(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            has_break_to_enclosing_construct(then_body)
+                || has_break_to_enclosing_construct(else_body)
+        }
+        // A nested loop or switch captures every `break` in its body.
+        HirStmt::While { .. }
+        | HirStmt::DoWhile { .. }
+        | HirStmt::For { .. }
+        | HirStmt::Switch { .. } => false,
+        HirStmt::Assign { .. }
+        | HirStmt::Expr(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Return(_)
+        | HirStmt::Continue => false,
     })
 }
 
