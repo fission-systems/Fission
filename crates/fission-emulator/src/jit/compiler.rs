@@ -1405,7 +1405,24 @@ impl JitCompiler {
                         store_vn!(out, builder.inst_results(call)[0]);
                     }
                 }
-                PcodeOpcode::IntSub | PcodeOpcode::PtrSub => {
+                PcodeOpcode::PtrSub => {
+                    // A field offset into a structure: an addition, as in the
+                    // interpreter. Only the name says "sub".
+                    if let Some(out) = op.output.as_ref() {
+                        let a = load_vn!(&op.inputs[0]);
+                        let b = load_vn!(&op.inputs[1]);
+                        store_vn!(out, builder.ins().iadd(a, b));
+                        emit_shadow_binop!(
+                            out,
+                            &op.inputs[0],
+                            &op.inputs[1],
+                            a,
+                            b,
+                            SymBinOpKind::Add as u32
+                        );
+                    }
+                }
+                PcodeOpcode::IntSub => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
@@ -1435,35 +1452,78 @@ impl JitCompiler {
                         );
                     }
                 }
-                PcodeOpcode::IntDiv => {
+                // Cranelift's divide instructions trap the *host* on a zero
+                // divisor (and `sdiv` on `i64::MIN / -1`). The interpreter
+                // answers a zero divisor with zero and wraps the overflow, so
+                // the guest never reaches the trap there; swap in a harmless
+                // divisor and select the interpreter's answer afterwards.
+                PcodeOpcode::IntDiv | PcodeOpcode::IntRem => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().udiv(a, b));
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let one = builder.ins().iconst(types::I64, 1);
+                        let b_is_zero = builder.ins().icmp_imm(IntCC::Equal, b, 0);
+                        let safe_b = builder.ins().select(b_is_zero, one, b);
+                        let value = if op.opcode == PcodeOpcode::IntDiv {
+                            builder.ins().udiv(a, safe_b)
+                        } else {
+                            builder.ins().urem(a, safe_b)
+                        };
+                        store_vn!(out, builder.ins().select(b_is_zero, zero, value));
                     }
                 }
-                PcodeOpcode::IntSDiv => {
+                PcodeOpcode::IntSDiv | PcodeOpcode::IntSRem => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn_signed!(&op.inputs[0]);
                         let b = load_vn_signed!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().sdiv(a, b));
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let one = builder.ins().iconst(types::I64, 1);
+                        let b_is_zero = builder.ins().icmp_imm(IntCC::Equal, b, 0);
+                        let b_is_minus_one = builder.ins().icmp_imm(IntCC::Equal, b, -1);
+                        // `x / -1` and `x % -1` need no divide at all.
+                        let b_special = builder.ins().bor(b_is_zero, b_is_minus_one);
+                        let safe_b = builder.ins().select(b_special, one, b);
+                        let value = if op.opcode == PcodeOpcode::IntSDiv {
+                            let quotient = builder.ins().sdiv(a, safe_b);
+                            let negated = builder.ins().ineg(a); // wraps on i64::MIN
+                            let quotient = builder.ins().select(b_is_minus_one, negated, quotient);
+                            builder.ins().select(b_is_zero, zero, quotient)
+                        } else {
+                            let rem = builder.ins().srem(a, safe_b);
+                            builder.ins().select(b_special, zero, rem)
+                        };
+                        store_vn!(out, value);
                     }
                 }
-                PcodeOpcode::IntRem => {
+                PcodeOpcode::BoolAnd | PcodeOpcode::BoolOr | PcodeOpcode::BoolXor => {
+                    // A boolean is "non-zero", not "bit 0": the interpreter
+                    // tests `a != 0`, so a raw `band`/`bor`/`bxor` of two
+                    // non-zero bytes disagrees with it.
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().urem(a, b));
+                        let zero = builder.ins().iconst(types::I64, 0);
+                        let one = builder.ins().iconst(types::I64, 1);
+                        let a_nz = builder.ins().icmp_imm(IntCC::NotEqual, a, 0);
+                        let b_nz = builder.ins().icmp_imm(IntCC::NotEqual, b, 0);
+                        let a1 = builder.ins().select(a_nz, one, zero);
+                        let b1 = builder.ins().select(b_nz, one, zero);
+                        let value = match op.opcode {
+                            PcodeOpcode::BoolAnd => builder.ins().band(a1, b1),
+                            PcodeOpcode::BoolOr => builder.ins().bor(a1, b1),
+                            _ => builder.ins().bxor(a1, b1),
+                        };
+                        store_vn!(out, value);
+                        let kind = match op.opcode {
+                            PcodeOpcode::BoolAnd => SymBinOpKind::And,
+                            PcodeOpcode::BoolOr => SymBinOpKind::Or,
+                            _ => SymBinOpKind::Xor,
+                        };
+                        emit_shadow_binop!(out, &op.inputs[0], &op.inputs[1], a, b, kind as u32);
                     }
                 }
-                PcodeOpcode::IntSRem => {
-                    if let Some(out) = op.output.as_ref() {
-                        let a = load_vn_signed!(&op.inputs[0]);
-                        let b = load_vn_signed!(&op.inputs[1]);
-                        store_vn!(out, builder.ins().srem(a, b));
-                    }
-                }
-                PcodeOpcode::IntAnd | PcodeOpcode::BoolAnd => {
+                PcodeOpcode::IntAnd => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
@@ -1478,7 +1538,7 @@ impl JitCompiler {
                         );
                     }
                 }
-                PcodeOpcode::IntOr | PcodeOpcode::BoolOr => {
+                PcodeOpcode::IntOr => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
@@ -1493,7 +1553,7 @@ impl JitCompiler {
                         );
                     }
                 }
-                PcodeOpcode::IntXor | PcodeOpcode::BoolXor => {
+                PcodeOpcode::IntXor => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
                         let b = load_vn!(&op.inputs[1]);
@@ -1636,7 +1696,7 @@ impl JitCompiler {
                     if let Some(out) = op.output.as_ref() {
                         let in_vn = &op.inputs[0];
                         let val = load_vn!(in_vn);
-                        let bits = (in_vn.size as u64).saturating_mul(8).min(63);
+                        let bits = (in_vn.size as u64).saturating_mul(8);
                         let mask = if bits >= 64 {
                             u64::MAX
                         } else {
@@ -1671,7 +1731,7 @@ impl JitCompiler {
                         } else {
                             val
                         };
-                        let bits = (out.size as u64).saturating_mul(8).min(63);
+                        let bits = (out.size as u64).saturating_mul(8);
                         let mask = if bits >= 64 {
                             u64::MAX
                         } else {
@@ -1685,13 +1745,20 @@ impl JitCompiler {
                     if let Some(out) = op.output.as_ref() {
                         let high = load_vn!(&op.inputs[0]);
                         let low = load_vn!(&op.inputs[1]);
-                        let low_bits = (op.inputs[1].size as i64).saturating_mul(8).min(63);
-                        let shifted = if low_bits > 0 {
-                            builder.ins().ishl_imm(high, low_bits)
+                        let low_bits = (op.inputs[1].size as i64).saturating_mul(8);
+                        // Eight low bytes leave no room for `high` in a 64-bit
+                        // value (the interpreter returns `low`); clamping the
+                        // shift to 63 instead put `high`'s bit 0 on `low`'s sign.
+                        if low_bits >= 64 {
+                            store_vn!(out, low);
                         } else {
-                            high
-                        };
-                        store_vn!(out, builder.ins().bor(shifted, low));
+                            let shifted = if low_bits > 0 {
+                                builder.ins().ishl_imm(high, low_bits)
+                            } else {
+                                high
+                            };
+                            store_vn!(out, builder.ins().bor(shifted, low));
+                        }
                     }
                 }
                 // EXTRACT: (val >> offset) truncated to out.size
@@ -1716,7 +1783,7 @@ impl JitCompiler {
                         } else {
                             val
                         };
-                        let bits = (out.size as u64).saturating_mul(8).min(63);
+                        let bits = (out.size as u64).saturating_mul(8);
                         let mask = if bits >= 64 {
                             u64::MAX
                         } else {
@@ -2634,6 +2701,117 @@ mod tests {
             inputs: vec![imm(val, size)],
             asm_mnemonic: None,
         }
+    }
+
+    fn unop_sized(opcode: PcodeOpcode, out: u64, out_size: u32, a: u64, a_size: u32) -> PcodeOp {
+        PcodeOp {
+            seq_num: 1,
+            opcode,
+            address: 0x1000,
+            output: Some(reg(out, out_size)),
+            inputs: vec![reg(a, a_size)],
+            asm_mnemonic: None,
+        }
+    }
+
+    /// A zero divisor used to reach Cranelift's `udiv`/`sdiv`/`urem`/`srem`,
+    /// which trap the *host* process; `i64::MIN / -1` trapped `sdiv` the same
+    /// way. The interpreter answers zero for the first and wraps the second.
+    #[test]
+    fn division_by_zero_and_overflow_do_not_trap_the_host() {
+        let ops = vec![
+            copy_const(0, 7, 8),
+            copy_const(8, 0, 8),
+            copy_const(16, i64::MIN, 8),
+            copy_const(24, -1, 8),
+            binop_sized(PcodeOpcode::IntDiv, 32, 0, 8, 8, 8),
+            binop_sized(PcodeOpcode::IntRem, 40, 0, 8, 8, 8),
+            binop_sized(PcodeOpcode::IntSDiv, 48, 0, 8, 8, 8),
+            binop_sized(PcodeOpcode::IntSRem, 56, 0, 8, 8, 8),
+            binop_sized(PcodeOpcode::IntSDiv, 64, 16, 8, 24, 8),
+            binop_sized(PcodeOpcode::IntSRem, 72, 16, 8, 24, 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        for off in [32, 40, 48, 56] {
+            assert_eq!(read_reg(&mut emu, off), 0, "7 op 0 is 0 (offset {off})");
+        }
+        assert_eq!(read_reg(&mut emu, 64), i64::MIN as u64, "MIN / -1 wraps");
+        assert_eq!(read_reg(&mut emu, 72), 0, "MIN % -1 is 0");
+    }
+
+    /// `.min(63)` on the bit width turned the 8-byte mask into `2^63 - 1` and
+    /// cleared bit 63 of every eight-byte result.
+    #[test]
+    fn eight_byte_results_keep_bit_63() {
+        let top = 0x8000_0000_0000_0001u64;
+        let ops = vec![
+            copy_const(0, top as i64, 8),
+            unop_sized(PcodeOpcode::IntZExt, 16, 8, 0, 8),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::SubPiece,
+                address: 0x1000,
+                output: Some(reg(24, 8)),
+                inputs: vec![reg(0, 8), imm(0, 4)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Extract,
+                address: 0x1000,
+                output: Some(reg(32, 8)),
+                inputs: vec![reg(0, 8), imm(0, 4)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), top, "INT_ZEXT");
+        assert_eq!(read_reg(&mut emu, 24), top, "SUBPIECE");
+        assert_eq!(read_reg(&mut emu, 32), top, "EXTRACT");
+    }
+
+    /// `PTRSUB` is an addition. The JIT subtracted; the interpreter added.
+    #[test]
+    fn ptrsub_adds_its_offset() {
+        let ops = vec![
+            copy_const(0, 100, 8),
+            copy_const(8, 5, 8),
+            binop_sized(PcodeOpcode::PtrSub, 16, 0, 8, 8, 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 105);
+    }
+
+    /// A boolean is "non-zero". `band`/`bor`/`bxor` of the raw bytes disagree
+    /// with the interpreter's `a != 0` when an operand is not exactly 0 or 1.
+    #[test]
+    fn boolean_ops_test_non_zero_rather_than_bit_zero() {
+        let ops = vec![
+            copy_const(0, 2, 1),
+            copy_const(8, 1, 1),
+            copy_const(16, 0, 1),
+            binop_sized(PcodeOpcode::BoolAnd, 24, 0, 1, 8, 1), // 2 && 1
+            binop_sized(PcodeOpcode::BoolOr, 32, 0, 1, 16, 1), // 2 || 0
+            binop_sized(PcodeOpcode::BoolXor, 40, 0, 1, 8, 1), // 2 ^ 1, both true
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 24), 1);
+        assert_eq!(read_reg(&mut emu, 32), 1);
+        assert_eq!(read_reg(&mut emu, 40), 0);
+    }
+
+    /// Eight low bytes leave no room for the high half; clamping the shift to
+    /// 63 put `high`'s bit 0 on `low`'s sign bit.
+    #[test]
+    fn piece_with_an_eight_byte_low_half_keeps_the_low_half() {
+        let ops = vec![
+            // Odd, so that a shift by 63 would put a bit on `low`'s sign.
+            copy_const(0, 0xAAAB, 8),
+            copy_const(8, 0x1234, 8),
+            binop_sized(PcodeOpcode::Piece, 16, 0, 8, 8, 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 16), 0x1234);
     }
 
     fn binop_sized(

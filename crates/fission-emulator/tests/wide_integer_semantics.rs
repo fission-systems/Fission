@@ -200,3 +200,113 @@ fn widening_and_narrowing_use_the_operands_own_width() {
     bench.run(PcodeOpcode::SubPiece, &[wide, eight], &half);
     assert_eq!(bench.get(&half), 0x1122_3344_5566_7788);
 }
+
+/// Run a two-operand flag op on `size`-byte operands and read the one-byte answer.
+fn flag(bench: &mut Bench, opcode: PcodeOpcode, size: u32, a: u128, b: u128) -> bool {
+    let (va, vb, vo) = (slot(0x00, size), slot(0x20, size), slot(0x40, 1));
+    bench.put(&va, a);
+    bench.put(&vb, b);
+    bench.put(&vo, 0xFF);
+    bench.run(opcode, &[va.clone(), vb.clone()], &vo);
+    bench.get(&vo) != 0
+}
+
+#[test]
+fn carry_and_signed_overflow_flags_exist_at_every_width() {
+    let mut bench = Bench::new();
+
+    // 16 bytes. `sign_extend` computed `64 - 16 * 8`, which underflows.
+    let max = i128::MAX as u128;
+    let min = i128::MIN as u128;
+    assert!(flag(&mut bench, PcodeOpcode::IntSCarry, 16, max, 1));
+    assert!(!flag(&mut bench, PcodeOpcode::IntSCarry, 16, u128::MAX, 1)); // -1 + 1
+    assert!(flag(&mut bench, PcodeOpcode::IntSBorrow, 16, min, 1));
+    assert!(!flag(&mut bench, PcodeOpcode::IntSBorrow, 16, 0, 1));
+    assert!(flag(&mut bench, PcodeOpcode::IntCarry, 16, u128::MAX, 1));
+    assert!(!flag(&mut bench, PcodeOpcode::IntCarry, 16, 1, 1));
+
+    // 9 bytes: neither the low eight bytes nor the full 128 bits.
+    let max9 = (1u128 << 71) - 1;
+    assert!(flag(&mut bench, PcodeOpcode::IntSCarry, 9, max9, 1));
+    assert!(!flag(&mut bench, PcodeOpcode::IntSCarry, 9, max9 - 1, 1));
+    assert!(flag(
+        &mut bench,
+        PcodeOpcode::IntCarry,
+        9,
+        (1u128 << 72) - 1,
+        1
+    ));
+    assert!(!flag(
+        &mut bench,
+        PcodeOpcode::IntCarry,
+        9,
+        (1u128 << 72) - 2,
+        1
+    ));
+
+    // Eight bytes was always fine and must stay so.
+    assert!(flag(
+        &mut bench,
+        PcodeOpcode::IntSCarry,
+        8,
+        i64::MAX as u128,
+        1
+    ));
+}
+
+#[test]
+fn a_zero_width_operand_has_no_sign_to_overflow() {
+    let mut bench = Bench::new();
+    // `sign_extend(_, 0)` shifted by 64.
+    assert!(!flag(&mut bench, PcodeOpcode::IntSCarry, 0, 0, 0));
+    assert!(!flag(&mut bench, PcodeOpcode::IntSBorrow, 0, 0, 0));
+}
+
+#[test]
+fn pointer_arithmetic_at_wide_width_adds_and_scales() {
+    let mut bench = Bench::new();
+    let (ptr, idx, elem, out) = (slot(0x00, 16), slot(0x20, 8), slot(0x30, 8), slot(0x40, 16));
+    let base = 1u128 << 70;
+    bench.put(&ptr, base);
+    bench.put(&idx, 3);
+    bench.put(&elem, 4);
+    // PTRADD ptr, index, element_size == ptr + index * element_size.
+    bench.run(
+        PcodeOpcode::PtrAdd,
+        &[ptr.clone(), idx.clone(), elem.clone()],
+        &out,
+    );
+    assert_eq!(bench.get(&out), base + 12);
+    // PTRSUB is an addition: a field offset, whatever its name says.
+    bench.run(PcodeOpcode::PtrSub, &[ptr.clone(), idx.clone()], &out);
+    assert_eq!(bench.get(&out), base + 3);
+}
+
+#[test]
+fn leading_zeros_count_the_whole_varnode() {
+    let mut bench = Bench::new();
+    let run = |bench: &mut Bench, size: u32, value: u128| -> u128 {
+        let (v, out) = (slot(0x00, size), slot(0x40, 8));
+        bench.put(&v, value);
+        bench.run(PcodeOpcode::LzCount, &[v.clone()], &out);
+        bench.get(&out)
+    };
+    // `64 - bits` underflowed for anything wider than eight bytes.
+    assert_eq!(run(&mut bench, 16, 1u128 << 100), 27);
+    assert_eq!(run(&mut bench, 16, 0), 128);
+    assert_eq!(run(&mut bench, 16, 1u128 << 127), 0);
+    assert_eq!(run(&mut bench, 12, 1u128 << 80), 15); // 96 bits, top set bit is 80
+    assert_eq!(run(&mut bench, 8, 1), 63);
+}
+
+#[test]
+fn a_piece_with_an_eight_byte_low_half_does_not_shift_by_64() {
+    let mut bench = Bench::new();
+    let (hi, lo, out) = (slot(0x00, 8), slot(0x20, 8), slot(0x40, 8));
+    bench.put(&hi, 0xAAAA);
+    bench.put(&lo, 0x1234);
+    bench.run(PcodeOpcode::Piece, &[hi, lo], &out);
+    // Eight bytes cannot hold both halves; the interpreter keeps the low one,
+    // and `<< 64` is a panic (or, without overflow checks, `hi | lo`).
+    assert_eq!(bench.get(&out), 0x1234);
+}
