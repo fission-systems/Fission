@@ -860,7 +860,9 @@ impl ElfLoader {
         let strtab = if strtab_shndx < shdrs.len() {
             let sh = &shdrs[strtab_shndx];
             let start = sh.sh_offset as usize;
-            let end = start + sh.sh_size as usize;
+            let Some(end) = start.checked_add(sh.sh_size as usize) else {
+                return;
+            };
             if end <= full_data.len() {
                 &full_data[start..end]
             } else {
@@ -878,14 +880,18 @@ impl ElfLoader {
         let count = (size as usize).checked_div(entry_size).unwrap_or(0);
 
         let sym_start = offset as usize;
-        let sym_end = sym_start + size as usize;
+        let Some(sym_end) = sym_start.checked_add(size as usize) else {
+            return;
+        };
         if sym_end > full_data.len() {
             return;
         }
 
         let reader = ByteReader::new(full_data, endian);
         for index in 0..count {
-            let offset = sym_start + index * entry_size;
+            let Some(offset) = entry_offset(full_data.len(), sym_start, index, entry_size) else {
+                break;
+            };
             let sym = match Elf64Sym::parse(&reader, offset) {
                 Ok(sym) => sym,
                 Err(_) => break,
@@ -1019,7 +1025,9 @@ impl ElfLoader {
         let strtab = if strtab_shndx < shdrs.len() {
             let sh = &shdrs[strtab_shndx];
             let start = sh.sh_offset as usize;
-            let end = start + sh.sh_size as usize;
+            let Some(end) = start.checked_add(sh.sh_size as usize) else {
+                return;
+            };
             if end <= full_data.len() {
                 &full_data[start..end]
             } else {
@@ -1037,7 +1045,9 @@ impl ElfLoader {
         let count = (size as usize).checked_div(entry_size).unwrap_or(0);
 
         let sym_start = offset as usize;
-        let sym_end = sym_start + size as usize;
+        let Some(sym_end) = sym_start.checked_add(size as usize) else {
+            return;
+        };
         if sym_end > full_data.len() {
             return;
         }
@@ -1047,7 +1057,9 @@ impl ElfLoader {
         let functions_before = out_funcs.len();
         let reader = ByteReader::new(full_data, endian);
         for index in 0..count {
-            let offset = sym_start + index * entry_size;
+            let Some(offset) = entry_offset(full_data.len(), sym_start, index, entry_size) else {
+                break;
+            };
             let sym = match Elf32Sym::parse(&reader, offset) {
                 Ok(sym) => sym,
                 Err(_) => break,
@@ -1282,10 +1294,9 @@ fn parse_elf_iat_symbols_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -1344,10 +1355,9 @@ fn parse_elf_iat_symbols_32(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u32(offset) else {
                 break;
             };
@@ -1390,7 +1400,10 @@ fn decode_plt_stub_got_slot(stub_addr: u64, stub_bytes: &[u8], rip_relative: boo
         return Some(if rip_relative {
             // x86-64: RIP-relative, RIP is the address right after this
             // instruction's 4-byte displacement operand.
-            (stub_addr + disp_off as u64 + 4).wrapping_add(disp as i64 as u64)
+            stub_addr
+                .wrapping_add(disp_off as u64)
+                .wrapping_add(4)
+                .wrapping_add(disp as i64 as u64)
         } else {
             // i386: the operand is an absolute GOT slot address.
             disp as u32 as u64
@@ -1440,7 +1453,7 @@ fn resolve_elf_plt_stub_imports(
         const STUB_SIZE: usize = 16;
         let mut offset = 0usize;
         while offset + STUB_SIZE <= section_bytes.len() {
-            let stub_addr = section.virtual_address + offset as u64;
+            let stub_addr = section.virtual_address.wrapping_add(offset as u64);
             let stub_bytes = &section_bytes[offset..offset + STUB_SIZE];
             if let Some(got_addr) = decode_plt_stub_got_slot(stub_addr, stub_bytes, rip_relative)
                 && let Some(name) = iat_symbols.get(&got_addr)
@@ -1502,10 +1515,9 @@ fn parse_relocation_symbols_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -1559,10 +1571,9 @@ fn parse_relocation_symbols_32(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u32(offset) else {
                 break;
             };
@@ -1577,6 +1588,15 @@ fn parse_relocation_symbols_32(
             out.entry(addr).or_insert(name);
         }
     }
+}
+
+/// File offset of fixed-size entry `index` of a table that starts at `start`,
+/// or `None` if the entry -- or the arithmetic that locates it -- leaves a file
+/// of `len` bytes. Header fields are attacker-controlled, so `start + index *
+/// entry_size` is checked rather than added.
+fn entry_offset(len: usize, start: usize, index: usize, entry_size: usize) -> Option<usize> {
+    let offset = start.checked_add(index.checked_mul(entry_size)?)?;
+    (offset.checked_add(entry_size)? <= len).then_some(offset)
 }
 
 fn symbol_string_table_64<'a>(
@@ -1618,7 +1638,7 @@ fn symbol_name_64(
         Elf64Sym::SIZE
     };
     let offset = (symtab.sh_offset as usize).checked_add(sym_index.checked_mul(entry_size)?)?;
-    if offset + entry_size > full_data.len() {
+    if offset.checked_add(entry_size)? > full_data.len() {
         return None;
     }
     let reader = ByteReader::new(full_data, endian);
@@ -1640,7 +1660,7 @@ fn symbol_name_32(
         Elf32Sym::SIZE
     };
     let offset = (symtab.sh_offset as usize).checked_add(sym_index.checked_mul(entry_size)?)?;
-    if offset + entry_size > full_data.len() {
+    if offset.checked_add(entry_size)? > full_data.len() {
         return None;
     }
     let reader = ByteReader::new(full_data, endian);
@@ -2571,10 +2591,9 @@ fn parse_relocations_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -2650,10 +2669,9 @@ fn parse_relocations_32(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = entry_offset(full_data.len(), start, index, entry_size) else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u32(offset) else {
                 break;
             };
@@ -2849,15 +2867,16 @@ fn map_symbol_versions_64(
 
         let count = versym_count.min(symtab_count);
         for idx in 0..count {
-            let Ok(ver_idx) = reader.u16(versym_offset + idx * 2) else {
+            let Ok(ver_idx) = reader.u16(versym_offset.saturating_add(idx * 2)) else {
                 break;
             };
             let clean_ver_idx = (ver_idx & 0x7FFF) as u32;
 
             if clean_ver_idx >= 2 {
                 if let Some(ver_name) = ver_names.get(&clean_ver_idx) {
-                    let sym_offset = symtab_offset + idx * symtab_entry_size;
-                    if sym_offset + symtab_entry_size <= full_data.len() {
+                    let sym_offset =
+                        entry_offset(full_data.len(), symtab_offset, idx, symtab_entry_size);
+                    if let Some(sym_offset) = sym_offset {
                         if let Ok(sym_val) = reader.u64(sym_offset + 8) {
                             if sym_val != 0 {
                                 symbol_versions.insert(sym_val, ver_name.clone());
@@ -3045,15 +3064,16 @@ fn map_symbol_versions_32(
 
         let count = versym_count.min(symtab_count);
         for idx in 0..count {
-            let Ok(ver_idx) = reader.u16(versym_offset + idx * 2) else {
+            let Ok(ver_idx) = reader.u16(versym_offset.saturating_add(idx * 2)) else {
                 break;
             };
             let clean_ver_idx = (ver_idx & 0x7FFF) as u32;
 
             if clean_ver_idx >= 2 {
                 if let Some(ver_name) = ver_names.get(&clean_ver_idx) {
-                    let sym_offset = symtab_offset + idx * symtab_entry_size;
-                    if sym_offset + symtab_entry_size <= full_data.len() {
+                    let sym_offset =
+                        entry_offset(full_data.len(), symtab_offset, idx, symtab_entry_size);
+                    if let Some(sym_offset) = sym_offset {
                         if let Ok(sym_val) = reader.u32(sym_offset + 4) {
                             if sym_val != 0 {
                                 symbol_versions.insert(sym_val as u64, ver_name.clone());
@@ -3152,6 +3172,23 @@ mod tests {
             symbol_string_table_64(&data, &[inside64.clone()], &inside64).map(<[u8]>::len),
             Some(50)
         );
+    }
+
+    /// `start + index * entry_size` is attacker-controlled arithmetic.
+    #[test]
+    fn entry_offset_rejects_overflow_and_out_of_file_entries() {
+        // In range: the third 24-byte entry of a table at 100 in a 200-byte file.
+        assert_eq!(entry_offset(200, 100, 2, 24), Some(148));
+        // Entry runs past the end of the file.
+        assert_eq!(entry_offset(200, 100, 4, 24), None);
+        // The multiplication overflows.
+        assert_eq!(entry_offset(200, 0, usize::MAX, 24), None);
+        // The addition overflows.
+        assert_eq!(entry_offset(200, usize::MAX - 8, 1, 24), None);
+        // The final `+ entry_size` overflows.
+        assert_eq!(entry_offset(usize::MAX, usize::MAX - 8, 0, 24), None);
+        // Zero-sized entries never go out of range.
+        assert_eq!(entry_offset(200, 100, 5, 0), Some(100));
     }
 
     #[test]

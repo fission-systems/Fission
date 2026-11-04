@@ -392,8 +392,12 @@ fn detect_by_strings(binary: &LoadedBinary, result: &mut DetectionResult) {
             }
             // Check first 16 bytes of data sections for magic
             if !section.is_executable && section.file_size >= 4 {
-                if let Some(sdata) = binary.get_bytes(section.virtual_address, 16) {
-                    let magic = u32::from_le_bytes([sdata[0], sdata[1], sdata[2], sdata[3]]);
+                // `get_bytes` returns whatever the section holds, which can be
+                // fewer than the 16 asked for -- or than the 4 read here.
+                if let Some(sdata) = binary.get_bytes(section.virtual_address, 16)
+                    && let Some(head) = sdata.first_chunk::<4>()
+                {
+                    let magic = u32::from_le_bytes(*head);
                     if matches!(magic, 0xfffffffb | 0xfffffffa | 0xfffffff0 | 0xfffffff1) {
                         is_go = true;
                         break;

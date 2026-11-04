@@ -173,11 +173,7 @@ pub(super) fn print_strings(
                 shown
             }
         };
-        let text = if found.text.len() > 60 {
-            format!("{}...", &found.text[..57])
-        } else {
-            found.text.clone()
-        };
+        let text = truncate_for_display(&found.text, 60);
         if with_xrefs {
             writeln!(
                 stdout,
@@ -479,8 +475,51 @@ fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
     }
 }
 
+/// `text` unchanged if it fits in `max` bytes, else cut to fit with `...` appended.
+///
+/// The cut lands on a character boundary: a string such as `"...Ā..."` has
+/// multi-byte characters, and slicing at a fixed byte index inside one panics.
+fn truncate_for_display(text: &str, max: usize) -> String {
+    if text.len() <= max {
+        return text.to_string();
+    }
+    let keep = max.saturating_sub(3);
+    let cut = (0..=keep)
+        .rev()
+        .find(|&i| text.is_char_boundary(i))
+        .unwrap_or(0);
+    format!("{}...", &text[..cut])
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn truncation_never_splits_a_multi_byte_character() {
+        // 56 ASCII bytes, then a two-byte character spanning bytes 56..58:
+        // a cut at byte 57 lands inside it.
+        let text = format!("{}\u{100}tail-beyond-the-limit-xxxxxxxxxx", "a".repeat(56));
+        assert!(text.len() > 60);
+        let shown = truncate_for_display(&text, 60);
+        assert_eq!(shown, format!("{}...", "a".repeat(56)));
+        assert!(shown.len() <= 60);
+    }
+
+    #[test]
+    fn truncation_keeps_short_text_and_cuts_long_ascii_exactly() {
+        assert_eq!(truncate_for_display("short", 60), "short");
+        let sixty = "b".repeat(60);
+        assert_eq!(truncate_for_display(&sixty, 60), sixty);
+        let long = "c".repeat(61);
+        assert_eq!(
+            truncate_for_display(&long, 60),
+            format!("{}...", "c".repeat(57))
+        );
+        // A string made entirely of multi-byte characters still shortens.
+        let wide = "\u{4e16}".repeat(30);
+        let shown = truncate_for_display(&wide, 60);
+        assert!(shown.ends_with("...") && shown.len() <= 60, "{shown}");
+    }
+
     use super::*;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
 

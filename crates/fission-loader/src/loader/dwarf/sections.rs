@@ -48,7 +48,10 @@ impl SectionData {
                     0 => section.file_size as usize,
                     virtual_size => (virtual_size.min(section.file_size)) as usize,
                 };
-                if file_offset + file_size <= data_len {
+                if file_offset
+                    .checked_add(file_size)
+                    .is_some_and(|end| end <= data_len)
+                {
                     sections.insert(key, (file_offset, file_size));
                 }
             }
