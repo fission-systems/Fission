@@ -615,24 +615,25 @@ impl OptimizationRules {
 
     // ===== Float Comparisons =====
 
-    fn optimize_float_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
-        if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
-            return Some(self.make_boolean(op, true));
-        }
+    // `x == x`, `x <= x` and `x != x` are not constants for floats: a NaN is
+    // unordered, so `NaN == NaN` and `NaN <= NaN` are false and `NaN != NaN` is
+    // true. Folding them to the integer answers erases the `x != x` NaN test.
+    fn optimize_float_equal(&self, _op: &PcodeOp) -> Option<PcodeOp> {
         None
     }
 
+    /// `x < x` is false for every `x`, NaN included; `x != x` is not constant.
     fn optimize_float_not_equal_less(&self, op: &PcodeOp) -> Option<PcodeOp> {
-        if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
+        if op.opcode == PcodeOpcode::FloatLess
+            && op.inputs.len() == 2
+            && op.inputs[0] == op.inputs[1]
+        {
             return Some(self.make_boolean(op, false));
         }
         None
     }
 
-    fn optimize_float_less_equal(&self, op: &PcodeOp) -> Option<PcodeOp> {
-        if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] {
-            return Some(self.make_boolean(op, true));
-        }
+    fn optimize_float_less_equal(&self, _op: &PcodeOp) -> Option<PcodeOp> {
         None
     }
 

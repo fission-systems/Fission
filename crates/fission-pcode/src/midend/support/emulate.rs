@@ -113,7 +113,14 @@ pub(crate) fn emulate_path(
         let mut inputs = Vec::with_capacity(op.inputs.len());
         for input in &op.inputs {
             let val = if input.is_constant {
-                input.constant_val as u64
+                // `constant_val` holds the signed form: `-1:4` is all 64 bits set.
+                // A constant is a value of its own width; left unmasked it feeds
+                // upper one-bits into every unsigned operation below.
+                if input.size == 0 {
+                    input.constant_val as u64
+                } else {
+                    mask_to_size(input.constant_val as u64, input.size)
+                }
             } else {
                 let key = VarnodeKey::from(input);
                 *values.get(&key).unwrap_or(&0)
@@ -190,7 +197,8 @@ pub(crate) fn emulate_path(
                         return None;
                     }
                     let dividend = sign_extend(inputs[0], op.inputs[0].size);
-                    computed = (dividend / divisor) as u64;
+                    // `i64::MIN / -1` overflows and panics with plain `/`.
+                    computed = dividend.wrapping_div(divisor) as u64;
                 }
             }
             PcodeOpcode::IntAnd => {
@@ -268,8 +276,11 @@ pub(crate) fn emulate_path(
             }
             PcodeOpcode::IntCarry => {
                 if inputs.len() >= 2 {
-                    let sum = inputs[0].wrapping_add(inputs[1]);
-                    computed = if sum < inputs[0] { 1 } else { 0 };
+                    // Carry out of the operand width, not out of 64 bits.
+                    let bits = op.inputs[0].size.saturating_mul(8).min(64);
+                    let sum = u128::from(mask_to_size(inputs[0], op.inputs[0].size))
+                        + u128::from(mask_to_size(inputs[1], op.inputs[0].size));
+                    computed = if bits > 0 && (sum >> bits) != 0 { 1 } else { 0 };
                 }
             }
             PcodeOpcode::IntSCarry => {
@@ -277,7 +288,9 @@ pub(crate) fn emulate_path(
                     let sum = inputs[0].wrapping_add(inputs[1]);
                     let sign_lhs = sign_extend(inputs[0], op.inputs[0].size) < 0;
                     let sign_rhs = sign_extend(inputs[1], op.inputs[1].size) < 0;
-                    let sign_sum = sign_extend(sum, op.output.as_ref()?.size) < 0;
+                    // The sign of the sum is judged at the operand width; the
+                    // output is a one-byte flag.
+                    let sign_sum = sign_extend(sum, op.inputs[0].size) < 0;
                     let overflow = (sign_lhs == sign_rhs) && (sign_lhs != sign_sum);
                     computed = if overflow { 1 } else { 0 };
                 }
@@ -287,7 +300,7 @@ pub(crate) fn emulate_path(
                     let diff = inputs[0].wrapping_sub(inputs[1]);
                     let sign_lhs = sign_extend(inputs[0], op.inputs[0].size) < 0;
                     let sign_rhs = sign_extend(inputs[1], op.inputs[1].size) < 0;
-                    let sign_diff = sign_extend(diff, op.output.as_ref()?.size) < 0;
+                    let sign_diff = sign_extend(diff, op.inputs[0].size) < 0;
                     let overflow = (sign_lhs != sign_rhs) && (sign_lhs != sign_diff);
                     computed = if overflow { 1 } else { 0 };
                 }
@@ -441,5 +454,91 @@ mod tests {
         assert_eq!(sign_extend(0x80, 0), 0x80);
         assert_eq!(mask_to_size(0x80, 0), 0);
         assert_eq!(sign_extend(0x80, u32::MAX), 0x80);
+    }
+
+    fn constant(value: i64, size: u32) -> Varnode {
+        let mut c = vn(0, size);
+        c.is_constant = true;
+        c.constant_val = value;
+        c
+    }
+
+    /// `constant_val` holds the signed form: `-8:4` is all 64 bits set. As a
+    /// 4-byte value it is 0xFFFFFFF8, and shifting that right by one is
+    /// 0x7FFFFFFC -- not the 0xFFFFFFFC a sign-extended input would give.
+    #[test]
+    fn a_narrow_negative_constant_is_masked_to_its_width() {
+        let out = vn(0x40, 4);
+        let shift = op(
+            PcodeOpcode::IntRight,
+            out,
+            vec![constant(-8, 4), constant(1, 4)],
+        );
+        let leaves = HashMap::default();
+        assert_eq!(
+            emulate_path(&[shift], &leaves, None, false),
+            Some(0x7FFF_FFFC)
+        );
+    }
+
+    #[test]
+    fn carry_is_judged_at_the_operand_width() {
+        // 0xFFFFFFFF + 1 carries out of 32 bits (and not out of 64).
+        let out = vn(0x40, 1);
+        let carry = |a: i64, b: i64| {
+            let o = op(
+                PcodeOpcode::IntCarry,
+                out.clone(),
+                vec![constant(a, 4), constant(b, 4)],
+            );
+            emulate_path(&[o], &HashMap::default(), None, false)
+        };
+        assert_eq!(carry(-1, 1), Some(1));
+        // 2^31 + 2^31 carries out of 32 bits; as 64-bit values the sum does not wrap.
+        assert_eq!(carry(0x8000_0000, 0x8000_0000), Some(1));
+        assert_eq!(carry(0x7FFF_FFFF, 1), Some(0));
+        // Eight bytes still carry out of 64 bits.
+        let o = op(
+            PcodeOpcode::IntCarry,
+            out,
+            vec![constant(-1, 8), constant(1, 8)],
+        );
+        assert_eq!(
+            emulate_path(&[o], &HashMap::default(), None, false),
+            Some(1)
+        );
+    }
+
+    /// The flag output is one byte; the sign it tests is the operands'.
+    #[test]
+    fn signed_overflow_flags_test_the_operand_sign_not_the_flag_width() {
+        let out = vn(0x40, 1);
+        let run = |opcode, a: i64, b: i64| {
+            let o = op(opcode, out.clone(), vec![constant(a, 4), constant(b, 4)]);
+            emulate_path(&[o], &HashMap::default(), None, false)
+        };
+        // i32::MAX + 1 overflows; -1 + 1 does not.
+        assert_eq!(run(PcodeOpcode::IntSCarry, 0x7FFF_FFFF, 1), Some(1));
+        assert_eq!(run(PcodeOpcode::IntSCarry, -1, 1), Some(0));
+        // i32::MIN - 1 overflows; 0 - 1 does not.
+        assert_eq!(
+            run(PcodeOpcode::IntSBorrow, i64::from(i32::MIN), 1),
+            Some(1)
+        );
+        assert_eq!(run(PcodeOpcode::IntSBorrow, 0, 1), Some(0));
+    }
+
+    #[test]
+    fn signed_division_of_the_minimum_by_minus_one_does_not_panic() {
+        let out = vn(0x40, 8);
+        let div = op(
+            PcodeOpcode::IntSDiv,
+            out,
+            vec![constant(i64::MIN, 8), constant(-1, 8)],
+        );
+        assert_eq!(
+            emulate_path(&[div], &HashMap::default(), None, false),
+            Some(i64::MIN as u64)
+        );
     }
 }
