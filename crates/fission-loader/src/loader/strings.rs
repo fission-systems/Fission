@@ -83,7 +83,7 @@ pub fn scan_ascii_strings(data: &[u8], base_addr: u64) -> HashMap<u64, String> {
 
             if let Some(offset) = best_offset {
                 let len = end - offset;
-                let va = base_addr + offset as u64;
+                let va = base_addr.wrapping_add(offset as u64);
                 let bytes = &data[offset..offset + len];
                 match std::str::from_utf8(bytes) {
                     Ok(s) => {
@@ -173,7 +173,9 @@ pub fn scan_ascii_strings_from_sections(
             continue;
         }
         let file_start = section.file_offset as usize;
-        let file_end = file_start + section.file_size as usize;
+        let Some(file_end) = file_start.checked_add(section.file_size as usize) else {
+            continue;
+        };
         if file_end > data.len() || file_start >= file_end {
             continue;
         }

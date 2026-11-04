@@ -1242,13 +1242,19 @@ impl DieMatcher {
             .sections
             .iter()
             .find(|s| {
-                ep_rva >= s.virtual_address && ep_rva < s.virtual_address + s.virtual_size as u64
+                ep_rva >= s.virtual_address
+                    && ep_rva < s.virtual_address.saturating_add(s.virtual_size as u64)
             })
             .and_then(|s| {
                 let offset = (ep_rva - s.virtual_address) as usize;
-                let file_offset = s.file_offset as usize + offset + extra_offset;
+                let file_offset = (s.file_offset as usize)
+                    .saturating_add(offset)
+                    .saturating_add(extra_offset);
                 if file_offset < binary.data.as_slice().len() {
-                    let end = std::cmp::min(file_offset + 128, binary.data.as_slice().len());
+                    let end = std::cmp::min(
+                        file_offset.saturating_add(128),
+                        binary.data.as_slice().len(),
+                    );
                     Some(&binary.data.as_slice()[file_offset..end])
                 } else {
                     None

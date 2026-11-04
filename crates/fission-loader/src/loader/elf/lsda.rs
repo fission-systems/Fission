@@ -70,7 +70,7 @@ pub fn analyze_eh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
     let read_at = |addr: u64, len: usize| binary.get_bytes(addr, len);
     let symbol_at = |addr: u64| binary.relocation_symbols.get(&addr).cloned();
     let table_start_vma = except_table_sec.virtual_address;
-    let table_end_vma = table_start_vma + except_table_sec.virtual_size;
+    let table_end_vma = table_start_vma.saturating_add(except_table_sec.virtual_size);
 
     let mut entries = eh_frame.entries(&bases);
     loop {

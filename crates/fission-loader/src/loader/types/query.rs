@@ -18,7 +18,7 @@ impl LoadedBinary {
         let idx = self.sections.binary_search_by(|section| {
             if address < section.virtual_address {
                 std::cmp::Ordering::Greater
-            } else if address >= section.virtual_address + section.virtual_size {
+            } else if address >= section.virtual_address.saturating_add(section.virtual_size) {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Equal
@@ -105,9 +105,10 @@ impl LoadedBinary {
         if take == 0 {
             return None;
         }
-        let file_offset = section.file_offset as usize + offset_in_section as usize;
-        if file_offset + take <= self.data.as_slice().len() {
-            Some(&self.data.as_slice()[file_offset..file_offset + take])
+        let file_offset = (section.file_offset as usize).checked_add(offset_in_section as usize)?;
+        let end = file_offset.checked_add(take)?;
+        if end <= self.data.as_slice().len() {
+            Some(&self.data.as_slice()[file_offset..end])
         } else {
             None
         }
@@ -418,7 +419,7 @@ fn section_contains(section: &SectionInfo, address: u64) -> bool {
     };
     section_size > 0
         && address >= section.virtual_address
-        && address < section.virtual_address + section_size
+        && address < section.virtual_address.saturating_add(section_size)
 }
 
 #[cfg(test)]
