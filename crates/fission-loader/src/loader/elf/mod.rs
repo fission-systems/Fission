@@ -1587,7 +1587,9 @@ fn symbol_string_table_64<'a>(
     let strtab = shdrs.get(symtab.sh_link as usize)?;
     let start = strtab.sh_offset as usize;
     let end = start.checked_add(strtab.sh_size as usize)?;
-    (end <= full_data.len()).then_some(&full_data[start..end])
+    // `then_some` evaluates its argument first, so slicing here panicked on an
+    // out-of-range `sh_offset` before the length check could reject it.
+    (end <= full_data.len()).then(|| &full_data[start..end])
 }
 
 fn symbol_string_table_32<'a>(
@@ -1598,7 +1600,9 @@ fn symbol_string_table_32<'a>(
     let strtab = shdrs.get(symtab.sh_link as usize)?;
     let start = strtab.sh_offset as usize;
     let end = start.checked_add(strtab.sh_size as usize)?;
-    (end <= full_data.len()).then_some(&full_data[start..end])
+    // `then_some` evaluates its argument first, so slicing here panicked on an
+    // out-of-range `sh_offset` before the length check could reject it.
+    (end <= full_data.len()).then(|| &full_data[start..end])
 }
 
 fn symbol_name_64(
@@ -3084,6 +3088,71 @@ fn map_symbol_versions_32(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// `sh_type` of a string table; only the test headers need it.
+    const SHT_STRTAB: u32 = 3;
+
+    fn shdr32(sh_offset: u32, sh_size: u32) -> Elf32Shdr {
+        Elf32Shdr {
+            sh_name: 0,
+            sh_type: SHT_STRTAB,
+            sh_flags: 0,
+            sh_addr: 0,
+            sh_offset,
+            sh_size,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: 1,
+            sh_entsize: 0,
+        }
+    }
+
+    fn shdr64(sh_offset: u64, sh_size: u64) -> Elf64Shdr {
+        Elf64Shdr {
+            sh_name: 0,
+            sh_type: SHT_STRTAB,
+            sh_flags: 0,
+            sh_addr: 0,
+            sh_offset,
+            sh_size,
+            sh_link: 0,
+            sh_info: 0,
+            sh_addralign: 1,
+            sh_entsize: 0,
+        }
+    }
+
+    /// A symbol table whose string table starts past the end of the file is
+    /// malformed input, not a reason to panic: `then_some(&data[start..end])`
+    /// sliced before it checked the bounds (found by `fuzz_elf_parser`).
+    #[test]
+    fn symbol_string_table_rejects_a_range_outside_the_file() {
+        let data = [0u8; 191];
+
+        // sh_link = 0, so the section is its own string table.
+        let past_end32 = shdr32(1_560_281_088, 16);
+        assert!(symbol_string_table_32(&data, &[past_end32.clone()], &past_end32).is_none());
+        let past_end64 = shdr64(1_560_281_088, 16);
+        assert!(symbol_string_table_64(&data, &[past_end64.clone()], &past_end64).is_none());
+
+        // Starts inside the file, ends outside it.
+        let straddles32 = shdr32(180, 100);
+        assert!(symbol_string_table_32(&data, &[straddles32.clone()], &straddles32).is_none());
+        let straddles64 = shdr64(180, 100);
+        assert!(symbol_string_table_64(&data, &[straddles64.clone()], &straddles64).is_none());
+
+        // The in-range case still resolves.
+        let inside32 = shdr32(100, 50);
+        assert_eq!(
+            symbol_string_table_32(&data, &[inside32.clone()], &inside32).map(<[u8]>::len),
+            Some(50)
+        );
+        let inside64 = shdr64(100, 50);
+        assert_eq!(
+            symbol_string_table_64(&data, &[inside64.clone()], &inside64).map(<[u8]>::len),
+            Some(50)
+        );
+    }
 
     #[test]
     fn elf_nobits_sections_have_no_file_bytes() {

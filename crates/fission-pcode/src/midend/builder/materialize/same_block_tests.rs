@@ -2362,3 +2362,34 @@ fn stack_addr_frame_stable_trial_rejects_non_memory_consumer() {
         Err(StackAddrFrameStableTrialReason::RejectedConsumerKind)
     );
 }
+
+#[test]
+fn popcount_input_extraction_tolerates_a_call_without_arguments() {
+    // `then_some(&args[0])` indexed before checking `args.len() == 1`.
+    let no_args = PreHirExpr::Call {
+        origin: None,
+        target: "helper".to_string(),
+        args: vec![],
+        ty: int(32),
+    };
+    assert!(PreviewBuilder::extract_popcount_input_expr(&no_args).is_none());
+
+    let popcount_no_args = PreHirExpr::Call {
+        origin: None,
+        target: "__popcount".to_string(),
+        args: vec![],
+        ty: int(32),
+    };
+    assert!(PreviewBuilder::extract_popcount_input_expr(&popcount_no_args).is_none());
+
+    let popcount = PreHirExpr::Call {
+        origin: None,
+        target: "__popcount".to_string(),
+        args: vec![PreHirExpr::Var("param_1".to_string())],
+        ty: int(32),
+    };
+    assert_eq!(
+        PreviewBuilder::extract_popcount_input_expr(&popcount),
+        Some(&PreHirExpr::Var("param_1".to_string()))
+    );
+}

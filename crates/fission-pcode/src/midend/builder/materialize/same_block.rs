@@ -2499,7 +2499,9 @@ impl<'a> PreviewBuilder<'a> {
         let PreHirExpr::Call { target, args, .. } = rhs else {
             return None;
         };
-        (target == "__popcount" && args.len() == 1).then_some(&args[0])
+        // `then_some` would evaluate `&args[0]` first and panic on a call with no
+        // arguments before the length check.
+        (target == "__popcount" && args.len() == 1).then(|| &args[0])
     }
 
     fn extract_intand_popcount_operand<'b>(
