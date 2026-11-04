@@ -1358,3 +1358,334 @@ fn test_or_all_ones_is_all_ones_at_every_width() {
         );
     }
 }
+
+fn cse_vn(offset: u64, size: u32) -> Varnode {
+    Varnode {
+        space_id: 2,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+fn cse_op(seq: u32, opcode: PcodeOpcode, output: Varnode, inputs: Vec<Varnode>) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode,
+        address: 0x1000 + u64::from(seq),
+        output: Some(output),
+        inputs,
+        asm_mnemonic: None,
+    }
+}
+
+fn run_cse(ops: Vec<PcodeOp>) -> Vec<PcodeOp> {
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops,
+        }],
+    };
+    CommonSubexpressionEliminator::new().eliminate(&mut func);
+    func.blocks.remove(0).ops
+}
+
+#[test]
+fn cse_keeps_zero_extensions_of_different_widths_apart() {
+    // y:4 = ZEXT(x:1); z:8 = ZEXT(x:1). Rewriting z into COPY y hands back a
+    // 4-byte value where an 8-byte one was asked for.
+    let x = cse_vn(0x10, 1);
+    let ops = run_cse(vec![
+        cse_op(0, PcodeOpcode::IntZExt, cse_vn(0x100, 4), vec![x.clone()]),
+        cse_op(1, PcodeOpcode::IntZExt, cse_vn(0x108, 8), vec![x]),
+    ]);
+    assert_eq!(ops[1].opcode, PcodeOpcode::IntZExt);
+}
+
+#[test]
+fn cse_forgets_an_expression_once_an_input_is_overwritten() {
+    // t = a + b; a = c; u = a + b  -- the second `a + b` is a different value.
+    let (a, b, c) = (cse_vn(0x10, 4), cse_vn(0x20, 4), cse_vn(0x30, 4));
+    let ops = run_cse(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAdd,
+            cse_vn(0x100, 4),
+            vec![a.clone(), b.clone()],
+        ),
+        cse_op(1, PcodeOpcode::Copy, a.clone(), vec![c]),
+        cse_op(2, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+    ]);
+    assert_eq!(ops[2].opcode, PcodeOpcode::IntAdd);
+}
+
+#[test]
+fn cse_forgets_an_expression_once_its_result_is_overwritten() {
+    // x = a + b; x = c; y = a + b  -- `x` no longer holds `a + b`.
+    let (a, b, c, x) = (
+        cse_vn(0x10, 4),
+        cse_vn(0x20, 4),
+        cse_vn(0x30, 4),
+        cse_vn(0x100, 4),
+    );
+    let ops = run_cse(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAdd,
+            x.clone(),
+            vec![a.clone(), b.clone()],
+        ),
+        cse_op(1, PcodeOpcode::Copy, x, vec![c]),
+        cse_op(2, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+    ]);
+    assert_eq!(ops[2].opcode, PcodeOpcode::IntAdd);
+}
+
+#[test]
+fn cse_forgets_an_expression_when_a_sub_register_of_an_input_is_written() {
+    // a is 4 bytes at 0x10; a write to the 2 bytes at 0x12 overlaps it.
+    let (a, b) = (cse_vn(0x10, 4), cse_vn(0x20, 4));
+    let ops = run_cse(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAdd,
+            cse_vn(0x100, 4),
+            vec![a.clone(), b.clone()],
+        ),
+        cse_op(1, PcodeOpcode::Copy, cse_vn(0x12, 2), vec![cse_vn(0x40, 2)]),
+        cse_op(2, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+    ]);
+    assert_eq!(ops[2].opcode, PcodeOpcode::IntAdd);
+}
+
+#[test]
+fn cse_does_not_cache_a_result_that_overwrote_its_own_input() {
+    // a = a + b; c = a + b  -- the second `a` is the new one.
+    let (a, b) = (cse_vn(0x10, 4), cse_vn(0x20, 4));
+    let ops = run_cse(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAdd,
+            a.clone(),
+            vec![a.clone(), b.clone()],
+        ),
+        cse_op(1, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+    ]);
+    assert_eq!(ops[1].opcode, PcodeOpcode::IntAdd);
+}
+
+#[test]
+fn cse_forgets_everything_across_a_call_or_store() {
+    for barrier in [
+        PcodeOpcode::Call,
+        PcodeOpcode::CallOther,
+        PcodeOpcode::Store,
+    ] {
+        let (a, b) = (cse_vn(0x10, 4), cse_vn(0x20, 4));
+        let mut call = cse_op(1, barrier, cse_vn(0x500, 4), vec![cse_vn(0x50, 8)]);
+        call.output = None;
+        let ops = run_cse(vec![
+            cse_op(
+                0,
+                PcodeOpcode::IntAdd,
+                cse_vn(0x100, 4),
+                vec![a.clone(), b.clone()],
+            ),
+            call,
+            cse_op(2, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+        ]);
+        assert_eq!(ops[2].opcode, PcodeOpcode::IntAdd, "{barrier:?}");
+    }
+}
+
+#[test]
+fn cse_still_merges_a_repeat_with_unrelated_writes_in_between() {
+    let (a, b) = (cse_vn(0x10, 4), cse_vn(0x20, 4));
+    let ops = run_cse(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAdd,
+            cse_vn(0x100, 4),
+            vec![a.clone(), b.clone()],
+        ),
+        cse_op(
+            1,
+            PcodeOpcode::Copy,
+            cse_vn(0x300, 4),
+            vec![cse_vn(0x40, 4)],
+        ),
+        cse_op(2, PcodeOpcode::IntAdd, cse_vn(0x104, 4), vec![a, b]),
+    ]);
+    assert_eq!(ops[2].opcode, PcodeOpcode::Copy);
+}
+
+fn float_cmp(opcode: PcodeOpcode) -> PcodeOp {
+    let x = cse_vn(0x10, 8);
+    PcodeOp {
+        seq_num: 0,
+        opcode,
+        address: 0x1000,
+        output: Some(cse_vn(0x100, 1)),
+        inputs: vec![x.clone(), x],
+        asm_mnemonic: None,
+    }
+}
+
+#[test]
+fn float_self_comparisons_are_not_folded_except_the_strict_less() {
+    // NaN is unordered: NaN == NaN and NaN <= NaN are false, NaN != NaN is true.
+    let optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+    for opcode in [
+        PcodeOpcode::FloatEqual,
+        PcodeOpcode::FloatNotEqual,
+        PcodeOpcode::FloatLessEqual,
+    ] {
+        assert!(
+            optimizer.rules.try_optimize(&float_cmp(opcode)).is_none(),
+            "{opcode:?}(x, x) must not fold"
+        );
+    }
+    // x < x is false for every x, NaN included.
+    assert!(
+        optimizer
+            .rules
+            .try_optimize(&float_cmp(PcodeOpcode::FloatLess))
+            .is_some()
+    );
+}
+
+fn optimize_ops(ops: Vec<PcodeOp>) -> Vec<PcodeOp> {
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops,
+        }],
+    };
+    PcodeOptimizer::new(PcodeOptimizerConfig::default()).optimize(&mut func);
+    func.blocks.remove(0).ops
+}
+
+fn ret(seq: u32, value: Varnode) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::Return,
+        address: 0x1000 + u64::from(seq),
+        output: None,
+        inputs: vec![value],
+        asm_mnemonic: None,
+    }
+}
+
+/// A function input is read but never written, so nothing is known about its
+/// bits. The mask was seeded as "all bits zero", and `x & 0xff` was rewritten
+/// to `x`.
+#[test]
+fn and_mask_on_a_function_input_is_kept() {
+    let (input, out) = (cse_vn(0x10, 4), cse_vn(0x100, 4));
+    let ops = optimize_ops(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAnd,
+            out.clone(),
+            vec![input, Varnode::constant(0xFF, 4)],
+        ),
+        ret(1, out),
+    ]);
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        "the mask must survive: {ops:?}"
+    );
+}
+
+/// `and esi, 0xf` reads the old `esi` while defining the new one.
+#[test]
+fn in_place_and_on_a_live_in_register_is_kept() {
+    let (esi, eax) = (cse_vn(0x20, 4), cse_vn(0x0, 4));
+    let ops = optimize_ops(vec![
+        cse_op(
+            0,
+            PcodeOpcode::IntAnd,
+            esi.clone(),
+            vec![esi.clone(), Varnode::constant(0xF, 4)],
+        ),
+        cse_op(1, PcodeOpcode::Copy, eax.clone(), vec![esi]),
+        ret(2, eax),
+    ]);
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        "the mask must survive: {ops:?}"
+    );
+}
+
+/// `mov eax, esi; and eax, 0xf`.
+#[test]
+fn copy_then_mask_of_a_live_in_register_is_kept() {
+    let (esi, eax) = (cse_vn(0x20, 4), cse_vn(0x0, 4));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::Copy, eax.clone(), vec![esi]),
+        cse_op(
+            1,
+            PcodeOpcode::IntAnd,
+            eax.clone(),
+            vec![eax.clone(), Varnode::constant(0xF, 4)],
+        ),
+        ret(2, eax),
+    ]);
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        "the mask must survive: {ops:?}"
+    );
+}
+
+/// What the mask is for: a value the program built itself has known bits, and a
+/// mask that cannot clear any of them goes away.
+#[test]
+fn and_mask_after_a_zero_extension_is_still_removed() {
+    let (byte, wide, masked) = (cse_vn(0x10, 1), cse_vn(0x100, 4), cse_vn(0x104, 4));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::IntZExt, wide.clone(), vec![byte]),
+        cse_op(
+            1,
+            PcodeOpcode::IntAnd,
+            masked.clone(),
+            vec![wide, Varnode::constant(0xFF, 4)],
+        ),
+        ret(2, masked),
+    ]);
+    assert!(
+        !ops.iter().any(|op| op.opcode == PcodeOpcode::IntAnd),
+        "a mask that clears nothing should be dropped: {ops:?}"
+    );
+}
+
+/// Writing `ax` changes the low half of `eax`, which is a different varnode id.
+#[test]
+fn a_partial_register_write_makes_the_wide_register_untracked() {
+    let (byte, eax, ax, other) = (
+        cse_vn(0x10, 1),
+        cse_vn(0x0, 4),
+        cse_vn(0x0, 2),
+        cse_vn(0x30, 2),
+    );
+    let func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                cse_op(0, PcodeOpcode::IntZExt, eax.clone(), vec![byte]),
+                cse_op(1, PcodeOpcode::Copy, ax, vec![other]),
+                ret(2, eax.clone()),
+            ],
+        }],
+    };
+    let mut tracker = DefUseTracker::new();
+    tracker.build(&func);
+    // Not the 0xFF a zero-extended byte would give: `ax` was overwritten.
+    assert_eq!(tracker.get_nz_mask(&eax), 0xFFFF_FFFF);
+}

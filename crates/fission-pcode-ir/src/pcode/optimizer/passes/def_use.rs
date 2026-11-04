@@ -61,18 +61,26 @@ pub struct DefUseInfo {
 pub struct DefUseTracker {
     /// Map from varnode ID to its def-use info
     def_use: HashMap<VarnodeId, DefUseInfo>,
+    /// Varnodes whose non-zero mask is not tracked and stays "any bit".
+    ///
+    /// The mask is one value per varnode, not per program point, so it only
+    /// describes a varnode that holds a single value for its whole life. See
+    /// [`DefUseTracker::find_untracked_nz`].
+    nz_untracked: std::collections::HashSet<VarnodeId>,
 }
 
 impl DefUseTracker {
     pub fn new() -> Self {
         Self {
             def_use: HashMap::new(),
+            nz_untracked: std::collections::HashSet::new(),
         }
     }
 
     /// Build def-use chains for a function
     pub fn build(&mut self, func: &PcodeFunction) {
         self.def_use.clear();
+        self.nz_untracked.clear();
 
         // Pass 1: Find all definitions
         for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -118,6 +126,7 @@ impl DefUseTracker {
         }
 
         // Pass 3: Compute non-zero masks
+        self.find_untracked_nz(func);
         self.compute_nz_masks(func);
 
         // Pass 4: Compute consume masks
@@ -191,7 +200,76 @@ impl DefUseTracker {
     }
 
     /// Compute non-zero masks for all varnodes
+    /// Mark every varnode whose single per-varnode non-zero mask would be wrong.
+    ///
+    /// A mask describes "the value this varnode holds", but p-code here is not
+    /// SSA: a register can be read before it is written (a function input) or
+    /// written more than once, and `esi = esi & 0xf` reads the *old* `esi` while
+    /// defining the new one. Seeding every varnode with mask 0 and iterating up
+    /// then reports an input as "all bits zero", which let `x & 0xf` be rewritten
+    /// to `x`. A mask is only trusted when the varnode
+    ///
+    /// - has exactly one definition,
+    /// - is read only in the definition's own block, after it, and
+    /// - shares no storage with a different, written varnode (`eax` / `ax`).
+    ///
+    /// Everything else keeps "any bit may be set".
+    fn find_untracked_nz(&mut self, func: &PcodeFunction) {
+        let mut def_counts: HashMap<VarnodeId, usize> = HashMap::new();
+        for block in &func.blocks {
+            for op in &block.ops {
+                if let Some(out) = &op.output {
+                    *def_counts.entry(VarnodeId::from(out)).or_insert(0) += 1;
+                }
+            }
+        }
+
+        for (id, info) in &self.def_use {
+            let tracked = def_counts.get(id) == Some(&1)
+                && info.def.is_some_and(|def| {
+                    info.uses
+                        .iter()
+                        .all(|u| u.block_idx == def.block_idx && u.op_idx > def.op_idx)
+                });
+            if !tracked {
+                self.nz_untracked.insert(id.clone());
+            }
+        }
+
+        // Written varnodes that overlap a different written varnode.
+        let mut written: Vec<&VarnodeId> = def_counts.keys().collect();
+        written.sort_by_key(|id| (id.space_id, id.offset, id.size));
+        let mut active: Vec<(&VarnodeId, u64)> = Vec::new();
+        let mut overlapping: Vec<VarnodeId> = Vec::new();
+        for id in written {
+            if let Some((prev, _)) = active.first() {
+                if prev.space_id != id.space_id {
+                    active.clear();
+                }
+            }
+            active.retain(|(_, end)| *end > id.offset);
+            let end = id.offset.saturating_add(u64::from(id.size.max(1)));
+            if !active.is_empty() {
+                overlapping.push(id.clone());
+                overlapping.extend(active.iter().map(|(other, _)| (*other).clone()));
+            }
+            active.push((id, end));
+        }
+        self.nz_untracked.extend(overlapping);
+    }
+
     fn compute_nz_masks(&mut self, func: &PcodeFunction) {
+        for id in &self.nz_untracked {
+            if let Some(info) = self.def_use.get_mut(id) {
+                info.nz_mask = match id.size {
+                    1 => 0xFF,
+                    2 => 0xFFFF,
+                    4 => 0xFFFF_FFFF,
+                    _ => u64::MAX,
+                };
+            }
+        }
+
         // Iterate multiple times until convergence
         let max_iterations = 10;
         for _ in 0..max_iterations {
@@ -200,6 +278,9 @@ impl DefUseTracker {
             for block in &func.blocks {
                 for op in &block.ops {
                     if let Some(out) = &op.output {
+                        if self.nz_untracked.contains(&VarnodeId::from(out)) {
+                            continue;
+                        }
                         let old_mask = self.get_nz_mask(out);
                         let new_mask = self.compute_op_nz_mask(op);
 
@@ -270,7 +351,7 @@ impl DefUseTracker {
                 safe_shl_u64(self.get_nz_mask(&op.inputs[0]), shift_amt) & mask
             }
 
-            PcodeOpcode::IntRight | PcodeOpcode::IntSRight => {
+            PcodeOpcode::IntRight => {
                 if op.inputs.len() < 2 {
                     return mask;
                 }
@@ -280,6 +361,33 @@ impl DefUseTracker {
                     return mask; // Unknown shift
                 };
                 safe_shr_u64(self.get_nz_mask(&op.inputs[0]), shift_amt)
+            }
+
+            // An arithmetic shift fills from the sign bit, not with zeros. If
+            // the input's sign bit can be set, so can every bit shifted in.
+            PcodeOpcode::IntSRight => {
+                if op.inputs.len() < 2 {
+                    return mask;
+                }
+                let shift_amt = if op.inputs[1].is_constant {
+                    op.inputs[1].constant_val as u32
+                } else {
+                    return mask; // Unknown shift
+                };
+                let in_size = op.inputs[0].size;
+                if in_size == 0 || in_size > 8 {
+                    return mask;
+                }
+                let in_mask = self.size_mask(in_size);
+                let in_nz = self.get_nz_mask(&op.inputs[0]) & in_mask;
+                let logical = safe_shr_u64(in_nz, shift_amt);
+                let sign_bit = in_mask ^ (in_mask >> 1);
+                if in_nz & sign_bit == 0 {
+                    logical
+                } else {
+                    let fill = in_mask & !safe_shr_u64(in_mask, shift_amt);
+                    (logical | fill) & mask
+                }
             }
 
             PcodeOpcode::IntZExt => {
@@ -416,10 +524,22 @@ impl DefUseTracker {
                             if op.inputs.len() >= 2 {
                                 if op.inputs[1].is_constant {
                                     let shift_amt = op.inputs[1].constant_val as u32;
-                                    if self.add_consume(
-                                        &op.inputs[0],
-                                        safe_shl_u64(input_consume_req, shift_amt),
-                                    ) {
+                                    let mut consumed = safe_shl_u64(input_consume_req, shift_amt);
+                                    if op.opcode == PcodeOpcode::IntSRight {
+                                        // The top `C` bits of A are copies of B's sign
+                                        // bit, so consuming any of them consumes it.
+                                        let in_size = op.inputs[0].size;
+                                        if in_size == 0 || in_size > 8 {
+                                            consumed = u64::MAX;
+                                        } else {
+                                            let in_mask = self.size_mask(in_size);
+                                            let fill = in_mask & !safe_shr_u64(in_mask, shift_amt);
+                                            if input_consume_req & fill != 0 {
+                                                consumed |= in_mask ^ (in_mask >> 1);
+                                            }
+                                        }
+                                    }
+                                    if self.add_consume(&op.inputs[0], consumed) {
                                         changed = true;
                                     }
                                 } else {
@@ -662,5 +782,149 @@ mod tests {
         tracker.build(&func);
 
         assert_eq!(tracker.get_consume_mask(&wide), u64::MAX);
+    }
+
+    fn sright_func(extra_and_mask: Option<i64>) -> (PcodeFunction, Varnode, Varnode) {
+        // b:4 is a leaf; a:4 = b s>> 4; [c:4 = a & mask;] return.
+        let b = Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let a = Varnode {
+            space_id: 1,
+            offset: 0x200,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let mut ops = vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::IntSRight,
+            address: 0x1000,
+            output: Some(a.clone()),
+            inputs: vec![b.clone(), Varnode::constant(4, 4)],
+            asm_mnemonic: None,
+        }];
+        let result = if let Some(mask) = extra_and_mask {
+            let c = Varnode {
+                space_id: 1,
+                offset: 0x300,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            };
+            ops.push(PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::IntAnd,
+                address: 0x1004,
+                output: Some(c.clone()),
+                inputs: vec![a.clone(), Varnode::constant(mask, 4)],
+                asm_mnemonic: None,
+            });
+            c
+        } else {
+            a.clone()
+        };
+        ops.push(PcodeOp {
+            seq_num: 2,
+            opcode: PcodeOpcode::Return,
+            address: 0x1008,
+            output: None,
+            inputs: vec![result],
+            asm_mnemonic: None,
+        });
+        (
+            PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![],
+                    ops,
+                }],
+            },
+            b,
+            a,
+        )
+    }
+
+    #[test]
+    fn arithmetic_right_shift_may_set_the_bits_it_shifts_in() {
+        // b is an unknown 32-bit value, so its sign bit can be 1 and so can the
+        // four bits `b s>> 4` shifts in at the top.
+        let (func, _b, a) = sright_func(None);
+        let mut tracker = DefUseTracker::new();
+        tracker.build(&func);
+        assert_eq!(tracker.get_nz_mask(&a), 0xFFFF_FFFF);
+    }
+
+    #[test]
+    fn arithmetic_right_shift_of_a_non_negative_value_shifts_in_zeros() {
+        // b & 0x7FFFFFFF has a clear sign bit, so the shift fills with zeros.
+        let b = Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let masked = Varnode {
+            space_id: 1,
+            offset: 0x180,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let a = Varnode {
+            space_id: 1,
+            offset: 0x200,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAnd,
+                        address: 0x1000,
+                        output: Some(masked.clone()),
+                        inputs: vec![b, Varnode::constant(0x7FFF_FFFF, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::IntSRight,
+                        address: 0x1004,
+                        output: Some(a.clone()),
+                        inputs: vec![masked, Varnode::constant(4, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+        let mut tracker = DefUseTracker::new();
+        tracker.build(&func);
+        assert_eq!(tracker.get_nz_mask(&a), 0x07FF_FFFF);
+    }
+
+    #[test]
+    fn consuming_the_shifted_in_bits_consumes_the_sign_bit() {
+        // a = b s>> 4; c = a & 0xF0000000. Only the top four bits of `a` are
+        // wanted, and they are all copies of b's bit 31.
+        let (func, b, _a) = sright_func(Some(0xF000_0000u32 as i32 as i64));
+        let mut tracker = DefUseTracker::new();
+        tracker.build(&func);
+        assert_ne!(
+            tracker.get_consume_mask(&b) & 0x8000_0000,
+            0,
+            "b's sign bit feeds the top bits of the result"
+        );
     }
 }
