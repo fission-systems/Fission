@@ -364,22 +364,27 @@ impl ProgramSnapshot {
 
     /// Return the most specific function range containing `address`.
     ///
-    /// Exact entries win. For overlapping non-zero ranges, the smallest range
-    /// wins and stable IDs break ties, keeping the query deterministic.
+    /// For overlapping non-zero ranges, the smallest range wins and stable IDs
+    /// break ties, keeping the query deterministic. A sized function that
+    /// covers `address` wins, whatever else starts there: an assembly label or
+    /// alias of size zero at the same entry (`_start`, say) says where
+    /// something begins, not where it ends, and letting it win at the entry made
+    /// the answer change between `entry` and `entry + 4` of the one function.
+    /// A zero-sized function is returned only when no sized function covers
+    /// the address.
     pub fn function_containing(&self, address: u64) -> Option<&FunctionRecord> {
-        self.function_at(address).or_else(|| {
-            let functions = &self.functions;
-            self.function_intervals
-                .find_best(address, |candidate, current| {
-                    let candidate = &functions[candidate];
-                    current.is_none_or(|current| {
-                        let current = &functions[current];
-                        (candidate.size, candidate.entry, candidate.id)
-                            < (current.size, current.entry, current.id)
-                    })
+        let functions = &self.functions;
+        self.function_intervals
+            .find_best(address, |candidate, current| {
+                let candidate = &functions[candidate];
+                current.is_none_or(|current| {
+                    let current = &functions[current];
+                    (candidate.size, candidate.entry, candidate.id)
+                        < (current.size, current.entry, current.id)
                 })
-                .and_then(|index| functions.get(index))
-        })
+            })
+            .and_then(|index| functions.get(index))
+            .or_else(|| self.function_at(address))
     }
 
     pub fn memory_block_containing(&self, address: u64) -> Option<&MemoryBlock> {
@@ -904,6 +909,63 @@ mod tests {
         assert_eq!(
             snapshot.memory_blocks_overlapping(0x1030, 0x1030).count(),
             0
+        );
+    }
+
+    /// A zero-sized label at a function's entry used to win the query *at the
+    /// entry only*, so `entry` and `entry + 4` of one function disagreed.
+    #[test]
+    fn a_zero_sized_alias_does_not_shadow_the_function_it_starts() {
+        let function = |name: &str, address: u64, size: u64| FunctionInfo {
+            name: name.into(),
+            address,
+            size,
+            ..FunctionInfo::default()
+        };
+        let binary = LoadedBinaryBuilder::new("alias.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .is_64bit(true)
+            // Sorts ahead of `real_body` by name, which is what `function_at` returns.
+            .add_functions([
+                function("_start", 0x1000, 0),
+                function("real_body", 0x1000, 256),
+            ])
+            .add_sections([SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            }])
+            .build()
+            .expect("fixture should build");
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        for address in [0x1000u64, 0x1004, 0x10ff] {
+            assert_eq!(
+                snapshot
+                    .function_containing(address)
+                    .map(|row| row.name.as_str()),
+                Some("real_body"),
+                "0x{address:x}"
+            );
+        }
+        // Nothing sized covers it, so the label is the only answer there is.
+        let lone = LoadedBinaryBuilder::new("lone.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .is_64bit(true)
+            .add_functions([function("_label", 0x2000, 0)])
+            .build()
+            .expect("fixture should build");
+        assert_eq!(
+            ProgramSnapshot::from_loaded_binary(&lone)
+                .function_containing(0x2000)
+                .map(|row| row.name.as_str()),
+            Some("_label")
         );
     }
 

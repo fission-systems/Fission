@@ -623,12 +623,33 @@ fn resolve_pdb_sidecar_path(
 }
 
 fn pdb_matches_image(debug: Option<&PdbDebugInfo>, pdb_info: &pdb::PDBInformation<'_>) -> bool {
+    pdb_identity_matches(debug, pdb_info.guid.to_bytes_le(), pdb_info.age)
+}
+
+/// Does a PDB with this signature belong to the image whose CodeView record is
+/// `debug`?
+///
+/// `guid_le` is the GUID in the byte order a CodeView `RSDS` record stores it
+/// (`Data1`..`Data3` little-endian), which is the order `guid_hex` was read in.
+/// An image that records no GUID (`NB10`, or no CodeView record at all) cannot
+/// be checked against one, so only the age applies.
+///
+/// A PDB whose age is *newer* than the image's is accepted -- incremental links
+/// bump the PDB's age without rewriting the image -- but never an older one.
+fn pdb_identity_matches(debug: Option<&PdbDebugInfo>, guid_le: [u8; 16], age: u32) -> bool {
     let Some(debug) = debug else {
         return true;
     };
 
+    if let Some(expected_guid) = debug.guid_hex.as_deref() {
+        let actual: String = guid_le.iter().map(|byte| format!("{byte:02x}")).collect();
+        if !actual.eq_ignore_ascii_case(expected_guid) {
+            return false;
+        }
+    }
+
     if let Some(expected_age) = debug.age {
-        if pdb_info.age < expected_age {
+        if age < expected_age {
             return false;
         }
     }
@@ -802,6 +823,51 @@ fn resolve_type_data_name(
 mod tests {
     use super::*;
     use crate::loader::LoadedBinary;
+
+    fn debug_record(guid_hex: Option<&str>, age: Option<u32>) -> PdbDebugInfo {
+        PdbDebugInfo {
+            path_hint: None,
+            guid_hex: guid_hex.map(str::to_string),
+            age,
+            has_codeview: true,
+        }
+    }
+
+    const GUID: [u8; 16] = [
+        0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff,
+        0x00,
+    ];
+
+    #[test]
+    fn a_pdb_with_a_different_guid_is_not_the_images_pdb() {
+        let image = debug_record(Some("112233445566778899aabbccddeeff00"), Some(1));
+        assert!(pdb_identity_matches(Some(&image), GUID, 1));
+
+        let mut other = GUID;
+        other[15] ^= 1;
+        assert!(
+            !pdb_identity_matches(Some(&image), other, 1),
+            "a stale PDB with another signature must not name this image's functions"
+        );
+    }
+
+    #[test]
+    fn the_guid_comparison_ignores_case_and_a_missing_guid_is_unchecked() {
+        let upper = debug_record(Some("112233445566778899AABBCCDDEEFF00"), None);
+        assert!(pdb_identity_matches(Some(&upper), GUID, 0));
+
+        let nb10 = debug_record(None, Some(2));
+        assert!(pdb_identity_matches(Some(&nb10), [0; 16], 2));
+        assert!(pdb_identity_matches(None, [0; 16], 0));
+    }
+
+    #[test]
+    fn an_older_pdb_age_is_rejected_and_a_newer_one_accepted() {
+        let image = debug_record(Some("112233445566778899aabbccddeeff00"), Some(3));
+        assert!(!pdb_identity_matches(Some(&image), GUID, 2));
+        assert!(pdb_identity_matches(Some(&image), GUID, 3));
+        assert!(pdb_identity_matches(Some(&image), GUID, 4));
+    }
 
     #[test]
     fn loads_focused_pdb_function_facts_from_repo_sample() {
