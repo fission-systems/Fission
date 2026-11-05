@@ -27,17 +27,20 @@ impl LoadedBinary {
 
         if let Ok(idx) = idx {
             let section = &self.sections[idx];
-            return self.view_section_bytes(section, address, size);
+            if let Some(bytes) = self.view_section_bytes(section, address, size) {
+                return Some(bytes);
+            }
         }
         // The search assumes sections are disjoint and non-empty. A zero-sized
-        // section, or a relocatable object's overlapping placeholder ranges,
-        // can steer it past the section that does contain `address`. A miss is
-        // confirmed against the (few) sections before it is believed.
-        let section = self
-            .sections
+        // section can steer it past the section that does contain `address`,
+        // and a relocatable object's overlapping placeholder ranges (`.text`,
+        // `.data` and `.bss` all at 0) make it stop on an arbitrary one of
+        // them -- `.bss`, say, which holds no bytes -- while a neighbour does.
+        // A miss is confirmed against the (few) sections before it is believed.
+        self.sections
             .iter()
-            .find(|section| section_contains(section, address))?;
-        self.view_section_bytes(section, address, size)
+            .filter(|section| section_contains(section, address))
+            .find_map(|section| self.view_section_bytes(section, address, size))
     }
 
     /// [`view_bytes`](Self::view_bytes), but only when the section holds all
@@ -582,5 +585,48 @@ mod view_bytes_tests {
         assert_eq!(binary.view_bytes(0x1020, 1), Some(&[0xab][..]));
         assert!(binary.view_bytes(0x2000, 1).is_none(), "between sections");
         assert!(binary.view_bytes(0x1200, 1).is_none(), "one past .real");
+    }
+
+    /// Sections of a relocatable object share a placeholder address. The search
+    /// may stop on `.bss`, which holds no bytes, and must then still find the
+    /// section that does.
+    #[test]
+    fn overlapping_sections_are_tried_until_one_has_the_bytes() {
+        let mut bytes = vec![0u8; 0x100];
+        bytes[0x40] = 0xcd;
+        let bss = SectionInfo {
+            name: ".bss".to_string(),
+            virtual_address: 0,
+            virtual_size: 0x80,
+            // Sorts after `.text`, so the search's last probe lands here.
+            file_offset: 0x90,
+            file_size: 0,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        };
+        let text = section(".text", 0, 0x20, 0x40);
+        let tbss = SectionInfo {
+            name: ".tbss".to_string(),
+            file_offset: 0xa0,
+            ..bss.clone()
+        };
+        // Whichever of three the search probes first, the bytes are in `.text`.
+        for sections in [
+            vec![text.clone(), bss.clone(), tbss.clone()],
+            vec![bss.clone(), text.clone(), tbss.clone()],
+            vec![bss.clone(), tbss.clone(), text.clone()],
+        ] {
+            let binary = LoadedBinaryBuilder::new("obj.o".into(), DataBuffer::Heap(bytes.clone()))
+                .format("ELF")
+                .add_sections(sections)
+                .build()
+                .unwrap();
+            assert_eq!(binary.view_bytes(0, 1), Some(&[0xcd][..]));
+            assert!(
+                binary.view_bytes(0x40, 1).is_none(),
+                "past .text, only .bss covers it and .bss has no bytes"
+            );
+        }
     }
 }
