@@ -292,16 +292,42 @@ impl PageMap {
             }
             page += PAGE_SIZE;
         }
-        // Update mapping metadata for overlapping ranges (best-effort).
-        for m in &mut self.mappings {
+        // Keep the mapping list in step with the page flags. A mapping that
+        // only partly overlaps the range is split, as `map_region` and
+        // `unmap_region` do, so the part outside the range keeps its old
+        // protection and the part inside takes the new one.
+        let mut next = Vec::with_capacity(self.mappings.len() + 2);
+        for m in self.mappings.drain(..) {
             if m.end <= start || m.start >= end {
+                next.push(m);
                 continue;
             }
-            // Full cover: replace prot.
-            if m.start >= start && m.end <= end {
-                m.prot = new_prot | if m.anon { prot::ANON } else { 0 };
+            if m.start < start {
+                next.push(GuestMapping {
+                    start: m.start,
+                    end: start,
+                    prot: m.prot,
+                    anon: m.anon,
+                });
+            }
+            next.push(GuestMapping {
+                start: m.start.max(start),
+                end: m.end.min(end),
+                prot: new_prot | if m.anon { prot::ANON } else { 0 },
+                anon: m.anon,
+            });
+            if m.end > end {
+                next.push(GuestMapping {
+                    start: end,
+                    end: m.end,
+                    prot: m.prot,
+                    anon: m.anon,
+                });
             }
         }
+        self.mappings = next;
+        self.mappings.sort_by_key(|m| m.start);
+        self.coalesce_mappings();
         true
     }
 
@@ -747,5 +773,76 @@ mod tests {
         // Requesting across to unmapped 0x3000
         let near_second_edge = 0x3000 - 15;
         assert_eq!(pm.readable_extent(near_second_edge, 100), 15);
+    }
+    #[test]
+    fn mprotect_splits_a_mapping_it_only_partly_covers() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x4000, prot::RW, true);
+        assert!(pm.mprotect_checked(0x2000, 0x1000, prot::READ | prot::EXEC));
+
+        let spans: Vec<(u64, u64, bool)> = pm
+            .mappings()
+            .iter()
+            .map(|m| (m.start, m.end, m.prot & prot::EXEC != 0))
+            .collect();
+        assert_eq!(
+            spans,
+            vec![
+                (0x1000, 0x2000, false),
+                (0x2000, 0x3000, true),
+                (0x3000, 0x5000, false)
+            ],
+            "the mapping list must agree with the page flags"
+        );
+        for m in pm.mappings() {
+            assert!(m.anon, "the split pieces stay anonymous");
+        }
+        // Every page's flags and its mapping's protection agree.
+        for page in [0x1000u64, 0x2000, 0x3000, 0x4000] {
+            let flags = pm.page_flags(page).unwrap();
+            let m = pm.mappings().iter().find(|m| m.contains(page)).unwrap();
+            assert_eq!(
+                flags & (prot::READ | prot::WRITE | prot::EXEC),
+                m.prot & (prot::READ | prot::WRITE | prot::EXEC),
+                "page 0x{page:x}"
+            );
+        }
+    }
+
+    #[test]
+    fn mprotect_back_to_the_original_protection_merges_the_pieces_again() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x4000, prot::RW, true);
+        assert!(pm.mprotect_checked(0x2000, 0x1000, prot::READ));
+        assert_eq!(pm.mappings().len(), 3);
+        assert!(pm.mprotect_checked(0x2000, 0x1000, prot::RW));
+        assert_eq!(pm.mappings().len(), 1, "{:?}", pm.mappings());
+        assert_eq!(
+            (pm.mappings()[0].start, pm.mappings()[0].end),
+            (0x1000, 0x5000)
+        );
+    }
+
+    #[test]
+    fn mprotect_over_several_mappings_changes_each_part_it_touches() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x2000, prot::READ, true);
+        pm.map_region(0x3000, 0x2000, prot::RW, false);
+        // Covers the upper page of the first mapping and the lower of the second.
+        assert!(pm.mprotect_checked(0x2000, 0x2000, prot::READ | prot::EXEC));
+        let spans: Vec<(u64, u64, bool, bool)> = pm
+            .mappings()
+            .iter()
+            .map(|m| (m.start, m.end, m.anon, m.prot & prot::EXEC != 0))
+            .collect();
+        assert_eq!(
+            spans,
+            vec![
+                (0x1000, 0x2000, true, false),
+                (0x2000, 0x3000, true, true),
+                (0x3000, 0x4000, false, true),
+                (0x4000, 0x5000, false, false),
+            ]
+        );
     }
 }
