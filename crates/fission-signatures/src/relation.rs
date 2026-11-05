@@ -40,6 +40,11 @@ pub trait CallGraphView {
 /// 2. If signature has expected_callers, check if any expected caller calls this function
 /// 3. If force_relation is set and no callees found, reject the match
 /// 4. Adjust confidence based on relation matches
+///
+/// Relations are corroboration unless `force_relation` makes them mandatory.
+/// Without it a signature whose expected callees or callers are not found still
+/// passes -- a stripped binary names none of them, and inlining removes some --
+/// with its confidence scaled down by how many were missing.
 pub fn validate_relation<G: CallGraphView + ?Sized>(
     sig: &FunctionSignature,
     func_addr: u64,
@@ -94,7 +99,9 @@ pub fn validate_relation<G: CallGraphView + ?Sized>(
         };
     }
 
-    let passed = callee_ok && caller_ok;
+    // Only a forced relation is a requirement. Otherwise a missing callee or
+    // caller costs confidence (below), which the scaling exists to express.
+    let passed = !sig.force_relation || (callee_ok && caller_ok);
 
     // Calculate adjusted confidence
     let mut confidence = sig.confidence;
@@ -191,5 +198,35 @@ mod tests {
         let result = validate_relation(&sig, 0x1000, &graph);
         assert!(!result.passed);
         assert!(result.reason.is_some());
+    }
+    #[test]
+    fn missing_relations_cost_confidence_but_do_not_reject_an_unforced_signature() {
+        let sig = FunctionSignature::from_hex("_malloc_base", "48 89 5C 24")
+            .with_callees(&["HeapAlloc", "GetProcessHeap"])
+            .with_callers(&["main"]);
+        let full = sig.confidence;
+
+        let none = validate_relation(&sig, 0x1000, &TestGraph::default());
+        assert!(none.passed, "{:?}", none.reason);
+        // 30% off for no callee match, a further 20% off for no caller match.
+        let expected = ((full as f32 * 0.7) as u8 as f32 * 0.8) as u8;
+        assert_eq!(none.confidence, expected);
+        assert!(none.confidence < full);
+
+        let half = TestGraph {
+            callees: HashMap::from([(0x1000, HashSet::from(["HeapAlloc".to_string()]))]),
+            callers: HashMap::from([(0x1000, HashSet::from(["main".to_string()]))]),
+        };
+        let some = validate_relation(&sig, 0x1000, &half);
+        assert!(some.passed);
+        assert!(some.confidence > none.confidence, "matches raise it again");
+    }
+
+    #[test]
+    fn a_forced_relation_still_needs_every_kind_it_names() {
+        let sig = FunctionSignature::from_hex("_malloc_base", "48 89 5C 24")
+            .with_callers(&["main"])
+            .force_relation();
+        assert!(!validate_relation(&sig, 0x1000, &TestGraph::default()).passed);
     }
 }
