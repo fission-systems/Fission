@@ -442,8 +442,13 @@ impl<'a> Evaluator<'a> {
     /// Read a float value from a varnode. Returns (bits, size_bytes).
     fn read_varnode_f64(&mut self, vn: &Varnode) -> Result<f64> {
         if vn.is_constant {
-            // Interpret constant bits as IEEE-754
-            return Ok(f64::from_bits(vn.constant_val as u64));
+            // The constant is the raw bits of a float of the varnode's size: a
+            // four-byte one is a single-precision value, not the low half of a
+            // double (which reads as a denormal near zero).
+            return Ok(match vn.size {
+                4 => f32::from_bits(vn.constant_val as u32) as f64,
+                _ => f64::from_bits(vn.constant_val as u64),
+            });
         }
         let data = self
             .state
@@ -451,16 +456,7 @@ impl<'a> Evaluator<'a> {
         Ok(match vn.size {
             4 => f32::from_bits(u32::from_le_bytes(data[..4].try_into().unwrap())) as f64,
             8 => f64::from_bits(u64::from_le_bytes(data[..8].try_into().unwrap())),
-            10 => {
-                // x87 80-bit extended precision — approximate via f64
-                let frac = u64::from_le_bytes(data[..8].try_into().unwrap());
-                let exp_sign = u16::from_le_bytes(data[8..10].try_into().unwrap());
-                let sign = (exp_sign >> 15) as u64;
-                let exp = (exp_sign & 0x7FFF) as i32 - 16383;
-                let mantissa = frac as f64 / (1u64 << 63) as f64;
-                let val = mantissa * (2.0f64).powi(exp);
-                if sign != 0 { -val } else { val }
-            }
+            10 => x87_to_f64(&data[..10]),
             _ => {
                 tracing::warn!("read_varnode_f64: unsupported float size {}", vn.size);
                 0.0
@@ -478,13 +474,9 @@ impl<'a> Evaluator<'a> {
                 let bits = val.to_bits().to_le_bytes();
                 self.state.write_space(vn.space_id, vn.offset, &bits)
             }
-            10 => {
-                // x87 80-bit — store approximate representation
-                let bits = val.to_bits();
-                let mut buf = [0u8; 10];
-                buf[..8].copy_from_slice(&bits.to_le_bytes());
-                self.state.write_space(vn.space_id, vn.offset, &buf)
-            }
+            10 => self
+                .state
+                .write_space(vn.space_id, vn.offset, &f64_to_x87(val)),
             _ => {
                 tracing::warn!("write_varnode_f64: unsupported float size {}", vn.size);
                 Ok(())
@@ -507,15 +499,17 @@ impl<'a> Evaluator<'a> {
             PcodeOpcode::Copy => {
                 let out = op.output.as_ref().expect("COPY must have output");
                 let node = self.read_varnode_shadow(&op.inputs[0]);
-                if let Some(id) = node {
-                    self.write_varnode_shadow(out, id);
-                }
                 if Self::is_wide(out) || Self::is_wide(&op.inputs[0]) {
                     let data = self.read_varnode_bytes(&op.inputs[0])?;
                     self.write_varnode_bytes(out, &data)?;
                 } else {
                     let val = self.read_varnode_u64(&op.inputs[0])?;
                     self.write_varnode_u64(out, val)?;
+                }
+                // After the concrete bytes: storing them clears the shadow of
+                // the bytes it overwrites, so a shadow set first is wiped.
+                if let Some(id) = node {
+                    self.write_varnode_shadow(out, id);
                 }
             }
 
@@ -544,10 +538,11 @@ impl<'a> Evaluator<'a> {
                     let addr = self.read_varnode_u64(&op.inputs[1])?;
                     let raw = self.state.read_space(space_id, addr, out.size as usize)?;
                     let node = self.state.get_shadow_memory(space_id, addr);
+                    self.state.write_space(out.space_id, out.offset, &raw)?;
+                    // After the concrete bytes, which clear the shadow they cover.
                     if let Some(id) = node {
                         self.write_varnode_shadow(out, id);
                     }
-                    self.state.write_space(out.space_id, out.offset, &raw)?;
                 }
             }
 
@@ -606,6 +601,7 @@ impl<'a> Evaluator<'a> {
             // ── Integer arithmetic ────────────────────────────────────────────
             PcodeOpcode::IntAdd => {
                 let (a, b, out) = self.int_binary(&op)?;
+                let mut sum_shadow = None;
                 let a_node = self.read_varnode_shadow(&op.inputs[0]);
                 let b_node = self.read_varnode_shadow(&op.inputs[1]);
                 if a_node.is_some() || b_node.is_some() {
@@ -628,9 +624,13 @@ impl<'a> Evaluator<'a> {
                         });
                     let new_expr = SymExpr::new_add(a_expr, b_expr);
                     let new_id = self.solver.register_node(new_expr);
-                    self.write_varnode_shadow(out, new_id);
+                    sum_shadow = Some(new_id);
                 }
                 self.write_varnode_u64(out, a.wrapping_add(b))?;
+                // After the concrete sum, which clears the shadow it overwrites.
+                if let Some(id) = sum_shadow {
+                    self.write_varnode_shadow(out, id);
+                }
             }
             PcodeOpcode::IntSub => {
                 let (a, b, out) = self.int_binary(&op)?;
@@ -1296,10 +1296,102 @@ fn size_mask_u64(size: u32) -> u64 {
 /// report its value -- shifted past sixty-three. In a debug build that panics;
 /// in a release build it wraps, and the observer reports a number that is
 /// quietly wrong.
+/// Decode an x87 80-bit extended value: a 64-bit significand with an explicit
+/// integer bit, then a sign bit and a 15-bit exponent (bias 16383). Values
+/// outside `f64`'s range become infinity or zero.
+fn x87_to_f64(data: &[u8]) -> f64 {
+    let frac = u64::from_le_bytes(data[..8].try_into().unwrap());
+    let sign_exp = u16::from_le_bytes(data[8..10].try_into().unwrap());
+    let negative = sign_exp >> 15 != 0;
+    let exp = (sign_exp & 0x7fff) as i32;
+    let magnitude = if exp == 0x7fff {
+        if frac << 1 == 0 {
+            f64::INFINITY
+        } else {
+            f64::NAN
+        }
+    } else if frac == 0 {
+        0.0
+    } else {
+        // value = frac * 2^(exp - 16383 - 63); a denormal has exponent 1.
+        let k = (if exp == 0 { 1 } else { exp }) - 16383 - 63;
+        // Two steps, so an intermediate power of two does not overflow or
+        // vanish while the product is still representable.
+        let half = k / 2;
+        (frac as f64) * 2f64.powi(half) * 2f64.powi(k - half)
+    };
+    if negative { -magnitude } else { magnitude }
+}
+
+/// Encode an `f64` as an x87 80-bit extended value. Every `f64` is exactly
+/// representable, subnormals included.
+fn f64_to_x87(val: f64) -> [u8; 10] {
+    let bits = val.to_bits();
+    let sign = ((bits >> 63) as u16) << 15;
+    let exp11 = ((bits >> 52) & 0x7ff) as i32;
+    let mant = bits & ((1u64 << 52) - 1);
+    let (exp15, frac): (u16, u64) = if exp11 == 0x7ff {
+        // Infinity has only the integer bit set; a NaN also sets the top
+        // fraction bit (a quiet NaN).
+        (
+            0x7fff,
+            if mant == 0 {
+                1 << 63
+            } else {
+                0xc000_0000_0000_0000
+            },
+        )
+    } else if exp11 == 0 {
+        if mant == 0 {
+            (0, 0)
+        } else {
+            // A subnormal double: normalise it into the wider format.
+            let lz = mant.leading_zeros() as i32;
+            ((63 - lz - 1074 + 16383) as u16, mant << lz)
+        }
+    } else {
+        ((exp11 - 1023 + 16383) as u16, (1u64 << 63) | (mant << 11))
+    };
+    let mut out = [0u8; 10];
+    out[..8].copy_from_slice(&frac.to_le_bytes());
+    out[8..].copy_from_slice(&(sign | exp15).to_le_bytes());
+    out
+}
+
 fn le_bytes_to_u64(bytes: &[u8]) -> u64 {
     let mut v = 0u64;
     for (i, &b) in bytes.iter().take(8).enumerate() {
         v |= (b as u64) << (i * 8);
     }
     v
+}
+
+#[cfg(test)]
+mod x87_tests {
+    use super::*;
+
+    #[test]
+    fn x87_encoding_round_trips_and_matches_known_values() {
+        // 1.0 is the integer bit alone at exponent 16383.
+        let one = f64_to_x87(1.0);
+        assert_eq!(u64::from_le_bytes(one[..8].try_into().unwrap()), 1 << 63);
+        assert_eq!(u16::from_le_bytes(one[8..].try_into().unwrap()), 0x3fff);
+        assert_eq!(f64_to_x87(-0.0)[9], 0x80);
+        for v in [
+            1.0,
+            -2.5,
+            0.1,
+            1e300,
+            -1e-300,
+            f64::MIN_POSITIVE,
+            f64::from_bits(1),
+            f64::MAX,
+            0.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            assert_eq!(x87_to_f64(&f64_to_x87(v)).to_bits(), v.to_bits(), "{v:e}");
+        }
+        assert!(x87_to_f64(&f64_to_x87(f64::NAN)).is_nan());
+    }
 }
