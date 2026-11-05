@@ -688,4 +688,121 @@ mod tests {
             "a may-alias store need not overwrite local_18; return must still read 7 when p differs"
         );
     }
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn slot_store(value: i64) -> PreHirStmt {
+        dead_stack_store("local_10", value)
+    }
+
+    fn slot_load_into(var: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(var.to_string()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Var("local_10".to_string())),
+                ty: u32_ty(),
+            },
+        }
+    }
+
+    fn locals_for_loop_tests() -> Vec<PreHirBinding> {
+        vec![int_binding("local_10"), int_binding("v")]
+    }
+
+    /// Positive control for the loop test below: without it, "kept" could just
+    /// mean the pass removes nothing in this shape.
+    #[test]
+    fn control_an_overwritten_store_is_removed() {
+        let mut func = base_func(vec![slot_store(1), slot_store(2)], locals_for_loop_tests());
+        apply_dead_store_elimination(&mut func);
+        assert!(func.body.len() < 2, "{:?}", func.body);
+    }
+
+    /// `*slot = 0; while (c) { v = *slot; use(v); *slot = 5; }` -- the store in
+    /// the body is read by the *next* iteration through the back edge, and by
+    /// nothing after the loop. A single forward scan of the body sees that read
+    /// before the store and never credits the store with it.
+    #[test]
+    fn dead_store_elimination_keeps_a_store_read_by_the_next_iteration() {
+        let body = vec![
+            slot_load_into("v"),
+            PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "use".to_string(),
+                args: vec![PreHirExpr::Var("v".to_string())],
+                ty: NirType::Unknown,
+            }),
+            slot_store(5),
+        ];
+        let mut func = base_func(
+            vec![
+                slot_store(0),
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("c".to_string()),
+                    body: Rc::new(body),
+                },
+            ],
+            locals_for_loop_tests(),
+        );
+        apply_dead_store_elimination(&mut func);
+        let PreHirStmt::While { body, .. } = &func.body[func.body.len() - 1] else {
+            panic!("{:?}", func.body)
+        };
+        assert_eq!(
+            body.len(),
+            3,
+            "the body's store is read on the next iteration:\n{:?}",
+            func.body
+        );
+    }
+
+    /// `if (c) { *slot = 1; } use(*slot);` -- a definition on one path only
+    /// still reaches the read after the join (the other path reads the value
+    /// from before the `if`, which is the entry value here).
+    #[test]
+    fn dead_store_elimination_keeps_a_one_sided_store_read_after_the_join() {
+        let mut func = base_func(
+            vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c".to_string()),
+                    then_body: Rc::new(vec![slot_store(1)]),
+                    else_body: Rc::new(Vec::new()),
+                },
+                slot_load_into("v"),
+            ],
+            locals_for_loop_tests(),
+        );
+        apply_dead_store_elimination(&mut func);
+        let PreHirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("{:?}", func.body)
+        };
+        assert_eq!(then_body.len(), 1, "{:?}", func.body);
+    }
+
+    /// The one-sided store is overwritten on every path before any read, so
+    /// removing it is right -- the pass must not keep everything it cannot
+    /// prove dead, or the checks above would hold for the wrong reason.
+    #[test]
+    fn control_a_one_sided_store_overwritten_before_any_read_is_removed() {
+        let mut func = base_func(
+            vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c".to_string()),
+                    then_body: Rc::new(vec![slot_store(1)]),
+                    else_body: Rc::new(Vec::new()),
+                },
+                slot_store(2),
+            ],
+            locals_for_loop_tests(),
+        );
+        apply_dead_store_elimination(&mut func);
+        let PreHirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("{:?}", func.body)
+        };
+        assert!(then_body.is_empty(), "{:?}", func.body);
+    }
 }
