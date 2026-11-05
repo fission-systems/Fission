@@ -109,8 +109,10 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             }
             cache.clear();
         }
-        PreHirStmt::While { cond, body } => {
-            rewrite_loads_in_expr(cond, cache, &mut changed);
+        PreHirStmt::While { cond: _, body } => {
+            // The condition is evaluated again after every iteration of the
+            // body, so a value cached before the loop is not the value it
+            // reads the second time round. It is left as it is.
             let mut inner = LoadCache::default();
             if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
                 changed = true;
@@ -127,7 +129,7 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
         }
         PreHirStmt::For {
             init,
-            cond,
+            cond: _,
             update,
             body,
         } => {
@@ -136,15 +138,16 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
                     changed = true;
                 }
             }
-            if let Some(e) = cond {
-                rewrite_loads_in_expr(e, cache, &mut changed);
-            }
+            // As for `while`, the condition runs after every iteration and is
+            // not rewritten from what was cached before the loop. The update
+            // runs after the body, so it sees the body's own end state -- an
+            // `if` in the body clears that, which also covers a `continue`.
             let mut inner = LoadCache::default();
             if rle_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), &mut inner) {
                 changed = true;
             }
             if let Some(s) = update {
-                if rle_stmt(s, cache) {
+                if rle_stmt(s, &mut inner) {
                     changed = true;
                 }
             }
@@ -332,6 +335,153 @@ mod tests {
         assert!(
             matches!(rhs, PreHirExpr::Load { .. }),
             "reassigned v must not be substituted for later load"
+        );
+    }
+    fn loop_fixture(body: Vec<PreHirStmt>) -> PreHirFunction {
+        let local = |name: &str, ty: NirType, origin| PreHirBinding {
+            name: name.into(),
+            ty,
+            surface_type_name: None,
+            origin,
+            initializer: None,
+        };
+        PreHirFunction {
+            name: "rle_loop".into(),
+            locals: vec![
+                local(
+                    "local_10",
+                    u32_ty(),
+                    Some(NirBindingOrigin::StackOffset(-0x10)),
+                ),
+                local("w", u32_ty(), None),
+                local("v", u32_ty(), None),
+            ],
+            body,
+            ..Default::default()
+        }
+    }
+
+    fn load_slot() -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::AddressOfLocal("local_10".into())),
+            ty: u32_ty(),
+        }
+    }
+
+    fn store_slot(value: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::AddressOfLocal("local_10".into())),
+                ty: u32_ty(),
+            },
+            rhs: value,
+        }
+    }
+
+    fn cache_v() -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("v".into()),
+            rhs: load_slot(),
+        }
+    }
+
+    fn lt_ten(lhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(lhs),
+            rhs: Box::new(PreHirExpr::Const(10, u32_ty())),
+            ty: NirType::Bool,
+        }
+    }
+
+    fn mentions_v(expr: &PreHirExpr) -> bool {
+        format!("{expr:?}").contains("Var(\"v\")")
+    }
+
+    /// `v = *slot; while (*slot < 10) { *slot = 5; }` -- the condition is
+    /// evaluated again after every body, so it must keep reading the slot.
+    #[test]
+    fn a_while_condition_is_not_rewritten_from_before_the_loop() {
+        let mut func = loop_fixture(vec![
+            cache_v(),
+            PreHirStmt::While {
+                cond: lt_ten(load_slot()),
+                body: std::rc::Rc::new(vec![store_slot(PreHirExpr::Const(5, u32_ty()))]),
+            },
+        ]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::While { cond, .. } = &func.body[1] else {
+            panic!()
+        };
+        assert!(!mentions_v(cond), "the body rewrites the slot: {cond:?}");
+    }
+
+    /// The update runs after the body, so it sees the body's stores.
+    #[test]
+    fn a_for_update_sees_the_stores_of_the_body() {
+        let mut func = loop_fixture(vec![PreHirStmt::For {
+            init: Some(Box::new(cache_v())),
+            cond: Some(lt_ten(PreHirExpr::Var("v".into()))),
+            update: Some(Box::new(PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("v".into()),
+                rhs: load_slot(),
+            })),
+            body: std::rc::Rc::new(vec![store_slot(PreHirExpr::Const(5, u32_ty()))]),
+        }]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::For { update, .. } = &func.body[0] else {
+            panic!()
+        };
+        let Some(update) = update else { panic!() };
+        let PreHirStmt::Assign { rhs, .. } = update.as_ref() else {
+            panic!()
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Load { .. }),
+            "the body stores to the slot before the update runs: {rhs:?}"
+        );
+    }
+
+    /// A loop that never touches the slot still lets its body reuse nothing
+    /// from before it, but must not break the straight-line case.
+    #[test]
+    fn straight_line_reload_after_the_loop_is_not_reused_across_it() {
+        let mut func = loop_fixture(vec![
+            cache_v(),
+            PreHirStmt::While {
+                cond: lt_ten(PreHirExpr::Var("v".into())),
+                body: std::rc::Rc::new(vec![store_slot(PreHirExpr::Const(5, u32_ty()))]),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("v".into()),
+                rhs: load_slot(),
+            },
+        ]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!()
+        };
+        assert!(matches!(rhs, PreHirExpr::Load { .. }));
+    }
+
+    /// Positive control: without it the loop tests could pass because nothing
+    /// is ever cached.
+    #[test]
+    fn control_a_straight_line_reload_is_reused() {
+        let mut func = loop_fixture(vec![
+            cache_v(),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("w".into()),
+                rhs: load_slot(),
+            },
+        ]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
+            panic!()
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Var(name) if name == "v"),
+            "{rhs:?}"
         );
     }
 }
