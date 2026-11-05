@@ -1080,6 +1080,42 @@ impl JitCompiler {
             {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());
+                // The evaluator reads its inputs from `MachineState`, and a
+                // unique temporary written earlier in this block exists only
+                // in a Cranelift variable -- unique space is never written
+                // through (see `store_vn!`). `x86-64 div qword ptr [m]` loads
+                // the operand into a temporary and widens it; without this
+                // the 128-bit op read zero. Flush every cached view that
+                // overlaps a unique input. (Registers need no flush: their
+                // stores already reach the mirror.)
+                if unique_space != 0 {
+                    let mut flush: Vec<((u64, u64, u64), Variable)> = Vec::new();
+                    for input in op
+                        .inputs
+                        .iter()
+                        .filter(|v| !v.is_constant && v.space_id == unique_space)
+                    {
+                        let (lo, hi) = (input.offset, input.offset + u64::from(input.size));
+                        flush.extend(
+                            var_map
+                                .iter()
+                                .filter(|(k, _)| k.0 == unique_space && k.1 < hi && k.1 + k.2 > lo)
+                                .map(|(k, v)| (*k, *v)),
+                        );
+                    }
+                    // `HashMap` order must not decide which view lands last.
+                    flush.sort_by_key(|(k, _)| *k);
+                    flush.dedup_by_key(|(k, _)| *k);
+                    for ((space, offset, size), var) in flush {
+                        let val = builder.use_var(var);
+                        let sp = builder.ins().iconst(types::I64, space as i64);
+                        let off = builder.ins().iconst(types::I64, offset as i64);
+                        let sz = builder.ins().iconst(types::I64, size.min(8) as i64);
+                        builder
+                            .ins()
+                            .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                    }
+                }
                 let idx_val = builder.ins().iconst(types::I64, index);
                 let call = builder.ins().call(wide_op_ref, &[emu_ptr, idx_val]);
                 let failed = builder.inst_results(call)[0];
@@ -1102,6 +1138,17 @@ impl JitCompiler {
                 // because its *output* is an ordinary eight-byte register.
                 // So re-read what the call just wrote.
                 if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+                    // The call wrote all of `out`, up to sixteen bytes. Any
+                    // other cached view of those bytes -- a four-byte half, the
+                    // upper eight -- is stale now, not just the exact one.
+                    let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
+                    let exact = (out.space_id, out.offset, u64::from(out.size.min(8)));
+                    var_map.retain(|key, _| {
+                        *key == exact
+                            || key.0 != out.space_id
+                            || key.1 >= whi
+                            || key.1 + key.2 <= wlo
+                    });
                     let size = out.size.min(8);
                     let v = ensure_var!(out.space_id, out.offset, size);
                     let sp = builder.ins().iconst(types::I64, out.space_id as i64);
@@ -2676,10 +2723,14 @@ mod tests {
             ops,
         }];
         let mut compiler = JitCompiler::new().expect("cranelift backend available");
+        // The block calls back into the emulator by index into this table, so
+        // it has to be the emulator's own.
+        let mut wide_ops = Vec::new();
         let func_ptr = compiler
-            .compile_translation_block(&insns, 4, 2, false, &mut Vec::new())
+            .compile_translation_block(&insns, 4, 2, false, &mut wide_ops)
             .expect("compile");
         let mut emu = make_emu();
+        emu.wide_ops = wide_ops;
         let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
             unsafe { std::mem::transmute(func_ptr) };
         let next_pc = f(&mut emu as *mut _);
@@ -3058,5 +3109,70 @@ mod tests {
             0x2211,
             "2-byte read of a 4-byte unique"
         );
+    }
+    fn unique(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: 2, // the unique space `compile_and_run` hands the compiler
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    /// A temporary written earlier in the block lives only in a Cranelift
+    /// variable; a 128-bit op is handed to the interpreter, which reads its
+    /// inputs from `MachineState`. `x86-64 div qword ptr [mem]` is exactly this
+    /// shape: the loaded operand is a unique temporary that the widening
+    /// consumes.
+    #[test]
+    fn a_wide_op_sees_a_unique_temporary_written_earlier_in_the_block() {
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(unique(0x100, 8)),
+                inputs: vec![imm(0x1234_5678_9abc, 8)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::IntZExt,
+                address: 0x1000,
+                output: Some(reg(0x40, 16)),
+                inputs: vec![unique(0x100, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(
+            read_reg(&mut emu, 0x40),
+            0x1234_5678_9abc,
+            "the zero-extended 16-byte result must hold the temporary's value"
+        );
+        assert_eq!(read_reg(&mut emu, 0x48), 0, "high half is zero");
+    }
+    /// A narrower view of a register that a wide op then overwrites must not
+    /// keep answering with the old value: only the exact eight-byte key was
+    /// refreshed after the call, so the four-byte view read stale.
+    #[test]
+    fn a_wide_op_result_replaces_a_narrower_cached_view_of_its_output() {
+        let ops = vec![
+            copy_const(0x40, 1, 4), // caches (reg, 0x40, 4)
+            copy_const(0x80, 0x7777, 8),
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::IntZExt,
+                address: 0x1000,
+                output: Some(reg(0x40, 16)),
+                inputs: vec![reg(0x80, 8)],
+                asm_mnemonic: None,
+            },
+            // Reads the four-byte view of the bytes the wide op just wrote.
+            unop_sized(PcodeOpcode::Copy, 0x100, 4, 0x40, 4),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x100) & 0xffff_ffff, 0x7777);
     }
 }
