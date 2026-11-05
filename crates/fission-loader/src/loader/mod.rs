@@ -375,6 +375,12 @@ impl LoadedBinary {
                         || current_name.starts_with("sub_")
                     {
                         binary.inner_mut().functions[idx].name = func_info.name.clone();
+                        // The name index must follow the rename, or a lookup by
+                        // the DWARF name finds nothing.
+                        binary
+                            .inner_mut()
+                            .function_name_index
+                            .insert(func_info.name.clone(), idx);
                     }
                 }
             }
@@ -386,6 +392,10 @@ impl LoadedBinary {
                     dwarf_functions.insert(func_info.address, func_info);
                 }
             }
+            // The first merge ran before DWARF was read, so `dwarf_functions`
+            // was empty and its DWARF branch could never fire. A symbol the
+            // symtab gives no size gets one from DWARF here.
+            merge_debug_function_sizes(&mut binary);
         }
 
         // dwarf_lines_res is already sorted ascending by address (see
