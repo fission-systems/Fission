@@ -479,7 +479,13 @@ macro_rules! define_interp {
                     $BinaryOp::Shr => {
                         (unsigned_masked(l, operand_bits) >> ((r as u32) & 63)) as i64
                     }
-                    $BinaryOp::Sar => l.wrapping_shr((r as u32) & 63),
+                    // The sign of an operand is bit `operand_bits - 1`, not bit
+                    // 63 of the stored `i64`: an unsigned-typed 32-bit value is
+                    // held zero-extended, so `0x8000_0000` is +2^31 there and
+                    // only negative once read at its own width.
+                    $BinaryOp::Sar => {
+                        (sign_extend_i128(l, operand_bits) >> ((r as u32) & 63)) as i64
+                    }
                     $BinaryOp::Eq => bool_to_raw(l == r),
                     $BinaryOp::Ne => bool_to_raw(l != r),
                     $BinaryOp::Lt => bool_to_raw(
@@ -494,10 +500,18 @@ macro_rules! define_interp {
                     $BinaryOp::Ge => bool_to_raw(
                         unsigned_masked(l, operand_bits) >= unsigned_masked(r, operand_bits),
                     ),
-                    $BinaryOp::SLt => bool_to_raw(l < r),
-                    $BinaryOp::SLe => bool_to_raw(l <= r),
-                    $BinaryOp::SGt => bool_to_raw(l > r),
-                    $BinaryOp::SGe => bool_to_raw(l >= r),
+                    $BinaryOp::SLt => bool_to_raw(
+                        sign_extend_i128(l, operand_bits) < sign_extend_i128(r, operand_bits),
+                    ),
+                    $BinaryOp::SLe => bool_to_raw(
+                        sign_extend_i128(l, operand_bits) <= sign_extend_i128(r, operand_bits),
+                    ),
+                    $BinaryOp::SGt => bool_to_raw(
+                        sign_extend_i128(l, operand_bits) > sign_extend_i128(r, operand_bits),
+                    ),
+                    $BinaryOp::SGe => bool_to_raw(
+                        sign_extend_i128(l, operand_bits) >= sign_extend_i128(r, operand_bits),
+                    ),
                 };
                 Ok(normalize(raw, ty))
             }
@@ -987,7 +1001,93 @@ pub use prehir::interpret_with_state as interpret_prehir_with_state;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fission_midend_core::ir::{HirExpr, HirLValue, HirStmt, NirBinding, NirType};
+    use fission_midend_core::ir::{HirBinaryOp, HirExpr, HirLValue, HirStmt, NirBinding, NirType};
+
+    fn u32_const(v: i64) -> HirExpr {
+        HirExpr::Const(
+            v,
+            NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        )
+    }
+
+    fn binary(op: HirBinaryOp, l: HirExpr, r: HirExpr, ty: NirType) -> HirExpr {
+        HirExpr::Binary {
+            op,
+            lhs: Box::new(l),
+            rhs: Box::new(r),
+            ty,
+        }
+    }
+
+    /// A value is stored zero-extended when its type is unsigned, so a signed
+    /// operation on a 32-bit operand must read the sign from bit 31 rather than
+    /// from bit 63 of the stored `i64`.
+    #[test]
+    fn signed_comparisons_use_the_operand_width_not_sixty_four_bits() {
+        let boolean = NirType::Bool;
+        let int_min = u32_const(0x8000_0000);
+        let zero = u32_const(0);
+        let eval = |op| {
+            interpret_hir(
+                &[HirStmt::Return(Some(binary(
+                    op,
+                    int_min.clone(),
+                    zero.clone(),
+                    boolean.clone(),
+                )))],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("interpret")
+        };
+        // 0x80000000 as a signed 32-bit value is negative.
+        assert_eq!(eval(HirBinaryOp::SLt), Some(1));
+        assert_eq!(eval(HirBinaryOp::SLe), Some(1));
+        assert_eq!(eval(HirBinaryOp::SGt), Some(0));
+        assert_eq!(eval(HirBinaryOp::SGe), Some(0));
+        // Positive control: the unsigned comparison of the same bits is the
+        // opposite, and a small positive pair is unaffected.
+        assert_eq!(eval(HirBinaryOp::Gt), Some(1));
+        let small = interpret_hir(
+            &[HirStmt::Return(Some(binary(
+                HirBinaryOp::SLt,
+                u32_const(1),
+                u32_const(2),
+                boolean,
+            )))],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("interpret");
+        assert_eq!(small, Some(1));
+    }
+
+    #[test]
+    fn arithmetic_shift_right_replicates_the_operand_sign_bit() {
+        let result_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        // 0x80000000 >> 4 arithmetically, as a 32-bit value, is 0xF8000000.
+        let value = interpret_hir(
+            &[HirStmt::Return(Some(binary(
+                HirBinaryOp::Sar,
+                u32_const(0x8000_0000),
+                u32_const(4),
+                result_ty,
+            )))],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("interpret");
+        assert_eq!(value, Some(0xF800_0000));
+    }
 
     #[test]
     fn local_initializer_is_normalized_to_declared_type() {

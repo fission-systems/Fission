@@ -259,7 +259,8 @@ macro_rules! define_lower_sym {
                     $Expr::Binary { op, lhs, rhs, ty } => eval_binary(op, lhs, rhs, ty, env),
                     $Expr::Select { cond, then_expr, else_expr, ty } => {
                         let c = eval_expr(cond, env)?;
-                        let is_true = SymExpr::new_neq(c, SymExpr::Const { val: 0, size: 1 });
+                        let zero = SymExpr::Const { val: 0, size: bit_width(&c) };
+                        let is_true = SymExpr::new_neq(c, zero);
                         let t = eval_expr(then_expr, env)?;
                         let f = eval_expr(else_expr, env)?;
                         let _ = ty;
@@ -292,12 +293,12 @@ macro_rules! define_lower_sym {
                     $BinaryOp::Shl => SymExpr::Shl(Box::new(l), Box::new(r)),
                     $BinaryOp::Shr => SymExpr::Lshr(Box::new(l), Box::new(r)),
                     $BinaryOp::LogicalAnd => and(
-                        SymExpr::new_neq(l, SymExpr::Const { val: 0, size: 1 }),
-                        SymExpr::new_neq(r, SymExpr::Const { val: 0, size: 1 }),
+                        SymExpr::new_neq(l.clone(), SymExpr::Const { val: 0, size: bit_width(&l) }),
+                        SymExpr::new_neq(r.clone(), SymExpr::Const { val: 0, size: bit_width(&r) }),
                     ),
                     $BinaryOp::LogicalOr => {
-                        let l_true = SymExpr::new_neq(l, SymExpr::Const { val: 0, size: 1 });
-                        let r_true = SymExpr::new_neq(r, SymExpr::Const { val: 0, size: 1 });
+                        let l_true = SymExpr::new_neq(l.clone(), SymExpr::Const { val: 0, size: bit_width(&l) });
+                        let r_true = SymExpr::new_neq(r.clone(), SymExpr::Const { val: 0, size: bit_width(&r) });
                         SymExpr::new_not(and(SymExpr::new_not(l_true), SymExpr::new_not(r_true)))
                     }
                     $BinaryOp::Eq => resize(SymExpr::new_eq(l, r), 1, result_bits.max(1), false),
@@ -376,8 +377,9 @@ macro_rules! define_lower_sym {
                         }
                         $Stmt::If { cond, then_body, else_body } => {
                             let c = eval_expr(cond, &env)?;
-                            let is_true = SymExpr::new_neq(c.clone(), SymExpr::Const { val: 0, size: 1 });
-                            let is_false = SymExpr::new_eq(c, SymExpr::Const { val: 0, size: 1 });
+                            let zero = SymExpr::Const { val: 0, size: bit_width(&c) };
+                            let is_true = SymExpr::new_neq(c.clone(), zero.clone());
+                            let is_false = SymExpr::new_eq(c, zero);
                             let then_leaves = exec_from(
                                 then_body, 0, and(path_cond.clone(), is_true), env.clone(), budget,
                             )?;
