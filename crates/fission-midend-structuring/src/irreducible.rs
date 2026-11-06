@@ -509,6 +509,12 @@ fn find_irreducible_headers(
         }
         let component_set: std::collections::HashSet<usize> = component.iter().copied().collect();
         let mut headers = Vec::new();
+        // The function entry is entered from outside the graph. A loop that
+        // contains block 0 has a way in that no predecessor edge shows, so the
+        // entry counts as a header of its component.
+        if component_set.contains(&0) {
+            headers.push(0);
+        }
         for &node in component {
             for &pred in predecessors.get(node).into_iter().flatten() {
                 if !component_set.contains(&pred) {
@@ -654,5 +660,31 @@ mod tests {
         let fas = compute_fas_virtual_gotos(&succs, &preds);
         // It should complete successfully using fallback out-degree scoring
         assert!(fas.len() <= MAX_FAS_VIRTUAL_GOTOS);
+    }
+    /// 0 -> 1 -> 2 -> 0 is a loop through the function entry; 0 -> 3 -> 2 gives
+    /// it a second way in, at 2. That is irreducible, but block 0 has no
+    /// predecessor outside the loop, so only 2 was counted as a header.
+    #[test]
+    fn a_loop_through_the_entry_block_with_a_second_entry_is_irreducible() {
+        let succs = vec![vec![1, 3], vec![2], vec![0], vec![2]];
+        let preds = build_preds(&succs);
+        let components = vec![vec![0, 1, 2]];
+        let found = find_irreducible_headers(&components, &preds);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].1, vec![2], "2 is the extra entry");
+    }
+
+    /// Positive control: the same loop with no second entry stays reducible,
+    /// and a loop elsewhere in the graph is judged as before.
+    #[test]
+    fn counting_the_entry_does_not_make_a_single_entry_loop_irreducible() {
+        let single = vec![vec![1], vec![2], vec![0]];
+        assert!(find_irreducible_headers(&[vec![0, 1, 2]], &build_preds(&single)).is_empty());
+
+        // 0 -> 1; 1 <-> 2; 1 and 2 both entered from outside (0 and 3): irreducible
+        // as before, and block 0 is not in the component.
+        let elsewhere = vec![vec![1, 2], vec![2], vec![1]];
+        let found = find_irreducible_headers(&[vec![1, 2]], &build_preds(&elsewhere));
+        assert_eq!(found.len(), 1, "{found:?}");
     }
 }
