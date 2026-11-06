@@ -673,53 +673,87 @@ fn should_preserve_unreferenced_leading_labels(stmts: &[PreHirStmt]) -> bool {
 }
 
 pub fn single_pred_label_inline(stmts: &mut Vec<PreHirStmt>) -> bool {
+    // Labels are function-scoped, so "this label has one predecessor" is a
+    // property of the whole body, not of whichever nested list is being
+    // rewritten. Counting references per list made a `goto L; ...; L:` pair
+    // inside one `if` arm look single-predecessor while another `goto L` sat
+    // in a different list, and inlining it deleted `L` out from under that
+    // other `goto`. The counts are taken once here, from the list the caller
+    // owns, and shared with every nested list.
+    let mut ref_counts = collect_referenced_label_counts(stmts);
+    single_pred_label_inline_in_list(stmts, &mut ref_counts)
+}
+
+fn single_pred_label_inline_in_list(
+    stmts: &mut Vec<PreHirStmt>,
+    ref_counts: &mut HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
-        changed |= single_pred_label_inline_in_stmt(stmt);
+        changed |= single_pred_label_inline_in_stmt(stmt, ref_counts);
     }
-    changed |= single_pred_label_inline_flat(stmts);
+    changed |= single_pred_label_inline_flat(stmts, ref_counts);
     changed
 }
 
-fn single_pred_label_inline_in_stmt(stmt: &mut PreHirStmt) -> bool {
+fn single_pred_label_inline_in_stmt(
+    stmt: &mut PreHirStmt,
+    ref_counts: &mut HashMap<String, usize>,
+) -> bool {
     match stmt {
-        PreHirStmt::Block(body) => {
-            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
-        }
+        PreHirStmt::Block(body) => single_pred_label_inline_in_list(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            ref_counts,
+        ),
         PreHirStmt::If {
             then_body,
             else_body,
             ..
         } => {
-            let a = single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
-            let b = single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
+            let a = single_pred_label_inline_in_list(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                ref_counts,
+            );
+            let b = single_pred_label_inline_in_list(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                ref_counts,
+            );
             a || b
         }
         PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
-            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
+            single_pred_label_inline_in_list(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                ref_counts,
+            )
         }
-        PreHirStmt::For { body, .. } => {
-            single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
-        }
+        PreHirStmt::For { body, .. } => single_pred_label_inline_in_list(
+            std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+            ref_counts,
+        ),
         PreHirStmt::Switch { cases, default, .. } => {
             let mut changed = false;
             for case in cases.iter_mut() {
-                changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
-                    &mut case.body,
-                ));
+                changed |= single_pred_label_inline_in_list(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    ref_counts,
+                );
             }
-            changed |= single_pred_label_inline(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+            changed |= single_pred_label_inline_in_list(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                ref_counts,
+            );
             changed
         }
         _ => false,
     }
 }
 
-fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
+fn single_pred_label_inline_flat(
+    stmts: &mut Vec<PreHirStmt>,
+    ref_counts: &mut HashMap<String, usize>,
+) -> bool {
     let mut changed = false;
     for _ in 0..512 {
-        let ref_counts = collect_referenced_label_counts(stmts);
-
         let mut did_inline = false;
         let mut i = 0;
         while i < stmts.len() {
@@ -742,8 +776,7 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
                 .map(|offset| offset + i + 1);
 
             let Some(j) = label_pos else {
-                if hoist_goto_target_from_guarded_infinite_loop(stmts, i, &goto_label, &ref_counts)
-                {
+                if hoist_goto_target_from_guarded_infinite_loop(stmts, i, &goto_label, ref_counts) {
                     did_inline = true;
                     changed = true;
                     continue;
@@ -782,6 +815,14 @@ fn single_pred_label_inline_flat(stmts: &mut Vec<PreHirStmt>) -> bool {
                 continue;
             }
 
+            // The `goto` and the drained segment are gone, and so is every
+            // reference they held; keep the shared counts exact so a later
+            // pair that this removal turned single-predecessor still inlines.
+            for (label, removed) in collect_referenced_label_counts(&stmts[i..j]) {
+                if let Some(count) = ref_counts.get_mut(&label) {
+                    *count = count.saturating_sub(removed);
+                }
+            }
             stmts.remove(j);
             if j > i + 1 {
                 stmts.drain(i + 1..j);
