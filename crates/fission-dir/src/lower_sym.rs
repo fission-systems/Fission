@@ -102,7 +102,7 @@ fn sym_const(val: i64, ty: &NirType) -> SymExpr {
 /// Sign- or zero-extend / narrow `v` (currently `from_bits` wide) to
 /// `to_bits`, matching [`crate::eval::normalize`]'s semantics for the
 /// concrete tier.
-fn resize(v: SymExpr, from_bits: u32, to_bits: u32, signed_from: bool) -> SymExpr {
+pub(crate) fn resize(v: SymExpr, from_bits: u32, to_bits: u32, signed_from: bool) -> SymExpr {
     use std::cmp::Ordering;
     match to_bits.cmp(&from_bits) {
         Ordering::Equal => v,

@@ -491,7 +491,7 @@ impl MachineHost {
 /// architecture calls it (`rip`, `eip`, `pc`): `regs()` already reports it under
 /// that name, but `reg("pc")` looked only at the named entries and failed on
 /// any machine that does not list a register called `pc`.
-fn register_value(regs: &fission_ttd::RegisterState, name: &str) -> Option<u64> {
+fn register_value(regs: &fission_dynamic::debug::types::RegisterState, name: &str) -> Option<u64> {
     if name.eq_ignore_ascii_case("pc") {
         return Some(regs.pc);
     }
@@ -615,7 +615,7 @@ mod reg_and_event_tests {
 
     #[test]
     fn pc_is_readable_on_a_machine_with_no_register_called_pc() {
-        let regs = fission_ttd::RegisterState::at(0x401000).with("rax", 5);
+        let regs = fission_dynamic::debug::types::RegisterState::at(0x401000).with("rax", 5);
         assert_eq!(register_value(&regs, "pc"), Some(0x401000));
         assert_eq!(register_value(&regs, "PC"), Some(0x401000));
         // Positive control: an ordinary register is unaffected, a missing one is missing.

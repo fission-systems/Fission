@@ -107,8 +107,21 @@ pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) ->
     let prehir_bits = sym_bits(&prehir_result);
     let hir_bits = sym_bits(&hir_result);
     let cmp_bits = prehir_bits.max(hir_bits);
-    let prehir_cmp = zext_to(prehir_result, prehir_bits, cmp_bits);
-    let hir_cmp = zext_to(hir_result, hir_bits, cmp_bits);
+    // Widen by each side's own return type: a signed `-1` of eight bits is
+    // `0xFF`, and zero-extending it to 32 bits makes `255`, which no longer
+    // equals the `-1` the wider side returns.
+    let prehir_cmp = lower_sym::resize(
+        prehir_result,
+        prehir_bits,
+        cmp_bits,
+        crate::eval::is_signed(&prehir.return_type),
+    );
+    let hir_cmp = lower_sym::resize(
+        hir_result,
+        hir_bits,
+        cmp_bits,
+        crate::eval::is_signed(&hir.return_type),
+    );
 
     let mut solver = Solver::new();
     for v in &param_vars {
@@ -153,23 +166,67 @@ fn sym_bits(e: &SymExpr) -> u32 {
     }
 }
 
-fn zext_to(e: SymExpr, from_bits: u32, to_bits: u32) -> SymExpr {
-    if to_bits <= from_bits {
-        return e;
-    }
-    let extra = to_bits - from_bits;
-    SymExpr::Concat(
-        Box::new(SymExpr::Const {
-            val: 0,
-            size: extra,
-        }),
-        Box::new(e),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{SolverVerdict, classify_solver_result};
+
+    fn int(bits: u32, signed: bool) -> fission_midend_core::ir::NirType {
+        fission_midend_core::ir::NirType::Int { bits, signed }
+    }
+
+    fn prehir_returning(value: i64, bits: u32) -> fission_midend_prehir::PreHirFunction {
+        use fission_midend_prehir::{PreHirExpr, PreHirStmt};
+        fission_midend_prehir::PreHirFunction {
+            return_type: int(bits, true),
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                value,
+                int(bits, true),
+            )))],
+            ..Default::default()
+        }
+    }
+
+    fn hir_returning(value: i64, bits: u32) -> fission_midend_core::ir::HirFunction {
+        use fission_midend_core::ir::{HirExpr, HirStmt};
+        fission_midend_core::ir::HirFunction {
+            return_type: int(bits, true),
+            body: vec![HirStmt::Return(Some(HirExpr::Const(
+                value,
+                int(bits, true),
+            )))],
+            ..Default::default()
+        }
+    }
+
+    fn name(outcome: &super::SymbolicOutcome) -> &'static str {
+        match outcome {
+            super::SymbolicOutcome::Equivalent => "Equivalent",
+            super::SymbolicOutcome::Diverged(_) => "Diverged",
+            super::SymbolicOutcome::Unsupported(_) => "Unsupported",
+        }
+    }
+
+    /// A signed `-1` returned at eight bits and at thirty-two is the same
+    /// value. Zero-extending the narrow side made it `255` and reported a
+    /// divergence that is not one.
+    #[test]
+    fn a_signed_return_is_widened_by_sign_not_by_zero() {
+        use super::{SymbolicOutcome, check_symbolic_equivalence};
+        let verdict = check_symbolic_equivalence(&prehir_returning(-1, 8), &hir_returning(-1, 32));
+        assert!(
+            matches!(verdict, SymbolicOutcome::Equivalent),
+            "got {}",
+            name(&verdict)
+        );
+        // The check still has teeth: a genuinely different value diverges.
+        let different =
+            check_symbolic_equivalence(&prehir_returning(-1, 8), &hir_returning(255, 32));
+        assert!(
+            matches!(different, SymbolicOutcome::Diverged(_)),
+            "got {}",
+            name(&different)
+        );
+    }
     use fission_solver::ast::SymExpr;
     use fission_solver::{SatResult, Solver};
 
