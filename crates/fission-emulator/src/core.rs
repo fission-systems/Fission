@@ -1783,6 +1783,8 @@ impl Emulator {
             );
         };
 
+        // Where the machine is now, before the restore moves the counter.
+        let came_from = self.inst_count;
         // Bulk restore: drop register cache so restored values are authoritative.
         self.state.invalidate_reg_cache();
 
@@ -1801,6 +1803,38 @@ impl Emulator {
         }
         self.pc = snap.registers.pc;
         self.inst_count = snap.step_index;
+
+        // Undo what ran after the target before restoring anything else: the
+        // writes recorded in later snapshots, newest first, and the ones made
+        // since the last snapshot that are still waiting in the trace. Without
+        // this a byte written after the target kept its later value --
+        // `old_value` was recorded for exactly this and never read.
+        if came_from > snap.step_index {
+            let ram = self.state.ram_space();
+            let pending: Vec<(u64, Vec<u8>)> = self
+                .state
+                .trace_mem_writes
+                .iter()
+                .map(|(addr, old, _new)| (*addr, old.clone()))
+                .collect();
+            let later: Vec<(u64, Vec<u8>)> = self
+                .ttd
+                .snapshots()
+                .iter()
+                .filter(|s| s.step_index > snap.step_index)
+                .flat_map(|s| {
+                    s.memory_deltas
+                        .iter()
+                        .map(|d| (d.address, d.old_value.clone()))
+                })
+                .collect();
+            for (address, old) in pending.iter().rev().chain(later.iter().rev()) {
+                let _ = self.state.write_space(ram, *address, old);
+            }
+            // The undo itself is not execution; do not let it be recorded as such.
+            self.state.trace_mem_writes.clear();
+            self.state.trace_shadow_writes.clear();
+        }
 
         // Restore memory via stored deltas (forward apply new_value at keyframe).
         for delta in &snap.memory_deltas {
