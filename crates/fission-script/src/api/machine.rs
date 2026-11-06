@@ -259,7 +259,7 @@ impl MachineHost {
     pub fn reg(&mut self, name: String) -> ScriptResult<i64> {
         self.with("read a register", |b| {
             let regs = b.fetch_registers(THREAD).map_err(fail)?;
-            regs.get(&name)
+            register_value(&regs, &name)
                 .map(|v| v as i64)
                 .ok_or_else(|| fail(format!("this machine has no register {name}")))
         })
@@ -487,6 +487,17 @@ impl MachineHost {
     }
 }
 
+/// A register's value by name. `pc` is the program counter whatever the
+/// architecture calls it (`rip`, `eip`, `pc`): `regs()` already reports it under
+/// that name, but `reg("pc")` looked only at the named entries and failed on
+/// any machine that does not list a register called `pc`.
+fn register_value(regs: &fission_ttd::RegisterState, name: &str) -> Option<u64> {
+    if name.eq_ignore_ascii_case("pc") {
+        return Some(regs.pc);
+    }
+    regs.get(name)
+}
+
 fn event_map(event: &DebugEvent) -> Map {
     let mut m = Map::new();
     let mut set = |k: &str, v: Dynamic| {
@@ -531,8 +542,16 @@ fn event_map(event: &DebugEvent) -> Map {
             set("address", Dynamic::from(*address as i64));
         }
         DebugEvent::ThreadCreated { thread_id } | DebugEvent::ThreadExited { thread_id } => {
+            // Still `"thread"`, which scripts already match on, with the
+            // direction the two used to share one shape without.
             set("event", Dynamic::from("thread".to_string()));
             set("thread_id", Dynamic::from(*thread_id as i64));
+            let state = if matches!(event, DebugEvent::ThreadCreated { .. }) {
+                "created"
+            } else {
+                "exited"
+            };
+            set("state", Dynamic::from(state.to_string()));
         }
         DebugEvent::DllLoaded { base_address, name } => {
             set("event", Dynamic::from("dll_loaded".to_string()));
@@ -572,4 +591,35 @@ pub fn register(engine: &mut rhai::Engine) {
         .register_fn("disasm", MachineHost::disasm_here)
         .register_fn("events", MachineHost::events)
         .register_fn("output", MachineHost::output);
+}
+
+#[cfg(test)]
+mod reg_and_event_tests {
+    use super::*;
+
+    fn text(m: &Map, key: &str) -> String {
+        m.get(key)
+            .and_then(|v| v.clone().into_string().ok())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_thread_event_says_whether_the_thread_was_created_or_exited() {
+        let created = event_map(&DebugEvent::ThreadCreated { thread_id: 7 });
+        let exited = event_map(&DebugEvent::ThreadExited { thread_id: 7 });
+        assert_eq!(text(&created, "event"), "thread");
+        assert_eq!(text(&exited, "event"), "thread");
+        assert_eq!(text(&created, "state"), "created");
+        assert_eq!(text(&exited, "state"), "exited");
+    }
+
+    #[test]
+    fn pc_is_readable_on_a_machine_with_no_register_called_pc() {
+        let regs = fission_ttd::RegisterState::at(0x401000).with("rax", 5);
+        assert_eq!(register_value(&regs, "pc"), Some(0x401000));
+        assert_eq!(register_value(&regs, "PC"), Some(0x401000));
+        // Positive control: an ordinary register is unaffected, a missing one is missing.
+        assert_eq!(register_value(&regs, "rax"), Some(5));
+        assert_eq!(register_value(&regs, "nope"), None);
+    }
 }
