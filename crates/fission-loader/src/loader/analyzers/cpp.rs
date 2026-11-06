@@ -619,24 +619,34 @@ impl<'a> CppAnalyzer<'a> {
         };
 
         // 1. Sweep Itanium VTables
-        // In Itanium, __ZTV points to the start of the vtable array.
+        // In Itanium, `_ZTV<name>` points to the start of the vtable array.
         // Index 0: offset_to_top, Index 1: typeinfo ptr, Index 2: first vfunc.
+        // Symbol names reach this analyzer demangled (`{vtable(D)}`); the raw
+        // `_ZTV`/`__ZTV` spellings are kept for a name that arrives as it was
+        // read. Matching only `__ZTV` found no vtable on any ELF.
+        fn is_itanium_vtable_symbol(name: &str) -> bool {
+            (name.starts_with("{vtable(") && name.ends_with(")}"))
+                || name.starts_with("_ZTV")
+                || name.starts_with("__ZTV")
+        }
         let mut itanium_vtables = Vec::new();
         for (addr, name) in &self.binary.iat_symbols {
-            if name.starts_with("__ZTV") {
+            if is_itanium_vtable_symbol(name) {
                 itanium_vtables.push(*addr);
             }
         }
         for func in &self.binary.functions {
-            if func.name.starts_with("__ZTV") {
+            if is_itanium_vtable_symbol(&func.name) {
                 itanium_vtables.push(func.address);
             }
         }
         for (addr, name) in &self.binary.global_symbols {
-            if name.starts_with("__ZTV") {
+            if is_itanium_vtable_symbol(name) {
                 itanium_vtables.push(*addr);
             }
         }
+        itanium_vtables.sort_unstable();
+        itanium_vtables.dedup();
 
         for vt_addr in itanium_vtables {
             let func_array_start = vt_addr + 2 * ptr_size;
@@ -923,5 +933,34 @@ mod tests {
             .find(|t| t.name.starts_with("D "))
             .unwrap_or_else(|| panic!("no D entry in {inferred:#x?}"));
         assert_eq!(d.name, "D : public B, public C");
+    }
+    /// The Itanium sweep matched the raw `__ZTV` prefix, but every symbol name
+    /// is demangled before this analyzer sees it (`{vtable(D)}`), so on a real
+    /// ELF it found no vtable and no virtual function. `analyze_itanium_classes`
+    /// was fixed the same way and is the positive control: it does see the
+    /// classes in the same binary.
+    #[test]
+    fn discover_vtable_functions_finds_the_virtual_functions_of_a_real_elf() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_dyn_vmi_rtti_test.elf");
+        let binary = LoadedBinary::from_file(&path).expect("load RTTI test ELF");
+        let analyzer = CppAnalyzer::new(&binary);
+        assert!(
+            !analyzer.analyze_itanium_classes().is_empty(),
+            "control: the classes themselves are found"
+        );
+        let found = analyzer.discover_vtable_functions();
+        assert!(!found.is_empty(), "no virtual function discovered");
+        for function in &found {
+            assert_eq!(function.origin.as_deref(), Some("cpp_rtti"));
+            assert_eq!(function.kind.as_deref(), Some("vtable"));
+            assert!(
+                binary.sections.iter().any(|s| s.is_executable
+                    && function.address >= s.virtual_address
+                    && function.address < s.virtual_address + s.virtual_size),
+                "0x{:x} is not in an executable section",
+                function.address
+            );
+        }
     }
 }
