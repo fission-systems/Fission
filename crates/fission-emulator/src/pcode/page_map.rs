@@ -403,6 +403,37 @@ impl PageMap {
         available.min(max_len)
     }
 
+    /// Whether no page of `[start, start + len)` is mapped.
+    pub fn range_is_free(&self, start: u64, len: u64) -> bool {
+        let first = page_align_down(start);
+        let end = page_align_up(start.saturating_add(len.max(1)));
+        let mut page = first;
+        while page < end {
+            if self.flags.get(&page).is_some_and(|f| *f & prot::VALID != 0) {
+                return false;
+            }
+            page += PAGE_SIZE;
+        }
+        true
+    }
+
+    /// `mmap`'s placement rule. With `MAP_FIXED` the range is mapped exactly
+    /// where asked, replacing whatever is there. Without it `addr` is only a
+    /// hint: it is used when the range is free and ignored otherwise, so a
+    /// hint that happens to name a live mapping never silently overwrites it.
+    /// Returns the base, or 0 when no hole is large enough.
+    pub fn mmap_with_hint(&mut self, addr: u64, len: u64, page_prot: u8, fixed: bool) -> u64 {
+        if fixed {
+            self.map_region(addr, len.max(1), page_prot, true);
+            return page_align_down(addr);
+        }
+        if addr != 0 && self.range_is_free(addr, len) {
+            self.map_region(addr, len.max(1), page_prot, true);
+            return page_align_down(addr);
+        }
+        self.mmap_anon(len.max(1), page_prot)
+    }
+
     /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
     /// Returns the base address on success, or `0` on allocation failure.
     pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
@@ -844,5 +875,42 @@ mod tests {
                 (0x4000, 0x5000, false, false),
             ]
         );
+    }
+    #[test]
+    fn a_mmap_hint_naming_a_live_mapping_does_not_overwrite_it() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000_0000, 0x2000, prot::RW, true);
+        // Without MAP_FIXED the hint is advisory: it is taken, and the existing
+        // mapping left alone, when the range is occupied.
+        let base = pm.mmap_with_hint(0x1000_0000, 0x1000, prot::RW, false);
+        assert_ne!(base, 0);
+        assert!(
+            base >= 0x1000_2000 || base + 0x1000 <= 0x1000_0000,
+            "0x{base:x} overlaps the live mapping"
+        );
+        assert_eq!(
+            pm.mappings()
+                .iter()
+                .find(|m| m.start == 0x1000_0000)
+                .map(|m| m.end),
+            Some(0x1000_2000),
+            "the original mapping is untouched"
+        );
+    }
+
+    #[test]
+    fn a_free_mmap_hint_is_honoured_and_map_fixed_still_replaces() {
+        let mut pm = PageMap::new();
+        assert_eq!(
+            pm.mmap_with_hint(0x2000_0000, 0x1000, prot::RW, false),
+            0x2000_0000
+        );
+        assert!(pm.is_mapped(0x2000_0000));
+        // MAP_FIXED over the live mapping replaces it at exactly that address.
+        assert_eq!(
+            pm.mmap_with_hint(0x2000_0000, 0x1000, prot::READ, true),
+            0x2000_0000
+        );
+        assert_eq!(pm.page_flags(0x2000_0000).unwrap() & prot::WRITE, 0);
     }
 }

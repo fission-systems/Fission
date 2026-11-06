@@ -1390,15 +1390,35 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let flags = emu.read_arg(1)?;
     let addr = emu.read_arg(2)?;
     let bytes = emu.read_arg(3)? as usize;
-    if let Some(new_addr) = env.heap.lock().unwrap().realloc(addr, bytes) {
-        if (flags & 8) != 0 {
-            // zeroing memory might be needed but for dummy it's fine to skip diff
-        }
-        tracing::info!("HeapReAlloc(0x{:X}, {}) -> 0x{:X}", addr, bytes, new_addr);
-        emu.write_return_val(new_addr)?;
-    } else {
+    // An address the heap never handed out is an invalid pointer: NULL.
+    let old_size = env.heap.lock().unwrap().allocations.get(&addr).copied();
+    let Some(old_size) = old_size else {
         emu.write_return_val(0)?;
+        return Ok(());
+    };
+    // A new, mapped block (the old `realloc` returned an address nobody had
+    // mapped), then the old contents carried over: a reallocation that returns
+    // a zeroed or unmapped block loses the caller's data.
+    let new_addr = heap_alloc_mapped(emu, env, bytes);
+    if new_addr == 0 {
+        emu.write_return_val(0)?;
+        return Ok(());
     }
+    let keep = old_size.min(bytes);
+    if keep > 0 {
+        let ram = emu.state.ram_space();
+        let data = emu.state.read_space(ram, addr, keep)?;
+        emu.state.write_space(ram, new_addr, &data)?;
+    }
+    if (flags & 8) != 0 && bytes > keep {
+        // HEAP_ZERO_MEMORY: the part past the old contents.
+        let zeros = vec![0u8; bytes - keep];
+        emu.state
+            .write_space(emu.state.ram_space(), new_addr + keep as u64, &zeros)?;
+    }
+    env.heap.lock().unwrap().free(addr);
+    tracing::info!("HeapReAlloc(0x{:X}, {}) -> 0x{:X}", addr, bytes, new_addr);
+    emu.write_return_val(new_addr)?;
     Ok(())
 }
 
@@ -1502,14 +1522,31 @@ fn handle_get_module_file_name_a(emu: &mut Emulator) -> Result<()> {
     let buf = emu.read_arg(1)?;
     let size = emu.read_arg(2)? as usize;
 
-    let path = "C:\\sandbox\\test.exe";
-    let mut bytes = path.as_bytes().to_vec();
-    bytes.push(0);
-    let copied = std::cmp::min(bytes.len(), size);
-    emu.state
-        .write_space(emu.state.ram_space(), buf, &bytes[..copied])?;
-    emu.write_return_val((copied - 1) as u64)?;
+    let (bytes, ret) = module_file_name_reply("C:\\sandbox\\test.exe", size);
+    if !bytes.is_empty() {
+        emu.state.write_space(emu.state.ram_space(), buf, &bytes)?;
+    }
+    emu.write_return_val(ret)?;
     Ok(())
+}
+
+/// What `GetModuleFileNameA` writes and returns for a buffer of `size` bytes.
+/// A buffer of zero bytes gets nothing and `0` (the old code computed
+/// `copied - 1` on `0`, which wraps). One that is too small gets the string
+/// truncated *and* NUL-terminated, and the return value is `size`.
+pub(crate) fn module_file_name_reply(path: &str, size: usize) -> (Vec<u8>, u64) {
+    if size == 0 {
+        return (Vec::new(), 0);
+    }
+    let mut bytes = path.as_bytes().to_vec();
+    if bytes.len() < size {
+        let len = bytes.len() as u64;
+        bytes.push(0);
+        return (bytes, len);
+    }
+    bytes.truncate(size - 1);
+    bytes.push(0);
+    (bytes, size as u64)
 }
 
 fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
@@ -2103,4 +2140,103 @@ fn handle_case(emu: &mut Emulator, name: &str) -> Result<()> {
         Err(_) => value,
     };
     emu.write_return_val(converted as i64 as u64)
+}
+
+#[cfg(test)]
+mod heap_realloc_tests {
+    use super::*;
+    use crate::os::LinuxEnv;
+    use crate::pcode::state::MachineState;
+
+    /// A real emulator (a SysV x86-64 one; `HeapReAlloc`'s arguments are read
+    /// through its calling convention: rdi, rsi, rdx, rcx).
+    fn emulator() -> Emulator {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_static_printf_malloc.elf");
+        let binary = fission_loader::loader::LoadedBinary::from_file(&path).expect("load ELF");
+        let mut state = MachineState::new();
+        crate::os::linux::loader::load_elf(&mut state, &binary).expect("load_elf");
+        let load_spec = binary.load_spec().expect("load spec").clone();
+        let sleigh =
+            fission_sleigh::runtime::RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(
+                &load_spec,
+            )
+            .expect("sleigh frontends")
+            .into_iter()
+            .next()
+            .expect("a sleigh frontend");
+        let arch = crate::arch::ArchInfo::from_language_id(
+            load_spec.pair.language_id.as_str(),
+            Some(&binary),
+        )
+        .expect("arch");
+        Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).expect("emulator")
+    }
+
+    fn call_realloc(emu: &mut Emulator, env: &WindowsEnv, flags: u64, ptr: u64, bytes: u64) -> u64 {
+        emu.write_register_u64("rdi", 0).unwrap();
+        emu.write_register_u64("rsi", flags).unwrap();
+        emu.write_register_u64("rdx", ptr).unwrap();
+        emu.write_register_u64("rcx", bytes).unwrap();
+        handle_heap_realloc(emu, env).expect("HeapReAlloc");
+        emu.read_register_u64("rax").unwrap()
+    }
+
+    #[test]
+    fn heap_realloc_carries_the_old_contents_into_a_mapped_block() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let old = heap_alloc_mapped(&mut emu, &env, 16);
+        let ram = emu.state.ram_space();
+        let payload: Vec<u8> = (1..=16).collect();
+        emu.state.write_space(ram, old, &payload).unwrap();
+
+        let new = call_realloc(&mut emu, &env, 0, old, 4096);
+        assert_ne!(new, 0);
+        assert_ne!(new, old, "a larger request moves the block");
+        assert_eq!(emu.state.read_space(ram, new, 16).unwrap(), payload);
+        // The whole new block is mapped, not just where the allocation began.
+        assert!(emu.state.page_map.is_mapped(new + 4095));
+        assert!(!env.heap.lock().unwrap().allocations.contains_key(&old));
+    }
+
+    #[test]
+    fn heap_realloc_to_a_smaller_size_keeps_what_fits_and_rejects_a_foreign_pointer() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let old = heap_alloc_mapped(&mut emu, &env, 32);
+        let ram = emu.state.ram_space();
+        let payload: Vec<u8> = (0..32).collect();
+        emu.state.write_space(ram, old, &payload).unwrap();
+
+        let new = call_realloc(&mut emu, &env, 0, old, 8);
+        assert_eq!(emu.state.read_space(ram, new, 8).unwrap(), payload[..8]);
+
+        // A pointer the heap never returned is NULL, not a fresh allocation.
+        assert_eq!(call_realloc(&mut emu, &env, 0, 0xdead_0000, 8), 0);
+    }
+}
+
+#[cfg(test)]
+mod module_file_name_tests {
+    use super::module_file_name_reply;
+
+    #[test]
+    fn a_zero_sized_buffer_gets_nothing_and_does_not_wrap() {
+        assert_eq!(module_file_name_reply("C:\\a.exe", 0), (Vec::new(), 0));
+    }
+
+    #[test]
+    fn a_fitting_buffer_gets_the_path_and_its_length() {
+        let (bytes, ret) = module_file_name_reply("C:\\a.exe", 64);
+        assert_eq!(bytes, b"C:\\a.exe\0");
+        assert_eq!(ret, 8);
+    }
+
+    #[test]
+    fn a_small_buffer_gets_a_truncated_nul_terminated_path_and_size() {
+        let (bytes, ret) = module_file_name_reply("C:\\a.exe", 4);
+        assert_eq!(bytes, b"C:\\\0");
+        assert_eq!(ret, 4);
+    }
 }

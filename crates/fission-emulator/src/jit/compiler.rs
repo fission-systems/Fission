@@ -1200,21 +1200,27 @@ impl JitCompiler {
                             if out.size > 8 || src.size > 8 {
                                 // Bulk copy via stack buffer.
                                 let sz = out.size.max(src.size) as usize;
+                                // Whole words, zeroed first: a stack slot holds
+                                // whatever the last user left, and the
+                                // destination write below copies all `out.size`
+                                // bytes of it.
+                                let words = sz.div_ceil(8);
                                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                     StackSlotKind::ExplicitSlot,
-                                    sz as u32,
+                                    (words * 8) as u32,
                                     0,
                                 ));
                                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
+                                let zero = builder.ins().iconst(types::I64, 0);
+                                for word in 0..words {
+                                    builder.ins().stack_store(zero, slot, (word * 8) as i32);
+                                }
                                 let sp = builder.ins().iconst(types::I64, src.space_id as i64);
-                                let off = if src.is_constant {
-                                    builder.ins().iconst(types::I64, src.offset as i64)
-                                } else {
-                                    builder.ins().iconst(types::I64, src.offset as i64)
-                                };
+                                let off = builder.ins().iconst(types::I64, src.offset as i64);
                                 // For constants, write bytes manually; for vars, read_bytes.
                                 if src.is_constant {
-                                    // store constant low bytes into slot via store sequence (max 8)
+                                    // The constant's low eight bytes; the rest
+                                    // is zero, as the interpreter widens it.
                                     let c =
                                         builder.ins().iconst(types::I64, src.constant_val as i64);
                                     builder.ins().stack_store(c, slot, 0);
@@ -3174,5 +3180,38 @@ mod tests {
         ];
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 0x100) & 0xffff_ffff, 0x7777);
+    }
+    /// `COPY` of a 16-byte constant (the zeroing of a vector register's upper
+    /// half lifts to one) filled the stack buffer with its low eight bytes and
+    /// copied the other eight out uninitialised. The interpreter widens a
+    /// constant by zero-extending it.
+    #[test]
+    fn a_wide_constant_copy_zero_extends_into_the_destination() {
+        let wide_const = |value: i64| PcodeOp {
+            seq_num: 2,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(reg(0x40, 16)),
+            inputs: vec![imm(value, 16)],
+            asm_mnemonic: None,
+        };
+        // Several rounds so stale stack contents cannot hide the fault by
+        // happening to be zero.
+        for round in 0..8 {
+            let ops = vec![
+                copy_const(0x48, -1, 8),
+                wide_const(0x1122_3344_5566_7788 + round),
+            ];
+            let mut emu = compile_and_run(ops);
+            assert_eq!(
+                read_reg(&mut emu, 0x40),
+                (0x1122_3344_5566_7788i64 + round) as u64
+            );
+            assert_eq!(
+                read_reg(&mut emu, 0x48),
+                0,
+                "round {round}: the upper half is zero"
+            );
+        }
     }
 }

@@ -1157,7 +1157,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            let inner = print_expr_prec(expr, 110, depth + 1);
+            let inner = separate_unary_minus(symbol, print_expr_prec(expr, 110, depth + 1));
             (format!("{symbol}{inner}"), 110)
         }
         HirExpr::Binary { op, lhs, rhs, ty } => {
@@ -1442,6 +1442,17 @@ fn print_binary_op(op: HirBinaryOp) -> &'static str {
         HirBinaryOp::Le | HirBinaryOp::SLe => "<=",
         HirBinaryOp::Gt | HirBinaryOp::SGt => ">",
         HirBinaryOp::Ge | HirBinaryOp::SGe => ">=",
+    }
+}
+
+/// `-` followed by an operand that itself starts with `-` must not print as
+/// `--`, which C reads as the pre-decrement operator (maximal munch): `-(-x)`
+/// would become `--x`, a store to `x`, and `-(-5)` would not compile.
+fn separate_unary_minus(symbol: &str, inner: String) -> String {
+    if symbol == "-" && inner.starts_with('-') {
+        format!("({inner})")
+    } else {
+        inner
     }
 }
 
@@ -1842,7 +1853,8 @@ fn print_expr_prec_ctx(
                 HirUnaryOp::Not => "!",
                 HirUnaryOp::BitNot => "~",
             };
-            let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
+            let inner =
+                separate_unary_minus(symbol, print_expr_prec_ctx(expr, 110, depth + 1, ctx));
             if matches!(op, HirUnaryOp::Neg | HirUnaryOp::BitNot) && ctx.expr_is_pointer(expr) {
                 (format!("{symbol}(unsigned long long){inner}"), 110)
             } else {
@@ -2613,6 +2625,40 @@ pub fn render_contracted_wrapper_summary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn nested_unary_minus_is_not_printed_as_a_decrement() {
+        use super::*;
+        let int = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let x = HirExpr::Var("x".into());
+        let neg = |e: HirExpr| HirExpr::Unary {
+            op: HirUnaryOp::Neg,
+            expr: Box::new(e),
+            ty: int.clone(),
+        };
+        // Positive control: a single negation is unchanged.
+        assert_eq!(print_expr_prec(&neg(x.clone()), 0, 0), "-x");
+        // Double negation, and negating a negative literal.
+        assert_eq!(print_expr_prec(&neg(neg(x.clone())), 0, 0), "-(-x)");
+        assert_eq!(
+            print_expr_prec(&neg(HirExpr::Const(-5, int.clone())), 0, 0),
+            "-(-5)"
+        );
+        // `!!x` and `~~x` are not decrements and keep their short form.
+        let not = HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(HirExpr::Unary {
+                op: HirUnaryOp::Not,
+                expr: Box::new(x),
+                ty: int.clone(),
+            }),
+            ty: int,
+        };
+        assert_eq!(print_expr_prec(&not, 0, 0), "!!x");
+    }
+
     #[test]
     fn definition_lines_preserve_text_and_do_not_map_rhs_uses() {
         use super::*;

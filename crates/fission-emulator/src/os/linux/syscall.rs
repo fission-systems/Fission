@@ -230,22 +230,31 @@ impl SimProcedure for SysNewfstatat {
     }
 }
 
+/// Where an `lseek` lands. `offset` is a signed `off_t`: a negative `SEEK_CUR`
+/// or `SEEK_END` offset moves backwards, and a result before the start of the
+/// file (or an unknown `whence`) is an error. Read as an unsigned `usize`, `-1`
+/// was `usize::MAX` and sent the cursor to the end of the address space.
+pub(crate) fn lseek_target(cursor: usize, len: usize, offset: i64, whence: u64) -> Option<usize> {
+    let base: i128 = match whence {
+        0 => 0,              // SEEK_SET
+        1 => cursor as i128, // SEEK_CUR
+        2 => len as i128,    // SEEK_END
+        _ => return None,
+    };
+    usize::try_from(base + i128::from(offset)).ok()
+}
+
 pub struct SysLseek;
 impl SimProcedure for SysLseek {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let fd = emu.syscall_arg(0);
-        let offset = emu.syscall_arg(1) as usize;
+        let offset = emu.syscall_arg(1) as i64;
         let whence = emu.syscall_arg(2);
         tracing::info!("sys_lseek({}, {}, {})", fd, offset, whence);
         if let Some(file) = emu.vfs.files.get_mut(&fd) {
-            let new = match whence {
-                0 => offset, // SEEK_SET
-                1 => file.cursor.saturating_add(offset),
-                2 => file.content.len().saturating_add(offset),
-                _ => {
-                    emu.set_syscall_return((-1i64) as u64)?;
-                    return Ok(HleResult::Continue);
-                }
+            let Some(new) = lseek_target(file.cursor, file.content.len(), offset, whence) else {
+                emu.set_syscall_return((-1i64) as u64)?;
+                return Ok(HleResult::Continue);
             };
             file.seek(new);
             emu.set_syscall_return(new as u64)?;
@@ -320,14 +329,10 @@ impl SimProcedure for SysMmap {
         let map_fixed = flags & 0x10 != 0; // MAP_FIXED
         let map_anon = flags & 0x20 != 0; // MAP_ANONYMOUS
 
-        let base = if addr == 0 && !map_fixed {
-            emu.state.page_map.mmap_anon(length.max(1), page_prot)
-        } else {
-            emu.state
-                .page_map
-                .map_region(addr, length.max(1), page_prot, true);
-            page_align_down(addr)
-        };
+        let base = emu
+            .state
+            .page_map
+            .mmap_with_hint(addr, length, page_prot, map_fixed);
         if base == 0 {
             // mmap_anon found no free hole; report it rather than handing the
             // guest address 0 as a successful mapping.
@@ -916,5 +921,25 @@ impl SimProcedure for SysPrlimit64 {
         }
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
+    }
+}
+
+#[cfg(test)]
+mod lseek_tests {
+    use super::lseek_target;
+
+    #[test]
+    fn a_negative_relative_seek_moves_backwards() {
+        assert_eq!(lseek_target(10, 100, -4, 1), Some(6));
+        assert_eq!(lseek_target(10, 100, -1, 2), Some(99));
+        assert_eq!(lseek_target(10, 100, 5, 1), Some(15));
+        assert_eq!(lseek_target(10, 100, 0, 0), Some(0));
+    }
+
+    #[test]
+    fn a_seek_before_the_start_or_with_a_bad_whence_is_an_error() {
+        assert_eq!(lseek_target(3, 100, -4, 1), None);
+        assert_eq!(lseek_target(0, 100, -1, 0), None);
+        assert_eq!(lseek_target(0, 100, 0, 9), None);
     }
 }
