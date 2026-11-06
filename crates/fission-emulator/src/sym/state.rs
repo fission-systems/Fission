@@ -48,6 +48,14 @@ impl SimState {
         }
     }
 
+    /// Keep the constraints that led here. A state that finished (exited, or
+    /// stopped with no further symbolic branch) is rebuilt from the machine
+    /// state, and without this its path would read as unconstrained.
+    pub fn with_history(mut self, history: SimStateHistory) -> Self {
+        self.history = history;
+        self
+    }
+
     pub fn with_environment(
         mut self,
         vfs: crate::os::vfs::SimVFS,

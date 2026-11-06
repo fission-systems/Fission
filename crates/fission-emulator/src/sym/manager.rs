@@ -121,6 +121,7 @@ impl SimulationManager {
             if run_result.is_err() {
                 next_deadended.push(
                     SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_history(state.history.clone())
                         .with_environment(current_vfs, current_stdin),
                 );
                 continue;
@@ -130,6 +131,7 @@ impl SimulationManager {
             if branches.is_empty() {
                 next_deadended.push(
                     SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_history(state.history.clone())
                         .with_environment(current_vfs, current_stdin),
                 );
                 continue;
@@ -139,6 +141,7 @@ impl SimulationManager {
             let Some(cond_node) = branch.condition_node else {
                 next_deadended.push(
                     SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_history(state.history.clone())
                         .with_environment(current_vfs, current_stdin),
                 );
                 continue;
@@ -146,6 +149,7 @@ impl SimulationManager {
             let Some(cond_expr) = self.emu.solver.nodes.get(&cond_node).cloned() else {
                 next_deadended.push(
                     SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
+                        .with_history(state.history.clone())
                         .with_environment(current_vfs, current_stdin),
                 );
                 continue;

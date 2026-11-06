@@ -723,3 +723,24 @@ mod bit_width_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod width_convention_tests {
+    use super::*;
+
+    /// `Sort::BitVector` and every `Const.size` are in bits. #293 said
+    /// `new_slt` / `new_sle` multiplied by eight and shifted by 511 on a
+    /// 64-bit constant; they fold at the stated width.
+    #[test]
+    fn signed_comparisons_fold_at_the_stated_bit_width() {
+        let k = |val, size| SymExpr::Const { val, size };
+        for (width, minus_one) in [(8u32, 0xffu64), (32, 0xffff_ffff), (64, u64::MAX)] {
+            let lt = SymExpr::new_slt(k(minus_one, width), k(1, width));
+            assert_eq!(lt, k(1, 1), "-1 <s 1 at {width} bits");
+            let le = SymExpr::new_sle(k(1, width), k(minus_one, width));
+            assert_eq!(le, k(0, 1), "1 <=s -1 at {width} bits");
+        }
+        assert_eq!(Sort::BitVector(8).byte_size(), 1);
+        assert_eq!(Sort::BitVector(9).byte_size(), 2);
+    }
+}
