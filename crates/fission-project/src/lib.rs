@@ -857,15 +857,59 @@ pub mod signature_syntax {
     use super::{Param, Signature};
 
     /// Split `text` at the parenthesis that opens the parameter list.
+    ///
+    /// The list is the last balanced `( ... )` group, which must end the text.
+    /// What precedes it is the return type, minus a function name if one was
+    /// written: `int parse_header(char *buf)` returns `int`, not
+    /// `int parse_header`.
     fn split_at_params(text: &str) -> Result<(&str, &str), String> {
-        let open = text
-            .find('(')
-            .ok_or_else(|| format!("{text:?} has no parameter list; write e.g. `int (char *)`"))?;
-        if !text.trim_end().ends_with(')') {
+        let trimmed = text.trim_end();
+        if !text.contains('(') {
+            return Err(format!(
+                "{text:?} has no parameter list; write e.g. `int (char *)`"
+            ));
+        }
+        if !trimmed.ends_with(')') {
             return Err(format!("{text:?} is missing its closing parenthesis"));
         }
-        let close = text.rfind(')').expect("checked above");
-        Ok((text[..open].trim(), text[open + 1..close].trim()))
+        // Walk back from the final `)` to its matching `(`.
+        let mut depth = 0i32;
+        let mut open = None;
+        for (i, c) in trimmed.char_indices().rev() {
+            match c {
+                ')' => depth += 1,
+                '(' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        open = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let Some(open) = open else {
+            return Err(format!("unbalanced parentheses in {text:?}"));
+        };
+        let returns = text[..open].trim();
+        if returns.contains(['(', ')']) {
+            return Err(format!("unbalanced parentheses in {text:?}"));
+        }
+        let params = trimmed[open + 1..trimmed.len() - 1].trim();
+        Ok((strip_function_name(returns), params))
+    }
+
+    /// `int parse_header` -> `int`: a trailing identifier after a complete
+    /// return type is the function's name. A lone word (`int`) or a type made
+    /// only of keywords/tags (`struct stat`, `unsigned int`) is the type itself.
+    fn strip_function_name(returns: &str) -> &str {
+        let (type_name, name) = split_declaration(returns);
+        if name.is_empty() {
+            returns
+        } else {
+            let len = type_name.len();
+            returns[..len].trim_end()
+        }
     }
 
     /// Split a parameter list on commas that are not inside brackets.
@@ -911,23 +955,49 @@ pub mod signature_syntax {
             "const", "volatile", "struct", "union", "enum",
         ];
         let text = text.trim();
+
+        // `void (*cmp)(int, int)`: the name sits right after the `*` inside the
+        // first parenthesis. The type keeps its shape with the name taken out.
+        if let Some(open) = text.find("(*") {
+            let after = &text[open + 2..];
+            if let Some(close) = after.find(')') {
+                let name = after[..close].trim();
+                if is_plain_identifier(name) {
+                    let type_name = format!("{}(*){}", &text[..open], &after[close + 1..]);
+                    return (type_name.trim().to_string(), name.to_string());
+                }
+            }
+        }
+        // `char buf[64]`, `int items[]`: a trailing array suffix belongs to the
+        // declarator; the identifier before it is the name.
+        if let Some(bracket) = text.find('[') {
+            let (decl, suffix) = text.split_at(bracket);
+            let (type_name, name) = split_declaration(decl);
+            if !name.is_empty() {
+                let type_name = format!("{} {}", type_name.trim_end(), suffix.trim());
+                return (type_name.replace("* [", "*[").trim().to_string(), name);
+            }
+        }
         let Some(last_space) = text.rfind(|c: char| c.is_whitespace() || c == '*') else {
             return (text.to_string(), String::new());
         };
         let (head, tail) = text.split_at(last_space + 1);
         let tail = tail.trim();
-        let is_identifier = !tail.is_empty()
-            && tail.chars().all(|c| c.is_alphanumeric() || c == '_')
-            && tail
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic() || c == '_')
-            && !KEYWORDS.contains(&tail);
+        let is_identifier = is_plain_identifier(tail) && !KEYWORDS.contains(&tail);
         if is_identifier && !head.trim().is_empty() && !completes_the_type(head, tail) {
             (head.trim().to_string(), tail.to_string())
         } else {
             (text.to_string(), String::new())
         }
+    }
+
+    fn is_plain_identifier(word: &str) -> bool {
+        !word.is_empty()
+            && word.chars().all(|c| c.is_alphanumeric() || c == '_')
+            && word
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_alphabetic() || c == '_')
     }
 
     /// Whether `tail` is the last word of the *type* in `head tail`, not a name.
@@ -1137,6 +1207,60 @@ mod signature_tests {
             let once = parse(text).expect("parse");
             let again = parse(&render(&once)).expect("re-parse");
             assert_eq!(once, again, "{text:?} did not survive a round trip");
+        }
+    }
+
+    /// The declared name of a function-pointer or array parameter is a name,
+    /// not part of its type.
+    #[test]
+    fn function_pointer_and_array_parameters_keep_their_names() {
+        let s = parse("void (void (*cmp)(int, int), char buf[64], int items[], char *argv[])")
+            .expect("parse");
+        let got: Vec<(&str, &str)> = s
+            .params
+            .iter()
+            .map(|p| (p.type_name.as_str(), p.name.as_str()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("void (*)(int, int)", "cmp"),
+                ("char [64]", "buf"),
+                ("int []", "items"),
+                ("char *[]", "argv"),
+            ]
+        );
+        // Rendered and read again, the same signature comes back.
+        let again = parse(&render(&s)).expect("re-parse");
+        assert_eq!(again.params.len(), s.params.len());
+        for (a, b) in again.params.iter().zip(&s.params) {
+            assert_eq!((&a.type_name, &a.name), (&b.type_name, &b.name));
+        }
+        // An unnamed function pointer stays a type.
+        let unnamed = parse("int (void (*)(int), int)").expect("parse");
+        assert_eq!(unnamed.params[0].type_name, "void (*)(int)");
+        assert_eq!(unnamed.params[0].name, "");
+    }
+
+    /// A function's own name is not part of its return type, and a parameter
+    /// list that is not balanced is refused.
+    #[test]
+    fn a_function_name_is_not_the_return_type_and_unbalanced_parens_are_refused() {
+        let s = parse("int parse_header(char *buf, int len)").expect("parse");
+        assert_eq!(s.returns.as_deref(), Some("int"));
+        assert_eq!(s.params.len(), 2);
+        // Positive controls: plain return types are unchanged.
+        assert_eq!(parse("int (char)").unwrap().returns.as_deref(), Some("int"));
+        assert_eq!(
+            parse("unsigned int (char)").unwrap().returns.as_deref(),
+            Some("unsigned int")
+        );
+        assert_eq!(
+            parse("struct stat (char)").unwrap().returns.as_deref(),
+            Some("struct stat")
+        );
+        for bad in ["int )(int)", "int ((int)", "int (int))"] {
+            assert!(parse(bad).is_err(), "{bad:?} was accepted");
         }
     }
 }
