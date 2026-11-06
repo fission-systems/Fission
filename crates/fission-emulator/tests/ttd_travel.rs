@@ -403,3 +403,84 @@ fn seeking_back_restores_vector_registers() {
         "seek restored different vector registers: {differing:?}"
     );
 }
+
+/// Every writable byte of guest memory, in address order.
+fn writable_memory(emu: &mut Emulator) -> Vec<(u64, Vec<u8>)> {
+    use fission_emulator::pcode::page_map::prot;
+    let ram = emu.state.ram_space();
+    let spans: Vec<(u64, u64)> = emu
+        .state
+        .page_map
+        .mappings()
+        .iter()
+        .filter(|m| m.prot & prot::WRITE != 0)
+        .map(|m| (m.start, m.end))
+        .collect();
+    spans
+        .into_iter()
+        .filter_map(|(start, end)| {
+            let len = (end - start).min(8 * 1024 * 1024) as usize;
+            emu.state
+                .read_space(ram, start, len)
+                .ok()
+                .map(|b| (start, b))
+        })
+        .collect()
+}
+
+/// Seeking back has to undo the writes made after the target, wherever they
+/// landed -- not only the stack window the test above compares. `ttd_seek`
+/// applied the *forward* deltas of the snapshot it restored and never read a
+/// delta's `old_value`, so a global or heap byte written after the target kept
+/// its later value.
+#[test]
+fn seeking_back_undoes_writes_to_all_writable_memory() {
+    let mut traveler = build(2400, 4);
+    let _ = traveler.run();
+    let target = traveler
+        .ttd
+        .snapshots()
+        .iter()
+        .map(|s| s.step_index)
+        .find(|step| *step >= 400)
+        .expect("a snapshot to seek to");
+
+    let mut reference = build(target + 1, 0);
+    let _ = reference.run();
+    let want = writable_memory(&mut reference);
+
+    let before = writable_memory(&mut traveler);
+    let before_map: std::collections::HashMap<u64, &Vec<u8>> =
+        before.iter().map(|(a, b)| (*a, b)).collect();
+    let differs = want.iter().any(|(start, a)| {
+        before_map
+            .get(start)
+            .is_some_and(|b| a.iter().zip(b.iter()).any(|(x, y)| x != y))
+    });
+    assert!(
+        differs,
+        "the end of the run and the target are indistinguishable in memory, so this cannot \
+         tell a working seek from one that undoes nothing"
+    );
+
+    traveler.ttd_seek(target).expect("seek");
+    let got = writable_memory(&mut traveler);
+    // A mapping made after the target (the heap growing, an `mmap`) exists only
+    // in the traveler; compare the ones both runs have.
+    let got: std::collections::HashMap<u64, Vec<u8>> = got.into_iter().collect();
+    let mut compared = 0usize;
+    for (start, a) in &want {
+        let Some(b) = got.get(start) else { continue };
+        compared += 1;
+        let n = a.len().min(b.len());
+        if let Some(i) = a[..n].iter().zip(&b[..n]).position(|(x, y)| x != y) {
+            panic!(
+                "memory differs after the seek at 0x{:x}: want 0x{:02x} got 0x{:02x}",
+                start + i as u64,
+                a[i],
+                b[i]
+            );
+        }
+    }
+    assert!(compared > 0, "no mapping was compared");
+}
