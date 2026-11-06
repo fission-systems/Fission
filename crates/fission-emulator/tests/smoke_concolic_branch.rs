@@ -236,3 +236,29 @@ fn stdin_read_taints_buffer_unit() {
         "sys_read must taint stdin destination"
     );
 }
+
+/// A path that reached its end carries the constraints that led there: they
+/// are what a solver turns back into an input. `step` rebuilt every finished
+/// state with `SimState::new`, so each came out of `deadended` with none.
+#[test]
+fn smoke_deadended_states_keep_their_path_constraints() {
+    use fission_emulator::sym::SimulationManager;
+
+    let emu = load_emu(b"A", true).unwrap_or_else(|e| panic!("{e:#}"));
+    let mut mgr = SimulationManager::new(emu).with_max_steps(16);
+    mgr.explore().unwrap_or_else(|e| panic!("explore: {e:#}"));
+
+    let dead = mgr.stashes.get("deadended").cloned().unwrap_or_default();
+    assert!(
+        dead.len() >= 2,
+        "need both exits to have deadended: {}",
+        dead.len()
+    );
+    for state in &dead {
+        assert!(
+            !state.history.constraints.is_empty(),
+            "a deadended state at 0x{:x} lost its path constraints",
+            state.pc
+        );
+    }
+}
