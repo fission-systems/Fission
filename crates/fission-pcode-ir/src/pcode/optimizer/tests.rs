@@ -1689,3 +1689,80 @@ fn a_partial_register_write_makes_the_wide_register_untracked() {
     // Not the 0xFF a zero-extended byte would give: `ax` was overwritten.
     assert_eq!(tracker.get_nz_mask(&eax), 0xFFFF_FFFF);
 }
+
+fn reg_vn(offset: u64) -> Varnode {
+    Varnode {
+        space_id: 2,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+fn add_op(seq: u32, out: &Varnode, a: &Varnode, b: &Varnode) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::IntAdd,
+        address: 0x1000 + u64::from(seq) * 4,
+        output: Some(out.clone()),
+        inputs: vec![a.clone(), b.clone()],
+        asm_mnemonic: None,
+    }
+}
+
+/// #320: `DeadCodeEliminator::eliminate` marks every op's inputs as used, so a
+/// single call removes only the last link of a dead chain. The driver repeats
+/// until nothing changes, so a chain `t3 = t2 + d; t2 = t1 + c; t1 = a + b`
+/// that nothing reads is gone after `optimize`, not after one pass.
+#[test]
+fn a_dead_chain_is_removed_by_the_driver_and_a_live_result_is_kept() {
+    let (a, b, c, d) = (reg_vn(0x10), reg_vn(0x14), reg_vn(0x18), reg_vn(0x1c));
+    let (t1, t2, t3, live) = (reg_vn(0x100), reg_vn(0x104), reg_vn(0x108), reg_vn(0x200));
+    let ret = PcodeOp {
+        seq_num: 9,
+        opcode: PcodeOpcode::Return,
+        address: 0x1040,
+        output: None,
+        inputs: vec![live.clone()],
+        asm_mnemonic: None,
+    };
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                add_op(0, &t1, &a, &b),
+                add_op(1, &t2, &t1, &c),
+                add_op(2, &t3, &t2, &d),
+                add_op(3, &live, &a, &d),
+                ret,
+            ],
+        }],
+    };
+    // Only DCE, so folding and CSE cannot be what removes them.
+    let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig {
+        enable_constant_folding: false,
+        enable_algebraic_simplification: false,
+        enable_copy_propagation: false,
+        enable_cse: false,
+        enable_identity_removal: false,
+        enable_loop_header_temp_coalescing: false,
+        enable_subvariable_flow: false,
+        enable_dead_code_elimination: true,
+        ..PcodeOptimizerConfig::default()
+    });
+    optimizer.optimize(&mut func);
+
+    let outputs: Vec<u64> = func.blocks[0]
+        .ops
+        .iter()
+        .filter_map(|op| op.output.as_ref().map(|o| o.offset))
+        .collect();
+    assert_eq!(
+        outputs,
+        vec![0x200],
+        "only the value the return reads survives"
+    );
+}

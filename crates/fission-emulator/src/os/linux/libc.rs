@@ -142,7 +142,7 @@ impl SimProcedure for Memset {
 pub struct Mmap;
 impl SimProcedure for Mmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        use crate::pcode::page_map::{page_align_down, page_align_up, prot};
+        use crate::pcode::page_map::{page_align_up, prot};
         // SysV: mmap(addr, length, prot, flags, fd, offset)
         let addr = emu.read_arg(0).unwrap_or(0);
         let length = emu.read_arg(1).unwrap_or(0);
@@ -154,14 +154,10 @@ impl SimProcedure for Mmap {
         let map_fixed = flags & 0x10 != 0;
         let map_anon = flags & 0x20 != 0;
 
-        let base = if addr == 0 && !map_fixed {
-            emu.state.page_map.mmap_anon(length.max(1), page_prot)
-        } else {
-            emu.state
-                .page_map
-                .map_region(addr, length.max(1), page_prot, true);
-            page_align_down(addr)
-        };
+        let base = emu
+            .state
+            .page_map
+            .mmap_with_hint(addr, length, page_prot, map_fixed);
         if base == 0 {
             // No free hole: libc's mmap returns MAP_FAILED.
             tracing::warn!("SimProcedure: mmap(len={length}) -> MAP_FAILED");
