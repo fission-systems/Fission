@@ -1312,6 +1312,71 @@ fn single_pred_label_inline_keeps_dead_zone_with_externally_referenced_nested_la
     }
 }
 
+/// `goto L; <dead>; L:` inside one nested list, with a *second* `goto L` in a
+/// different list. The label has two references in the function, so it is not
+/// single-predecessor, even though only one of them is visible from the list
+/// being rewritten. Counting references per list inlined it anyway and left
+/// the other `goto` without a target.
+fn nested_single_pred_candidate(with_outside_reference: bool) -> Vec<PreHirStmt> {
+    let mut stmts = vec![PreHirStmt::If {
+        cond: PreHirExpr::Var("c".to_string()),
+        then_body: vec![
+            PreHirStmt::Goto("latch".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("unreached".to_string()),
+                rhs: PreHirExpr::Const(1, int(32)),
+            },
+            PreHirStmt::Label("latch".to_string()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".to_string()),
+                rhs: PreHirExpr::Const(2, int(32)),
+            },
+        ]
+        .into(),
+        else_body: vec![].into(),
+    }];
+    if with_outside_reference {
+        stmts.push(PreHirStmt::Goto("latch".to_string()));
+    } else {
+        stmts.push(PreHirStmt::Return(None));
+    }
+    stmts
+}
+
+#[test]
+fn single_pred_label_inline_keeps_label_referenced_from_another_list() {
+    let mut stmts = nested_single_pred_candidate(true);
+
+    single_pred_label_inline(&mut stmts);
+
+    let defined: std::collections::HashSet<String> =
+        collect_defined_labels(&stmts).into_iter().collect();
+    let referenced = super::utils::collect_referenced_labels(&stmts);
+    for label in &referenced {
+        assert!(
+            defined.contains(label),
+            "goto target {label:?} must still have a matching label after cleanup"
+        );
+    }
+}
+
+#[test]
+fn single_pred_label_inline_still_inlines_when_every_reference_is_local() {
+    // Positive control for the test above: without the outside `goto` the same
+    // nested pair has one reference in the whole function and must still be
+    // inlined, so the fix cannot pass by switching the rewrite off.
+    let mut stmts = nested_single_pred_candidate(false);
+
+    assert!(single_pred_label_inline(&mut stmts));
+
+    let defined: std::collections::HashSet<String> =
+        collect_defined_labels(&stmts).into_iter().collect();
+    assert!(
+        !defined.contains("latch"),
+        "the single-predecessor label should have been inlined away"
+    );
+}
+
 #[test]
 fn prune_unused_temp_bindings_removes_dead_preserved_temp() {
     let mut func = PreHirFunction {
