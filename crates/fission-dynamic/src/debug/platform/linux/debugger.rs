@@ -1015,11 +1015,15 @@ mod tests {
     }
 
     /// Run `debugger` until it reports an event, within about five seconds.
+    /// `launch` queues a `ProcessCreated` for the stop it establishes; that is
+    /// not an event of the run being tested, so it is skipped.
     #[cfg(target_arch = "x86_64")]
     fn next_event(debugger: &mut LinuxDebugger) -> Result<crate::debug::types::DebugEvent, String> {
         for _ in 0..50 {
-            if let Some(event) = debugger.poll_event(100).map_err(|e| e.to_string())? {
-                return Ok(event);
+            match debugger.poll_event(100).map_err(|e| e.to_string())? {
+                Some(crate::debug::types::DebugEvent::ProcessCreated { .. }) => {}
+                Some(event) => return Ok(event),
+                None => {}
             }
         }
         Err("no debug event within 5 seconds".to_string())
