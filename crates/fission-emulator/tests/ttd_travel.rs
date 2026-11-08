@@ -484,3 +484,29 @@ fn seeking_back_undoes_writes_to_all_writable_memory() {
     }
     assert!(compared > 0, "no mapping was compared");
 }
+
+/// A snapshot interval that falls inside a compiled block is still due.
+///
+/// `inst_count` advances once per guest instruction *inside* a JIT block, but
+/// the snapshot check runs only between blocks, and asked whether the count is
+/// a multiple of the interval. A block that steps over a multiple left no
+/// snapshot, so with a few instructions per block most intervals were skipped
+/// and `ttd_seek` found nothing at or before the step it was asked for.
+#[test]
+fn jit_blocks_do_not_skip_snapshot_intervals() {
+    let interval = 4;
+    let mut emu = build(400, interval);
+    emu.force_interpreter = false;
+    let _ = emu.run();
+
+    let executed = emu.inst_count;
+    assert!(executed >= 100, "ran only {executed} instructions");
+    let recorded = emu.ttd.stats().count as u64;
+    // One snapshot per interval crossed, give or take the block that ends the
+    // run. Before the fix this was a small fraction of that.
+    let due = executed / interval;
+    assert!(
+        recorded * 2 >= due,
+        "{recorded} snapshots recorded over {executed} instructions at interval {interval} (about {due} due)"
+    );
+}
