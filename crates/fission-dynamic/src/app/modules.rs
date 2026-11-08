@@ -34,9 +34,11 @@ impl ModuleContext {
     }
 
     pub fn get_service<T: Any + Send + Sync>(&self, name: &str) -> Option<Arc<T>> {
+        // The map holds `Arc<dyn Any>`; the value inside is a `T`, not an
+        // `Arc<T>`, so ask for `T` and hand back the shared pointer.
         self.services
             .get(name)
-            .and_then(|any| any.downcast_ref::<Arc<T>>().cloned())
+            .and_then(|any| Arc::clone(any).downcast::<T>().ok())
     }
 }
 
@@ -177,5 +179,37 @@ impl ModuleManager {
     /// Get context for service lookup
     pub fn context(&self) -> &ModuleContext {
         &self.context
+    }
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    fn context() -> ModuleContext {
+        ModuleContext::new(Arc::new(EventBus::new()))
+    }
+
+    #[test]
+    fn a_registered_service_can_be_fetched_back() {
+        // `register_service` stores the `Arc<T>` as `Arc<dyn Any>`, whose
+        // dynamic type is `T`. `get_service` asked for `Arc<T>` instead, which
+        // is never what is stored, so every lookup was `None`.
+        let mut ctx = context();
+        ctx.register_service("answer", Arc::new(42u32));
+
+        let got = ctx.get_service::<u32>("answer").expect("service is there");
+        assert_eq!(*got, 42);
+    }
+
+    #[test]
+    fn a_missing_name_or_a_wrong_type_is_none() {
+        // Positive control: the fix is a typed lookup, not "return whatever
+        // is stored under the name".
+        let mut ctx = context();
+        ctx.register_service("answer", Arc::new(42u32));
+
+        assert!(ctx.get_service::<u32>("nope").is_none());
+        assert!(ctx.get_service::<String>("answer").is_none());
     }
 }

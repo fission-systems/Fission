@@ -212,19 +212,19 @@ impl GdbMiParser {
         if s.starts_with('"') {
             // String constant
             let end = self.find_string_end(s);
-            let content = &s[1..end];
-            let content = self.unescape_string(content);
-            (MiValue::Const(content), &s[end + 1..])
+            let content = self.unescape_string(Self::between(s, 1, end));
+            (MiValue::Const(content), Self::after(s, end))
         } else if s.starts_with('{') {
             // Tuple: {name="value",...}
-            let end = self.find_matching_brace(s, '{', '}').unwrap_or(s.len() - 1);
-            let content = &s[1..end];
-            let results = self.parse_results(content);
-            (MiValue::Tuple(results), &s[end + 1..])
+            // An unterminated tuple (a truncated record) runs to the end of the
+            // input rather than past it.
+            let end = self.find_matching_brace(s, '{', '}').unwrap_or(s.len());
+            let results = self.parse_results(Self::between(s, 1, end));
+            (MiValue::Tuple(results), Self::after(s, end))
         } else if s.starts_with('[') {
             // List: [value1,value2,...] or [name="value",...]
-            let end = self.find_matching_brace(s, '[', ']').unwrap_or(s.len() - 1);
-            let content = &s[1..end].trim();
+            let end = self.find_matching_brace(s, '[', ']').unwrap_or(s.len());
+            let content = &Self::between(s, 1, end).trim();
 
             let mut list = Vec::new();
             if !content.is_empty() {
@@ -243,7 +243,7 @@ impl GdbMiParser {
                     }
                 }
             }
-            (MiValue::List(list), &s[end + 1..])
+            (MiValue::List(list), Self::after(s, end))
         } else {
             // Raw identifier or number
             let end = s.find([',', '}', ']']).unwrap_or(s.len());
@@ -262,15 +262,43 @@ impl GdbMiParser {
                 return i;
             }
         }
-        s.len() - 1
+        // Unterminated: the string runs to the end of the input.
+        s.len()
     }
 
+    /// `s[start..end]`, empty when the range is inverted or off the end.
+    fn between(s: &str, start: usize, end: usize) -> &str {
+        s.get(start..end.max(start)).unwrap_or("")
+    }
+
+    /// What follows the delimiter at `end`, empty when there is no more input.
+    fn after(s: &str, end: usize) -> &str {
+        s.get(end + 1..).unwrap_or("")
+    }
+
+    /// Index of the `close` that matches the `open` the text starts with.
+    ///
+    /// Delimiters inside a quoted string (`{msg="a } b"}`) are text, not
+    /// structure, and a `close` seen with nothing open is ignored rather than
+    /// subtracted from zero.
     fn find_matching_brace(&self, s: &str, open: char, close: char) -> Option<usize> {
-        let mut depth = 0;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
         for (i, c) in s.char_indices() {
-            if c == open {
+            if in_string {
+                if escaped {
+                    escaped = false;
+                } else if c == '\\' {
+                    escaped = true;
+                } else if c == '"' {
+                    in_string = false;
+                }
+            } else if c == '"' {
+                in_string = true;
+            } else if c == open {
                 depth += 1;
-            } else if c == close {
+            } else if c == close && depth > 0 {
                 depth -= 1;
                 if depth == 0 {
                     return Some(i);
@@ -333,6 +361,71 @@ mod tests {
             assert!(results.contains_key("reason"));
         } else {
             panic!("Expected ExecAsync");
+        }
+    }
+
+    fn first_result(line: &str) -> HashMap<String, MiValue> {
+        let mut parser = GdbMiParser::new();
+        parser.feed(line);
+        match parser.parse().into_iter().next() {
+            Some(MiResponse::Result { results, .. }) => results,
+            other => panic!("expected a result record, got {other:?}"),
+        }
+    }
+
+    fn tuple(value: &MiValue) -> &HashMap<String, MiValue> {
+        match value {
+            MiValue::Tuple(map) => map,
+            other => panic!("expected a tuple, got {other:?}"),
+        }
+    }
+
+    fn constant(value: &MiValue) -> &str {
+        match value {
+            MiValue::Const(text) => text,
+            other => panic!("expected a constant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_closing_brace_inside_a_string_does_not_end_the_tuple() {
+        // `msg` contains `}` and `]`; both must stay inside the string, and
+        // `line` after it must still be parsed.
+        let results = first_result("^done,frame={msg=\"a } b ] c\",line=\"7\"}\n");
+        let frame = tuple(&results["frame"]);
+        assert_eq!(constant(&frame["msg"]), "a } b ] c");
+        assert_eq!(constant(&frame["line"]), "7");
+    }
+
+    #[test]
+    fn nested_tuples_and_lists_still_parse() {
+        // Positive control for the test above: ordinary nesting is unchanged.
+        let results = first_result("^done,frame={a=\"1\",b={c=\"2\"},d=[\"x\",\"y\"]}\n");
+        let frame = tuple(&results["frame"]);
+        assert_eq!(constant(&frame["a"]), "1");
+        assert_eq!(constant(&tuple(&frame["b"])["c"]), "2");
+        match &frame["d"] {
+            MiValue::List(items) => {
+                assert_eq!(items.iter().map(constant).collect::<Vec<_>>(), ["x", "y"])
+            }
+            other => panic!("expected a list, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncated_records_do_not_panic() {
+        // A record cut off mid-value (a partial read, a crashed gdb) used to
+        // slice with its start past its end.
+        for line in [
+            "^done,msg=\"\n",
+            "^done,frame={\n",
+            "^done,files=[\n",
+            "^done,frame={a=\"1\"\n",
+            "^done,x={[\"\n",
+        ] {
+            let mut parser = GdbMiParser::new();
+            parser.feed(line);
+            let _ = parser.parse();
         }
     }
 }
