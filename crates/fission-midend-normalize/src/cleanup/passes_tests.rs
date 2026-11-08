@@ -2503,6 +2503,87 @@ fn condexe_folding_preserves_safety_on_assignment() {
     assert_eq!(func.body.len(), 2);
 }
 
+fn if_then(cond: PreHirExpr, then_body: Vec<PreHirStmt>) -> PreHirStmt {
+    PreHirStmt::If {
+        cond,
+        then_body: then_body.into(),
+        else_body: Vec::new().into(),
+    }
+}
+
+fn assign_var(name: &str, value: i64) -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(name.to_string()),
+        rhs: PreHirExpr::Const(value, int(32)),
+    }
+}
+
+#[test]
+fn condexe_folding_keeps_two_evaluations_of_a_condition_that_calls() {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    // `if (f()) x = 1; if (f()) y = 2;` calls `f` twice, and may take a
+    // different branch the second time. Merged, it calls `f` once.
+    let call = || PreHirExpr::Call {
+        origin: None,
+        target: "f".to_string(),
+        args: Vec::new(),
+        ty: int(32),
+    };
+    let mut body = vec![
+        if_then(call(), vec![assign_var("x", 1)]),
+        if_then(call(), vec![assign_var("y", 2)]),
+    ];
+
+    assert!(!apply_condexe_folding_pass(&mut body));
+    assert_eq!(body.len(), 2);
+}
+
+#[test]
+fn condexe_folding_keeps_a_condition_that_reads_memory_the_first_body_writes() {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    // `if (*p) *p = 0; if (*p) y = 2;` -- the second test sees the store.
+    let load = || PreHirExpr::Load {
+        ptr: Box::new(PreHirExpr::Var("p".to_string())),
+        ty: int(32),
+    };
+    let store = PreHirStmt::Assign {
+        lhs: PreHirLValue::Deref {
+            ptr: Box::new(PreHirExpr::Var("p".to_string())),
+            ty: int(32),
+        },
+        rhs: PreHirExpr::Const(0, int(32)),
+    };
+    let mut body = vec![
+        if_then(load(), vec![store]),
+        if_then(load(), vec![assign_var("y", 2)]),
+    ];
+
+    assert!(!apply_condexe_folding_pass(&mut body));
+    assert_eq!(body.len(), 2);
+}
+
+#[test]
+fn condexe_folding_still_merges_a_pure_condition_with_an_unrelated_assignment() {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    // Positive control for the two tests above: a side-effect-free condition
+    // whose variable the first body never touches is still merged, so the
+    // guard is not just "never fold".
+    let unrelated_store = PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("x".to_string()),
+        rhs: PreHirExpr::Const(1, int(32)),
+    };
+    let mut body = vec![
+        if_then(PreHirExpr::Var("a".to_string()), vec![unrelated_store]),
+        if_then(PreHirExpr::Var("a".to_string()), vec![assign_var("y", 2)]),
+    ];
+
+    assert!(apply_condexe_folding_pass(&mut body));
+    assert_eq!(body.len(), 1);
+}
+
 #[test]
 fn deindirect_resolves_const_address_to_symbol() {
     use crate::cleanup::apply_deindirect_pass;

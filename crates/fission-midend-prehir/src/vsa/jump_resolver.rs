@@ -14,7 +14,7 @@
 /// - Ghidra `rangeutil.hh`: `CircleRange`, `ValueSetSolver`
 use super::solver::solve;
 use super::transfer::{RangeEnv, eval_expr};
-use crate::ir::{PreHirFunction, PreHirStmt};
+use crate::ir::{PreHirFunction, PreHirStmt, PreHirSwitchCase};
 use fission_midend_core::wave_stats::{
     add_dispatcher_shape_recoveries, add_indirect_target_set_refinements,
 };
@@ -210,11 +210,19 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<S
         {
             let range = eval_expr(expr, env);
             if let Some(v) = range.singleton_value() {
-                let v_signed = v as i64;
-                let matching_case = cases.iter().find(|c| c.values.contains(&v_signed));
+                // `v` is the discriminant's bits, zero-extended; a case value
+                // is a signed integer. `-1` and `0xFFFFFFFF` are the same
+                // 32-bit value, so compare at the discriminant's width.
+                let bits = range.bits();
+                let matches = |c: &PreHirSwitchCase| {
+                    c.values
+                        .iter()
+                        .any(|value| case_value_matches(*value, v, bits))
+                };
+                let matching_case = cases.iter().find(|c| matches(c));
                 let other_branches_have_label = cases
                     .iter()
-                    .filter(|c| !c.values.contains(&v_signed))
+                    .filter(|c| !matches(c))
                     .any(|c| contains_referenced_label(&c.body, targets))
                     || (matching_case.is_some() && contains_referenced_label(default, targets));
                 if !other_branches_have_label {
@@ -235,6 +243,16 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<S
         i += 1;
     }
     changed
+}
+
+/// Does the switch case value `case` denote the `bits`-wide value `value`?
+fn case_value_matches(case: i64, value: u64, bits: u32) -> bool {
+    let mask = if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    };
+    (case as u64) & mask == value & mask
 }
 
 fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv, targets: &HashSet<String>) -> bool {
@@ -428,6 +446,63 @@ mod tests {
         // When dead branch contains referenced label, condition folding must not delete it
         apply_jump_resolver_pass(&mut func);
         assert!(matches!(&func.body[0], PreHirStmt::If { .. }));
+    }
+}
+
+#[cfg(test)]
+mod signed_case_regressions {
+    use super::*;
+    use crate::ir::{NirType, PreHirExpr, PreHirLValue, PreHirSwitchCase};
+    use std::rc::Rc;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+
+    /// `switch (<const>) { case <case_value>: y = 1; default: y = 2; }`
+    fn resolve(const_value: i64, bits: u32, case_value: i64) -> u64 {
+        let ty = int(bits, true);
+        let assign = |v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("y".to_string()),
+            rhs: PreHirExpr::Const(v, int(32, true)),
+        };
+        let mut func = PreHirFunction {
+            name: "signed_case".to_string(),
+            body: vec![PreHirStmt::Switch {
+                expr: PreHirExpr::Const(const_value, ty),
+                cases: vec![PreHirSwitchCase {
+                    values: vec![case_value],
+                    body: Rc::new(vec![assign(1), PreHirStmt::Break]),
+                }],
+                default: Rc::new(vec![assign(2), PreHirStmt::Break]),
+            }],
+            ..Default::default()
+        };
+        assert!(apply_jump_resolver_pass(&mut func));
+        match &func.body[0] {
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Const(v, _),
+                ..
+            } => *v as u64,
+            other => panic!("switch not resolved to an assignment: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_narrow_negative_constant_selects_the_negative_case() {
+        // The discriminant is the 32-bit value 0xFFFFFFFF, i.e. -1, and the
+        // case says -1. Comparing the zero-extended 4294967295 with -1 missed
+        // the case and inlined `default`: a different branch of the program.
+        assert_eq!(resolve(-1, 32, -1), 1);
+        assert_eq!(resolve(-128, 8, -128), 1);
+    }
+
+    #[test]
+    fn a_narrow_constant_that_matches_no_case_still_selects_default() {
+        // Positive control: the fix compares at the discriminant's width, it
+        // does not make every case match.
+        assert_eq!(resolve(-1, 32, 5), 2);
+        assert_eq!(resolve(7, 32, 7), 1);
     }
 }
 

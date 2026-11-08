@@ -50,13 +50,23 @@ fn fold_sequential_siblings(stmts: &mut Vec<PreHirStmt>) -> bool {
             ) = (stmts.get(idx), stmts.get(idx + 1))
             {
                 if cond1 == cond2 && else1.is_empty() && else2.is_empty() {
-                    // Check if any variable in cond1 is modified inside then1
-                    let mut cond_vars = HashSet::default();
-                    get_variables_in_expr(cond1, &mut cond_vars);
-                    let modifies_cond_var = cond_vars
-                        .iter()
-                        .any(|var| then1.iter().any(|stmt| stmt_assigns_var(stmt, var)));
-                    !modifies_cond_var
+                    // Merging evaluates the condition once instead of twice, so
+                    // the second evaluation must be unobservable: no call in it
+                    // (`f()` run twice may answer differently), and no memory
+                    // read that the first body could have changed.
+                    if expr_has_side_effects(cond1)
+                        || (expr_reads_memory(cond1) && then1.iter().any(stmt_may_write_memory))
+                    {
+                        false
+                    } else {
+                        // Check if any variable in cond1 is modified inside then1
+                        let mut cond_vars = HashSet::default();
+                        get_variables_in_expr(cond1, &mut cond_vars);
+                        let modifies_cond_var = cond_vars
+                            .iter()
+                            .any(|var| then1.iter().any(|stmt| stmt_assigns_var(stmt, var)));
+                        !modifies_cond_var
+                    }
                 } else {
                     false
                 }
@@ -285,6 +295,60 @@ fn fold_conditions(
     }
 
     changed
+}
+
+/// True when evaluating `expr` reads memory (as opposed to registers/locals).
+fn expr_reads_memory(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. } => expr_reads_memory(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_reads_memory(lhs) || expr_reads_memory(rhs),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_reads_memory(cond) || expr_reads_memory(then_expr) || expr_reads_memory(else_expr)
+        }
+        PreHirExpr::Call { args, .. } => args.iter().any(expr_reads_memory),
+        // Loads, indexing, field and aggregate accesses all go through memory.
+        _ => true,
+    }
+}
+
+/// True unless `stmt` provably writes no memory: only plain local assignments
+/// and control flow around them qualify, anything else (a store through a
+/// pointer, a call, an unknown statement) may.
+fn stmt_may_write_memory(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(_),
+            rhs,
+        } => expr_has_side_effects(rhs),
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Return(None) => false,
+        PreHirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
+        PreHirStmt::Block(body) => body.iter().any(stmt_may_write_memory),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_has_side_effects(cond)
+                || then_body.iter().any(stmt_may_write_memory)
+                || else_body.iter().any(stmt_may_write_memory)
+        }
+        _ => true,
+    }
 }
 
 fn get_variables_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
