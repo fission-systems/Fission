@@ -537,7 +537,23 @@ impl AigManager {
                     self.add_var(*id, bits)
                 }
             }
-            SymExpr::ArraySelect { .. } => {
+            SymExpr::ArraySelect { array, .. } => {
+                // A read gets fresh bits. Only the emulator's own memory
+                // arrays (`space_<id>`) are constrained afterwards, by the
+                // oracle CEGAR in `Solver::check_sat_with_oracle`. Any other
+                // array term -- a store chain, an arbitrary array variable --
+                // has neither read-over-write nor functional-consistency
+                // axioms here, so a model of the fresh bits is not a model of
+                // the formula. Say so, so the answer degrades to `Unknown`.
+                let oracle_backed = matches!(
+                    array.as_ref(),
+                    SymExpr::Var { name, .. } if name.starts_with("space_")
+                );
+                if !oracle_backed {
+                    self.note_unsupported(
+                        "ArraySelect over a term without array axioms".to_string(),
+                    );
+                }
                 if let Some(bits) = self.array_select_map.get(expr) {
                     bits.clone()
                 } else {
