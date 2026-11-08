@@ -1013,4 +1013,72 @@ mod tests {
         assert!(detach.is_ok(), "could not detach test child: {detach:?}");
         assert!(cleanup.is_ok(), "could not reap test child: {cleanup:?}");
     }
+
+    /// Run `debugger` until it reports an event, within about five seconds.
+    #[cfg(target_arch = "x86_64")]
+    fn next_event(debugger: &mut LinuxDebugger) -> Result<crate::debug::types::DebugEvent, String> {
+        for _ in 0..50 {
+            if let Some(event) = debugger.poll_event(100).map_err(|e| e.to_string())? {
+                return Ok(event);
+            }
+        }
+        Err("no debug event within 5 seconds".to_string())
+    }
+
+    /// An INT3 advances RIP past itself before the trap is reported. Reporting
+    /// `BreakpointHit { address }` while leaving RIP at `address + 1` resumes
+    /// the process in the middle of the instruction the breakpoint replaced.
+    /// The stop has to leave RIP at the breakpoint, and continuing from it has
+    /// to run the real instruction (with the breakpoint still set) rather than
+    /// trap again or execute from the wrong byte.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn a_software_breakpoint_stop_leaves_pc_at_the_breakpoint_and_continuing_runs_on() {
+        use crate::debug::types::DebugEvent;
+
+        let mut debugger = LinuxDebugger::new();
+        let pid = debugger
+            .launch("/bin/true", &[])
+            .expect("launch a child under ptrace");
+
+        let outcome = (|| -> Result<(), String> {
+            let entry = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            debugger
+                .set_sw_breakpoint(entry)
+                .map_err(|e| e.to_string())?;
+            debugger.continue_execution().map_err(|e| e.to_string())?;
+
+            match next_event(&mut debugger)? {
+                DebugEvent::BreakpointHit { address, .. } if address == entry => {}
+                other => {
+                    return Err(format!(
+                        "expected a breakpoint hit at {entry:#x}, got {other:?}"
+                    ));
+                }
+            }
+            let pc = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            if pc != entry {
+                return Err(format!(
+                    "stopped at the breakpoint {entry:#x} but PC is {pc:#x}"
+                ));
+            }
+
+            // The breakpoint is still set. Continuing must step over it.
+            debugger.continue_execution().map_err(|e| e.to_string())?;
+            match next_event(&mut debugger)? {
+                DebugEvent::ProcessExited { exit_code: 0 } => Ok(()),
+                other => Err(format!(
+                    "expected a clean exit after continuing, got {other:?}"
+                )),
+            }
+        })();
+
+        // Whatever happened, do not leave the child behind.
+        let child = nix::unistd::Pid::from_raw(pid as i32);
+        if nix::sys::ptrace::kill(child).is_ok() {
+            let _ = nix::sys::wait::waitpid(child, None);
+        }
+
+        assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
 }
