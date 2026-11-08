@@ -49,18 +49,14 @@ impl DwarfRegisterMappings {
             rest = &rest[lt + 1..];
 
             if rest.starts_with('?') || rest.starts_with('!') {
-                if let Some(end) = rest.find('>') {
-                    rest = &rest[end + 1..];
-                } else {
-                    break;
+                match crate::xml_scan::skip_markup(rest) {
+                    Some(after) => rest = after,
+                    None => break,
                 }
                 continue;
             }
 
-            let tag_end = rest
-                .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
-                .unwrap_or(rest.len());
-            let tag = &rest[..tag_end];
+            let tag = crate::xml_scan::tag_name(rest);
 
             let close = rest.find('>').unwrap_or(rest.len());
             let segment = &rest[..close];
@@ -198,6 +194,20 @@ fn parse_u32(s: &str) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_mapping_inside_an_xml_comment_is_ignored() {
+        // The comment ended at the first `>`, so the second commented-out mapping
+        // was parsed as live.
+        let xml = r#"<dwarf><register_mappings>
+<!-- <register_mapping dwarf="58" ghidra="FSBASE"/> <register_mapping dwarf="59" ghidra="GSBASE"/> -->
+<register_mapping dwarf="49" ghidra="rflags"/>
+</register_mappings></dwarf>"#;
+        let doc = DwarfRegisterMappings::parse_str(xml);
+        assert_eq!(doc.ghidra_name_for(58), None);
+        assert_eq!(doc.ghidra_name_for(59), None);
+        assert_eq!(doc.ghidra_name_for(49), Some("rflags"));
+    }
 
     #[test]
     fn parse_simple_and_stackpointer_mappings() {

@@ -55,6 +55,7 @@ mod slaspec_parse;
 /// tests call them; production code has no reason to.
 #[doc(hidden)]
 pub mod test_maps;
+mod xml_scan;
 
 /// A name → (offset_in_register_space, size_in_bytes) lookup table.
 /// Populated from `ELEM_VARNODE_SYM` in the compiled `.sla` artifact.
