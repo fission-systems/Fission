@@ -1192,6 +1192,14 @@ mod tests {
             .expect("launch a child under ptrace");
 
         let outcome = (|| -> Result<(), String> {
+            // A breakpoint at the current PC is not hit by continuing (the
+            // instruction there runs first), so take one step to the next
+            // instruction boundary and put the breakpoint there.
+            debugger.single_step().map_err(|e| e.to_string())?;
+            match next_event(&mut debugger)? {
+                DebugEvent::SingleStep { .. } => {}
+                other => return Err(format!("expected a single-step stop, got {other:?}")),
+            }
             let entry = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
             debugger
                 .set_sw_breakpoint(entry)
