@@ -47,6 +47,103 @@ impl LinuxDebugger {
         &self.state
     }
 
+    /// Replace the byte at `address` in the tracee's memory.
+    fn poke_byte(pid: u32, address: u64, byte: u8) -> FissionResult<()> {
+        use nix::sys::ptrace;
+        use nix::unistd::Pid;
+
+        let pid = Pid::from_raw(pid as i32);
+        let word = ptrace::read(pid, address as *mut std::ffi::c_void).map_err(|e| {
+            FissionError::debug(format!("Failed to read memory at 0x{:x}: {}", address, e))
+        })?;
+        let patched = (word & !0xFF) | i64::from(byte);
+        // SAFETY: `address` is an address in the tracee, written through ptrace.
+        unsafe {
+            ptrace::write(
+                pid,
+                address as *mut std::ffi::c_void,
+                patched as *mut std::ffi::c_void,
+            )
+        }
+        .map_err(|e| {
+            FissionError::debug(format!("Failed to write memory at 0x{:x}: {}", address, e))
+        })
+    }
+
+    /// Move the tracee's instruction pointer.
+    fn set_pc(pid: u32, pc: u64) -> FissionResult<()> {
+        use nix::sys::ptrace;
+        use nix::unistd::Pid;
+
+        let pid = Pid::from_raw(pid as i32);
+        let mut regs = ptrace::getregs(pid)
+            .map_err(|e| FissionError::debug(format!("Failed to get registers: {}", e)))?;
+        regs.rip = pc;
+        ptrace::setregs(pid, regs)
+            .map_err(|e| FissionError::debug(format!("Failed to set registers: {}", e)))
+    }
+
+    /// If an enabled software breakpoint sits at the instruction pointer,
+    /// execute that one instruction with the original byte restored, then put
+    /// the `INT3` back. Returns the wait status of the step, or `None` when
+    /// there was nothing to step over.
+    ///
+    /// Without this, resuming from a breakpoint either re-executes the `INT3`
+    /// (trapping forever) or, if the PC was left past it, runs from the middle
+    /// of the instruction the breakpoint replaced.
+    fn step_over_breakpoint(
+        &mut self,
+        pid: u32,
+    ) -> FissionResult<Option<nix::sys::wait::WaitStatus>> {
+        use nix::sys::ptrace;
+        use nix::sys::wait::waitpid;
+        use nix::unistd::Pid;
+
+        let pc = self.fetch_registers(pid)?.pc;
+        let Some(original) = self
+            .state
+            .breakpoints
+            .get(&pc)
+            .filter(|bp| bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software)
+            .map(|bp| bp.original_byte)
+        else {
+            return Ok(None);
+        };
+
+        Self::poke_byte(pid, pc, original)?;
+        let stepped = ptrace::step(Pid::from_raw(pid as i32), None)
+            .map_err(|e| FissionError::debug(format!("Step over breakpoint failed: {}", e)))
+            .and_then(|()| {
+                waitpid(Pid::from_raw(pid as i32), None)
+                    .map_err(|e| FissionError::debug(format!("waitpid failed: {}", e)))
+            });
+        // Put the breakpoint back whether or not the step worked, unless the
+        // process is gone and there is no memory left to write.
+        if matches!(stepped, Ok(nix::sys::wait::WaitStatus::Stopped(..))) || stepped.is_err() {
+            let _ = Self::poke_byte(pid, pc, 0xCC);
+        }
+        stepped.map(Some)
+    }
+
+    /// The process ended while we were stepping it: report it the way
+    /// `poll_event` does.
+    fn note_process_ended(&mut self, status: nix::sys::wait::WaitStatus) {
+        use nix::sys::wait::WaitStatus;
+
+        let exit_code = match status {
+            WaitStatus::Exited(_, code) => code as u32,
+            WaitStatus::Signaled(_, signal, _) => 128 + signal as u32,
+            _ => return,
+        };
+        self.target_pid = None;
+        self.state.attached_pid = None;
+        self.state.status = DebugStatus::Terminated;
+        self.state.event_count = self.state.event_count.saturating_add(1);
+        self.stop_ttd_recording();
+        self.pending_events
+            .push_back(DebugEvent::ProcessExited { exit_code });
+    }
+
     fn record_ttd_snapshot(&mut self, thread_id: u32, registers: RegisterState) {
         let Some(timeline) = &self.ttd_timeline else {
             return;
@@ -549,6 +646,25 @@ impl ExecutionBackend for LinuxDebugger {
             .target_pid
             .ok_or_else(|| FissionError::debug("Not attached"))?;
 
+        // Leaving a breakpoint: run its instruction first, with it lifted.
+        match self.step_over_breakpoint(pid)? {
+            Some(nix::sys::wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP))
+            | None => {}
+            Some(
+                status @ (nix::sys::wait::WaitStatus::Exited(..)
+                | nix::sys::wait::WaitStatus::Signaled(..)),
+            ) => {
+                self.note_process_ended(status);
+                return Ok(());
+            }
+            Some(other) => {
+                return Err(FissionError::debug(format!(
+                    "Unexpected stop while stepping over a breakpoint: {:?}",
+                    other
+                )));
+            }
+        }
+
         ptrace::cont(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Continue failed: {}", e)))?;
 
@@ -563,6 +679,31 @@ impl ExecutionBackend for LinuxDebugger {
         let pid = self
             .target_pid
             .ok_or_else(|| FissionError::debug("Not attached"))?;
+
+        // On a breakpoint the step is the breakpoint's own instruction, run
+        // with it lifted; report it as the single-step event it is.
+        match self.step_over_breakpoint(pid)? {
+            Some(nix::sys::wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP)) => {
+                self.state.status = DebugStatus::Suspended;
+                self.pending_events
+                    .push_back(DebugEvent::SingleStep { thread_id: pid });
+                return Ok(());
+            }
+            Some(
+                status @ (nix::sys::wait::WaitStatus::Exited(..)
+                | nix::sys::wait::WaitStatus::Signaled(..)),
+            ) => {
+                self.note_process_ended(status);
+                return Ok(());
+            }
+            Some(other) => {
+                return Err(FissionError::debug(format!(
+                    "Unexpected stop while stepping over a breakpoint: {:?}",
+                    other
+                )));
+            }
+            None => {}
+        }
 
         ptrace::step(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Single step failed: {}", e)))?;
@@ -638,6 +779,11 @@ impl ExecutionBackend for LinuxDebugger {
                             if let Some(breakpoint) = self.state.breakpoints.get_mut(&address) {
                                 breakpoint.hits = breakpoint.hits.saturating_add(1);
                             }
+                            // An INT3 leaves RIP one byte past itself. Put it back
+                            // on the breakpoint so the stop, and the next resume,
+                            // are at the instruction the breakpoint replaced.
+                            Self::set_pc(pid, address)?;
+                            self.state.registers = Some(self.fetch_registers(pid)?);
                             return Ok(Some(crate::debug::types::DebugEvent::BreakpointHit {
                                 address,
                                 thread_id: pid,
