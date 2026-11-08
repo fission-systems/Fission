@@ -87,7 +87,7 @@ impl FissionEvent {
     }
 }
 
-type EventHandler = Box<dyn Fn(&FissionEvent) + Send + Sync>;
+type EventHandler = Arc<dyn Fn(&FissionEvent) + Send + Sync>;
 
 pub struct EventBus {
     subscribers: RwLock<HashMap<u64, EventHandler>>,
@@ -112,7 +112,7 @@ impl EventBus {
         drop(id_guard);
 
         let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
-        subs.insert(id, Box::new(handler));
+        subs.insert(id, Arc::new(handler));
 
         id
     }
@@ -123,8 +123,14 @@ impl EventBus {
     }
 
     pub fn publish(&self, event: FissionEvent) {
-        let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
-        for handler in subs.values() {
+        // Call the handlers with the lock released. A handler that subscribes
+        // or unsubscribes takes the write lock, and waiting for it while this
+        // thread still held the read lock deadlocked.
+        let handlers: Vec<EventHandler> = {
+            let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
+            subs.values().cloned().collect()
+        };
+        for handler in handlers {
             handler(&event);
         }
     }
@@ -160,5 +166,55 @@ mod tests {
         });
 
         assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_handler_may_subscribe_while_an_event_is_being_published() {
+        // `publish` held the subscriber read lock across the handler calls, so
+        // a handler that subscribes (a write) on the same bus waited for a lock
+        // its own caller held. Run it on a thread so a regression fails the
+        // test instead of hanging it.
+        let bus = Arc::new(EventBus::new());
+        let seen = Arc::new(AtomicUsize::new(0));
+        {
+            let (bus_inner, seen_inner) = (bus.clone(), seen.clone());
+            bus.subscribe(move |_| {
+                let seen_late = seen_inner.clone();
+                bus_inner.subscribe(move |_| {
+                    seen_late.fetch_add(1, Ordering::SeqCst);
+                });
+            });
+        }
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let publisher = bus.clone();
+        std::thread::spawn(move || {
+            publisher.publish(FissionEvent::AppStarted);
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .is_ok(),
+            "publish deadlocked on a handler that subscribes"
+        );
+        // The late subscriber is there for the next event.
+        bus.publish(FissionEvent::AppStarted);
+        assert!(seen.load(Ordering::SeqCst) >= 1);
+    }
+
+    #[test]
+    fn every_subscriber_still_receives_each_event() {
+        // Positive control: the snapshot taken for the fix still reaches all of
+        // them, in one publish.
+        let bus = EventBus::new();
+        let hits = Arc::new(AtomicUsize::new(0));
+        for _ in 0..3 {
+            let hits = hits.clone();
+            bus.subscribe(move |_| {
+                hits.fetch_add(1, Ordering::SeqCst);
+            });
+        }
+        bus.publish(FissionEvent::AppStarted);
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
     }
 }

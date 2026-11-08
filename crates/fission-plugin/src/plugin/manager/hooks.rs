@@ -82,10 +82,11 @@ impl PluginManager {
             .hooks
             .values()
             .filter(|(hook, _)| {
-                if let Some(plugin) = self.plugins.get(&hook.plugin_id)
-                    && !plugin.info.enabled
-                {
-                    return false;
+                // A hook runs only for a plugin that is loaded and enabled. A
+                // plugin that is no longer in the map leaves an orphan hook.
+                match self.plugins.get(&hook.plugin_id) {
+                    Some(plugin) if plugin.info.enabled => {}
+                    _ => return false,
                 }
 
                 hook.event_type == event_type || hook.event_type == FissionEventType::All
