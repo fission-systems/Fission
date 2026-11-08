@@ -56,7 +56,9 @@ impl PluginManager {
             enabled: true,
         };
 
+        let on_load_called = self.api.is_some();
         let loaded = LoadedPlugin {
+            on_load_called,
             info,
             hooks: Vec::new(),
             instance: Some(plugin),
@@ -134,7 +136,9 @@ impl PluginManager {
             enabled: true,
         };
 
+        let on_load_called = self.api.is_some();
         let loaded = LoadedPlugin {
+            on_load_called,
             info,
             hooks: Vec::new(),
             instance: Some(plugin),

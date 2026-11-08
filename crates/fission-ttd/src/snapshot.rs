@@ -87,11 +87,16 @@ impl ExecutionSnapshot {
     /// Estimate memory usage of this snapshot in bytes
     pub fn memory_usage(&self) -> usize {
         std::mem::size_of::<Self>()
+            // The registers' own heap, the bulk of a snapshot.
+            + self.registers.heap_bytes()
+            // The delta records' buffers, and the byte vectors inside them.
+            + self.memory_deltas.capacity() * std::mem::size_of::<MemoryDelta>()
             + self
                 .memory_deltas
                 .iter()
                 .map(|d| d.old_value.len() + d.new_value.len())
                 .sum::<usize>()
+            + self.shadow_deltas.capacity() * std::mem::size_of::<ShadowDelta>()
     }
 }
 
@@ -104,4 +109,67 @@ pub struct SnapshotStats {
     pub memory_bytes: usize,
     /// Average memory deltas per snapshot
     pub avg_deltas_per_snapshot: f64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::RegisterState;
+
+    fn snapshot(registers: RegisterState) -> ExecutionSnapshot {
+        ExecutionSnapshot::new(1, registers, 0)
+    }
+
+    #[test]
+    fn a_snapshot_with_more_registers_reports_more_memory() {
+        // `memory_usage` counted the struct and the memory-delta bytes, so the
+        // registers -- the bulk of a snapshot taken every few thousand
+        // instructions -- cost nothing no matter how many there were.
+        let few = snapshot(RegisterState::at(0x1000).with("RAX", 1));
+        let mut many = RegisterState::at(0x1000);
+        for i in 0..16 {
+            many.set(&format!("R{i}"), i);
+        }
+        many.set_bytes("XMM0", &[0xAA; 32]);
+        let many = snapshot(many);
+
+        assert!(many.memory_usage() > few.memory_usage());
+        // And by at least what the wide register's bytes alone occupy.
+        assert!(many.memory_usage() >= few.memory_usage() + 32);
+    }
+
+    #[test]
+    fn delta_buffers_count_beyond_their_value_bytes() {
+        // The deltas' own records (the Vec's buffer) are heap too, not only the
+        // old/new byte vectors inside them.
+        let mut with_deltas = snapshot(RegisterState::at(0x1000));
+        for i in 0..8 {
+            with_deltas.add_memory_delta(MemoryDelta::new(i, vec![0], vec![1]));
+            with_deltas.add_shadow_delta(ShadowDelta {
+                space_id: 0,
+                address: i,
+                old_node: None,
+                new_node: Some(1),
+            });
+        }
+        let empty = snapshot(RegisterState::at(0x1000));
+        let value_bytes = 8 * 2;
+        assert!(
+            with_deltas.memory_usage()
+                >= empty.memory_usage()
+                    + value_bytes
+                    + 8 * std::mem::size_of::<MemoryDelta>()
+                    + 8 * std::mem::size_of::<ShadowDelta>()
+        );
+    }
+
+    #[test]
+    fn an_empty_snapshot_costs_only_its_own_size() {
+        // Positive control: nothing is invented for a snapshot with no heap.
+        let empty = snapshot(RegisterState::at(0x1000));
+        assert_eq!(
+            empty.memory_usage(),
+            std::mem::size_of::<ExecutionSnapshot>()
+        );
+    }
 }

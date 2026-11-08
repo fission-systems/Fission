@@ -44,7 +44,29 @@ impl PluginManager {
     }
 
     pub fn set_api(&mut self, api: Arc<dyn PluginAPI>) {
-        self.api = Some(api);
+        self.api = Some(api.clone());
+
+        // Registration only calls `on_load` once there is an API to hand the
+        // plugin, so a plugin registered earlier has not been loaded yet. Do it
+        // now, once. One whose `on_load` fails ends as registration would have
+        // ended it -- not running -- so it is disabled rather than left active.
+        let extension = self
+            .event_bus
+            .clone()
+            .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
+        let ctx = crate::contracts::traits::PluginContext::new(api, extension);
+        for plugin in self.plugins.values_mut() {
+            if plugin.on_load_called {
+                continue;
+            }
+            let Some(instance) = plugin.instance.as_mut() else {
+                continue;
+            };
+            plugin.on_load_called = true;
+            if instance.on_load(&ctx).is_err() {
+                plugin.info.enabled = false;
+            }
+        }
     }
 
     pub fn set_event_bus(&mut self, event_bus: Arc<EventBus>) {
