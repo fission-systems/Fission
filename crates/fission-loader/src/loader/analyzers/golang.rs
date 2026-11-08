@@ -390,11 +390,15 @@ impl<'a> GoAnalyzer<'a> {
             return None;
         }
 
-        // First byte might be flags, second byte is length
-        let name_start = if data[0] & 0x04 != 0 { 3 } else { 1 };
-        let len = data[name_start - 1] as usize;
+        // `runtime.name`: byte 0 is flags (exported / has-tag / has-pkgpath),
+        // then the name's length as a varint, then the name itself. The tag and
+        // the package path, when flagged, come *after* the name, so none of the
+        // flag bits moves where the length starts.
+        let (len, len_bytes) = read_uvarint(&data[1..])?;
+        let name_start = 1 + len_bytes;
+        let len = usize::try_from(len).ok()?;
 
-        if name_start + len > data.len() || len == 0 {
+        if len == 0 || name_start.checked_add(len)? > data.len() {
             return None;
         }
 
@@ -709,6 +713,20 @@ impl GoTypeInfo {
     }
 }
 
+/// Decode an unsigned LEB128 varint (Go's `binary.Uvarint`): the value and how
+/// many bytes it took. `None` if the input ends first or it is longer than a
+/// u64 allows.
+fn read_uvarint(bytes: &[u8]) -> Option<(u64, usize)> {
+    let mut value = 0u64;
+    for (i, byte) in bytes.iter().take(10).enumerate() {
+        value |= u64::from(byte & 0x7f).checked_shl(7 * i as u32)?;
+        if byte & 0x80 == 0 {
+            return Some((value, i + 1));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -774,5 +792,79 @@ mod tests {
 
         let strings = GoAnalyzer::new(&binary).scan_go_strings();
         assert_eq!(strings.get(&0x1000), Some(&"\"hello\"".to_string()));
+    }
+
+    /// A binary whose `.rodata` is `bytes`, mapped at 0x1000, 0x200 bytes long.
+    fn binary_with_rodata(bytes: &[u8]) -> LoadedBinary {
+        let mut data = vec![0u8; 0x200];
+        data[..bytes.len()].copy_from_slice(bytes);
+        LoadedBinaryBuilder::new("go-name-test".to_string(), DataBuffer::Heap(data))
+            .format("ELF")
+            .image_base(0x1000)
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".rodata".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x200,
+                file_offset: 0,
+                file_size: 0x200,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("synthetic Go binary should build")
+    }
+
+    fn read_name(bytes: &[u8]) -> Option<String> {
+        let binary = binary_with_rodata(bytes);
+        GoAnalyzer::new(&binary).read_go_name(0x1000)
+    }
+
+    /// A `runtime.name` is a flags byte, then the name's length as a varint,
+    /// then the name; the package path and tag follow. The reader took the
+    /// flags byte for the length whenever the pkgpath bit was clear, so an
+    /// unexported name (flags 0) came back `None` and an exported one (flags 1)
+    /// came back as one stray byte.
+    #[test]
+    fn a_go_name_is_flags_then_a_varint_length_then_the_text() {
+        // flags 0: not exported, no tag, no package path.
+        assert_eq!(
+            read_name(&[0x00, 3, b'f', b'o', b'o']).as_deref(),
+            Some("foo")
+        );
+        // flags 1: exported.
+        assert_eq!(
+            read_name(&[0x01, 3, b'F', b'o', b'o']).as_deref(),
+            Some("Foo")
+        );
+        // flags 2: has a tag, which follows the name and is not part of it.
+        assert_eq!(
+            read_name(&[0x02, 3, b'b', b'a', b'z', 2, b'h', b'i']).as_deref(),
+            Some("baz")
+        );
+        // flags 4: has a package path, which also follows the name.
+        assert_eq!(
+            read_name(&[0x04, 3, b'b', b'a', b'r', 0, 0, 0, 0, 0]).as_deref(),
+            Some("bar")
+        );
+    }
+
+    #[test]
+    fn a_go_name_longer_than_127_bytes_has_a_two_byte_length() {
+        let mut bytes = vec![0x00, 0xC8, 0x01]; // varint 200
+        bytes.extend(std::iter::repeat_n(b'x', 200));
+        let name = read_name(&bytes).expect("a 200-byte name");
+        assert_eq!(name.len(), 200);
+        assert!(name.bytes().all(|b| b == b'x'));
+    }
+
+    #[test]
+    fn an_empty_or_truncated_go_name_is_none() {
+        // Positive control for the cases above: a zero length has no name, and a
+        // length that runs past the readable bytes is refused, not clipped.
+        assert_eq!(read_name(&[0x00, 0]), None);
+        assert_eq!(read_name(&[0x00, 0xFF, 0x7F]), None); // varint 16383 > 256
     }
 }
