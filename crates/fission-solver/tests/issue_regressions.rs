@@ -209,3 +209,72 @@ fn registered_nested_arrays_are_not_extracted_as_u64_scalars() {
     assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
     assert!(!solver.model.contains_key(&id));
 }
+
+fn array_select(array: SymExpr, index: SymExpr) -> SymExpr {
+    SymExpr::ArraySelect {
+        array: Box::new(array),
+        index: Box::new(index),
+    }
+}
+
+fn array_store(array: SymExpr, index: SymExpr, value: SymExpr) -> SymExpr {
+    SymExpr::ArrayStore {
+        array: Box::new(array),
+        index: Box::new(index),
+        value: Box::new(value),
+    }
+}
+
+fn not_equal(a: SymExpr, b: SymExpr) -> SymExpr {
+    SymExpr::new_not(SymExpr::Eq(Box::new(a), Box::new(b)))
+}
+
+/// `select(store(a, i, v), i) != v` has no model. The solver has no array
+/// axioms for a store chain, so the only sound answers are `Unsat` or
+/// `Unknown`; it used to answer `Sat` because an `ArraySelect` was lowered to
+/// fresh unconstrained bits without its array operand being looked at, so the
+/// `ArrayStore` inside it was never even flagged as unsupported.
+#[test]
+fn select_over_store_is_not_reported_satisfiable() {
+    let a = SymExpr::new_array_var("a", 8, 8);
+    let i = SymExpr::new_var("i", 8);
+    let v = SymExpr::new_var("v", 8);
+    let mut solver = Solver::new();
+    solver.assert(not_equal(
+        array_select(array_store(a, i.clone(), v.clone()), i),
+        v,
+    ));
+    assert_ne!(solver.check_sat().unwrap(), SatResult::Sat);
+}
+
+/// Functional consistency: equal indices read equal values. Fresh bits per
+/// `ArraySelect` node made `select(a, i) != select(a, j)` with `i == j`
+/// satisfiable.
+#[test]
+fn equal_indices_of_an_unconstrained_array_are_not_reported_distinguishable() {
+    let a = SymExpr::new_array_var("a", 8, 8);
+    let i = SymExpr::new_var("i", 8);
+    let j = SymExpr::new_var("j", 8);
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::Eq(Box::new(i.clone()), Box::new(j.clone())));
+    solver.assert(not_equal(array_select(a.clone(), i), array_select(a, j)));
+    assert_ne!(solver.check_sat().unwrap(), SatResult::Sat);
+}
+
+/// Positive control for the two tests above: a read from the emulator's own
+/// memory array (`space_<id>`) is constrained afterwards by the oracle CEGAR in
+/// `Solver::check_sat_with_oracle`, so lowering it must stay supported. The
+/// fix cannot pass by flagging every array read.
+#[test]
+fn select_from_an_oracle_backed_space_array_stays_supported() {
+    use fission_solver::aig::AigManager;
+    let space = SymExpr::new_array_var("space_1", 64, 8);
+    let read = array_select(space, SymExpr::new_var("addr", 64));
+    let mut aig = AigManager::new();
+    assert_eq!(aig.lower_expr(&read).len(), 8);
+    assert!(
+        aig.unsupported().is_empty(),
+        "oracle-backed read was flagged: {:?}",
+        aig.unsupported()
+    );
+}
