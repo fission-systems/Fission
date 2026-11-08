@@ -117,19 +117,15 @@ impl PspecDocument {
 
             // Skip XML declaration / comments.
             if rest.starts_with('?') || rest.starts_with('!') {
-                if let Some(end) = rest.find('>') {
-                    rest = &rest[end + 1..];
-                } else {
-                    break;
+                match crate::xml_scan::skip_markup(rest) {
+                    Some(after) => rest = after,
+                    None => break,
                 }
                 continue;
             }
 
             // Read tag name (stop at whitespace, '>', '/').
-            let tag_end = rest
-                .find(|c: char| c.is_ascii_whitespace() || c == '>' || c == '/')
-                .unwrap_or(rest.len());
-            let tag = &rest[..tag_end];
+            let tag = crate::xml_scan::tag_name(rest);
 
             let close = rest.find('>').unwrap_or(rest.len());
             let segment = &rest[..close];
@@ -330,6 +326,48 @@ fn parse_u64(s: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_set_after_a_closed_block_is_not_part_of_that_block() {
+        // `</context_set>` was never recognised (the tag name came out empty), so
+        // every `<set>` after it still counted as inside the block.
+        let doc = PspecDocument::parse_str(
+            r#"<context_set space="ram"><set name="a" val="1"/></context_set><set name="b" val="2"/>"#,
+        );
+        assert_eq!(doc.context_set, vec![("a".to_string(), 1)]);
+    }
+
+    #[test]
+    fn a_range_after_the_volatile_block_is_not_volatile() {
+        let doc = PspecDocument::parse_str(
+            r#"<volatile outputop="w" inputop="r"><range space="ram" first="0x10" last="0x1f"/></volatile><range space="ram" first="0x20" last="0x2f"/>"#,
+        );
+        assert_eq!(doc.volatile_ranges.len(), 1);
+        assert_eq!(doc.volatile_ranges[0].first, 0x10);
+    }
+
+    #[test]
+    fn every_tag_inside_an_xml_comment_is_ignored() {
+        // The comment ended at the first `>`, so the second commented-out
+        // `<set>` was parsed as live.
+        let doc = PspecDocument::parse_str(
+            r#"<context_set space="ram"><!-- <set name="x" val="1"/> <set name="y" val="2"/> --><set name="z" val="3"/></context_set>"#,
+        );
+        assert_eq!(doc.context_set, vec![("z".to_string(), 3)]);
+    }
+
+    #[test]
+    fn ordinary_blocks_still_parse_their_sets_in_order() {
+        // Positive control for the three tests above.
+        let doc = PspecDocument::parse_str(
+            r#"<context_set space="ram"><set name="a" val="1"/><set name="b" val="2"/></context_set><tracked_set space="ram"><set name="DF" val="0"/></tracked_set>"#,
+        );
+        assert_eq!(
+            doc.context_set,
+            vec![("a".to_string(), 1), ("b".to_string(), 2)]
+        );
+        assert_eq!(doc.tracked_set, vec![("DF".to_string(), 0)]);
+    }
 
     #[test]
     fn parse_x86_64_pspec_tracked_set_and_hidden() {
