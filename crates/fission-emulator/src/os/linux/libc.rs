@@ -330,7 +330,18 @@ impl SimProcedure for Read {
             emu.write_return_val(bytes_read as u64)?;
         } else {
             tracing::info!("SimProcedure: read({}, 0x{:X}, {})", fd, buf, count);
-            emu.write_return_val(0)?;
+            // Every other fd is a VFS file, the same ones the `read` syscall
+            // serves. Answering 0 for all of them made an opened file look
+            // empty to a guest that reads through libc.
+            match emu.vfs.read(fd, count) {
+                Ok(data) => {
+                    if !data.is_empty() {
+                        emu.state.write_space(emu.state.ram_space(), buf, &data)?;
+                    }
+                    emu.write_return_val(data.len() as u64)?;
+                }
+                Err(_) => emu.write_return_val((-1i64) as u64)?,
+            }
         }
         Ok(HleResult::Continue)
     }
@@ -942,6 +953,45 @@ mod tests {
         emu.write_register_u64("RDX", 42).unwrap();
         let out = format_printf(&mut emu, "hello %s %d %%", 1).unwrap();
         assert_eq!(out, "hello world 42 %");
+    }
+
+    fn libc_read(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -> i64 {
+        emu.write_register_u64("RDI", fd).unwrap();
+        emu.write_register_u64("RSI", buf).unwrap();
+        emu.write_register_u64("RDX", count).unwrap();
+        Read.run(emu).unwrap();
+        emu.read_register_u64("RAX").unwrap() as i64
+    }
+
+    /// `read(fd, ...)` on an open VFS file returns that file's bytes, as the
+    /// `read` syscall already does. The libc entry point answered 0 (EOF) for
+    /// every fd but 0, so a guest that `open`ed a seeded file and read it
+    /// through libc saw an empty file.
+    #[test]
+    fn libc_read_returns_the_bytes_of_an_open_vfs_file() {
+        let mut emu = tiny_emu();
+        let fd = emu.vfs.open("data.txt", b"hello world".to_vec());
+        let buf = emu.heap_alloc(32).unwrap();
+
+        assert_eq!(libc_read(&mut emu, fd, buf, 5), 5);
+        let got = emu.state.read_space(emu.state.ram_space(), buf, 5).unwrap();
+        assert_eq!(got, b"hello");
+        // The cursor advanced: the next read continues where the first stopped.
+        assert_eq!(libc_read(&mut emu, fd, buf, 32), 6);
+        let rest = emu.state.read_space(emu.state.ram_space(), buf, 6).unwrap();
+        assert_eq!(rest, b" world");
+        // And at the end of the file it is EOF, not an error.
+        assert_eq!(libc_read(&mut emu, fd, buf, 4), 0);
+    }
+
+    #[test]
+    fn libc_read_of_an_fd_that_is_not_open_is_an_error() {
+        // Positive control for the test above: reading is not simply
+        // "succeed for everything but stdin". A closed or never-opened fd is
+        // -1, the same answer the syscall gives.
+        let mut emu = tiny_emu();
+        let buf = emu.heap_alloc(8).unwrap();
+        assert_eq!(libc_read(&mut emu, 999, buf, 4), -1);
     }
 
     #[test]
