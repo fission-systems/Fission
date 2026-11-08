@@ -1368,6 +1368,132 @@ mod tests {
         );
     }
 
+    /// `goto end; <loop that defines "inner">; end:` with a `goto inner` in a
+    /// different statement. The loop is skipped by the first goto, but control
+    /// can still enter it through the other jump, so it is not dead. The
+    /// unreachable-tail rule used to stop dropping only at a top-level label
+    /// and deleted the whole loop, taking `inner` with it.
+    fn skipped_loop_that_defines_a_jump_target(jump_from_outside: bool) -> Vec<PreHirStmt> {
+        let mut stmts = Vec::new();
+        if jump_from_outside {
+            stmts.push(PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("inner".to_string())].into(),
+                else_body: vec![].into(),
+            });
+        }
+        stmts.extend([
+            PreHirStmt::Goto("end".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    PreHirStmt::Label("inner".to_string()),
+                    PreHirStmt::Expr(PreHirExpr::Var("work".to_string())),
+                ]
+                .into(),
+            },
+            PreHirStmt::Label("end".to_string()),
+            PreHirStmt::Return(None),
+        ]);
+        stmts
+    }
+
+    #[test]
+    fn goto_elim_keeps_skipped_statement_that_defines_a_label_jumped_to_elsewhere() {
+        let result = eliminate_redundant_gotos(skipped_loop_that_defines_a_jump_target(true));
+
+        let defined = collect_defined_labels(&result);
+        let referenced = collect_referenced_label_counts(&result);
+        for label in referenced.keys() {
+            assert!(
+                defined.contains(label),
+                "goto target {label:?} lost its label: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn goto_elim_still_drops_skipped_statement_nothing_jumps_into() {
+        // Positive control: with no jump into the loop it really is dead and
+        // must still go, so the fix cannot pass by keeping everything.
+        let result = eliminate_redundant_gotos(skipped_loop_that_defines_a_jump_target(false));
+
+        assert!(
+            !format!("{result:?}").contains("While"),
+            "dead loop should have been removed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn goto_elim_drops_skipped_statements_that_only_jump_to_each_other() {
+        // Two skipped loops, each jumping into the other. Nothing reachable
+        // refers to either label, so the whole run is dead and must go.
+        // Counting references over the whole function treated each loop's
+        // `goto` as an outside reference to the other loop and kept both.
+        let loop_with = |defines: &str, jumps_to: &str| PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
+            body: vec![
+                PreHirStmt::Label(defines.to_string()),
+                PreHirStmt::Goto(jumps_to.to_string()),
+            ]
+            .into(),
+        };
+        let stmts = vec![
+            PreHirStmt::Goto("end".to_string()),
+            loop_with("a", "b"),
+            loop_with("b", "a"),
+            PreHirStmt::Label("end".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+
+        assert!(
+            !format!("{result:?}").contains("While"),
+            "mutually-referencing dead loops should have been removed: {result:?}"
+        );
+    }
+
+    #[test]
+    fn goto_elim_keeps_an_earlier_skipped_statement_a_kept_one_jumps_back_to() {
+        // `inner` is jumped to from outside, so the second loop stays. The
+        // first loop defines `first`, which the second loop jumps back to, so
+        // it must stay too.
+        let stmts = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".to_string()),
+                then_body: vec![PreHirStmt::Goto("inner".to_string())].into(),
+                else_body: vec![].into(),
+            },
+            PreHirStmt::Goto("end".to_string()),
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![PreHirStmt::Label("first".to_string())].into(),
+            },
+            PreHirStmt::While {
+                cond: PreHirExpr::Const(1, NirType::Bool),
+                body: vec![
+                    PreHirStmt::Label("inner".to_string()),
+                    PreHirStmt::Goto("first".to_string()),
+                ]
+                .into(),
+            },
+            PreHirStmt::Label("end".to_string()),
+            PreHirStmt::Return(None),
+        ];
+
+        let result = eliminate_redundant_gotos(stmts);
+
+        let defined = collect_defined_labels(&result);
+        let referenced = collect_referenced_label_counts(&result);
+        for label in referenced.keys() {
+            assert!(
+                defined.contains(label),
+                "goto target {label:?} lost its label: {result:?}"
+            );
+        }
+    }
+
     #[test]
     fn post_layout_finalization_removes_fallthrough_created_by_guard_inversion() {
         let body = vec![
