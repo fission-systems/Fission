@@ -109,6 +109,17 @@ pub enum PcodeNativeReconstructError {
     },
     #[error("selected output {output:?} is not defined by the region")]
     OutputNotDefined { output: ObservedLocation },
+    #[error(
+        "operation {op_index} overwrites the low {size} bytes of a {existing_size}-byte value \
+         at space {space_id} offset 0x{offset:x}; splicing a partial write is not modeled"
+    )]
+    PartialOverwrite {
+        op_index: usize,
+        space_id: u64,
+        offset: u64,
+        size: u32,
+        existing_size: u32,
+    },
 }
 
 impl DirReconstructor for PcodeNativeReconstructor {
@@ -168,6 +179,36 @@ impl DirReconstructor for PcodeNativeReconstructor {
             let output_location = location_of(output);
             let expression =
                 reconstruct_op(op, op_index, &self.value_space_ids, &values, &mut inputs)?;
+            // Entries are keyed by (space, offset, size), so a write at one width
+            // does not touch the entries at another. `AL`/`AX`/`EAX`/`RAX` share
+            // a start, so they overlap and the map has to be kept consistent:
+            if let Some(existing) = values
+                .keys()
+                .filter(|known| {
+                    known.space_id == output_location.space_id
+                        && known.offset == output_location.offset
+                        && known.size > output_location.size
+                })
+                .map(|known| known.size)
+                .max()
+            {
+                // a narrower write over a wider value splices into it, which the
+                // region model does not do -- say so instead of answering with
+                // the wide value as though the write had not happened;
+                return Err(PcodeNativeReconstructError::PartialOverwrite {
+                    op_index,
+                    space_id: output_location.space_id,
+                    offset: output_location.offset,
+                    size: output_location.size,
+                    existing_size: existing,
+                });
+            }
+            // a wider write replaces every narrower prefix recorded before it.
+            values.retain(|known, _| {
+                !(known.space_id == output_location.space_id
+                    && known.offset == output_location.offset
+                    && known.size < output_location.size)
+            });
             values.insert(output_location, expression);
         }
 
@@ -323,26 +364,29 @@ fn reconstruct_op(
                     bits,
                 ),
                 // Signed add overflows iff `(a + b) <s a` disagrees with `b <s 0`.
+                // The comparisons are p-code booleans, one byte wide like the flag
+                // they compose into, not a 1-bit value: the verifier admits only
+                // whole-byte widths and refused every region built from a 1.
                 PcodeOpcode::IntSCarry => bin(
                     PcodeNativeBinaryOp::NotEqual,
                     bin(
                         PcodeNativeBinaryOp::SignedLess,
                         bin(PcodeNativeBinaryOp::Add, a.clone(), b.clone(), width),
                         a,
-                        1,
+                        bits,
                     ),
-                    bin(PcodeNativeBinaryOp::SignedLess, b, zero, 1),
+                    bin(PcodeNativeBinaryOp::SignedLess, b, zero, bits),
                     bits,
                 ),
                 // Signed subtract overflows iff `a <s b` disagrees with `(a - b) <s 0`.
                 PcodeOpcode::IntSBorrow => bin(
                     PcodeNativeBinaryOp::NotEqual,
-                    bin(PcodeNativeBinaryOp::SignedLess, a.clone(), b.clone(), 1),
+                    bin(PcodeNativeBinaryOp::SignedLess, a.clone(), b.clone(), bits),
                     bin(
                         PcodeNativeBinaryOp::SignedLess,
                         bin(PcodeNativeBinaryOp::Subtract, a, b, width),
                         zero,
-                        1,
+                        bits,
                     ),
                     bits,
                 ),
@@ -1873,6 +1917,183 @@ mod tests {
                     assert_eq!(got, want, "{opcode:?} at a={a} b={b}");
                 }
             }
+        }
+    }
+
+    /// A region of `Copy` ops, each `(output, input)`, reading `out` last.
+    fn copy_chain(
+        copies: &[(Varnode, Varnode)],
+        out: Varnode,
+    ) -> (PcodeFoundation, PcodeRegionSelection) {
+        let ops = copies
+            .iter()
+            .enumerate()
+            .map(|(i, (to, from))| PcodeOp {
+                seq_num: i as u32,
+                opcode: PcodeOpcode::Copy,
+                address: 0x401000,
+                output: Some(to.clone()),
+                inputs: vec![from.clone()],
+                asm_mnemonic: None,
+            })
+            .collect::<Vec<_>>();
+        let selection = PcodeRegionSelection {
+            block_index: 0,
+            first_op: 0,
+            op_count: ops.len(),
+            output: location_of(&out),
+        };
+        let function = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: Vec::new(),
+                ops,
+            }],
+        };
+        (PcodeFoundation::new(0x401000, function).unwrap(), selection)
+    }
+
+    /// Evaluate a reconstructed region with each live-in set from `values`
+    /// (keyed by its offset).
+    fn evaluate_region(candidate: &DirCandidate, values: &[(u64, u64)]) -> u64 {
+        let CandidateSemantics::PcodeNativeRegion(region) = &candidate.semantics else {
+            panic!("expected a native region");
+        };
+        let inputs = region
+            .inputs
+            .iter()
+            .map(|input| {
+                let offset = input.location().expect("register live-in").offset;
+                values
+                    .iter()
+                    .find(|(o, _)| *o == offset)
+                    .expect("input value")
+                    .1
+            })
+            .collect::<Vec<_>>();
+        evaluate_expression(&region.expression, &inputs)
+    }
+
+    /// Writing a wider register replaces what was recorded for its narrower
+    /// prefix. `EAX = a; RAX = b; out = EAX` reads the low half of `b`; the
+    /// map kept the stale `a` under `EAX` and answered with that.
+    #[test]
+    fn a_wide_write_replaces_a_narrower_prefix_that_was_written_before_it() {
+        let (eax, rax, out) = (
+            varnode(2, 0x100, 4),
+            varnode(2, 0x100, 8),
+            varnode(2, 0x40, 4),
+        );
+        let (a, b) = (varnode(2, 0x20, 4), varnode(2, 0x28, 8));
+        let (foundation, selection) =
+            copy_chain(&[(eax.clone(), a), (rax, b), (out.clone(), eax)], out);
+        let candidate = PcodeNativeReconstructor::new(selection, [2])
+            .reconstruct(&foundation)
+            .expect("reconstructs")
+            .remove(0);
+
+        let got = evaluate_region(
+            &candidate,
+            &[(0x20, 0x1111_1111), (0x28, 0x2222_2222_3333_3333)],
+        );
+        assert_eq!(got, 0x3333_3333);
+    }
+
+    /// Positive control: with no earlier narrow write, reading the low half of
+    /// a wide register is the truncation of what it was given.
+    #[test]
+    fn a_narrow_read_of_a_wide_write_is_its_low_half() {
+        let (rax, eax, out) = (
+            varnode(2, 0x100, 8),
+            varnode(2, 0x100, 4),
+            varnode(2, 0x40, 4),
+        );
+        let b = varnode(2, 0x28, 8);
+        let (foundation, selection) = copy_chain(&[(rax, b), (out.clone(), eax)], out);
+        let candidate = PcodeNativeReconstructor::new(selection, [2])
+            .reconstruct(&foundation)
+            .expect("reconstructs")
+            .remove(0);
+
+        assert_eq!(
+            evaluate_region(&candidate, &[(0x28, 0x2222_2222_3333_3333)]),
+            0x3333_3333
+        );
+    }
+
+    /// Overwriting only the low half of a wider value is a splice the region
+    /// model does not make. It has to say so rather than hand back the wide
+    /// value as if the write had not happened.
+    #[test]
+    fn a_partial_overwrite_of_a_wider_value_is_refused() {
+        let (rax, eax, out) = (
+            varnode(2, 0x100, 8),
+            varnode(2, 0x100, 4),
+            varnode(2, 0x40, 8),
+        );
+        let (b, a) = (varnode(2, 0x28, 8), varnode(2, 0x20, 4));
+        let (foundation, selection) =
+            copy_chain(&[(rax.clone(), b), (eax, a), (out.clone(), rax)], out);
+        let result = PcodeNativeReconstructor::new(selection, [2]).reconstruct(&foundation);
+
+        assert!(
+            matches!(
+                result,
+                Err(PcodeNativeReconstructError::PartialOverwrite { .. })
+            ),
+            "expected a refused partial overwrite, got {result:?}"
+        );
+    }
+
+    /// A region the reconstructor builds has to pass the verifier's own
+    /// contract check. `IntSCarry`/`IntSBorrow` composed their comparisons at
+    /// 1 bit, a width `validate_expression_bits` refuses, so every such region
+    /// came back `Unsupported` -- and the evaluation test above, which only
+    /// runs the expression, could not see it.
+    #[test]
+    fn signed_overflow_flag_regions_pass_the_verifier_contract() {
+        for opcode in [PcodeOpcode::IntSCarry, PcodeOpcode::IntSBorrow] {
+            let out = varnode(2, 16, 1);
+            let function = PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x401000,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode,
+                        address: 0x401000,
+                        output: Some(out.clone()),
+                        inputs: vec![varnode(2, 0, 1), varnode(2, 8, 1)],
+                        asm_mnemonic: None,
+                    }],
+                }],
+            };
+            let selection = PcodeRegionSelection {
+                block_index: 0,
+                first_op: 0,
+                op_count: 1,
+                output: location_of(&out),
+            };
+            let foundation = PcodeFoundation::new(0x401000, function).unwrap();
+            let candidate = PcodeNativeReconstructor::new(selection, [2])
+                .reconstruct(&foundation)
+                .expect("flag region reconstructs")
+                .remove(0);
+
+            let (verdict, evidence) = PcodeObservationVerifier::default().verify(
+                &foundation,
+                &candidate,
+                &ObservationScope::location_only(selection.output),
+                ValidationBudget::default(),
+            );
+            assert_eq!(
+                verdict,
+                ValidationVerdict::Equivalent,
+                "{opcode:?}: {}",
+                evidence.detail
+            );
         }
     }
 
