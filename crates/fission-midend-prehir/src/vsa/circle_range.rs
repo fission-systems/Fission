@@ -203,6 +203,16 @@ impl CircleRange {
             return a;
         }
 
+        // One arc inside the other: the intersection is the inner arc. The
+        // staggered-overlap cases below assume neither contains the other, and
+        // on nested arcs they stretch the result out to the outer arc's end.
+        if a.contains_range(&b) {
+            return b;
+        }
+        if b.contains_range(&a) {
+            return a;
+        }
+
         // Intersect two arcs on the circle.
         let mask = Self::mask(bits);
         // Check if a.lo is in b and if b.lo is in a.
@@ -323,8 +333,12 @@ impl CircleRange {
         }
         let mask = Self::mask(self.bits);
         let m = mask_val & mask;
+        if m == mask {
+            // The mask keeps every bit, so it bounds nothing.
+            return Self::top(self.bits);
+        }
         // Result is always in [0, m+1) — a conservative upper bound.
-        Self::interval(0, m.wrapping_add(1) & mask.wrapping_add(1), self.bits)
+        Self::interval(0, m + 1, self.bits)
     }
 
     /// Zero-extend or truncate to `new_bits`.
@@ -433,6 +447,50 @@ impl CircleRange {
 #[cfg(test)]
 mod tests {
     use super::CircleRange;
+
+    /// Every value the range holds, by asking the range itself.
+    fn members(range: &CircleRange) -> Vec<u64> {
+        (0..(1u64 << range.bits()))
+            .filter(|v| range.contains_mod(*v, CircleRange::mask(range.bits())))
+            .collect()
+    }
+
+    #[test]
+    fn meet_of_nested_ranges_is_the_inner_range() {
+        // [10, 20) lies inside [0, 100). Taking `[b.lo, a.hi)` gave [10, 100),
+        // eighty values the intersection does not have.
+        let outer = CircleRange::interval(0, 100, 8);
+        let inner = CircleRange::interval(10, 20, 8);
+        assert_eq!(outer.meet(&inner), inner);
+        assert_eq!(inner.meet(&outer), inner);
+    }
+
+    #[test]
+    fn meet_of_staggered_and_disjoint_ranges_is_unchanged() {
+        // Positive controls: the containment case must not disturb the arcs
+        // that were already right.
+        let low = CircleRange::interval(0, 20, 8);
+        let high = CircleRange::interval(10, 30, 8);
+        assert_eq!(low.meet(&high), CircleRange::interval(10, 20, 8));
+        let far = CircleRange::interval(40, 50, 8);
+        assert!(low.meet(&far).is_bottom());
+    }
+
+    #[test]
+    fn and_const_bounds_the_result_by_the_mask() {
+        // `x & 0x0F` is in [0, 16). The upper bound used to be computed as
+        // `(m + 1) & (mask + 1)`, which is 0 for every mask narrower than the
+        // type, and an empty-looking interval is turned into top.
+        let masked = CircleRange::top(8).and_const(0x0F);
+        assert!(!masked.is_top(), "x & 0x0F is not unconstrained");
+        assert_eq!(members(&masked), (0..16).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn and_const_with_a_full_mask_stays_unconstrained() {
+        // Positive control: a mask that keeps every bit bounds nothing.
+        assert_eq!(CircleRange::top(8).and_const(0xFF).count(), 256);
+    }
 
     #[test]
     fn adding_singletons_gives_the_singleton_sum() {
