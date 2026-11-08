@@ -1192,15 +1192,34 @@ mod tests {
             .expect("launch a child under ptrace");
 
         let outcome = (|| -> Result<(), String> {
-            // A breakpoint at the current PC is not hit by continuing (the
-            // instruction there runs first), so take one step to the next
-            // instruction boundary and put the breakpoint there.
-            debugger.single_step().map_err(|e| e.to_string())?;
-            match next_event(&mut debugger)? {
-                DebugEvent::SingleStep { .. } => {}
-                other => return Err(format!("expected a single-step stop, got {other:?}")),
-            }
-            let entry = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            // Break where the program will arrive, not where it is stopped: a
+            // breakpoint at the PC being continued from is stepped over (as in
+            // gdb). The launch stop is in the dynamic loader, so use the main
+            // executable's own entry point, which the loader jumps to.
+            let exe = std::fs::canonicalize("/bin/true").map_err(|e| e.to_string())?;
+            let image = std::fs::read(&exe).map_err(|e| e.to_string())?;
+            let e_entry = u64::from_le_bytes(
+                image
+                    .get(0x18..0x20)
+                    .ok_or("ELF header too short")?
+                    .try_into()
+                    .map_err(|_| "ELF header too short".to_string())?,
+            );
+            let report = debugger.list_modules().map_err(|e| e.to_string())?;
+            let module = report
+                .modules
+                .iter()
+                .find(|module| std::path::Path::new(&module.path) == exe)
+                .ok_or_else(|| format!("{} is not in the module list", exe.display()))?;
+            let ModuleAddressTransform::Resolved { load_bias, .. } = &module.address_transform
+            else {
+                return Err(format!(
+                    "no resolved ELF transform for {}: {:?}",
+                    module.path, module.address_transform
+                ));
+            };
+            let entry = u64::try_from(i128::from(e_entry) + i128::from(*load_bias))
+                .map_err(|_| "entry point is outside the address space".to_string())?;
             debugger
                 .set_sw_breakpoint(entry)
                 .map_err(|e| e.to_string())?;
