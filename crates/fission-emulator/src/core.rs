@@ -91,6 +91,9 @@ pub struct Emulator {
     pub ttd: TTDRecorder,
     /// Interval at which to record full snapshots for TTD (0 = disabled).
     pub ttd_snapshot_interval: u64,
+    /// Instruction count at the last snapshot taken or restored, so a block
+    /// that steps over an interval boundary still owes the snapshot.
+    ttd_last_snapshot_inst: u64,
     /// Simulated tick counter used for time-related HLE APIs.
     pub tick_count: u64,
     /// How many times `RDTSC` has been read, which is what keeps two
@@ -431,6 +434,7 @@ impl Emulator {
             host_stdout: true,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
+            ttd_last_snapshot_inst: 0,
             tick_count: 0,
             tsc_reads: 0,
             sym_events: Vec::new(),
@@ -1803,6 +1807,7 @@ impl Emulator {
         }
         self.pc = snap.registers.pc;
         self.inst_count = snap.step_index;
+        self.ttd_last_snapshot_inst = snap.step_index;
 
         // Undo what ran after the target before restoring anything else: the
         // writes recorded in later snapshots, newest first, and the ones made
@@ -2496,8 +2501,14 @@ impl Emulator {
             if self.ttd_snapshot_interval > 0
                 && self.ttd.is_recording()
                 && self.inst_count > 0
-                && self.inst_count % self.ttd_snapshot_interval == 0
+                // `inst_count` advances per instruction inside a compiled block
+                // but this runs between blocks, so ask whether a boundary was
+                // crossed since the last snapshot, not whether the count sits
+                // exactly on one.
+                && self.inst_count / self.ttd_snapshot_interval
+                    > self.ttd_last_snapshot_inst / self.ttd_snapshot_interval
             {
+                self.ttd_last_snapshot_inst = self.inst_count;
                 let regs = self.register_state();
                 let deltas: Vec<fission_ttd::MemoryDelta> = self
                     .state

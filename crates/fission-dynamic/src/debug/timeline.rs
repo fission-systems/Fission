@@ -196,8 +196,12 @@ impl Timeline {
                     };
                 }
 
-                if let Some(snapshot) = rec.get_snapshot(step_index) {
-                    self.current_position = Some(step_index);
+                // Snapshots sit at guest instruction counts, a block boundary
+                // every N instructions, so most steps in range have none of
+                // their own. Land on the latest one at or before the request,
+                // the same rule `Emulator::ttd_seek` uses.
+                if let Some(snapshot) = rec.snapshot_at_or_before(step_index) {
+                    self.current_position = Some(snapshot.step_index);
                     self.replay_mode = true;
                     SeekResult::Success(snapshot.clone())
                 } else {
@@ -259,7 +263,16 @@ impl Timeline {
         }
 
         if let Some(pos) = self.current_position {
-            self.seek_to(pos.saturating_add(steps))
+            let target = pos.saturating_add(steps);
+            // Forward is the mirror of `seek_to`: the first snapshot at or
+            // after the target, otherwise the step just reached would be the
+            // one already held and `forward` would never move.
+            let next = match &self.backend {
+                Backend::Internal(rec) => rec.snapshot_at_or_after(target).map(|s| s.step_index),
+                #[cfg(target_os = "linux")]
+                Backend::RR(_) => None,
+            };
+            self.seek_to(next.unwrap_or(target))
         } else {
             SeekResult::Empty
         }
@@ -386,6 +399,52 @@ impl TimelineDriver for Timeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Snapshots at guest instruction counts, which are sparse by nature: the
+    /// emulator takes one at a block boundary every N instructions.
+    fn sparse_timeline(steps: &[u64]) -> Timeline {
+        let mut timeline = Timeline::new();
+        timeline.start_recording();
+        for &step in steps {
+            timeline.record_step_internal(step, RegisterState::at(0x401000 + step), 1);
+        }
+        timeline
+    }
+
+    fn position(result: SeekResult) -> u64 {
+        match result {
+            SeekResult::Success(snapshot) => snapshot.step_index,
+            other => panic!("expected a snapshot, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewind_one_step_lands_on_the_snapshot_before_it_on_a_sparse_timeline() {
+        let mut timeline = sparse_timeline(&[0, 4, 9, 15]);
+        assert_eq!(position(timeline.seek_to(15)), 15);
+        assert_eq!(position(timeline.rewind(1)), 9);
+        assert_eq!(timeline.current_position(), Some(9));
+    }
+
+    #[test]
+    fn forward_one_step_lands_on_the_next_snapshot_on_a_sparse_timeline() {
+        let mut timeline = sparse_timeline(&[0, 4, 9, 15]);
+        assert_eq!(position(timeline.seek_to(9)), 9);
+        assert_eq!(position(timeline.forward(1)), 15);
+    }
+
+    #[test]
+    fn seeking_outside_the_recorded_range_is_still_out_of_bounds() {
+        let mut timeline = sparse_timeline(&[4, 9, 15]);
+        assert!(matches!(
+            timeline.seek_to(20),
+            SeekResult::OutOfBounds { .. }
+        ));
+        assert!(matches!(
+            timeline.seek_to(2),
+            SeekResult::OutOfBounds { .. }
+        ));
+    }
 
     #[test]
     fn test_timeline_basic() {
