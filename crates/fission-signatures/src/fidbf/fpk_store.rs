@@ -329,6 +329,12 @@ pub fn decode(
 mod tests {
     use super::*;
 
+    /// The checkout's `utils/` tree, found from this crate rather than from
+    /// whoever happens to have cloned it where.
+    fn utils_dir() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils")
+    }
+
     fn write(dir: &Path, name: &str, bytes: &[u8]) -> std::path::PathBuf {
         let p = dir.join(name);
         std::fs::write(&p, bytes).unwrap();
@@ -340,8 +346,7 @@ mod tests {
     /// match on counts and hashes.
     #[test]
     fn a_real_database_round_trips_field_for_field() {
-        let src =
-            Path::new("/Users/sjkim1127/Fission/utils/signatures/fid/libc-x86.LE.64.default.fidbf");
+        let src = &utils_dir().join("signatures/fid/libc-x86.LE.64.default.fidbf");
         let Ok(original) = crate::fidbf::parse_fidbf(src) else {
             return; // bundle not present in this checkout
         };
@@ -396,9 +401,7 @@ mod tests {
     #[test]
     fn a_database_with_no_relations_parses() {
         for stem in ["gcc-MIPS.BE.32.default", "gcc-avr8.LE.16.extended"] {
-            let path = std::path::PathBuf::from(format!(
-                "/Users/sjkim1127/Fission/utils/signatures/fid/{stem}.fidbf"
-            ));
+            let path = utils_dir().join(format!("signatures/fid/{stem}.fidbf"));
             if !path.exists() {
                 continue; // bundle not present in this checkout
             }
