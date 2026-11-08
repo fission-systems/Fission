@@ -688,7 +688,9 @@ mod packed_tests {
     /// has to resolve the same way it did when the tags were merged at load.
     #[test]
     fn packed_and_json_agree_across_platforms() {
-        let dir = std::path::Path::new("/Users/sjkim1127/Fission/utils/signatures/typeinfo");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../utils/signatures/typeinfo");
+        let dir = dir.as_path();
         if !dir.join("golang").exists() {
             return; // bundle not present in this checkout
         }
@@ -697,6 +699,13 @@ mod packed_tests {
             ("go1.20.0", "linux", "amd64"),
         ] {
             let golang = dir.join("golang");
+            // Comparing needs the JSON the packed tables were built from. A
+            // checkout that carries only the packed tables has nothing to
+            // compare, and must not have its tracked `.fpk` files moved aside
+            // to find that out.
+            if resolve_json_path(version, dir).is_none() {
+                continue;
+            }
             let packed = match GoTypeinfoDatabase::load_for_binary(version, goos, goarch, dir) {
                 Some(db) if db.packed.is_some() => db,
                 _ => continue, // packed tables not built here

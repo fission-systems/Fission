@@ -975,9 +975,9 @@ mod tests {
         // uses zlib and flate2 uses miniz_oxide, which emit different streams at
         // the same level -- so what is pinned is what matters: both files carry
         // the same records, in the same order, with the same block boundaries.
-        let src = std::path::Path::new(
-            "/Users/sjkim1127/Fission/utils/signatures/typeinfo/win32/wdk_signatures.txt",
-        );
+        let utils = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils");
+        let src = utils.join("signatures/typeinfo/win32/wdk_signatures.txt");
+        let src = src.as_path();
         let Ok(text) = std::fs::read_to_string(src) else {
             return; // bundle not present in this checkout
         };
@@ -994,7 +994,7 @@ mod tests {
             std::env::temp_dir().join(format!("fpk_theirs_{}.fpk", std::process::id()));
         let Ok(run) = std::process::Command::new("python3")
             .args([
-                "/Users/sjkim1127/Fission/scripts/fpk_pack.py",
+                concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/fpk_pack.py"),
                 src.to_str().unwrap(),
                 "--kind",
                 "pipe-text",
