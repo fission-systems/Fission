@@ -10,12 +10,17 @@ use super::types::{HookCallback, LoadedPlugin};
 use crate::events::EventBus;
 
 pub struct PluginManager {
-    pub(super) plugins: HashMap<String, LoadedPlugin>,
     pub(super) hooks: HashMap<u64, (PluginHook, HookCallback)>,
     pub(super) next_hook_id: u64,
     pub(super) search_paths: Vec<PathBuf>,
     pub(super) api: Option<Arc<dyn PluginAPI>>,
     pub(super) event_bus: Option<Arc<EventBus>>,
+    /// Declared last on purpose. Struct fields drop in declaration order, and
+    /// a plugin's hook closures and event subscriptions run (and are dropped
+    /// by) code that lives in its dynamic library. `LoadedPlugin` unmaps the
+    /// library when it drops, so every field holding such a callback must be
+    /// declared before this one.
+    pub(super) plugins: HashMap<String, LoadedPlugin>,
 }
 
 impl PluginManager {

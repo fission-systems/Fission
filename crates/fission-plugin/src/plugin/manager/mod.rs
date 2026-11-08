@@ -94,6 +94,138 @@ mod tests {
         assert_eq!(pm.hook_count(), 0);
     }
 
+    /// Records its own drop into a shared log.
+    struct DropLog(&'static str, Arc<std::sync::Mutex<Vec<&'static str>>>);
+
+    impl Drop for DropLog {
+        fn drop(&mut self) {
+            self.1.lock().unwrap().push(self.0);
+        }
+    }
+
+    /// The field is never read; it exists to be dropped with the plugin.
+    struct DropRecordingPlugin(#[allow(dead_code)] DropLog);
+
+    impl FissionPlugin for DropRecordingPlugin {
+        fn id(&self) -> &str {
+            "drop_order"
+        }
+        fn name(&self) -> &str {
+            "Drop Order"
+        }
+    }
+
+    /// A plugin's callbacks run code that lives in the plugin's library, so
+    /// they have to be dropped before the plugin (and its `Library`, which is a
+    /// field of the same `LoadedPlugin`) is. Fields drop in declaration order,
+    /// and `plugins` was declared before `hooks`, so the library went first.
+    #[test]
+    fn hooks_are_dropped_before_the_plugins_whose_code_they_run() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let mut pm = PluginManager::new();
+            pm.plugins.insert(
+                "drop_order".into(),
+                LoadedPlugin {
+                    info: PluginInfo {
+                        id: "drop_order".into(),
+                        name: "Drop Order".into(),
+                        ..Default::default()
+                    },
+                    hooks: Vec::new(),
+                    instance: Some(Box::new(DropRecordingPlugin(DropLog(
+                        "plugin",
+                        log.clone(),
+                    )))),
+                    library: None,
+                    state: None,
+                },
+            );
+            let guard = DropLog("hook", log.clone());
+            pm.register_hook(
+                "drop_order",
+                FissionEventType::AppStarted,
+                HookPriority::Normal,
+                move |_| {
+                    let _keep = &guard;
+                },
+            )
+            .expect("hook registers");
+        }
+        assert_eq!(*log.lock().unwrap(), ["hook", "plugin"]);
+    }
+
+    /// Positive control: tearing a manager down by hand with the hooks still
+    /// registered must not change what a plugin with no hooks does.
+    #[test]
+    fn a_manager_with_a_plugin_and_no_hooks_still_drops_cleanly() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        {
+            let mut pm = PluginManager::new();
+            pm.plugins.insert(
+                "drop_order".into(),
+                LoadedPlugin {
+                    info: PluginInfo {
+                        id: "drop_order".into(),
+                        name: "Drop Order".into(),
+                        ..Default::default()
+                    },
+                    hooks: Vec::new(),
+                    instance: Some(Box::new(DropRecordingPlugin(DropLog(
+                        "plugin",
+                        log.clone(),
+                    )))),
+                    library: None,
+                    state: None,
+                },
+            );
+        }
+        assert_eq!(*log.lock().unwrap(), ["plugin"]);
+    }
+
+    /// A hook whose plugin is no longer in the map is an orphan, and it must
+    /// not run. The filter skipped a hook only when its plugin existed *and* was
+    /// disabled, so a missing plugin let it through.
+    #[test]
+    fn a_hook_whose_plugin_is_gone_does_not_run() {
+        let mut pm = PluginManager::new();
+        pm.plugins.insert(
+            "gone".into(),
+            LoadedPlugin {
+                info: PluginInfo {
+                    id: "gone".into(),
+                    name: "Gone".into(),
+                    ..Default::default()
+                },
+                hooks: Vec::new(),
+                instance: None,
+                library: None,
+                state: None,
+            },
+        );
+        let counter = Arc::new(AtomicU32::new(0));
+        let counter_clone = counter.clone();
+        pm.register_hook(
+            "gone",
+            FissionEventType::AppStarted,
+            HookPriority::Normal,
+            move |_| {
+                counter_clone.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .expect("hook registers");
+        pm.emit_event(&FissionEvent::AppStarted);
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "control: hook runs while its plugin is loaded"
+        );
+
+        pm.plugins.remove("gone");
+        pm.emit_event(&FissionEvent::AppStarted);
+        assert_eq!(counter.load(Ordering::SeqCst), 1, "orphan hook ran");
+    }
+
     struct EventBusPlugin {
         id: String,
     }
