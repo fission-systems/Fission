@@ -101,13 +101,13 @@ impl PointerSweeper {
 
             let base_addr = section.virtual_address;
 
-            // We iterate with stride = pointer_size for aligned pointers,
-            // but to be safe against unaligned packed structs we could stride by 4.
-            // Ghidra usually aligns. Let's do stride = pointer_size to reduce false positives.
-            // If we want to be exhaustive, stride = 1 or 4. Let's use pointer_size alignment.
-            // The section.virtual_address might not be properly aligned, but usually it is.
+            // Stride by the pointer size over *aligned addresses* to reduce false
+            // positives. The alignment is of the virtual address, not of the
+            // offset into the section: a section that starts off-alignment
+            // (its VA is 4 mod 8, say) holds its pointers at addresses that are
+            // 0 mod 8, and striding from its first byte would never land on one.
             let alignment = self.pointer_size;
-            let mut i = 0;
+            let mut i = (alignment - (base_addr % alignment as u64) as usize) % alignment;
 
             while i + self.pointer_size <= code.len() {
                 let chunk = &code[i..i + self.pointer_size];
@@ -304,6 +304,73 @@ mod tests {
                 .map(|xref| (xref.from_addr, xref.to_addr))
                 .collect::<Vec<_>>(),
             vec![(0x2000, 0x1008), (0x2008, 0x2050)]
+        );
+    }
+
+    /// A binary with a `.text` at 0x1000 and a data section at `data_va`
+    /// holding two 8-byte pointers (to 0x1000 and 0x1008) at the first two
+    /// 8-aligned *addresses* at or after `data_va`.
+    fn sweep_data_section_at(data_va: u64) -> Vec<(u64, u64)> {
+        let pad = (8 - data_va % 8) % 8; // bytes before the first aligned slot
+        let mut file_data = vec![0u8; 0x10];
+        file_data.extend(std::iter::repeat_n(0u8, pad as usize));
+        file_data.extend_from_slice(&0x1000u64.to_le_bytes());
+        file_data.extend_from_slice(&0x1008u64.to_le_bytes());
+        let binary = LoadedBinaryBuilder::new(
+            "unaligned-section-test".to_string(),
+            DataBuffer::Heap(file_data.clone()),
+        )
+        .format("ELF")
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true)
+        .add_sections(vec![
+            SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x10,
+                file_offset: 0,
+                file_size: 0x10,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            },
+            SectionInfo {
+                name: ".rodata".to_string(),
+                virtual_address: data_va,
+                virtual_size: file_data.len() as u64 - 0x10,
+                file_offset: 0x10,
+                file_size: file_data.len() as u64 - 0x10,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            },
+        ])
+        .build()
+        .expect("synthetic binary should build");
+        PointerSweeper::new(&binary)
+            .sweep(&binary)
+            .iter()
+            .map(|xref| (xref.from_addr, xref.to_addr))
+            .collect()
+    }
+
+    #[test]
+    fn pointers_in_a_section_that_starts_off_alignment_are_still_found() {
+        // The section starts at 0x2004, so its pointers sit at 0x2008 and
+        // 0x2010. Striding from the section's first byte read 0x2004, 0x200c, ...
+        // and never saw an aligned slot.
+        assert_eq!(
+            sweep_data_section_at(0x2004),
+            vec![(0x2008, 0x1000), (0x2010, 0x1008)]
+        );
+    }
+
+    #[test]
+    fn pointers_in_an_aligned_section_are_unchanged() {
+        // Positive control: an aligned section is swept exactly as before.
+        assert_eq!(
+            sweep_data_section_at(0x2000),
+            vec![(0x2000, 0x1000), (0x2008, 0x1008)]
         );
     }
 
