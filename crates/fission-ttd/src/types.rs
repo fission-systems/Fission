@@ -69,6 +69,23 @@ impl RegisterValue {
 }
 
 impl RegisterState {
+    /// Heap this state owns: the entry buffer, each register's name, and the
+    /// bytes of every register too wide for a `u64`.
+    pub fn heap_bytes(&self) -> usize {
+        self.entries.capacity() * std::mem::size_of::<(Box<str>, RegisterValue)>()
+            + self
+                .entries
+                .iter()
+                .map(|(name, value)| {
+                    name.len()
+                        + match value {
+                            RegisterValue::Word(_) => 0,
+                            RegisterValue::Wide(bytes) => bytes.len(),
+                        }
+                })
+                .sum::<usize>()
+    }
+
     /// An empty state for a machine executing at `pc`.
     pub fn at(pc: u64) -> Self {
         Self {

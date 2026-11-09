@@ -64,6 +64,7 @@ mod tests {
         pm.plugins.insert(
             plugin_id.clone(),
             LoadedPlugin {
+                on_load_called: false,
                 info,
                 hooks: Vec::new(),
                 instance: None,
@@ -127,6 +128,7 @@ mod tests {
             pm.plugins.insert(
                 "drop_order".into(),
                 LoadedPlugin {
+                    on_load_called: false,
                     info: PluginInfo {
                         id: "drop_order".into(),
                         name: "Drop Order".into(),
@@ -165,6 +167,7 @@ mod tests {
             pm.plugins.insert(
                 "drop_order".into(),
                 LoadedPlugin {
+                    on_load_called: false,
                     info: PluginInfo {
                         id: "drop_order".into(),
                         name: "Drop Order".into(),
@@ -192,6 +195,7 @@ mod tests {
         pm.plugins.insert(
             "gone".into(),
             LoadedPlugin {
+                on_load_called: false,
                 info: PluginInfo {
                     id: "gone".into(),
                     name: "Gone".into(),
@@ -296,6 +300,92 @@ mod tests {
         assert!(pm.register_native_plugin(Box::new(plugin)).is_ok());
 
         assert_eq!(counter.load(Ordering::SeqCst), 1);
+    }
+
+    struct NoopApi;
+    impl PluginAPI for NoopApi {
+        fn get_binary(&self) -> Option<BinaryInfo> {
+            None
+        }
+        fn get_functions(&self) -> Vec<FunctionInfo> {
+            Vec::new()
+        }
+        fn read_binary_bytes(&self, _addr: u64, _size: usize) -> Option<Vec<u8>> {
+            None
+        }
+        fn log(&self, _msg: &str) {}
+        fn log_error(&self, _msg: &str) {}
+        fn decompile(&self, _addr: u64) -> Option<String> {
+            None
+        }
+        fn get_current_decompiled_code(&self) -> Option<String> {
+            None
+        }
+        fn disassemble(&self, _addr: u64, _size: usize) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    struct FailingLoadPlugin;
+    impl FissionPlugin for FailingLoadPlugin {
+        fn id(&self) -> &str {
+            "fails_to_load"
+        }
+        fn name(&self) -> &str {
+            "Fails To Load"
+        }
+        fn on_load(&mut self, _ctx: &PluginContext) -> Result<()> {
+            anyhow::bail!("refusing to load")
+        }
+    }
+
+    /// A plugin registered before the API exists used to be skipped by
+    /// `on_load` for good: registration gates the call on the API, and
+    /// `set_api` never went back to the plugins already in the map.
+    #[test]
+    fn set_api_calls_on_load_for_plugins_registered_before_it() {
+        let mut pm = PluginManager::new();
+        let count = Arc::new(AtomicU32::new(0));
+        pm.register_native_plugin(Box::new(MockPlugin {
+            id: "early".into(),
+            load_count: count.clone(),
+        }))
+        .expect("registers without an API");
+        assert_eq!(count.load(Ordering::SeqCst), 0, "no API yet, no on_load");
+
+        pm.set_api(Arc::new(NoopApi));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        // Positive control: a second set_api does not load it a second time.
+        pm.set_api(Arc::new(NoopApi));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_plugin_registered_with_the_api_present_is_loaded_exactly_once() {
+        let mut pm = PluginManager::new();
+        pm.set_api(Arc::new(NoopApi));
+        let count = Arc::new(AtomicU32::new(0));
+        pm.register_native_plugin(Box::new(MockPlugin {
+            id: "late".into(),
+            load_count: count.clone(),
+        }))
+        .expect("registers");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        pm.set_api(Arc::new(NoopApi));
+        assert_eq!(count.load(Ordering::SeqCst), 1, "set_api reloaded it");
+    }
+
+    #[test]
+    fn a_plugin_whose_on_load_fails_at_set_api_is_disabled() {
+        // Registration refuses a plugin whose on_load fails; the late call has
+        // to end the same way rather than leave it running half-loaded.
+        let mut pm = PluginManager::new();
+        pm.register_native_plugin(Box::new(FailingLoadPlugin))
+            .expect("registers without an API");
+        pm.set_api(Arc::new(NoopApi));
+        let info = pm.get_plugin("fails_to_load").expect("still listed");
+        assert!(!info.enabled);
     }
 
     #[test]
