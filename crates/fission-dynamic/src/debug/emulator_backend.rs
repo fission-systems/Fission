@@ -19,6 +19,42 @@ pub const EMULATED_PID: u32 = 9999;
 /// a better answer than pretending to switch.
 pub const EMULATED_THREAD_ID: u32 = 1;
 
+/// The emulator runs a single guest context. Register access names a thread
+/// like every other thread-taking call (`set_current_thread`), so an id that
+/// is not that context is an error rather than a silent read of thread 1.
+fn check_thread(thread_id: u32) -> FissionResult<()> {
+    if thread_id == EMULATED_THREAD_ID {
+        return Ok(());
+    }
+    Err(fission_core::err!(
+        debug,
+        "No such thread {}: the emulator runs one guest context, which is thread {}",
+        thread_id,
+        EMULATED_THREAD_ID
+    ))
+}
+
+/// Which loader a binary of this `format` goes through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GuestKind {
+    Pe,
+    Elf,
+}
+
+fn guest_kind(format: &str) -> FissionResult<GuestKind> {
+    match format {
+        "PE" => Ok(GuestKind::Pe),
+        "ELF" | "ELF64" => Ok(GuestKind::Elf),
+        // Loading anything else as an ELF maps garbage and fails far from the
+        // cause; the emulator has no loader for it, so say so.
+        other => Err(fission_core::err!(
+            debug,
+            "a {:?} image cannot be emulated: the emulator loads PE and ELF images only",
+            other
+        )),
+    }
+}
+
 /// The command line a Windows process is started with: the program, then each
 /// argument, quoted when it contains whitespace or a quote (the `CommandLine`
 /// string the guest's `GetCommandLineA` hands back).
@@ -550,7 +586,7 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn set_registers(&mut self, thread_id: u32, regs: &RegisterState) -> FissionResult<()> {
-        let _ = thread_id;
+        check_thread(thread_id)?;
         let Some(emu) = &mut self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));
         };
@@ -566,7 +602,7 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn fetch_registers(&mut self, thread_id: u32) -> FissionResult<RegisterState> {
-        let _ = thread_id;
+        check_thread(thread_id)?;
         let Some(emu) = &mut self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));
         };
@@ -608,7 +644,7 @@ impl ExecutionBackend for EmulatorBackend {
         .map_err(|e| fission_core::err!(debug, "Unsupported architecture: {}", e))?;
 
         let mut state = fission_emulator::pcode::state::MachineState::new();
-        let is_pe = binary.format == "PE";
+        let is_pe = guest_kind(&binary.format)? == GuestKind::Pe;
         let image = if is_pe {
             let pe_args = fission_emulator::os::windows::PeProcessArgs {
                 command_line: windows_command_line(path, args),
@@ -808,5 +844,28 @@ mod command_line_tests {
             windows_command_line("a.exe", &args),
             "a.exe \"two words\" \"say \\\"hi\\\"\" \"\""
         );
+    }
+}
+
+#[cfg(test)]
+mod guest_kind_tests {
+    use super::{GuestKind, guest_kind};
+
+    #[test]
+    fn pe_and_elf_images_have_a_loader() {
+        assert_eq!(guest_kind("PE").unwrap(), GuestKind::Pe);
+        assert_eq!(guest_kind("ELF").unwrap(), GuestKind::Elf);
+        assert_eq!(guest_kind("ELF64").unwrap(), GuestKind::Elf);
+    }
+
+    #[test]
+    fn a_format_with_no_loader_is_refused_not_loaded_as_elf() {
+        for format in ["Mach-O", "COFF", "Raw", ""] {
+            let error = guest_kind(format).expect_err(format);
+            assert!(
+                error.to_string().contains("cannot be emulated"),
+                "{format}: {error}"
+            );
+        }
     }
 }

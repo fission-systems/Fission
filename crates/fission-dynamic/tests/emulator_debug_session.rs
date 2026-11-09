@@ -258,3 +258,21 @@ fn launch_passes_its_arguments_to_the_guest_as_argv() {
 fn launch_without_arguments_still_starts_the_guest_with_argc_one() {
     assert_eq!(guest_argc(&[]), 1);
 }
+
+/// The emulator runs one guest context, thread 1; `set_current_thread`
+/// already refuses any other id, and the register calls take the same id.
+#[test]
+fn register_access_refuses_a_thread_the_emulator_does_not_have() {
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&fixture(), &[]).expect("launch");
+
+    let regs = backend.fetch_registers(1).expect("thread 1 exists");
+    backend
+        .set_registers(1, &regs)
+        .expect("thread 1 is writable");
+
+    let fetch = backend.fetch_registers(99);
+    assert!(fetch.is_err(), "no thread 99, got {fetch:?}");
+    let set = backend.set_registers(99, &regs);
+    assert!(set.is_err(), "no thread 99, got {set:?}");
+}

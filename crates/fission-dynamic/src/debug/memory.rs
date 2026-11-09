@@ -15,7 +15,7 @@ pub enum MemoryError {
     #[error("Failed to write memory at {address:#x}: {reason}")]
     WriteFailed { address: u64, reason: String },
 
-    #[error("Invalid memory region: {address:#x} - {address:#x}")]
+    #[error("Invalid memory region: {address:#x} ({size:#x} bytes)")]
     InvalidRegion { address: u64, size: usize },
 
     #[error("Access denied at {address:#x}")]
@@ -291,5 +291,26 @@ mod tests {
             Ok(3)
         });
         assert!(result.is_ok());
+    }
+}
+
+#[cfg(test)]
+mod error_message_tests {
+    use super::MemoryError;
+
+    #[test]
+    fn an_invalid_region_names_its_size_not_its_address_twice() {
+        let message = MemoryError::InvalidRegion {
+            address: 0x1000,
+            size: 0x20,
+        }
+        .to_string();
+        assert!(message.contains("0x1000"), "{message}");
+        assert!(message.contains("0x20"), "the size is missing: {message}");
+        assert_ne!(
+            message.matches("0x1000").count(),
+            2,
+            "the address is printed twice: {message}"
+        );
     }
 }
