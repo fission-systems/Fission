@@ -229,3 +229,32 @@ fn registers_can_be_written_back() {
 }
 
 use fission_dynamic::debug::types::RegisterState as RegisterStateForTest;
+
+/// The arguments given to `launch` are the guest's `argv`: at process entry the
+/// stack pointer addresses `argc`, which is the program path plus each
+/// argument. `launch` used to drop them, so a program reading its arguments
+/// always saw `argc == 1`.
+fn guest_argc(args: &[String]) -> u64 {
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&fixture(), args).expect("launch");
+    let sp = backend
+        .fetch_registers(1)
+        .expect("registers")
+        .get("RSP")
+        .expect("RSP");
+    let bytes = backend
+        .read_memory(sp, 8)
+        .expect("argc at the stack pointer");
+    u64::from_le_bytes(bytes.try_into().expect("8 bytes"))
+}
+
+#[test]
+fn launch_passes_its_arguments_to_the_guest_as_argv() {
+    let args = vec!["alpha".to_string(), "beta".to_string()];
+    assert_eq!(guest_argc(&args), 3, "program path + two arguments");
+}
+
+#[test]
+fn launch_without_arguments_still_starts_the_guest_with_argc_one() {
+    assert_eq!(guest_argc(&[]), 1);
+}

@@ -19,6 +19,24 @@ pub const EMULATED_PID: u32 = 9999;
 /// a better answer than pretending to switch.
 pub const EMULATED_THREAD_ID: u32 = 1;
 
+/// The command line a Windows process is started with: the program, then each
+/// argument, quoted when it contains whitespace or a quote (the `CommandLine`
+/// string the guest's `GetCommandLineA` hands back).
+fn windows_command_line(path: &str, args: &[String]) -> String {
+    let quote = |arg: &str| {
+        if arg.is_empty() || arg.contains([' ', '\t', '"']) {
+            format!("\"{}\"", arg.replace('"', "\\\""))
+        } else {
+            arg.to_string()
+        }
+    };
+    std::iter::once(path)
+        .chain(args.iter().map(String::as_str))
+        .map(quote)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct EmulatorBackend {
     pub emulator: Option<Emulator>,
     /// Session-owned timeline receiving one snapshot for each emulated stop.
@@ -565,8 +583,6 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn launch(&mut self, path: &str, args: &[String]) -> FissionResult<u32> {
-        let _ = args;
-
         let binary = fission_loader::loader::LoadedBinary::from_file(path)
             .map_err(|e| fission_core::err!(debug, "Loader error: {}", e))?;
 
@@ -594,11 +610,24 @@ impl ExecutionBackend for EmulatorBackend {
         let mut state = fission_emulator::pcode::state::MachineState::new();
         let is_pe = binary.format == "PE";
         let image = if is_pe {
-            fission_emulator::os::windows::loader::load_pe(&mut state, &binary)
+            let pe_args = fission_emulator::os::windows::PeProcessArgs {
+                command_line: windows_command_line(path, args),
+                ..Default::default()
+            };
+            fission_emulator::os::windows::loader::load_pe_with_args(&mut state, &binary, &pe_args)
                 .map(Ok)
                 .map_err(|e| fission_core::err!(debug, "PE load failed: {}", e))?
         } else {
-            fission_emulator::os::linux::loader::load_elf(&mut state, &binary)
+            // argv[0] is the program, then the caller's arguments: a program
+            // reading `argc`/`argv` must see the invocation it was asked to
+            // debug, not a bare one.
+            let mut argv = vec![path.to_string()];
+            argv.extend(args.iter().cloned());
+            let elf_args = fission_emulator::os::linux::ProcessArgs {
+                argv,
+                ..Default::default()
+            };
+            fission_emulator::os::linux::loader::load_elf_with_args(&mut state, &binary, &elf_args)
                 .map(Err)
                 .map_err(|e| fission_core::err!(debug, "ELF load failed: {}", e))?
         };
@@ -751,4 +780,33 @@ fn step_out_of_frame(emu: &mut Emulator) -> FissionResult<RunOutcome> {
         "step_out gave up after {} instructions without returning",
         MAX_STEPS
     ))
+}
+
+#[cfg(test)]
+mod command_line_tests {
+    use super::windows_command_line;
+
+    #[test]
+    fn the_program_alone_is_the_command_line() {
+        assert_eq!(windows_command_line("C:\\a.exe", &[]), "C:\\a.exe");
+    }
+
+    #[test]
+    fn plain_arguments_follow_separated_by_spaces() {
+        let args = vec!["-v".to_string(), "file.txt".to_string()];
+        assert_eq!(windows_command_line("a.exe", &args), "a.exe -v file.txt");
+    }
+
+    #[test]
+    fn arguments_with_whitespace_or_quotes_or_nothing_are_quoted() {
+        let args = vec![
+            "two words".to_string(),
+            "say \"hi\"".to_string(),
+            String::new(),
+        ];
+        assert_eq!(
+            windows_command_line("a.exe", &args),
+            "a.exe \"two words\" \"say \\\"hi\\\"\" \"\""
+        );
+    }
 }
