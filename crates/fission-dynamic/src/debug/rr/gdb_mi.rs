@@ -309,10 +309,30 @@ impl GdbMiParser {
     }
 
     fn unescape_string(&self, s: &str) -> String {
-        s.replace("\\n", "\n")
-            .replace("\\t", "\t")
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
+        // One left-to-right pass: each backslash escape is read exactly once,
+        // so the output of one replacement can never be read as the start of
+        // another (`\\` followed by `n` is a backslash and an `n`).
+        let mut out = String::with_capacity(s.len());
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('t') => out.push('\t'),
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                // Unknown escape: keep it as written.
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        }
+        out
     }
 
     fn parse_console_stream(&self, s: &str) -> Option<MiResponse> {
@@ -427,5 +447,21 @@ mod tests {
             parser.feed(line);
             let _ = parser.parse();
         }
+    }
+
+    #[test]
+    fn unescape_reads_each_escape_once_left_to_right() {
+        let parser = GdbMiParser::new();
+        // An escaped backslash followed by `n` is a backslash and an `n`, not
+        // a backslash and a newline.
+        assert_eq!(parser.unescape_string(r"a\\nb"), r"a\nb");
+        // An escaped backslash before a quote leaves the quote's own escape
+        // alone: `\\` then `\"` is a backslash and a quote.
+        assert_eq!(parser.unescape_string(r#"x\\\"y"#), r#"x\"y"#);
+        // The plain escapes still work.
+        assert_eq!(parser.unescape_string(r#"l1\nl2\tq\"e"#), "l1\nl2\tq\"e");
+        assert_eq!(parser.unescape_string("no escapes"), "no escapes");
+        // A trailing lone backslash is kept, not dropped.
+        assert_eq!(parser.unescape_string("end\\"), "end\\");
     }
 }
