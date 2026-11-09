@@ -60,23 +60,30 @@ impl<'a> GoAnalyzer<'a> {
             return Err(err!(loader, "Failed to read pclntab header"));
         };
 
+        // `pcHeader` is an 8-byte preamble followed by pointer-sized words, so
+        // every field offset scales with the pointer size. Go 1.18 added
+        // `textStart` after `nfiles`; before it (magic 1.16) the functab holds
+        // absolute pointer-sized PCs and `_func` leads with a pointer-sized
+        // entry instead of a `u32` offset from `textStart`.
+        let has_text_start = magic != GO_1_16_MAGIC;
+        let word = |index: usize| 8 + index * ptr_size;
         let nfunc = self.read_ptr(&header_data, 8, ptr_size) as usize;
-        let text_start = self.read_ptr(&header_data, 24, ptr_size);
-        let funcname_offset = self.read_ptr(&header_data, 32, ptr_size);
-        let functab_offset = if magic >= GO_1_18_MAGIC {
-            // For Go 1.18+, pclnOffset is at offset 64
-            self.read_ptr(&header_data, 64, ptr_size)
+        let (text_start, funcname_offset, functab_offset) = if has_text_start {
+            (
+                self.read_ptr(&header_data, word(2), ptr_size),
+                self.read_ptr(&header_data, word(3), ptr_size),
+                self.read_ptr(&header_data, word(7), ptr_size),
+            )
         } else {
-            // Before 1.18, functab was at fixed offset after header
-            (8 + 2 * ptr_size + 20) as u64
+            (
+                0,
+                self.read_ptr(&header_data, word(2), ptr_size),
+                self.read_ptr(&header_data, word(6), ptr_size),
+            )
         };
 
         let functab_addr = addr + functab_offset;
-        let entry_size = if magic >= GO_1_18_MAGIC {
-            8
-        } else {
-            ptr_size * 2
-        };
+        let entry_size = if has_text_start { 8 } else { ptr_size * 2 };
 
         let mut functions = Vec::with_capacity(nfunc.min(100000)); // Sanity limit
         for i in 0..nfunc.min(100000) {
@@ -85,7 +92,7 @@ impl<'a> GoAnalyzer<'a> {
                 break;
             };
 
-            let (pc_off, func_off) = if magic >= GO_1_18_MAGIC {
+            let (pc_off, func_off) = if has_text_start {
                 (
                     self.read_u32(ebytes, 0) as u64,
                     self.read_u32(ebytes, 4) as u64,
@@ -102,31 +109,38 @@ impl<'a> GoAnalyzer<'a> {
             // In Go 1.20+, func_off can be relative to the start of the functab area
             // or relative to the start of the pclntab depending on Go version and format.
             // We already confirmed that for Go 1.25 Mach-O, it's relative to functab_addr.
-            let mut func_struct_addr = functab_addr + func_off;
+            // Go 1.16 offsets are relative to the pclntab itself.
+            let func_struct_addr = if has_text_start {
+                functab_addr + func_off
+            } else {
+                addr + func_off
+            };
             let mut fbytes = self
                 .binary
                 .view_bytes(func_struct_addr, 16)
                 .map(|b| b.to_vec());
 
-            // Validation: First 4 bytes of _func should be entryOff (matching pc_off)
-            if let Some(ref fb) = fbytes {
-                let struct_entry_off = self.read_u32(fb, 0) as u64;
-                if struct_entry_off != pc_off && i > 0 {
-                    // Try relative to addr
-                    let alt_addr = addr + func_off;
-                    if let Some(alt_fb) = self.binary.view_bytes(alt_addr, 16) {
-                        let alt_entry_off = self.read_u32(alt_fb, 0) as u64;
-                        if alt_entry_off == pc_off {
-                            func_struct_addr = alt_addr;
-                            fbytes = Some(alt_fb.to_vec());
+            // Validation: the first field of _func is its entry, matching the functab's.
+            if has_text_start {
+                if let Some(ref fb) = fbytes {
+                    let struct_entry_off = self.read_u32(fb, 0) as u64;
+                    if struct_entry_off != pc_off && i > 0 {
+                        // Try relative to addr
+                        let alt_addr = addr + func_off;
+                        if let Some(alt_fb) = self.binary.view_bytes(alt_addr, 16) {
+                            let alt_entry_off = self.read_u32(alt_fb, 0) as u64;
+                            if alt_entry_off == pc_off {
+                                fbytes = Some(alt_fb.to_vec());
+                            }
                         }
                     }
                 }
             }
-            let _ = func_struct_addr;
 
             if let Some(fb) = fbytes {
-                let name_off = self.read_u32(&fb, 4) as u64;
+                // `nameOff` follows the entry: 4 bytes after a `u32` entryOff,
+                // a pointer's width after Go 1.16's pointer-sized entry.
+                let name_off = self.read_u32(&fb, if has_text_start { 4 } else { ptr_size }) as u64;
                 let name_addr = addr + funcname_offset + name_off;
 
                 if let Some(name) = self.read_string(name_addr) {
@@ -866,5 +880,107 @@ mod tests {
         // length that runs past the readable bytes is refused, not clipped.
         assert_eq!(read_name(&[0x00, 0]), None);
         assert_eq!(read_name(&[0x00, 0xFF, 0x7F]), None); // varint 16383 > 256
+    }
+
+    /// A synthetic `.gopclntab` at 0x1000 holding one function, laid out the
+    /// way the Go runtime does for `magic` and `ptr_size`:
+    /// - Go 1.18+: `nfunc, nfiles, textStart, funcnameOffset, cuOffset,
+    ///   filetabOffset, pctabOffset, pclnOffset` after an 8-byte preamble;
+    ///   functab entries are `u32` offsets from `textStart`.
+    /// - Go 1.16/1.17: no `textStart`; functab entries are pointer-sized
+    ///   absolute PCs and `_func` starts with a pointer-sized entry.
+    ///
+    /// Returns the analyzer's result for `main.f` at `text + 0x10`.
+    fn pclntab_function(magic: u32, ptr_size: usize) -> Vec<FunctionInfo> {
+        const SECTION: usize = 0x400;
+        const TEXT: u64 = 0x40_1000;
+        let put = |data: &mut Vec<u8>, off: usize, value: u64, size: usize| {
+            data[off..off + size].copy_from_slice(&value.to_le_bytes()[..size]);
+        };
+        let modern = magic != GO_1_16_MAGIC;
+        let mut data = vec![0u8; SECTION];
+        data[0..4].copy_from_slice(&magic.to_le_bytes());
+        data[6] = 1; // minLC
+        data[7] = ptr_size as u8;
+        put(&mut data, 8, 1, ptr_size); // nfunc
+        put(&mut data, 8 + ptr_size, 1, ptr_size); // nfiles
+        let funcname_off = 0x100u64;
+        let pcln_off = 0x200u64;
+        if modern {
+            put(&mut data, 8 + 2 * ptr_size, TEXT, ptr_size);
+            put(&mut data, 8 + 3 * ptr_size, funcname_off, ptr_size);
+            put(&mut data, 8 + 7 * ptr_size, pcln_off, ptr_size);
+            // functab: { entryOff: 0x10, funcOff: 0x20 } -> _func at pcln + 0x20
+            put(&mut data, 0x200, 0x10, 4);
+            put(&mut data, 0x204, 0x20, 4);
+            put(&mut data, 0x220, 0x10, 4); // _func.entryOff
+            put(&mut data, 0x224, 0, 4); // _func.nameOff
+        } else {
+            put(&mut data, 8 + 2 * ptr_size, funcname_off, ptr_size);
+            put(&mut data, 8 + 6 * ptr_size, pcln_off, ptr_size);
+            // functab: { entry: TEXT + 0x10, funcoff: 0x120 } -> _func at pclntab + 0x120
+            put(&mut data, 0x200, TEXT + 0x10, ptr_size);
+            put(&mut data, 0x200 + ptr_size, 0x120, ptr_size);
+            put(&mut data, 0x120, TEXT + 0x10, ptr_size); // _func.entry
+            put(&mut data, 0x120 + ptr_size, 0, 4); // _func.nameoff
+        }
+        data[0x100..0x107].copy_from_slice(b"main.f\0");
+
+        let binary =
+            LoadedBinaryBuilder::new("go-pclntab-test".to_string(), DataBuffer::Heap(data))
+                .format("ELF")
+                .image_base(0x1000)
+                .arch_spec(if ptr_size == 8 {
+                    "x86:LE:64:default"
+                } else {
+                    "x86:LE:32:default"
+                })
+                .is_64bit(ptr_size == 8)
+                .add_section(SectionInfo {
+                    name: ".gopclntab".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: SECTION as u64,
+                    file_offset: 0,
+                    file_size: SECTION as u64,
+                    is_executable: false,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("synthetic pclntab binary should build");
+        GoAnalyzer::new(&binary)
+            .analyze()
+            .expect("synthetic pclntab should parse")
+    }
+
+    fn assert_main_f(functions: &[FunctionInfo]) {
+        assert_eq!(functions.len(), 1, "{functions:?}");
+        assert_eq!(functions[0].name, "main.f");
+        assert_eq!(functions[0].address, 0x40_1010);
+    }
+
+    #[test]
+    fn go_1_18_pclntab_64_bit_recovers_its_function() {
+        assert_main_f(&pclntab_function(GO_1_18_MAGIC, 8));
+    }
+
+    #[test]
+    fn go_1_20_pclntab_64_bit_recovers_its_function() {
+        assert_main_f(&pclntab_function(GO_1_20_MAGIC, 8));
+    }
+
+    #[test]
+    fn go_1_18_pclntab_32_bit_scales_its_header_offsets_by_pointer_size() {
+        assert_main_f(&pclntab_function(GO_1_18_MAGIC, 4));
+    }
+
+    #[test]
+    fn go_1_16_pclntab_has_no_text_start_and_absolute_pcs() {
+        assert_main_f(&pclntab_function(GO_1_16_MAGIC, 8));
+    }
+
+    #[test]
+    fn go_1_16_pclntab_32_bit() {
+        assert_main_f(&pclntab_function(GO_1_16_MAGIC, 4));
     }
 }
