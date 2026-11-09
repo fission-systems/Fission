@@ -84,6 +84,9 @@ impl Timeline {
         match &mut self.backend {
             Backend::Internal(rec) => {
                 rec.start_recording();
+                // The recorder starts a fresh timeline; the event ordinals that
+                // index it start over with it.
+                self.events_recorded = 0;
                 self.current_position = None;
                 self.replay_mode = false;
             }
@@ -499,5 +502,21 @@ mod tests {
         assert!(matches!(timeline.seek_start(), SeekResult::Empty));
         assert!(matches!(timeline.seek_end(), SeekResult::Empty));
         assert!(matches!(timeline.seek_to(0), SeekResult::Empty));
+    }
+
+    #[test]
+    fn restarting_a_recording_restarts_the_event_ordinals() {
+        let mut timeline = Timeline::new();
+        timeline.start_recording();
+        for pc in [0x1000u64, 0x1004, 0x1008] {
+            timeline.record_event(RegisterState::at(pc), 1);
+        }
+        assert_eq!(timeline.latest_snapshot().map(|s| s.step_index), Some(2));
+
+        // A new recording is a new timeline; its first event is ordinal 0
+        // again, not 3 carried over from the one that was discarded.
+        timeline.start_recording();
+        timeline.record_event(RegisterState::at(0x2000), 1);
+        assert_eq!(timeline.latest_snapshot().map(|s| s.step_index), Some(0));
     }
 }
