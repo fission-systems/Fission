@@ -15,6 +15,27 @@ use crate::debug::traits::TimeTravelDebugger;
 use crate::debug::types::RegisterState;
 use fission_core::{FissionError, Result as FissionResult};
 
+/// One line of GDB/MI input: the token, then the command exactly as the caller
+/// wrote it. GDB/MI takes both MI commands (`-exec-continue`) and CLI commands
+/// (`reverse-stepi`) after a token, so nothing may be inserted between them --
+/// a `-` there turns `-exec-continue` into the undefined `--exec-continue` and
+/// `reverse-stepi` into the unknown MI command `-reverse-stepi`.
+fn mi_input_line(token: u32, cmd: &str) -> String {
+    format!("{}{}\n", token, cmd)
+}
+
+/// Does `resp` end the response to the command being read? A result record
+/// does, except `^running`: for an execution command that only says the target
+/// started, and the state the caller wants to read afterwards exists once the
+/// `*stopped` record arrives.
+fn response_ends_read(resp: &MiResponse) -> bool {
+    match resp {
+        MiResponse::Result { class, .. } => class != "running",
+        MiResponse::ExecAsync { class, .. } => class == "stopped",
+        _ => false,
+    }
+}
+
 /// RR debugger state
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RRState {
@@ -323,7 +344,7 @@ impl RRDebugger {
         let stdin = gdb.stdin.as_mut().ok_or("No stdin")?;
 
         self.token_counter += 1;
-        let full_cmd = format!("{}-{}\n", self.token_counter, cmd);
+        let full_cmd = mi_input_line(self.token_counter, cmd);
 
         stdin
             .write_all(full_cmd.as_bytes())
@@ -351,13 +372,12 @@ impl RRDebugger {
                         let parsed = self.mi_parser.parse();
 
                         for resp in parsed {
-                            let is_result = matches!(&resp, MiResponse::Result { .. });
-                            let is_stop = matches!(&resp, MiResponse::ExecAsync { class, .. } if class == "stopped");
+                            let ends = response_ends_read(&resp);
 
                             self.process_response_state(&resp);
                             responses.push(resp);
 
-                            if is_result || is_stop {
+                            if ends {
                                 done = true;
                                 break;
                             }
@@ -518,7 +538,9 @@ impl TimeTravelDebugger for RRDebugger {
 
         // Use rr's "when" command to get current event, and "run <N>" to seek
         // Note: 'run N' in rr-gdb is a custom command to jump to event N
-        let cmd = format!("interpreter-exec mi \"run {}\"", position);
+        // `run N` is a console (CLI) command of rr's gdb; the `mi` interpreter
+        // would try to parse it as an MI command.
+        let cmd = format!("-interpreter-exec console \"run {}\"", position);
         let _responses = self.send_command(&cmd)?;
 
         // Fetch registers after seek
@@ -759,5 +781,36 @@ mod tests {
         assert_eq!(state.get("SP"), Some(0x7ffffff0));
         assert_eq!(state.get("PC"), Some(0x400080));
         assert_eq!(state.pc, 0x400080);
+    }
+
+    fn result_record(class: &str) -> MiResponse {
+        MiResponse::Result {
+            token: None,
+            class: class.to_string(),
+            results: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn a_token_is_followed_by_the_command_as_written() {
+        assert_eq!(mi_input_line(7, "-exec-continue"), "7-exec-continue\n");
+        assert_eq!(
+            mi_input_line(8, "-data-list-register-values x"),
+            "8-data-list-register-values x\n"
+        );
+        // CLI commands stay CLI commands.
+        assert_eq!(mi_input_line(9, "reverse-stepi"), "9reverse-stepi\n");
+    }
+
+    #[test]
+    fn running_does_not_end_the_read_but_done_error_and_stopped_do() {
+        assert!(!response_ends_read(&result_record("running")));
+        assert!(response_ends_read(&result_record("done")));
+        assert!(response_ends_read(&result_record("error")));
+        assert!(response_ends_read(&MiResponse::ExecAsync {
+            token: None,
+            class: "stopped".to_string(),
+            results: HashMap::new(),
+        }));
     }
 }
