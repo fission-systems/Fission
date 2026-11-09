@@ -56,6 +56,21 @@ pub struct EmulatorHarness {
     scratch: Option<u64>,
 }
 
+/// Stack pointer at the callee's entry for a call with `stack_args` stack
+/// passed arguments, given the caller's baseline `sp`.
+///
+/// The return address sits at the new `sp`, the calling convention's own gap
+/// (`shadow_space`: Win64's 32 bytes, zero elsewhere) above it, and the
+/// stack-passed arguments above that. All of them have to live *below* the
+/// baseline `sp`: that is where a real caller's outgoing area is, whereas the
+/// memory at and above `sp` belongs to the entry frame (the auxv/argv tables
+/// on Linux, the top of the mapped stack on Windows).
+fn call_frame_sp(sp: u64, ptr_size: u64, shadow_space: u64, stack_args: u64) -> u64 {
+    // Round the argument area up to 16 so the entry alignment survives.
+    let arg_area = (stack_args * ptr_size).div_ceil(16) * 16;
+    sp - arg_area - ptr_size - shadow_space
+}
+
 impl EmulatorHarness {
     /// Build a fully-loaded emulator for `binary_path`, mirroring
     /// `fission-cli`'s `sandbox` setup sequence exactly (format-aware image
@@ -231,7 +246,8 @@ impl EmulatorHarness {
                 .cc
                 .stack_arg_offset(0)
                 .saturating_sub(ptr_size);
-            let new_sp = sp - ptr_size - shadow_space;
+            let stack_args = (args.len().saturating_sub(self.emu.arch.cc.arg_regs().len())) as u64;
+            let new_sp = call_frame_sp(sp, ptr_size, shadow_space, stack_args);
             let ram = self.emu.state.ram_space();
             let bytes = SENTINEL_RET.to_le_bytes()[..ptr_size as usize].to_vec();
             self.emu.state.write_space(ram, new_sp, &bytes)?;
@@ -266,5 +282,56 @@ impl EmulatorHarness {
             RunOutcome::ProcessExited => Ok(CallOutcome::ProcessExited),
             other => Ok(CallOutcome::Other(other)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::call_frame_sp;
+
+    /// Where the callee finds stack argument `n`, as `call` writes it:
+    /// `new_sp + stack_arg_offset(n)` with `stack_arg_offset(n) = ptr + shadow
+    /// + n * ptr` (SysV/cdecl have `shadow == 0`, Win64 has 32).
+    fn arg_slot(new_sp: u64, ptr: u64, shadow: u64, n: u64) -> u64 {
+        new_sp + ptr + shadow + n * ptr
+    }
+
+    #[test]
+    fn stack_arguments_live_below_the_baseline_sp() {
+        for (ptr, shadow) in [(8u64, 0u64), (8, 32), (4, 0)] {
+            for stack_args in [0u64, 1, 2, 5, 9] {
+                let sp = 0x7fff_ffff_e000u64;
+                let new_sp = call_frame_sp(sp, ptr, shadow, stack_args);
+                for n in 0..stack_args {
+                    let slot = arg_slot(new_sp, ptr, shadow, n);
+                    assert!(
+                        slot + ptr <= sp,
+                        "ptr {ptr} shadow {shadow}: argument {n} of {stack_args} at {slot:#x} reaches the baseline sp {sp:#x}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_entry_stack_pointer_keeps_its_abi_alignment() {
+        // At function entry (return address just pushed) `sp + ptr` is 16-byte
+        // aligned on SysV and Win64, whatever the number of stack arguments.
+        for (ptr, shadow) in [(8u64, 0u64), (8, 32)] {
+            for stack_args in 0..12u64 {
+                let new_sp = call_frame_sp(0x7fff_ffff_e000, ptr, shadow, stack_args);
+                assert_eq!(
+                    (new_sp + ptr) % 16,
+                    0,
+                    "ptr {ptr} shadow {shadow} stack_args {stack_args}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_call_without_stack_arguments_is_unchanged() {
+        assert_eq!(call_frame_sp(0x1000, 8, 0, 0), 0x1000 - 8);
+        assert_eq!(call_frame_sp(0x1000, 8, 32, 0), 0x1000 - 8 - 32);
     }
 }
