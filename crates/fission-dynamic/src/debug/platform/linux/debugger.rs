@@ -487,13 +487,33 @@ impl ExecutionBackend for LinuxDebugger {
 
         self.state.status = DebugStatus::Attaching;
 
-        ptrace::attach(Pid::from_raw(pid as i32)).map_err(|e| {
+        let tracee = Pid::from_raw(pid as i32);
+        ptrace::attach(tracee).map_err(|e| {
+            self.state.status = DebugStatus::Detached;
             FissionError::debug(format!("Failed to attach to process {}: {}", pid, e))
         })?;
 
+        // PTRACE_ATTACH only queues a SIGSTOP. Until waitpid reports the
+        // stop the tracee is still running, and every register read or
+        // memory write issued now fails with ESRCH. Report `Suspended` only
+        // once the kernel says it is.
+        match nix::sys::wait::waitpid(tracee, None) {
+            Ok(nix::sys::wait::WaitStatus::Stopped(..)) => {}
+            other => {
+                // Not stopped (it exited, or waitpid failed): undo the attach
+                // as far as it can be undone and do not claim a session.
+                let _ = ptrace::detach(tracee, None);
+                self.state.status = DebugStatus::Detached;
+                return Err(FissionError::debug(format!(
+                    "Process {} did not stop after attach: {:?}",
+                    pid, other
+                )));
+            }
+        }
+
         self.target_pid = Some(pid);
         self.state.attached_pid = Some(pid);
-        self.state.status = DebugStatus::Suspended; // ptrace attach sends SIGSTOP
+        self.state.status = DebugStatus::Suspended;
         self.state.last_event = Some(format!("Attached to PID {}", pid));
         if let Some(timeline) = &self.ttd_timeline {
             if let Ok(mut timeline) = timeline.lock() {
@@ -1257,5 +1277,44 @@ mod tests {
         }
 
         assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
+
+    /// `attach` must not return until the tracee is in ptrace-stop: the
+    /// SIGSTOP PTRACE_ATTACH queues is asynchronous, and a register read
+    /// issued before waitpid reports it fails with ESRCH. Repeated because the
+    /// race is only lost some of the time.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn linux_attach_returns_with_the_tracee_already_stopped() {
+        use std::process::{Command, Stdio};
+
+        for round in 0..20 {
+            let mut child = Command::new("/bin/sleep")
+                .arg("30")
+                .stdin(Stdio::null())
+                .spawn()
+                .expect("spawn a child to attach to");
+            let pid = child.id();
+
+            let mut debugger = LinuxDebugger::new();
+            let attached = debugger.attach(pid).map_err(|e| e.to_string());
+            let registers = attached
+                .is_ok()
+                .then(|| debugger.fetch_registers(pid).map_err(|e| e.to_string()));
+            let detached = if attached.is_ok() {
+                debugger.detach().map_err(|e| e.to_string())
+            } else {
+                Ok(())
+            };
+            let _ = child.kill();
+            let _ = child.wait();
+
+            attached.unwrap_or_else(|e| panic!("round {round}: attach failed: {e}"));
+            let registers = registers.expect("attached").unwrap_or_else(|e| {
+                panic!("round {round}: registers right after attach failed: {e}")
+            });
+            assert_ne!(registers.pc, 0, "round {round}: a stopped tracee has a PC");
+            detached.unwrap_or_else(|e| panic!("round {round}: detach failed: {e}"));
+        }
     }
 }
