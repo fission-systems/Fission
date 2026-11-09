@@ -2,7 +2,7 @@
 //!
 //! Provides recording and replay of program execution using rr.
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::Child;
@@ -24,13 +24,19 @@ fn mi_input_line(token: u32, cmd: &str) -> String {
     format!("{}{}\n", token, cmd)
 }
 
-/// Does `resp` end the response to the command being read? A result record
-/// does, except `^running`: for an execution command that only says the target
-/// started, and the state the caller wants to read afterwards exists once the
-/// `*stopped` record arrives.
-fn response_ends_read(resp: &MiResponse) -> bool {
+/// Does `resp` end the response to the command sent with `token`? A result
+/// record does, except `^running` (for an execution command that only says the
+/// target started; the state the caller wants exists once `*stopped` arrives)
+/// and a result carrying a different token (the late answer to an earlier
+/// command, which is not this command's answer).
+fn response_ends_read(resp: &MiResponse, token: u32) -> bool {
     match resp {
-        MiResponse::Result { class, .. } => class != "running",
+        // A record with no token cannot be matched, so it is taken as ours.
+        MiResponse::Result {
+            token: result_token,
+            class,
+            ..
+        } => class != "running" && result_token.is_none_or(|t| t == token),
         MiResponse::ExecAsync { class, .. } => class == "stopped",
         _ => false,
     }
@@ -142,6 +148,9 @@ pub struct RRDebugger {
     last_registers: RegisterState,
     /// Command token counter
     token_counter: u32,
+    /// Records parsed after the one that ended a read. They belong to what
+    /// gdb says next, so they are kept for the next read, not dropped.
+    pending_responses: VecDeque<MiResponse>,
     /// Persistent reader for GDB/MI stdout
     gdb_reader: Option<BufReader<std::process::ChildStdout>>,
     /// Target architecture
@@ -172,6 +181,7 @@ impl RRDebugger {
             max_position: 0,
             last_registers: RegisterState::default(),
             token_counter: 0,
+            pending_responses: VecDeque::new(),
             gdb_reader: None,
             arch: RRArch::default(),
         }
@@ -357,36 +367,49 @@ impl RRDebugger {
         self.read_until_result()
     }
 
+    /// Feed one batch of parsed records into `responses`, stopping at the one
+    /// that ends the read. Returns whether it was reached.
+    fn consume_batch(&mut self, batch: Vec<MiResponse>, responses: &mut Vec<MiResponse>) -> bool {
+        let token = self.token_counter;
+        let mut batch = batch.into_iter();
+        for resp in batch.by_ref() {
+            let ends = response_ends_read(&resp, token);
+            self.process_response_state(&resp);
+            responses.push(resp);
+            if ends {
+                // Whatever the same chunk held after it is what gdb says next.
+                self.pending_responses.extend(batch);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Read responses until we get a result record or a stop event
     fn read_until_result(&mut self) -> Result<Vec<MiResponse>, String> {
         let mut responses = Vec::new();
-        let mut done = false;
 
-        while !done {
+        // Records kept from the previous read come first.
+        let carried: Vec<MiResponse> = self.pending_responses.drain(..).collect();
+        if self.consume_batch(carried, &mut responses) {
+            return Ok(responses);
+        }
+
+        loop {
             let mut line = String::new();
-            if let Some(reader) = self.gdb_reader.as_mut() {
-                match reader.read_line(&mut line) {
-                    Ok(0) => break, // EOF
-                    Ok(_) => {
-                        self.mi_parser.feed(&line);
-                        let parsed = self.mi_parser.parse();
-
-                        for resp in parsed {
-                            let ends = response_ends_read(&resp);
-
-                            self.process_response_state(&resp);
-                            responses.push(resp);
-
-                            if ends {
-                                done = true;
-                                break;
-                            }
-                        }
-                    }
-                    Err(e) => return Err(format!("Read error: {}", e)),
-                }
-            } else {
+            let Some(reader) = self.gdb_reader.as_mut() else {
                 return Err("No GDB reader".to_string());
+            };
+            match reader.read_line(&mut line) {
+                Ok(0) => break, // EOF
+                Ok(_) => {
+                    self.mi_parser.feed(&line);
+                    let parsed = self.mi_parser.parse();
+                    if self.consume_batch(parsed, &mut responses) {
+                        break;
+                    }
+                }
+                Err(e) => return Err(format!("Read error: {}", e)),
             }
         }
 
@@ -804,13 +827,64 @@ mod tests {
 
     #[test]
     fn running_does_not_end_the_read_but_done_error_and_stopped_do() {
-        assert!(!response_ends_read(&result_record("running")));
-        assert!(response_ends_read(&result_record("done")));
-        assert!(response_ends_read(&result_record("error")));
-        assert!(response_ends_read(&MiResponse::ExecAsync {
-            token: None,
-            class: "stopped".to_string(),
+        assert!(!response_ends_read(&result_record("running"), 1));
+        assert!(response_ends_read(&result_record("done"), 1));
+        assert!(response_ends_read(&result_record("error"), 1));
+        assert!(response_ends_read(
+            &MiResponse::ExecAsync {
+                token: None,
+                class: "stopped".to_string(),
+                results: HashMap::new(),
+            },
+            1
+        ));
+    }
+
+    fn result_with_token(token: Option<u32>, class: &str) -> MiResponse {
+        MiResponse::Result {
+            token,
+            class: class.to_string(),
             results: HashMap::new(),
-        }));
+        }
+    }
+
+    #[test]
+    fn a_result_for_another_token_does_not_end_the_read() {
+        let late = result_with_token(Some(3), "done");
+        assert!(
+            !response_ends_read(&late, 5),
+            "answer to command 3, reading for 5"
+        );
+        assert!(response_ends_read(&late, 3));
+        // gdb echoes the token it was given; a record without one still ends it.
+        assert!(response_ends_read(&result_with_token(None, "done"), 5));
+        // An error for this command ends it too.
+        assert!(response_ends_read(&result_with_token(Some(5), "error"), 5));
+    }
+
+    #[test]
+    fn records_after_the_terminator_are_kept_for_the_next_read() {
+        let mut rr = RRDebugger::new();
+        rr.token_counter = 1;
+        let mut responses = Vec::new();
+        let batch = vec![
+            MiResponse::ConsoleStream("before".to_string()),
+            result_with_token(Some(1), "done"),
+            MiResponse::ConsoleStream("after".to_string()),
+        ];
+        assert!(rr.consume_batch(batch, &mut responses));
+        assert_eq!(responses.len(), 2, "up to and including the result");
+        assert_eq!(
+            rr.pending_responses.len(),
+            1,
+            "the trailing record survives"
+        );
+
+        // The next read starts from what was kept.
+        let mut next = Vec::new();
+        rr.token_counter = 2;
+        let carried: Vec<MiResponse> = rr.pending_responses.drain(..).collect();
+        assert!(!rr.consume_batch(carried, &mut next));
+        assert_eq!(next.len(), 1);
     }
 }
