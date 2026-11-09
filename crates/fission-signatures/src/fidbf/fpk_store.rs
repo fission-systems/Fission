@@ -697,19 +697,12 @@ impl LazyFidDatabase {
         else {
             return false;
         };
+        // Same reasoning as the eager database: relation scores are added to
+        // the standalone score afterwards, so it cannot gate the context.
         records.iter().any(|func| {
             func.force_relation
                 && !func.auto_fail
                 && (!func.force_specific || func.specific_hash == specific_hash)
-                && (func.auto_pass
-                    || (func.code_unit_size as f32
-                        + if func.specific_hash == specific_hash {
-                            10.0
-                        } else {
-                            0.0
-                        })
-                    .min(100.0)
-                        >= FID_ACCEPT_THRESHOLD)
         })
     }
 

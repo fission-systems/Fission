@@ -237,11 +237,14 @@ impl FidbfDatabase {
     /// candidate.  This lets callers defer building a whole-binary call graph
     /// unless the current program actually needs relation context.
     pub fn has_force_relation_candidate(&self, full_hash: u64, specific_hash: u64) -> bool {
-        self.find_by_full_hash(full_hash).into_iter().any(|func| {
-            func.force_relation
-                && self.hash_candidate_is_eligible(func, specific_hash)
-                && (func.auto_pass || self.score_match(func, specific_hash) >= FID_ACCEPT_THRESHOLD)
-        })
+        // The candidate's final score is `standalone + child + parent`, and
+        // a forced-relation function is accepted only with a known child. A
+        // short wrapper whose standalone score is below the threshold is the
+        // very one the context exists for, so the standalone score cannot be
+        // part of this test.
+        self.find_by_full_hash(full_hash)
+            .into_iter()
+            .any(|func| func.force_relation && self.hash_candidate_is_eligible(func, specific_hash))
     }
 
     /// Identify a function by its dual FID hashes and return matching library
@@ -453,5 +456,50 @@ mod flag_tests {
         let matches = database.identify_by_hashes_with_relations(0xabc, 0xdef, context);
         assert_eq!(matches.len(), 1);
         assert!(matches[0].score > 20.0);
+    }
+
+    /// The gate asks "does this program need relation context?". A forced-
+    /// relation candidate is accepted only with a known child, and its score is
+    /// then `standalone + child + parent`, so a wrapper too small to clear the
+    /// threshold on its own is exactly the one that needs the context. Judging
+    /// it by its standalone score alone made the gate false for it, so the
+    /// context was never built and the wrapper could never be identified.
+    #[test]
+    fn a_short_force_relation_function_needs_the_relation_context() {
+        let mut wrapper = func("wrapper", 0xabc, 0xdef, 3);
+        wrapper.force_relation = true;
+        assert!(
+            (wrapper.code_unit_size as f32 + 10.0) < FID_ACCEPT_THRESHOLD,
+            "test needs a function below the threshold even with the specific-hash bonus"
+        );
+        let db = db(vec![wrapper]);
+        assert!(db.has_force_relation_candidate(0xabc, 0xdef));
+        assert!(db.has_force_relation_candidate(0xabc, 0x999));
+    }
+
+    #[test]
+    fn the_relation_gate_still_excludes_what_can_never_be_returned() {
+        // Not forced: no relation context is ever required.
+        let plain = db(vec![func("plain", 0xabc, 0xdef, 3)]);
+        assert!(!plain.has_force_relation_candidate(0xabc, 0xdef));
+
+        // Auto-fail is never returned, relation or not.
+        let mut failed = func("failed", 0xabc, 0xdef, 100);
+        failed.force_relation = true;
+        failed.auto_fail = true;
+        assert!(!db(vec![failed]).has_force_relation_candidate(0xabc, 0xdef));
+
+        // force_specific with a different specific hash is ineligible.
+        let mut strict = func("strict", 0xabc, 0xdef, 100);
+        strict.force_relation = true;
+        strict.force_specific = true;
+        let strict = db(vec![strict]);
+        assert!(strict.has_force_relation_candidate(0xabc, 0xdef));
+        assert!(!strict.has_force_relation_candidate(0xabc, 0x999));
+
+        // A different full hash is not a candidate at all.
+        let mut other = func("other", 0x111, 0xdef, 100);
+        other.force_relation = true;
+        assert!(!db(vec![other]).has_force_relation_candidate(0xabc, 0xdef));
     }
 }
