@@ -493,24 +493,6 @@ impl ExecutionBackend for LinuxDebugger {
             FissionError::debug(format!("Failed to attach to process {}: {}", pid, e))
         })?;
 
-        // PTRACE_ATTACH only queues a SIGSTOP. Until waitpid reports the
-        // stop the tracee is still running, and every register read or
-        // memory write issued now fails with ESRCH. Report `Suspended` only
-        // once the kernel says it is.
-        match nix::sys::wait::waitpid(tracee, None) {
-            Ok(nix::sys::wait::WaitStatus::Stopped(..)) => {}
-            other => {
-                // Not stopped (it exited, or waitpid failed): undo the attach
-                // as far as it can be undone and do not claim a session.
-                let _ = ptrace::detach(tracee, None);
-                self.state.status = DebugStatus::Detached;
-                return Err(FissionError::debug(format!(
-                    "Process {} did not stop after attach: {:?}",
-                    pid, other
-                )));
-            }
-        }
-
         self.target_pid = Some(pid);
         self.state.attached_pid = Some(pid);
         self.state.status = DebugStatus::Suspended;
