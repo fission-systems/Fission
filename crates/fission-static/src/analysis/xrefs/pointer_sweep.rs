@@ -25,7 +25,7 @@ pub struct PointerSweepResult {
 
 impl PointerSweeper {
     pub fn new(binary: &LoadedBinary) -> Self {
-        let mut valid_regions = BTreeMap::new();
+        let mut intervals: Vec<(u64, u64)> = Vec::new();
         for section in &binary.inner().sections {
             if !section.is_addressable() {
                 continue;
@@ -33,8 +33,30 @@ impl PointerSweeper {
             let start = section.virtual_address;
             let end = start.saturating_add(section.virtual_size);
             if start < end {
-                valid_regions.insert(start, end);
+                intervals.push((start, end));
             }
+        }
+        // `is_valid_pointer` asks only the interval with the nearest start, so
+        // the intervals must not overlap: a section nested in another, or two
+        // starting at the same address, would otherwise hide the rest of the
+        // longer one. Merge overlapping and touching ranges.
+        intervals.sort_unstable();
+        let mut valid_regions = BTreeMap::new();
+        let mut merged: Option<(u64, u64)> = None;
+        for (start, end) in intervals {
+            merged = match merged {
+                Some((cur_start, cur_end)) if start <= cur_end => {
+                    Some((cur_start, cur_end.max(end)))
+                }
+                Some((cur_start, cur_end)) => {
+                    valid_regions.insert(cur_start, cur_end);
+                    Some((start, end))
+                }
+                None => Some((start, end)),
+            };
+        }
+        if let Some((start, end)) = merged {
+            valid_regions.insert(start, end);
         }
 
         // Detect pointer size based on architecture.
@@ -433,5 +455,63 @@ mod tests {
             vec![(0x2010, 0x1008)],
             "small values covered only by a zero-VMA debug section are not pointers"
         );
+    }
+
+    fn sweeper_over(sections: &[(u64, u64)]) -> PointerSweeper {
+        let mut builder = LoadedBinaryBuilder::new(
+            "pointer-sweep-intervals".to_string(),
+            DataBuffer::Heap(vec![0u8; 0x10]),
+        )
+        .format("ELF")
+        .image_base(0x1000)
+        .arch_spec("x86:LE:64:default")
+        .is_64bit(true);
+        for (i, &(start, size)) in sections.iter().enumerate() {
+            builder = builder.add_section(SectionInfo {
+                name: format!(".s{i}"),
+                virtual_address: start,
+                virtual_size: size,
+                file_offset: 0,
+                file_size: 0,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            });
+        }
+        PointerSweeper::new(&builder.build().expect("synthetic binary should build"))
+    }
+
+    /// An address inside an enclosing section is a valid pointer even when a
+    /// section nested in it starts closer to the address: the lookup takes the
+    /// nearest start at or below the value, so a nested interval that ends
+    /// early used to hide the rest of the one around it.
+    #[test]
+    fn a_nested_section_does_not_hide_the_tail_of_its_enclosing_section() {
+        let sweeper = sweeper_over(&[(0x1000, 0x4000), (0x2000, 0x1000)]);
+        assert!(sweeper.is_valid_pointer(0x2800), "inside both");
+        assert!(
+            sweeper.is_valid_pointer(0x3500),
+            "tail of the enclosing one"
+        );
+        assert!(
+            sweeper.is_valid_pointer(0x4fff),
+            "last byte of the enclosing one"
+        );
+        assert!(!sweeper.is_valid_pointer(0x5000), "one past the end");
+        assert!(!sweeper.is_valid_pointer(0xfff), "before the first section");
+    }
+
+    #[test]
+    fn two_sections_with_the_same_start_keep_the_longer_extent() {
+        let sweeper = sweeper_over(&[(0x2000, 0x2000), (0x2000, 0x100)]);
+        assert!(sweeper.is_valid_pointer(0x2800));
+    }
+
+    #[test]
+    fn disjoint_sections_still_leave_the_gap_between_them_invalid() {
+        let sweeper = sweeper_over(&[(0x1000, 0x1000), (0x3000, 0x1000)]);
+        assert!(sweeper.is_valid_pointer(0x1800));
+        assert!(!sweeper.is_valid_pointer(0x2800), "the gap");
+        assert!(sweeper.is_valid_pointer(0x3800));
     }
 }
