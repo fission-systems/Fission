@@ -1012,6 +1012,27 @@ impl JitCompiler {
             }};
         }
 
+        // A bulk op (more than eight bytes) writes straight to `MachineState`,
+        // bypassing the SSA variables. Any cached view of the bytes it wrote --
+        // a four-byte half, the upper eight -- is stale afterwards, and so is a
+        // pending exit-flush of one that the write fully covers; left alone the
+        // flush would put the old value back over the new one. Drop them so the
+        // next read re-seeds from the backing store.
+        macro_rules! drop_stale_views {
+            ($out:expr) => {{
+                let out: &Varnode = $out;
+                if out.space_id != unique_space {
+                    let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
+                    var_map.retain(|key, _| {
+                        key.0 != out.space_id || key.1 >= whi || key.1 + key.2 <= wlo
+                    });
+                    dirty.retain(|(sp, off, sz, _)| {
+                        !(*sp == out.space_id && *off >= wlo && *off + u64::from(*sz) <= whi)
+                    });
+                }
+            }};
+        }
+
         if observe.block {
             let pc = builder.ins().iconst(types::I64, start_pc as i64);
             builder.ins().call(observe_block_ref, &[emu_ptr, pc]);
@@ -1248,6 +1269,7 @@ impl JitCompiler {
                                 builder
                                     .ins()
                                     .call(write_bytes_ref, &[emu_ptr, dsp, doff, ptr, dsz]);
+                                drop_stale_views!(out);
                             } else {
                                 let val = load_vn!(src);
                                 store_vn!(out, val);
@@ -1304,6 +1326,7 @@ impl JitCompiler {
                                 builder
                                     .ins()
                                     .call(write_bytes_ref, &[emu_ptr, dsp, doff, ptr, sz]);
+                                drop_stale_views!(out);
                             } else {
                                 let sp = builder.ins().iconst(types::I64, space_id as i64);
                                 let sz = builder.ins().iconst(types::I64, out.size as i64);
@@ -3214,6 +3237,40 @@ mod tests {
             read_reg(&mut emu, 0x48) & 0xffff_ffff,
             0x5566_7788,
             "low half"
+        );
+    }
+
+    /// A sixteen-byte `Copy` goes through the bulk path; a narrower cached view
+    /// of its output (the old low half of the register) must not survive it.
+    #[test]
+    fn a_bulk_copy_replaces_a_narrower_cached_view_of_its_output() {
+        let ops = vec![
+            copy_const(0x40, 1, 4), // caches (reg, 0x40, 4)
+            copy_const(0x80, 0x7777, 8),
+            copy_const(0x88, 0x9999, 8),
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0x40, 16)),
+                inputs: vec![reg(0x80, 16)],
+                asm_mnemonic: None,
+            },
+            // read the old narrow view back
+            PcodeOp {
+                seq_num: 4,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0x100, 4)),
+                inputs: vec![reg(0x40, 4)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(
+            read_reg(&mut emu, 0x100) & 0xffff_ffff,
+            0x7777,
+            "the narrow view must reflect the bulk copy, not the earlier write"
         );
     }
 
