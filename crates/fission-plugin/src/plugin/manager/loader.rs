@@ -1,5 +1,5 @@
 use super::core::PluginManager;
-use super::types::LoadedPlugin;
+use super::types::{LoadedPlugin, PluginDestroy, release_library_instance};
 use crate::plugin::api::{PluginInfo, PluginType};
 use crate::plugin::{FissionPlugin, PluginContext};
 use std::path::Path;
@@ -23,6 +23,7 @@ use std::path::Path;
 type PluginCreate = unsafe extern "C" fn() -> *mut dyn FissionPlugin;
 
 const PLUGIN_CREATE_SYMBOL: &[u8] = b"fission_plugin_create\0";
+const PLUGIN_DESTROY_SYMBOL: &[u8] = b"fission_plugin_destroy\0";
 
 impl PluginManager {
     pub fn register_native_plugin(
@@ -63,6 +64,7 @@ impl PluginManager {
             hooks: Vec::new(),
             instance: Some(plugin),
             library: None,
+            destroy: None,
             state: None,
         };
 
@@ -106,12 +108,21 @@ impl PluginManager {
         // The constructor transfers ownership of the Box allocation to the
         // manager.  It is dropped before `library`, so its vtable and drop
         // glue remain mapped for the entire lifetime of the object.
+        // The library may export how to free it; see `release_library_instance`.
+        let destroy: Option<PluginDestroy> = unsafe {
+            library
+                .get::<PluginDestroy>(PLUGIN_DESTROY_SYMBOL)
+                .ok()
+                .map(|symbol| *symbol)
+        };
         let mut plugin = unsafe { Box::from_raw(raw_plugin) };
         let plugin_id = plugin.id().to_string();
         if plugin_id.is_empty() {
+            release_library_instance(plugin, destroy);
             return Err(format!("Plugin {:?} returned an empty plugin id", path));
         }
         if self.plugins.contains_key(&plugin_id) {
+            release_library_instance(plugin, destroy);
             return Err(format!("Plugin '{}' already loaded", plugin_id));
         }
 
@@ -122,6 +133,7 @@ impl PluginManager {
                 .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
             let ctx = PluginContext::new(api.clone(), extension);
             if let Err(error) = plugin.on_load(&ctx) {
+                release_library_instance(plugin, destroy);
                 return Err(format!("Failed to load plugin '{}': {error:?}", plugin_id));
             }
         }
@@ -143,6 +155,7 @@ impl PluginManager {
             hooks: Vec::new(),
             instance: Some(plugin),
             library: Some(library),
+            destroy,
             state: None,
         };
 
@@ -152,8 +165,7 @@ impl PluginManager {
 
     pub fn unload_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(mut plugin) = self.plugins.remove(plugin_id) {
-            let mut instance = plugin.instance.take();
-            if let (Some(instance_ref), Some(api)) = (instance.as_mut(), &self.api) {
+            if let (Some(instance_ref), Some(api)) = (plugin.instance.as_mut(), &self.api) {
                 let extension = self
                     .event_bus
                     .clone()
@@ -161,11 +173,11 @@ impl PluginManager {
                 let ctx = PluginContext::new(api.clone(), extension);
                 let _ = instance_ref.on_unload(&ctx);
             }
-            // Drop the trait object while the originating library is still
+            // Release the instance while the originating library is still
             // mapped; its vtable and drop glue live in that library.
-            drop(instance);
+            plugin.release_instance();
 
-            for hook_id in plugin.hooks {
+            for hook_id in std::mem::take(&mut plugin.hooks) {
                 self.hooks.remove(&hook_id);
             }
 

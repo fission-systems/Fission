@@ -69,6 +69,7 @@ mod tests {
                 hooks: Vec::new(),
                 instance: None,
                 library: None,
+                destroy: None,
                 state: None,
             },
         );
@@ -129,6 +130,7 @@ mod tests {
                 "drop_order".into(),
                 LoadedPlugin {
                     on_load_called: false,
+                    destroy: None,
                     info: PluginInfo {
                         id: "drop_order".into(),
                         name: "Drop Order".into(),
@@ -168,6 +170,7 @@ mod tests {
                 "drop_order".into(),
                 LoadedPlugin {
                     on_load_called: false,
+                    destroy: None,
                     info: PluginInfo {
                         id: "drop_order".into(),
                         name: "Drop Order".into(),
@@ -196,6 +199,7 @@ mod tests {
             "gone".into(),
             LoadedPlugin {
                 on_load_called: false,
+                destroy: None,
                 info: PluginInfo {
                     id: "gone".into(),
                     name: "Gone".into(),
@@ -403,5 +407,139 @@ mod tests {
 
         assert!(error.contains("Failed to open plugin"), "{error}");
         assert_eq!(pm.plugin_count(), 0);
+    }
+}
+
+/// An instance a dynamic plugin made was allocated by that library's own
+/// allocator, which need not be the host's (`fission_cli` uses mimalloc, a Rust
+/// `cdylib` defaults to the system allocator). The host must not free it.
+#[cfg(all(test, unix))]
+mod foreign_allocation_tests {
+    use super::*;
+    use crate::plugin::FissionPlugin;
+    use crate::plugin::api::PluginInfo;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use types::LoadedPlugin;
+
+    /// Distinctive size, so only this test's allocation is counted.
+    const PROBE_SIZE: usize = 3001;
+    static FREES_OF_PROBE: AtomicUsize = AtomicUsize::new(0);
+    static PROBE_DROPPED: AtomicBool = AtomicBool::new(false);
+
+    struct CountingAllocator;
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if layout.size() == PROBE_SIZE {
+                FREES_OF_PROBE.fetch_add(1, Ordering::SeqCst);
+            }
+            unsafe { System.dealloc(ptr, layout) }
+        }
+    }
+
+    #[global_allocator]
+    static ALLOCATOR: CountingAllocator = CountingAllocator;
+
+    struct Probe {
+        _padding: [u8; PROBE_SIZE],
+    }
+
+    impl Drop for Probe {
+        fn drop(&mut self) {
+            PROBE_DROPPED.store(true, Ordering::SeqCst);
+        }
+    }
+
+    impl FissionPlugin for Probe {
+        fn id(&self) -> &str {
+            "probe"
+        }
+        fn name(&self) -> &str {
+            "Probe"
+        }
+    }
+
+    #[test]
+    fn the_host_does_not_free_an_instance_a_library_allocated() {
+        let mut manager = PluginManager::new();
+        // Any library handle will do: the plugin counts as library-made.
+        let library = libloading::Library::from(libloading::os::unix::Library::this());
+        manager.plugins.insert(
+            "probe".to_string(),
+            LoadedPlugin {
+                info: PluginInfo {
+                    id: "probe".into(),
+                    name: "Probe".into(),
+                    ..Default::default()
+                },
+                hooks: Vec::new(),
+                instance: Some(Box::new(Probe {
+                    _padding: [0; PROBE_SIZE],
+                })),
+                library: Some(library),
+                on_load_called: true,
+                destroy: None,
+                state: None,
+            },
+        );
+
+        manager.unload_plugin("probe").expect("unload");
+
+        assert!(
+            PROBE_DROPPED.load(Ordering::SeqCst),
+            "the plugin's own drop glue still runs"
+        );
+        assert_eq!(
+            FREES_OF_PROBE.load(Ordering::SeqCst),
+            0,
+            "the host must not free memory the plugin library allocated"
+        );
+    }
+
+    static DESTROY_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+    #[allow(improper_ctypes_definitions)]
+    unsafe extern "C" fn test_destroy(plugin: *mut dyn FissionPlugin) {
+        DESTROY_CALLS.fetch_add(1, Ordering::SeqCst);
+        drop(unsafe { Box::from_raw(plugin) });
+    }
+
+    #[test]
+    fn a_library_that_exports_destroy_frees_its_own_instance() {
+        let before_frees = FREES_OF_PROBE.load(Ordering::SeqCst);
+        let before_calls = DESTROY_CALLS.load(Ordering::SeqCst);
+        let mut manager = PluginManager::new();
+        let library = libloading::Library::from(libloading::os::unix::Library::this());
+        manager.plugins.insert(
+            "probe2".to_string(),
+            LoadedPlugin {
+                info: PluginInfo {
+                    id: "probe2".into(),
+                    name: "Probe".into(),
+                    ..Default::default()
+                },
+                hooks: Vec::new(),
+                instance: Some(Box::new(Probe {
+                    _padding: [0; PROBE_SIZE],
+                })),
+                library: Some(library),
+                on_load_called: true,
+                destroy: Some(test_destroy),
+                state: None,
+            },
+        );
+
+        manager.unload_plugin("probe2").expect("unload");
+
+        assert_eq!(DESTROY_CALLS.load(Ordering::SeqCst), before_calls + 1);
+        assert_eq!(
+            FREES_OF_PROBE.load(Ordering::SeqCst),
+            before_frees + 1,
+            "freed once, by the library's destroy"
+        );
     }
 }
