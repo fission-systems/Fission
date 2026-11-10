@@ -54,6 +54,26 @@ pub fn recovered_switch_case_values(
     )
 }
 
+/// The `case N: goto target;` arms of a table-driven switch that could not be
+/// structured and has no dispatcher proof. A table slot's label is its position
+/// in the table plus `min_val`; the default's slots are dropped *after*
+/// numbering, because a default entry in the middle of the table still
+/// occupies an ordinal.
+pub fn ordinal_goto_cases(
+    targets: &[u64],
+    default_target: Option<u64>,
+    min_val: i64,
+) -> Vec<PreHirSwitchCase> {
+    recovered_switch_case_values(targets, default_target, min_val, None)
+        .0
+        .into_iter()
+        .map(|(value, target)| PreHirSwitchCase {
+            values: vec![value],
+            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(target))]),
+        })
+        .collect()
+}
+
 pub fn proof_supports_direct_emit(proof: &DispatcherProofUnit) -> bool {
     EmitReadyDecision::from_dispatcher_proof(Some(proof)).emit_ready
         && proof.recovered_cases.len() >= proof.selector_cardinality
@@ -233,5 +253,41 @@ fn normalize_affine_case_expr(expr: &PreHirExpr, value: i64) -> Option<(PreHirEx
                 .map(|normalized| ((*lhs.clone()), normalized))
         }
         _ => Some((expr.clone(), value)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case_values(cases: &[PreHirSwitchCase]) -> Vec<(i64, PreHirStmt)> {
+        cases
+            .iter()
+            .map(|case| (case.values[0], case.body[0].clone()))
+            .collect()
+    }
+
+    /// A table `[A, DEFAULT, B]` has slot 0 -> A and slot 2 -> B. Numbering the
+    /// slots after dropping the default would call B slot 1.
+    #[test]
+    fn a_default_entry_in_the_middle_of_a_table_keeps_its_ordinal() {
+        let cases = ordinal_goto_cases(&[0x10, 0x99, 0x20], Some(0x99), 0);
+        assert_eq!(
+            case_values(&cases),
+            vec![
+                (0, PreHirStmt::Goto(block_label(0x10))),
+                (2, PreHirStmt::Goto(block_label(0x20))),
+            ]
+        );
+    }
+
+    /// Labels start at the recovered minimum, not at zero.
+    #[test]
+    fn ordinals_are_offset_by_the_minimum_selector_value() {
+        let cases = ordinal_goto_cases(&[0x10, 0x99, 0x20], Some(0x99), 5);
+        assert_eq!(
+            cases.iter().map(|case| case.values[0]).collect::<Vec<_>>(),
+            vec![5, 7]
+        );
     }
 }

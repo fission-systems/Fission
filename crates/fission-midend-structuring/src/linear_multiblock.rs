@@ -8,7 +8,7 @@ use crate::cleanup::{cleanup_redundant_labels_protecting, finalize_structured_bo
 use crate::guarded_tail::{
     discover_guarded_tail_candidates, promote_guarded_tail_regions_until_stable,
 };
-use crate::helpers::{block_label, recovered_switch_case_values};
+use crate::helpers::{block_label, ordinal_goto_cases, recovered_switch_case_values};
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator};
 use crate::regions::EmitReadyDecision;
@@ -304,15 +304,7 @@ pub fn build_linear_multiblock_body(
                         })
                         .collect()
                 } else {
-                    targets
-                        .into_iter()
-                        .filter(|target| Some(*target) != default_target)
-                        .enumerate()
-                        .map(|(i, t)| PreHirSwitchCase {
-                            values: vec![min_val + i as i64],
-                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
-                        })
-                        .collect()
+                    ordinal_goto_cases(&targets, default_target, min_val)
                 };
                 body.push(PreHirStmt::Switch {
                     expr,
