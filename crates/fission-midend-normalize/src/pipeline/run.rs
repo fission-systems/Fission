@@ -12,11 +12,10 @@ use super::super::arith::{
     canonicalize_unsigned_compare_operands, cleanup_arithmetic_wrappers, collapse_zero_offset_cast,
     merge_consecutive_shifts, normalize_boolean_logic, recognize_compiler_runtime_division,
     recognize_concat_zext_or, recognize_dumpty_hump_cast, recognize_dumpty_hump_late,
-    recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_magic_number_division,
-    recognize_mod_div_power_of_two, recognize_wide_integer_recombine, recombine_remainder,
-    simplify_collect_mul_terms, simplify_distribute_common_factor, simplify_double_add,
-    simplify_factor_common_mul, simplify_negated_const, simplify_nested_adds_subs,
-    simplify_subpiece_chain,
+    recognize_hi_lo_extract, recognize_humpty_dumpty_or, recognize_mod_div_power_of_two,
+    recognize_wide_integer_recombine, recombine_remainder, simplify_collect_mul_terms,
+    simplify_distribute_common_factor, simplify_double_add, simplify_factor_common_mul,
+    simplify_negated_const, simplify_nested_adds_subs, simplify_subpiece_chain,
 };
 use super::super::cleanup::single_pred_label_inline;
 use super::super::cleanup::{
@@ -2131,7 +2130,6 @@ pub fn normalize_expr(expr: &mut PreHirExpr) {
             .or_else(|| recognize_compiler_runtime_division(expr))
             .or_else(|| recognize_mod_div_power_of_two(expr))
             .or_else(|| recombine_remainder(expr))
-            .or_else(|| recognize_magic_number_division(expr))
             .or_else(|| recognize_hi_lo_extract(expr))
             .or_else(|| simplify_subpiece_chain(expr))
             .or_else(|| merge_consecutive_shifts(expr))
