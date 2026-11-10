@@ -333,22 +333,11 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             .get_attr_u64(entry, DwAt(0x0b))? // DW_AT_byte_size
             .unwrap_or(0) as u32;
 
-        // Extract members from children
-        let mut members = Vec::new();
-        let mut tree = unit.entries_tree(Some(entry.offset()))?;
-        let root = tree.root()?;
-        let mut children = root.children();
-        while let Some(child) = children.next()? {
-            let child_entry = child.entry();
-            if child_entry.tag() == DwTag(0x0d) {
-                // DW_TAG_member
-                if let Some(member) =
-                    self.extract_member_info(child_entry, unit, dwarf, type_cache)?
-                {
-                    members.push(member);
-                }
-            }
-        }
+        // Extract members from children, base classes first: a derived
+        // object begins with its base subobjects.
+        let mut visiting = vec![entry.offset()];
+        let members =
+            self.collect_members(entry.offset(), 0, unit, dwarf, type_cache, &mut visiting)?;
 
         Ok(Some(DwarfTypeInfo {
             name,
@@ -356,6 +345,70 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
             size,
             members,
         }))
+    }
+
+    /// The members of the class/struct at `offset`, with the members of each
+    /// base class (`DW_TAG_inheritance`) placed at that base's
+    /// `DW_AT_data_member_location`, so an access through a pointer to the
+    /// derived class resolves against the inherited fields too.
+    ///
+    /// A base whose location is not a plain constant (virtual inheritance
+    /// stores an expression) is skipped rather than guessed at. `visiting`
+    /// guards against a malformed cycle and the depth is bounded.
+    fn collect_members(
+        &self,
+        offset: UnitOffset<usize>,
+        base_offset: u32,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
+        type_cache: &HashMap<UnitOffset<usize>, String>,
+        visiting: &mut Vec<UnitOffset<usize>>,
+    ) -> Result<Vec<DwarfMemberInfo>, gimli::Error> {
+        const MAX_BASE_DEPTH: usize = 8;
+        let mut members = Vec::new();
+        let mut tree = unit.entries_tree(Some(offset))?;
+        let root = tree.root()?;
+        let mut children = root.children();
+        while let Some(child) = children.next()? {
+            let child_entry = child.entry();
+            match child_entry.tag() {
+                DwTag(0x0d) => {
+                    // DW_TAG_member
+                    if let Some(mut member) =
+                        self.extract_member_info(child_entry, unit, dwarf, type_cache)?
+                    {
+                        member.offset = member.offset.saturating_add(base_offset);
+                        members.push(member);
+                    }
+                }
+                DwTag(0x1c) if visiting.len() <= MAX_BASE_DEPTH => {
+                    // DW_TAG_inheritance
+                    let Some(AttributeValue::UnitRef(base)) = child_entry.attr_value(DwAt(0x49))?
+                    else {
+                        continue;
+                    };
+                    let Some(location) = self.get_member_offset(child_entry)? else {
+                        continue;
+                    };
+                    if visiting.contains(&base) {
+                        continue;
+                    }
+                    visiting.push(base);
+                    let inherited = self.collect_members(
+                        base,
+                        base_offset.saturating_add(location),
+                        unit,
+                        dwarf,
+                        type_cache,
+                        visiting,
+                    );
+                    visiting.pop();
+                    members.extend(inherited?);
+                }
+                _ => {}
+            }
+        }
+        Ok(members)
     }
 
     /// Extract member information from a DW_TAG_member DIE
@@ -372,6 +425,24 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         if name.is_empty() {
             return Ok(None);
         }
+        // A member name is emitted as `p->name`. The compiler's own members
+        // are not always identifiers (GCC's hidden vtable pointer is
+        // `_vptr.Base`), so anything that is not one becomes `_`.
+        let name: String = name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        let name = if name.starts_with(|c: char| c.is_ascii_digit()) {
+            format!("_{name}")
+        } else {
+            name
+        };
 
         let type_name = self
             .resolve_type_ref(entry, unit, type_cache)?
@@ -744,5 +815,112 @@ mod hostile_input_tests {
         assert_eq!(element_count_from_upper_bound(0), 1);
         assert_eq!(element_count_from_upper_bound(9), 10);
         assert_eq!(element_count_from_upper_bound(u64::MAX), 0);
+    }
+}
+
+#[cfg(test)]
+mod inheritance_tests {
+    use super::*;
+    use crate::loader::dwarf::DwarfAnalyzer;
+
+    /// `g++ -O0 -g` builds of `testdata/x64_cpp_methods_{a,b}.cpp`.
+    /// `struct Derived : Base { int b; int c; }` is laid out as its base
+    /// subobject first, then its own members; DWARF lists the base only as a
+    /// `DW_TAG_inheritance` child (type + `DW_AT_data_member_location`).
+    fn types(fixture: &str) -> Vec<DwarfTypeInfo> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(fixture);
+        let binary = crate::loader::LoadedBinary::from_file(&path).expect("load C++ DWARF fixture");
+        DwarfAnalyzer::new(&binary).analyze_types()
+    }
+
+    fn members(info: &DwarfTypeInfo) -> Vec<(&str, u32)> {
+        info.members
+            .iter()
+            .map(|m| (m.name.as_str(), m.offset))
+            .collect()
+    }
+
+    fn named<'t>(all: &'t [DwarfTypeInfo], name: &str) -> &'t DwarfTypeInfo {
+        all.iter().find(|t| t.name == name).unwrap_or_else(|| {
+            panic!(
+                "no type {name}; have {:?}",
+                all.iter().map(|t| &t.name).collect::<Vec<_>>()
+            )
+        })
+    }
+
+    #[test]
+    fn a_derived_class_carries_the_members_of_its_base_at_the_base_offset() {
+        let all = types("testdata/x64_cpp_methods_a.elf");
+        let derived = named(&all, "Derived");
+        let got = members(derived);
+        for expected in [("a", 8), ("tag", 12), ("b", 16), ("c", 20)] {
+            assert!(got.contains(&expected), "{expected:?} missing from {got:?}");
+        }
+    }
+
+    #[test]
+    fn with_two_bases_each_base_is_placed_at_its_own_offset() {
+        let all = types("testdata/x64_cpp_methods_b.elf");
+        let circle = named(&all, "Circle");
+        let got = members(circle);
+        // Shape { long id @0; double scale @8 }, Named { int len; char tag[12] }
+        // placed at 16, then Circle's own `r`.
+        for expected in [("id", 0), ("scale", 8), ("len", 16), ("tag", 20)] {
+            assert!(got.contains(&expected), "{expected:?} missing from {got:?}");
+        }
+        assert!(got.iter().any(|(n, _)| *n == "r"), "{got:?}");
+    }
+
+    /// GCC names the hidden vtable pointer `_vptr.Base`. A member name ends up
+    /// in decompiled C as `p->name`, so it has to be an identifier.
+    #[test]
+    fn member_names_are_c_identifiers() {
+        for fixture in [
+            "testdata/x64_cpp_methods_a.elf",
+            "testdata/x64_cpp_methods_b.elf",
+        ] {
+            for ty in types(fixture) {
+                for m in &ty.members {
+                    let mut chars = m.name.chars();
+                    let first_ok = chars
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+                    assert!(
+                        first_ok && chars.all(|c| c.is_ascii_alphanumeric() || c == '_'),
+                        "{}::{} is not a C identifier",
+                        ty.name,
+                        m.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_hidden_vtable_pointer_keeps_a_recognizable_name() {
+        let all = types("testdata/x64_cpp_methods_a.elf");
+        let base = named(&all, "Base");
+        assert!(
+            base.members
+                .iter()
+                .any(|m| m.name == "_vptr_Base" && m.offset == 0),
+            "{:?}",
+            members(base)
+        );
+    }
+
+    /// The control: a class with no base keeps exactly its own members.
+    #[test]
+    fn a_class_without_a_base_is_unchanged() {
+        let all = types("testdata/x64_cpp_methods_a.elf");
+        let base = named(&all, "Base");
+        let names: Vec<&str> = base.members.iter().map(|m| m.name.as_str()).collect();
+        assert!(names.contains(&"a") && names.contains(&"tag"), "{names:?}");
+        assert_eq!(
+            base.members.iter().filter(|m| m.name == "a").count(),
+            1,
+            "{names:?}"
+        );
     }
 }
