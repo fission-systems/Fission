@@ -302,6 +302,7 @@ impl<'a> PreviewBuilder<'a> {
             jump_targets_cache: None,
             branchind_jump_table_exprs: HashMap::default(),
             string_literal_addresses: HashMap::default(),
+            branchind_bound_probes: HashSet::default(),
             branchind_jump_table_targets: HashMap::default(),
             active_trace_id: None,
             last_trace_id: None,
