@@ -162,7 +162,11 @@ fn run_script_inner(
 
     let ast = match engine.compile(script_source) {
         Ok(a) => a,
-        Err(e) => return ScriptRunResult::error_compile(e.to_string(), &limits),
+        Err(e) => {
+            let mut res = ScriptRunResult::error_compile(e.to_string(), &limits);
+            res.script = Some(meta);
+            return res;
+        }
     };
 
     let host_bin = BinaryHost(bin);
@@ -193,10 +197,20 @@ fn run_script_inner(
     let timed_out = Arc::new(AtomicBool::new(false));
     let deadline = Instant::now() + deadline;
     let timed_out_for_progress = timed_out.clone();
+    let halted_for_progress = halted.clone();
     engine.on_progress(move |_| {
         if Instant::now() >= deadline {
             timed_out_for_progress.store(true, std::sync::atomic::Ordering::Relaxed);
             Some("script exceeded max_runtime_ms".into())
+        } else if halted_for_progress
+            .lock()
+            .map(|h| h.is_some())
+            .unwrap_or(true)
+        {
+            // An output limit was hit: stop the script rather than let it keep
+            // running (and, with a machine, keep changing it) past a result
+            // that is already truncated. The limit is reported once, below.
+            Some("script stopped at an output limit".into())
         } else {
             None
         }
@@ -232,6 +246,10 @@ fn run_script_inner(
     let mut diagnostics = Vec::new();
     match eval_result {
         Ok(_) => {}
+        // Our own stop at an output limit; the limit itself is reported below.
+        Err(e)
+            if matches!(*e, rhai::EvalAltResult::ErrorTerminated(..))
+                && halted.lock().map(|h| h.is_some()).unwrap_or(false) => {}
         Err(e) => diagnostics.push(ScriptDiagnostic {
             severity: "error".into(),
             message: e.to_string(),

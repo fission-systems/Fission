@@ -85,3 +85,59 @@ fn addr_refuses_what_is_not_an_address() {
         );
     }
 }
+
+/// A script that does not compile still says which script it was: the result is
+/// read by something that ran several, and every other outcome names it.
+#[test]
+fn a_compile_error_still_names_the_script() {
+    let result = run("let x = ;");
+    assert_eq!(result.status, ScriptRunStatus::Error);
+    let script = result
+        .script
+        .as_ref()
+        .expect("a compile error carries the script metadata");
+    assert_eq!(script.path, "test.rhai");
+}
+
+/// Once a limit on findings is hit the script is stopped, not left to run on
+/// (a script driving `machine.step()`/`machine.write()` would keep changing the
+/// machine after the result is already truncated). The only diagnostic is the
+/// limit that stopped it, not whatever the rest of the script then ran into.
+#[test]
+fn a_script_that_exceeds_max_findings_is_stopped_not_left_running() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../fission-emulator/testdata/win_x64_write.exe"
+    );
+    let binary = LoadedBinary::from_file(path).expect("load the fixture");
+    let limits = ScriptLimits {
+        max_findings: 2,
+        ..ScriptLimits::default()
+    };
+    // After the third `emit` a loop that would blow the operation budget.
+    let source = r#"
+        emit(#{ kind: "a" });
+        emit(#{ kind: "b" });
+        emit(#{ kind: "c" });
+        let n = 0;
+        loop { n += 1; if n > 100_000_000 { break; } }
+    "#;
+    let result = run_script_with(
+        &binary,
+        source,
+        "limit.rhai",
+        limits,
+        ScriptOptions { machine: false },
+    );
+    assert_eq!(result.findings.len(), 2);
+    let messages: Vec<&str> = result
+        .diagnostics
+        .iter()
+        .map(|d| d.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["script exceeded max_findings limit"],
+        "the script must stop at the limit: {messages:?}"
+    );
+}
