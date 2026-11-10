@@ -179,6 +179,52 @@ fn recover_relative_switch_selector(
 /// selector * Const(scale) + Const(base)         (commuted)
 /// selector * Const(scale)                        (relocatable: implicit base 0)
 /// ```
+/// Put back the address of a string literal that is really the base of a jump
+/// table.
+///
+/// The literal reading is right for a constant the code passes around, and
+/// wrong for a table whose first entry's low bytes are printable and end in a
+/// zero byte (`44 20 00 01` reads as `"D "`). Only an address with one
+/// unambiguous literal is restored, and only inside the arithmetic of a load's
+/// address, which is where a table base lives.
+pub(super) fn restore_literal_table_bases<S: std::hash::BuildHasher>(
+    expr: PreHirExpr,
+    known: &std::collections::HashMap<String, Option<u64>, S>,
+    in_address: bool,
+) -> PreHirExpr {
+    match expr {
+        PreHirExpr::AddressOfGlobal(name) if in_address => match known.get(&name) {
+            Some(Some(address)) => PreHirExpr::Const(
+                *address as i64,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
+            _ => PreHirExpr::AddressOfGlobal(name),
+        },
+        PreHirExpr::Load { ptr, ty } => PreHirExpr::Load {
+            ptr: Box::new(restore_literal_table_bases(*ptr, known, true)),
+            ty,
+        },
+        PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
+            ty,
+            expr: Box::new(restore_literal_table_bases(*expr, known, in_address)),
+        },
+        PreHirExpr::Binary { op, lhs, rhs, ty }
+            if in_address && matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Mul) =>
+        {
+            PreHirExpr::Binary {
+                op,
+                lhs: Box::new(restore_literal_table_bases(*lhs, known, true)),
+                rhs: Box::new(restore_literal_table_bases(*rhs, known, true)),
+                ty,
+            }
+        }
+        other => other,
+    }
+}
+
 fn extract_table_base_and_selector(addr: &PreHirExpr) -> Option<(u64, &PreHirExpr, u64, bool)> {
     let mut const_base = 0u64;
     let mut saw_const = false;
@@ -728,5 +774,44 @@ mod tests {
             0x5000,
             &opts
         ));
+    }
+
+    #[test]
+    fn a_literal_table_base_is_restored_to_its_address_only_inside_a_load() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let table = || PreHirExpr::AddressOfGlobal("\"D \"".to_string());
+        let entry = |base: PreHirExpr| PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(base),
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Var("idx".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(8, u64_ty.clone())),
+                    ty: u64_ty.clone(),
+                }),
+                ty: u64_ty.clone(),
+            }),
+            ty: u64_ty.clone(),
+        };
+        let known = std::collections::HashMap::from([("\"D \"".to_string(), Some(0x1002044u64))]);
+        let opts = options_with_section(0x1002000, 0x1003000);
+
+        // The literal hid the table: nothing to recover from.
+        assert!(recover_switch_discriminant(&entry(table()), &opts).is_none());
+        let restored = restore_literal_table_bases(entry(table()), &known, false);
+        let selector = recover_switch_discriminant(&restored, &opts).expect("table recovered");
+        assert_eq!(selector.table_base, 0x1002044);
+
+        // A literal that is not under a load keeps meaning the string.
+        let bare = restore_literal_table_bases(table(), &known, false);
+        assert!(matches!(bare, PreHirExpr::AddressOfGlobal(_)));
+        // One text at several addresses is ambiguous, so it is left alone.
+        let ambiguous = std::collections::HashMap::from([("\"D \"".to_string(), None)]);
+        let kept = restore_literal_table_bases(entry(table()), &ambiguous, false);
+        assert!(recover_switch_discriminant(&kept, &opts).is_none());
     }
 }
