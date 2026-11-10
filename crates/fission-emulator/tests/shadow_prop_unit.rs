@@ -168,3 +168,28 @@ fn host_reg_file_mirrors_register_writes() {
     let _ = state.read_space(reg, off, 8).unwrap();
     assert!(state.reg_cache_hits >= hits);
 }
+
+/// A COPY of a value whose bytes carry different symbolic nodes keeps each
+/// byte's node: taint is per byte, so byte 1 of the copy is byte 1 of the
+/// source, not a repeat of byte 0.
+#[test]
+fn shadow_copy_keeps_each_bytes_own_node() {
+    let mut emu = mini_emu();
+    let uniq = emu.state.unique_space();
+    emu.state.set_shadow_memory(uniq, 0x10, 101);
+    emu.state.set_shadow_memory(uniq, 0x11, 202);
+    emu.state.set_shadow_memory(uniq, 0x12, 303);
+    // Byte 3 is concrete.
+    let emu_ptr = &mut emu as *mut Emulator;
+
+    jit_shadow_copy(emu_ptr, uniq, 0x20, 4, uniq, 0x10);
+
+    assert_eq!(emu.state.get_shadow_memory(uniq, 0x20), Some(101));
+    assert_eq!(emu.state.get_shadow_memory(uniq, 0x21), Some(202));
+    assert_eq!(emu.state.get_shadow_memory(uniq, 0x22), Some(303));
+    assert_eq!(
+        emu.state.get_shadow_memory(uniq, 0x23),
+        Some(101),
+        "a clean byte next to a tainted byte 0 is still filled from byte 0, as LOAD does"
+    );
+}
