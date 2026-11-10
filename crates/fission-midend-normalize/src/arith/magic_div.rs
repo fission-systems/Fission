@@ -683,7 +683,7 @@ fn recognize_signed(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
         return None;
     };
     let x = strip_extensions(mask_operand, ctx);
-    let w = value_bits(x, ctx).filter(|w| (8..=32).contains(w))?;
+    let w = value_bits(x, ctx).filter(|w| (8..=64).contains(w))?;
     // The difference is a `w`-bit value; that truncation is what makes a
     // logical high-half shift below equal to the arithmetic one.
     if int_bits(sub_ty) != Some(w) {
@@ -698,7 +698,9 @@ fn recognize_signed(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
         return None;
     }
     let (d, e) = magic_parameters(m, n)?;
-    if (1i128 << (w - 1)) * e > (1i128 << n) {
+    // `2^(w-1) * e` can pass `i128` for a 64-bit dividend; that is far past
+    // `2^n` (`n < 100`), so an overflow is a rejection, exactly.
+    if (1i128 << (w - 1)).checked_mul(e)? > (1i128 << n) {
         return None;
     }
     Some(division(as_int(x, w, true, ctx), d, w, true))
@@ -1421,6 +1423,78 @@ mod tests {
             }
         }
         assert!(accepted > 10, "the sweep must exercise the recognizer");
+    }
+
+    /// `((long long)((__int128)x * m >> 64) >> k) - (x >> 63)`: a signed 64-bit
+    /// division as the lifter records it (signed 128-bit product, arithmetic high
+    /// half read through a 64-bit cast).
+    fn signed_64_bit_division(m: i64, k: i64) -> PreHirExpr {
+        let s64 = i(64, true);
+        let s128 = i(128, true);
+        let hi = bin(
+            PreHirBinaryOp::Sar,
+            bin(
+                PreHirBinaryOp::Mul,
+                cast(s128.clone(), var("x")),
+                konst(m, s128.clone()),
+                s128.clone(),
+            ),
+            konst(64, i(64, false)),
+            i(128, false),
+        );
+        bin(
+            PreHirBinaryOp::Sub,
+            bin(
+                PreHirBinaryOp::Sar,
+                cast(s64.clone(), hi),
+                konst(k, i(32, false)),
+                s64.clone(),
+            ),
+            bin(
+                PreHirBinaryOp::Sar,
+                var("x"),
+                konst(63, i(32, false)),
+                s64.clone(),
+            ),
+            s64,
+        )
+    }
+
+    fn signed_ctx_with_x(bits: u32) -> Ctx {
+        let mut tys = crate::HashMap::default();
+        tys.insert("x".to_string(), i(bits, true));
+        Ctx {
+            tys,
+            address_taken: Default::default(),
+        }
+    }
+
+    #[test]
+    fn signed_64_bit_division_by_ten_as_the_lifter_records_it() {
+        // 7378697629483820647 >> (64 + 2) is x / 10.
+        let found = recognize_signed(
+            &signed_64_bit_division(7378697629483820647, 2),
+            &signed_ctx_with_x(64),
+        )
+        .expect("x / 10");
+        let PreHirExpr::Binary { op, rhs, ty, .. } = &found else {
+            panic!("expected a division, got {found:?}");
+        };
+        assert_eq!(*op, PreHirBinaryOp::Div);
+        assert_eq!(**rhs, konst(10, i(64, true)));
+        assert_eq!(*ty, i(64, true));
+    }
+
+    #[test]
+    fn signed_64_bit_multiplier_that_is_not_a_division_is_left_alone() {
+        // Far enough off the /10 multiplier that some x rounds the wrong way.
+        assert!(
+            recognize_signed(
+                &signed_64_bit_division(7378697629483820647 + 1_000_000_000, 2),
+                &signed_ctx_with_x(64),
+            )
+            .is_none()
+        );
     }
 
     // ── The arithmetic claim, checked against brute force ────────────────────
