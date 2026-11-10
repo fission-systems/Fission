@@ -24,7 +24,10 @@ pub fn run(args: DbArgs) -> Result<()> {
     // the functions the container's symbol table names, and refuses to name
     // one that `list` had just printed -- which is how this was found.
     let _ = fission_static::analysis::discover_functions_with_runtime(&mut binary);
-    let path = Project::default_path(&args.binary);
+    let path = args
+        .project_path
+        .clone()
+        .unwrap_or_else(|| Project::default_path(&args.binary));
 
     let read_only = matches!(
         &args.command,
