@@ -235,9 +235,13 @@ fn read_encoded(
 /// `first_action` (as stored in a call-site table entry's `cs_action`
 /// field), returning the type filters tried in order. Each action record is
 /// `(filter: sleb128, next_disp: sleb128)`; `next_disp == 0` ends the chain,
-/// otherwise the next record is at `record_start + next_disp` -- relative to
-/// where *this* record started, not where `next_disp` itself is stored (the
-/// convention libgcc's `unwind-c.c` `PERSONALITY_FUNCTION` uses).
+/// otherwise the next record is at the address of the `next_disp` field plus
+/// `next_disp` -- relative to where that field itself is stored, after the
+/// filter, not to where the record started (the Itanium ABI, and what
+/// libgcc's `unwind-c.c` does: it reads the filter, then advances from the
+/// position of the displacement). Measuring from the record start walks into
+/// the middle of a record whenever a chain has more than one link, i.e.
+/// whenever a `try` has more than one `catch`.
 fn resolve_action_chain(
     data: &[u8],
     action_table_start: usize,
@@ -248,15 +252,15 @@ fn resolve_action_chain(
         .checked_add(first_action)?
         .checked_sub(1)?;
     for _ in 0..64 {
-        let record_start = pos;
         let mut cur = Cursor::at(data, pos);
         let filter = cur.sleb128()?;
+        let disp_field = cur.pos;
         let disp = cur.sleb128()?;
         chain.push(filter);
         if disp == 0 {
             return Some(chain);
         }
-        pos = usize::try_from(i64::try_from(record_start).ok()?.checked_add(disp)?).ok()?;
+        pos = usize::try_from(i64::try_from(disp_field).ok()?.checked_add(disp)?).ok()?;
     }
     None // malformed or cyclic chain -- bail rather than loop forever
 }
@@ -501,5 +505,103 @@ mod tests {
                 symbol: None, // no relocation table wired into this unit test
             }]
         );
+    }
+}
+
+#[cfg(test)]
+mod action_chain_tests {
+    use super::*;
+
+    /// `guarded()`'s LSDA from `testdata/x64_cpp_eh_dyn.elf` (g++ -O0, non-PIE):
+    /// three `catch` clauses, so the call site's action chain is
+    /// `(1, -3) -> (2, -3) -> (3, 0)`. Each displacement is relative to *its own
+    /// field* (the Itanium ABI and libgcc's `unwind-c.c`), so `-3` from the
+    /// field of record 1 lands on record 2. `ttype_encoding` is `udata4`.
+    const GUARDED: [u8; 32] = [
+        0xff, 0x03, 0x1d, 0x01, 0x08, 0x11, 0x05, 0x1d, 0x05, 0x38, 0x05, 0x00, 0x00, 0x03, 0x00,
+        0x02, 0x7d, 0x01, 0x7d, 0x00, 0x40, 0x3d, 0x40, 0x00, 0xa8, 0x3d, 0x40, 0x00, 0x10, 0x20,
+        0x40, 0x00,
+    ];
+    const LSDA_VMA: u64 = 0x402190;
+    const REGION: u64 = 0x40125c;
+
+    fn parse() -> Option<LsdaInfo> {
+        let read_at = |addr: u64, len: usize| {
+            let offset = usize::try_from(addr.checked_sub(LSDA_VMA)?).ok()?;
+            GUARDED.get(offset..offset + len).map(<[u8]>::to_vec)
+        };
+        let symbol_at = |addr: u64| match addr {
+            0x403da8 => Some("typeinfo for std::exception".to_string()),
+            0x403d40 => Some("typeinfo for int".to_string()),
+            _ => None,
+        };
+        parse_lsda(&GUARDED, LSDA_VMA, REGION, true, &read_at, &symbol_at)
+    }
+
+    #[test]
+    fn a_chain_of_several_catch_clauses_is_followed_to_its_end() {
+        let info = parse().expect("a multi-catch LSDA must parse, not be dropped");
+        assert_eq!(info.call_sites[0].action_chain, vec![1, 2, 3]);
+        assert_eq!(info.call_sites[0].landing_pad, Some(REGION + 0x1d));
+    }
+
+    #[test]
+    fn every_filter_of_the_chain_gets_its_type_table_entry() {
+        let info = parse().expect("parse");
+        let addresses: Vec<u64> = info.type_table.iter().map(|t| t.address).collect();
+        // filter N is stored at ttype_base - 4 * N
+        assert_eq!(addresses, vec![0x402010, 0x403da8, 0x403d40]);
+        let symbols: Vec<Option<&str>> = info
+            .type_table
+            .iter()
+            .map(|t| t.symbol.as_deref())
+            .collect();
+        assert_eq!(
+            symbols,
+            vec![
+                None,
+                Some("typeinfo for std::exception"),
+                Some("typeinfo for int")
+            ]
+        );
+    }
+
+    /// End to end on the real file: `guarded()` has three `catch` clauses and
+    /// used to be missing from `eh_lsda` altogether, taking its landing pad
+    /// with it.
+    #[test]
+    fn a_multi_catch_function_is_present_in_the_loaded_binary() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_cpp_eh_dyn.elf");
+        let binary = crate::loader::LoadedBinary::from_file(&path).expect("load fixture");
+        let guarded = binary
+            .eh_lsda
+            .get(&REGION)
+            .expect("guarded()'s LSDA is in eh_lsda");
+        assert_eq!(guarded.call_sites[0].action_chain, vec![1, 2, 3]);
+        let symbols: Vec<Option<&str>> = guarded
+            .type_table
+            .iter()
+            .map(|t| t.symbol.as_deref())
+            .collect();
+        assert_eq!(symbols[1], Some("typeinfo for std::exception"));
+        assert_eq!(symbols[2], Some("typeinfo for int"));
+        // risky()'s cleanup-only LSDA, found before the fix too, stays.
+        assert!(binary.eh_lsda.contains_key(&0x4011a6));
+    }
+
+    /// The control the existing fixture tests rely on: a one-record chain
+    /// (`next == 0`) is unaffected by which origin the displacement uses.
+    #[test]
+    fn a_single_record_chain_is_unchanged() {
+        assert_eq!(resolve_action_chain(&[0x01, 0x00], 0, 1), Some(vec![1]));
+    }
+
+    /// A displacement walking out of the table ends the walk instead of
+    /// reading garbage.
+    #[test]
+    fn a_chain_that_leaves_the_table_is_refused() {
+        // record (1, -100): the "next" record would be before the table
+        assert_eq!(resolve_action_chain(&[0x01, 0x9c, 0x7f], 0, 1), None);
     }
 }
