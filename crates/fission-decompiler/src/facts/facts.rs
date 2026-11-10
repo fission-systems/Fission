@@ -769,17 +769,41 @@ fn build_nir_call_effect_summaries(
     // will call it by. A local `report-and-die` helper has no import symbol
     // and no `CallTargetRef`, so nothing above ever reaches it -- and on a
     // stripped binary that helper is every `exit` wrapper the program has.
-    for address in fission_static::analysis::noreturn::no_return_functions_for(binary) {
-        let entry = result
-            .entry(format!("sub_{address:x}"))
-            .or_insert(NirCallEffectSummary::default());
-        if entry.may_exit.is_none() {
-            entry.may_exit = Some(true);
-            entry.source = Some(CallEffectSummarySource::TransitiveNoReturnAnalysis);
-        }
-    }
+    record_transitive_no_return(
+        &mut result,
+        call_target_refs,
+        fission_static::analysis::noreturn::no_return_functions_for(binary),
+    );
 
     result
+}
+
+/// Record `may_exit` for functions the whole-binary fixpoint proved no-return.
+///
+/// The renderer looks a callee up by the name it prints, which is the resolved
+/// call-target symbol when one exists and `sub_<addr>` otherwise. Keying only
+/// the generic form left a symbol-named helper (`die`) unrecognised while the
+/// identical function in a stripped build (`sub_401146`) was recognised, so
+/// the same code rendered differently depending on whether its name survived.
+fn record_transitive_no_return(
+    result: &mut HashMap<String, NirCallEffectSummary>,
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+    addresses: impl IntoIterator<Item = u64>,
+) {
+    for address in addresses {
+        let generic = format!("sub_{address:x}");
+        let named = call_target_refs
+            .get(&address)
+            .map(|target_ref| target_ref.symbol.clone())
+            .filter(|symbol| *symbol != generic);
+        for key in std::iter::once(generic).chain(named) {
+            let entry = result.entry(key).or_default();
+            if entry.may_exit.is_none() {
+                entry.may_exit = Some(true);
+                entry.source = Some(CallEffectSummarySource::TransitiveNoReturnAnalysis);
+            }
+        }
+    }
 }
 
 fn ghidra_no_return_compiler_key(binary: &LoadedBinary) -> Option<&'static str> {
@@ -2578,6 +2602,42 @@ mod tests {
         let mut ctx = NirTypeContext::default();
         ctx.call_targets.insert(addr, name.to_string());
         ctx
+    }
+
+    #[test]
+    fn transitive_no_return_is_recorded_under_the_symbol_the_renderer_prints() {
+        let named_addr = 0x401146;
+        let anonymous_addr = 0x401200;
+        let refs = HashMap::from([(
+            named_addr,
+            CallTargetRef {
+                address: Some(named_addr),
+                symbol: "die".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        )]);
+        // A later-resolved symbol must not be overwritten by the default entry.
+        let mut result = HashMap::from([(
+            "die".to_string(),
+            NirCallEffectSummary {
+                source: Some(CallEffectSummarySource::CallTargetRef),
+                ..NirCallEffectSummary::default()
+            },
+        )]);
+
+        super::record_transitive_no_return(&mut result, &refs, [named_addr, anonymous_addr]);
+
+        for key in ["die", "sub_401146", "sub_401200"] {
+            assert_eq!(result[key].may_exit, Some(true), "{key}");
+            assert_eq!(
+                result[key].source,
+                Some(CallEffectSummarySource::TransitiveNoReturnAnalysis),
+                "{key}"
+            );
+        }
+        assert_eq!(result.len(), 3);
     }
 
     #[test]
