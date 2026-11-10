@@ -243,7 +243,14 @@ impl<'a> PreviewBuilder<'a> {
                     .insert(block_key, expr.clone());
                 Some(expr)
             }
-            None => self.branchind_jump_table_exprs.get(&block_key).cloned(),
+            // Only a table that decoded once is worth looking through to: with no
+            // targets behind it the recovered selector would be the only thing
+            // the dispatch had, and a dispatch with a selector and no targets
+            // lowers to a bare `return`.
+            None if self.branchind_jump_table_targets.contains_key(&block_key) => {
+                self.branchind_jump_table_exprs.get(&block_key).cloned()
+            }
+            None => None,
         };
 
         match (
