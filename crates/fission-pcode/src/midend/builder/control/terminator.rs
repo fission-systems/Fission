@@ -1925,13 +1925,65 @@ impl<'a> PreviewBuilder<'a> {
                             let mut inferred_single_input_target = false;
                             let mut recovered_case_map = None;
                             let mut recovered_selector_cardinality = None;
-                            if let Some(recovered_targets) = this
+                            let block_key = this.block_target_key(idx);
+                            let inferred_targets = this
                                 .infer_branchind_targets_from_jump_table_expr(
                                     idx,
                                     &switch_expr,
                                     selector_alias.as_ref(),
                                 )
-                            {
+                                .inspect(|found| {
+                                    // Keep the case map as table positions: its
+                                    // values are in terms of the selector this
+                                    // lowering found (`orig` when it saw
+                                    // `orig - min`), and a later lowering can
+                                    // find the already-subtracted variable.
+                                    let min_val = super::switch_table::recover_switch_discriminant(
+                                        &switch_expr,
+                                        &this.options,
+                                    )
+                                    .map_or(0, |recovered| recovered.min_val);
+                                    this.branchind_jump_table_targets.insert(
+                                        block_key,
+                                        (
+                                            found.unique_targets.clone(),
+                                            found
+                                                .recovered_cases
+                                                .iter()
+                                                .map(|(value, target)| {
+                                                    (value.wrapping_sub(min_val), *target)
+                                                })
+                                                .collect(),
+                                            found.selector_cardinality,
+                                            found.decode_mode,
+                                        ),
+                                    );
+                                })
+                                .or_else(|| {
+                                    // Only when this lowering still shows the table:
+                                    // a stale answer must not apply to some other
+                                    // dispatch that merely shares a block key.
+                                    let min_val = super::switch_table::recover_switch_discriminant(
+                                        &switch_expr,
+                                        &this.options,
+                                    )?
+                                    .min_val;
+                                    let (unique_targets, positions, cardinality, mode) =
+                                        this.branchind_jump_table_targets.get(&block_key)?.clone();
+                                    let recovered_cases = positions
+                                        .into_iter()
+                                        .map(|(position, target)| {
+                                            (position.wrapping_add(min_val), target)
+                                        })
+                                        .collect();
+                                    Some(InferredJumpTableTargets {
+                                        unique_targets,
+                                        recovered_cases,
+                                        selector_cardinality: cardinality,
+                                        decode_mode: mode,
+                                    })
+                                });
+                            if let Some(recovered_targets) = inferred_targets {
                                 merge_inferred_branchind_targets(
                                     &mut targets,
                                     recovered_targets,

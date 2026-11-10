@@ -57,6 +57,19 @@ static FACTS_CACHE: OnceLock<
     Mutex<LruCache<String, std::sync::Arc<OnceLock<CachedControlFlowFacts>>>>,
 > = OnceLock::new();
 
+/// Cache key: the file's hash plus a digest of the function list the facts are
+/// built from.
+fn facts_cache_key(binary: &LoadedBinary) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    binary.functions.len().hash(&mut hasher);
+    for function in &binary.functions {
+        function.address.hash(&mut hasher);
+        function.size.hash(&mut hasher);
+    }
+    format!("{}:{:016x}", binary.hash, hasher.finish())
+}
+
 fn facts_cache()
 -> &'static Mutex<LruCache<String, std::sync::Arc<OnceLock<CachedControlFlowFacts>>>> {
     FACTS_CACHE.get_or_init(|| {
@@ -106,7 +119,10 @@ fn with_control_flow_facts_and_seeds<R>(
     seeds: Option<&mut DecodeSeeds>,
     project: impl FnOnce(AssembledControlFlowFacts<'_>) -> R,
 ) -> R {
-    let hash = binary.hash.clone();
+    // The file's hash does not change when discovery adds functions, but the
+    // extents and leaders built from `binary.functions` do: key on both, so
+    // facts taken before discovery are not served after it.
+    let hash = facts_cache_key(binary);
 
     let slot = {
         let mut cache = facts_cache()
@@ -1000,6 +1016,7 @@ mod tests {
                             size: if offset == 252 { 4 } else { 8 },
                             addend: 0,
                             symbol_name: None,
+                            symbol_address: None,
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -1084,6 +1101,7 @@ mod tests {
                     size: 8,
                     addend: 0,
                     symbol_name: None,
+                    symbol_address: None,
                 }])
                 .build()
                 .expect("patched range fixture");
@@ -1105,6 +1123,60 @@ mod tests {
         let expected = facts.decode_context_for(&binary, 0x1000, 128);
         assert_eq!(expected.jump_table_targets, vec![0x1020, 0x1040]);
         assert_eq!(assembled.decode_context_for(&binary, 0x1000, 128), expected);
+    }
+
+    fn sample_with_functions(functions: &[(&str, u64, u64)]) -> LoadedBinary {
+        let mut builder = LoadedBinaryBuilder::new(
+            "order.exe".to_string(),
+            DataBuffer::Heap(vec![0x90; 0x1000]),
+        )
+        .format("PE")
+        .is_64bit(true)
+        .image_base(0x1000)
+        .add_section(fission_loader::loader::SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x1000,
+            file_offset: 0,
+            file_size: 0x1000,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        });
+        for (name, address, size) in functions {
+            builder = builder.add_function(FunctionInfo {
+                name: (*name).to_string(),
+                address: *address,
+                size: *size,
+                ..Default::default()
+            });
+        }
+        builder.build().expect("build")
+    }
+
+    /// The cache is keyed by the file's hash, which discovery does not change.
+    /// Facts taken before discovery added a function must not be what a caller
+    /// gets after it: the new function's boundary would be missing and the one
+    /// before it would run over into it.
+    #[test]
+    fn facts_taken_before_discovery_are_not_served_after_it() {
+        let before = sample_with_functions(&[("first", 0x1000, 0)]);
+        let after = sample_with_functions(&[("first", 0x1000, 0), ("second", 0x1100, 32)]);
+        assert_eq!(
+            before.hash, after.hash,
+            "same file, different discovery state"
+        );
+
+        let stale = control_flow_facts_for(&before);
+        assert_eq!(stale.function_extents.get(&0x1000).copied(), Some(0x2000));
+
+        let fresh = control_flow_facts_for(&after);
+        assert_eq!(
+            fresh.function_extents.get(&0x1000).copied(),
+            Some(0x1100),
+            "`first` ends where `second` starts once `second` is known"
+        );
+        assert!(fresh.function_extents.contains_key(&0x1100));
     }
 
     #[test]
@@ -1259,6 +1331,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: None,
+                symbol_address: None,
             }])
             .build()
             .expect("build");
@@ -1338,6 +1411,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: None,
+                symbol_address: None,
             }])
             .build()
             .expect("build");

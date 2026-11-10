@@ -698,9 +698,17 @@ fn build_relocations(binary: &LoadedBinary, symbols: &[SymbolRecord]) -> Vec<Rel
         .enumerate()
         .map(|(index, relocation)| {
             let symbol = relocation.symbol_name.as_deref().and_then(|name| {
-                symbol_ids_at_address
-                    .get(&(relocation.address, name))
-                    .copied()
+                // The symbol-table index the relocation carried, resolved to an
+                // address by the loader, says which of several same-named
+                // symbols it means. Without one, the first of that name.
+                relocation
+                    .symbol_address
+                    .and_then(|address| symbol_ids_at_address.get(&(address, name)).copied())
+                    .or_else(|| {
+                        symbol_ids_at_address
+                            .get(&(relocation.address, name))
+                            .copied()
+                    })
                     .or_else(|| first_symbol_id_by_name.get(name).copied())
             });
             RelocationRecord {
@@ -829,6 +837,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: Some("global_value".into()),
+                symbol_address: None,
             }])
             .build()
             .expect("fixture should build")
@@ -860,6 +869,37 @@ mod tests {
         assert_eq!(first.memory_block, Some(MemoryBlockId(0)));
         assert_eq!(snapshot.relocations.len(), 1);
         assert!(snapshot.relocations[0].symbol.is_some());
+    }
+
+    /// Two symbols named `dup` (static functions in different files); the
+    /// relocation's own symbol address says which one it means.
+    #[test]
+    fn a_relocation_binds_to_the_same_named_symbol_it_points_at() {
+        let binary = LoadedBinaryBuilder::new("fixture.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .entry_point(0x1000)
+            .is_64bit(true)
+            .add_global_symbol(0x1000, "dup".into())
+            .add_global_symbol(0x1010, "dup".into())
+            .add_relocations([RelocationEntry {
+                address: 0x2000,
+                r_type: 1,
+                size: 8,
+                addend: 0,
+                symbol_name: Some("dup".into()),
+                symbol_address: Some(0x1010),
+            }])
+            .build()
+            .expect("fixture should build");
+        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let bound = snapshot.relocations[0].symbol.expect("bound to a symbol");
+        let symbol = snapshot
+            .symbols
+            .iter()
+            .find(|symbol| symbol.id == bound)
+            .expect("the bound symbol exists");
+        assert_eq!(symbol.address, 0x1010);
     }
 
     #[test]
@@ -1236,6 +1276,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: Some("external_printf".into()),
+                symbol_address: None,
             }])
             .build()
             .expect("fixture should build");

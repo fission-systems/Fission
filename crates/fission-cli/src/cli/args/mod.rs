@@ -264,6 +264,11 @@ pub struct DbArgs {
     /// Output in JSON format
     #[arg(short, long, global = true)]
     pub json: bool,
+
+    /// Where the decisions live, from the global `--db`; beside the binary
+    /// when absent. Filled in after parsing, not a flag of its own.
+    #[arg(skip)]
+    pub project_path: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
@@ -1055,6 +1060,10 @@ where
                 parsed.args.analysis_db = analysis_db;
                 parsed.args.no_analysis_db = no_analysis_db;
                 ParsedInvocation::OneShot(parsed)
+            }
+            ParsedInvocation::Db(mut db) => {
+                db.project_path = analysis_db;
+                ParsedInvocation::Db(db)
             }
             other => other,
         }

@@ -1766,3 +1766,148 @@ fn a_dead_chain_is_removed_by_the_driver_and_a_live_result_is_kept() {
         "only the value the return reads survives"
     );
 }
+
+// ---- constant folding reads each constant at its own width -------------------
+//
+// A 4-byte `-16` can be held as 0xfffffff0 (zero-extended) or as -16
+// (sign-extended); both are the same p-code value, and a fold must give the
+// same answer for either.
+
+fn fold(opcode: PcodeOpcode, out_size: u32, lhs: (i64, u32), rhs: (i64, u32)) -> (i64, u32) {
+    let optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+    let op = PcodeOp {
+        seq_num: 0,
+        opcode,
+        address: 0x1000,
+        output: Some(Varnode {
+            space_id: 1,
+            offset: 0x100,
+            size: out_size,
+            is_constant: false,
+            constant_val: 0,
+        }),
+        inputs: vec![
+            Varnode::constant(lhs.0, lhs.1),
+            Varnode::constant(rhs.0, rhs.1),
+        ],
+        asm_mnemonic: None,
+    };
+    let folded = optimizer
+        .rules
+        .try_optimize(&op)
+        .expect("a constant fold applies");
+    assert_eq!(folded.opcode, PcodeOpcode::Copy, "{opcode:?}");
+    let value = &folded.inputs[0];
+    assert!(value.is_constant);
+    // The value at the output's width, however the constant is stored.
+    let bits = out_size * 8;
+    let masked = if bits >= 64 {
+        value.constant_val as u64
+    } else {
+        (value.constant_val as u64) & ((1u64 << bits) - 1)
+    };
+    (masked as i64, out_size)
+}
+
+const NEG16_ZEXT: i64 = 0xffff_fff0;
+const NEG16_SEXT: i64 = -16;
+
+#[test]
+fn signed_less_reads_narrow_negative_constants_as_negative() {
+    for neg in [NEG16_ZEXT, NEG16_SEXT] {
+        // -16 <s 0 is true for a 4-byte operand
+        assert_eq!(
+            fold(PcodeOpcode::IntSLess, 1, (neg, 4), (0, 4)).0,
+            1,
+            "{neg}"
+        );
+        assert_eq!(
+            fold(PcodeOpcode::IntSLess, 1, (0, 4), (neg, 4)).0,
+            0,
+            "{neg}"
+        );
+        assert_eq!(
+            fold(PcodeOpcode::IntSLessEqual, 1, (neg, 4), (0, 4)).0,
+            1,
+            "{neg}"
+        );
+    }
+}
+
+#[test]
+fn unsigned_less_reads_narrow_negative_constants_as_large() {
+    for neg in [NEG16_ZEXT, NEG16_SEXT] {
+        // 0xfffffff0 <u 1 is false; 1 <u 0xfffffff0 is true
+        assert_eq!(
+            fold(PcodeOpcode::IntLess, 1, (neg, 4), (1, 4)).0,
+            0,
+            "{neg}"
+        );
+        assert_eq!(
+            fold(PcodeOpcode::IntLess, 1, (1, 4), (neg, 4)).0,
+            1,
+            "{neg}"
+        );
+    }
+}
+
+#[test]
+fn right_shifts_of_a_narrow_negative_constant() {
+    for neg in [NEG16_ZEXT, NEG16_SEXT] {
+        // logical: 0xfffffff0 >> 4 = 0x0fffffff
+        assert_eq!(
+            fold(PcodeOpcode::IntRight, 4, (neg, 4), (4, 4)).0,
+            0x0fff_ffff,
+            "{neg}"
+        );
+        // arithmetic: -16 >>s 4 = -1 = 0xffffffff
+        assert_eq!(
+            fold(PcodeOpcode::IntSRight, 4, (neg, 4), (4, 4)).0,
+            0xffff_ffff,
+            "{neg}"
+        );
+    }
+}
+
+#[test]
+fn division_and_remainder_of_narrow_negative_constants() {
+    for neg in [NEG16_ZEXT, NEG16_SEXT] {
+        // signed: -16 / 3 = -5, -16 % 3 = -1
+        assert_eq!(
+            fold(PcodeOpcode::IntSDiv, 4, (neg, 4), (3, 4)).0,
+            0xffff_fffb,
+            "{neg}"
+        );
+        assert_eq!(
+            fold(PcodeOpcode::IntSRem, 4, (neg, 4), (3, 4)).0,
+            0xffff_ffff,
+            "{neg}"
+        );
+        // unsigned: 0xfffffff0 / 3 = 0x55555550, % 3 = 0
+        assert_eq!(
+            fold(PcodeOpcode::IntDiv, 4, (neg, 4), (3, 4)).0,
+            0x5555_5550,
+            "{neg}"
+        );
+        assert_eq!(fold(PcodeOpcode::IntRem, 4, (neg, 4), (3, 4)).0, 0, "{neg}");
+    }
+}
+
+#[test]
+fn equal_compares_constants_at_their_width() {
+    // The same 4-byte value stored two ways is equal.
+    assert_eq!(
+        fold(PcodeOpcode::IntEqual, 1, (NEG16_ZEXT, 4), (NEG16_SEXT, 4)).0,
+        1
+    );
+    assert_eq!(
+        fold(
+            PcodeOpcode::IntNotEqual,
+            1,
+            (NEG16_ZEXT, 4),
+            (NEG16_SEXT, 4)
+        )
+        .0,
+        0
+    );
+}

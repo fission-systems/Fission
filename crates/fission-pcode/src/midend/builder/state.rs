@@ -178,9 +178,28 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) active_linear_body_keys: BuilderCacheSet<LinearBodyCacheKey>,
     pub(crate) active_conditional_tail_keys: BuilderCacheSet<ConditionalTailKey>,
     pub(crate) jump_targets_cache: Option<HashSet<u64>>,
+    /// The table-load expression a jump-table dispatch was first lowered to,
+    /// by block. Once the load is materialised into a variable, lowering the
+    /// same `BranchInd` yields only that variable, which names no table.
+    pub(crate) branchind_jump_table_exprs: HashMap<u64, PreHirExpr>,
+    /// Where each string literal a constant was read as came from; `None` when
+    /// one text sits at several addresses. A jump table whose first entry's
+    /// bytes happen to spell a short string is lowered as that literal, and the
+    /// table's address is then only recoverable from here.
+    pub(crate) string_literal_addresses: HashMap<String, Option<u64>>,
+    /// What decoding that table gave, by block: the unique targets, the
+    /// `(table position, target)` map, the selector cardinality and the decode
+    /// mode. The bound that proves the table's length is the guard in front of
+    /// the dispatch, which structuring has consumed by the time the dispatch is
+    /// lowered again, so a second decode finds no bound and gives up.
+    pub(crate) branchind_jump_table_targets:
+        HashMap<u64, (Vec<u64>, Vec<(i64, u64)>, usize, &'static str)>,
     pub(crate) active_trace_id: Option<u64>,
     pub(crate) last_trace_id: Option<u64>,
     pub(crate) next_trace_id: u64,
+    /// Dispatch blocks whose predecessors' terminators are being lowered to
+    /// bound the selector; a re-entry for the same block gets no bound.
+    pub(crate) branchind_bound_probes: HashSet<usize>,
     pub(crate) lowering_site_depth: usize,
     pub(in crate::midend::builder) materialize_owner_repartition:
         RefCell<super::materialize::MaterializeOwnerRepartition>,

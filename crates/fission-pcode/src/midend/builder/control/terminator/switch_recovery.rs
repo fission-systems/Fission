@@ -204,6 +204,15 @@ impl<'a> PreviewBuilder<'a> {
         canonical_block_index_for_address(self.pcode, &self.address_to_index, load_addr)
     }
 
+    /// See [`restore_literal_table_bases`].
+    pub(super) fn restore_table_base_literals(&self, expr: PreHirExpr) -> PreHirExpr {
+        super::super::switch_table::restore_literal_table_bases(
+            expr,
+            &self.string_literal_addresses,
+            false,
+        )
+    }
+
     pub(super) fn lower_branchind_switch_expr(
         &mut self,
         idx: usize,
@@ -214,6 +223,9 @@ impl<'a> PreviewBuilder<'a> {
         let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var, visiting);
         let predecessor_expr =
             self.recover_branchind_switch_expr_from_predecessors(idx, switch_var, visiting);
+        let exact_expr = exact_expr.map(|expr| self.restore_table_base_literals(expr));
+        let alias_expr = alias_expr.map(|expr| self.restore_table_base_literals(expr));
+        let predecessor_expr = predecessor_expr.map(|expr| self.restore_table_base_literals(expr));
 
         let best_jump_table_expr = exact_expr
             .iter()
@@ -221,6 +233,39 @@ impl<'a> PreviewBuilder<'a> {
             .chain(predecessor_expr.iter())
             .find(|expr| super::super::switch_table::has_jump_table_surface(expr, &self.options))
             .cloned();
+
+        // Remember the first lowering that still shows the table, and fall back
+        // to it when a later lowering only finds the variable it was stored in.
+        let block_key = self.block_target_key(idx);
+        let best_jump_table_expr = match best_jump_table_expr {
+            Some(expr) => {
+                self.branchind_jump_table_exprs
+                    .insert(block_key, expr.clone());
+                Some(expr)
+            }
+            // Only a table that decoded once is worth looking through to: with no
+            // targets behind it the recovered selector would be the only thing
+            // the dispatch had, and a dispatch with a selector and no targets
+            // lowers to a bare `return`.
+            None if self.branchind_jump_table_targets.contains_key(&block_key) => {
+                self.branchind_jump_table_exprs.get(&block_key).cloned()
+            }
+            // A relative table (`base + table[idx]`) is not decoded into
+            // `branchind_jump_table_targets`; the lifter attaches its targets
+            // to the block as successors instead. Look through to the
+            // remembered table for those. Absolute tables are left to the
+            // first arm: reusing a remembered absolute table on successors
+            // alone re-lowered the same dispatch without end on a Thumb
+            // `table[idx] & ~1` dispatch.
+            None if self.pcode_block_has_successors(idx) => self
+                .branchind_jump_table_exprs
+                .get(&block_key)
+                .filter(|expr| {
+                    super::super::switch_table::is_relative_table_surface(expr, &self.options)
+                })
+                .cloned(),
+            None => None,
+        };
 
         match (
             best_jump_table_expr,
@@ -234,6 +279,17 @@ impl<'a> PreviewBuilder<'a> {
             (None, None, None, Some(expr)) => Ok(expr),
             (None, None, None, None) => self.lower_wrapped_varnode(switch_var, visiting),
         }
+    }
+
+    /// Whether the lifter attached successors to this block's dispatch. A table
+    /// that decoded to targets of its own (relative entries, for one) leaves
+    /// them here rather than in `branchind_jump_table_targets`.
+    fn pcode_block_has_successors(&self, idx: usize) -> bool {
+        let pcode_idx = self.pcode_block_idx(idx);
+        self.pcode
+            .blocks
+            .get(pcode_idx)
+            .is_some_and(|block| !block.successors.is_empty())
     }
 
     pub(super) fn lower_branchind_same_block_alias_expr(
@@ -939,7 +995,34 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Bound the selector from the guards in front of the dispatch at `idx`.
+    ///
+    /// That lowers each predecessor's terminator, and a predecessor can be
+    /// reached from the dispatch again (a dispatch inside a loop, or a state
+    /// machine whose cases jump back to the dispatch). Lowering it then needs
+    /// this bound again, without end. A dispatch that is already being bounded
+    /// has no answer for its own re-entry.
     pub(super) fn infer_branchind_selector_upper_bound(
+        &mut self,
+        idx: usize,
+        selector: &PreHirExpr,
+        selector_alias: Option<&Varnode>,
+        min_val: i64,
+    ) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let bound = self.infer_branchind_selector_upper_bound_unguarded(
+            idx,
+            selector,
+            selector_alias,
+            min_val,
+        );
+        self.branchind_bound_probes.remove(&idx);
+        bound
+    }
+
+    fn infer_branchind_selector_upper_bound_unguarded(
         &mut self,
         idx: usize,
         selector: &PreHirExpr,
@@ -1060,7 +1143,26 @@ impl<'a> PreviewBuilder<'a> {
         best
     }
 
+    /// See [`Self::infer_branchind_selector_upper_bound`] for the re-entry guard.
     pub(super) fn infer_branchind_selector_upper_bound_from_alias_family(
+        &mut self,
+        idx: usize,
+        selector_alias: &Varnode,
+        min_val: i64,
+    ) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let bound = self.infer_branchind_selector_upper_bound_from_alias_family_unguarded(
+            idx,
+            selector_alias,
+            min_val,
+        );
+        self.branchind_bound_probes.remove(&idx);
+        bound
+    }
+
+    fn infer_branchind_selector_upper_bound_from_alias_family_unguarded(
         &mut self,
         idx: usize,
         selector_alias: &Varnode,

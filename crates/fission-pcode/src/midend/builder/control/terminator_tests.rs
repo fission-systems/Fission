@@ -1893,3 +1893,137 @@ fn x64_loop_direct_epilogue_return_exit_keeps_predecessor_value() {
         "sentinel exit lost:\n{code}"
     );
 }
+
+fn bound_probe_options() -> MlilPreviewOptions {
+    preview_options_with_cspec(MlilPreviewOptions {
+        pe_x64_only: false,
+        is_64bit: true,
+        is_big_endian: false,
+        pointer_size: 8,
+        format: "PE".to_string(),
+        image_base: 0x1000,
+        sections: vec![(0x1000, 0x3000)],
+        region_linearize_structuring: false,
+        force_linear_structuring: false,
+        conservative_irreducible_fallback: false,
+        structuring_engine: StructuringEngineKind::GraphCollapseV1,
+        global_names: Default::default(),
+        global_sizes: Default::default(),
+        relocation_names: Default::default(),
+        calling_convention: CallingConvention::WindowsX64,
+        ..Default::default()
+    })
+}
+
+fn bound_probe_function() -> PcodeFunction {
+    let reg = |offset: u64| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let unique = Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset: 0x100,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let konst = |value: u64| Varnode {
+        space_id: 0,
+        offset: value,
+        size: 4,
+        is_constant: true,
+        constant_val: value as i64,
+    };
+    PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![2, 1],
+                ops: vec![
+                    // `if (5 < sel) goto default`
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0x1000,
+                        output: Some(unique.clone()),
+                        inputs: vec![konst(5), reg(0x38)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1002,
+                        output: None,
+                        inputs: vec![konst(0x1020), unique],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x1010,
+                    output: None,
+                    inputs: vec![reg(0x38)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1020,
+                    output: None,
+                    inputs: vec![konst(0)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    }
+}
+
+/// The guard in front of a dispatch bounds its selector.
+#[test]
+fn a_dispatch_is_bounded_by_the_guard_in_front_of_it() {
+    let pcode = bound_probe_function();
+    let options = bound_probe_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let selector_vn = pcode.blocks[1].ops[0].inputs[0].clone();
+    let mut visiting = Default::default();
+    let selector = builder
+        .lower_wrapped_varnode(&selector_vn, &mut visiting)
+        .expect("selector");
+    let bound = builder.infer_branchind_selector_upper_bound(1, &selector, Some(&selector_vn), 0);
+    assert_eq!(bound, Some(5));
+}
+
+/// Bounding a dispatch lowers its predecessors' terminators, which can lead
+/// back to the dispatch (a state machine whose cases jump to it); the
+/// re-entry has no bound of its own instead of recursing without end.
+#[test]
+fn a_dispatch_already_being_bounded_gets_no_bound_on_re_entry() {
+    let pcode = bound_probe_function();
+    let options = bound_probe_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let selector_vn = pcode.blocks[1].ops[0].inputs[0].clone();
+    let mut visiting = Default::default();
+    let selector = builder
+        .lower_wrapped_varnode(&selector_vn, &mut visiting)
+        .expect("selector");
+    builder.branchind_bound_probes.insert(1);
+    let bound = builder.infer_branchind_selector_upper_bound(1, &selector, Some(&selector_vn), 0);
+    assert_eq!(bound, None);
+    // The probe that was already running is not ours to clear.
+    assert!(builder.branchind_bound_probes.contains(&1));
+}

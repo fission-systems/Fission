@@ -2621,12 +2621,24 @@ fn parse_relocations_64(
                 _ => 8,
             };
 
+            let symbol_address = symtab.and_then(|sym| {
+                relocation_patches::defined_symbol_address_64(
+                    full_data,
+                    sym,
+                    section_addresses,
+                    is_relocatable,
+                    sym_index,
+                    endian,
+                )
+            });
+
             relocs.push(crate::loader::types::RelocationEntry {
                 address,
                 r_type,
                 size,
                 addend,
                 symbol_name,
+                symbol_address,
             });
         }
     }
@@ -2698,12 +2710,24 @@ fn parse_relocations_32(
                 _ => 4,
             };
 
+            let symbol_address = symtab.and_then(|sym| {
+                relocation_patches::defined_symbol_address_32(
+                    full_data,
+                    sym,
+                    section_addresses,
+                    is_relocatable,
+                    sym_index,
+                    endian,
+                )
+            });
+
             relocs.push(crate::loader::types::RelocationEntry {
                 address,
                 r_type,
                 size,
                 addend,
                 symbol_name,
+                symbol_address,
             });
         }
     }

@@ -179,6 +179,52 @@ fn recover_relative_switch_selector(
 /// selector * Const(scale) + Const(base)         (commuted)
 /// selector * Const(scale)                        (relocatable: implicit base 0)
 /// ```
+/// Put back the address of a string literal that is really the base of a jump
+/// table.
+///
+/// The literal reading is right for a constant the code passes around, and
+/// wrong for a table whose first entry's low bytes are printable and end in a
+/// zero byte (`44 20 00 01` reads as `"D "`). Only an address with one
+/// unambiguous literal is restored, and only inside the arithmetic of a load's
+/// address, which is where a table base lives.
+pub(super) fn restore_literal_table_bases<S: std::hash::BuildHasher>(
+    expr: PreHirExpr,
+    known: &std::collections::HashMap<String, Option<u64>, S>,
+    in_address: bool,
+) -> PreHirExpr {
+    match expr {
+        PreHirExpr::AddressOfGlobal(name) if in_address => match known.get(&name) {
+            Some(Some(address)) => PreHirExpr::Const(
+                *address as i64,
+                NirType::Int {
+                    bits: 64,
+                    signed: false,
+                },
+            ),
+            _ => PreHirExpr::AddressOfGlobal(name),
+        },
+        PreHirExpr::Load { ptr, ty } => PreHirExpr::Load {
+            ptr: Box::new(restore_literal_table_bases(*ptr, known, true)),
+            ty,
+        },
+        PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
+            ty,
+            expr: Box::new(restore_literal_table_bases(*expr, known, in_address)),
+        },
+        PreHirExpr::Binary { op, lhs, rhs, ty }
+            if in_address && matches!(op, PreHirBinaryOp::Add | PreHirBinaryOp::Mul) =>
+        {
+            PreHirExpr::Binary {
+                op,
+                lhs: Box::new(restore_literal_table_bases(*lhs, known, true)),
+                rhs: Box::new(restore_literal_table_bases(*rhs, known, true)),
+                ty,
+            }
+        }
+        other => other,
+    }
+}
+
 fn extract_table_base_and_selector(addr: &PreHirExpr) -> Option<(u64, &PreHirExpr, u64, bool)> {
     let mut const_base = 0u64;
     let mut saw_const = false;
@@ -296,6 +342,18 @@ pub(super) fn proves_single_target_dispatcher_surface(
     has_jump_table_surface(switch_expr, options)
 }
 
+/// Whether `switch_expr` is a relative table (`base + table[idx]`), the only
+/// kind a dispatch may be looked through to on successors alone: its targets
+/// come from the lifter, not from a decoded table, so nothing else remembers
+/// it. An absolute table that decoded keeps its targets in the builder.
+pub(super) fn is_relative_table_surface(
+    switch_expr: &PreHirExpr,
+    options: &NirRenderOptions,
+) -> bool {
+    recover_switch_discriminant(switch_expr, options)
+        .is_some_and(|recovered| recovered.relative_entries)
+}
+
 pub(super) fn has_jump_table_surface(switch_expr: &PreHirExpr, options: &NirRenderOptions) -> bool {
     recover_switch_discriminant(switch_expr, options).is_some()
         || is_mapped_global_load_source(switch_expr, options)
@@ -409,6 +467,14 @@ fn extract_const_address(expr: &PreHirExpr) -> Option<u64> {
             rhs,
             ..
         } => extract_const_address(lhs)?.checked_sub(extract_const_address(rhs)?),
+        // A table base scaled by one (`base * 1`) survives lowering when the
+        // addressing mode carried a scale on a constant register.
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => extract_const_address(lhs)?.checked_mul(extract_const_address(rhs)?),
         _ => None,
     }
 }
@@ -525,6 +591,33 @@ mod tests {
             },
             expr: Box::new(inner),
         }
+    }
+
+    // A relative table qualifies for look-through on successors alone; an
+    // absolute one (`table[idx] & ~1` on Thumb) does not.
+    #[test]
+    fn only_a_relative_table_is_a_look_through_surface() {
+        let opts = options_with_section(0x40b000, 0x40c000);
+        let sel = var("sel");
+        let absolute = load(add(cst(0x40b000), mul(sel.clone(), cst(8))));
+        let relative = add(load32(add(cst(0x40b000), mul(sel, cst(4)))), cst(0x40b000));
+        assert!(!is_relative_table_surface(&absolute, &opts));
+        assert!(is_relative_table_surface(&relative, &opts));
+    }
+
+    // switch_expr = Load32(0x40b000 + sel * 4 + 0x40b000 * 1) + 0x40b000: a
+    // relative table whose base reached the address as `base * 1`.
+    // expected: the table base is found, discriminant = sel
+    #[test]
+    fn a_table_base_scaled_by_one_is_still_a_constant() {
+        let opts = options_with_section(0x40b000, 0x40c000);
+        let sel = var("sel");
+        let addr = add(mul(sel.clone(), cst(4)), mul(cst(0x40b000), cst(1)));
+        let expr = add(load32(addr), cst(0x40b000));
+        let recovered = recover_switch_discriminant(&expr, &opts).expect("a relative table");
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.table_base, 0x40b000);
+        assert!(recovered.relative_entries);
     }
 
     // switch_expr = Load(0x40b000 + sel * 8)
@@ -728,5 +821,44 @@ mod tests {
             0x5000,
             &opts
         ));
+    }
+
+    #[test]
+    fn a_literal_table_base_is_restored_to_its_address_only_inside_a_load() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let table = || PreHirExpr::AddressOfGlobal("\"D \"".to_string());
+        let entry = |base: PreHirExpr| PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(base),
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Var("idx".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(8, u64_ty.clone())),
+                    ty: u64_ty.clone(),
+                }),
+                ty: u64_ty.clone(),
+            }),
+            ty: u64_ty.clone(),
+        };
+        let known = std::collections::HashMap::from([("\"D \"".to_string(), Some(0x1002044u64))]);
+        let opts = options_with_section(0x1002000, 0x1003000);
+
+        // The literal hid the table: nothing to recover from.
+        assert!(recover_switch_discriminant(&entry(table()), &opts).is_none());
+        let restored = restore_literal_table_bases(entry(table()), &known, false);
+        let selector = recover_switch_discriminant(&restored, &opts).expect("table recovered");
+        assert_eq!(selector.table_base, 0x1002044);
+
+        // A literal that is not under a load keeps meaning the string.
+        let bare = restore_literal_table_bases(table(), &known, false);
+        assert!(matches!(bare, PreHirExpr::AddressOfGlobal(_)));
+        // One text at several addresses is ambiguous, so it is left alone.
+        let ambiguous = std::collections::HashMap::from([("\"D \"".to_string(), None)]);
+        let kept = restore_literal_table_bases(entry(table()), &ambiguous, false);
+        assert!(recover_switch_discriminant(&kept, &opts).is_none());
     }
 }

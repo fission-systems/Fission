@@ -1216,6 +1216,7 @@ mod tests {
                     size: 8,
                     addend: -4,
                     symbol_name: Some("raw_control_sink".into()),
+                    symbol_address: None,
                 },
                 RelocationEntry {
                     address: 0x100130,
@@ -1223,6 +1224,7 @@ mod tests {
                     size: 8,
                     addend: 8,
                     symbol_name: None,
+                    symbol_address: None,
                 },
             ])
             .add_relocation_symbols(relocation_symbols)

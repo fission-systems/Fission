@@ -90,6 +90,29 @@ impl BinaryHost {
 /// the rest of the tool says `0x140001040`.
 pub fn register_helpers(engine: &mut Engine) {
     engine.register_fn("hex", |n: i64| format!("0x{:x}", n as u64));
+    engine.register_fn("addr", parse_address_arg);
+}
+
+/// `addr(s)` -- the way back from [`hex`](register_helpers): `"0x401000"` or
+/// `"4198400"` to the integer the machine functions take.
+///
+/// The static views (`binary.functions()`, `binary.sections()`,
+/// `binary.image_base()`) write every address as a string, while
+/// `machine.bp`/`read`/`pc` use integers, and Rhai does not coerce between
+/// them. Anything that is not an address is an error: a lenient `0` would set
+/// a breakpoint at address 0 and report success.
+fn parse_address_arg(text: &str) -> Result<i64, Box<rhai::EvalAltResult>> {
+    let trimmed = text.trim();
+    let parsed = match trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        Some(hex) => u64::from_str_radix(hex, 16),
+        None => trimmed.parse::<u64>(),
+    };
+    parsed
+        .map(|value| value as i64)
+        .map_err(|_| format!("addr({text:?}): not an address (expected 0x... or decimal)").into())
 }
 
 pub fn register_binary(engine: &mut Engine) -> Result<(), ScriptError> {

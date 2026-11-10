@@ -469,14 +469,20 @@ pub extern "C" fn jit_shadow_copy(
     if dst_sp == 0 {
         return;
     }
-    let node = if src_sp == 0 {
-        None
-    } else {
-        emu.state.get_shadow_memory(src_sp, src_off)
-    };
     let n = (dst_sz as usize).min(64) as u64;
+    // Taint is per byte: byte `i` of the copy is byte `i` of the source. A
+    // byte of the source with no node of its own takes byte 0's, as LOAD does.
+    // Read every source byte before writing any, since the two can overlap.
+    let nodes: Vec<_> = if src_sp == 0 {
+        Vec::new()
+    } else {
+        let first = emu.state.get_shadow_memory(src_sp, src_off);
+        (0..n)
+            .map(|i| emu.state.get_shadow_memory(src_sp, src_off + i).or(first))
+            .collect()
+    };
     for i in 0..n {
-        if let Some(id) = node {
+        if let Some(id) = nodes.get(i as usize).copied().flatten() {
             emu.state.set_shadow_memory(dst_sp, dst_off + i, id);
         } else {
             emu.state.clear_shadow_memory(dst_sp, dst_off + i);

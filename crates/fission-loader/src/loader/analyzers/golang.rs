@@ -51,7 +51,61 @@ impl<'a> GoAnalyzer<'a> {
                 return Ok(section.virtual_address);
             }
         }
-        Err(err!(loader, "Could not find Go pclntab"))
+        // A Windows Go binary has no `.gopclntab` section: the table sits in
+        // `.rdata`, and a stripped one has no symbol naming it. Find it by the
+        // `pcHeader` that opens it.
+        self.scan_for_pclntab_header()
+            .ok_or_else(|| err!(loader, "Could not find Go pclntab"))
+    }
+
+    /// The address of a `pcHeader` in a readable, non-writable section: a Go
+    /// magic, two zero pad bytes, `minLC` (1, 2 or 4) and a pointer size equal
+    /// to the image's. The function count that follows must also fit in the
+    /// bytes left in the section, so a magic-like word in data is rejected.
+    fn scan_for_pclntab_header(&self) -> Option<u64> {
+        let ptr_size: u8 = if self.binary.is_64bit { 8 } else { 4 };
+        for section in &self.binary.sections {
+            if !section.is_readable || section.is_writable {
+                continue;
+            }
+            let size = section
+                .file_size
+                .min(section.virtual_size.max(section.file_size));
+            let Ok(size) = usize::try_from(size) else {
+                continue;
+            };
+            let Some(bytes) = self.binary.view_bytes(section.virtual_address, size) else {
+                continue;
+            };
+            let mut offset = 0usize;
+            while offset + 8 + 2 * usize::from(ptr_size) <= bytes.len() {
+                let magic = u32::from_le_bytes([
+                    bytes[offset],
+                    bytes[offset + 1],
+                    bytes[offset + 2],
+                    bytes[offset + 3],
+                ]);
+                let known = matches!(
+                    magic,
+                    GO_1_2_MAGIC | GO_1_16_MAGIC | GO_1_18_MAGIC | GO_1_20_MAGIC
+                );
+                if known
+                    && bytes[offset + 4] == 0
+                    && bytes[offset + 5] == 0
+                    && matches!(bytes[offset + 6], 1 | 2 | 4)
+                    && bytes[offset + 7] == ptr_size
+                {
+                    let nfunc = self.read_ptr(&bytes[offset..], 8, usize::from(ptr_size));
+                    // Every function costs a functab entry of at least two u32s.
+                    let remaining = (bytes.len() - offset) as u64;
+                    if nfunc > 0 && nfunc.saturating_mul(8) <= remaining {
+                        return Some(section.virtual_address + offset as u64);
+                    }
+                }
+                offset += 4;
+            }
+        }
+        None
     }
 
     fn parse_modern_pclntab(&self, addr: u64, magic: u32) -> Result<Vec<FunctionInfo>> {
@@ -892,6 +946,18 @@ mod tests {
     ///
     /// Returns the analyzer's result for `main.f` at `text + 0x10`.
     fn pclntab_function(magic: u32, ptr_size: usize) -> Vec<FunctionInfo> {
+        pclntab_function_in(magic, ptr_size, ".gopclntab", 0, "ELF")
+    }
+
+    /// The same table placed `lead` bytes into a section called `section_name`
+    /// of a `format` image: a stripped Windows binary has no `.gopclntab`.
+    fn pclntab_function_in(
+        magic: u32,
+        ptr_size: usize,
+        section_name: &str,
+        lead: usize,
+        format: &str,
+    ) -> Vec<FunctionInfo> {
         const SECTION: usize = 0x400;
         const TEXT: u64 = 0x40_1000;
         let put = |data: &mut Vec<u8>, off: usize, value: u64, size: usize| {
@@ -925,10 +991,13 @@ mod tests {
             put(&mut data, 0x120 + ptr_size, 0, 4); // _func.nameoff
         }
         data[0x100..0x107].copy_from_slice(b"main.f\0");
+        let mut padded = vec![0u8; lead];
+        padded.extend_from_slice(&data);
+        let data = padded;
 
         let binary =
             LoadedBinaryBuilder::new("go-pclntab-test".to_string(), DataBuffer::Heap(data))
-                .format("ELF")
+                .format(format)
                 .image_base(0x1000)
                 .arch_spec(if ptr_size == 8 {
                     "x86:LE:64:default"
@@ -937,11 +1006,11 @@ mod tests {
                 })
                 .is_64bit(ptr_size == 8)
                 .add_section(SectionInfo {
-                    name: ".gopclntab".to_string(),
+                    name: section_name.to_string(),
                     virtual_address: 0x1000,
-                    virtual_size: SECTION as u64,
+                    virtual_size: (lead + SECTION) as u64,
                     file_offset: 0,
-                    file_size: SECTION as u64,
+                    file_size: (lead + SECTION) as u64,
                     is_executable: false,
                     is_readable: true,
                     is_writable: false,
@@ -951,6 +1020,50 @@ mod tests {
         GoAnalyzer::new(&binary)
             .analyze()
             .expect("synthetic pclntab should parse")
+    }
+
+    /// A Go binary built for Windows keeps its table in `.rdata` (and a
+    /// stripped one has no symbol naming it), so the table has to be found by
+    /// its header. Without that, `-s -w` Windows Go binaries had every runtime
+    /// function unnamed.
+    #[test]
+    fn a_pclntab_in_a_pe_data_section_is_found_by_its_header() {
+        for (magic, ptr) in [
+            (GO_1_20_MAGIC, 8usize),
+            (GO_1_18_MAGIC, 8),
+            (GO_1_16_MAGIC, 8),
+            (GO_1_18_MAGIC, 4),
+        ] {
+            let functions = pclntab_function_in(magic, ptr, ".rdata", 0x40, "PE");
+            assert_main_f(&functions);
+        }
+    }
+
+    #[test]
+    fn a_section_without_a_pclntab_header_is_not_mistaken_for_one() {
+        // Only the magic, with a pointer size that contradicts the image.
+        let mut data = vec![0u8; 0x400];
+        data[0x40..0x44].copy_from_slice(&GO_1_20_MAGIC.to_le_bytes());
+        data[0x46] = 1;
+        data[0x47] = 4; // 32-bit pointers in a 64-bit image
+        let binary = LoadedBinaryBuilder::new("not-go".to_string(), DataBuffer::Heap(data))
+            .format("PE")
+            .image_base(0x1000)
+            .arch_spec("x86:LE:64:default")
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".rdata".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x400,
+                file_offset: 0,
+                file_size: 0x400,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
+        assert!(GoAnalyzer::new(&binary).analyze().is_err());
     }
 
     fn assert_main_f(functions: &[FunctionInfo]) {

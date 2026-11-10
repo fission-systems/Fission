@@ -334,7 +334,16 @@ fn classify_register_relative(
 
     if matches_param || matches_local {
         let pointer_size: i32 = if is_64bit { 8 } else { 4 };
-        let threshold = i32::try_from(info.total_frame_bytes).unwrap_or(i32::MAX) + pointer_size;
+        // Anchored on a frame pointer, the register points at the saved frame
+        // pointer: the return address is above it and the incoming parameters
+        // start at `2 * ptr`, whatever the size of the frame below. Anchored
+        // on the stack pointer it points at the bottom of the frame, and the
+        // parameters start above the frame and the return address.
+        let threshold = if matches!(reg_name, "ebp" | "rbp" | "fbp") {
+            2 * pointer_size
+        } else {
+            i32::try_from(info.total_frame_bytes).unwrap_or(i32::MAX) + pointer_size
+        };
         return if offset >= threshold {
             VariableRole::Param
         } else {
@@ -942,6 +951,68 @@ mod tests {
         assert!(matches!(
             classify_register_relative(Some(&info), true, "rsp", 32),
             VariableRole::Local
+        ));
+    }
+
+    /// A frame-pointer-anchored frame (`push ebp; mov ebp, esp`): the saved
+    /// frame pointer and the return address sit at `[ebp]` and `[ebp + ptr]`,
+    /// so the incoming parameters start at `[ebp + 2 * ptr]` and the locals
+    /// are at negative offsets -- whatever the size of the frame. The
+    /// stack-pointer formula (`frame size + ptr`) put every parameter of a
+    /// function that has locals below its threshold, i.e. among the locals.
+    #[test]
+    fn classify_register_relative_frame_pointer_frames_split_at_the_return_address() {
+        // 32-bit: both the parameter and local registers are EBP.
+        let x86 = FrameProcInfo {
+            total_frame_bytes: 48,
+            param_fp_reg: Some("ebp"),
+            local_fp_reg: Some("ebp"),
+        };
+        for (offset, role) in [(8, "param"), (12, "param"), (-4, "local"), (-48, "local")] {
+            let got = classify_register_relative(Some(&x86), false, "ebp", offset);
+            assert_eq!(
+                matches!(got, VariableRole::Param),
+                role == "param",
+                "[ebp{offset:+}] should be a {role}, got param={}",
+                matches!(got, VariableRole::Param)
+            );
+        }
+        // 64-bit: the frame pointer is `fbp` (RBP).
+        let x64 = FrameProcInfo {
+            total_frame_bytes: 48,
+            param_fp_reg: Some("fbp"),
+            local_fp_reg: Some("fbp"),
+        };
+        for (offset, role) in [(16, "param"), (24, "param"), (-8, "local"), (-40, "local")] {
+            let got = classify_register_relative(Some(&x64), true, "fbp", offset);
+            assert_eq!(
+                matches!(got, VariableRole::Param),
+                role == "param",
+                "[fbp{offset:+}] should be a {role}, got param={}",
+                matches!(got, VariableRole::Param)
+            );
+        }
+    }
+
+    /// The control: a frame without a frame pointer keeps the frame-size
+    /// split (the printf-wrapper case above), at a size where it differs from
+    /// the frame-pointer split.
+    #[test]
+    fn classify_register_relative_stack_pointer_frames_still_use_the_frame_size() {
+        let info = FrameProcInfo {
+            total_frame_bytes: 48,
+            param_fp_reg: Some("rsp"),
+            local_fp_reg: Some("rsp"),
+        };
+        // 16 would be a parameter under the frame-pointer split; here it is
+        // inside the 48-byte frame.
+        assert!(matches!(
+            classify_register_relative(Some(&info), true, "rsp", 16),
+            VariableRole::Local
+        ));
+        assert!(matches!(
+            classify_register_relative(Some(&info), true, "rsp", 56),
+            VariableRole::Param
         ));
     }
 

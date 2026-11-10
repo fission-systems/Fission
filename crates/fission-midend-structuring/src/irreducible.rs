@@ -117,8 +117,15 @@ pub fn compute_node_splits(
                 let clone_idx = cur_succs.len();
                 virtual_to_original.push(orig_header);
 
-                // Clone's successors = header's successors.
-                cur_succs.push(cur_succs[header].clone());
+                // Clone's successors = header's successors. A self-loop of the
+                // header is a loop on that block, so the clone's copy of it is a
+                // loop on the clone, not an edge back to the original; left as
+                // is, header and clone would form a cycle of their own.
+                let clone_succs: Vec<usize> = cur_succs[header]
+                    .iter()
+                    .map(|&succ| if succ == header { clone_idx } else { succ })
+                    .collect();
+                cur_succs.push(clone_succs);
                 // Clone's predecessors: will be populated below.
                 cur_preds.push(Vec::new());
 
@@ -129,10 +136,11 @@ pub fn compute_node_splits(
 
                 // Redirect back-edges from within the SCC targeting header
                 // to target the clone instead.
+                // The header's own self-loop stays on the header.
                 let back_edge_sources: Vec<usize> = cur_preds[header]
                     .iter()
                     .copied()
-                    .filter(|&pred| component_set.contains(&pred))
+                    .filter(|&pred| pred != header && component_set.contains(&pred))
                     .collect();
 
                 for source in back_edge_sources {
@@ -686,5 +694,174 @@ mod tests {
         let elsewhere = vec![vec![1, 2], vec![2], vec![1]];
         let found = find_irreducible_headers(&[vec![1, 2]], &build_preds(&elsewhere));
         assert_eq!(found.len(), 1, "{found:?}");
+    }
+
+    /// Number of entry nodes of every non-trivial SCC of `succs`. A CFG is
+    /// reducible exactly when each has at most one.
+    fn scc_entry_counts(succs: &[Vec<usize>]) -> Vec<usize> {
+        let n = succs.len();
+        let mut reach = vec![vec![false; n]; n];
+        for (a, outs) in succs.iter().enumerate() {
+            for &b in outs {
+                reach[a][b] = true;
+            }
+        }
+        for k in 0..n {
+            for a in 0..n {
+                for b in 0..n {
+                    if reach[a][k] && reach[k][b] {
+                        reach[a][b] = true;
+                    }
+                }
+            }
+        }
+        let preds = build_preds(succs);
+        let mut seen = vec![false; n];
+        let mut out = Vec::new();
+        for v in 0..n {
+            if seen[v] || !reach[v][v] {
+                continue;
+            }
+            let comp: Vec<usize> = (0..n).filter(|&u| reach[v][u] && reach[u][v]).collect();
+            for &u in &comp {
+                seen[u] = true;
+            }
+            out.push(
+                comp.iter()
+                    .filter(|&&u| preds[u].iter().any(|p| !comp.contains(p)))
+                    .count(),
+            );
+        }
+        out
+    }
+
+    /// Two external entries (2 -> 0, 3 -> 1) into the cycle 0 <-> 1, with an
+    /// optional self-loop on either node. Whatever the self-loops, a result
+    /// that is returned must be reducible: it is applied without re-checking.
+    #[test]
+    fn node_splitting_returns_only_reducible_graphs_whatever_the_self_loops() {
+        for self_loops in 0..4u32 {
+            let mut succs = vec![vec![1], vec![0], vec![0], vec![1]];
+            if self_loops & 1 != 0 {
+                succs[0].push(0);
+            }
+            if self_loops & 2 != 0 {
+                succs[1].push(1);
+            }
+            let preds = build_preds(&succs);
+            let counts = vec![1usize; succs.len()];
+            if let Some(result) = compute_node_splits(&succs, &preds, &counts) {
+                let entries = scc_entry_counts(&result.new_successors);
+                assert!(
+                    entries.iter().all(|&e| e <= 1),
+                    "self-loop mask {self_loops}: still irreducible after {} splits \
+                     (SCC entry counts {entries:?}): {:?}",
+                    result.splits_applied,
+                    result.new_successors
+                );
+            }
+        }
+    }
+
+    /// A self-loop belongs to the node that has it; the clone made for the
+    /// in-SCC predecessors gets its own self-loop, not an edge to the original.
+    #[test]
+    fn splitting_a_header_with_a_self_loop_keeps_the_loop_on_each_copy() {
+        // 2 -> 0, 3 -> 1, 0 <-> 1, and 1 loops on itself.
+        let succs = vec![vec![1], vec![0, 1], vec![0], vec![1]];
+        let preds = build_preds(&succs);
+        let counts = vec![1usize; succs.len()];
+        let result = compute_node_splits(&succs, &preds, &counts)
+            .expect("an irreducible CFG is split, or refused, never silently kept");
+        for (idx, outs) in result.new_successors.iter().enumerate() {
+            if result.original_for(idx) == 1 {
+                assert!(
+                    outs.contains(&idx),
+                    "copy {idx} of block 1 lost its self-loop: {:?}",
+                    result.new_successors
+                );
+            }
+        }
+    }
+
+    /// The control: no self-loops, the existing behaviour.
+    #[test]
+    fn node_splitting_without_self_loops_still_makes_the_cycle_reducible() {
+        let succs = vec![vec![1], vec![0], vec![0], vec![1]];
+        let preds = build_preds(&succs);
+        let counts = vec![1usize; succs.len()];
+        let result = compute_node_splits(&succs, &preds, &counts).expect("split");
+        assert!(
+            scc_entry_counts(&result.new_successors)
+                .iter()
+                .all(|&e| e <= 1)
+        );
+    }
+
+    /// `succ in succs[pred]` exactly when `pred in preds[succ]`, with the same
+    /// multiplicity. Dominance and post-dominance are computed from both.
+    fn assert_succs_and_preds_agree(result: &NodeSplitResult) {
+        let n = result.new_successors.len();
+        for a in 0..n {
+            for b in 0..n {
+                let out = result.new_successors[a].iter().filter(|&&s| s == b).count();
+                let inn = result.new_predecessors[b]
+                    .iter()
+                    .filter(|&&p| p == a)
+                    .count();
+                assert_eq!(
+                    out, inn,
+                    "edge {a} -> {b}: {out} in successors but {inn} in predecessors; \
+                     succs={:?} preds={:?}",
+                    result.new_successors, result.new_predecessors
+                );
+            }
+        }
+    }
+
+    /// Block 1 reaches header 0 through two parallel edges (a switch with two
+    /// cases sharing a target). Both must move to the clone and the successor
+    /// and predecessor lists must still describe the same graph, whichever
+    /// position the duplicate edge is in.
+    #[test]
+    fn parallel_edges_into_a_split_header_are_all_redirected_consistently() {
+        for (dup_01, dup_10) in [(false, true), (true, false), (true, true)] {
+            let mut succs = vec![vec![1], vec![0], vec![0], vec![1]];
+            if dup_01 {
+                succs[0].push(1);
+            }
+            if dup_10 {
+                succs[1].push(0);
+            }
+            let preds = build_preds(&succs);
+            let counts = vec![1usize; succs.len()];
+            let result = compute_node_splits(&succs, &preds, &counts).expect("split");
+            assert_succs_and_preds_agree(&result);
+        }
+    }
+
+    /// The control: single edges keep the invariant (it held before the fix).
+    #[test]
+    fn single_edges_keep_successors_and_predecessors_in_agreement() {
+        let succs = vec![vec![1], vec![0], vec![0], vec![1]];
+        let preds = build_preds(&succs);
+        let counts = vec![1usize; succs.len()];
+        let result = compute_node_splits(&succs, &preds, &counts).expect("split");
+        assert_succs_and_preds_agree(&result);
+    }
+
+    /// The checker above has to be able to fail: a result whose predecessor
+    /// list is missing one of two parallel edges is rejected.
+    #[test]
+    #[should_panic(expected = "in successors but")]
+    fn the_succs_preds_checker_rejects_a_desynchronized_result() {
+        let result = NodeSplitResult {
+            new_successors: vec![vec![1, 1], vec![]],
+            new_predecessors: vec![vec![], vec![0]],
+            virtual_to_original: vec![],
+            original_count: 2,
+            splits_applied: 0,
+        };
+        assert_succs_and_preds_agree(&result);
     }
 }

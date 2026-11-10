@@ -511,10 +511,16 @@ impl<'a> PreviewBuilder<'a> {
             // Short strings the load-time scan is right to skip -- see
             // `read_c_string_from_binary`.
             if let Some(text) = self.read_c_string_from_binary(address) {
-                return Ok(PreHirExpr::AddressOfGlobal(format!(
-                    "\"{}\"",
-                    text.escape_default()
-                )));
+                let literal = format!("\"{}\"", text.escape_default());
+                self.string_literal_addresses
+                    .entry(literal.clone())
+                    .and_modify(|known| {
+                        if *known != Some(address) {
+                            *known = None;
+                        }
+                    })
+                    .or_insert(Some(address));
+                return Ok(PreHirExpr::AddressOfGlobal(literal));
             }
             return Ok(PreHirExpr::Const(
                 vn.constant_val,

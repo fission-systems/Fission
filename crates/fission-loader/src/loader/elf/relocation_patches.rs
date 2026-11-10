@@ -151,7 +151,7 @@ pub(super) fn symbol_value_64(
         std::mem::size_of::<Elf64Sym>()
     };
     let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
-    if offset + entry_size > full_data.len() {
+    if offset.checked_add(entry_size)? > full_data.len() {
         return None;
     }
     let reader = ByteReader::new(full_data, endian);
@@ -164,6 +164,60 @@ pub(super) fn symbol_value_64(
     }
     let base = section_addresses.get(symbol.st_shndx as usize).copied()?;
     Some(base.saturating_add(symbol.st_value))
+}
+
+/// The address a relocation's symbol is defined at, or `None` when the symbol
+/// is undefined here. In a relocatable object a symbol's value is relative to
+/// its section; in an executable or shared object it is already an address.
+pub(super) fn defined_symbol_address_64(
+    full_data: &[u8],
+    symtab: &Elf64Shdr,
+    section_addresses: &[u64],
+    is_relocatable: bool,
+    symbol_index: usize,
+    endian: Endian,
+) -> Option<u64> {
+    if is_relocatable {
+        return symbol_value_64(full_data, symtab, section_addresses, symbol_index, endian);
+    }
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        std::mem::size_of::<Elf64Sym>()
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
+    if offset.checked_add(entry_size)? > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let symbol = Elf64Sym::parse(&reader, offset).ok()?;
+    (symbol.st_shndx != SHN_UNDEF && symbol.st_value != 0).then_some(symbol.st_value)
+}
+
+/// See [`defined_symbol_address_64`].
+pub(super) fn defined_symbol_address_32(
+    full_data: &[u8],
+    symtab: &Elf32Shdr,
+    section_addresses: &[u64],
+    is_relocatable: bool,
+    symbol_index: usize,
+    endian: Endian,
+) -> Option<u64> {
+    if is_relocatable {
+        return symbol_value_32(full_data, symtab, section_addresses, symbol_index, endian);
+    }
+    let entry_size = if symtab.sh_entsize > 0 {
+        symtab.sh_entsize as usize
+    } else {
+        Elf32Sym::SIZE
+    };
+    let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
+    if offset.checked_add(entry_size)? > full_data.len() {
+        return None;
+    }
+    let reader = ByteReader::new(full_data, endian);
+    let symbol = Elf32Sym::parse(&reader, offset).ok()?;
+    (symbol.st_shndx != SHN_UNDEF && symbol.st_value != 0).then_some(u64::from(symbol.st_value))
 }
 
 pub(super) fn apply_riscv_relocation_to_word(
@@ -460,7 +514,7 @@ pub(super) fn symbol_value_32(
         Elf32Sym::SIZE
     };
     let offset = (symtab.sh_offset as usize).checked_add(symbol_index.checked_mul(entry_size)?)?;
-    if offset + entry_size > full_data.len() {
+    if offset.checked_add(entry_size)? > full_data.len() {
         return None;
     }
     let reader = ByteReader::new(full_data, endian);

@@ -110,6 +110,7 @@ impl<'a> TeLoaderImpl<'a> {
                     size,
                     addend: 0,
                     symbol_name: None,
+                    symbol_address: None,
                 });
             }
 
