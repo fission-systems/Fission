@@ -892,7 +892,7 @@ fn reconstruct_sese_final_body_impl(
     use crate::graph::{
         BlockOwnership, StructureEdgeFlags, StructureGraph, StructureNode, surface_structure_graph,
     };
-    use crate::helpers::{block_label, recovered_switch_case_values};
+    use crate::helpers::{block_label, ordinal_goto_cases, recovered_switch_case_values};
     use crate::linear_types::LoweredTerminator;
     use crate::regions::EmitReadyDecision;
     use fission_midend_prehir::PreHirSwitchCase;
@@ -1130,15 +1130,7 @@ fn reconstruct_sese_final_body_impl(
                         })
                         .collect()
                 } else {
-                    targets
-                        .into_iter()
-                        .filter(|target| Some(*target) != default_target)
-                        .enumerate()
-                        .map(|(i, t)| PreHirSwitchCase {
-                            values: vec![min_val + i as i64],
-                            body: std::rc::Rc::new(vec![PreHirStmt::Goto(block_label(t))]),
-                        })
-                        .collect()
+                    ordinal_goto_cases(&targets, default_target, min_val)
                 };
                 node_body.push(PreHirStmt::Switch {
                     expr,
