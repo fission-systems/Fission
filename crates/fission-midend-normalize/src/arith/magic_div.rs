@@ -281,7 +281,9 @@ fn recognize_resolved(expr: &PreHirExpr, ctx_tys: &Ctx) -> Option<PreHirExpr> {
         other => (None, other),
     };
     let core = strip_casts(core);
-    let division = recognize_signed(core, ctx_tys).or_else(|| recognize_unsigned(core, ctx_tys))?;
+    let division = recognize_signed(core, ctx_tys)
+        .or_else(|| recognize_unsigned(core, ctx_tys))
+        .or_else(|| recognize_unsigned_add(core, ctx_tys))?;
     Some(match outer_cast {
         Some(ty) if int_bits(&ty).is_some() => PreHirExpr::Cast {
             ty,
@@ -489,6 +491,150 @@ fn recognize_unsigned(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
         }
     }
     Some(division(as_int(x, w, false, ctx), d, w, false))
+}
+
+/// Unsigned division whose magic multiplier needs `w + 1` bits.
+///
+/// The compiler keeps the multiply to `w` bits by taking the high half `t` of
+/// `x * m'` (with `m = m' + 2^w`) and adding the missing `x * 2^w` back without
+/// overflowing: `(((x - t) >> 1) + t) >> k`. That is `floor(x * m / 2^n)` with
+/// `n = w + 1 + k`, so the same exact bound as [`recognize_unsigned`] decides
+/// whether it is `x / d`.
+fn recognize_unsigned_add(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
+    let (sum, k) = match core {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs,
+            rhs,
+            ..
+        } => (strip_casts(lhs), u32::try_from(const_value(rhs)?).ok()?),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let divisor = const_value(rhs)?;
+            if divisor <= 1 || divisor.count_ones() != 1 {
+                return None;
+            }
+            (strip_casts(lhs), divisor.trailing_zeros())
+        }
+        other => (other, 0),
+    };
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: left,
+        rhs: right,
+        ..
+    } = sum
+    else {
+        return None;
+    };
+    // One side is `(x - t) >> 1`, the other is `t`.
+    let (halved, t_other) = [(left, right), (right, left)]
+        .into_iter()
+        .find_map(|(a, b)| {
+            matches!(
+                strip_casts(a),
+                PreHirExpr::Binary { op: PreHirBinaryOp::Shr, rhs, .. }
+                    if const_value(rhs) == Some(1)
+            )
+            .then_some((strip_casts(a), b))
+        })?;
+    let PreHirExpr::Binary {
+        lhs: difference, ..
+    } = halved
+    else {
+        return None;
+    };
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
+        lhs: x_side,
+        rhs: t_side,
+        ..
+    } = strip_casts(difference)
+    else {
+        return None;
+    };
+    if strip_casts(t_side) != strip_casts(t_other) {
+        return None;
+    }
+    // `t` is the high half of `x * m'`, read through a cast that keeps its
+    // low `w` bits: an arithmetic and a logical shift agree there.
+    let (t, narrowest) = strip_casts_tracking_width(t_other);
+    let PreHirExpr::Binary {
+        op: high_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
+        lhs: product,
+        rhs: high_shift,
+        ..
+    } = t
+    else {
+        return None;
+    };
+    let product = strip_casts(product);
+    let (x, m_low, mul_bits) = split_mul_by_const(product, ctx)?;
+    let extended_unsigned = matches!(
+        x_of_mul(product),
+        Some(PreHirExpr::Cast {
+            ty: NirType::Int { signed: false, .. },
+            ..
+        })
+    );
+    let x = strip_extensions(x, ctx);
+    let w = value_bits(x, ctx).filter(|w| (8..=64).contains(w))?;
+    // Up to 32 bits the product of two `w`-bit values fits `2w` bits whatever
+    // signedness the multiply records; wider, the multiplicand must be visibly
+    // zero-extended or the multiply itself unsigned.
+    if w > 32
+        && !extended_unsigned
+        && !matches!(
+            product,
+            PreHirExpr::Binary {
+                ty: NirType::Int { signed: false, .. },
+                ..
+            }
+        )
+    {
+        return None;
+    }
+    if strip_extensions(x_side, ctx) != x
+        || const_value(high_shift)? != i128::from(w)
+        || mul_bits < 2 * w
+    {
+        return None;
+    }
+    if *high_op == PreHirBinaryOp::Sar
+        && (narrowest == u32::MAX || w.checked_add(narrowest)? > mul_bits)
+    {
+        return None;
+    }
+    let m = m_low.checked_add(1i128 << w)?;
+    let n = w.checked_add(1)?.checked_add(k)?;
+    let (d, e) = magic_parameters(m, n)?;
+    let max_x = (1i128 << w) - 1;
+    if m_low <= 0 || max_x.checked_mul(e)? >= (1i128 << n) {
+        return None;
+    }
+    Some(division(as_int(x, w, false, ctx), d, w, false))
+}
+
+/// The multiplicand of a `Mul(extension, constant)`.
+fn x_of_mul(product: &PreHirExpr) -> Option<&PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mul,
+        lhs,
+        rhs,
+        ..
+    } = product
+    else {
+        return None;
+    };
+    match (const_value(lhs), const_value(rhs)) {
+        (None, Some(_)) => Some(lhs.as_ref()),
+        (Some(_), None) => Some(rhs.as_ref()),
+        _ => None,
+    }
 }
 
 /// `Mul(extension of x, constant)` -> (`x`, constant, bits of the multiply).
@@ -1151,6 +1297,130 @@ mod tests {
             }
         }
         assert!(!recognize_magic_division_in_function(&mut func));
+    }
+
+    /// `(((x - t) >> 1) + t) >> k` with `t` the high half of `x * m_low`.
+    /// `recorded` builds the form the lifter writes for a 64-bit dividend: a
+    /// signed 128-bit product of a zero-extended `x`, an arithmetic high half
+    /// read through a signed 64-bit cast.
+    fn add_correction(w: u32, m_low: i64, k: i64, recorded: bool) -> PreHirExpr {
+        let uw = i(w, false);
+        let (wide, mul_ty, shift_ty) = if recorded {
+            (i(128, false), i(128, true), i(128, true))
+        } else {
+            (i(2 * w, false), i(2 * w, true), i(2 * w, false))
+        };
+        let high_op = if recorded {
+            PreHirBinaryOp::Sar
+        } else {
+            PreHirBinaryOp::Shr
+        };
+        let hi = bin(
+            high_op,
+            bin(
+                PreHirBinaryOp::Mul,
+                cast(wide.clone(), var("x")),
+                konst(m_low, wide.clone()),
+                mul_ty,
+            ),
+            konst(i64::from(w), i(64, false)),
+            shift_ty,
+        );
+        let t = cast(if recorded { i(64, true) } else { uw.clone() }, hi);
+        let halved = bin(
+            PreHirBinaryOp::Shr,
+            bin(PreHirBinaryOp::Sub, var("x"), t.clone(), uw.clone()),
+            konst(1, uw.clone()),
+            uw.clone(),
+        );
+        let sum = bin(PreHirBinaryOp::Add, halved, t, uw.clone());
+        bin(PreHirBinaryOp::Shr, sum, konst(k, uw.clone()), uw)
+    }
+
+    fn ctx_with_x(w: u32) -> Ctx {
+        let mut tys = crate::HashMap::default();
+        tys.insert("x".to_string(), i(w, false));
+        Ctx {
+            tys,
+            address_taken: Default::default(),
+        }
+    }
+
+    fn divisor_of(found: &PreHirExpr) -> i64 {
+        let PreHirExpr::Binary { op, rhs, .. } = found else {
+            panic!("expected a division, got {found:?}");
+        };
+        assert_eq!(*op, PreHirBinaryOp::Div);
+        match **rhs {
+            PreHirExpr::Const(d, _) => d,
+            _ => panic!("divisor is not a constant"),
+        }
+    }
+
+    #[test]
+    fn unsigned_division_by_seven_through_the_add_correction() {
+        // m = 613566757 + 2^32, n = 32 + 1 + 2 = 35: x / 7.
+        let found =
+            recognize_unsigned_add(&add_correction(32, 613566757, 2, false), &ctx_with_x(32))
+                .expect("x / 7");
+        assert_eq!(divisor_of(&found), 7);
+    }
+
+    #[test]
+    fn a_64_bit_add_correction_as_the_lifter_records_it_is_x_over_seven() {
+        // 2635249153387078803 + 2^64, n = 64 + 1 + 2.
+        let found = recognize_unsigned_add(
+            &add_correction(64, 2635249153387078803, 2, true),
+            &ctx_with_x(64),
+        )
+        .expect("x / 7");
+        assert_eq!(divisor_of(&found), 7);
+    }
+
+    #[test]
+    fn an_add_correction_whose_multiplier_is_off_is_left_alone() {
+        assert!(
+            recognize_unsigned_add(
+                &add_correction(32, 613566757 + 3, 2, false),
+                &ctx_with_x(32)
+            )
+            .is_none()
+        );
+        // The correction must subtract the SAME high half it adds.
+        let mut wrong = add_correction(32, 613566757, 2, false);
+        if let PreHirExpr::Binary { lhs, .. } = &mut wrong {
+            *lhs = Box::new(bin(
+                PreHirBinaryOp::Add,
+                var("x"),
+                konst(1, i(32, false)),
+                i(32, false),
+            ));
+        }
+        assert!(recognize_unsigned_add(&wrong, &ctx_with_x(32)).is_none());
+    }
+
+    /// Whatever the recognizer accepts for an 8-bit dividend equals `x / d` for
+    /// every `x`: the add-correction arithmetic, checked against brute force.
+    #[test]
+    fn add_correction_bound_is_sound_exhaustively() {
+        let mut accepted = 0;
+        for m_low in 1..256i64 {
+            for k in 0..6i64 {
+                let Some(found) =
+                    recognize_unsigned_add(&add_correction(8, m_low, k, false), &ctx_with_x(8))
+                else {
+                    continue;
+                };
+                let d = divisor_of(&found);
+                accepted += 1;
+                for x in 0..256i64 {
+                    let t = (x * m_low) >> 8;
+                    let q = (((x - t) >> 1) + t) >> k;
+                    assert_eq!(q, x / d, "m_low={m_low} k={k} x={x} d={d}");
+                }
+            }
+        }
+        assert!(accepted > 10, "the sweep must exercise the recognizer");
     }
 
     // ── The arithmetic claim, checked against brute force ────────────────────
