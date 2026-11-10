@@ -57,7 +57,10 @@ fn render_with_rust_sleigh(
     want_prehir: bool,
 ) -> Result<RustSleighRender, FissionError> {
     let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
-    config.nir_timeout_ms = timeout_ms;
+    // `0` means "no timeout" (the flag's help, and the worker layer, which
+    // filters it out). The renderer reads `Some(0)` as a deadline that has
+    // already passed, so it must not see it.
+    config.nir_timeout_ms = timeout_ms.filter(|ms| *ms > 0);
     let result = fission_decompiler::decompile_with_rust_sleigh_with_facts(
         binary,
         facts,
