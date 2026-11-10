@@ -17,6 +17,29 @@ pub struct OptimizationRules {
     // Can add statistics or configuration here later
 }
 
+/// A constant read at its own width, as an unsigned number. A narrow constant
+/// is held either zero-extended or sign-extended in `constant_val`; both mean
+/// the same p-code value.
+fn unsigned_value(v: &Varnode) -> u64 {
+    let bits = v.size.saturating_mul(8);
+    match bits {
+        1..=63 => (v.constant_val as u64) & ((1u64 << bits) - 1),
+        _ => v.constant_val as u64,
+    }
+}
+
+/// The same constant as a signed number: the top bit of its width is the sign.
+fn signed_value(v: &Varnode) -> i64 {
+    let bits = v.size.saturating_mul(8);
+    match bits {
+        1..=63 => {
+            let shift = 64 - bits;
+            ((v.constant_val as u64) << shift) as i64 >> shift
+        }
+        _ => v.constant_val,
+    }
+}
+
 fn safe_shl_u64(value: u64, shift: u32) -> u64 {
     value.checked_shl(shift).unwrap_or(0)
 }
@@ -306,12 +329,9 @@ impl OptimizationRules {
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
             let result = if op.opcode == PcodeOpcode::IntDiv {
-                (op.inputs[0].constant_val as u64).wrapping_div(op.inputs[1].constant_val as u64)
-                    as i64
+                unsigned_value(&op.inputs[0]).wrapping_div(unsigned_value(&op.inputs[1])) as i64
             } else {
-                op.inputs[0]
-                    .constant_val
-                    .wrapping_div(op.inputs[1].constant_val)
+                signed_value(&op.inputs[0]).wrapping_div(signed_value(&op.inputs[1]))
             };
             return Some(self.make_constant(op, result));
         }
@@ -332,12 +352,9 @@ impl OptimizationRules {
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
             let result = if op.opcode == PcodeOpcode::IntRem {
-                (op.inputs[0].constant_val as u64).wrapping_rem(op.inputs[1].constant_val as u64)
-                    as i64
+                unsigned_value(&op.inputs[0]).wrapping_rem(unsigned_value(&op.inputs[1])) as i64
             } else {
-                op.inputs[0]
-                    .constant_val
-                    .wrapping_rem(op.inputs[1].constant_val)
+                signed_value(&op.inputs[0]).wrapping_rem(signed_value(&op.inputs[1]))
             };
             return Some(self.make_constant(op, result));
         }
@@ -380,8 +397,8 @@ impl OptimizationRules {
 
         // Constant folding (unsigned shift)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = (op.inputs[0].constant_val as u64)
-                .wrapping_shr(op.inputs[1].constant_val as u32) as i64;
+            let result = unsigned_value(&op.inputs[0])
+                .wrapping_shr(unsigned_value(&op.inputs[1]) as u32) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -400,9 +417,8 @@ impl OptimizationRules {
 
         // Constant folding (signed shift)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0]
-                .constant_val
-                .wrapping_shr(op.inputs[1].constant_val as u32);
+            let result =
+                signed_value(&op.inputs[0]).wrapping_shr(unsigned_value(&op.inputs[1]) as u32);
             return Some(self.make_constant(op, result));
         }
 
@@ -423,7 +439,7 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val == op.inputs[1].constant_val;
+            let result = unsigned_value(&op.inputs[0]) == unsigned_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
@@ -442,7 +458,7 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val != op.inputs[1].constant_val;
+            let result = unsigned_value(&op.inputs[0]) != unsigned_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
@@ -461,7 +477,7 @@ impl OptimizationRules {
 
         // Constant folding (unsigned)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = (op.inputs[0].constant_val as u64) < (op.inputs[1].constant_val as u64);
+            let result = unsigned_value(&op.inputs[0]) < unsigned_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
@@ -480,7 +496,7 @@ impl OptimizationRules {
 
         // Constant folding (signed)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val < op.inputs[1].constant_val;
+            let result = signed_value(&op.inputs[0]) < signed_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
@@ -499,7 +515,7 @@ impl OptimizationRules {
 
         // Constant folding (unsigned)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = (op.inputs[0].constant_val as u64) <= (op.inputs[1].constant_val as u64);
+            let result = unsigned_value(&op.inputs[0]) <= unsigned_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
@@ -518,7 +534,7 @@ impl OptimizationRules {
 
         // Constant folding (signed)
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val <= op.inputs[1].constant_val;
+            let result = signed_value(&op.inputs[0]) <= signed_value(&op.inputs[1]);
             return Some(self.make_boolean(op, result));
         }
 
