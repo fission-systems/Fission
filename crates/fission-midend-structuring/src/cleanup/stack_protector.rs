@@ -33,7 +33,11 @@ use std::rc::Rc;
 fn is_stack_chk_fail(target: &str) -> bool {
     matches!(
         target.trim_start_matches('_'),
-        "stack_chk_fail" | "stack_chk_fail_local" | "stack_smash_handler"
+        "stack_chk_fail"
+            | "stack_chk_fail_local"
+            | "stack_smash_handler"
+            // MSVC /GS: the cookie mismatch handler, reached the same way.
+            | "report_gsfailure"
     )
 }
 
@@ -167,6 +171,14 @@ mod tests {
     #[test]
     fn guard_in_the_then_arm_goes() {
         let body = vec![guard(vec![call("__stack_chk_fail")], vec![]), call("f")];
+        let (out, changed) = drop_stack_protector_guards(body);
+        assert!(changed);
+        assert_eq!(out, vec![call("f")]);
+    }
+
+    #[test]
+    fn an_msvc_gs_failure_guard_goes() {
+        let body = vec![guard(vec![call("__report_gsfailure")], vec![]), call("f")];
         let (out, changed) = drop_stack_protector_guards(body);
         assert!(changed);
         assert_eq!(out, vec![call("f")]);
