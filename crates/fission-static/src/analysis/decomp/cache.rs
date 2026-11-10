@@ -6,6 +6,22 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use tracing::{debug, info};
 
+/// The identifier becomes one directory name under the cache root, so it must be
+/// a single plain path component: a hash is letters, digits, `-` and `_`.
+fn validate_binary_hash(binary_hash: &str) -> Result<()> {
+    let plain = !binary_hash.is_empty()
+        && binary_hash
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if plain {
+        Ok(())
+    } else {
+        Err(FissionError::other(format!(
+            "invalid binary hash for the decompiler cache: {binary_hash:?}"
+        )))
+    }
+}
+
 /// Decompiler Cache - Manages In-memory (L1) and Disk (L2) caching
 pub struct DecompilerCache {
     /// L1 Cache: In-memory LRU
@@ -19,6 +35,7 @@ pub struct DecompilerCache {
 impl DecompilerCache {
     /// Create a new decompiler cache for a specific binary
     pub fn new(binary_hash: &str, l1_size: usize) -> Result<Self> {
+        validate_binary_hash(binary_hash)?;
         let cache_dir = dirs::cache_dir()
             .ok_or_else(|| FissionError::other("Could not determine cache directory"))?
             .join(APP_DIR_NAME)
@@ -100,5 +117,36 @@ impl DecompilerCache {
     /// Get the binary hash associated with this cache
     pub fn binary_hash(&self) -> &str {
         &self.binary_hash
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_binary_hash_is_one_plain_directory_name() {
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../escape",
+            "a/b",
+            "a\\b",
+            "/abs",
+            "x\0y",
+            "a b",
+        ] {
+            assert!(
+                DecompilerCache::new(bad, 4).is_err(),
+                "{bad:?} must not become a cache directory"
+            );
+        }
+    }
+
+    #[test]
+    fn a_hex_hash_is_accepted() {
+        assert!(validate_binary_hash("0123456789abcdefABCDEF").is_ok());
+        assert!(validate_binary_hash("sha256_deadbeef-01").is_ok());
     }
 }
