@@ -150,6 +150,17 @@ pub fn lower_structured_switch_terminator(
     )))
 }
 
+/// Whether recovering a switch at `idx` moves the walk forward.
+///
+/// `skip_to` is where the recovered switch's arms rejoin and the walk resumes.
+/// A join that is not past the dispatcher makes the walk stand still or go
+/// backwards, recover the same switch again and push another `Switch`, forever;
+/// the body grows until the process is killed. Every place that resumes at a
+/// recovered switch's join must ask this first.
+fn switch_join_advances(idx: usize, skip_to: usize) -> bool {
+    skip_to > idx
+}
+
 /// Build a linear multiblock body (optional switch recovery at admitted CFGs).
 pub fn build_linear_multiblock_body(
     host: &mut impl StructuringHost,
@@ -184,7 +195,7 @@ pub fn build_linear_multiblock_body(
         if try_switch_recovery
             && switch_recovery_cfg_admitted(host, idx)
             && let Some((switch_stmt, skip_to)) = try_lower_switch(host, idx)?
-            && skip_to > idx
+            && switch_join_advances(idx, skip_to)
         {
             if (idx == 0 || targeted.contains(&block_key)) && emitted_labels.insert(block_key) {
                 body.push(PreHirStmt::Label(block_label(block_key)));
@@ -273,7 +284,8 @@ pub fn build_linear_multiblock_body(
                     default_target,
                     min_val,
                     proof.as_ref(),
-                )? {
+                )? && switch_join_advances(idx, skip_to)
+                {
                     body.push(switch_stmt);
                     idx = skip_to;
                     continue;
@@ -322,4 +334,22 @@ pub fn build_linear_multiblock_body(
     promote_guarded_tail_regions_until_stable(host, &mut body);
     discover_guarded_tail_candidates(host, &body);
     Ok(finalize_structured_body(&protected, body))
+}
+
+#[cfg(test)]
+mod forward_progress_tests {
+    use super::switch_join_advances;
+
+    #[test]
+    fn a_switch_join_must_lie_past_the_dispatcher() {
+        assert!(switch_join_advances(3, 4));
+        assert!(
+            !switch_join_advances(3, 3),
+            "standing still recovers it again"
+        );
+        assert!(
+            !switch_join_advances(3, 1),
+            "going backwards recovers it again"
+        );
+    }
 }
