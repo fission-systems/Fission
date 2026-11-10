@@ -247,11 +247,23 @@ impl<'a> PreviewBuilder<'a> {
             // targets behind it the recovered selector would be the only thing
             // the dispatch had, and a dispatch with a selector and no targets
             // lowers to a bare `return`.
-            None if self.branchind_jump_table_targets.contains_key(&block_key)
-                || self.pcode_block_has_successors(idx) =>
-            {
+            None if self.branchind_jump_table_targets.contains_key(&block_key) => {
                 self.branchind_jump_table_exprs.get(&block_key).cloned()
             }
+            // A relative table (`base + table[idx]`) is not decoded into
+            // `branchind_jump_table_targets`; the lifter attaches its targets
+            // to the block as successors instead. Look through to the
+            // remembered table for those. Absolute tables are left to the
+            // first arm: reusing a remembered absolute table on successors
+            // alone re-lowered the same dispatch without end on a Thumb
+            // `table[idx] & ~1` dispatch.
+            None if self.pcode_block_has_successors(idx) => self
+                .branchind_jump_table_exprs
+                .get(&block_key)
+                .filter(|expr| {
+                    super::super::switch_table::is_relative_table_surface(expr, &self.options)
+                })
+                .cloned(),
             None => None,
         };
 

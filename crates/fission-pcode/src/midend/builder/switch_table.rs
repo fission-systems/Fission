@@ -342,6 +342,18 @@ pub(super) fn proves_single_target_dispatcher_surface(
     has_jump_table_surface(switch_expr, options)
 }
 
+/// Whether `switch_expr` is a relative table (`base + table[idx]`), the only
+/// kind a dispatch may be looked through to on successors alone: its targets
+/// come from the lifter, not from a decoded table, so nothing else remembers
+/// it. An absolute table that decoded keeps its targets in the builder.
+pub(super) fn is_relative_table_surface(
+    switch_expr: &PreHirExpr,
+    options: &NirRenderOptions,
+) -> bool {
+    recover_switch_discriminant(switch_expr, options)
+        .is_some_and(|recovered| recovered.relative_entries)
+}
+
 pub(super) fn has_jump_table_surface(switch_expr: &PreHirExpr, options: &NirRenderOptions) -> bool {
     recover_switch_discriminant(switch_expr, options).is_some()
         || is_mapped_global_load_source(switch_expr, options)
@@ -579,6 +591,18 @@ mod tests {
             },
             expr: Box::new(inner),
         }
+    }
+
+    // A relative table qualifies for look-through on successors alone; an
+    // absolute one (`table[idx] & ~1` on Thumb) does not.
+    #[test]
+    fn only_a_relative_table_is_a_look_through_surface() {
+        let opts = options_with_section(0x40b000, 0x40c000);
+        let sel = var("sel");
+        let absolute = load(add(cst(0x40b000), mul(sel.clone(), cst(8))));
+        let relative = add(load32(add(cst(0x40b000), mul(sel, cst(4)))), cst(0x40b000));
+        assert!(!is_relative_table_surface(&absolute, &opts));
+        assert!(is_relative_table_surface(&relative, &opts));
     }
 
     // switch_expr = Load32(0x40b000 + sel * 4 + 0x40b000 * 1) + 0x40b000: a
