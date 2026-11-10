@@ -1089,13 +1089,22 @@ pub fn attach_inferred_indirect_edges(
         else {
             continue;
         };
+        // The CFG builder wires every `BranchInd` to the function-wide union of
+        // indirect targets (it cannot know which dispatch owns which target
+        // before the fixed point has run), so a function with two switches
+        // gives each dispatcher the other's case bodies as well. A dispatch
+        // whose own targets were resolved owns exactly those successors.
+        let mut own = Vec::new();
         for target in targets {
             let Some(target_idx) = block_start_to_index.get(target).copied() else {
                 continue;
             };
-            if !block.successors.contains(&target_idx) {
-                block.successors.push(target_idx);
+            if !own.contains(&target_idx) {
+                own.push(target_idx);
             }
+        }
+        if !own.is_empty() {
+            block.successors = own;
         }
     }
 }
@@ -2147,6 +2156,54 @@ mod dispatch_tests {
         attach_inferred_indirect_edges(&mut func, &edges);
 
         assert_eq!(func.blocks[0].successors, vec![1, 2]);
+    }
+
+    /// A function with two switches: the CFG builder gave each `BranchInd` the
+    /// union of every indirect target, so each dispatcher also reached the
+    /// other switch's case bodies. Attaching a dispatch's own resolved
+    /// targets must leave it with exactly those successors.
+    #[test]
+    fn attach_inferred_indirect_edges_replaces_the_broadcast_union_with_the_dispatchs_own_targets()
+    {
+        let dispatch = |index: u32, start: u64, at: u64| PcodeBasicBlock {
+            index,
+            start_address: start,
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::BranchInd,
+                output: None,
+                inputs: vec![vn(4, 0x40, 8)],
+                address: at,
+                asm_mnemonic: None,
+            }],
+            // What `build_instruction_cfg_snapshot` produces: the union.
+            successors: vec![2, 3, 4, 5],
+        };
+        let leaf = |index: u32, start: u64| PcodeBasicBlock {
+            index,
+            start_address: start,
+            ops: Vec::new(),
+            successors: Vec::new(),
+        };
+        let mut func = PcodeFunction {
+            blocks: vec![
+                dispatch(0, 0x1000, 0x1004),
+                dispatch(1, 0x1100, 0x1104),
+                leaf(2, 0x2000),
+                leaf(3, 0x2050),
+                leaf(4, 0x3000),
+                leaf(5, 0x3050),
+            ],
+        };
+        let edges = BTreeMap::from([
+            (0x1004, vec![0x2000, 0x2050]),
+            (0x1104, vec![0x3000, 0x3050]),
+        ]);
+
+        attach_inferred_indirect_edges(&mut func, &edges);
+
+        assert_eq!(func.blocks[0].successors, vec![2, 3]);
+        assert_eq!(func.blocks[1].successors, vec![4, 5]);
     }
 }
 
