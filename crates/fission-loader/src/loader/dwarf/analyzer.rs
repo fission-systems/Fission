@@ -306,8 +306,57 @@ impl<'a> DwarfAnalyzer<'a> {
             Some(AttributeValue::Data2(v)) => Ok(Some(v as u32)),
             Some(AttributeValue::Data4(v)) => Ok(Some(v as u32)),
             Some(AttributeValue::Sdata(v)) => Ok(Some(v as u32)),
+            // DWARF 2 and 3 write the offset as an expression, `DW_OP_plus_uconst n`.
+            Some(AttributeValue::Exprloc(expr)) => Ok(plus_uconst_offset(expr.0.slice())),
+            Some(AttributeValue::Block(block)) => Ok(plus_uconst_offset(block.slice())),
             _ => Ok(None),
         }
+    }
+}
+
+/// The `n` of a lone `DW_OP_plus_uconst n` (0x23, ULEB128 operand), which is
+/// how DWARF 2/3 give a member's byte offset. Anything else is not a plain
+/// offset and is left unread rather than guessed.
+fn plus_uconst_offset(bytes: &[u8]) -> Option<u32> {
+    let (&op, mut rest) = bytes.split_first()?;
+    if op != 0x23 {
+        return None;
+    }
+    let mut value: u64 = 0;
+    let mut shift = 0u32;
+    loop {
+        let (&byte, tail) = rest.split_first()?;
+        rest = tail;
+        value |= u64::from(byte & 0x7f).checked_shl(shift)?;
+        if byte & 0x80 == 0 {
+            break;
+        }
+        shift += 7;
+    }
+    if !rest.is_empty() {
+        return None;
+    }
+    u32::try_from(value).ok()
+}
+
+#[cfg(test)]
+mod member_offset_tests {
+    use super::plus_uconst_offset;
+
+    #[test]
+    fn a_lone_plus_uconst_is_an_offset() {
+        assert_eq!(plus_uconst_offset(&[0x23, 0x08]), Some(8));
+        assert_eq!(plus_uconst_offset(&[0x23, 0x80, 0x01]), Some(128));
+        assert_eq!(plus_uconst_offset(&[0x23, 0x00]), Some(0));
+    }
+
+    #[test]
+    fn anything_else_is_left_unread() {
+        assert_eq!(plus_uconst_offset(&[]), None);
+        assert_eq!(plus_uconst_offset(&[0x91, 0x08]), None); // DW_OP_fbreg
+        assert_eq!(plus_uconst_offset(&[0x23]), None); // no operand
+        assert_eq!(plus_uconst_offset(&[0x23, 0x80]), None); // unterminated ULEB
+        assert_eq!(plus_uconst_offset(&[0x23, 0x08, 0x06]), None); // trailing ops
     }
 }
 
@@ -459,6 +508,38 @@ mod tests {
         assert_eq!(type_name_of("arr"), "int[10]");
         assert_eq!(type_name_of("matrix"), "int[3][4]");
         assert_eq!(type_name_of("name"), "char[16]");
+    }
+
+    /// `testdata/x64_dwarf2_struct_test.elf`: `gcc -O0 -g -gdwarf-2` from
+    /// `x64_dwarf2_struct_test.c`. DWARF 2 writes `DW_AT_data_member_location`
+    /// as an expression (`DW_OP_plus_uconst n`) rather than a constant, so a
+    /// reader that only takes constant forms puts every member at offset 0 and
+    /// the decompiler falls back to `field_8`, `field_10`.
+    #[test]
+    fn analyze_types_reads_dwarf2_expression_member_offsets() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dwarf2_struct_test.elf");
+        let binary = LoadedBinary::from_file(&path).expect("load DWARF 2 struct ELF");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        assert!(analyzer.has_debug_info());
+        let types = analyzer.analyze_types();
+        let rec = types
+            .iter()
+            .find(|t| t.name == "rec")
+            .unwrap_or_else(|| panic!("expected a \"rec\" struct in {types:?}"));
+        let offset_of = |field: &str| -> u32 {
+            rec.members
+                .iter()
+                .find(|m| m.name == field)
+                .unwrap_or_else(|| panic!("expected field {field} in {:?}", rec.members))
+                .offset
+        };
+        // struct rec { int a; long b; short c; char d; double e; };
+        assert_eq!(offset_of("a"), 0);
+        assert_eq!(offset_of("b"), 8);
+        assert_eq!(offset_of("c"), 16);
+        assert_eq!(offset_of("d"), 18);
+        assert_eq!(offset_of("e"), 24);
     }
 
     /// `testdata/x64_dyn_lexblock_test.elf`: GCC-compiled from a source with
