@@ -124,6 +124,7 @@ pub(super) fn mingw_pseudo_reloc_entries(use_sites: &[u64]) -> Vec<RelocationEnt
             size: 4,
             addend: 0,
             symbol_name: None,
+            symbol_address: None,
         })
         .collect()
 }
