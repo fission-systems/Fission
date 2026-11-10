@@ -498,3 +498,31 @@ fn failed_save_has_no_success_payload_and_preserves_the_target() {
     assert_eq!(std::fs::read(&target).unwrap(), bytes);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 3);
 }
+
+#[test]
+fn the_global_db_flag_chooses_where_db_keeps_its_decisions() {
+    let (dir, binary) = sample("sample.exe");
+    let path = binary.to_str().expect("path");
+    let custom = dir.path().join("custom.json");
+    let custom_path = custom.to_str().expect("path");
+
+    let (ok, out) = run(&[
+        "--db",
+        custom_path,
+        "db",
+        path,
+        "name",
+        ENTRY,
+        "write_hello_and_exit",
+    ]);
+    assert!(ok, "{out}");
+
+    assert!(custom.exists(), "--db was ignored by `db`");
+    assert!(
+        !fission_project::Project::default_path(&binary).exists(),
+        "the default database was written although --db named another"
+    );
+    let (ok, shown) = run(&["--db", custom_path, "list", path]);
+    assert!(ok, "{shown}");
+    assert!(shown.contains("write_hello_and_exit"), "{shown}");
+}

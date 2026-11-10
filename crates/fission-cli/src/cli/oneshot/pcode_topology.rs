@@ -20,9 +20,12 @@ pub(super) fn emit_pcode_topology(
             format!("no function found at or containing 0x{addr:x}"),
         )
     })?;
+    // The command is documented to accept an address inside the function, and
+    // the payload reports the function's name and size: decode the function,
+    // not the tail that starts at the requested address.
     let (decode_addr, lifted) = lift_raw_pcode(
         binary,
-        addr,
+        func.address,
         max_bytes,
         instruction_limit,
         !strict_indirect_stop,
