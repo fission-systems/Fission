@@ -17,12 +17,39 @@ pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
             let bits = nir_bits(ty).unwrap_or(64);
             CircleRange::singleton(*value as u64, bits)
         }
-        PreHirExpr::Var(name)
-        | PreHirExpr::AddressOfGlobal(name)
-        | PreHirExpr::AddressOfLocal(name) => env
+        PreHirExpr::Var(name) => env
             .get(name.as_str())
             .copied()
             .unwrap_or_else(|| CircleRange::top(64)),
+        // Where a variable lives, not what it holds: the environment maps names
+        // to stored values, so reading it here made `&x` equal to `x`.
+        PreHirExpr::AddressOfGlobal(_) | PreHirExpr::AddressOfLocal(_) => CircleRange::top(64),
+        PreHirExpr::PtrOffset { base, offset } => {
+            let base = eval_expr(base, env);
+            let bits = base.bits();
+            base.add(&CircleRange::singleton(*offset as u64, bits))
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ty,
+        } => {
+            let bits = nir_bits(ty).unwrap_or(64);
+            match eval_expr(cond, env).singleton_value() {
+                Some(0) => eval_expr(else_expr, env),
+                Some(_) => eval_expr(then_expr, env),
+                None => {
+                    let then_range = eval_expr(then_expr, env);
+                    let else_range = eval_expr(else_expr, env);
+                    if then_range.bits() == else_range.bits() {
+                        then_range.join(&else_range)
+                    } else {
+                        CircleRange::top(bits)
+                    }
+                }
+            }
+        }
         PreHirExpr::Cast { expr: inner, ty } => {
             let bits = nir_bits(ty).unwrap_or(64);
             let src = eval_expr(inner, env);
@@ -350,5 +377,73 @@ mod tests {
         let b = CircleRange::singleton(8, 64);
         let out = eval_binary(PreHirBinaryOp::Shl, a, b, 64);
         assert_eq!(out.singleton_value(), Some(0x100));
+    }
+}
+
+#[cfg(test)]
+mod address_of_tests {
+    use super::*;
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    /// `&x` is where `x` lives, not what it holds: with `x == 0` the address of
+    /// `x` is not the number zero.
+    #[test]
+    fn the_address_of_a_variable_is_not_its_value() {
+        let mut env = RangeEnv::new();
+        env.insert("x".to_string(), CircleRange::singleton(0, 64));
+        for expr in [
+            PreHirExpr::AddressOfLocal("x".to_string()),
+            PreHirExpr::AddressOfGlobal("x".to_string()),
+        ] {
+            assert!(eval_expr(&expr, &env).is_top(), "{expr:?}");
+        }
+        // The variable itself is still read from the environment.
+        assert_eq!(
+            eval_expr(&PreHirExpr::Var("x".to_string()), &env).singleton_value(),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn a_pointer_offset_adds_to_the_base_range() {
+        let mut env = RangeEnv::new();
+        env.insert("p".to_string(), CircleRange::singleton(100, 64));
+        let expr = PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("p".to_string())),
+            offset: 8,
+        };
+        assert_eq!(eval_expr(&expr, &env).singleton_value(), Some(108));
+        let _ = u64_ty();
+    }
+
+    #[test]
+    fn a_select_on_a_known_condition_takes_that_arm() {
+        let one = |v: i64| PreHirExpr::Const(v, u64_ty());
+        let select = |cond: PreHirExpr| PreHirExpr::Select {
+            cond: Box::new(cond),
+            then_expr: Box::new(one(22)),
+            else_expr: Box::new(one(11)),
+            ty: u64_ty(),
+        };
+        let truth = PreHirExpr::Const(1, NirType::Bool);
+        let falsity = PreHirExpr::Const(0, NirType::Bool);
+        assert_eq!(
+            eval_expr(&select(truth), &RangeEnv::new()).singleton_value(),
+            Some(22)
+        );
+        assert_eq!(
+            eval_expr(&select(falsity), &RangeEnv::new()).singleton_value(),
+            Some(11)
+        );
+        // An unknown condition may take either arm.
+        let unknown = select(PreHirExpr::Var("c".to_string()));
+        let joined = eval_expr(&unknown, &RangeEnv::new());
+        assert_eq!(joined.singleton_value(), None);
     }
 }
