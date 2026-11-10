@@ -797,4 +797,71 @@ mod tests {
                 .all(|&e| e <= 1)
         );
     }
+
+    /// `succ in succs[pred]` exactly when `pred in preds[succ]`, with the same
+    /// multiplicity. Dominance and post-dominance are computed from both.
+    fn assert_succs_and_preds_agree(result: &NodeSplitResult) {
+        let n = result.new_successors.len();
+        for a in 0..n {
+            for b in 0..n {
+                let out = result.new_successors[a].iter().filter(|&&s| s == b).count();
+                let inn = result.new_predecessors[b]
+                    .iter()
+                    .filter(|&&p| p == a)
+                    .count();
+                assert_eq!(
+                    out, inn,
+                    "edge {a} -> {b}: {out} in successors but {inn} in predecessors; \
+                     succs={:?} preds={:?}",
+                    result.new_successors, result.new_predecessors
+                );
+            }
+        }
+    }
+
+    /// Block 1 reaches header 0 through two parallel edges (a switch with two
+    /// cases sharing a target). Both must move to the clone and the successor
+    /// and predecessor lists must still describe the same graph, whichever
+    /// position the duplicate edge is in.
+    #[test]
+    fn parallel_edges_into_a_split_header_are_all_redirected_consistently() {
+        for (dup_01, dup_10) in [(false, true), (true, false), (true, true)] {
+            let mut succs = vec![vec![1], vec![0], vec![0], vec![1]];
+            if dup_01 {
+                succs[0].push(1);
+            }
+            if dup_10 {
+                succs[1].push(0);
+            }
+            let preds = build_preds(&succs);
+            let counts = vec![1usize; succs.len()];
+            let result = compute_node_splits(&succs, &preds, &counts).expect("split");
+            assert_succs_and_preds_agree(&result);
+        }
+    }
+
+    /// The control: single edges keep the invariant (it held before the fix).
+    #[test]
+    fn single_edges_keep_successors_and_predecessors_in_agreement() {
+        let succs = vec![vec![1], vec![0], vec![0], vec![1]];
+        let preds = build_preds(&succs);
+        let counts = vec![1usize; succs.len()];
+        let result = compute_node_splits(&succs, &preds, &counts).expect("split");
+        assert_succs_and_preds_agree(&result);
+    }
+
+    /// The checker above has to be able to fail: a result whose predecessor
+    /// list is missing one of two parallel edges is rejected.
+    #[test]
+    #[should_panic(expected = "in successors but")]
+    fn the_succs_preds_checker_rejects_a_desynchronized_result() {
+        let result = NodeSplitResult {
+            new_successors: vec![vec![1, 1], vec![]],
+            new_predecessors: vec![vec![], vec![0]],
+            virtual_to_original: vec![],
+            original_count: 2,
+            splits_applied: 0,
+        };
+        assert_succs_and_preds_agree(&result);
+    }
 }
