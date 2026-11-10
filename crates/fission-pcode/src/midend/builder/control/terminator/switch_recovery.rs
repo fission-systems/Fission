@@ -995,7 +995,34 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Bound the selector from the guards in front of the dispatch at `idx`.
+    ///
+    /// That lowers each predecessor's terminator, and a predecessor can be
+    /// reached from the dispatch again (a dispatch inside a loop, or a state
+    /// machine whose cases jump back to the dispatch). Lowering it then needs
+    /// this bound again, without end. A dispatch that is already being bounded
+    /// has no answer for its own re-entry.
     pub(super) fn infer_branchind_selector_upper_bound(
+        &mut self,
+        idx: usize,
+        selector: &PreHirExpr,
+        selector_alias: Option<&Varnode>,
+        min_val: i64,
+    ) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let bound = self.infer_branchind_selector_upper_bound_unguarded(
+            idx,
+            selector,
+            selector_alias,
+            min_val,
+        );
+        self.branchind_bound_probes.remove(&idx);
+        bound
+    }
+
+    fn infer_branchind_selector_upper_bound_unguarded(
         &mut self,
         idx: usize,
         selector: &PreHirExpr,
@@ -1116,7 +1143,26 @@ impl<'a> PreviewBuilder<'a> {
         best
     }
 
+    /// See [`Self::infer_branchind_selector_upper_bound`] for the re-entry guard.
     pub(super) fn infer_branchind_selector_upper_bound_from_alias_family(
+        &mut self,
+        idx: usize,
+        selector_alias: &Varnode,
+        min_val: i64,
+    ) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let bound = self.infer_branchind_selector_upper_bound_from_alias_family_unguarded(
+            idx,
+            selector_alias,
+            min_val,
+        );
+        self.branchind_bound_probes.remove(&idx);
+        bound
+    }
+
+    fn infer_branchind_selector_upper_bound_from_alias_family_unguarded(
         &mut self,
         idx: usize,
         selector_alias: &Varnode,

@@ -197,6 +197,9 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) active_trace_id: Option<u64>,
     pub(crate) last_trace_id: Option<u64>,
     pub(crate) next_trace_id: u64,
+    /// Dispatch blocks whose predecessors' terminators are being lowered to
+    /// bound the selector; a re-entry for the same block gets no bound.
+    pub(crate) branchind_bound_probes: HashSet<usize>,
     pub(crate) lowering_site_depth: usize,
     pub(in crate::midend::builder) materialize_owner_repartition:
         RefCell<super::materialize::MaterializeOwnerRepartition>,
