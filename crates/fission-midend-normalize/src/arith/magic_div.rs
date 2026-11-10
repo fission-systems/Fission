@@ -343,6 +343,23 @@ fn value_bits(expr: &PreHirExpr, ctx: &Ctx) -> Option<u32> {
     }
 }
 
+/// A constant stored in an `i64` but typed as an unsigned 64- or 128-bit value
+/// is the 64-bit pattern above `2^63`, not a negative number (a magic
+/// multiplier is often that large, and a 128-bit multiply holds the register's
+/// 64-bit pattern).
+fn unsigned_multiplier(constant: &PreHirExpr, value: i128) -> i128 {
+    match strip_casts(constant) {
+        PreHirExpr::Const(
+            _,
+            NirType::Int {
+                bits: 64 | 128,
+                signed: false,
+            },
+        ) if value < 0 => value + (1i128 << 64),
+        _ => value,
+    }
+}
+
 fn const_value(expr: &PreHirExpr) -> Option<i128> {
     match strip_casts(expr) {
         PreHirExpr::Const(v, _) => Some(i128::from(*v)),
@@ -421,28 +438,53 @@ fn recognize_unsigned(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
     let (shifted, narrowest) = strip_casts_tracking_width(lhs);
     let (product, n, inner_shift) = match shifted {
         PreHirExpr::Binary {
-            op: PreHirBinaryOp::Shr,
+            op: inner_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
             lhs: inner,
             rhs: inner_amount,
             ..
         } if const_value(inner_amount).is_some() => {
             let a = u32::try_from(const_value(inner_amount)?).ok()?;
-            (strip_casts(inner), n.checked_add(a)?, Some((a, narrowest)))
+            let product = strip_casts(inner);
+            // An arithmetic shift differs from a logical one only in the bits
+            // above the product. A cast that keeps `narrowest` bits starting at
+            // `a` reads bits `a..a + narrowest`; when those lie inside the
+            // product the two shifts are the same value.
+            if *inner_op == PreHirBinaryOp::Sar {
+                let product_bits = match product {
+                    PreHirExpr::Binary { ty, .. } => int_bits(ty)?,
+                    _ => return None,
+                };
+                if narrowest == u32::MAX || a.checked_add(narrowest)? > product_bits {
+                    return None;
+                }
+            }
+            (product, n.checked_add(a)?, Some((a, narrowest)))
         }
         other => (other, n, None),
     };
     let (x, m, mul_bits) = split_mul_by_const(product, ctx)?;
-    let w = value_bits(x, ctx).filter(|w| (8..=32).contains(w))?;
+    // 64-bit dividends multiply in 128 bits; the bounds below are exact there
+    // because a product that overflows `i128` is far past `2^n` (`n < 100`).
+    let w = value_bits(x, ctx).filter(|w| (8..=64).contains(w))?;
     if mul_bits < 2 * w || n < w {
         return None;
     }
     let (d, e) = magic_parameters(m, n)?;
     let max_x = (1i128 << w) - 1;
-    if m <= 0 || max_x * e >= (1i128 << n) || max_x * m >= (1i128 << mul_bits) {
+    let error_fits = max_x
+        .checked_mul(e)
+        .is_some_and(|error| error < (1i128 << n));
+    // `(2^64 - 1) * m` reaches `2^128`, past `i128` but inside `u128`.
+    let wide = u128::try_from(max_x)
+        .ok()
+        .zip(u128::try_from(m).ok())
+        .and_then(|(x, m)| x.checked_mul(m));
+    let product_fits = wide.is_some_and(|wide| mul_bits >= 128 || wide < (1u128 << mul_bits));
+    if m <= 0 || !error_fits || !product_fits {
         return None;
     }
     if let Some((a, narrowest)) = inner_shift {
-        if narrowest < 128 && (max_x * m) >> a >= (1i128 << narrowest) {
+        if narrowest < 128 && (wide? >> a) >= (1u128 << narrowest) {
             return None;
         }
     }
@@ -461,8 +503,8 @@ fn split_mul_by_const<'a>(expr: &'a PreHirExpr, ctx: &Ctx) -> Option<(&'a PreHir
         return None;
     };
     let (other, m) = match (const_value(lhs), const_value(rhs)) {
-        (None, Some(m)) => (lhs.as_ref(), m),
-        (Some(m), None) => (rhs.as_ref(), m),
+        (None, Some(m)) => (lhs.as_ref(), unsigned_multiplier(rhs, m)),
+        (Some(m), None) => (rhs.as_ref(), unsigned_multiplier(lhs, m)),
         _ => return None,
     };
     Some((strip_extensions(other, ctx), m, int_bits(ty)?))
@@ -963,6 +1005,152 @@ mod tests {
         );
         assert!(recognize_magic_division_in_function(&mut func));
         assert_is_div(&last_assign_rhs(&func, "t"), 100, false);
+    }
+
+    /// `t = (u128)x * M; t = t >> 64; t = (u64)t >> k` for a 64-bit dividend.
+    fn unsigned_wide_chain(m: i64, k: i64) -> PreHirFunction {
+        let w64 = i(64, false);
+        let w128 = i(128, false);
+        function(
+            vec![("x", w64.clone()), ("t", w128.clone())],
+            vec![
+                assign("t", cast(w128.clone(), var("x"))),
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Mul,
+                        var("t"),
+                        konst(m, w64.clone()),
+                        w128.clone(),
+                    ),
+                ),
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Shr,
+                        var("t"),
+                        konst(64, w64.clone()),
+                        w128.clone(),
+                    ),
+                ),
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Shr,
+                        cast(w64.clone(), var("t")),
+                        konst(k, w64.clone()),
+                        w64.clone(),
+                    ),
+                ),
+                PreHirStmt::Return(Some(var("t"))),
+            ],
+        )
+    }
+
+    fn assert_is_u64_div(expr: &PreHirExpr, divisor: i64) {
+        let PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
+            lhs,
+            rhs,
+            ty,
+        } = strip_casts(expr)
+        else {
+            panic!("expected a division, got {expr:?}");
+        };
+        assert_eq!(**rhs, konst(divisor, i(64, false)));
+        assert_eq!(*ty, i(64, false));
+        assert_eq!(strip_casts(lhs), &var("x"));
+    }
+
+    #[test]
+    fn unsigned_64_bit_division_through_a_128_bit_multiply() {
+        // x / 1000000: M = ceil(2^82 / 10^6), n = 64 + 18.
+        let mut func = unsigned_wide_chain(4835703278458516699, 18);
+        assert!(recognize_magic_division_in_function(&mut func));
+        assert_is_u64_div(&last_assign_rhs(&func, "t"), 1_000_000);
+    }
+
+    #[test]
+    fn unsigned_64_bit_multiplier_above_two_to_the_63_is_not_negative() {
+        // x / 3: M = 0xAAAAAAAAAAAAAAAB, which an i64 holds as a negative number.
+        let mut func = unsigned_wide_chain(0xAAAA_AAAA_AAAA_AAABu64 as i64, 1);
+        assert!(recognize_magic_division_in_function(&mut func));
+        assert_is_u64_div(&last_assign_rhs(&func, "t"), 3);
+    }
+
+    #[test]
+    fn unsigned_64_bit_multiplier_that_is_not_a_division_is_left_alone() {
+        // 1000 off the /10^6 multiplier: the error term reaches a whole unit
+        // for some 64-bit x, so it is only something that looks like a division.
+        let mut func = unsigned_wide_chain(4835703278458516699 + 1000, 18);
+        assert!(!recognize_magic_division_in_function(&mut func));
+    }
+
+    /// The coalesced chain a 64-bit unsigned `x / 24` compiles to, in the form
+    /// the lifter records it: a 128-bit product typed SIGNED, its high half
+    /// taken with an arithmetic shift and read through a signed 64-bit cast,
+    /// then an UNSIGNED divide by the power of two. The multiplier is the 64-bit
+    /// pattern `0xAAAAAAAAAAAAAAAB` held in a 128-bit constant as a negative
+    /// `i64`.
+    fn recorded_wide_chain(m: i64) -> PreHirFunction {
+        let u64t = i(64, false);
+        let s64t = i(64, true);
+        let u128t = i(128, false);
+        let s128t = i(128, true);
+        function(
+            vec![("x", u64t.clone()), ("t", s128t.clone())],
+            vec![
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Mul,
+                        cast(u128t.clone(), var("x")),
+                        konst(m, u128t.clone()),
+                        s128t.clone(),
+                    ),
+                ),
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        var("t"),
+                        konst(64, u64t.clone()),
+                        s128t.clone(),
+                    ),
+                ),
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Div,
+                        cast(s64t.clone(), var("t")),
+                        konst(16, u64t.clone()),
+                        u64t.clone(),
+                    ),
+                ),
+                PreHirStmt::Return(Some(var("t"))),
+            ],
+        )
+    }
+
+    #[test]
+    fn a_signed_recorded_wide_product_with_an_arithmetic_high_half_is_still_unsigned_division() {
+        let mut func = recorded_wide_chain(0xAAAA_AAAA_AAAA_AAABu64 as i64);
+        assert!(recognize_magic_division_in_function(&mut func));
+        assert_is_u64_div(&last_assign_rhs(&func, "t"), 24);
+    }
+
+    #[test]
+    fn an_arithmetic_high_half_is_left_alone_when_the_cast_reads_past_the_product() {
+        // A 32-bit cast of `P >> 64` would be fine; a shift that leaves fewer
+        // than 64 product bits above it is not. Shifting by 100 of a 128-bit
+        // product with a 64-bit cast reads bits 100..164, past the product.
+        let mut func = recorded_wide_chain(0xAAAA_AAAA_AAAA_AAABu64 as i64);
+        if let PreHirStmt::Assign { rhs, .. } = &mut func.body[1] {
+            if let PreHirExpr::Binary { rhs: amount, .. } = rhs {
+                *amount = Box::new(konst(100, i(64, false)));
+            }
+        }
+        assert!(!recognize_magic_division_in_function(&mut func));
     }
 
     // ── The arithmetic claim, checked against brute force ────────────────────
