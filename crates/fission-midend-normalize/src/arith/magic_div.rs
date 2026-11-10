@@ -257,18 +257,63 @@ fn contains_magic_multiplier(expr: &PreHirExpr) -> bool {
 
 fn rewrite_expr(expr: &mut PreHirExpr, live: &crate::HashMap<String, Tracked>, ctx: &Ctx) -> bool {
     let Some(resolved) = resolve(expr, live, ctx) else {
-        return false;
+        return recombine_remainders(expr);
     };
+    // A quotient recovered by an earlier statement and stored in a temporary
+    // reaches this one only through `live`: fold `x - q * d` with it resolved
+    // in, and keep that only when it is smaller than what it replaces.
+    let mut folded = resolved.clone();
+    if recombine_remainders(&mut folded) && count_nodes(&folded) < count_nodes(expr) {
+        *expr = folded;
+        return true;
+    }
     if !contains_magic_multiplier(&resolved) {
-        return false;
+        return recombine_remainders(expr);
     }
     match recognize_resolved(&resolved, ctx) {
         Some(new_expr) if new_expr != *expr => {
             *expr = new_expr;
+            recombine_remainders(expr);
             true
         }
-        _ => false,
+        _ => recombine_remainders(expr),
     }
+}
+
+/// A quotient recovered here, or one already in the expression, may be the
+/// `x / d` of `x - x / d * d`; fold that into `x % d`, innermost first.
+fn recombine_remainders(expr: &mut PreHirExpr) -> bool {
+    let mut changed = false;
+    match expr {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. } => changed |= recombine_remainders(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            changed |= recombine_remainders(lhs);
+            changed |= recombine_remainders(rhs);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= recombine_remainders(cond);
+            changed |= recombine_remainders(then_expr);
+            changed |= recombine_remainders(else_expr);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                changed |= recombine_remainders(arg);
+            }
+        }
+        _ => {}
+    }
+    if let Some(remainder) = crate::arith::recombine_remainder(expr) {
+        *expr = remainder;
+        changed = true;
+    }
+    changed
 }
 
 // ── Recognition on a resolved tree ───────────────────────────────────────────
@@ -1494,6 +1539,91 @@ mod tests {
                 &signed_ctx_with_x(64),
             )
             .is_none()
+        );
+    }
+
+    #[test]
+    fn a_recovered_quotient_inside_x_minus_q_times_d_becomes_a_remainder() {
+        let w64 = i(64, false);
+        let quotient = bin(
+            PreHirBinaryOp::Div,
+            var("s"),
+            konst(65521, w64.clone()),
+            w64.clone(),
+        );
+        let mut func = function(
+            vec![("s", w64.clone())],
+            vec![
+                assign(
+                    "s",
+                    bin(
+                        PreHirBinaryOp::Sub,
+                        var("s"),
+                        bin(
+                            PreHirBinaryOp::Mul,
+                            quotient,
+                            konst(65521, w64.clone()),
+                            w64.clone(),
+                        ),
+                        w64.clone(),
+                    ),
+                ),
+                PreHirStmt::Return(Some(var("s"))),
+            ],
+        );
+        assert!(recognize_magic_division_in_function(&mut func));
+        assert_eq!(
+            last_assign_rhs(&func, "s"),
+            bin(
+                PreHirBinaryOp::Mod,
+                var("s"),
+                konst(65521, w64.clone()),
+                w64
+            )
+        );
+    }
+
+    #[test]
+    fn a_quotient_kept_in_a_temporary_still_folds_into_the_remainder() {
+        let w64 = i(64, false);
+        let mut func = function(
+            vec![("s", w64.clone()), ("q", w64.clone())],
+            vec![
+                assign(
+                    "q",
+                    bin(
+                        PreHirBinaryOp::Div,
+                        var("s"),
+                        konst(65521, w64.clone()),
+                        w64.clone(),
+                    ),
+                ),
+                assign(
+                    "s",
+                    bin(
+                        PreHirBinaryOp::Sub,
+                        var("s"),
+                        bin(
+                            PreHirBinaryOp::Mul,
+                            var("q"),
+                            konst(65521, w64.clone()),
+                            w64.clone(),
+                        ),
+                        w64.clone(),
+                    ),
+                ),
+                PreHirStmt::Return(Some(var("s"))),
+            ],
+        );
+        assert!(recognize_magic_division_in_function(&mut func));
+        assert_eq!(
+            last_assign_rhs(&func, "s"),
+            bin(
+                PreHirBinaryOp::Mod,
+                var("s"),
+                konst(65521, w64.clone()),
+                w64
+            )
         );
     }
 
