@@ -2020,8 +2020,21 @@ pub(super) fn struct_base_name_for_single_pointer(type_name: &str) -> Option<&st
             break;
         }
     }
+    // Qualifiers on the pointer itself follow the star (`Foo* const`).
+    loop {
+        let trimmed = name.trim_end();
+        if let Some(rest) = trimmed.strip_suffix("const") {
+            name = rest.trim_end();
+        } else if let Some(rest) = trimmed.strip_suffix("volatile") {
+            name = rest.trim_end();
+        } else {
+            name = trimmed;
+            break;
+        }
+    }
     let inner = name.strip_suffix('*')?;
-    if inner.is_empty() || inner.ends_with('*') {
+    // One level only: a `*` anywhere left of the last one is a second level.
+    if inner.is_empty() || inner.contains('*') {
         return None;
     }
     let inner = inner.trim();
@@ -2585,5 +2598,47 @@ fn drop_return_values(body: &mut Vec<HirStmt>) {
         }
         body[index] = HirStmt::Return(None);
         index += 1;
+    }
+}
+
+#[cfg(test)]
+mod struct_base_name_tests {
+    use super::struct_base_name_for_single_pointer as base;
+
+    #[test]
+    fn a_pointer_to_a_struct_names_the_struct() {
+        assert_eq!(base("Foo*"), Some("Foo"));
+        assert_eq!(base("const Foo*"), Some("Foo"));
+        assert_eq!(base("volatile const Foo*"), Some("Foo"));
+        assert_eq!(base("struct Foo*"), Some("Foo"));
+        assert_eq!(base("class Foo *"), Some("Foo"));
+    }
+
+    /// A qualifier on the pointer itself follows the star (`Foo* const`); it
+    /// says nothing about the pointee, so the struct is still `Foo`.
+    #[test]
+    fn a_qualifier_on_the_pointer_itself_does_not_hide_the_struct() {
+        assert_eq!(base("Foo* const"), Some("Foo"));
+        assert_eq!(base("const Foo* const"), Some("Foo"));
+        assert_eq!(base("Foo* volatile"), Some("Foo"));
+        assert_eq!(base("const Foo* const volatile"), Some("Foo"));
+        assert_eq!(base("struct Foo * const"), Some("Foo"));
+    }
+
+    /// Still one level only: the fields belong to `**binding` otherwise.
+    #[test]
+    fn deeper_pointers_are_still_refused() {
+        assert_eq!(base("Foo**"), None);
+        assert_eq!(base("Foo* const*"), None);
+        assert_eq!(base("Foo** const"), None);
+        assert_eq!(base("const Foo* const*"), None);
+    }
+
+    #[test]
+    fn non_pointers_are_refused() {
+        assert_eq!(base("Foo"), None);
+        assert_eq!(base("const Foo"), None);
+        assert_eq!(base("*"), None);
+        assert_eq!(base(""), None);
     }
 }

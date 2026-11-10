@@ -494,6 +494,20 @@ struct TypeDieInfo {
     array_dimensions: Vec<Option<u64>>,
 }
 
+/// Apply a `const`/`volatile` qualifier to the rendered name of a type.
+///
+/// A qualifier on a pointer type belongs to the pointer, not to what it points
+/// at, and C writes it after the `*`: `const T* const`. Writing it in front --
+/// `const const T*` -- repeats the qualifier on the pointee and says nothing
+/// about the pointer. For every other type the qualifier leads, as before.
+fn qualify(type_name: &str, qualifier: &str) -> String {
+    if type_name.ends_with('*') {
+        format!("{type_name} {qualifier}")
+    } else {
+        format!("{qualifier} {type_name}")
+    }
+}
+
 fn resolve_type_name(
     offset: UnitOffset<usize>,
     all_types: &HashMap<UnitOffset<usize>, TypeDieInfo>,
@@ -527,7 +541,7 @@ fn resolve_type_name(
             } else {
                 None
             };
-            base.map(|b| format!("const {}", b))
+            base.map(|b| qualify(&b, "const"))
         }
         DwTag(0x35) => {
             // DW_TAG_volatile_type
@@ -536,7 +550,7 @@ fn resolve_type_name(
             } else {
                 None
             };
-            base.map(|b| format!("volatile {}", b))
+            base.map(|b| qualify(&b, "volatile"))
         }
         DwTag(0x01) => {
             // DW_TAG_array_type: DW_AT_type is the *element* type; each

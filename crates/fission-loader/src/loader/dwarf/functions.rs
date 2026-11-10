@@ -131,8 +131,11 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                             continue;
                         };
                         match entry.tag() {
-                            DwTag(0x05) => {
-                                // DW_TAG_formal_parameter
+                            // DW_TAG_formal_parameter. Only a *direct* child of the
+                            // subprogram is one of its parameters. The same tag also
+                            // appears under DW_TAG_inlined_subroutine, where it is a
+                            // parameter of the function that was inlined here.
+                            DwTag(0x05) if func_depth == 2 => {
                                 if let Some(param) =
                                     self.extract_param_info(entry, &unit, &dwarf, &type_cache)?
                                 {
@@ -172,16 +175,43 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                         continue; // Declaration-only / inlined
                     };
 
-                    let raw_name = self
-                        .get_attr_string(entry, DwAt(0x6e), &unit, &dwarf)?
-                        .or(self.get_attr_string(entry, DwAt(0x03), &unit, &dwarf)?)
-                        .unwrap_or_default();
+                    // An out-of-line member function (and a template
+                    // instance) is a declaration inside its class plus a
+                    // definition that carries the code range and parameters
+                    // and reaches the declaration through DW_AT_specification
+                    // (or DW_AT_abstract_origin). The definition has neither a
+                    // name nor a return type of its own, so both come from the
+                    // first DIE of the chain that has one.
+                    let chain = self.origin_chain(entry, &unit)?;
+                    let mut raw_name = String::new();
+                    let mut return_type = None;
+                    let mut return_type_found = false;
+                    for &offset in &chain {
+                        let Ok(link) = unit.entry(offset) else {
+                            continue;
+                        };
+                        if raw_name.is_empty() {
+                            raw_name = self
+                                .get_attr_string(&link, DwAt(0x6e), &unit, &dwarf)?
+                                .or(self.get_attr_string(&link, DwAt(0x03), &unit, &dwarf)?)
+                                .unwrap_or_default();
+                        }
+                        if !return_type_found && link.attr_value(DwAt(0x49))?.is_some() {
+                            return_type =
+                                self.resolve_return_type_ref(&link, &unit, &type_cache)?;
+                            return_type_found = true;
+                        }
+                    }
                     if raw_name.is_empty() {
                         continue;
                     }
+                    if !return_type_found {
+                        // No DIE in the chain has a DW_AT_type: the function
+                        // returns void.
+                        return_type = self.resolve_return_type_ref(entry, &unit, &type_cache)?;
+                    }
 
                     let name = crate::loader::demangle::demangle(&raw_name);
-                    let return_type = self.resolve_return_type_ref(entry, &unit, &type_cache)?;
                     let frame_base = self.extract_frame_base(entry, &unit)?;
                     let size = self.subprogram_size(entry, address)?;
 
@@ -208,6 +238,38 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         }
 
         Ok(functions)
+    }
+
+    /// Offsets of a DIE (a subprogram or one of its parameters) and then of
+    /// the DIEs it points at through `DW_AT_specification` /
+    /// `DW_AT_abstract_origin`, nearest first.
+    /// The walk is bounded: a reference cycle only a malformed `.debug_info`
+    /// produces must not hang the loader.
+    fn origin_chain(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+    ) -> Result<Vec<UnitOffset<usize>>, gimli::Error> {
+        const MAX_HOPS: usize = 4;
+        let mut chain = vec![entry.offset()];
+        let mut current = entry.offset();
+        for _ in 0..MAX_HOPS {
+            let Ok(die) = unit.entry(current) else { break };
+            let target = match die.attr_value(DwAt(0x47))? {
+                Some(gimli::AttributeValue::UnitRef(offset)) => Some(offset),
+                _ => match die.attr_value(DwAt(0x31))? {
+                    Some(gimli::AttributeValue::UnitRef(offset)) => Some(offset),
+                    _ => None,
+                },
+            };
+            let Some(offset) = target else { break };
+            if chain.contains(&offset) {
+                break;
+            }
+            chain.push(offset);
+            current = offset;
+        }
+        Ok(chain)
     }
 
     /// Resolve a `DW_TAG_subprogram`'s size from `DW_AT_high_pc`.
@@ -307,16 +369,29 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
         type_cache: &HashMap<UnitOffset<usize>, String>,
     ) -> Result<Option<DwarfParamInfo>, gimli::Error> {
-        let name = self
-            .get_attr_string(entry, DwAt(0x03), unit, dwarf)?
-            .unwrap_or_default();
+        // A concrete out-of-line instance (what -O2 emits for a function that
+        // was also inlined) names and types its parameters only through
+        // DW_AT_abstract_origin; the location stays on the concrete DIE.
+        let mut name = String::new();
+        let mut resolved_type = None;
+        for offset in self.origin_chain(entry, unit)? {
+            let Ok(link) = unit.entry(offset) else {
+                continue;
+            };
+            if name.is_empty() {
+                name = self
+                    .get_attr_string(&link, DwAt(0x03), unit, dwarf)?
+                    .unwrap_or_default();
+            }
+            if resolved_type.is_none() {
+                resolved_type = self.resolve_type_ref(&link, unit, type_cache)?;
+            }
+        }
         if name.is_empty() {
             return Ok(None);
         }
 
-        let type_name = self
-            .resolve_type_ref(entry, unit, type_cache)?
-            .unwrap_or_else(|| "int".to_string());
+        let type_name = resolved_type.unwrap_or_else(|| "int".to_string());
 
         let location = self.extract_location(entry, unit, dwarf)?;
 
@@ -602,5 +677,134 @@ mod location_list_tests {
                 .collect::<Vec<_>>(),
             ["fixed", "format"]
         );
+    }
+}
+
+#[cfg(test)]
+mod specification_tests {
+    use super::*;
+    use crate::loader::dwarf::DwarfAnalyzer;
+
+    /// `g++ -O0 -g -fno-pie -no-pie` builds of `testdata/x64_cpp_methods_{a,b}.cpp`.
+    /// An out-of-line member function is a declaration inside its class
+    /// (name, linkage name, return type) plus a definition at unit level
+    /// that carries the code range and parameters and reaches the
+    /// declaration through `DW_AT_specification`.
+    fn dwarf_functions(fixture: &str) -> Vec<crate::loader::DwarfFunctionInfo> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(fixture);
+        let binary = crate::loader::LoadedBinary::from_file(&path).expect("load C++ DWARF fixture");
+        let analyzer = DwarfAnalyzer::new(&binary);
+        assert!(analyzer.has_debug_info());
+        analyzer.analyze_functions()
+    }
+
+    fn find<'f>(
+        functions: &'f [crate::loader::DwarfFunctionInfo],
+        needle: &str,
+    ) -> &'f crate::loader::DwarfFunctionInfo {
+        functions
+            .iter()
+            .find(|f| f.name.contains(needle))
+            .unwrap_or_else(|| {
+                panic!(
+                    "no DWARF function containing {needle:?}; have {:?}",
+                    functions
+                        .iter()
+                        .map(|f| f.name.as_str())
+                        .collect::<Vec<_>>()
+                )
+            })
+    }
+
+    #[test]
+    fn out_of_line_methods_are_named_through_their_declaration() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        for needle in ["Base::get", "Derived::sum", "Base::vget"] {
+            find(&a, needle);
+        }
+        let b = dwarf_functions("testdata/x64_cpp_methods_b.elf");
+        for needle in [
+            "Shape::area",
+            "Named::checksum",
+            "Circle::perimeter",
+            "Box<int>::twice",
+            "Box<long>::twice",
+        ] {
+            find(&b, needle);
+        }
+    }
+
+    #[test]
+    fn an_out_of_line_method_takes_its_return_type_from_the_declaration() {
+        // The definition DIE has no DW_AT_type; reading it as "no type" made
+        // every such method return void.
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        let get = find(&a, "Base::get");
+        assert_eq!(get.return_type.as_deref(), Some("int"), "{get:?}");
+        let b = dwarf_functions("testdata/x64_cpp_methods_b.elf");
+        let area = find(&b, "Shape::area");
+        assert_eq!(area.return_type.as_deref(), Some("double"), "{area:?}");
+    }
+
+    #[test]
+    fn out_of_line_methods_keep_the_parameters_the_definition_names() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        let sum = find(&a, "Derived::sum");
+        let params: Vec<&str> = sum.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(params, ["this", "k"], "{sum:?}");
+    }
+
+    /// `this` of a const method is a const *pointer* to a const object. The
+    /// qualifier that belongs to the pointer is written after the `*`; writing
+    /// it in front as well gave `const const Derived*`, which says "const"
+    /// twice about the object and nothing about the pointer.
+    #[test]
+    fn a_const_pointer_keeps_its_qualifier_after_the_star() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        let sum = find(&a, "Derived::sum");
+        let this = sum.params.iter().find(|p| p.name == "this").expect("this");
+        assert_eq!(this.type_name, "const Derived* const", "{sum:?}");
+        let b = dwarf_functions("testdata/x64_cpp_methods_b.elf");
+        let area = find(&b, "Shape::area");
+        let this = area.params.iter().find(|p| p.name == "this").expect("this");
+        // Type names carry no namespace qualification (unchanged here).
+        assert_eq!(this.type_name, "const Shape* const", "{area:?}");
+    }
+
+    /// The control: a pointer to a const object, with no qualifier on the
+    /// pointer itself, still reads `const T*`.
+    #[test]
+    fn a_pointer_to_const_is_unchanged() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        let used = find(&a, "use(");
+        let d = used.params.iter().find(|p| p.name == "d").expect("d");
+        assert_eq!(d.type_name, "const Derived*", "{used:?}");
+    }
+
+    /// At -O2 the definition's parameters are `DW_TAG_formal_parameter` DIEs
+    /// that carry no name or type of their own, only a `DW_AT_abstract_origin`
+    /// to the parameter of the abstract instance. Dropping them registered the
+    /// function with *no* parameters, and a call site then loses its arguments.
+    #[test]
+    fn parameters_are_read_through_their_abstract_origin() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a_o2.elf");
+        let sum = find(&a, "Derived::sum");
+        let params: Vec<&str> = sum.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(params, ["this", "k"], "{sum:?}");
+        let b = dwarf_functions("testdata/x64_cpp_methods_b_o2.elf");
+        let area = find(&b, "Shape::area");
+        let params: Vec<&str> = area.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(params, ["this", "mode"], "{area:?}");
+        let k = sum.params.iter().find(|p| p.name == "k").expect("k");
+        assert_eq!(k.type_name, "int", "{sum:?}");
+    }
+
+    /// The control: a plain function carries its own name and was always found.
+    #[test]
+    fn a_plain_function_is_unaffected() {
+        let a = dwarf_functions("testdata/x64_cpp_methods_a.elf");
+        let helper = find(&a, "helper");
+        let params: Vec<&str> = helper.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(params, ["x", "y"], "{helper:?}");
     }
 }

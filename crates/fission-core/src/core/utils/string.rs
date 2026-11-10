@@ -102,6 +102,23 @@ pub fn sanitize_symbol_name(name: &str) -> String {
     sanitized
 }
 
+/// `name` without a trailing `const`/`volatile` word, if it ends in one that
+/// stands alone (preceded by whitespace or a pointer/reference mark).
+fn strip_trailing_qualifier(name: &str) -> Option<&str> {
+    for qualifier in ["const", "volatile"] {
+        if let Some(rest) = name.strip_suffix(qualifier) {
+            let standalone = rest
+                .chars()
+                .next_back()
+                .is_none_or(|c| c.is_whitespace() || c == '*' || c == '&');
+            if standalone {
+                return Some(rest);
+            }
+        }
+    }
+    None
+}
+
 /// Normalize a spelled type name into a stable nominal identity.
 ///
 /// This strips trailing pointer/reference qualifiers and C/C++ storage keywords
@@ -112,11 +129,19 @@ pub fn normalize_named_type_identity(type_name: &str) -> Option<String> {
         return None;
     }
 
-    while let Some(stripped) = cleaned.strip_suffix('*') {
-        cleaned = stripped.trim_end();
-    }
-    while let Some(stripped) = cleaned.strip_suffix('&') {
-        cleaned = stripped.trim_end();
+    // Peel what follows the name: pointer/reference marks and the qualifiers
+    // of the pointer itself, which C writes after the star (`Foo* const`). A
+    // qualifier is a whole word: `is_const` is a type name, not `is_` + const.
+    loop {
+        if let Some(stripped) = cleaned.strip_suffix('*') {
+            cleaned = stripped.trim_end();
+        } else if let Some(stripped) = cleaned.strip_suffix('&') {
+            cleaned = stripped.trim_end();
+        } else if let Some(stripped) = strip_trailing_qualifier(cleaned) {
+            cleaned = stripped.trim_end();
+        } else {
+            break;
+        }
     }
 
     let tokens: Vec<&str> = cleaned
@@ -192,5 +217,48 @@ mod tests {
             normalize_named_type_identity("volatile class FooBar &"),
             Some("FooBar".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod named_type_identity_tests {
+    use super::normalize_named_type_identity as identity;
+
+    #[test]
+    fn pointer_and_leading_qualifiers_reduce_to_the_type_name() {
+        assert_eq!(identity("Foo*").as_deref(), Some("Foo"));
+        assert_eq!(identity("const Foo*").as_deref(), Some("Foo"));
+        assert_eq!(identity("struct Foo *").as_deref(), Some("Foo"));
+        assert_eq!(identity("volatile const Foo**").as_deref(), Some("Foo"));
+        assert_eq!(identity("Foo").as_deref(), Some("Foo"));
+    }
+
+    /// A qualifier on the pointer itself follows the star (`Foo* const`) and
+    /// must not stop the stars from being peeled -- it left `Foo*`, a name no
+    /// definition has, so the type's typedef and fields were lost.
+    #[test]
+    fn qualifiers_after_the_star_do_not_hide_the_type_name() {
+        assert_eq!(identity("const Foo* const").as_deref(), Some("Foo"));
+        assert_eq!(identity("Foo* volatile").as_deref(), Some("Foo"));
+        assert_eq!(identity("Foo *const").as_deref(), Some("Foo"));
+        assert_eq!(
+            identity("const Foo* const volatile").as_deref(),
+            Some("Foo")
+        );
+        assert_eq!(identity("Foo* const*").as_deref(), Some("Foo"));
+    }
+
+    /// A type whose own name ends in a qualifier word is not a qualifier.
+    #[test]
+    fn identifiers_that_merely_end_in_const_are_kept() {
+        assert_eq!(identity("is_const").as_deref(), Some("is_const"));
+        assert_eq!(identity("my_volatile*").as_deref(), Some("my_volatile"));
+    }
+
+    #[test]
+    fn nothing_left_is_none() {
+        assert_eq!(identity(""), None);
+        assert_eq!(identity("const"), None);
+        assert_eq!(identity("*"), None);
     }
 }
