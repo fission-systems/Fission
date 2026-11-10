@@ -204,6 +204,15 @@ impl<'a> PreviewBuilder<'a> {
         canonical_block_index_for_address(self.pcode, &self.address_to_index, load_addr)
     }
 
+    /// See [`restore_literal_table_bases`].
+    pub(super) fn restore_table_base_literals(&self, expr: PreHirExpr) -> PreHirExpr {
+        super::super::switch_table::restore_literal_table_bases(
+            expr,
+            &self.string_literal_addresses,
+            false,
+        )
+    }
+
     pub(super) fn lower_branchind_switch_expr(
         &mut self,
         idx: usize,
@@ -214,6 +223,9 @@ impl<'a> PreviewBuilder<'a> {
         let alias_expr = self.lower_branchind_same_block_alias_expr(idx, switch_var, visiting);
         let predecessor_expr =
             self.recover_branchind_switch_expr_from_predecessors(idx, switch_var, visiting);
+        let exact_expr = exact_expr.map(|expr| self.restore_table_base_literals(expr));
+        let alias_expr = alias_expr.map(|expr| self.restore_table_base_literals(expr));
+        let predecessor_expr = predecessor_expr.map(|expr| self.restore_table_base_literals(expr));
 
         let best_jump_table_expr = exact_expr
             .iter()
@@ -221,6 +233,25 @@ impl<'a> PreviewBuilder<'a> {
             .chain(predecessor_expr.iter())
             .find(|expr| super::super::switch_table::has_jump_table_surface(expr, &self.options))
             .cloned();
+
+        // Remember the first lowering that still shows the table, and fall back
+        // to it when a later lowering only finds the variable it was stored in.
+        let block_key = self.block_target_key(idx);
+        let best_jump_table_expr = match best_jump_table_expr {
+            Some(expr) => {
+                self.branchind_jump_table_exprs
+                    .insert(block_key, expr.clone());
+                Some(expr)
+            }
+            // Only a table that decoded once is worth looking through to: with no
+            // targets behind it the recovered selector would be the only thing
+            // the dispatch had, and a dispatch with a selector and no targets
+            // lowers to a bare `return`.
+            None if self.branchind_jump_table_targets.contains_key(&block_key) => {
+                self.branchind_jump_table_exprs.get(&block_key).cloned()
+            }
+            None => None,
+        };
 
         match (
             best_jump_table_expr,

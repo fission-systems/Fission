@@ -1925,13 +1925,42 @@ impl<'a> PreviewBuilder<'a> {
                             let mut inferred_single_input_target = false;
                             let mut recovered_case_map = None;
                             let mut recovered_selector_cardinality = None;
-                            if let Some(recovered_targets) = this
+                            let block_key = this.block_target_key(idx);
+                            let inferred_targets = this
                                 .infer_branchind_targets_from_jump_table_expr(
                                     idx,
                                     &switch_expr,
                                     selector_alias.as_ref(),
                                 )
-                            {
+                                .inspect(|found| {
+                                    this.branchind_jump_table_targets.insert(
+                                        block_key,
+                                        (
+                                            found.unique_targets.clone(),
+                                            found.recovered_cases.clone(),
+                                            found.selector_cardinality,
+                                            found.decode_mode,
+                                        ),
+                                    );
+                                })
+                                .or_else(|| {
+                                    // Only when this lowering still shows the table:
+                                    // a stale answer must not apply to some other
+                                    // dispatch that merely shares a block key.
+                                    super::switch_table::recover_switch_discriminant(
+                                        &switch_expr,
+                                        &this.options,
+                                    )?;
+                                    let (unique_targets, recovered_cases, cardinality, mode) =
+                                        this.branchind_jump_table_targets.get(&block_key)?.clone();
+                                    Some(InferredJumpTableTargets {
+                                        unique_targets,
+                                        recovered_cases,
+                                        selector_cardinality: cardinality,
+                                        decode_mode: mode,
+                                    })
+                                });
+                            if let Some(recovered_targets) = inferred_targets {
                                 merge_inferred_branchind_targets(
                                     &mut targets,
                                     recovered_targets,
