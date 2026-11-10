@@ -1,6 +1,99 @@
 use super::util::*;
 use crate::prelude::*;
 
+/// `x - (x / d) * d` is `x % d`.
+///
+/// Compilers compute a remainder by a constant as the dividend minus the
+/// quotient times the divisor, and after the quotient is recovered as `x / d`
+/// that is what is left. In C's truncating arithmetic the two are the same
+/// value for signed and unsigned operands alike. The dividend appears twice, so
+/// it must be a pure expression, and both occurrences must be the same value at
+/// the same width (they may differ by a cast, which does not change the bits).
+pub fn recombine_remainder(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Sub,
+        lhs: minuend,
+        rhs: product,
+        ty: sub_ty,
+    } = expr
+    else {
+        return None;
+    };
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mul,
+        lhs: left,
+        rhs: right,
+        ..
+    } = strip_cast_chain(product)
+    else {
+        return None;
+    };
+    let (quotient, factor) = [(left, right), (right, left)].into_iter().find(|(q, _)| {
+        matches!(
+            strip_cast_chain(q),
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                ..
+            }
+        )
+    })?;
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Div,
+        lhs: dividend,
+        rhs: divisor,
+        ty: div_ty,
+    } = strip_cast_chain(quotient)
+    else {
+        return None;
+    };
+    let (PreHirExpr::Const(d, _), PreHirExpr::Const(f, _)) =
+        (strip_cast_chain(divisor), strip_cast_chain(factor))
+    else {
+        return None;
+    };
+    if d != f || *d <= 1 {
+        return None;
+    }
+    let x = strip_cast_chain(minuend);
+    if x != strip_cast_chain(dividend) || crate::cleanup::expr_has_side_effects(x) {
+        return None;
+    }
+    // One bit width throughout, so the subtraction cannot see a different
+    // number than the division did.
+    let NirType::Int { bits, .. } = div_ty else {
+        return None;
+    };
+    let same_width = |t: &NirType| matches!(t, NirType::Int { bits: b, .. } if b == bits);
+    // A bare variable carries no type at this level; it is read at the width
+    // of the node that holds it, which is the same for both occurrences. A
+    // dividend whose type IS recorded must agree.
+    let known_width_agrees = |t: &NirType| matches!(t, NirType::Unknown) || same_width(t);
+    if !same_width(sub_ty) || !known_width_agrees(&expr_type(x)) {
+        return None;
+    }
+    let remainder = PreHirExpr::Binary {
+        op: PreHirBinaryOp::Mod,
+        lhs: dividend.clone(),
+        rhs: divisor.clone(),
+        ty: div_ty.clone(),
+    };
+    Some(if div_ty == sub_ty {
+        remainder
+    } else {
+        PreHirExpr::Cast {
+            ty: sub_ty.clone(),
+            expr: Box::new(remainder),
+        }
+    })
+}
+
+fn strip_cast_chain(mut expr: &PreHirExpr) -> &PreHirExpr {
+    while let PreHirExpr::Cast { expr: inner, .. } = expr {
+        expr = inner;
+    }
+    expr
+}
+
 pub fn recognize_mod_div_power_of_two(expr: &PreHirExpr) -> Option<PreHirExpr> {
     normalize_signed_power_of_two_mod(expr)
         .or_else(|| normalize_signed_power_of_two_div(expr))
@@ -1238,5 +1331,141 @@ mod pr_review_regressions {
             recognize_magic_number_division(&expr).is_none(),
             "must not replace arithmetic shift (-1) with truncating division (0)"
         );
+    }
+}
+
+#[cfg(test)]
+mod remainder_tests {
+    use super::*;
+
+    fn int(bits: u32, signed: bool) -> NirType {
+        NirType::Int { bits, signed }
+    }
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+    fn konst(v: i64, ty: NirType) -> PreHirExpr {
+        PreHirExpr::Const(v, ty)
+    }
+    fn bin(op: PreHirBinaryOp, l: PreHirExpr, r: PreHirExpr, ty: NirType) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op,
+            lhs: Box::new(l),
+            rhs: Box::new(r),
+            ty,
+        }
+    }
+    fn cast(ty: NirType, e: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Cast {
+            ty,
+            expr: Box::new(e),
+        }
+    }
+
+    /// `x - (x / d) * d` with the dividend and the difference in `ty`.
+    fn remainder_shape(x: PreHirExpr, ty: NirType, d: i64) -> PreHirExpr {
+        bin(
+            PreHirBinaryOp::Sub,
+            x.clone(),
+            bin(
+                PreHirBinaryOp::Mul,
+                bin(PreHirBinaryOp::Div, x, konst(d, ty.clone()), ty.clone()),
+                konst(d, ty.clone()),
+                ty.clone(),
+            ),
+            ty,
+        )
+    }
+
+    #[test]
+    fn dividend_minus_quotient_times_divisor_is_a_remainder() {
+        for signed in [false, true] {
+            let ty = int(64, signed);
+            let found = recombine_remainder(&remainder_shape(var("sum2"), ty.clone(), 65521))
+                .expect("sum2 % 65521");
+            assert_eq!(
+                found,
+                bin(
+                    PreHirBinaryOp::Mod,
+                    var("sum2"),
+                    konst(65521, ty.clone()),
+                    ty
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn a_cast_on_one_dividend_does_not_hide_the_remainder() {
+        // `iVar13 - (uint)iVar13 / 70 * 70`: the divide is unsigned, the
+        // minuend is the same 32 bits seen as signed.
+        let u = int(32, false);
+        let s = int(32, true);
+        let shape = bin(
+            PreHirBinaryOp::Sub,
+            var("i"),
+            bin(
+                PreHirBinaryOp::Mul,
+                bin(
+                    PreHirBinaryOp::Div,
+                    cast(u.clone(), var("i")),
+                    konst(70, u.clone()),
+                    u.clone(),
+                ),
+                konst(70, u.clone()),
+                u.clone(),
+            ),
+            u.clone(),
+        );
+        let _ = s;
+        let found = recombine_remainder(&shape).expect("(uint)i % 70");
+        assert_eq!(
+            found,
+            bin(
+                PreHirBinaryOp::Mod,
+                cast(u.clone(), var("i")),
+                konst(70, u.clone()),
+                u
+            )
+        );
+    }
+
+    #[test]
+    fn different_dividends_or_divisors_are_left_alone() {
+        let ty = int(32, false);
+        let mut other_dividend = remainder_shape(var("a"), ty.clone(), 10);
+        if let PreHirExpr::Binary { lhs, .. } = &mut other_dividend {
+            *lhs = Box::new(var("b"));
+        }
+        assert!(recombine_remainder(&other_dividend).is_none());
+
+        let mut other_factor = remainder_shape(var("a"), ty.clone(), 10);
+        if let PreHirExpr::Binary { rhs, .. } = &mut other_factor {
+            if let PreHirExpr::Binary { rhs: factor, .. } = rhs.as_mut() {
+                *factor = Box::new(konst(11, ty.clone()));
+            }
+        }
+        assert!(recombine_remainder(&other_factor).is_none());
+        // A call evaluated twice is not the same value.
+        let call = PreHirExpr::Call {
+            origin: None,
+            target: "next".to_string(),
+            args: vec![],
+            ty: ty.clone(),
+        };
+        assert!(recombine_remainder(&remainder_shape(call, ty, 10)).is_none());
+    }
+
+    /// The identity itself, on every 8-bit pair: C's truncating `/` and `%`.
+    #[test]
+    fn the_identity_holds_for_every_8_bit_operand() {
+        for d in 2..=127i16 {
+            for x in -128..=127i16 {
+                assert_eq!(x - (x / d) * d, x % d, "signed {x} {d}");
+            }
+            for x in 0..=255i16 {
+                assert_eq!(x - (x / d) * d, x % d, "unsigned {x} {d}");
+            }
+        }
     }
 }
