@@ -1016,6 +1016,7 @@ mod tests {
                             size: if offset == 252 { 4 } else { 8 },
                             addend: 0,
                             symbol_name: None,
+                            symbol_address: None,
                         })
                         .collect::<Vec<_>>(),
                 )
@@ -1100,6 +1101,7 @@ mod tests {
                     size: 8,
                     addend: 0,
                     symbol_name: None,
+                    symbol_address: None,
                 }])
                 .build()
                 .expect("patched range fixture");
@@ -1329,6 +1331,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: None,
+                symbol_address: None,
             }])
             .build()
             .expect("build");
@@ -1408,6 +1411,7 @@ mod tests {
                 size: 8,
                 addend: 0,
                 symbol_name: None,
+                symbol_address: None,
             }])
             .build()
             .expect("build");

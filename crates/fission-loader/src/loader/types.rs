@@ -365,6 +365,12 @@ pub struct RelocationEntry {
     pub size: u8,
     pub addend: i64,
     pub symbol_name: Option<String>,
+    /// Where the referenced symbol is defined, when the relocation names one
+    /// that is defined in this binary. Two symbols can share a name (static
+    /// functions in different files); the name alone cannot say which one a
+    /// relocation means, the symbol-table index it carried can, and this is
+    /// that index resolved to an address.
+    pub symbol_address: Option<u64>,
 }
 
 #[derive(Debug, Clone, Archive, Deserialize, Serialize)]
