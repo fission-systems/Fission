@@ -261,8 +261,7 @@ impl<'a> PreviewBuilder<'a> {
                 .branchind_jump_table_exprs
                 .get(&block_key)
                 .filter(|expr| {
-                    super::super::switch_table::recover_switch_discriminant(expr, &self.options)
-                        .is_some_and(|recovered| recovered.relative_entries)
+                    super::super::switch_table::is_relative_table_surface(expr, &self.options)
                 })
                 .cloned(),
             None => None,
