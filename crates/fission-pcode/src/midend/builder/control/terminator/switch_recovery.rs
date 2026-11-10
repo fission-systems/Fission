@@ -247,7 +247,9 @@ impl<'a> PreviewBuilder<'a> {
             // targets behind it the recovered selector would be the only thing
             // the dispatch had, and a dispatch with a selector and no targets
             // lowers to a bare `return`.
-            None if self.branchind_jump_table_targets.contains_key(&block_key) => {
+            None if self.branchind_jump_table_targets.contains_key(&block_key)
+                || self.pcode_block_has_successors(idx) =>
+            {
                 self.branchind_jump_table_exprs.get(&block_key).cloned()
             }
             None => None,
@@ -265,6 +267,17 @@ impl<'a> PreviewBuilder<'a> {
             (None, None, None, Some(expr)) => Ok(expr),
             (None, None, None, None) => self.lower_wrapped_varnode(switch_var, visiting),
         }
+    }
+
+    /// Whether the lifter attached successors to this block's dispatch. A table
+    /// that decoded to targets of its own (relative entries, for one) leaves
+    /// them here rather than in `branchind_jump_table_targets`.
+    fn pcode_block_has_successors(&self, idx: usize) -> bool {
+        let pcode_idx = self.pcode_block_idx(idx);
+        self.pcode
+            .blocks
+            .get(pcode_idx)
+            .is_some_and(|block| !block.successors.is_empty())
     }
 
     pub(super) fn lower_branchind_same_block_alias_expr(

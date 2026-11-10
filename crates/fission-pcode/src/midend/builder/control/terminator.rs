@@ -1933,11 +1933,27 @@ impl<'a> PreviewBuilder<'a> {
                                     selector_alias.as_ref(),
                                 )
                                 .inspect(|found| {
+                                    // Keep the case map as table positions: its
+                                    // values are in terms of the selector this
+                                    // lowering found (`orig` when it saw
+                                    // `orig - min`), and a later lowering can
+                                    // find the already-subtracted variable.
+                                    let min_val = super::switch_table::recover_switch_discriminant(
+                                        &switch_expr,
+                                        &this.options,
+                                    )
+                                    .map_or(0, |recovered| recovered.min_val);
                                     this.branchind_jump_table_targets.insert(
                                         block_key,
                                         (
                                             found.unique_targets.clone(),
-                                            found.recovered_cases.clone(),
+                                            found
+                                                .recovered_cases
+                                                .iter()
+                                                .map(|(value, target)| {
+                                                    (value.wrapping_sub(min_val), *target)
+                                                })
+                                                .collect(),
                                             found.selector_cardinality,
                                             found.decode_mode,
                                         ),
@@ -1947,12 +1963,19 @@ impl<'a> PreviewBuilder<'a> {
                                     // Only when this lowering still shows the table:
                                     // a stale answer must not apply to some other
                                     // dispatch that merely shares a block key.
-                                    super::switch_table::recover_switch_discriminant(
+                                    let min_val = super::switch_table::recover_switch_discriminant(
                                         &switch_expr,
                                         &this.options,
-                                    )?;
-                                    let (unique_targets, recovered_cases, cardinality, mode) =
+                                    )?
+                                    .min_val;
+                                    let (unique_targets, positions, cardinality, mode) =
                                         this.branchind_jump_table_targets.get(&block_key)?.clone();
+                                    let recovered_cases = positions
+                                        .into_iter()
+                                        .map(|(position, target)| {
+                                            (position.wrapping_add(min_val), target)
+                                        })
+                                        .collect();
                                     Some(InferredJumpTableTargets {
                                         unique_targets,
                                         recovered_cases,
