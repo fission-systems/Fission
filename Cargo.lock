@@ -1027,6 +1027,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "tracing",
 ]
 
 [[package]]
@@ -1038,6 +1039,7 @@ dependencies = [
  "fission-midend-prehir",
  "fission-signatures",
  "indexmap",
+ "once_cell",
  "rustc-hash",
  "serde_json",
  "tracing",
@@ -1059,9 +1061,12 @@ dependencies = [
 name = "fission-midend-structuring"
 version = "0.2.3"
 dependencies = [
+ "fission-core",
  "fission-midend-core",
  "fission-midend-prehir",
+ "indexmap",
  "rustc-hash",
+ "tracing",
 ]
 
 [[package]]
