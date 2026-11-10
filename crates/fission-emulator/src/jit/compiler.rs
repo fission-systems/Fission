@@ -676,30 +676,42 @@ impl JitCompiler {
                     // re-seed from, so the value has to be *derived* from the
                     // wider entry instead.
                     //
-                    // Same offset and strictly wider only. Measured over 60
-                    // functions / 4,719 instructions, all 32 occurrences were
-                    // that one shape -- no wider read of a narrower write, no
-                    // misaligned overlap -- and generalising past what was
-                    // observed would be guessing. Narrowing takes the low
-                    // bytes, which is what `read_varnode_u64` does on every
+                    // Only a read wholly inside a wider cached write: the same
+                    // offset narrower (measured over 60 functions / 4,719
+                    // instructions, all 32 occurrences were that shape) or an
+                    // inner byte offset of it. A wider read of a narrower
+                    // write, or a misaligned overlap, has no single source and
+                    // is not derived. Narrowing takes the low bytes after the
+                    // shift, which is what `read_varnode_u64` does on every
                     // little-endian target here.
+                    // A read inside a wider write -- the upper half of a
+                    // temporary, say -- is the same derivation shifted by the
+                    // byte distance from the entry's start. The interpreter
+                    // returns those bytes; reading none of them gave zero.
                     let derived_from_wider = if $space != 0 && $space == unique_space {
                         var_map
                             .iter()
                             .filter(|(k, _)| {
-                                k.0 == $space && k.1 == $offset && k.2 > ($size as u64)
+                                k.0 == $space
+                                    && k.1 <= $offset
+                                    && k.1 + k.2 >= ($offset as u64) + ($size as u64)
+                                    && (k.2 > ($size as u64) || k.1 < $offset)
                             })
-                            // The narrowest covering entry, so the choice does
-                            // not depend on `HashMap` iteration order.
-                            .min_by_key(|(k, _)| k.2)
-                            .map(|(_, v)| *v)
+                            // The narrowest covering entry, then the closest
+                            // start, so the choice does not depend on `HashMap`
+                            // iteration order.
+                            .min_by_key(|(k, _)| (k.2, $offset - k.1, k.1))
+                            .map(|(k, v)| (*v, ($offset - k.1) as u64))
                     } else {
                         None
                     };
                     let v = builder.declare_var(types::I64);
                     var_map.insert(key, v);
-                    if let Some(src) = derived_from_wider {
-                        let wide = builder.use_var(src);
+                    if let Some((src, distance)) = derived_from_wider {
+                        let mut wide = builder.use_var(src);
+                        if distance > 0 && distance < 8 {
+                            wide = builder.ins().ushr_imm(wide, (distance * 8) as i64);
+                        }
                         let bits = ($size as u64) * 8;
                         let val = if bits > 0 && bits < 64 {
                             builder.ins().band_imm(wide, ((1u64 << bits) - 1) as i64)
@@ -3159,6 +3171,52 @@ mod tests {
         );
         assert_eq!(read_reg(&mut emu, 0x48), 0, "high half is zero");
     }
+    /// A `unique` temporary read at a byte offset inside a larger one written
+    /// earlier in the block (`SubPiece` of its upper half) holds the written
+    /// bytes, not zero.
+    #[test]
+    fn a_unique_temporary_is_readable_at_an_offset_inside_a_wider_write() {
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(unique(0x100, 8)),
+                inputs: vec![imm(0x1122_3344_5566_7788, 8)],
+                asm_mnemonic: None,
+            },
+            // the upper four bytes of the temporary, read as their own varnode
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0x40, 4)),
+                inputs: vec![unique(0x104, 4)],
+                asm_mnemonic: None,
+            },
+            // the low four bytes
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0x48, 4)),
+                inputs: vec![unique(0x100, 4)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(
+            read_reg(&mut emu, 0x40) & 0xffff_ffff,
+            0x1122_3344,
+            "upper half"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 0x48) & 0xffff_ffff,
+            0x5566_7788,
+            "low half"
+        );
+    }
+
     /// A narrower view of a register that a wide op then overwrites must not
     /// keep answering with the old value: only the exact eight-byte key was
     /// refreshed after the call, so the four-byte view read stale.
