@@ -171,7 +171,21 @@ impl ValueSetAnalyzer {
         Self::default()
     }
 
+    /// Record a fact unless this exact fact is already recorded. A block is
+    /// evaluated again whenever its entry state grows, so the same load or
+    /// indirect branch reaches here once per visit; the facts a visit adds
+    /// that an earlier one did not (a wider target set, a new address) are
+    /// still new facts and are kept.
+    fn emit_fact(&mut self, fact: VsaFact) {
+        if !self.facts.contains(&fact) {
+            self.facts.push(fact);
+        }
+    }
+
     /// Converts all collected VSA facts into `Xref` instances.
+    ///
+    /// Each distinct `(from, to, kind)` appears once: a jump-table fact that
+    /// grows from `[A]` to `[A, B]` over two visits otherwise reports `A` twice.
     pub fn into_xrefs(&self) -> Vec<crate::analysis::xrefs::Xref> {
         let mut xrefs = Vec::new();
         for fact in &self.facts {
@@ -226,6 +240,8 @@ impl ValueSetAnalyzer {
                 }
             }
         }
+        let mut seen = std::collections::HashSet::new();
+        xrefs.retain(|x| seen.insert((x.from_addr, x.to_addr, x.xref_type as u8)));
         xrefs
     }
 
@@ -343,7 +359,7 @@ impl ValueSetAnalyzer {
                     // inputs[0] is space ID, inputs[1] is pointer
                     match state.get_value(addr_in) {
                         AbstractValue::Constant(addr) => {
-                            self.facts.push(VsaFact::DataRead {
+                            self.emit_fact(VsaFact::DataRead {
                                 instruction_addr: op.address,
                                 target_addr: addr,
                                 pcode_op: op.opcode,
@@ -351,7 +367,7 @@ impl ValueSetAnalyzer {
                         }
                         AbstractValue::Set(addrs) => {
                             for addr in addrs {
-                                self.facts.push(VsaFact::DataRead {
+                                self.emit_fact(VsaFact::DataRead {
                                     instruction_addr: op.address,
                                     target_addr: addr,
                                     pcode_op: op.opcode,
@@ -370,7 +386,7 @@ impl ValueSetAnalyzer {
                     // inputs[0] is space ID, inputs[1] is pointer
                     match state.get_value(addr_in) {
                         AbstractValue::Constant(addr) => {
-                            self.facts.push(VsaFact::DataWrite {
+                            self.emit_fact(VsaFact::DataWrite {
                                 instruction_addr: op.address,
                                 target_addr: addr,
                                 pcode_op: op.opcode,
@@ -378,7 +394,7 @@ impl ValueSetAnalyzer {
                         }
                         AbstractValue::Set(addrs) => {
                             for addr in addrs {
-                                self.facts.push(VsaFact::DataWrite {
+                                self.emit_fact(VsaFact::DataWrite {
                                     instruction_addr: op.address,
                                     target_addr: addr,
                                     pcode_op: op.opcode,
@@ -393,14 +409,14 @@ impl ValueSetAnalyzer {
                 if let Some(target_in) = op.inputs.get(0) {
                     match state.get_value(target_in) {
                         AbstractValue::Constant(target) => {
-                            self.facts.push(VsaFact::JumpTableTarget {
+                            self.emit_fact(VsaFact::JumpTableTarget {
                                 instruction_addr: op.address,
                                 targets: vec![target],
                                 pcode_op: op.opcode,
                             });
                         }
                         AbstractValue::Set(addrs) => {
-                            self.facts.push(VsaFact::JumpTableTarget {
+                            self.emit_fact(VsaFact::JumpTableTarget {
                                 instruction_addr: op.address,
                                 targets: addrs,
                                 pcode_op: op.opcode,
@@ -536,5 +552,85 @@ mod tests {
         analyzer.evaluate_op(&mut state, &block.ops[0]);
 
         assert_eq!(state.get_value(&var_out), AbstractValue::Constant(30));
+    }
+
+    /// Block 0 sets `r = 0x2000` and falls into block 1; block 1 reads memory
+    /// at `r`, then adds 8 to `r` and loops to itself. The worklist visits
+    /// block 1 more than once before it settles.
+    fn looping_read() -> PcodeFunction {
+        let r = Varnode {
+            space_id: 1,
+            offset: 0x10,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let loaded = Varnode {
+            space_id: 1,
+            offset: 0x40,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let op = |seq, opcode, address, output: Option<Varnode>, inputs: Vec<Varnode>| PcodeOp {
+            seq_num: seq,
+            opcode,
+            address,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        };
+        PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: vec![op(
+                        0,
+                        PcodeOpcode::Copy,
+                        0x1000,
+                        Some(r.clone()),
+                        vec![Varnode::constant(0x2000, 8)],
+                    )],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![1],
+                    ops: vec![
+                        op(
+                            1,
+                            PcodeOpcode::Load,
+                            0x1010,
+                            Some(loaded),
+                            vec![Varnode::constant(0, 4), r.clone()],
+                        ),
+                        op(
+                            2,
+                            PcodeOpcode::IntAdd,
+                            0x1014,
+                            Some(r.clone()),
+                            vec![r, Varnode::constant(8, 8)],
+                        ),
+                    ],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn a_block_revisited_during_convergence_emits_each_fact_once() {
+        let mut analyzer = ValueSetAnalyzer::new();
+        assert!(analyzer.analyze(&looping_read()));
+        let xrefs = analyzer.into_xrefs();
+        let mut seen = std::collections::HashSet::new();
+        for x in &xrefs {
+            assert!(
+                seen.insert((x.from_addr, x.to_addr, format!("{:?}", x.xref_type))),
+                "duplicate xref {x:?} in {xrefs:?}"
+            );
+        }
+        assert!(!xrefs.is_empty(), "the loop's read should be reported");
     }
 }
