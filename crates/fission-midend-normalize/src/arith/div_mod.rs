@@ -179,6 +179,12 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 live.clear();
                 continue;
             }
+            // Another path can enter at a label with a different value in the
+            // temporary, and a jump leaves the straight line the facts hold on.
+            PreHirStmt::Label(_) | PreHirStmt::Goto(_) => {
+                live.clear();
+                continue;
+            }
             _ => {}
         }
 
@@ -299,10 +305,13 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr
     if !matches!(op, PreHirBinaryOp::Mod | PreHirBinaryOp::Div) {
         return None;
     }
-    let low = extract_cdq_low_from_wide_dividend(lhs)?;
+    let (low, shift_amt) = extract_cdq_low_and_shift(lhs)?;
+    // The dividend is as wide as the high half's shift says (`cdq`: 32,
+    // `cqo`: 64); a bare variable carries no type at this level.
+    let from_shift = if shift_amt >= 64 { 64 } else { 32 };
     let bits = match expr_type(&low) {
-        NirType::Int { bits, .. } => bits.max(32),
-        _ => 32,
+        NirType::Int { bits, .. } => bits.max(from_shift),
+        _ => from_shift,
     };
     let signed_ty = NirType::Int { bits, signed: true };
     Some(PreHirExpr::Binary {
@@ -320,6 +329,10 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr
 }
 
 fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<PreHirExpr> {
+    extract_cdq_low_and_shift(expr).map(|(low, _)| low)
+}
+
+fn extract_cdq_low_and_shift(expr: &PreHirExpr) -> Option<(PreHirExpr, u32)> {
     let expr = strip_casts(expr);
     // (hi << k) | lo
     let PreHirExpr::Binary {
@@ -362,7 +375,7 @@ fn extract_cdq_low_from_wide_dividend(expr: &PreHirExpr) -> Option<PreHirExpr> {
     // hi should be sign-related to low: SAR(low, …) or cast of SAR.
     let hi = strip_casts(hi_expr);
     if expr_is_sign_fill_of(&hi, &low, *shift_amt) {
-        return Some(low);
+        return Some((low, u32::try_from(*shift_amt).ok()?));
     }
     None
 }
@@ -826,141 +839,6 @@ fn normalize_signed_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
     })
 }
 
-pub fn recognize_magic_number_division(expr: &PreHirExpr) -> Option<PreHirExpr> {
-    let mut current = expr;
-    let mut n = 0u32;
-    let mut x_size_bits = None;
-    let mut ext_ty_bits = None;
-
-    if let PreHirExpr::Cast { ty, expr: inner } = current {
-        if let Some(bits) = int_type_bits(ty) {
-            ext_ty_bits = Some(bits);
-            current = inner.as_ref();
-        }
-    }
-
-    let mut is_signed_shift = false;
-    if let PreHirExpr::Binary { op, lhs, rhs, .. } = current {
-        if matches!(op, PreHirBinaryOp::Shr | PreHirBinaryOp::Sar) {
-            if let PreHirExpr::Const(shift_amt, _) = rhs.as_ref() {
-                n += *shift_amt as u32;
-                is_signed_shift = matches!(op, PreHirBinaryOp::Sar);
-                current = lhs.as_ref();
-            }
-        }
-    }
-
-    if let PreHirExpr::Binary {
-        op: PreHirBinaryOp::Mul,
-        lhs,
-        rhs,
-        ty: mul_ty,
-    } = current
-    {
-        let (x_ext, y_expr) = if let PreHirExpr::Const(_, _) = rhs.as_ref() {
-            (lhs.as_ref(), rhs.as_ref())
-        } else if let PreHirExpr::Const(_, _) = lhs.as_ref() {
-            (rhs.as_ref(), lhs.as_ref())
-        } else {
-            return None;
-        };
-
-        let PreHirExpr::Const(y_val, _) = y_expr else {
-            return None;
-        };
-
-        if let Some(bits) = int_type_bits(mul_ty) {
-            let mask = if bits >= 64 {
-                u64::MAX
-            } else {
-                (1u64 << bits) - 1
-            };
-            let y_128 = ((*y_val as u64) & mask) as u128;
-
-            let mut x_val = x_ext;
-            let mut is_sext = false;
-
-            if let PreHirExpr::Cast {
-                ty: cast_ty,
-                expr: original_x,
-            } = x_ext
-            {
-                if let NirType::Int {
-                    bits: orig_bits,
-                    signed,
-                } = expr_type(original_x.as_ref())
-                {
-                    x_size_bits = Some(orig_bits);
-                    is_sext = signed;
-                }
-                x_val = original_x.as_ref();
-            } else if let NirType::Int {
-                bits: orig_bits,
-                signed,
-            } = expr_type(x_ext)
-            {
-                x_size_bits = Some(orig_bits);
-                is_sext = signed;
-            }
-
-            if let Some(x_bits) = x_size_bits {
-                if n <= 127 && x_bits <= 64 && y_128 > 1 {
-                    let y_minus_1 = y_128 - 1;
-                    let power = 1u128 << n;
-                    let mut q = power / y_minus_1;
-                    let mut r = power % y_minus_1;
-
-                    if q <= u64::MAX as u128 && y_minus_1 >= q {
-                        let mut diff = 0;
-                        if r >= q {
-                            q += 1;
-                            r = r.wrapping_sub(y_minus_1).wrapping_add(q);
-                            if r >= q {
-                                // invalid magic
-                            } else {
-                                diff = q;
-                            }
-                        } else {
-                            diff = 0;
-                        }
-
-                        let mut maxx = if x_bits == 64 { 0 } else { 1u128 << x_bits };
-                        maxx = maxx.wrapping_sub(1);
-                        diff += q.saturating_sub(r);
-
-                        if diff != 0 {
-                            let tmp = power / diff;
-                            if tmp > maxx {
-                                let divisor = q as u64;
-                                let _out_bits = ext_ty_bits.unwrap_or(x_bits);
-                                // Return the recovered division
-                                let div = PreHirExpr::Binary {
-                                    op: PreHirBinaryOp::Div,
-                                    lhs: Box::new(x_val.clone()),
-                                    rhs: Box::new(PreHirExpr::Const(
-                                        divisor as i64,
-                                        expr_type(x_val),
-                                    )),
-                                    ty: expr_type(x_val),
-                                };
-                                return Some(if expr_type(expr) == expr_type(x_val) {
-                                    div
-                                } else {
-                                    PreHirExpr::Cast {
-                                        ty: expr_type(expr),
-                                        expr: Box::new(div),
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1005,39 +883,6 @@ mod tests {
                 },
             }
         );
-    }
-
-    #[test]
-    fn magic_number_division_handles_multiplication_width_above_u64() {
-        let expr = PreHirExpr::Binary {
-            op: PreHirBinaryOp::Mul,
-            lhs: Box::new(PreHirExpr::Cast {
-                ty: NirType::Int {
-                    bits: 128,
-                    signed: false,
-                },
-                expr: Box::new(PreHirExpr::Cast {
-                    ty: NirType::Int {
-                        bits: 32,
-                        signed: false,
-                    },
-                    expr: Box::new(var("value")),
-                }),
-            }),
-            rhs: Box::new(PreHirExpr::Const(
-                3,
-                NirType::Int {
-                    bits: 128,
-                    signed: false,
-                },
-            )),
-            ty: NirType::Int {
-                bits: 128,
-                signed: false,
-            },
-        };
-
-        assert!(recognize_magic_number_division(&expr).is_none());
     }
 }
 
@@ -1123,6 +968,87 @@ mod cdq_tests {
             }
             other => panic!("unexpected: {other:?}"),
         }
+    }
+
+    fn cqo_wide(low_name: &str) -> PreHirExpr {
+        // (hi << 64) | lo with hi = lo >>s 63: x86-64 `cqo; idiv`.
+        let x = PreHirExpr::Var(low_name.into());
+        let i64s = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let hi = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(x.clone()),
+            rhs: Box::new(PreHirExpr::Const(63, i32_ty())),
+            ty: i64s,
+        };
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(hi),
+                rhs: Box::new(PreHirExpr::Const(64, i32_ty())),
+                ty: NirType::Int {
+                    bits: 128,
+                    signed: false,
+                },
+            }),
+            rhs: Box::new(x),
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+        }
+    }
+
+    #[test]
+    fn a_64_bit_cqo_idiv_stays_64_bits_wide() {
+        // `rax` has no recorded type at this level; the shift of 64 says it is
+        // a 64-bit dividend, and truncating it to 32 changes the quotient.
+        let expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
+            lhs: Box::new(cqo_wide("rax")),
+            rhs: Box::new(PreHirExpr::Var("rcx".into())),
+            ty: NirType::Int {
+                bits: 128,
+                signed: false,
+            },
+        };
+        let out = collapse_cdq_style_signed_mod_div(&expr).expect("collapse");
+        let PreHirExpr::Binary { ty, .. } = &out else {
+            panic!("unexpected: {out:?}");
+        };
+        assert_eq!(
+            *ty,
+            NirType::Int {
+                bits: 64,
+                signed: true
+            }
+        );
+    }
+
+    #[test]
+    fn a_cdq_dividend_does_not_survive_a_label() {
+        // t = wide(a); L: x = t % d. Another path may enter L with a different
+        // `t`, so `t` cannot be replaced by `a`'s low half after the label.
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".into()),
+                rhs: cdq_wide("a"),
+            },
+            PreHirStmt::Label("L".into()),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".into()),
+                rhs: mod_vars(PreHirExpr::Var("t".into()), "d"),
+            },
+        ];
+        assert!(!collapse_cdq_signed_mod_in_stmts(&mut stmts));
+        assert!(matches!(
+            &stmts[2],
+            PreHirStmt::Assign { rhs: PreHirExpr::Binary { lhs, .. }, .. }
+                if matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "t")
+        ));
     }
 
     #[test]
@@ -1304,34 +1230,6 @@ mod cdq_tests {
 #[cfg(test)]
 mod pr_review_regressions {
     use super::*;
-    #[test]
-    fn review_signed_shift_is_not_truncating_division() {
-        let i64_ty = NirType::Int {
-            bits: 64,
-            signed: true,
-        };
-        let expr = PreHirExpr::Binary {
-            op: PreHirBinaryOp::Sar,
-            lhs: Box::new(PreHirExpr::Binary {
-                op: PreHirBinaryOp::Mul,
-                lhs: Box::new(PreHirExpr::Cast {
-                    ty: i64_ty.clone(),
-                    expr: Box::new(PreHirExpr::Var("x".into())),
-                }),
-                rhs: Box::new(PreHirExpr::Const(0x5555_5556, i64_ty.clone())),
-                ty: i64_ty.clone(),
-            }),
-            rhs: Box::new(PreHirExpr::Const(32, i64_ty.clone())),
-            ty: i64_ty,
-        };
-        let original = (-1_i64 * 0x5555_5556) >> 32;
-        let rewritten = -1_i64 / 3;
-        assert_ne!(original, rewritten);
-        assert!(
-            recognize_magic_number_division(&expr).is_none(),
-            "must not replace arithmetic shift (-1) with truncating division (0)"
-        );
-    }
 }
 
 #[cfg(test)]

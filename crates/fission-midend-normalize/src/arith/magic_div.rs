@@ -9,8 +9,9 @@
 //! t = x;  t = t * M;  k = 33;  t = t >> k;  t = t - (x >> 31);
 //! ```
 //!
-//! so the expression-level `recognize_magic_number_division` only ever sees the
-//! bare multiply. This pass keeps a block-local view of each variable's current
+//! so an expression-level recognizer only ever sees the bare multiply (the
+//! one that used to live in `div_mod.rs` rejected every standard reciprocal and
+//! never fired on any binary; this pass owns constant-division recovery). This pass keeps a block-local view of each variable's current
 //! definition (the same reaching-definition fact [`collapse_cdq_signed_mod_in_stmts`]
 //! uses), resolves a statement's operands through it, and recognizes the
 //! division on the resolved tree. The intermediate definitions are left for the
@@ -1625,6 +1626,33 @@ mod tests {
                 w64
             )
         );
+    }
+
+    #[test]
+    fn an_arithmetic_shift_of_a_product_is_not_replaced_by_truncating_division() {
+        // (sext(x) * 0x55555556) >>s 32 is -1 for x = -1; `x / 3` is 0.
+        let s64 = i(64, true);
+        let mut func = function(
+            vec![("x", i(32, true)), ("t", s64.clone())],
+            vec![
+                assign(
+                    "t",
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        bin(
+                            PreHirBinaryOp::Mul,
+                            cast(s64.clone(), var("x")),
+                            konst(0x5555_5556, s64.clone()),
+                            s64.clone(),
+                        ),
+                        konst(32, s64.clone()),
+                        s64,
+                    ),
+                ),
+                PreHirStmt::Return(Some(var("t"))),
+            ],
+        );
+        assert!(!recognize_magic_division_in_function(&mut func));
     }
 
     // ── The arithmetic claim, checked against brute force ────────────────────
