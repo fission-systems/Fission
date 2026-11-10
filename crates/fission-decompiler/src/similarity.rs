@@ -35,7 +35,7 @@ use fission_pcode::{PcodeBasicBlock, PcodeFunction, PcodeOp, Varnode};
 use serde::{Deserialize, Serialize};
 
 /// Version of the on-disk feature format and feature-extraction contract.
-pub const SIMILARITY_INDEX_VERSION: u32 = 2;
+pub const SIMILARITY_INDEX_VERSION: u32 = 3;
 
 /// Sentinel hash used in place of a "no definer inside this function"
 /// neighbor (an external register/memory read) during data-flow refinement.
@@ -433,19 +433,19 @@ fn extract_feature_set_with_iterations(
         return ExtractedSimilarityFeatures::default();
     }
 
-    let mut definer: HashMap<(u64, u64), OpId> = HashMap::new();
-    for (id, op) in flat_ops.iter().enumerate() {
-        if let Some(out) = &op.output
-            && let Some(key) = varnode_key(out)
-        {
-            definer.insert(key, id);
-        }
-    }
-
     // Each op's list of "input-defining op ids" (None entries are leaves:
     // external register/memory reads with no definer inside this function).
+    //
+    // The p-code is not in SSA form, so a varnode can be written many times. An
+    // input is defined by the most recent write *before* the op in function
+    // order; a read with no earlier write sees the value the function was
+    // entered with and is a leaf. (Linking it to the function's last write, as
+    // a whole-function map would, makes an op's fingerprint depend on code that
+    // runs after it.) A value carried round a loop back edge is therefore a
+    // leaf at its first read, which is also the value that read sees first.
+    let mut definer: HashMap<(u64, u64), OpId> = HashMap::new();
     let mut input_defs: Vec<Vec<Option<OpId>>> = Vec::with_capacity(flat_ops.len());
-    for op in &flat_ops {
+    for (id, op) in flat_ops.iter().enumerate() {
         let defs = op
             .inputs
             .iter()
@@ -453,6 +453,11 @@ fn extract_feature_set_with_iterations(
             .map(|vn| varnode_key(vn).and_then(|k| definer.get(&k).copied()))
             .collect();
         input_defs.push(defs);
+        if let Some(out) = &op.output
+            && let Some(key) = varnode_key(out)
+        {
+            definer.insert(key, id);
+        }
     }
 
     // Preserve the local operation signature as a separate feature radius.
@@ -1487,6 +1492,62 @@ mod tests {
         .expect("one local-operation family per feature")
     }
 
+    /// `t = r + 1; r = <value>`: a read that comes before the only write to
+    /// `r` in the function. The read sees `r`'s value on entry, whatever the
+    /// later write stores.
+    fn read_then_overwrite(overwrite_with: i64) -> PcodeFunction {
+        PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1000,
+                        output: Some(varnode(1, 0x100, 4)),
+                        inputs: vec![varnode(2, 0x20, 4), const_vn(1, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x1004,
+                        output: Some(varnode(2, 0x20, 4)),
+                        inputs: vec![const_vn(overwrite_with, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1008,
+                        output: None,
+                        inputs: vec![varnode(1, 0x100, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        }
+    }
+
+    #[test]
+    fn a_read_does_not_depend_on_a_write_that_comes_after_it() {
+        // The refined hash of op 0 covers its input's definer. Op 0 reads `r`
+        // before anything in the function writes it, so changing what a later
+        // op writes to `r` cannot change it.
+        let refined_of_first_op = |function: &PcodeFunction| {
+            let extracted = extract_function_features_with_provenance(function);
+            let n = function.blocks[0].ops.len();
+            // local operation hashes come first, then the refined ones.
+            extracted.features[n]
+        };
+        assert_eq!(
+            refined_of_first_op(&read_then_overwrite(0)),
+            refined_of_first_op(&read_then_overwrite(0x4000_0000)),
+        );
+    }
+
     fn simple_add_function(reg_offset: u64) -> PcodeFunction {
         // out = reg_offset_var + 5; return out
         PcodeFunction {
@@ -1728,7 +1789,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_feature_provenance_round_trips_in_index_v2() {
+    fn optional_feature_provenance_round_trips_in_the_index() {
         let mut document = index_document(
             "hash-with-provenance",
             "candidate.elf",
@@ -1742,7 +1803,7 @@ mod tests {
         index.upsert(document);
 
         let serialized = serde_json::to_string(&index).expect("serialize index v2");
-        assert_eq!(index.format_version(), 2);
+        assert_eq!(index.format_version(), SIMILARITY_INDEX_VERSION);
         let decoded: SimilarityIndex = serde_json::from_str(&serialized).expect("read index v2");
         assert_eq!(decoded, index);
         assert_eq!(decoded.documents()[0].features, vec![1, 2, 3]);
@@ -1823,10 +1884,19 @@ mod tests {
         );
     }
 
+    /// Features from before reads linked to earlier writes only mean something
+    /// to the extraction that made them.
     #[test]
-    fn legacy_v2_index_without_provenance_stays_queryable_and_reports_unavailable() {
+    fn an_index_built_by_the_older_extraction_is_incompatible() {
+        let old: SimilarityIndex =
+            serde_json::from_str(r#"{"format_version": 2, "documents": []}"#).expect("read v2");
+        assert!(!old.is_compatible());
+    }
+
+    #[test]
+    fn index_without_provenance_stays_queryable_and_reports_unavailable() {
         let legacy = r#"{
-            "format_version": 2,
+            "format_version": 3,
             "documents": [{
                 "binary_hash": "legacy-hash",
                 "binary_path": "legacy.elf",
@@ -1837,7 +1907,8 @@ mod tests {
                 "features": [1, 2]
             }]
         }"#;
-        let index: SimilarityIndex = serde_json::from_str(legacy).expect("read legacy index v2");
+        let index: SimilarityIndex =
+            serde_json::from_str(legacy).expect("read index without provenance");
         let query = [1, 2];
         let query_provenance = local_operation_provenance(&query);
         let result = index
