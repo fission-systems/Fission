@@ -113,6 +113,36 @@ fn try_extract_index_mul(expr: &PreHirExpr) -> Option<(PreHirExpr, i64)> {
     }
 }
 
+/// Like [`try_extract_index_mul`], but a left shift by a constant also scales:
+/// `Shl(idx, k)` is `idx * (1 << k)`. Returns `(idx_expr, stride, is_shift)`.
+///
+/// Only the load/store rewrite uses this. That rewrite names its element type
+/// from the access itself (`Index { elem_ty: access_ty }`), so it does not
+/// depend on the base's declared pointee. The element-unit rewrite of a bare
+/// `base + idx * stride` does -- it divides the stride by the *current*
+/// pointee size, and a later pass can change that pointee -- so it keeps
+/// matching `Mul` only.
+fn try_extract_index_scale(expr: &PreHirExpr) -> Option<(PreHirExpr, i64, bool)> {
+    if let Some((idx, stride)) = try_extract_index_mul(expr) {
+        return Some((idx, stride, false));
+    }
+    let PreHirExpr::Binary {
+        op: PreHirBinaryOp::Shl,
+        lhs,
+        rhs,
+        ..
+    } = expr
+    else {
+        return None;
+    };
+    match rhs.as_ref() {
+        PreHirExpr::Const(shift, _) if (1..=6).contains(shift) => {
+            Some((*lhs.clone(), 1i64 << *shift, true))
+        }
+        _ => None,
+    }
+}
+
 /// Return a typed pointer base expression.  The builder may preserve byte-level
 /// address arithmetic as `Cast(Ptr(Int8), p)` even after use-driven inference
 /// has proven that `p` is a more specific pointer type.  Keep track of that
@@ -1066,7 +1096,7 @@ fn try_recover_index_access(
             elem_ty = access_ty.clone();
         }
     }
-    let (idx_expr, stride) = try_extract_index_mul(rhs.as_ref())?;
+    let (idx_expr, stride, from_shift) = try_extract_index_scale(rhs.as_ref())?;
 
     // On-the-fly refinement for stride/index matching
     if matches!(elem_ty, NirType::Unknown | NirType::Int { bits: 8, .. }) && stride > 0 {
@@ -1098,6 +1128,10 @@ fn try_recover_index_access(
             index: Box::new(idx_expr),
             elem_ty: access_ty.clone(),
         })
+    } else if from_shift {
+        // A shifted stride that is not the access size is a field of a wider
+        // element; only the multiplied form has been measured for that shape.
+        None
     } else if stride > 0
         && access_size > 0
         && (stride as u64) > access_size
@@ -2638,6 +2672,111 @@ mod tests {
             ));
         } else {
             panic!("expected assign");
+        }
+    }
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    /// `*(T *)(p + (i << shift))` with a `T`-sized access, `p` bound to `ptr_ty`.
+    fn shifted_load_body(shift: i64, access_bits: u32) -> Vec<PreHirStmt> {
+        let access = NirType::Int {
+            bits: access_bits,
+            signed: false,
+        };
+        vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("result".to_owned()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::Var("p".to_owned())),
+                    rhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
+                        lhs: Box::new(PreHirExpr::Var("i".to_owned())),
+                        rhs: Box::new(PreHirExpr::Const(shift, u64_ty())),
+                        ty: u64_ty(),
+                    }),
+                    ty: u64_ty(),
+                }),
+                ty: access,
+            },
+        }]
+    }
+
+    /// `Load(p + (i << 2))` of a 4-byte value is `p[i]`, exactly as `i * 4` is.
+    #[test]
+    fn a_shifted_stride_equal_to_the_access_size_recovers_an_index() {
+        for (shift, bits) in [(1, 16), (2, 32), (3, 64)] {
+            let p_ty = NirType::Ptr(Box::new(NirType::Int {
+                bits,
+                signed: false,
+            }));
+            let mut func = make_func(
+                vec![make_binding_with_ty("p", p_ty)],
+                shifted_load_body(shift, bits),
+            );
+            assert!(super::apply_ptr_arith_recovery_pass(&mut func));
+            let PreHirStmt::Assign { rhs, .. } = &func.body[0] else {
+                panic!("expected assign");
+            };
+            assert!(
+                matches!(rhs, PreHirExpr::Index { .. }),
+                "shift {shift} access {bits} bits: {rhs:?}"
+            );
+        }
+    }
+
+    /// A shift whose stride is not the access size is a field of a wider
+    /// element, or an access of a different width than the scaling; the shifted
+    /// form is not rewritten for it.
+    #[test]
+    fn a_shifted_stride_that_is_not_the_access_size_is_left_alone() {
+        // stride 8 (<< 3), 4-byte access
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 32,
+            signed: false,
+        }));
+        let mut func = make_func(
+            vec![make_binding_with_ty("p", p_ty)],
+            shifted_load_body(3, 32),
+        );
+        super::apply_ptr_arith_recovery_pass(&mut func);
+        let PreHirStmt::Assign { rhs, .. } = &func.body[0] else {
+            panic!("expected assign");
+        };
+        assert!(
+            !matches!(
+                rhs,
+                PreHirExpr::Index { .. } | PreHirExpr::FieldAccess { .. }
+            ),
+            "{rhs:?}"
+        );
+    }
+
+    /// A shift count outside 1..=6 is not a scale.
+    #[test]
+    fn an_out_of_range_shift_is_not_a_stride() {
+        for shift in [0, 7, 63] {
+            let p_ty = NirType::Ptr(Box::new(NirType::Int {
+                bits: 8,
+                signed: false,
+            }));
+            let mut func = make_func(
+                vec![make_binding_with_ty("p", p_ty)],
+                shifted_load_body(shift, 8),
+            );
+            super::apply_ptr_arith_recovery_pass(&mut func);
+            let PreHirStmt::Assign { rhs, .. } = &func.body[0] else {
+                panic!("expected assign");
+            };
+            assert!(
+                !matches!(rhs, PreHirExpr::Index { .. }),
+                "shift {shift}: {rhs:?}"
+            );
         }
     }
 
