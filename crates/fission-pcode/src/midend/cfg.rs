@@ -51,6 +51,76 @@ pub(super) fn lsda_extra_edges(
         .collect()
 }
 
+/// Userop indices for the values the unwinder hands a landing pad.
+const EH_EXCEPTION_POINTER_USEROP: u32 = 0x7fff_ff01;
+const EH_SELECTOR_USEROP: u32 = 0x7fff_ff02;
+
+/// Give each C++ landing pad of `pcode` its entry state.
+///
+/// A landing pad is entered by the personality routine unwinding into it, which
+/// leaves the exception object pointer and the handler selector in two
+/// registers (see `RegisterNamer::exception_data_registers`). Nothing in the
+/// function's own p-code defines them, so a pad that reads one looks like it
+/// reads a value passed in by the caller and the function grows a parameter
+/// for it. Define them at the top of each pad, as the opaque values they are
+/// (`CallOther` with an output), and the pad's reads have a definition.
+///
+/// Returns `None`, leaving `pcode` and `options` as they are, for every
+/// function without landing pads and for ABIs with no exception-register data.
+pub(super) fn with_landing_pad_entry_definitions(
+    pcode: &PcodeFunction,
+    binary: Option<&LoadedBinary>,
+    options: &MlilPreviewOptions,
+) -> Option<(PcodeFunction, MlilPreviewOptions)> {
+    let binary = binary?;
+    let entry_address = pcode.blocks.first()?.start_address;
+    let info = binary.eh_lsda.get(&entry_address)?;
+    let registers =
+        crate::midend::cspec::RegisterNamer::from_options(options).exception_data_registers();
+    if registers.len() != 2 {
+        return None;
+    }
+    let address_to_index = build_address_to_index_map(pcode);
+    let mut pads: Vec<usize> = info
+        .call_sites
+        .iter()
+        .filter_map(|call_site| call_site.landing_pad)
+        .filter_map(|pad| canonical_block_index_for_address(pcode, &address_to_index, pad))
+        .collect();
+    pads.sort_unstable();
+    pads.dedup();
+    if pads.is_empty() {
+        return None;
+    }
+
+    let mut prepared = pcode.clone();
+    for &pad in &pads {
+        let block = &mut prepared.blocks[pad];
+        let address = block.start_address;
+        let definitions = registers
+            .iter()
+            .zip([EH_EXCEPTION_POINTER_USEROP, EH_SELECTOR_USEROP])
+            .map(|(register, userop)| PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::CallOther,
+                address,
+                output: Some(register.clone()),
+                inputs: vec![crate::pcode::Varnode::constant(i64::from(userop), 4)],
+                asm_mnemonic: None,
+            });
+        block.ops.splice(0..0, definitions);
+    }
+    let mut options = options.clone();
+    options.userops.insert(
+        EH_EXCEPTION_POINTER_USEROP,
+        "__fission_eh_exception_pointer".to_string(),
+    );
+    options
+        .userops
+        .insert(EH_SELECTOR_USEROP, "__fission_eh_selector".to_string());
+    Some((prepared, options))
+}
+
 pub(super) fn block_ends_in_proven_noreturn_call(
     block: &crate::pcode::PcodeBasicBlock,
     options: &MlilPreviewOptions,
@@ -466,5 +536,98 @@ mod lsda_extra_edges_tests {
         prune_proven_noreturn_successors(&pcode, &mut successors, &options, Some(&context));
 
         assert_eq!(successors, vec![vec![1], vec![]]);
+    }
+
+    fn eh_options() -> MlilPreviewOptions {
+        let mut options = MlilPreviewOptions {
+            is_64bit: true,
+            pointer_size: 8,
+            calling_convention: crate::midend::support::CallingConvention::SystemVAmd64,
+            ..Default::default()
+        };
+        options.sla_register_map = Some(
+            [((0x0, 8), "RAX"), ((0x10, 8), "RDX"), ((0x8, 8), "RCX")]
+                .into_iter()
+                .map(|(key, name)| (key, name.to_string()))
+                .collect(),
+        );
+        options
+    }
+
+    fn function_with_landing_pad() -> (PcodeFunction, fission_loader::loader::LoadedBinary) {
+        let pcode = PcodeFunction {
+            blocks: vec![
+                empty_block(0x1000),
+                empty_block(0x1010),
+                empty_block(0x1020),
+            ],
+        };
+        let mut binary = test_binary();
+        binary.eh_lsda.insert(
+            0x1000,
+            LsdaInfo {
+                lp_start: 0x1000,
+                call_sites: vec![LsdaCallSite {
+                    start: 0x1000,
+                    end: 0x1010,
+                    landing_pad: Some(0x1020),
+                    action_chain: vec![1],
+                }],
+                type_table: vec![],
+            },
+        );
+        (pcode, binary)
+    }
+
+    /// The unwinder defines the exception pointer and selector registers on
+    /// entering a pad; without that a pad's read of one looks like a caller
+    /// input and the function grows a parameter for it.
+    #[test]
+    fn a_landing_pad_starts_by_defining_the_exception_registers() {
+        let (pcode, binary) = function_with_landing_pad();
+        let (prepared, options) =
+            with_landing_pad_entry_definitions(&pcode, Some(&binary), &eh_options())
+                .expect("a function with a landing pad is prepared");
+
+        let pad = &prepared.blocks[2];
+        assert_eq!(pad.ops.len(), 2);
+        let defined: Vec<u64> = pad
+            .ops
+            .iter()
+            .map(|op| {
+                assert_eq!(op.opcode, PcodeOpcode::CallOther);
+                op.output.as_ref().expect("defines a register").offset
+            })
+            .collect();
+        assert_eq!(defined, vec![0x0, 0x10], "rax then rdx");
+        // The other blocks are untouched, and the userops have names.
+        assert!(prepared.blocks[0].ops.is_empty() && prepared.blocks[1].ops.is_empty());
+        assert!(
+            options
+                .userops
+                .values()
+                .any(|name| name == "__fission_eh_selector")
+        );
+    }
+
+    #[test]
+    fn a_function_without_a_landing_pad_is_left_alone() {
+        let (pcode, binary) = function_with_landing_pad();
+        assert!(with_landing_pad_entry_definitions(&pcode, None, &eh_options()).is_none());
+        let mut no_lsda = binary.clone();
+        no_lsda.eh_lsda.clear();
+        assert!(
+            with_landing_pad_entry_definitions(&pcode, Some(&no_lsda), &eh_options()).is_none()
+        );
+    }
+
+    /// An ABI or register map that cannot name the registers gets no
+    /// definitions rather than guessed ones.
+    #[test]
+    fn without_register_data_nothing_is_defined() {
+        let (pcode, binary) = function_with_landing_pad();
+        let mut options = eh_options();
+        options.sla_register_map = None;
+        assert!(with_landing_pad_entry_definitions(&pcode, Some(&binary), &options).is_none());
     }
 }

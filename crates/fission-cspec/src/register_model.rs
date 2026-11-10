@@ -710,6 +710,42 @@ impl RegisterNamer {
             .unwrap_or_else(|| self.pointer_size.clamp(4, 8))
     }
 
+    /// The two registers the unwinder fills in on entering a landing pad: the
+    /// exception object pointer, then the handler selector. Both are *defined*
+    /// there, by the personality routine, not read from the function's
+    /// caller. Per-ABI register names are ISA data (the Itanium ABI's
+    /// `__builtin_eh_return_data_regno(0/1)`); the offsets come from the
+    /// language's own register map, so an ABI that is not listed, or a register
+    /// the map does not carry, yields nothing and callers leave the pad alone.
+    pub fn exception_data_registers(&self) -> Vec<Varnode> {
+        let names: [&str; 2] = match self.abi {
+            CallingConvention::SystemVAmd64 => ["rax", "rdx"],
+            CallingConvention::X86_32 => ["eax", "edx"],
+            CallingConvention::AArch64 => ["x0", "x1"],
+            CallingConvention::Arm32 => ["r0", "r1"],
+            _ => return Vec::new(),
+        };
+        let Some(map) = self.sla_map.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(2);
+        for name in names {
+            let Some((&(offset, size), _)) = map.iter().find(|((_, size), candidate)| {
+                *size == self.pointer_size && candidate.eq_ignore_ascii_case(name)
+            }) else {
+                return Vec::new();
+            };
+            out.push(Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                offset,
+                size,
+                is_constant: false,
+                constant_val: 0,
+            });
+        }
+        out
+    }
+
     /// Candidate varnodes for a scalar floating-point ABI return carrier.
     ///
     /// The integer and floating return slots are independent cspec facts. Keep

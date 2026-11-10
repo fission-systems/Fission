@@ -108,6 +108,11 @@ pub fn build_raw_hir(
     binary: Option<&LoadedBinary>,
     type_context: Option<&PreviewTypeContext>,
 ) -> Result<super::PreHirFunction, MlilPreviewError> {
+    let prepared = super::cfg::with_landing_pad_entry_definitions(pcode, binary, options);
+    let (pcode, options) = match &prepared {
+        Some((pcode, options)) => (pcode, options),
+        None => (pcode, options),
+    };
     super::builder::with_discarded_register_origins(|| {
         let mut builder = PreviewBuilder::new_with_binary(pcode, options, binary, type_context);
         builder.build_hir(name, address)
@@ -201,7 +206,12 @@ fn render_mlil_preview_with_binary_and_context_output(
     if let Some(type_context) = type_context {
         effective_options.function_type_aliases = type_context.function_type_aliases.clone();
     }
-    let options = &effective_options;
+    let landing_pads =
+        super::cfg::with_landing_pad_entry_definitions(pcode, binary, &effective_options);
+    let (pcode, options) = match &landing_pads {
+        Some((pcode, options)) => (pcode, options),
+        None => (pcode, &effective_options),
+    };
     let debug = RenderDebugFlags::from_env();
     let debug_log = |stage: &str| {
         if debug.preview_debug {
