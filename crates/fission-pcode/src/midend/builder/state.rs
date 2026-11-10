@@ -188,7 +188,7 @@ pub(crate) struct PreviewBuilder<'a> {
     /// table's address is then only recoverable from here.
     pub(crate) string_literal_addresses: HashMap<String, Option<u64>>,
     /// What decoding that table gave, by block: the unique targets, the
-    /// `(selector value, target)` map, the selector cardinality and the decode
+    /// `(table position, target)` map, the selector cardinality and the decode
     /// mode. The bound that proves the table's length is the guard in front of
     /// the dispatch, which structuring has consumed by the time the dispatch is
     /// lowered again, so a second decode finds no bound and gives up.

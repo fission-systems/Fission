@@ -455,6 +455,14 @@ fn extract_const_address(expr: &PreHirExpr) -> Option<u64> {
             rhs,
             ..
         } => extract_const_address(lhs)?.checked_sub(extract_const_address(rhs)?),
+        // A table base scaled by one (`base * 1`) survives lowering when the
+        // addressing mode carried a scale on a constant register.
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mul,
+            lhs,
+            rhs,
+            ..
+        } => extract_const_address(lhs)?.checked_mul(extract_const_address(rhs)?),
         _ => None,
     }
 }
@@ -571,6 +579,21 @@ mod tests {
             },
             expr: Box::new(inner),
         }
+    }
+
+    // switch_expr = Load32(0x40b000 + sel * 4 + 0x40b000 * 1) + 0x40b000: a
+    // relative table whose base reached the address as `base * 1`.
+    // expected: the table base is found, discriminant = sel
+    #[test]
+    fn a_table_base_scaled_by_one_is_still_a_constant() {
+        let opts = options_with_section(0x40b000, 0x40c000);
+        let sel = var("sel");
+        let addr = add(mul(sel.clone(), cst(4)), mul(cst(0x40b000), cst(1)));
+        let expr = add(load32(addr), cst(0x40b000));
+        let recovered = recover_switch_discriminant(&expr, &opts).expect("a relative table");
+        assert_eq!(recovered.discriminant, sel);
+        assert_eq!(recovered.table_base, 0x40b000);
+        assert!(recovered.relative_entries);
     }
 
     // switch_expr = Load(0x40b000 + sel * 8)
