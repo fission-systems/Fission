@@ -866,11 +866,9 @@ dependencies = [
  "libc",
  "miette",
  "mimalloc",
- "rayon",
  "serde",
  "serde_json",
  "tempfile",
- "tokio",
  "tracing",
  "unicode-width 0.2.0",
 ]
@@ -880,9 +878,7 @@ name = "fission-core"
 version = "0.2.3"
 dependencies = [
  "anyhow",
- "bitflags 2.13.0",
  "dirs",
- "once_cell",
  "rkyv",
  "serde",
  "serde_json",
@@ -923,12 +919,10 @@ dependencies = [
  "fission-sleigh",
  "fission-static",
  "lru",
- "once_cell",
  "rayon",
  "regex",
  "serde",
  "serde_json",
- "thiserror",
  "tracing",
 ]
 
@@ -937,7 +931,6 @@ name = "fission-dir"
 version = "0.2.3"
 dependencies = [
  "anyhow",
- "fission-core",
  "fission-decompiler",
  "fission-emulator",
  "fission-loader",
@@ -958,24 +951,17 @@ version = "0.2.3"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
- "dirs",
  "fission-core",
  "fission-emulator",
  "fission-loader",
  "fission-plugin",
  "fission-sleigh",
- "fission-static",
  "fission-ttd",
- "lru",
  "nix 0.28.0",
- "once_cell",
- "regex",
  "rkyv",
  "serde",
  "serde_json",
  "thiserror",
- "tracing",
- "tracing-subscriber",
  "windows",
 ]
 
@@ -991,14 +977,12 @@ dependencies = [
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
- "fission-core",
  "fission-loader",
  "fission-pcode-ir",
  "fission-sleigh",
  "fission-solver",
  "fission-static",
  "fission-ttd",
- "hex",
  "im",
  "libc",
  "serde",
@@ -1043,7 +1027,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "tracing",
 ]
 
 [[package]]
@@ -1055,7 +1038,6 @@ dependencies = [
  "fission-midend-prehir",
  "fission-signatures",
  "indexmap",
- "once_cell",
  "rustc-hash",
  "serde_json",
  "tracing",
@@ -1066,14 +1048,10 @@ name = "fission-midend-prehir"
 version = "0.2.3"
 dependencies = [
  "fission-core",
- "fission-loader",
  "fission-midend-core",
  "indexmap",
- "metrics",
  "rustc-hash",
- "serde",
  "serde_json",
- "thiserror",
  "tracing",
 ]
 
@@ -1081,19 +1059,15 @@ dependencies = [
 name = "fission-midend-structuring"
 version = "0.2.3"
 dependencies = [
- "fission-core",
  "fission-midend-core",
  "fission-midend-prehir",
- "indexmap",
  "rustc-hash",
- "tracing",
 ]
 
 [[package]]
 name = "fission-pcode"
 version = "0.2.3"
 dependencies = [
- "anyhow",
  "criterion",
  "fission-core",
  "fission-cspec",
@@ -1106,15 +1080,11 @@ dependencies = [
  "fission-signatures",
  "indexmap",
  "insta",
- "log",
- "lru",
  "metrics",
- "once_cell",
  "petgraph",
  "rustc-hash",
  "serde",
  "serde_json",
- "thiserror",
  "tracing",
 ]
 
@@ -1167,7 +1137,6 @@ dependencies = [
 name = "fission-signatures"
 version = "0.2.3"
 dependencies = [
- "anyhow",
  "criterion",
  "fission-core",
  "flate2",
@@ -1175,7 +1144,6 @@ dependencies = [
  "memmap2 0.9.11",
  "once_cell",
  "quick-xml",
- "regex",
  "serde",
  "serde_json",
  "sha2",
@@ -1194,8 +1162,6 @@ dependencies = [
  "fission-pcode-ir",
  "fission-static",
  "flate2",
- "libloading",
- "memmap2 0.9.11",
  "rkyv",
  "serde",
  "serde_json",
@@ -1220,7 +1186,6 @@ dependencies = [
  "anyhow",
  "cc",
  "criterion",
- "crossbeam-channel",
  "dirs",
  "fission-analysis-db",
  "fission-core",
@@ -1240,7 +1205,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1423,12 +1387,6 @@ name = "hermit-abi"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc0fef456e4baa96da950455cd02c081ca953b141298e41db3fc7e36b1da849c"
-
-[[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "im"
@@ -2648,27 +2606,6 @@ name = "tinyvec_macros"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
-
-[[package]]
-name = "tokio"
-version = "1.54.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b52fd3255258d26fac7264ab5a76b53c13367136dc011d3d6ad4f8ed070396a3"
-dependencies = [
- "pin-project-lite",
- "tokio-macros",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "2.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "385a6cb71ab9ab790c5fe8d67f1645e6c450a7ce006a33de03daa956cf70a496"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.118",
-]
 
 [[package]]
 name = "toml"

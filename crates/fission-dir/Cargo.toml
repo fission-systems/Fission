@@ -14,7 +14,6 @@ categories = ["development-tools"]
 name = "fission_dir"
 
 [dependencies]
-fission-core = { path = "../fission-core" }
 fission-loader = { path = "../fission-loader" }
 fission-static = { path = "../fission-static" }
 fission-midend-core = { path = "../fission-midend-core" }
