@@ -356,8 +356,12 @@ impl CircleRange {
             let hi_minus1 = self.hi.wrapping_sub(1) & Self::mask(self.bits);
             hi_minus1 <= new_mask
         };
-        if lo_fits && hi_fits && self.lo <= (self.hi.wrapping_sub(1) & Self::mask(self.bits)) {
-            Self::interval(self.lo, self.hi, new_bits)
+        let last = self.hi.wrapping_sub(1) & Self::mask(self.bits);
+        if lo_fits && hi_fits && self.lo <= last {
+            // `hi` is exclusive and wraps to 0 when the range ends at the top of
+            // its width; the member list ends at `last`, so rebuild `hi` from it
+            // in the new width instead of copying the wrapped value.
+            Self::interval(self.lo, last.wrapping_add(1), new_bits)
         } else {
             Self::top(new_bits)
         }
@@ -601,5 +605,57 @@ mod tests {
         assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
         assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
         assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
+    }
+}
+
+#[cfg(test)]
+mod widening_tests {
+    use super::*;
+
+    /// An interval that ends at the top of its width has `hi == 0` after the
+    /// wrap; copying that `hi` into a wider domain turned `{255}` into the
+    /// arc `[255, 2^32)`.
+    #[test]
+    fn widening_keeps_a_range_that_ends_at_the_top_of_its_width() {
+        assert_eq!(
+            CircleRange::singleton(255, 8).cast_unsigned(32),
+            CircleRange::singleton(255, 32)
+        );
+        assert_eq!(
+            CircleRange::interval(250, 0, 8).cast_unsigned(32),
+            CircleRange::interval(250, 256, 32)
+        );
+        assert_eq!(
+            CircleRange::singleton(1, 1).cast_unsigned(8),
+            CircleRange::singleton(1, 8)
+        );
+    }
+
+    #[test]
+    fn widening_never_loses_a_member() {
+        for bits in [1u32, 4, 8] {
+            let top = 1u64 << bits;
+            for lo in 0..top {
+                for hi in 0..top {
+                    if lo == hi {
+                        continue;
+                    }
+                    let narrow = CircleRange::interval(lo, hi, bits);
+                    let wide = narrow.cast_unsigned(16);
+                    // every member of the narrow arc is a member of the wide one
+                    let members: Vec<u64> = if lo < hi {
+                        (lo..hi).collect()
+                    } else {
+                        (lo..top).chain(0..hi).collect()
+                    };
+                    for v in members {
+                        assert!(
+                            wide.is_top() || wide.contains_mod(v, CircleRange::mask(16)),
+                            "{lo}..{hi} ({bits}) lost {v} after widening: {wide:?}"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
