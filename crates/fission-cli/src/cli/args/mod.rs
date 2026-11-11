@@ -1053,23 +1053,98 @@ where
         let analysis_db = cli.analysis_db.clone();
         let no_analysis_db = cli.no_analysis_db;
         let invocation = normalize_canonical(cli);
-        match invocation {
+        let invocation = match invocation {
             ParsedInvocation::OneShot(mut parsed) => {
-                parsed.args.language_override = language_override;
-                parsed.args.arch = arch;
-                parsed.args.analysis_db = analysis_db;
+                parsed.args.language_override = language_override.clone();
+                parsed.args.arch = arch.clone();
+                parsed.args.analysis_db = analysis_db.clone();
                 parsed.args.no_analysis_db = no_analysis_db;
                 ParsedInvocation::OneShot(parsed)
             }
             ParsedInvocation::Db(mut db) => {
-                db.project_path = analysis_db;
+                db.project_path = analysis_db.clone();
                 ParsedInvocation::Db(db)
             }
             other => other,
+        };
+        for warning in ignored_option_warnings(
+            &invocation,
+            language_override.as_deref(),
+            arch.as_deref(),
+            analysis_db.as_deref(),
+            no_analysis_db,
+        ) {
+            eprintln!("{warning}");
         }
+        invocation
     } else {
-        ParsedInvocation::OneShot(normalize_legacy(LegacyCliArgs::parse_from(argv)))
+        let invocation =
+            ParsedInvocation::OneShot(normalize_legacy(LegacyCliArgs::parse_from(argv)));
+        for warning in ignored_option_warnings(&invocation, None, None, None, false) {
+            eprintln!("{warning}");
+        }
+        invocation
     }
+}
+
+/// Options the command line accepted but the chosen command cannot honor.
+///
+/// `--language`, `--arch`, `--db` and `--no-db` are global, so clap takes them
+/// on every subcommand, but only the one-shot analysis commands (and `db`, for
+/// `--db`) act on them; `--compiler-id`, `--format` and `--engine` are parsed
+/// for `decomp` and read by nothing. Dropping them without a word makes a
+/// command appear to have run with the setting the caller asked for.
+fn ignored_option_warnings(
+    invocation: &ParsedInvocation,
+    language: Option<&str>,
+    arch: Option<&str>,
+    analysis_db: Option<&std::path::Path>,
+    no_analysis_db: bool,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let mut ignored = |flag: &str, command: &str| {
+        warnings.push(format!(
+            "warning: `{flag}` is accepted but ignored by `{command}`"
+        ));
+    };
+    match invocation {
+        ParsedInvocation::OneShot(parsed) => {
+            if parsed.args.compiler_id.is_some() {
+                ignored("--compiler-id", "decomp");
+            }
+            if parsed.args.format.is_some() {
+                ignored("--format", "decomp");
+            }
+            if parsed.args.engine.is_some() {
+                ignored("--engine", "decomp");
+            }
+        }
+        ParsedInvocation::Script(_)
+        | ParsedInvocation::Sandbox(_)
+        | ParsedInvocation::Verify(_)
+        | ParsedInvocation::Db(_) => {
+            let command = match invocation {
+                ParsedInvocation::Script(_) => "script",
+                ParsedInvocation::Sandbox(_) => "sandbox",
+                ParsedInvocation::Verify(_) => "verify",
+                _ => "db",
+            };
+            if language.is_some() {
+                ignored("--language", command);
+            }
+            if arch.is_some() {
+                ignored("--arch", command);
+            }
+            if no_analysis_db {
+                ignored("--no-db", command);
+            }
+            if analysis_db.is_some() && !matches!(invocation, ParsedInvocation::Db(_)) {
+                ignored("--db", command);
+            }
+        }
+        _ => {}
+    }
+    warnings
 }
 
 fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
