@@ -121,10 +121,14 @@ struct Builder {
     next_id: usize,
     /// Set of variable names whose address has been observed as a Call arg.
     escaped: crate::HashSet<String>,
+    /// Variables that hold a pointer. A write through one reaches its pointee,
+    /// not the slot the variable itself lives in, whatever the variable is
+    /// named (`local_18` is a spilled parameter, not a stack array).
+    pointer_vars: crate::HashSet<String>,
 }
 
 impl Builder {
-    fn new() -> Self {
+    fn new(pointer_vars: crate::HashSet<String>) -> Self {
         Self {
             defs: Vec::new(),
             uses: Vec::new(),
@@ -132,6 +136,7 @@ impl Builder {
             reaching: HashMap::default(),
             next_id: 0,
             escaped: crate::HashSet::default(),
+            pointer_vars,
         }
     }
 
@@ -239,7 +244,20 @@ impl Builder {
                     }
                     PreHirLValue::Var(_) => {} // Not a memory write.
                     PreHirLValue::FieldAccess { base, ty, .. } => {
-                        let key = self.alias_key_for_ptr(base, nir_byte_size(ty));
+                        // `p->field` where `p` is a pointer variable writes
+                        // *p's pointee*. Keying it by `p` (as for an aggregate
+                        // local) names the stack slot `p` is stored in, and an
+                        // unread "stack write" there is then deleted -- along
+                        // with a store the caller reads.
+                        let through_pointer = matches!(
+                            fission_midend_prehir::util::strip_casts(base),
+                            PreHirExpr::Var(ref name) if self.pointer_vars.contains(name)
+                        );
+                        let key = if through_pointer {
+                            AliasKey::Unknown
+                        } else {
+                            self.alias_key_for_ptr(base, nir_byte_size(ty))
+                        };
                         self.add_def(key);
                     }
                 }
@@ -462,7 +480,14 @@ pub fn alias_key_for_pointer_expr(ptr: &PreHirExpr, size: u32) -> AliasKey {
 
 /// Build MemSSA for a HIR function.
 pub fn build_mem_ssa(func: &PreHirFunction) -> MemSsa {
-    let mut builder = Builder::new();
+    let pointer_vars = func
+        .locals
+        .iter()
+        .chain(func.params.iter())
+        .filter(|binding| matches!(binding.ty, NirType::Ptr(_)))
+        .map(|binding| binding.name.clone())
+        .collect();
+    let mut builder = Builder::new(pointer_vars);
     builder.scan_stmts(&func.body);
     builder.finish()
 }
