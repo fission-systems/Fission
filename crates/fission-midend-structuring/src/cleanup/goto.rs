@@ -27,9 +27,10 @@ use fission_midend_prehir::util::{collect_referenced_label_counts, negate_expr};
 
 /// Apply the goto-elimination rules once to a statement list.
 /// Returns `(cleaned, changed)` where `changed` indicates whether any rule fired.
-fn goto_elim_pass(stmts: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
+fn goto_elim_pass(stmts: Vec<PreHirStmt>, retain_jump_targets: bool) -> (Vec<PreHirStmt>, bool) {
     let mut changed = false;
-    let stmts = strip_unreachable_after_unconditional_transfer(stmts, &mut changed);
+    let stmts =
+        strip_unreachable_after_unconditional_transfer(stmts, retain_jump_targets, &mut changed);
     let stmts = empty_jump_removal(stmts, &mut changed);
     let stmts = single_ref_label_inline(stmts, &mut changed);
     let stmts = guard_clause_promotion(stmts, &mut changed);
@@ -152,30 +153,91 @@ fn nested_fallthrough_removal(
 
 fn strip_unreachable_after_unconditional_transfer(
     stmts: Vec<PreHirStmt>,
+    retain_jump_targets: bool,
     changed: &mut bool,
 ) -> Vec<PreHirStmt> {
     let mut out = Vec::with_capacity(stmts.len());
-    let mut dropping = false;
-    for (idx, stmt) in stmts.iter().cloned().enumerate() {
-        if dropping {
-            if matches!(stmt, PreHirStmt::Label(_)) {
-                dropping = false;
-                out.push(stmt);
-            } else {
-                *changed = true;
-            }
-            continue;
-        }
-
-        dropping = match &stmt {
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        let stmt = stmts[idx].clone();
+        let skips_forward = match &stmt {
             PreHirStmt::Goto(label) => stmts[idx + 1..]
                 .iter()
                 .any(|candidate| matches!(candidate, PreHirStmt::Label(next) if next == label)),
             _ => false,
         };
         out.push(stmt);
+        idx += 1;
+        if !skips_forward {
+            continue;
+        }
+
+        // Straight-line flow skips everything up to the next top-level label.
+        let run_start = idx;
+        let mut run_end = run_start;
+        while run_end < stmts.len() && !matches!(stmts[run_end], PreHirStmt::Label(_)) {
+            run_end += 1;
+        }
+        // Only the final layout round keeps a skipped statement that defines a
+        // label some live `goto` still names. Earlier callers run while other
+        // rules can still inline or relocate that code, and keeping it there
+        // changes what they see.
+        let first_live = if retain_jump_targets {
+            first_live_in_skipped_run(&stmts, run_start, run_end)
+        } else {
+            run_end
+        };
+        if first_live > run_start {
+            *changed = true;
+        }
+        // From the first statement something can still jump into, control can
+        // fall through to everything after it, so the rest of the run stays.
+        out.extend(stmts[first_live..run_end].iter().cloned());
+        idx = run_end;
     }
     out
+}
+
+/// Index of the first statement in `stmts[start..end]` that must be kept, or
+/// `end` when the whole run is dead.
+///
+/// Labels are function-scoped, so a skipped compound statement that *contains*
+/// a label is reachable through any `goto` to it. But only a `goto` from code
+/// that is itself reachable counts: two skipped loops that jump into each other
+/// are both dead. A statement is live when it defines a label referenced from
+/// outside the run, and liveness spreads backwards to any earlier statement a
+/// kept one jumps to.
+fn first_live_in_skipped_run(stmts: &[PreHirStmt], start: usize, end: usize) -> usize {
+    let mut outside = collect_referenced_label_counts(&stmts[..start]);
+    for (label, count) in collect_referenced_label_counts(&stmts[end..]) {
+        *outside.entry(label).or_insert(0) += count;
+    }
+
+    let defines_referenced = |stmt: &PreHirStmt, refs: &dyn Fn(&str) -> bool| {
+        super::collect_defined_labels(std::slice::from_ref(stmt))
+            .iter()
+            .any(|label| refs(label.as_str()))
+    };
+
+    let mut first_live = (start..end)
+        .find(|&i| {
+            defines_referenced(&stmts[i], &|label| {
+                outside.get(label).copied().unwrap_or(0) > 0
+            })
+        })
+        .unwrap_or(end);
+
+    // Pull in earlier statements that the kept suffix jumps back to.
+    loop {
+        let kept_refs = collect_referenced_label_counts(&stmts[first_live..end]);
+        let Some(earlier) = (start..first_live)
+            .find(|&i| defines_referenced(&stmts[i], &|label| kept_refs.contains_key(label)))
+        else {
+            break;
+        };
+        first_live = earlier;
+    }
+    first_live
 }
 
 /// Rule 1: If a `Goto(L)` is immediately followed by `Label(L)`, remove the Goto.
@@ -439,10 +501,19 @@ fn is_promotable_guard_tail(tail: &[PreHirStmt]) -> bool {
 /// Apply `goto_elim_pass` to fixpoint (convergence when no rule fires).
 /// Structural rules other than nested fallthrough removal operate only at the
 /// top level of `stmts`.
-pub fn eliminate_redundant_gotos(mut stmts: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+pub fn eliminate_redundant_gotos(stmts: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+    eliminate_redundant_gotos_with(stmts, false)
+}
+
+/// [`eliminate_redundant_gotos`], optionally keeping skipped code that a live
+/// `goto` still jumps into (see `strip_unreachable_after_unconditional_transfer`).
+pub fn eliminate_redundant_gotos_with(
+    mut stmts: Vec<PreHirStmt>,
+    retain_jump_targets: bool,
+) -> Vec<PreHirStmt> {
     const MAX_GOTO_ELIM_ITERS: usize = 32;
     for _ in 0..MAX_GOTO_ELIM_ITERS {
-        let (new_stmts, changed) = goto_elim_pass(stmts);
+        let (new_stmts, changed) = goto_elim_pass(stmts, retain_jump_targets);
         stmts = new_stmts;
         if !changed {
             break;
