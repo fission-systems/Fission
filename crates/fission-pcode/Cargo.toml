@@ -28,6 +28,4 @@ rustc-hash = "2.1"
 indexmap = "2"
 
 [dev-dependencies]
-criterion = "0.5"
 insta = { version = "1.47", features = ["yaml"] }
-petgraph = "0.8"

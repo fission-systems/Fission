@@ -28,4 +28,3 @@ thiserror = "2.0"
 tracing = "0.1"
 
 [dev-dependencies]
-serde_json = "1.0"
