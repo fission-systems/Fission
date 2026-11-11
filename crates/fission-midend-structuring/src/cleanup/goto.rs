@@ -234,6 +234,11 @@ fn single_ref_label_inline(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<Pr
 /// Rule 3: `if (cond) { Goto(L) }` directly followed by `Label(L)` + rest →
 /// `if (!cond) { rest }`.  This handles early-exit / guard patterns.
 fn cond_goto_inversion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<PreHirStmt> {
+    // The inversion deletes `Label(L)`, so it is only sound when the guard's
+    // goto is the *only* reference to `L`. Any other `goto L` -- in a branch or
+    // a loop later in the list -- would be left jumping to a label that no
+    // longer exists.
+    let ref_counts = collect_referenced_label_counts(&stmts);
     let mut out = Vec::with_capacity(stmts.len());
     let mut i = 0;
     while i < stmts.len() {
@@ -249,7 +254,7 @@ fn cond_goto_inversion(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<PreHir
                     // Find the immediately following Label(L) at the top level.
                     if i + 1 < stmts.len() {
                         if let PreHirStmt::Label(label) = &stmts[i + 1] {
-                            if goto_label == label {
+                            if goto_label == label && ref_counts.get(label).copied() == Some(1) {
                                 // Collect everything after the label as the inlined else body.
                                 let inverted_cond = negate_expr(cond.clone());
                                 let rest_body: Vec<PreHirStmt> = stmts[i + 2..].to_vec();
