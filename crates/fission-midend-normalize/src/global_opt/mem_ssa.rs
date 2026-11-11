@@ -397,7 +397,29 @@ impl Builder {
 
     /// Compute an alias key for a pointer expression.
     fn alias_key_for_ptr(&self, ptr: &PreHirExpr, size: u32) -> AliasKey {
+        // An address built on a variable that *holds a pointer* -- `p`,
+        // `p + 8`, `(T *)p + i` -- names the pointee, not the stack slot `p`
+        // lives in. Partitioning it by `p` would call a write through the
+        // pointer a write to a local, and an unread local write is deleted.
+        if self.is_based_on_pointer_variable(ptr) {
+            return AliasKey::Unknown;
+        }
         alias_key_for_pointer_expr(ptr, size)
+    }
+
+    /// Whether the address expression is a pointer variable plus offsets.
+    fn is_based_on_pointer_variable(&self, expr: &PreHirExpr) -> bool {
+        match expr {
+            PreHirExpr::Var(name) => self.pointer_vars.contains(name),
+            PreHirExpr::Cast { expr, .. } => self.is_based_on_pointer_variable(expr),
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub,
+                lhs,
+                rhs,
+                ..
+            } => self.is_based_on_pointer_variable(lhs) || self.is_based_on_pointer_variable(rhs),
+            _ => false,
+        }
     }
 
     fn merge_reaching(&mut self, a: HashMap<AliasKey, usize>, b: HashMap<AliasKey, usize>) {

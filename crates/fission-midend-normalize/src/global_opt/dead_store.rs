@@ -215,34 +215,47 @@ struct StmtPath(Vec<usize>);
 /// We use a simple approach: rebuild each statement list, skipping
 /// the statements marked for removal.
 fn remove_dead_stores(stmts: &mut Vec<PreHirStmt>, paths: &[StmtPath]) {
-    // Collect top-level indices to remove.
     let top_level: crate::HashSet<usize> = paths
         .iter()
         .filter(|p| p.0.len() == 1)
         .map(|p| p.0[0])
         .collect();
+    let deeper: Vec<&StmtPath> = paths.iter().filter(|p| p.0.len() > 1).collect();
+    remove_listed_and_descend(stmts, &top_level, &deeper, 0);
+}
 
-    if !top_level.is_empty() {
-        let mut i = 0;
-        let mut original_idx = 0;
-        while i < stmts.len() {
-            if top_level.contains(&original_idx) && is_memory_store(&stmts[i]) {
-                stmts.remove(i);
-            } else {
-                i += 1;
+/// Apply the removals recorded for one statement list.
+///
+/// A path names a statement by the position it had when the collector walked
+/// the *original* tree, so a deeper path `[.., i, branch, ..]` belongs to the
+/// statement that stood at original position `i` of this list and to no other:
+/// descend into each statement with only its own paths, and do it before any
+/// removal shifts the positions.
+fn remove_listed_and_descend(
+    body: &mut Vec<PreHirStmt>,
+    remove_here: &crate::HashSet<usize>,
+    deeper: &[&StmtPath],
+    depth: usize,
+) {
+    if !deeper.is_empty() {
+        for (original_idx, stmt) in body.iter_mut().enumerate() {
+            let own: Vec<&StmtPath> = deeper
+                .iter()
+                .copied()
+                .filter(|p| p.0[depth] == original_idx)
+                .collect();
+            if !own.is_empty() {
+                recurse_remove(stmt, &own, depth + 1);
             }
-            original_idx += 1;
         }
     }
-
-    // Recurse for deeper paths.
-    let deeper: Vec<&StmtPath> = paths.iter().filter(|p| p.0.len() > 1).collect();
-    if deeper.is_empty() {
-        return;
-    }
-
-    for stmt in stmts.iter_mut() {
-        recurse_remove(stmt, &deeper, 1);
+    if !remove_here.is_empty() {
+        let mut original_idx = 0;
+        body.retain(|stmt| {
+            let keep = !(remove_here.contains(&original_idx) && is_memory_store(stmt));
+            original_idx += 1;
+            keep
+        });
     }
 }
 
@@ -351,26 +364,17 @@ fn remove_at_branch(body: &mut Vec<PreHirStmt>, paths: &[&StmtPath], depth: usiz
         return;
     }
     let next_depth = depth + 1;
-    let top_level: crate::HashSet<usize> = relevant
+    let remove_here: crate::HashSet<usize> = relevant
         .iter()
         .filter(|p| p.0.len() == next_depth + 1)
         .map(|p| p.0[next_depth])
         .collect();
-    if !top_level.is_empty() {
-        let mut i = 0;
-        let mut original_idx = 0;
-        while i < body.len() {
-            if top_level.contains(&original_idx) && is_memory_store(&body[i]) {
-                body.remove(i);
-            } else {
-                i += 1;
-            }
-            original_idx += 1;
-        }
-    }
-    for stmt in body.iter_mut() {
-        recurse_remove(stmt, &relevant, next_depth);
-    }
+    let deeper: Vec<&StmtPath> = relevant
+        .iter()
+        .copied()
+        .filter(|p| p.0.len() > next_depth + 1)
+        .collect();
+    remove_listed_and_descend(body, &remove_here, &deeper, next_depth);
 }
 
 #[cfg(test)]
@@ -932,5 +936,95 @@ mod tests {
         let mut body = vec![mem_store("p"), PreHirStmt::Return(None)];
         remove_dead_stores(&mut body, &[StmtPath(vec![0])]);
         assert_eq!(body, vec![PreHirStmt::Return(None)]);
+    }
+
+    /// A path names one statement: `[1, 0, 1]` is statement 1 of the top-level
+    /// list, its then-arm, item 1. Another `if` with a *store* at the same
+    /// position must keep it.
+    #[test]
+    fn a_nested_removal_touches_only_the_statement_its_path_names() {
+        let mut body = vec![
+            if_with(vec![
+                PreHirStmt::Expr(PreHirExpr::Var("a1".to_string())),
+                mem_store("p"),
+                PreHirStmt::Expr(PreHirExpr::Var("a3".to_string())),
+            ]),
+            if_with(vec![
+                PreHirStmt::Expr(PreHirExpr::Var("b1".to_string())),
+                mem_store("q"),
+                PreHirStmt::Expr(PreHirExpr::Var("b3".to_string())),
+            ]),
+        ];
+        remove_dead_stores(&mut body, &[StmtPath(vec![1, 0, 1])]);
+
+        let PreHirStmt::If {
+            then_body: first, ..
+        } = &body[0]
+        else {
+            panic!("expected if");
+        };
+        let PreHirStmt::If {
+            then_body: second, ..
+        } = &body[1]
+        else {
+            panic!("expected if");
+        };
+        assert_eq!(first.len(), 3, "the other if lost a store: {first:?}");
+        assert_eq!(second.len(), 2, "the named store is gone: {second:?}");
+    }
+
+    /// Removing a top-level statement shifts the ones after it; a nested path
+    /// still names the statement it was recorded for.
+    #[test]
+    fn a_nested_removal_survives_a_top_level_removal_before_it() {
+        let mut body = vec![
+            mem_store("dead"),
+            if_with(vec![
+                PreHirStmt::Expr(PreHirExpr::Var("keep".to_string())),
+                mem_store("q"),
+                PreHirStmt::Expr(PreHirExpr::Var("keep_too".to_string())),
+            ]),
+        ];
+        remove_dead_stores(&mut body, &[StmtPath(vec![0]), StmtPath(vec![1, 0, 1])]);
+
+        assert_eq!(body.len(), 1);
+        let PreHirStmt::If { then_body, .. } = &body[0] else {
+            panic!("expected if");
+        };
+        assert_eq!(then_body.len(), 2, "{then_body:?}");
+    }
+
+    #[test]
+    fn dead_store_elimination_keeps_deref_store_at_offset_from_stack_spilled_pointer() {
+        // `*(local_18 + 8) = 1` where `local_18` holds a pointer: the store
+        // writes the pointee, not `local_18`'s own stack slot.
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = base_func(
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("local_18".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(8, u32_ty.clone())),
+                        ty: NirType::Ptr(Box::new(u32_ty.clone())),
+                    }),
+                    ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(1, u32_ty),
+            }],
+            vec![ptr_binding("local_18")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(
+            !changed,
+            "a store at an offset from a stack-spilled pointer must not be DSE'd: {:?}",
+            func.body
+        );
+        assert_eq!(func.body.len(), 1, "{:?}", func.body);
     }
 }
