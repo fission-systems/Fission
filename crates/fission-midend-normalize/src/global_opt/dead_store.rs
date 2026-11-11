@@ -560,6 +560,42 @@ mod tests {
     /// MemSSA must not key that as a write to the stack slot that only
     /// *holds* the pointer — otherwise matrix out-param stores vanish.
     #[test]
+    fn dead_store_elimination_keeps_field_store_through_stack_spilled_pointer() {
+        // `local_18` holds a pointer (the spilled parameter); the store writes
+        // its pointee, not the stack slot `local_18` lives in.
+        let mut func = base_func(
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::FieldAccess {
+                    base: Box::new(PreHirExpr::Var("local_18".to_string())),
+                    field_name: "field_1a04".to_string(),
+                    offset: 6660,
+                    ty: NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                },
+                rhs: PreHirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 8,
+                        signed: false,
+                    },
+                ),
+            }],
+            vec![ptr_binding("local_18")],
+        );
+
+        let changed = apply_dead_store_elimination(&mut func);
+
+        assert!(
+            !changed,
+            "a field store through a stack-spilled pointer must not be DSE'd: {:?}",
+            func.body
+        );
+        assert_eq!(func.body.len(), 1, "{:?}", func.body);
+    }
+
+    #[test]
     fn dead_store_elimination_keeps_index_store_through_stack_spilled_pointer() {
         let mut func = base_func(
             vec![PreHirStmt::Assign {
