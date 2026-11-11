@@ -1202,6 +1202,63 @@ mod tests {
 
     use super::*;
 
+    fn goto_if(cond: &str, label: &str) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: PreHirExpr::Var(cond.to_string()),
+            then_body: vec![PreHirStmt::Goto(label.to_string())].into(),
+            else_body: Vec::new().into(),
+        }
+    }
+
+    fn call(name: &str) -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: name.to_string(),
+            args: Vec::new(),
+            ty: NirType::Unknown,
+        })
+    }
+
+    /// `if (c) goto L; L: rest` is `if (!c) { rest }` -- when the goto is the
+    /// only way to `L`.
+    #[test]
+    fn a_guard_goto_to_the_next_label_is_inverted_when_it_is_the_only_reference() {
+        let body = vec![
+            goto_if("c", "L"),
+            PreHirStmt::Label("L".to_string()),
+            call("rest"),
+        ];
+        let out = eliminate_redundant_gotos(body);
+        assert!(
+            !collect_defined_labels(&out).contains("L"),
+            "the only jump to L is gone, so is L: {out:?}"
+        );
+        assert!(matches!(out.as_slice(), [PreHirStmt::If { .. }]), "{out:?}");
+    }
+
+    /// Another jump to `L` -- here inside a loop that comes after the label --
+    /// still needs `L` to exist and to stand before `rest`.
+    #[test]
+    fn a_guard_goto_is_not_inverted_while_another_goto_still_targets_the_label() {
+        let body = vec![
+            goto_if("c", "L"),
+            PreHirStmt::Label("L".to_string()),
+            call("rest"),
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("again".to_string()),
+                body: vec![goto_if("d", "L")].into(),
+            },
+        ];
+        let out = eliminate_redundant_gotos(body);
+        let referenced = collect_referenced_labels(&out);
+        let defined = collect_defined_labels(&out);
+        let dangling: Vec<_> = referenced.difference(&defined).collect();
+        assert!(
+            dangling.is_empty(),
+            "goto to a label that no longer exists: {dangling:?} in {out:?}"
+        );
+    }
+
     #[test]
     fn nonfallthrough_aliases_retarget_function_scoped_gotos() {
         for transfer in [
