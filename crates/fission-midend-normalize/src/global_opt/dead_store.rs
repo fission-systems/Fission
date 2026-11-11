@@ -188,6 +188,24 @@ impl<'a> DeadStoreCollector<'a> {
     }
 }
 
+/// Whether `stmt` is a write through memory, the only kind of statement this
+/// pass ever collects. Paths are applied to every list of the same shape, so a
+/// path recorded for one store can land on a different statement in another
+/// list; deleting that statement -- a label some `goto` still names, say --
+/// is never what the pass set out to do, and leaving it alone costs only a
+/// store that stays.
+fn is_memory_store(stmt: &PreHirStmt) -> bool {
+    matches!(
+        stmt,
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { .. }
+                | PreHirLValue::Index { .. }
+                | PreHirLValue::FieldAccess { .. },
+            ..
+        }
+    )
+}
+
 /// A path to a statement in the nested HIR tree.
 #[derive(Debug, Clone)]
 struct StmtPath(Vec<usize>);
@@ -208,7 +226,7 @@ fn remove_dead_stores(stmts: &mut Vec<PreHirStmt>, paths: &[StmtPath]) {
         let mut i = 0;
         let mut original_idx = 0;
         while i < stmts.len() {
-            if top_level.contains(&original_idx) {
+            if top_level.contains(&original_idx) && is_memory_store(&stmts[i]) {
                 stmts.remove(i);
             } else {
                 i += 1;
@@ -342,7 +360,7 @@ fn remove_at_branch(body: &mut Vec<PreHirStmt>, paths: &[&StmtPath], depth: usiz
         let mut i = 0;
         let mut original_idx = 0;
         while i < body.len() {
-            if top_level.contains(&original_idx) {
+            if top_level.contains(&original_idx) && is_memory_store(&body[i]) {
                 body.remove(i);
             } else {
                 i += 1;
@@ -804,5 +822,79 @@ mod tests {
             panic!("{:?}", func.body)
         };
         assert!(then_body.is_empty(), "{:?}", func.body);
+    }
+
+    fn mem_store(name: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var(name.to_string())),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            },
+            rhs: PreHirExpr::Const(
+                0,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            ),
+        }
+    }
+
+    fn if_with(then: Vec<PreHirStmt>) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("c".to_string()),
+            then_body: Rc::new(then),
+            else_body: Rc::new(Vec::new()),
+        }
+    }
+
+    /// A path recorded for the store in the second `if` is also tried on the
+    /// first `if`'s list, where the same position holds a label some goto
+    /// names. The label must survive; the store it was recorded for goes.
+    #[test]
+    fn a_removal_path_never_deletes_a_statement_that_is_not_a_store() {
+        let mut body = vec![
+            if_with(vec![
+                PreHirStmt::Expr(PreHirExpr::Var("x".to_string())),
+                PreHirStmt::Label("L".to_string()),
+                PreHirStmt::Expr(PreHirExpr::Var("y".to_string())),
+            ]),
+            if_with(vec![
+                PreHirStmt::Expr(PreHirExpr::Var("a".to_string())),
+                mem_store("p"),
+                PreHirStmt::Expr(PreHirExpr::Var("b".to_string())),
+            ]),
+        ];
+        remove_dead_stores(&mut body, &[StmtPath(vec![1, 0, 1])]);
+
+        let PreHirStmt::If {
+            then_body: first, ..
+        } = &body[0]
+        else {
+            panic!("expected if");
+        };
+        let PreHirStmt::If {
+            then_body: second, ..
+        } = &body[1]
+        else {
+            panic!("expected if");
+        };
+        assert!(
+            first
+                .iter()
+                .any(|s| matches!(s, PreHirStmt::Label(l) if l == "L")),
+            "the label was deleted: {first:?}"
+        );
+        assert_eq!(second.len(), 2, "the named store is gone: {second:?}");
+    }
+
+    #[test]
+    fn a_removal_path_still_removes_the_store_it_names() {
+        let mut body = vec![mem_store("p"), PreHirStmt::Return(None)];
+        remove_dead_stores(&mut body, &[StmtPath(vec![0])]);
+        assert_eq!(body, vec![PreHirStmt::Return(None)]);
     }
 }
