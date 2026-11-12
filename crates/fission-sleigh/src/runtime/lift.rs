@@ -1199,6 +1199,72 @@ pub(super) mod tests {
         );
     }
 
+    /// The float-rounding p-code operations an AArch64 instruction word lifts to.
+    fn aarch64_fcvt_rounding_ops(word: u32) -> Vec<PcodeOpcode> {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&word.to_le_bytes(), 0x100000)
+            .unwrap_or_else(|error| panic!("lift {word:#010x}: {error:#}"));
+        assert_eq!(len, 4);
+        assert!(
+            ops.iter().any(|op| op.opcode == PcodeOpcode::FloatTrunc),
+            "{word:#010x} must still convert to an integer: {ops:#?}"
+        );
+        ops.iter()
+            .map(|op| op.opcode)
+            .filter(|opcode| {
+                matches!(
+                    opcode,
+                    PcodeOpcode::FloatFloor | PcodeOpcode::FloatCeil | PcodeOpcode::FloatRound
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn aarch64_fcvt_rounding_mode_selects_the_float_rounding_operation() {
+        use PcodeOpcode::{FloatCeil, FloatFloor, FloatRound};
+        // `fcvt<mode>s w0, s0` (scalar, single precision to 32-bit integer) and
+        // `fcvt<mode>s s0, s0` (the SIMD scalar form), one word per rounding mode.
+        // Upstream lifts every mode to a bare `trunc`; only round-toward-zero is.
+        let cases: [(&str, u32, &[PcodeOpcode]); 10] = [
+            ("fcvtms w0, s0", 0x1e30_0000, &[FloatFloor]),
+            ("fcvtps w0, s0", 0x1e28_0000, &[FloatCeil]),
+            ("fcvtns w0, s0", 0x1e20_0000, &[FloatRound]),
+            ("fcvtas w0, s0", 0x1e24_0000, &[FloatRound]),
+            ("fcvtzs w0, s0", 0x1e38_0000, &[]),
+            ("fcvtms s0, s0", 0x5e21_b800, &[FloatFloor]),
+            ("fcvtps s0, s0", 0x5ea1_a800, &[FloatCeil]),
+            ("fcvtns s0, s0", 0x5e21_a800, &[FloatRound]),
+            ("fcvtas s0, s0", 0x5e21_c800, &[FloatRound]),
+            ("fcvtzs s0, s0", 0x5ea1_b800, &[]),
+        ];
+        for (name, word, expected) in cases {
+            assert_eq!(
+                aarch64_fcvt_rounding_ops(word),
+                expected,
+                "{name} ({word:#010x})"
+            );
+        }
+    }
+
+    #[test]
+    fn aarch64_fcvt_vector_rounds_every_lane() {
+        use PcodeOpcode::{FloatCeil, FloatFloor};
+        // `fcvtms v0.4s, v0.4s` and `fcvtps v0.4s, v0.4s`: one rounding per lane.
+        assert_eq!(
+            aarch64_fcvt_rounding_ops(0x4e21_b800),
+            [FloatFloor; 4],
+            "fcvtms v0.4s"
+        );
+        assert_eq!(
+            aarch64_fcvt_rounding_ops(0x4ea1_a800),
+            [FloatCeil; 4],
+            "fcvtps v0.4s"
+        );
+    }
+
     #[test]
     fn aarch64_ands_immediate_decodes_repeated_high_bit_mask() {
         let frontend =
