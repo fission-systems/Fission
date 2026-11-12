@@ -35,6 +35,14 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `Ghidra/Features/Swift/data/extensions`). They are kept from 12.0.4 so Swift x86-64
   binaries still select a Swift calling-convention spec. Not yet migrated to the extension
   model.
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): upstream lifts every
+  FCVT{A,M,N,P,Z}{S,U} rounding mode to a bare `trunc`, so `fcvtms`/`fcvtps`/`fcvtns`/`fcvtas`
+  behave like `fcvtzs`. Each mode now has its own display table and constructors:
+  `trunc(floor(x))` for M, `trunc(ceil(x))` for P, `trunc(round(x))` for N and A, `trunc(x)`
+  for Z. N and A are approximations (SLEIGH has only half-up `round`, no ties-to-even or
+  ties-away), and saturation is unchanged. Re-apply with
+  `scripts/sleigh/apply_aarch64_fcvt_rounding.py` (needs a `sleigh` compiler of the same
+  Ghidra release), then recompile the three `.sla` and refresh `MANIFEST.sha256.json`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

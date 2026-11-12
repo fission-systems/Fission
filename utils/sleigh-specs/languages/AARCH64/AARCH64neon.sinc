@@ -6003,27 +6003,37 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & fpDpOpcode=0x4 & b_
 
 # C7.2.63 FCVTAS (vector) page C7-1136 line 65961 KEEPWITH
 
-fcvt_vmnemonic: "fcvtas" is b_29=0 & b_23=0 & b_1314=0b10 & b_12=0 { }
-fcvt_vmnemonic: "fcvtau" is b_29=1 & b_23=0 & b_1314=0b10 & b_12=0 { }
-fcvt_vmnemonic: "fcvtms" is b_29=0 & b_23=0 & b_1314=0b01 & b_12=1 { }
-fcvt_vmnemonic: "fcvtmu" is b_29=1 & b_23=0 & b_1314=0b01 & b_12=1 { }
-fcvt_vmnemonic: "fcvtns" is b_29=0 & b_23=0 & b_1314=0b01 & b_12=0 { }
-fcvt_vmnemonic: "fcvtnu" is b_29=1 & b_23=0 & b_1314=0b01 & b_12=0 { }
-fcvt_vmnemonic: "fcvtps" is b_29=0 & b_23=1 & b_1314=0b01 & b_12=0 { }
-fcvt_vmnemonic: "fcvtpu" is b_29=1 & b_23=1 & b_1314=0b01 & b_12=0 { }
-fcvt_vmnemonic: "fcvtzs" is b_29=0 & b_23=1 & b_1314=0b01 & b_12=1 { }
-fcvt_vmnemonic: "fcvtzu" is b_29=1 & b_23=1 & b_1314=0b01 & b_12=1 { }
+# Fission: FCVTA* rounds to nearest, ties away from zero (approximated by round).
+fcvt_vmnemonic_a: "fcvtas" is b_29=0 & b_23=0 & b_1314=0b10 & b_12=0 { }
+fcvt_vmnemonic_a: "fcvtau" is b_29=1 & b_23=0 & b_1314=0b10 & b_12=0 { }
+# Fission: FCVTM* rounds toward minus infinity.
+fcvt_vmnemonic_m: "fcvtms" is b_29=0 & b_23=0 & b_1314=0b01 & b_12=1 { }
+fcvt_vmnemonic_m: "fcvtmu" is b_29=1 & b_23=0 & b_1314=0b01 & b_12=1 { }
+# Fission: FCVTN* rounds to nearest, ties to even (approximated by round).
+fcvt_vmnemonic_n: "fcvtns" is b_29=0 & b_23=0 & b_1314=0b01 & b_12=0 { }
+fcvt_vmnemonic_n: "fcvtnu" is b_29=1 & b_23=0 & b_1314=0b01 & b_12=0 { }
+# Fission: FCVTP* rounds toward plus infinity.
+fcvt_vmnemonic_p: "fcvtps" is b_29=0 & b_23=1 & b_1314=0b01 & b_12=0 { }
+fcvt_vmnemonic_p: "fcvtpu" is b_29=1 & b_23=1 & b_1314=0b01 & b_12=0 { }
+# Fission: FCVTZ* rounds toward zero.
+fcvt_vmnemonic_z: "fcvtzs" is b_29=0 & b_23=1 & b_1314=0b01 & b_12=1 { }
+fcvt_vmnemonic_z: "fcvtzu" is b_29=1 & b_23=1 & b_1314=0b01 & b_12=1 { }
 
-fcvt_smnemonic: "fcvtas" is b_1920=0b00 & b_1618=0b100 { }
-fcvt_smnemonic: "fcvtau" is b_1920=0b00 & b_1618=0b101 { }
-fcvt_smnemonic: "fcvtms" is b_1920=0b10 & b_1618=0b000 { }
-fcvt_smnemonic: "fcvtmu" is b_1920=0b10 & b_1618=0b001 { }
-fcvt_smnemonic: "fcvtns" is b_1920=0b00 & b_1618=0b000 { }
-fcvt_smnemonic: "fcvtnu" is b_1920=0b00 & b_1618=0b001 { }
-fcvt_smnemonic: "fcvtps" is b_1920=0b01 & b_1618=0b000 { }
-fcvt_smnemonic: "fcvtpu" is b_1920=0b01 & b_1618=0b001 { }
-fcvt_smnemonic: "fcvtzs" is b_1920=0b11 & b_1618=0b000 { }
-fcvt_smnemonic: "fcvtzu" is b_1920=0b11 & b_1618=0b001 { }
+# Fission: FCVTA* rounds to nearest, ties away from zero (approximated by round).
+fcvt_smnemonic_a: "fcvtas" is b_1920=0b00 & b_1618=0b100 { }
+fcvt_smnemonic_a: "fcvtau" is b_1920=0b00 & b_1618=0b101 { }
+# Fission: FCVTM* rounds toward minus infinity.
+fcvt_smnemonic_m: "fcvtms" is b_1920=0b10 & b_1618=0b000 { }
+fcvt_smnemonic_m: "fcvtmu" is b_1920=0b10 & b_1618=0b001 { }
+# Fission: FCVTN* rounds to nearest, ties to even (approximated by round).
+fcvt_smnemonic_n: "fcvtns" is b_1920=0b00 & b_1618=0b000 { }
+fcvt_smnemonic_n: "fcvtnu" is b_1920=0b00 & b_1618=0b001 { }
+# Fission: FCVTP* rounds toward plus infinity.
+fcvt_smnemonic_p: "fcvtps" is b_1920=0b01 & b_1618=0b000 { }
+fcvt_smnemonic_p: "fcvtpu" is b_1920=0b01 & b_1618=0b001 { }
+# Fission: FCVTZ* rounds toward zero.
+fcvt_smnemonic_z: "fcvtzs" is b_1920=0b11 & b_1618=0b000 { }
+fcvt_smnemonic_z: "fcvtzu" is b_1920=0b11 & b_1618=0b001 { }
 
 # C7.2.70 FCVTAS (vector) page C7-2174 line 126882 MATCH x5e79c800/mask=xfffffc00
 # C7.2.72 FCVTAU (vector) page C7-2179 line 127203 MATCH x7e79c800/mask=xfffffc00
@@ -6033,10 +6043,10 @@ fcvt_smnemonic: "fcvtzu" is b_1920=0b11 & b_1618=0b001 { }
 # AUNIT --inst x5e79c800/mask=xdffffc00 --rand hfp --status noqemu --comment "nofpround"
 # Scalar half precision
 
-:^fcvt_vmnemonic Rd_FPR16, Rn_FPR16
-is b_3031=0b01 & b_1028=0b1111001111001110010 & fcvt_vmnemonic & Rd_FPR16 & Rn_FPR16 & Zd
+:^fcvt_vmnemonic_a Rd_FPR16, Rn_FPR16
+is b_3031=0b01 & b_1028=0b1111001111001110010 & fcvt_vmnemonic_a & Rd_FPR16 & Rn_FPR16 & Zd
 {
-	Rd_FPR16 = trunc(Rn_FPR16);
+	Rd_FPR16 = trunc(round(Rn_FPR16));
 	zext_zh(Zd); # zero upper 30 bytes of Zd
 }
 
@@ -6048,10 +6058,10 @@ is b_3031=0b01 & b_1028=0b1111001111001110010 & fcvt_vmnemonic & Rd_FPR16 & Rn_F
 # AUNIT --inst x5e21c800/mask=xdffffc00 --rand sfp --status fail --comment "nofpround"
 # Scalar single-precision and double-precision variant sz=0
 
-:^fcvt_vmnemonic Rd_FPR32, Rn_FPR32
-is b_3031=0b01 & b_2328=0b111100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic & Rd_FPR32 & Rn_FPR32 & Zd
+:^fcvt_vmnemonic_a Rd_FPR32, Rn_FPR32
+is b_3031=0b01 & b_2328=0b111100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic_a & Rd_FPR32 & Rn_FPR32 & Zd
 {
-	Rd_FPR32 = trunc(Rn_FPR32);
+	Rd_FPR32 = trunc(round(Rn_FPR32));
 	zext_zs(Zd); # zero upper 28 bytes of Zd
 }
 
@@ -6063,10 +6073,10 @@ is b_3031=0b01 & b_2328=0b111100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemon
 # AUNIT --inst x5e61c800/mask=xdffffc00 --rand dfp --status fail --comment "nofpround"
 # Scalar single-precision and double-precision variant sz=1
 
-:^fcvt_vmnemonic Rd_FPR64, Rn_FPR64
-is b_3031=0b01 & b_2328=0b111100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmnemonic & Rd_FPR64 & Rn_FPR64 & Zd
+:^fcvt_vmnemonic_a Rd_FPR64, Rn_FPR64
+is b_3031=0b01 & b_2328=0b111100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmnemonic_a & Rd_FPR64 & Rn_FPR64 & Zd
 {
-	Rd_FPR64 = trunc(Rn_FPR64);
+	Rd_FPR64 = trunc(round(Rn_FPR64));
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -6078,14 +6088,14 @@ is b_3031=0b01 & b_2328=0b111100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmnemon
 # AUNIT --inst x0e79c800/mask=xdffffc00 --rand hfp --status noqemu --comment "nofpround"
 # Vector half precision variant Q=0
 
-:^fcvt_vmnemonic Rd_VPR64.4H, Rn_VPR64.4H
-is b_31=0 & b_30=0 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic & Rd_VPR64.4H & Rn_VPR64.4H & Zd
+:^fcvt_vmnemonic_a Rd_VPR64.4H, Rn_VPR64.4H
+is b_31=0 & b_30=0 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic_a & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
-	# simd unary Rd_VPR64.4H = trunc(Rn_VPR64.4H) on lane size 2
-	Rd_VPR64.4H[0,16] = trunc(Rn_VPR64.4H[0,16]);
-	Rd_VPR64.4H[16,16] = trunc(Rn_VPR64.4H[16,16]);
-	Rd_VPR64.4H[32,16] = trunc(Rn_VPR64.4H[32,16]);
-	Rd_VPR64.4H[48,16] = trunc(Rn_VPR64.4H[48,16]);
+	# simd unary Rd_VPR64.4H = trunc(round(Rn_VPR64.4H)) on lane size 2
+	Rd_VPR64.4H[0,16] = trunc(round(Rn_VPR64.4H[0,16]));
+	Rd_VPR64.4H[16,16] = trunc(round(Rn_VPR64.4H[16,16]));
+	Rd_VPR64.4H[32,16] = trunc(round(Rn_VPR64.4H[32,16]));
+	Rd_VPR64.4H[48,16] = trunc(round(Rn_VPR64.4H[48,16]));
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -6097,18 +6107,18 @@ is b_31=0 & b_30=0 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic &
 # AUNIT --inst x4e79c800/mask=xdffffc00 --rand hfp --status noqemu --comment "nofpround"
 # Vector half precision variant Q=1
 
-:^fcvt_vmnemonic Rd_VPR128.8H, Rn_VPR128.8H
-is b_31=0 & b_30=1 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic & Rd_VPR128.8H & Rn_VPR128.8H & Zd
+:^fcvt_vmnemonic_a Rd_VPR128.8H, Rn_VPR128.8H
+is b_31=0 & b_30=1 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic_a & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
-	# simd unary Rd_VPR128.8H = trunc(Rn_VPR128.8H) on lane size 2
-	Rd_VPR128.8H[0,16] = trunc(Rn_VPR128.8H[0,16]);
-	Rd_VPR128.8H[16,16] = trunc(Rn_VPR128.8H[16,16]);
-	Rd_VPR128.8H[32,16] = trunc(Rn_VPR128.8H[32,16]);
-	Rd_VPR128.8H[48,16] = trunc(Rn_VPR128.8H[48,16]);
-	Rd_VPR128.8H[64,16] = trunc(Rn_VPR128.8H[64,16]);
-	Rd_VPR128.8H[80,16] = trunc(Rn_VPR128.8H[80,16]);
-	Rd_VPR128.8H[96,16] = trunc(Rn_VPR128.8H[96,16]);
-	Rd_VPR128.8H[112,16] = trunc(Rn_VPR128.8H[112,16]);
+	# simd unary Rd_VPR128.8H = trunc(round(Rn_VPR128.8H)) on lane size 2
+	Rd_VPR128.8H[0,16] = trunc(round(Rn_VPR128.8H[0,16]));
+	Rd_VPR128.8H[16,16] = trunc(round(Rn_VPR128.8H[16,16]));
+	Rd_VPR128.8H[32,16] = trunc(round(Rn_VPR128.8H[32,16]));
+	Rd_VPR128.8H[48,16] = trunc(round(Rn_VPR128.8H[48,16]));
+	Rd_VPR128.8H[64,16] = trunc(round(Rn_VPR128.8H[64,16]));
+	Rd_VPR128.8H[80,16] = trunc(round(Rn_VPR128.8H[80,16]));
+	Rd_VPR128.8H[96,16] = trunc(round(Rn_VPR128.8H[96,16]));
+	Rd_VPR128.8H[112,16] = trunc(round(Rn_VPR128.8H[112,16]));
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -6120,12 +6130,12 @@ is b_31=0 & b_30=1 & b_2328=0b011100 & b_1022=0b1111001110010 & fcvt_vmnemonic &
 # AUNIT --inst x0e21c800/mask=xdffffc00 --rand sfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 2S when sz = 0 , Q = 0
 
-:^fcvt_vmnemonic Rd_VPR64.2S, Rn_VPR64.2S
-is b_31=0 & b_30=0 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic & Rd_VPR64.2S & Rn_VPR64.2S & Zd
+:^fcvt_vmnemonic_a Rd_VPR64.2S, Rn_VPR64.2S
+is b_31=0 & b_30=0 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic_a & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
-	# simd unary Rd_VPR64.2S = trunc(Rn_VPR64.2S) on lane size 4
-	Rd_VPR64.2S[0,32] = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = trunc(Rn_VPR64.2S[32,32]);
+	# simd unary Rd_VPR64.2S = trunc(round(Rn_VPR64.2S)) on lane size 4
+	Rd_VPR64.2S[0,32] = trunc(round(Rn_VPR64.2S[0,32]));
+	Rd_VPR64.2S[32,32] = trunc(round(Rn_VPR64.2S[32,32]));
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -6137,14 +6147,14 @@ is b_31=0 & b_30=0 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmn
 # AUNIT --inst x4e21c800/mask=xdffffc00 --rand sfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 4S when sz = 0 , Q = 1
 
-:^fcvt_vmnemonic Rd_VPR128.4S, Rn_VPR128.4S
-is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic & Rd_VPR128.4S & Rn_VPR128.4S & Zd
+:^fcvt_vmnemonic_a Rd_VPR128.4S, Rn_VPR128.4S
+is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmnemonic_a & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
-	# simd unary Rd_VPR128.4S = trunc(Rn_VPR128.4S) on lane size 4
-	Rd_VPR128.4S[0,32] = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = trunc(Rn_VPR128.4S[96,32]);
+	# simd unary Rd_VPR128.4S = trunc(round(Rn_VPR128.4S)) on lane size 4
+	Rd_VPR128.4S[0,32] = trunc(round(Rn_VPR128.4S[0,32]));
+	Rd_VPR128.4S[32,32] = trunc(round(Rn_VPR128.4S[32,32]));
+	Rd_VPR128.4S[64,32] = trunc(round(Rn_VPR128.4S[64,32]));
+	Rd_VPR128.4S[96,32] = trunc(round(Rn_VPR128.4S[96,32]));
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -6156,12 +6166,12 @@ is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=0 & b_1021=0b100001110010 & fcvt_vmn
 # AUNIT --inst x4e61c800/mask=xdffffc00 --rand dfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 2D when sz = 1 , Q = 1
 
-:^fcvt_vmnemonic Rd_VPR128.2D, Rn_VPR128.2D
-is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmnemonic & Rd_VPR128.2D & Rn_VPR128.2D & Zd
+:^fcvt_vmnemonic_a Rd_VPR128.2D, Rn_VPR128.2D
+is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmnemonic_a & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
-	# simd unary Rd_VPR128.2D = trunc(Rn_VPR128.2D) on lane size 8
-	Rd_VPR128.2D[0,64] = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = trunc(Rn_VPR128.2D[64,64]);
+	# simd unary Rd_VPR128.2D = trunc(round(Rn_VPR128.2D)) on lane size 8
+	Rd_VPR128.2D[0,64] = trunc(round(Rn_VPR128.2D[0,64]));
+	Rd_VPR128.2D[64,64] = trunc(round(Rn_VPR128.2D[64,64]));
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -6173,10 +6183,10 @@ is b_31=0 & b_30=1 & b_2328=0b011100 & b_22=1 & b_1021=0b100001110010 & fcvt_vmn
 # AUNIT --inst x1ee40000/mask=xfffefc00 --rand hfp --status noqemu --comment "nofpround"
 # Half-precision to 32-bit variant when sf == 0 && type == 11
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR16
-is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
+:^fcvt_smnemonic_a Rd_GPR32, Rn_FPR16
+is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
 {
-	Rd_GPR32 = trunc(Rn_FPR16);
+	Rd_GPR32 = trunc(round(Rn_FPR16));
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
 }
 
@@ -6188,10 +6198,10 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b0
 # AUNIT --inst x9ee40000/mask=xfffefc00 --rand hfp --status noqemu --comment "nofpround"
 # Half-precision to 64-bit variant when sf == 1 && type == 11
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR16
-is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR16
+:^fcvt_smnemonic_a Rd_GPR64, Rn_FPR16
+is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR64 & Rn_FPR16
 {
-	Rd_GPR64 = trunc(Rn_FPR16);
+	Rd_GPR64 = trunc(round(Rn_FPR16));
 }
 
 # C7.2.71 FCVTAS (scalar) page C7-2177 line 127075 MATCH x1e240000/mask=x7f3ffc00
@@ -6202,10 +6212,10 @@ is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1720=0b0010 & b_1015=0b0
 # AUNIT --inst x1e240000/mask=xfffefc00 --rand sfp --status fail --comment "nofpround"
 # Single-precision to 32-bit variant when sf == 0 && type == 00
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR32
-is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
+:^fcvt_smnemonic_a Rd_GPR32, Rn_FPR32
+is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
 {
-	Rd_GPR32 = trunc(Rn_FPR32);
+	Rd_GPR32 = trunc(round(Rn_FPR32));
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
 }
 
@@ -6217,10 +6227,10 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b0
 # AUNIT --inst x9e240000/mask=xfffefc00 --rand sfp --status fail --comment "nofpround"
 # Single-precision to 64-bit variant when sf == 1 && type == 00
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR32
-is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR32
+:^fcvt_smnemonic_a Rd_GPR64, Rn_FPR32
+is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR64 & Rn_FPR32
 {
-	Rd_GPR64 = trunc(Rn_FPR32);
+	Rd_GPR64 = trunc(round(Rn_FPR32));
 }
 
 # C7.2.71 FCVTAS (scalar) page C7-2177 line 127075 MATCH x1e240000/mask=x7f3ffc00
@@ -6231,10 +6241,10 @@ is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1720=0b0010 & b_1015=0b0
 # AUNIT --inst x1e640000/mask=xfffefc00 --rand dfp --status fail --comment "nofpround"
 # Double-precision to 32-bit variant when sf == 0 && type == 01
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR64
-is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
+:^fcvt_smnemonic_a Rd_GPR32, Rn_FPR64
+is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
 {
-	Rd_GPR32 = trunc(Rn_FPR64);
+	Rd_GPR32 = trunc(round(Rn_FPR64));
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
 }
 
@@ -6246,10 +6256,10 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1720=0b0010 & b_1015=0b0
 # AUNIT --inst x9e640000/mask=xfffefc00 --rand dfp --status fail --comment "nofpround"
 # Double-precision to 64-bit variant sf == 1 && type == 01
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR64
-is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR64
+:^fcvt_smnemonic_a Rd_GPR64, Rn_FPR64
+is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1720=0b0010 & b_1015=0b000000 & fcvt_smnemonic_a & Rd_GPR64 & Rn_FPR64
 {
-	Rd_GPR64 = trunc(Rn_FPR64);
+	Rd_GPR64 = trunc(round(Rn_FPR64));
 }
 
 # C7.2.74 FCVTL, FCVTL2 page C7-2184 line 127524 MATCH x0e217800/mask=xbfbffc00
@@ -6334,8 +6344,29 @@ is b_3131=0 & q=1 & u=0 & b_2428=0xe & advSIMD3.size=0 & b_1721=0x10 & b_1216=0x
 # AUNIT --inst x5e79a800/mask=xdf7fec00 --rand hfp --status noqemu --comment "nofpround"
 # Scalar half precision
 
-:^fcvt_vmnemonic Rd_FPR16, Rn_FPR16
-is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_FPR16 & Rn_FPR16 & Zd
+:^fcvt_vmnemonic_m Rd_FPR16, Rn_FPR16
+is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_FPR16 & Rn_FPR16 & Zd
+{
+	Rd_FPR16 = trunc(floor(Rn_FPR16));
+	zext_zh(Zd); # zero upper 30 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_FPR16, Rn_FPR16
+is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_FPR16 & Rn_FPR16 & Zd
+{
+	Rd_FPR16 = trunc(round(Rn_FPR16));
+	zext_zh(Zd); # zero upper 30 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_FPR16, Rn_FPR16
+is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_FPR16 & Rn_FPR16 & Zd
+{
+	Rd_FPR16 = trunc(ceil(Rn_FPR16));
+	zext_zh(Zd); # zero upper 30 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_FPR16, Rn_FPR16
+is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_FPR16 & Rn_FPR16 & Zd
 {
 	Rd_FPR16 = trunc(Rn_FPR16);
 	zext_zh(Zd); # zero upper 30 bytes of Zd
@@ -6355,8 +6386,29 @@ is b_3031=0b01 & b_2428=0b11110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnem
 # AUNIT --inst x5e21a800/mask=xdf7fec00 --rand sfp --status fail --comment "nofpround"
 # Scalar single-precision and double-precision variant sz=0
 
-:^fcvt_vmnemonic Rd_FPR32, Rn_FPR32
-is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_FPR32 & Rn_FPR32 & Zd
+:^fcvt_vmnemonic_m Rd_FPR32, Rn_FPR32
+is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_FPR32 & Rn_FPR32 & Zd
+{
+	Rd_FPR32 = trunc(floor(Rn_FPR32));
+	zext_zs(Zd); # zero upper 28 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_FPR32, Rn_FPR32
+is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_FPR32 & Rn_FPR32 & Zd
+{
+	Rd_FPR32 = trunc(round(Rn_FPR32));
+	zext_zs(Zd); # zero upper 28 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_FPR32, Rn_FPR32
+is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_FPR32 & Rn_FPR32 & Zd
+{
+	Rd_FPR32 = trunc(ceil(Rn_FPR32));
+	zext_zs(Zd); # zero upper 28 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_FPR32, Rn_FPR32
+is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_FPR32 & Rn_FPR32 & Zd
 {
 	Rd_FPR32 = trunc(Rn_FPR32);
 	zext_zs(Zd); # zero upper 28 bytes of Zd
@@ -6376,8 +6428,29 @@ is b_3031=0b01 & b_2428=0b11110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fc
 # AUNIT --inst x5e61a800/mask=xdf7fec00 --rand dfp --status fail --comment "nofpround"
 # Scalar single-precision and double-precision variant sz=1
 
-:^fcvt_vmnemonic Rd_FPR64, Rn_FPR64
-is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_FPR64 & Rn_FPR64 & Zd
+:^fcvt_vmnemonic_m Rd_FPR64, Rn_FPR64
+is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_FPR64 & Rn_FPR64 & Zd
+{
+	Rd_FPR64 = trunc(floor(Rn_FPR64));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_FPR64, Rn_FPR64
+is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_FPR64 & Rn_FPR64 & Zd
+{
+	Rd_FPR64 = trunc(round(Rn_FPR64));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_FPR64, Rn_FPR64
+is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_FPR64 & Rn_FPR64 & Zd
+{
+	Rd_FPR64 = trunc(ceil(Rn_FPR64));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_FPR64, Rn_FPR64
+is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_FPR64 & Rn_FPR64 & Zd
 {
 	Rd_FPR64 = trunc(Rn_FPR64);
 	zext_zd(Zd); # zero upper 24 bytes of Zd
@@ -6397,8 +6470,41 @@ is b_3031=0b01 & b_2428=0b11110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fc
 # AUNIT --inst x0e79a800/mask=xdf7fec00 --rand hfp --status noqemu --comment "nofpround"
 # Vector half precision variant Q=0
 
-:^fcvt_vmnemonic Rd_VPR64.4H, Rn_VPR64.4H
-is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_VPR64.4H & Rn_VPR64.4H & Zd
+:^fcvt_vmnemonic_m Rd_VPR64.4H, Rn_VPR64.4H
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_VPR64.4H & Rn_VPR64.4H & Zd
+{
+	# simd unary Rd_VPR64.4H = trunc(floor(Rn_VPR64.4H)) on lane size 2
+	Rd_VPR64.4H[0,16] = trunc(floor(Rn_VPR64.4H[0,16]));
+	Rd_VPR64.4H[16,16] = trunc(floor(Rn_VPR64.4H[16,16]));
+	Rd_VPR64.4H[32,16] = trunc(floor(Rn_VPR64.4H[32,16]));
+	Rd_VPR64.4H[48,16] = trunc(floor(Rn_VPR64.4H[48,16]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_VPR64.4H, Rn_VPR64.4H
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_VPR64.4H & Rn_VPR64.4H & Zd
+{
+	# simd unary Rd_VPR64.4H = trunc(round(Rn_VPR64.4H)) on lane size 2
+	Rd_VPR64.4H[0,16] = trunc(round(Rn_VPR64.4H[0,16]));
+	Rd_VPR64.4H[16,16] = trunc(round(Rn_VPR64.4H[16,16]));
+	Rd_VPR64.4H[32,16] = trunc(round(Rn_VPR64.4H[32,16]));
+	Rd_VPR64.4H[48,16] = trunc(round(Rn_VPR64.4H[48,16]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_VPR64.4H, Rn_VPR64.4H
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_VPR64.4H & Rn_VPR64.4H & Zd
+{
+	# simd unary Rd_VPR64.4H = trunc(ceil(Rn_VPR64.4H)) on lane size 2
+	Rd_VPR64.4H[0,16] = trunc(ceil(Rn_VPR64.4H[0,16]));
+	Rd_VPR64.4H[16,16] = trunc(ceil(Rn_VPR64.4H[16,16]));
+	Rd_VPR64.4H[32,16] = trunc(ceil(Rn_VPR64.4H[32,16]));
+	Rd_VPR64.4H[48,16] = trunc(ceil(Rn_VPR64.4H[48,16]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_VPR64.4H, Rn_VPR64.4H
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
 	# simd unary Rd_VPR64.4H = trunc(Rn_VPR64.4H) on lane size 2
 	Rd_VPR64.4H[0,16] = trunc(Rn_VPR64.4H[0,16]);
@@ -6422,8 +6528,53 @@ is b_31=0 & b_30=0 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_v
 # AUNIT --inst x4e79a800/mask=xdf7fec00 --rand hfp --status noqemu --comment "nofpround"
 # Vector half precision variant Q=1
 
-:^fcvt_vmnemonic Rd_VPR128.8H, Rn_VPR128.8H
-is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_VPR128.8H & Rn_VPR128.8H & Zd
+:^fcvt_vmnemonic_m Rd_VPR128.8H, Rn_VPR128.8H
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_VPR128.8H & Rn_VPR128.8H & Zd
+{
+	# simd unary Rd_VPR128.8H = trunc(floor(Rn_VPR128.8H)) on lane size 2
+	Rd_VPR128.8H[0,16] = trunc(floor(Rn_VPR128.8H[0,16]));
+	Rd_VPR128.8H[16,16] = trunc(floor(Rn_VPR128.8H[16,16]));
+	Rd_VPR128.8H[32,16] = trunc(floor(Rn_VPR128.8H[32,16]));
+	Rd_VPR128.8H[48,16] = trunc(floor(Rn_VPR128.8H[48,16]));
+	Rd_VPR128.8H[64,16] = trunc(floor(Rn_VPR128.8H[64,16]));
+	Rd_VPR128.8H[80,16] = trunc(floor(Rn_VPR128.8H[80,16]));
+	Rd_VPR128.8H[96,16] = trunc(floor(Rn_VPR128.8H[96,16]));
+	Rd_VPR128.8H[112,16] = trunc(floor(Rn_VPR128.8H[112,16]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_VPR128.8H, Rn_VPR128.8H
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_VPR128.8H & Rn_VPR128.8H & Zd
+{
+	# simd unary Rd_VPR128.8H = trunc(round(Rn_VPR128.8H)) on lane size 2
+	Rd_VPR128.8H[0,16] = trunc(round(Rn_VPR128.8H[0,16]));
+	Rd_VPR128.8H[16,16] = trunc(round(Rn_VPR128.8H[16,16]));
+	Rd_VPR128.8H[32,16] = trunc(round(Rn_VPR128.8H[32,16]));
+	Rd_VPR128.8H[48,16] = trunc(round(Rn_VPR128.8H[48,16]));
+	Rd_VPR128.8H[64,16] = trunc(round(Rn_VPR128.8H[64,16]));
+	Rd_VPR128.8H[80,16] = trunc(round(Rn_VPR128.8H[80,16]));
+	Rd_VPR128.8H[96,16] = trunc(round(Rn_VPR128.8H[96,16]));
+	Rd_VPR128.8H[112,16] = trunc(round(Rn_VPR128.8H[112,16]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_VPR128.8H, Rn_VPR128.8H
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_VPR128.8H & Rn_VPR128.8H & Zd
+{
+	# simd unary Rd_VPR128.8H = trunc(ceil(Rn_VPR128.8H)) on lane size 2
+	Rd_VPR128.8H[0,16] = trunc(ceil(Rn_VPR128.8H[0,16]));
+	Rd_VPR128.8H[16,16] = trunc(ceil(Rn_VPR128.8H[16,16]));
+	Rd_VPR128.8H[32,16] = trunc(ceil(Rn_VPR128.8H[32,16]));
+	Rd_VPR128.8H[48,16] = trunc(ceil(Rn_VPR128.8H[48,16]));
+	Rd_VPR128.8H[64,16] = trunc(ceil(Rn_VPR128.8H[64,16]));
+	Rd_VPR128.8H[80,16] = trunc(ceil(Rn_VPR128.8H[80,16]));
+	Rd_VPR128.8H[96,16] = trunc(ceil(Rn_VPR128.8H[96,16]));
+	Rd_VPR128.8H[112,16] = trunc(ceil(Rn_VPR128.8H[112,16]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_VPR128.8H, Rn_VPR128.8H
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
 	# simd unary Rd_VPR128.8H = trunc(Rn_VPR128.8H) on lane size 2
 	Rd_VPR128.8H[0,16] = trunc(Rn_VPR128.8H[0,16]);
@@ -6451,8 +6602,35 @@ is b_31=0 & b_30=1 & b_2428=0b01110 & b_1322=0b1111001101 & b_1011=0b10 & fcvt_v
 # AUNIT --inst x0e21a800/mask=xdf7fec00 --rand sfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 2S when sz = 0 , Q = 0
 
-:^fcvt_vmnemonic Rd_VPR64.2S, Rn_VPR64.2S
-is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_VPR64.2S & Rn_VPR64.2S & Zd
+:^fcvt_vmnemonic_m Rd_VPR64.2S, Rn_VPR64.2S
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_VPR64.2S & Rn_VPR64.2S & Zd
+{
+	# simd unary Rd_VPR64.2S = trunc(floor(Rn_VPR64.2S)) on lane size 4
+	Rd_VPR64.2S[0,32] = trunc(floor(Rn_VPR64.2S[0,32]));
+	Rd_VPR64.2S[32,32] = trunc(floor(Rn_VPR64.2S[32,32]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_VPR64.2S, Rn_VPR64.2S
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_VPR64.2S & Rn_VPR64.2S & Zd
+{
+	# simd unary Rd_VPR64.2S = trunc(round(Rn_VPR64.2S)) on lane size 4
+	Rd_VPR64.2S[0,32] = trunc(round(Rn_VPR64.2S[0,32]));
+	Rd_VPR64.2S[32,32] = trunc(round(Rn_VPR64.2S[32,32]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_VPR64.2S, Rn_VPR64.2S
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_VPR64.2S & Rn_VPR64.2S & Zd
+{
+	# simd unary Rd_VPR64.2S = trunc(ceil(Rn_VPR64.2S)) on lane size 4
+	Rd_VPR64.2S[0,32] = trunc(ceil(Rn_VPR64.2S[0,32]));
+	Rd_VPR64.2S[32,32] = trunc(ceil(Rn_VPR64.2S[32,32]));
+	zext_zd(Zd); # zero upper 24 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_VPR64.2S, Rn_VPR64.2S
+is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
 	# simd unary Rd_VPR64.2S = trunc(Rn_VPR64.2S) on lane size 4
 	Rd_VPR64.2S[0,32] = trunc(Rn_VPR64.2S[0,32]);
@@ -6474,8 +6652,41 @@ is b_31=0 & b_30=0 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 
 # AUNIT --inst x4e21a800/mask=xdf7fec00 --rand sfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 4S when sz = 0 , Q = 1
 
-:^fcvt_vmnemonic Rd_VPR128.4S, Rn_VPR128.4S
-is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_VPR128.4S & Rn_VPR128.4S & Zd
+:^fcvt_vmnemonic_m Rd_VPR128.4S, Rn_VPR128.4S
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_VPR128.4S & Rn_VPR128.4S & Zd
+{
+	# simd unary Rd_VPR128.4S = trunc(floor(Rn_VPR128.4S)) on lane size 4
+	Rd_VPR128.4S[0,32] = trunc(floor(Rn_VPR128.4S[0,32]));
+	Rd_VPR128.4S[32,32] = trunc(floor(Rn_VPR128.4S[32,32]));
+	Rd_VPR128.4S[64,32] = trunc(floor(Rn_VPR128.4S[64,32]));
+	Rd_VPR128.4S[96,32] = trunc(floor(Rn_VPR128.4S[96,32]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_VPR128.4S, Rn_VPR128.4S
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_VPR128.4S & Rn_VPR128.4S & Zd
+{
+	# simd unary Rd_VPR128.4S = trunc(round(Rn_VPR128.4S)) on lane size 4
+	Rd_VPR128.4S[0,32] = trunc(round(Rn_VPR128.4S[0,32]));
+	Rd_VPR128.4S[32,32] = trunc(round(Rn_VPR128.4S[32,32]));
+	Rd_VPR128.4S[64,32] = trunc(round(Rn_VPR128.4S[64,32]));
+	Rd_VPR128.4S[96,32] = trunc(round(Rn_VPR128.4S[96,32]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_VPR128.4S, Rn_VPR128.4S
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_VPR128.4S & Rn_VPR128.4S & Zd
+{
+	# simd unary Rd_VPR128.4S = trunc(ceil(Rn_VPR128.4S)) on lane size 4
+	Rd_VPR128.4S[0,32] = trunc(ceil(Rn_VPR128.4S[0,32]));
+	Rd_VPR128.4S[32,32] = trunc(ceil(Rn_VPR128.4S[32,32]));
+	Rd_VPR128.4S[64,32] = trunc(ceil(Rn_VPR128.4S[64,32]));
+	Rd_VPR128.4S[96,32] = trunc(ceil(Rn_VPR128.4S[96,32]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_VPR128.4S, Rn_VPR128.4S
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
 	# simd unary Rd_VPR128.4S = trunc(Rn_VPR128.4S) on lane size 4
 	Rd_VPR128.4S[0,32] = trunc(Rn_VPR128.4S[0,32]);
@@ -6499,8 +6710,35 @@ is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=0 & b_1321=0b100001101 & b_1011=0b10 
 # AUNIT --inst x4e61a800/mask=xdf7fec00 --rand dfp --status fail --comment "nofpround"
 # Vector single-precision and double-precision variant SIMD 2D when sz = 1 , Q = 1
 
-:^fcvt_vmnemonic Rd_VPR128.2D, Rn_VPR128.2D
-is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic & Rd_VPR128.2D & Rn_VPR128.2D & Zd
+:^fcvt_vmnemonic_m Rd_VPR128.2D, Rn_VPR128.2D
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_m & Rd_VPR128.2D & Rn_VPR128.2D & Zd
+{
+	# simd unary Rd_VPR128.2D = trunc(floor(Rn_VPR128.2D)) on lane size 8
+	Rd_VPR128.2D[0,64] = trunc(floor(Rn_VPR128.2D[0,64]));
+	Rd_VPR128.2D[64,64] = trunc(floor(Rn_VPR128.2D[64,64]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_n Rd_VPR128.2D, Rn_VPR128.2D
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_n & Rd_VPR128.2D & Rn_VPR128.2D & Zd
+{
+	# simd unary Rd_VPR128.2D = trunc(round(Rn_VPR128.2D)) on lane size 8
+	Rd_VPR128.2D[0,64] = trunc(round(Rn_VPR128.2D[0,64]));
+	Rd_VPR128.2D[64,64] = trunc(round(Rn_VPR128.2D[64,64]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_p Rd_VPR128.2D, Rn_VPR128.2D
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_p & Rd_VPR128.2D & Rn_VPR128.2D & Zd
+{
+	# simd unary Rd_VPR128.2D = trunc(ceil(Rn_VPR128.2D)) on lane size 8
+	Rd_VPR128.2D[0,64] = trunc(ceil(Rn_VPR128.2D[0,64]));
+	Rd_VPR128.2D[64,64] = trunc(ceil(Rn_VPR128.2D[64,64]));
+	zext_zq(Zd); # zero upper 16 bytes of Zd
+}
+
+:^fcvt_vmnemonic_z Rd_VPR128.2D, Rn_VPR128.2D
+is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 & fcvt_vmnemonic_z & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
 	# simd unary Rd_VPR128.2D = trunc(Rn_VPR128.2D) on lane size 8
 	Rd_VPR128.2D[0,64] = trunc(Rn_VPR128.2D[0,64]);
@@ -6522,8 +6760,29 @@ is b_31=0 & b_30=1 & b_2428=0b01110 & b_22=1 & b_1321=0b100001101 & b_1011=0b10 
 # AUNIT --inst x1ee00000/mask=xffe6fc00 --rand hfp --status noqemu --comment "nofpround"
 # Half-precision to 32-bit variant when sf == 0 && type == 11
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR16
-is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
+:^fcvt_smnemonic_m Rd_GPR32, Rn_FPR16
+is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(floor(Rn_FPR16));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_n Rd_GPR32, Rn_FPR16
+is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(round(Rn_FPR16));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_p Rd_GPR32, Rn_FPR16
+is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(ceil(Rn_FPR16));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_z Rd_GPR32, Rn_FPR16
+is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR32 & Rn_FPR16 & Rd_GPR64
 {
 	Rd_GPR32 = trunc(Rn_FPR16);
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
@@ -6543,8 +6802,26 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000
 # AUNIT --inst x9ee00000/mask=xffe6fc00 --rand hfp --status noqemu --comment "nofpround"
 # Half-precision to 64-bit variant when sf == 1 && type == 11
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR16
-is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR16
+:^fcvt_smnemonic_m Rd_GPR64, Rn_FPR16
+is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR64 & Rn_FPR16
+{
+	Rd_GPR64 = trunc(floor(Rn_FPR16));
+}
+
+:^fcvt_smnemonic_n Rd_GPR64, Rn_FPR16
+is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR64 & Rn_FPR16
+{
+	Rd_GPR64 = trunc(round(Rn_FPR16));
+}
+
+:^fcvt_smnemonic_p Rd_GPR64, Rn_FPR16
+is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR64 & Rn_FPR16
+{
+	Rd_GPR64 = trunc(ceil(Rn_FPR16));
+}
+
+:^fcvt_smnemonic_z Rd_GPR64, Rn_FPR16
+is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR64 & Rn_FPR16
 {
 	Rd_GPR64 = trunc(Rn_FPR16);
 }
@@ -6563,8 +6840,29 @@ is b_31=1 & b_2430=0b0011110 & b_2223=0b11 & b_21=1 & b_1718=0b00 & b_1015=0b000
 # AUNIT --inst x1e200000/mask=xffe6fc00 --rand sfp --status fail --comment "nofpround"
 # Single-precision to 32-bit variant when sf == 0 && type == 00
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR32
-is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
+:^fcvt_smnemonic_m Rd_GPR32, Rn_FPR32
+is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(floor(Rn_FPR32));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_n Rd_GPR32, Rn_FPR32
+is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(round(Rn_FPR32));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_p Rd_GPR32, Rn_FPR32
+is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(ceil(Rn_FPR32));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_z Rd_GPR32, Rn_FPR32
+is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR32 & Rn_FPR32 & Rd_GPR64
 {
 	Rd_GPR32 = trunc(Rn_FPR32);
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
@@ -6584,8 +6882,26 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000
 # AUNIT --inst x9e200000/mask=xffe6fc00 --rand sfp --status fail --comment "nofpround"
 # Single-precision to 64-bit variant when sf == 1 && type == 00
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR32
-is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR32
+:^fcvt_smnemonic_m Rd_GPR64, Rn_FPR32
+is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR64 & Rn_FPR32
+{
+	Rd_GPR64 = trunc(floor(Rn_FPR32));
+}
+
+:^fcvt_smnemonic_n Rd_GPR64, Rn_FPR32
+is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR64 & Rn_FPR32
+{
+	Rd_GPR64 = trunc(round(Rn_FPR32));
+}
+
+:^fcvt_smnemonic_p Rd_GPR64, Rn_FPR32
+is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR64 & Rn_FPR32
+{
+	Rd_GPR64 = trunc(ceil(Rn_FPR32));
+}
+
+:^fcvt_smnemonic_z Rd_GPR64, Rn_FPR32
+is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR64 & Rn_FPR32
 {
 	Rd_GPR64 = trunc(Rn_FPR32);
 }
@@ -6604,8 +6920,29 @@ is b_31=1 & b_2430=0b0011110 & b_2223=0b00 & b_21=1 & b_1718=0b00 & b_1015=0b000
 # AUNIT --inst x1e600000/mask=xffe6fc00 --rand dfp --status fail --comment "nofpround"
 # Double-precision to 32-bit variant when sf == 0 && type == 01
 
-:^fcvt_smnemonic Rd_GPR32, Rn_FPR64
-is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
+:^fcvt_smnemonic_m Rd_GPR32, Rn_FPR64
+is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(floor(Rn_FPR64));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_n Rd_GPR32, Rn_FPR64
+is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(round(Rn_FPR64));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_p Rd_GPR32, Rn_FPR64
+is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
+{
+	Rd_GPR32 = trunc(ceil(Rn_FPR64));
+	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
+}
+
+:^fcvt_smnemonic_z Rd_GPR32, Rn_FPR64
+is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
 {
 	Rd_GPR32 = trunc(Rn_FPR64);
 	zext_rs(Rd_GPR64); # zero upper 28 bytes of Rd_GPR64
@@ -6625,8 +6962,26 @@ is b_31=0 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000
 # AUNIT --inst x9e600000/mask=xffe6fc00 --rand dfp --status fail --comment "nofpround"
 # Double-precision to 64-bit variant sf == 1 && type == 01
 
-:^fcvt_smnemonic Rd_GPR64, Rn_FPR64
-is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic & Rd_GPR64 & Rn_FPR64
+:^fcvt_smnemonic_m Rd_GPR64, Rn_FPR64
+is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_m & Rd_GPR64 & Rn_FPR64
+{
+	Rd_GPR64 = trunc(floor(Rn_FPR64));
+}
+
+:^fcvt_smnemonic_n Rd_GPR64, Rn_FPR64
+is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_n & Rd_GPR64 & Rn_FPR64
+{
+	Rd_GPR64 = trunc(round(Rn_FPR64));
+}
+
+:^fcvt_smnemonic_p Rd_GPR64, Rn_FPR64
+is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_p & Rd_GPR64 & Rn_FPR64
+{
+	Rd_GPR64 = trunc(ceil(Rn_FPR64));
+}
+
+:^fcvt_smnemonic_z Rd_GPR64, Rn_FPR64
+is b_31=1 & b_2430=0b0011110 & b_2223=0b01 & b_21=1 & b_1718=0b00 & b_1015=0b000000 & fcvt_smnemonic_z & Rd_GPR64 & Rn_FPR64
 {
 	Rd_GPR64 = trunc(Rn_FPR64);
 }
