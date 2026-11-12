@@ -561,7 +561,12 @@ impl<'a> PreviewBuilder<'a> {
         switch_expr: &PreHirExpr,
         selector_alias: Option<&Varnode>,
     ) -> Option<InferredJumpTableTargets> {
+        // Entries read past what the dominating range check proves: a heuristic
+        // extension, kept short.
         const MAX_JUMP_TABLE_CASES: u64 = 256;
+        // Entries a range check proves. The check bounds the selector, so the table
+        // is exactly that long; the cap only guards against a garbage bound.
+        const MAX_PROVEN_JUMP_TABLE_CASES: u64 = 1 << 16;
 
         let binary = self.binary?;
         let selector =
@@ -612,7 +617,9 @@ impl<'a> PreviewBuilder<'a> {
                 selector.min_val
             );
         }
-        let proven_case_count = max_selector.saturating_add(1).min(MAX_JUMP_TABLE_CASES);
+        let proven_case_count = max_selector
+            .saturating_add(1)
+            .min(MAX_PROVEN_JUMP_TABLE_CASES);
         if proven_case_count < 2 || selector.entry_size == 0 {
             return None;
         }
@@ -632,7 +639,7 @@ impl<'a> PreviewBuilder<'a> {
         for (decode_mode, relative_entries, relative_base) in decode_modes {
             let mut recovered_cases = Vec::new();
             let mut unique_targets = Vec::new();
-            for ordinal in 0..MAX_JUMP_TABLE_CASES {
+            for ordinal in 0..MAX_JUMP_TABLE_CASES.max(proven_case_count) {
                 let Some(entry_addr) = selector
                     .table_base
                     .checked_add(ordinal.saturating_mul(selector.entry_size))
