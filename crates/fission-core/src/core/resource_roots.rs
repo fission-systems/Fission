@@ -8,6 +8,51 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
 static CLI_RESOURCE_BUNDLE_ROOT: RwLock<Option<PathBuf>> = RwLock::new(None);
+static CLI_SIGNATURE_PATHS: RwLock<Vec<PathBuf>> = RwLock::new(Vec::new());
+
+/// Process-global `--signature-path` directories, replacing any earlier set.
+pub fn set_cli_signature_paths(paths: Vec<PathBuf>) {
+    *CLI_SIGNATURE_PATHS
+        .write()
+        .expect("signature path lock poisoned") = paths;
+}
+
+/// Extra directories of signature databases the user supplied, searched after the
+/// bundle: `--signature-path` (in the order given), then `FISSION_SIGNATURE_PATH`
+/// (a platform path list). Duplicates are dropped; nothing is checked for existence
+/// here -- see [`validate_user_signature_dirs`].
+#[must_use]
+pub fn user_signature_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = CLI_SIGNATURE_PATHS
+        .read()
+        .expect("signature path lock poisoned")
+        .clone();
+    if let Some(raw) = std::env::var_os("FISSION_SIGNATURE_PATH") {
+        dirs.extend(std::env::split_paths(&raw).filter(|path| !path.as_os_str().is_empty()));
+    }
+    let mut seen = std::collections::HashSet::new();
+    dirs.retain(|dir| seen.insert(dir.clone()));
+    dirs
+}
+
+/// A directory the user named for signatures must exist and be a directory.
+///
+/// The bundle is allowed to be absent (capabilities degrade); a path the user
+/// typed is a request, and ignoring it would look exactly like "no match".
+pub fn validate_user_signature_dirs() -> Result<(), String> {
+    for dir in user_signature_dirs() {
+        if !dir.exists() {
+            return Err(format!("signature path does not exist: {}", dir.display()));
+        }
+        if !dir.is_dir() {
+            return Err(format!(
+                "signature path is not a directory: {}",
+                dir.display()
+            ));
+        }
+    }
+    Ok(())
+}
 
 /// Process-global override from `--resource-root`. Must be set before the first [`crate::PATHS`] dereference if used.
 pub fn set_cli_resource_bundle_root(path: Option<PathBuf>) {
@@ -227,6 +272,17 @@ pub struct ResourceAvailability {
 pub struct ResourceStatusSnapshot {
     pub resource_roots: Vec<ResourceRootProbe>,
     pub resources: ResourceAvailability,
+    /// Directories named by `--signature-path` / `FISSION_SIGNATURE_PATH`.
+    pub signature_paths: Vec<SignaturePathStatus>,
+}
+
+/// One user-supplied signature directory and what was found in it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SignaturePathStatus {
+    pub path: String,
+    pub exists: bool,
+    /// FID databases the loaders would open from it.
+    pub fid_databases: usize,
 }
 
 #[must_use]
@@ -296,9 +352,18 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
         mac_osx_pipe_text: mac.as_ref().map(path_display),
         mac_osx_pipe_text_present: mac.is_some(),
     };
+    let signature_paths = user_signature_dirs()
+        .into_iter()
+        .map(|dir| SignaturePathStatus {
+            path: path_display(&dir),
+            exists: dir.is_dir(),
+            fid_databases: PathConfig::fid_databases_in_dir(&dir).len(),
+        })
+        .collect();
     ResourceStatusSnapshot {
         resource_roots: roots,
         resources,
+        signature_paths,
     }
 }
 
@@ -397,6 +462,70 @@ mod resource_bundle_tests {
 
     /// Serialize tests that touch [`PathConfig::detect`] / env / CLI override global state.
     static DETECT_LOCK: Mutex<()> = Mutex::new(());
+
+    fn touch(dir: &Path, names: &[&str]) {
+        for name in names {
+            fs::write(dir.join(name), b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn a_directory_lists_packed_and_bare_fid_databases_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        touch(
+            dir.path(),
+            &["d.fn.fpk", "d.lib.fpk", "a.fn.fpk", "b.fidbf", "notes.txt"],
+        );
+        let names: Vec<String> = PathConfig::fid_databases_in_dir(dir.path())
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+        // `<stem>.fn.fpk` is named by its `.fidbf`; the sibling tables and other
+        // files are not databases of their own.
+        assert_eq!(names, ["a.fidbf", "b.fidbf", "d.fidbf"]);
+    }
+
+    #[test]
+    fn user_signature_directories_follow_the_bundle_and_are_listed_once() {
+        let _guard = DETECT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        touch(dir.path(), &["mine.fn.fpk"]);
+        set_cli_signature_paths(vec![dir.path().to_path_buf(), dir.path().to_path_buf()]);
+
+        let paths = PathConfig::detect().all_fid_database_paths();
+        let mine = dir.path().join("mine.fidbf");
+        assert_eq!(paths.iter().filter(|p| **p == mine).count(), 1, "{paths:?}");
+        // After everything the bundle names: the user's databases never reorder it.
+        assert_eq!(paths.last(), Some(&mine), "{paths:?}");
+
+        set_cli_signature_paths(Vec::new());
+        assert!(
+            !PathConfig::detect()
+                .all_fid_database_paths()
+                .contains(&mine),
+            "clearing the paths removes them"
+        );
+    }
+
+    #[test]
+    fn a_signature_path_that_is_missing_or_a_file_is_an_error() {
+        let _guard = DETECT_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+
+        set_cli_signature_paths(vec![dir.path().join("nope")]);
+        let err = validate_user_signature_dirs().unwrap_err();
+        assert!(err.contains("does not exist"), "{err}");
+
+        let file = dir.path().join("a_file");
+        fs::write(&file, b"x").unwrap();
+        set_cli_signature_paths(vec![file]);
+        let err = validate_user_signature_dirs().unwrap_err();
+        assert!(err.contains("not a directory"), "{err}");
+
+        set_cli_signature_paths(vec![dir.path().to_path_buf()]);
+        assert!(validate_user_signature_dirs().is_ok());
+        set_cli_signature_paths(Vec::new());
+    }
 
     #[test]
     fn bundle_root_nested_signatures_resolves() {

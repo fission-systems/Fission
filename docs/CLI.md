@@ -95,6 +95,10 @@ FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, 
 |-----------|--------|
 | **`--resource-root <DIR>`** | Global CLI flag (may appear **before** the subcommand). Stored via `fission_core::resource_roots::set_cli_resource_bundle_root` during canonical parsing. Must be applied **before the first read of `PATHS`** in-process (`PATHS` is lazily initialized once). |
 | **`FISSION_RESOURCE_ROOT`** | Environment variable pointing at a bundle root directory (typically containing a `signatures` subdirectory). |
+| **`--signature-path <DIR>`** | Global, repeatable. Adds a directory of FID databases (`<stem>.fn.fpk` packs or bare `.fidbf`) searched **after** the bundle; the language check still decides which apply to the program. |
+| **`FISSION_SIGNATURE_PATH`** | The same, as a platform path list (`:` on Unix, `;` on Windows), after any `--signature-path`. |
+
+A directory named through `--signature-path` or `FISSION_SIGNATURE_PATH` must exist and be a directory; otherwise the command fails (`input_not_found`, exit 3 under `--contract v1`) instead of quietly searching less. `fission_cli resources status` lists each one with the number of FID databases found in it. Only FID databases are read from these paths so far; FLIRT `.sig` files are not supported.
 
 After those, detection considers executable-adjacent paths (`fission-data`, `share/fission`, common Unix prefixes), user data directories (`XDG_DATA_HOME`, platform data dirs), then existing workspace discovery (`FISSION_ROOT` / upward markers with `signatures` or `utils/signatures`), then legacy CWD-relative search paths. Missing optional corpora keep prior **degraded** behavior (optional `None` paths); pipelines must not fail closed solely because DiE or type corpora are absent.
 

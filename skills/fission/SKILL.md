@@ -208,6 +208,7 @@ fission_cli patch ./target.bin --addr 0x401760 --nop 5 --output patched.bin
 | Archive (`.zip`, `.tgz`) | Extract it and analyse the executable inside. |
 | Packed binary | Fission has no unpacker. Unpack with another tool first, then analyse the output. |
 | Missing signatures/detectors | `--resource-root DIR` or `FISSION_RESOURCE_ROOT`. |
+| Your own FID databases | `--signature-path DIR` (repeatable) or `FISSION_SIGNATURE_PATH`; searched after the bundle. A directory that does not exist is an error. `resources status` shows what was found. |
 
 ## Report honestly
 
