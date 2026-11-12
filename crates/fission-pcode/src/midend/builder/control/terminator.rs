@@ -283,10 +283,14 @@ impl<'a> PreviewBuilder<'a> {
         if self.address_to_index.contains_key(&target_addr) {
             return None;
         }
-        let resolved_target = self
-            .type_context
-            .and_then(|ctx| ctx.call_target_refs.get(&target_addr))
-            .map(|target_ref| sanitize_c_identifier(&target_ref.symbol))?;
+        // The same lookup an ordinary `call` uses: an ELF PLT stub is named by
+        // `call_targets` / `iat_target_refs`, not always by `call_target_refs`, so
+        // asking only the latter left `jmp puts@plt` as an opaque indirect branch.
+        let resolved_target =
+            sanitize_c_identifier(&super::super::dynamic_guards::resolve_call_target_address(
+                target_addr,
+                self.type_context,
+            )?);
         // The tail call's arguments are set up before the epilogue, in this
         // block or in the single predecessor that falls into it, and
         // `recover_tail_call_args` checks for exactly that. It used to run

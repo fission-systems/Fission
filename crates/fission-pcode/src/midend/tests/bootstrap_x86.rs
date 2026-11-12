@@ -1773,6 +1773,55 @@ fn preview_known_forward_external_direct_branch_becomes_tail_call() {
     assert!(!code.contains("goto block_406000;"), "{code}");
 }
 
+/// A direct `jmp` out of the function to an address whose name the type context holds
+/// only in `call_targets` (how an ELF PLT stub is named) is a tail call, exactly as when
+/// the name is in `call_target_refs`.
+fn render_direct_external_branch(configure: impl FnOnce(&mut PreviewTypeContext)) -> String {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x406000,
+            successors: vec![],
+            ops: vec![PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Branch,
+                address: 0x406000,
+                output: None,
+                inputs: vec![cst(0x407000, 8)],
+                asm_mnemonic: Some("JMP 0x407000".to_string()),
+            }],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    configure(&mut context);
+    render_mlil_preview_with_context(
+        &func,
+        "x86_plt_tail",
+        0x406000,
+        &preview_options_x86(),
+        Some(&context),
+    )
+    .expect("preview render")
+}
+
+#[test]
+fn preview_branch_to_a_stub_named_only_in_call_targets_is_a_tail_call() {
+    let code = render_direct_external_branch(|context| {
+        context.call_targets.insert(0x407000, "puts".to_string());
+    });
+    assert!(code.contains("return puts();"), "{code}");
+    assert!(!code.contains("__fission_branchind("), "{code}");
+}
+
+#[test]
+fn preview_branch_to_an_ambiguously_named_stub_is_not_guessed() {
+    let code = render_direct_external_branch(|context| {
+        context.call_targets.insert(0x407000, "puts".to_string());
+        context.ambiguous_call_targets.insert(0x407000);
+    });
+    assert!(!code.contains("return puts();"), "{code}");
+}
+
 #[test]
 fn preview_proven_void_external_tail_call_is_expr_then_bare_return() {
     let func = PcodeFunction {

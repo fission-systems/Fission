@@ -199,7 +199,7 @@ pub(in crate::midend) fn resolve_lifted_direct_call_target(
     resolve_call_target_address(target.offset, type_context)
 }
 
-fn resolve_call_target_address(
+pub(in crate::midend) fn resolve_call_target_address(
     address: u64,
     type_context: Option<&PreviewTypeContext>,
 ) -> Option<String> {
