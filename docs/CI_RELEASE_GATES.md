@@ -29,8 +29,8 @@ This document is the policy source for how Fission promotes a git commit to a
 Configure `main` branch protection to require these two Fast Gate checks by
 their exact check-run names:
 
-- **`🔎 Detect changes`** — the path/lane classifier, which must complete;
-- **`✅ CI Summary`** — the aggregate gate for every lane-enabled check.
+- **`Detect changes`** — the path/lane classifier, which must complete;
+- **`CI Summary`** — the aggregate gate for every lane-enabled check.
 
 Do not require lane-specific leaf contexts: the Fast Gate intentionally skips
 unrelated jobs for docs/scripts/CI-only changes, and its documented PR lane is
