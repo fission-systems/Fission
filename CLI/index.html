@@ -1618,6 +1618,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#agent-guide-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent guide (skill)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#machine-contract-contract-v1" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3361,6 +3372,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#agent-guide-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Agent guide (skill)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#machine-contract-contract-v1" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3417,6 +3439,7 @@
 <li><code>script</code> (Rhai)</li>
 <li><code>debug</code> (headless emulation and platform-native debugger commands)</li>
 <li><code>db</code> (saved analyst decisions, history, undo/redo, and comparison)</li>
+<li><code>skill</code> (the agent usage guide, compiled into the binary)</li>
 </ul>
 <p>Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.</p>
 <hr />
@@ -4198,14 +4221,22 @@ deletion remaps physical lines and abstains on ambiguous repeated text. No code 
 <code>line_mappings_hir</code> JSON fields were removed with the NIR/HIR split
 (<a href="../adr/0015-single-output-surface/">ADR 0015</a>); <code>--layer</code> is still accepted
 and ignored.</p>
+<h2 id="agent-guide-skill">Agent guide (<code>skill</code>)<a class="headerlink" href="#agent-guide-skill" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-58-1"><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>fission_cli<span class="w"> </span>skill
+</span></code></pre></div>
+<p>Prints <code>skills/fission/SKILL.md</code>, compiled into the binary, so an agent reads the
+guide that matches the version it is about to drive. A unit test checks every
+<code>fission_cli ...</code> line in the guide against the real command tree (subcommands,
+nested subcommands, flags) and every error code it names against the registry,
+so a renamed flag fails CI instead of an agent's session.</p>
 <h2 id="machine-contract-contract-v1">Machine contract (<code>--contract v1</code>)<a class="headerlink" href="#machine-contract-contract-v1" title="Permanent link">&para;</a></h2>
 <p>For AI agents and scripts that must branch on the result without parsing human
 text. Opt-in: without <code>--contract v1</code> (or <code>FISSION_CONTRACT=v1</code>) every command
 behaves as documented above. Design: <a href="../proposals/2026-10-26-agent-first-cli-contract/"><code>proposals/2026-10-26-agent-first-cli-contract.md</code></a>.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-58-1"><a id="__codelineno-58-1" name="__codelineno-58-1" href="#__codelineno-58-1"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
-</span><span id="__span-58-2"><a id="__codelineno-58-2" name="__codelineno-58-2" href="#__codelineno-58-2"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>--fail-on-partial<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--json
-</span><span id="__span-58-3"><a id="__codelineno-58-3" name="__codelineno-58-3" href="#__codelineno-58-3"></a>fission_cli<span class="w"> </span>schema<span class="w">                 </span><span class="c1"># JSON Schema of the response envelope</span>
-</span><span id="__span-58-4"><a id="__codelineno-58-4" name="__codelineno-58-4" href="#__codelineno-58-4"></a>fission_cli<span class="w"> </span>schema<span class="w"> </span>--error-codes<span class="w">   </span><span class="c1"># stable error codes, kinds, exit codes</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-59-1"><a id="__codelineno-59-1" name="__codelineno-59-1" href="#__codelineno-59-1"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>list<span class="w"> </span>app.exe<span class="w"> </span>--json
+</span><span id="__span-59-2"><a id="__codelineno-59-2" name="__codelineno-59-2" href="#__codelineno-59-2"></a>fission_cli<span class="w"> </span>--contract<span class="w"> </span>v1<span class="w"> </span>--fail-on-partial<span class="w"> </span>decomp<span class="w"> </span>app.exe<span class="w"> </span>--all<span class="w"> </span>--json
+</span><span id="__span-59-3"><a id="__codelineno-59-3" name="__codelineno-59-3" href="#__codelineno-59-3"></a>fission_cli<span class="w"> </span>schema<span class="w">                 </span><span class="c1"># JSON Schema of the response envelope</span>
+</span><span id="__span-59-4"><a id="__codelineno-59-4" name="__codelineno-59-4" href="#__codelineno-59-4"></a>fission_cli<span class="w"> </span>schema<span class="w"> </span>--error-codes<span class="w">   </span><span class="c1"># stable error codes, kinds, exit codes</span>
 </span></code></pre></div>
 <ul>
 <li>stdout is exactly one JSON document, success or failure; logs stay on stderr.</li>

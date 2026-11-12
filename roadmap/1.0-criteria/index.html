@@ -1364,19 +1364,29 @@ parity across every architecture and file format.</p>
    before they become part of a 1.0 promise.</li>
 <li><strong>Cost per call.</strong> Each CLI invocation reloads and re-analyses the binary.
    Measured on the 233-row sample set (2026-10-30): median 0.24 s, 2-3 s on
-   binaries with thousands of functions. An agent that queries one binary dozens
-   of times pays this each time. A resident session or an on-disk analysis cache
-   is the natural answer; no resident mode exists today (searched the CLI argument
-   definitions, <strong>unverified</strong> beyond that). <code>fission-analysis-protocol</code> already
-   defines local-HTTP backend contracts that nothing in the CLI uses (verified).</li>
+   binaries with thousands of functions. <strong>Re-measured 2026-11-12</strong> on a release
+   build of main (wall clock, min of 3, <code>list</code>/<code>hex</code>/<code>decomp --addr</code>/<code>xrefs</code>/
+   <code>strings --context</code>, ELF only): 0.01 s for a 28 KB binary with 23 functions;
+   0.07-0.09 s for bash O0 (3 MB, 2,884 functions); 0.12-0.14 s for the largest
+   corpus ELFs (4-6 MB, up to 4,188 functions). Every command costs about the same
+   as <code>list</code>, so the load dominates and the per-command work does not. The
+   earlier 2-3 s figure no longer reproduces on ELF; it predates the startup work
+   in #699-#701. <strong>Not measured:</strong> PE and Mach-O (the local corpus is 803 ELFs),
+   and cost on one very large function (that is per-function work, not reload). At
+   ~0.1 s a call, a resident session or analysis cache buys little for an agent
+   that makes dozens of calls, so it is not built; revisit if a PE or Mach-O
+   measurement or a larger image says otherwise. <code>fission-analysis-protocol</code>
+   already defines local-HTTP backend contracts that nothing in the CLI uses
+   (verified).</li>
 <li><strong>Provenance in results.</strong> Issue #660 reports evidence-traceability gaps in a
    PE64 workflow (unverified; not read). An agent can only trust a result that
    says where it came from.</li>
 <li><strong>Agent guidance artifact.</strong> <a href="../../skills/fission/SKILL.md"><code>skills/fission/SKILL.md</code></a>
    is a usage guide for agents, written from commands run against the current
-   CLI. It is a file in the repository; it is not yet embedded in the binary or
-   installable from it (Kuna serves its guide from <code>kuna docs</code>), and nothing
-   checks it against the CLI as the CLI changes.</li>
+   CLI. <code>fission_cli skill</code> prints it from the binary, and a unit test holds every
+   command, flag and error code it names to the real CLI. What is still open: it
+   is one file, not split into topics the way <code>kuna docs</code> is, and it is not
+   installable into an agent's skills directory by a command.</li>
 </ol>
 <h2 id="debugger">Debugger<a class="headerlink" href="#debugger" title="Permanent link">&para;</a></h2>
 <ul>
