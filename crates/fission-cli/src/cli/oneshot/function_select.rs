@@ -84,6 +84,59 @@ pub(crate) fn select_batch_functions(
     }
 }
 
+/// Why a `--name` selector did not name exactly one function.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum NameLookupError {
+    NotFound(String),
+    /// One name, several entry addresses (for example per-section statics).
+    Ambiguous(String, Vec<u64>),
+}
+
+impl std::fmt::Display for NameLookupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NotFound(name) => write!(
+                f,
+                "no discovered function is named `{name}`; `fission_cli list <binary> --json` shows the names and addresses"
+            ),
+            Self::Ambiguous(name, addresses) => {
+                let list: Vec<String> = addresses.iter().map(|a| format!("0x{a:x}")).collect();
+                write!(
+                    f,
+                    "`{name}` names {} functions ({}); pass one with --addr",
+                    addresses.len(),
+                    list.join(", ")
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for NameLookupError {}
+
+/// The one entry address a function name stands for.
+///
+/// The name must match exactly. Several records at one address (a symbol and
+/// its alias) are one function; the same name at different addresses is an
+/// error rather than a guess.
+pub(crate) fn select_function_address_by_name(
+    binary: &LoadedBinary,
+    name: &str,
+) -> Result<u64, NameLookupError> {
+    let mut addresses: Vec<u64> = canonical_functions_sorted(binary)
+        .into_iter()
+        .filter(|func| func.name == name)
+        .map(|func| func.address)
+        .collect();
+    addresses.sort_unstable();
+    addresses.dedup();
+    match addresses.as_slice() {
+        [] => Err(NameLookupError::NotFound(name.to_string())),
+        [only] => Ok(*only),
+        _ => Err(NameLookupError::Ambiguous(name.to_string(), addresses)),
+    }
+}
+
 pub(crate) fn select_function_by_address<'a>(
     binary: &'a LoadedBinary,
     address: u64,
@@ -250,6 +303,76 @@ mod tests {
         })
         .build()
         .expect("build binary")
+    }
+
+    #[test]
+    fn a_name_resolves_to_its_entry_address() {
+        let binary = test_binary();
+        assert_eq!(
+            select_function_address_by_name(&binary, "meaningful_name"),
+            Ok(0x140001080)
+        );
+    }
+
+    #[test]
+    fn an_unknown_name_is_not_found() {
+        let binary = test_binary();
+        assert_eq!(
+            select_function_address_by_name(&binary, "no_such_function"),
+            Err(NameLookupError::NotFound("no_such_function".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_name_is_exact_not_a_prefix() {
+        let binary = test_binary();
+        assert!(matches!(
+            select_function_address_by_name(&binary, "meaningful"),
+            Err(NameLookupError::NotFound(_))
+        ));
+    }
+
+    #[test]
+    fn one_name_at_two_addresses_is_ambiguous_not_guessed() {
+        let binary = LoadedBinaryBuilder::new(
+            "dup.bin".to_string(),
+            fission_loader::loader::DataBuffer::Heap(vec![0; 0x200]),
+        )
+        .image_base(0x1000)
+        .entry_point(0x1000)
+        .is_64bit(true)
+        .format("ELF")
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x200,
+            file_offset: 0,
+            file_size: 0x200,
+            is_executable: true,
+            is_writable: false,
+            is_readable: true,
+        })
+        .add_function(FunctionInfo {
+            name: "helper".to_string(),
+            address: 0x1000,
+            size: 0x20,
+            ..Default::default()
+        })
+        .add_function(FunctionInfo {
+            name: "helper".to_string(),
+            address: 0x1080,
+            size: 0x20,
+            ..Default::default()
+        })
+        .build()
+        .expect("build binary");
+        assert_eq!(
+            select_function_address_by_name(&binary, "helper"),
+            Err(NameLookupError::Ambiguous(
+                "helper".to_string(),
+                vec![0x1000, 0x1080]
+            ))
+        );
     }
 
     #[test]

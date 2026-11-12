@@ -200,6 +200,17 @@ Use `--function` when you want function boundaries instead of a fixed number of 
 fission_cli decomp app.exe --addr 0x140001000
 ```
 
+A function the binary names can be selected by exact name instead of address:
+
+```bash
+fission_cli decomp app.exe --name main
+```
+
+`--name` cannot be combined with `--addr`. A name that no discovered function
+has fails with `function_not_found`; a name that stands for several addresses
+fails with `function_ambiguous` and lists them, and you pass one with `--addr`.
+Stripped binaries have no names to select by; use `list` and `--addr`.
+
 Common variants:
 
 ```bash

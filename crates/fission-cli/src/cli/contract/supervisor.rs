@@ -379,6 +379,8 @@ fn hint_for(code: &str) -> Option<&'static str> {
         "input_unsupported_format" => Some(
             "The file is not a loadable executable; use --language for raw images, or unpack/extract it first.",
         ),
+        "function_not_found" => Some("List the names and addresses with `list <binary> --json`."),
+        "function_ambiguous" => Some("Pick one address and pass it with --addr."),
         "quality_budget_exceeded" => Some(
             "The guest used libc or syscalls the emulator does not model; rerun without the budget flags to see the output.",
         ),
