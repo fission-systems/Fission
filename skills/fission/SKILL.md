@@ -6,9 +6,11 @@ description: Use the Fission CLI (fission_cli) to inspect a binary, recover C-li
 # Fission for reversing binaries
 
 Fission is a headless CLI (`fission_cli`) on PATH, not an MCP server. It holds no
-resident session: every call loads and analyses the binary again (median 0.24 s on
-small files, seconds on binaries with thousands of functions). The one thing it
-saves is the optional analyst database described under "Keep your decisions".
+resident session: every call loads and analyses the binary again. On ELF that cost
+about 0.01 s for a 28 KB binary and 0.07-0.14 s for 3-6 MB binaries with up to
+4,200 functions (PE and Mach-O were not measured), so many small calls are cheap;
+the time is in a single large function, not in reloading. The one thing it saves
+is the optional analyst database described under "Keep your decisions".
 
 `fission_cli skill` prints this guide from the binary you are about to drive, so it
 matches that version. In a checkout the built CLI is `target/release/fission_cli`
@@ -111,8 +113,10 @@ fission_cli --contract v1 decomp ./target.bin --addresses-file addrs.txt --json
 ```
 
 - Decompile once for the scope you need, write the JSON to disk, then search it
-  with `rg`/`jq`/Python. Do not loop one call per function: each call reloads the
-  binary. `--addresses-file` takes one hex address per line.
+  with `rg`/`jq`/Python. Prefer one batch to a loop of single calls: each call
+  reloads the binary (about 0.1 s on the larger ELFs measured), which adds up over
+  hundreds of functions, and a saved file can be searched again for free.
+  `--addresses-file` takes one hex address per line.
 - `--all` is bounded batch output; use `--limit`. For whole-binary facts use
   `fission_cli inventory function-facts` (JSONL plus a summary), which is a
   different workflow from `decomp --all`.
