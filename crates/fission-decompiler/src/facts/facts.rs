@@ -1225,16 +1225,7 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
                 .call_effect_summaries
                 .insert(target_ref.symbol.clone(), effect_summary);
         }
-        if let Some(mut prototype_summary) = prototype_summary {
-            // A stripped `sub_<addr>` identity is sufficient to transport an
-            // ABI-slot type fact back to the exact direct call, but it is not
-            // a declaration-level proof that recovered extra arguments may be
-            // deleted. Keep exact-arity pruning on the pre-existing resolved
-            // symbol path only.
-            if !has_resolved_target_identity {
-                prototype_summary.min_arity = 0;
-                prototype_summary.locked_exact_arity = None;
-            }
+        if let Some(prototype_summary) = prototype_summary {
             if let Some(existing) = type_context
                 .call_prototype_summaries
                 .get_mut(&target_ref.symbol)
@@ -1574,6 +1565,15 @@ fn build_preview_callee_summaries_uncached(
     };
 
     let mut prototype = infer_prototype(&pcode, DirectCalleePrototypeEvidence::Complete);
+    // The parameter count is read off the callee's own body, so it is a proof
+    // of how many arguments the callee takes only when the whole body was
+    // decoded. A truncated decode can miss a later read of a further argument
+    // register: it is a lower bound, and a lower bound must not delete the
+    // call's extra arguments.
+    if !complete_decode && let Some(summary) = prototype.as_mut() {
+        summary.locked_exact_arity = None;
+        summary.min_arity = 0;
+    }
     let stable_prefix_limit = direct_callee_stable_prefix_instruction_limit(max_bytes);
     if stable_prefix_limit < instruction_limit
         && let Some(complete) = prototype.as_mut()
