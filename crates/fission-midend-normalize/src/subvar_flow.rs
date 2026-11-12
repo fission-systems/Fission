@@ -1134,12 +1134,20 @@ pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
         if solver.solve(&func.body) {
             for replace_var in solver.varmap.values() {
                 if !func.locals.iter().any(|l| l.name == replace_var.new_name) {
+                    // A leaf nothing in the body assigns (a formal, typically) is
+                    // read through the new name, so the new name must be given its
+                    // value: the low bits of the original. Without this the
+                    // replacement is a declaration nobody initializes.
+                    let leaf = !def_map.contains_key(&replace_var.original_name);
                     let binding = PreHirBinding {
                         name: replace_var.new_name.clone(),
                         ty: replace_var.new_type.clone(),
                         surface_type_name: None,
                         origin: Some(NirBindingOrigin::Temp),
-                        initializer: None,
+                        initializer: leaf.then(|| PreHirExpr::Cast {
+                            ty: replace_var.new_type.clone(),
+                            expr: Box::new(PreHirExpr::Var(replace_var.original_name.clone())),
+                        }),
                     };
                     func.locals.push(binding);
                 }
@@ -1176,6 +1184,73 @@ mod tests {
             bits: 64,
             signed: false,
         }
+    }
+
+    /// A formal narrowed through its uses is read under the new name; that name must
+    /// be given the formal's low bits, or the function reads a variable nothing sets.
+    #[test]
+    fn a_narrowed_formal_leaf_is_initialized_from_the_formal() {
+        let mut func = PreHirFunction::default();
+        func.name = "leaf_formal".to_string();
+        func.params.push(PreHirBinding {
+            name: "a".to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        });
+        for name in ["y", "z"] {
+            func.locals.push(PreHirBinding {
+                name: name.to_string(),
+                ty: u64_ty(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            });
+        }
+        // y = a & 0xff;  z = y == 12;
+        func.body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".to_string()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                    ty: u64_ty(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("z".to_string()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("y".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(12, u64_ty())),
+                    ty: NirType::Bool,
+                },
+            },
+        ];
+
+        assert!(apply_subvar_flow_pass(&mut func));
+
+        let narrowed = func
+            .locals
+            .iter()
+            .find(|binding| binding.name == "a_sub8")
+            .expect("the formal's low byte gets a name");
+        assert_eq!(
+            narrowed.initializer,
+            Some(PreHirExpr::Cast {
+                ty: u8_ty(),
+                expr: Box::new(PreHirExpr::Var("a".to_string())),
+            }),
+            "{narrowed:?}"
+        );
+        // A name the body assigns keeps no initializer: its value comes from the body.
+        let assigned = func.locals.iter().find(|binding| binding.name == "y_sub8");
+        assert!(
+            assigned.is_none_or(|binding| binding.initializer.is_none()),
+            "{assigned:?}"
+        );
     }
 
     #[test]
