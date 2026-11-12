@@ -541,3 +541,74 @@ fn preview_dual_absolute_cmov_clamp_chain_keeps_hi_bound() {
     );
     let _ = (eax, ecx, edx, r8d, zf);
 }
+
+/// SLEIGH builds a conditional select as `tmp = a; if (cond) goto L; tmp = b;
+/// L: use(tmp)` (AArch64 `csel` lifts to exactly this). The write before the
+/// skip is the value the skipped path carries to the use, so it must survive as
+/// the same variable the guarded write assigns. Dropping it leaves the variable
+/// uninitialised whenever the skip is taken.
+#[test]
+fn instruction_local_select_through_a_temp_keeps_both_arms() {
+    let op = |seq: u32, opcode, output: Option<Varnode>, inputs: Vec<Varnode>| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address: 0x7000,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    // result = (n < 0) ? 0 : m, as `csel w0, wzr, w1, lt` lifts it.
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x7000,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0,
+                    PcodeOpcode::IntSLess,
+                    Some(uniq(0x3d00, 1)),
+                    vec![reg(0x8, 4), cst(0, 4)],
+                ),
+                op(1, PcodeOpcode::Copy, Some(uniq(0x300, 4)), vec![cst(0, 4)]),
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(uniq(0x3b300, 4)),
+                    vec![uniq(0x300, 4)],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![cst(2, 4), uniq(0x3d00, 1)],
+                ),
+                op(
+                    4,
+                    PcodeOpcode::Copy,
+                    Some(uniq(0x3b300, 4)),
+                    vec![reg(0x10, 4)],
+                ),
+                op(
+                    5,
+                    PcodeOpcode::IntZExt,
+                    Some(reg(0x0, 8)),
+                    vec![uniq(0x3b300, 4)],
+                ),
+                op(6, PcodeOpcode::Return, None, vec![cst(0, 4), reg(0x0, 8)]),
+            ],
+        }],
+    };
+    let code = crate::midend::render_mechanical_preview(&func, "sel", 0x7000, &preview_options())
+        .expect("preview render");
+    // Both arms are present: the value written before the skip (0) and the
+    // guarded one (the second argument), selected on the sign of the first.
+    assert!(code.contains("param_2"), "{code}");
+    assert!(code.contains("0 <= param_1"), "{code}");
+    assert!(
+        code.contains(": 0"),
+        "the skipped arm's 0 was dropped:\n{code}"
+    );
+    // No local is left that only one arm initialises.
+    assert!(!code.contains("uVar"), "{code}");
+}

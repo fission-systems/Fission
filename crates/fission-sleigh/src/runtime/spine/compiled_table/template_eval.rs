@@ -410,8 +410,18 @@ impl<'c> CompiledTableEmitter<'c> {
         }
     }
 
-    fn normalize_direct_control_target(&self, target: Varnode) -> Result<Varnode> {
-        if !target.is_constant || decode_relative_sentinel(target.offset).is_some() {
+    /// Put a direct branch/call destination in the shape consumers read: a
+    /// constant template value becomes a code-space address.
+    ///
+    /// A destination that names a p-code-internal label (`is_label`) is the
+    /// exception and stays in the constant space. `finish` later patches it to
+    /// a signed op delta, and "constant space" is how every consumer tells that
+    /// delta from a machine address. Recognising it by value is not enough:
+    /// the sentinel is masked to the destination's width (4 bytes), so
+    /// `decode_relative_sentinel` no longer sees it, and the label would be
+    /// rewritten into a code-space address.
+    fn normalize_direct_control_target(&self, target: Varnode, is_label: bool) -> Result<Varnode> {
+        if is_label || !target.is_constant || decode_relative_sentinel(target.offset).is_some() {
             return Ok(target);
         }
         let size = if target.size == 0 {
@@ -544,7 +554,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     .ok_or_else(|| anyhow!("CALL template requires one input"))?;
                 // Use size 0: address size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
                 let target = self.read_template_varnode(target_tpl, state, 0)?;
-                let target = self.normalize_direct_control_target(target)?;
+                let target = self.normalize_direct_control_target(target, false)?;
                 self.emitter.emit_call(target, mnemonic)
             }
             CompiledOpTplOpcode::CallInd => {
@@ -566,7 +576,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 // Use size 0: address size is architecture-dependent.
                 let label = relative_label_target(target_tpl);
                 let target = self.read_template_varnode(target_tpl, state, 0)?;
-                let target = self.normalize_direct_control_target(target)?;
+                let target = self.normalize_direct_control_target(target, label.is_some())?;
                 self.emitter.emit_branch(target, mnemonic)?;
                 self.note_label_ref(label)?;
                 Ok(())
@@ -782,7 +792,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     // Target size is architecture-dependent (4 for 32-bit, 8 for 64-bit).
                     let label = relative_label_target(&op.inputs[0]);
                     let target = self.read_template_varnode(&op.inputs[0], state, 0)?;
-                    let target = self.normalize_direct_control_target(target)?;
+                    let target = self.normalize_direct_control_target(target, label.is_some())?;
                     let cond = self.read_template_varnode(&op.inputs[1], state, 1)?;
                     self.emitter.emit_cbranch(target, cond, mnemonic)?;
                     self.note_label_ref(label)?;

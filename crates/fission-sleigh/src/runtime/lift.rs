@@ -2342,6 +2342,57 @@ mod dispatch_tests {
 mod raw_seed_lift_tests {
     use super::*;
 
+    /// A SLEIGH `goto <label>` names an op of its own instruction, and Ghidra
+    /// emits that destination in the constant space as a signed op delta
+    /// (`LabelSymbol::getVarnode`). Every consumer reads it that way: it is how
+    /// they tell an instruction-internal skip from a machine branch. If the
+    /// lifter turns the delta into a code-space varnode instead, `csel`'s skip
+    /// reads as "branch to address 2" and the decompiler prints a call to it.
+    #[test]
+    fn instruction_internal_label_branches_are_constant_space_op_deltas() {
+        let cases: [(&str, &[u8]); 3] = [
+            // cmp w0,#0 ; csel w0,wzr,w8,mi ; ret
+            (
+                "AARCH64",
+                &[
+                    0x1f, 0x00, 0x00, 0x71, 0xe0, 0x43, 0x88, 0x1a, 0xc0, 0x03, 0x5f, 0xd6,
+                ],
+            ),
+            // tzcnt eax,eax ; ret   and   bsf eax,eax ; ret
+            ("x86-64", &[0xf3, 0x0f, 0xbc, 0xc0, 0xc3]),
+            ("x86-64", &[0x0f, 0xbc, 0xc0, 0xc3]),
+        ];
+        for (language, bytes) in cases {
+            let frontend = RuntimeSleighFrontend::new_for_language(language).unwrap();
+            let function = frontend.lift_raw_pcode_function(bytes, 0x1000).unwrap();
+            let ops: Vec<&PcodeOp> = function.blocks.iter().flat_map(|b| b.ops.iter()).collect();
+            let mut checked = 0;
+            for op in ops
+                .iter()
+                .filter(|op| matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch))
+            {
+                let dest = &op.inputs[0];
+                // The only branches in these instructions are label branches.
+                assert!(
+                    dest.is_constant && dest.space_id == 0,
+                    "{language} {:?} seq {}: label destination must be a constant-space delta, got {dest:?}",
+                    op.opcode,
+                    op.seq_num
+                );
+                let target_seq = relative_pcode_target_seq(op, dest)
+                    .unwrap_or_else(|| panic!("{language}: delta {dest:?} names no op"));
+                assert!(
+                    ops.iter()
+                        .any(|c| c.address == op.address && c.seq_num == target_seq),
+                    "{language}: seq {} targets seq {target_seq}, which is not an op of its instruction",
+                    op.seq_num
+                );
+                checked += 1;
+            }
+            assert!(checked > 0, "{language}: no label branch was lifted");
+        }
+    }
+
     #[test]
     fn raw_decode_seed_rebuilds_cfg_and_preserves_complete_results_across_languages() {
         for (language, bytes, address) in [
