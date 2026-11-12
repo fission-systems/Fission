@@ -15,7 +15,7 @@ fn contract_commands() -> Vec<&'static str> {
     CANONICAL_SUBCOMMANDS
         .iter()
         .copied()
-        .filter(|name| *name != "schema")
+        .filter(|name| !matches!(*name, "schema" | "skill"))
         .collect()
 }
 

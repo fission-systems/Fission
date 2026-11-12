@@ -47,6 +47,8 @@ pub enum ParsedInvocation {
     Verify(VerifyArgs),
     /// Machine-readable description of the CLI contract
     Schema(SchemaArgs),
+    /// The agent usage guide for this CLI
+    Skill,
 }
 
 /// `fission_cli schema`: describe the `--contract v1` envelope and error codes.
@@ -226,6 +228,11 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
 "
     )]
     Schema(SchemaArgs),
+    /// Print the agent usage guide (SKILL.md) built into this binary
+    #[command(
+        long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
+    )]
+    Skill,
 }
 
 // ── Verify subcommand types ────────────────────────────────────────────────
@@ -988,6 +995,12 @@ struct ScriptRunArgs {
     verbose: bool,
 }
 
+/// The full clap command tree, for tests that compare documentation to the CLI.
+#[cfg(test)]
+pub(crate) fn command_tree() -> clap::Command {
+    <CliArgs as clap::CommandFactory>::command()
+}
+
 pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "info",
     "list",
@@ -1014,6 +1027,7 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "db",
     "ai",
     "schema",
+    "skill",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1416,6 +1430,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Sandbox(sandbox) => return ParsedInvocation::Sandbox(sandbox),
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
                 CliCommand::Schema(schema) => return ParsedInvocation::Schema(schema),
+                CliCommand::Skill => return ParsedInvocation::Skill,
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1457,6 +1472,7 @@ mod tests {
             ParsedInvocation::Sandbox(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Schema(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Skill => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1472,6 +1488,7 @@ mod tests {
             ParsedInvocation::Sandbox(_) => panic!("legacy parser cannot emit sandbox"),
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
+            ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
         }
     }
 

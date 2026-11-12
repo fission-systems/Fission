@@ -7,6 +7,7 @@ pub mod contract;
 pub mod oneshot;
 pub mod output;
 pub mod resources;
+pub mod skill;
 
 mod args;
 
