@@ -273,8 +273,8 @@ impl WindowsDebugger {
                 } else {
                     // Name import
                     let hint_name_addr = base + (thunk_val & 0x7FFF_FFFF);
-                    let hint_name = self.read_memory(hint_name_addr, 256)?;
-                    let name = Self::extract_null_terminated_string(&hint_name[2..]);
+                    // The hint is a 2-byte index; the name follows it.
+                    let name = self.read_cstring(hint_name_addr.wrapping_add(2), 254);
                     imports.push(crate::debug::types::ImportInfo {
                         module: dll_name.clone(),
                         name: if name.is_empty() { None } else { Some(name) },
@@ -294,11 +294,35 @@ impl WindowsDebugger {
     }
 
     /// Read a null-terminated ASCII string from process memory.
+    ///
+    /// A string can sit within `max_len` bytes of the end of a mapped region
+    /// (the last name in an export section, say), and `ReadProcessMemory` fails
+    /// the whole request when it crosses into unmapped memory. So read up to
+    /// each page boundary, and where even that fails fall back to single bytes:
+    /// the string ends at its terminator, not at `max_len`.
     fn read_cstring(&self, addr: u64, max_len: usize) -> String {
-        match self.read_memory(addr, max_len) {
-            Ok(bytes) => Self::extract_null_terminated_string(&bytes),
-            Err(_) => String::new(),
+        const PAGE: u64 = 0x1000;
+        let mut out: Vec<u8> = Vec::new();
+        let mut cursor = addr;
+        while out.len() < max_len {
+            let to_boundary = (PAGE - (cursor % PAGE)) as usize;
+            let want = to_boundary.min(max_len - out.len());
+            let chunk = match self.read_memory(cursor, want) {
+                Ok(bytes) if !bytes.is_empty() => bytes,
+                _ => match self.read_memory(cursor, 1) {
+                    Ok(bytes) if !bytes.is_empty() => bytes,
+                    _ => break,
+                },
+            };
+            let len = chunk.len();
+            if let Some(nul) = chunk.iter().position(|&b| b == 0) {
+                out.extend_from_slice(&chunk[..nul]);
+                break;
+            }
+            out.extend_from_slice(&chunk);
+            cursor = cursor.wrapping_add(len as u64);
         }
+        Self::extract_null_terminated_string(&out)
     }
 
     fn extract_null_terminated_string(bytes: &[u8]) -> String {
