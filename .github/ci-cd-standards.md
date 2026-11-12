@@ -15,7 +15,7 @@ Fission's CI/CD pipelines consist of 3 levels:
 Pull Request/Feature Branch
          ↓
    ┌─────────────────────────────────────┐
-   │ 🟢 Fast Gate (ci.yml)                │
+   │ Fast Gate (ci.yml)                   │
    │  ├─ Lint & Format (2 min)            │
    │  ├─ Security Check (3 min)           │
    │  ├─ Build (5 min, 3 platforms)       │
@@ -26,7 +26,7 @@ Pull Request/Feature Branch
    Main Branch Merge
          ↓
    ┌─────────────────────────────────────┐
-   │ 🔵 Heavy Validation (ci-heavy.yml)   │
+   │ Heavy Validation (ci-heavy.yml)      │
    │  ├─ Corpus Validation (15 min)       │
    │  ├─ Full Test Suite (20 min)         │
    │  ├─ Build All Products (15 min)      │
@@ -37,7 +37,7 @@ Pull Request/Feature Branch
    Tag Creation (v*.*.*)
          ↓
    ┌─────────────────────────────────────┐
-   │ 🟡 Release (cd.yml)                  │
+   │ Release (cd.yml)                     │
    │  ├─ Build CLI (3 platforms, 15 min)  │
    │  ├─ Package (5 min)                  │
    │  └─ Upload (5 min)                   │
@@ -89,23 +89,23 @@ env:
 ## Success Criteria
 
 ### Fast Gate (required before PR approval)
-- ✅ `cargo fmt --all -- --check` 100% pass
-- ✅ `cargo clippy` 0 warnings (`-D warnings`)
-- ✅ `cargo deny check all` security pass
-- ✅ All platforms build successfully
-- ✅ Core module tests pass (fission-pcode, automation, loader)
+- `cargo fmt --all -- --check` 100% pass
+- `cargo clippy` 0 warnings (`-D warnings`)
+- `cargo deny check all` security pass
+- All platforms build successfully
+- Core module tests pass (fission-pcode, automation, loader)
 
 ### Heavy Validation (auto-runs after merge to main)
-- ✅ All Fast Gate criteria included
-- ✅ Full workspace tests pass (`cargo test --workspace`)
-- ✅ Corpus manifest validation pass
-- ✅ NIR-Check complete (Regression < 5%)
+- All Fast Gate criteria included
+- Full workspace tests pass (`cargo test --workspace`)
+- Corpus manifest validation pass
+- NIR-Check complete (Regression < 5%)
 
 ### Release (on tag creation)
-- ✅ All Heavy Validation criteria included
-- ✅ 3 platform binaries created
-- ✅ Packaging complete (.tar.gz, .zip)
-- ✅ Uploaded to GitHub Release
+- All Heavy Validation criteria included
+- 3 platform binaries created
+- Packaging complete (.tar.gz, .zip)
+- Uploaded to GitHub Release
 
 ---
 

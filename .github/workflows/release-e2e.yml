@@ -35,7 +35,7 @@ env:
 
 jobs:
   release-e2e:
-    name: 🔒 Release E2E (Linux · release CLI)
+    name: Release E2E (Linux · release CLI)
     runs-on: ubuntu-latest
     timeout-minutes: 50
     steps:

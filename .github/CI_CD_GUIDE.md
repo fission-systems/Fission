@@ -6,7 +6,7 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### CI/CD Pipeline Architecture
 
@@ -49,9 +49,9 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 
 ---
 
-## 📋 Pipeline-by-Pipeline Guide
+## Pipeline-by-Pipeline Guide
 
-### 1. Fast Gate (ci.yml) 🟢
+### 1. Fast Gate (ci.yml)
 
 **When is it triggered?**
 - PR creation/update
@@ -70,13 +70,13 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 
 **Validation steps (rust lane):**
 ```
-✓ Path filter (lane selection)
-✓ Security Check (cargo deny + audit)
-✓ Lint & Format (rustfmt + clippy, sccache)
-✓ Pass-gate / owner-boundary scripts
-✓ Core + midend Tests (Linux, single nextest multi -p, sccache)
-✓ CLI smoke + NIR regression gate
-✓ macOS test smoke (main push only; Windows release tests and release CLI builds run in Heavy)
+- Path filter (lane selection)
+- Security Check (cargo deny + audit)
+- Lint & Format (rustfmt + clippy, sccache)
+- Pass-gate / owner-boundary scripts
+- Core + midend Tests (Linux, single nextest multi -p, sccache)
+- CLI smoke + NIR regression gate
+- macOS test smoke (main push only; Windows release tests and release CLI builds run in Heavy)
 ```
 
 **Success criteria:**
@@ -102,7 +102,7 @@ git push
 
 ---
 
-### 2. Heavy Validation (ci-heavy.yml) 🔵
+### 2. Heavy Validation (ci-heavy.yml)
 
 **When is it triggered?**
 - Every non-documentation push to `main` (L1 release gate signal)
@@ -113,19 +113,19 @@ git push
 
 **Validation steps:**
 ```
-✓ Corpus Validation (~15 min)
+- Corpus Validation (~15 min)
   └─ Validate benchmark binary manifests
 
-✓ Full Test Suite (~25 min)
+- Full Test Suite (~25 min)
   ├─ Full workspace tests
   └─ fission-static tests
 
-✓ Heavy Platform Tests (~20 min)
+- Heavy Platform Tests (~20 min)
   ├─ Windows release build
   └─ macOS release build
 
 
-✓ Automation NIR-Check (~45 min)
+- Automation NIR-Check (~45 min)
   ├─ Quality lane validation
   ├─ Verify regression < 5%
   └─ Generate artifacts
@@ -151,7 +151,7 @@ cargo test --all
 
 ---
 
-### 3. Release Tag + E2E (release-tag.yml · release-e2e.yml) 🟠
+### 3. Release Tag + E2E (release-tag.yml · release-e2e.yml)
 
 **Preferred path (conservative):**
 
@@ -162,7 +162,7 @@ cargo test --all
 
 Do **not** auto-tag every `main` push. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
 
-### 4. Release / CD (cd.yml) 🟡
+### 4. Release / CD (cd.yml)
 
 **When is it triggered?**
 - Push of `v*.*.*` tag (or bare `X.Y.Z`)
@@ -198,7 +198,7 @@ git push origin v0.2.0
 
 ---
 
-## 🔧 Customizing Workflows
+## Customizing Workflows
 
 ### Using Reusable Workflows
 
@@ -207,7 +207,7 @@ git push origin v0.2.0
 ```yaml
 # .github/workflows/ci.yml
 test-new-module:
-  name: 🧪 Test New Module
+  name: Test New Module
   needs: [security-check, lint-format]
   uses: ./.github/workflows/reusable-run-tests.yml
   with:
@@ -233,7 +233,7 @@ test-new-module:
 
 ---
 
-## 📊 Monitoring & Debugging
+## Monitoring & Debugging
 
 ### Check workflow status
 
@@ -261,7 +261,7 @@ gh run download RUN_ID
 
 ---
 
-## 🎯 Best Practices
+## Best Practices
 
 ### 1. Get fast feedback
 
@@ -276,12 +276,12 @@ cargo test -p fission-pcode
 
 ### 2. Minimize CI failures
 
-✅ **Good**
+Good:
 ```bash
 git commit -m "fix(pcode): handle edge case in lowering"
 ```
 
-❌ **Bad**
+Bad:
 ```bash
 git commit -m "wip: various fixes"
 git commit -m "fix formatting"
@@ -298,7 +298,7 @@ For big refactors:
 
 ---
 
-## 🚨 Troubleshooting
+## Troubleshooting
 
 ### CI fails frequently
 
@@ -323,7 +323,7 @@ gh run view RUN_ID --log
 
 ---
 
-## 📚 References
+## References
 
 - [GitHub Actions Documentation](https://docs.github.com/en/actions)
 - [Rust Cargo Documentation](https://doc.rust-lang.org/cargo/)
@@ -332,7 +332,7 @@ gh run view RUN_ID --log
 
 ---
 
-## 🔗 Related Files
+## Related Files
 
 ```
 .github/
@@ -350,7 +350,7 @@ gh run view RUN_ID --log
 
 ---
 
-## 💡 Feedback & Improvements
+## Feedback & Improvements
 
 Suggestions for CI/CD pipeline improvements:
 1. [Create GitHub Issue](https://github.com/fission-systems/Fission/issues)

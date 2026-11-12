@@ -21,7 +21,7 @@ env:
 
 jobs:
   build-windows-heavy:
-    name: 🪟 Heavy Build & Test (Windows)
+    name: Heavy Build & Test (Windows)
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: windows-latest
@@ -29,7 +29,7 @@ jobs:
       upload_artifact: true
 
   test-windows-heavy:
-    name: 🧪 Heavy Tests (Windows)
+    name: Heavy Tests (Windows)
     needs: build-windows-heavy
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
@@ -39,7 +39,7 @@ jobs:
       timeout_minutes: 120
 
   test-windows-native-debugger:
-    name: 🪟 Native Win32 Debugger (Windows)
+    name: Native Win32 Debugger (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,7 +65,7 @@ jobs:
         run: cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
 
   build-macos-heavy:
-    name: 🍎 Heavy Build (macOS)
+    name: Heavy Build (macOS)
     uses: ./.github/workflows/reusable-build-cli.yml
     with:
       os: macos-latest
@@ -73,14 +73,14 @@ jobs:
       upload_artifact: true
 
   msrv-check:
-    name: 🦀 MSRV Check
+    name: MSRV Check
     uses: ./.github/workflows/reusable-msrv.yml
     with:
       crates: "fission-midend-structuring,fission-pcode,fission-loader,fission-decompiler"
 
   # ── Extended (nightly + manual only) ──────────────────────────────────────
   test-linux-full:
-    name: 🧪 Full Tests (Linux · extended)
+    name: Full Tests (Linux · extended)
     uses: ./.github/workflows/reusable-run-tests.yml
     with:
       os: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
       run_script_emulator_tests: true
 
   compile-surface:
-    name: 🧱 Compile Surface (Linux · all features)
+    name: Compile Surface (Linux · all features)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -126,7 +126,7 @@ jobs:
   # crate that grows unsafe it can check.
 
   coverage:
-    name: 📈 Code Coverage (extended)
+    name: Code Coverage (extended)
     uses: ./.github/workflows/reusable-coverage.yml
     with:
       crates: "fission-pcode-ir,fission-cspec,fission-pcode,fission-loader"
@@ -134,7 +134,7 @@ jobs:
 
   # Final summary for the nightly and manual validation run.
   heavy-summary:
-    name: ✅ Heavy Validation Summary
+    name: Heavy Validation Summary
     needs:
       - build-macos-heavy
       - test-windows-heavy
@@ -155,10 +155,10 @@ jobs:
             local name="$1"
             local result="$2"
             if [ "$result" != "success" ]; then
-              echo "❌ ${name} failed (result=${result})"
+              echo "ERROR: ${name} failed (result=${result})"
               FAILED=1
             else
-              echo "✅ ${name}"
+              echo "OK: ${name}"
             fi
           }
 
@@ -171,15 +171,15 @@ jobs:
 
           # Coverage is warn-only even when run
           if [ "${{ needs.coverage.result }}" = "failure" ]; then
-            echo "⚠️ Coverage job encountered an error (non-blocking)"
+            echo "WARNING: Coverage job encountered an error (non-blocking)"
           elif [ "${{ needs.coverage.result }}" = "skipped" ]; then
-            echo "ℹ️  Coverage skipped"
+            echo "INFO: Coverage skipped"
           else
-            echo "ℹ️  Coverage finished (${{ needs.coverage.result }})"
+            echo "INFO: Coverage finished (${{ needs.coverage.result }})"
           fi
 
           if [ "$FAILED" -eq 1 ]; then
             exit 1
           fi
-          echo "✅ Heavy validation checks passed for this event!"
-          echo "ℹ️  Heavy runs nightly or on demand; dispatch it for a release candidate SHA before tagging."
+          echo "OK: Heavy validation checks passed for this event!"
+          echo "INFO: Heavy runs nightly or on demand; dispatch it for a release candidate SHA before tagging."

@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   monitor:
-    name: 📊 CI/CD Health Monitor
+    name: CI/CD Health Monitor
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -43,13 +43,13 @@ jobs:
 
           def summarize(label, runs):
               if not runs:
-                  return f"### {label}\n- ⚠️ No runs found\n"
+                  return f"### {label}\n- No runs found\n"
               total = len(runs)
               passed = sum(1 for r in runs if r.get("conclusion") == "success")
               failed = sum(1 for r in runs if r.get("conclusion") == "failure")
               rate = passed / total * 100 if total > 0 else 0
               avg_dur = sum(r.get("durationMinutes", 0) for r in runs) / total
-              badges = "".join("🟢" if r.get("conclusion")=="success" else "🔴" if r.get("conclusion")=="failure" else "⚪" for r in runs)
+              badges = " ".join("pass" if r.get("conclusion")=="success" else "FAIL" if r.get("conclusion")=="failure" else "-" for r in runs)
               return (
                   f"### {label}\n"
                   f"- Success rate: **{rate:.0f}%** ({passed}/{total}), Failures: {failed}\n"
@@ -62,13 +62,13 @@ jobs:
           cd = fetch_runs("cd.yml", limit=5)
 
           report = (
-              "# 📊 CI/CD Weekly Health Report\n\n"
+              "# CI/CD Weekly Health Report\n\n"
               f"Generated: $(date -u +'%Y-%m-%d %H:%M UTC')\n\n"
-              + summarize("🟢 Fast Gate (ci.yml) — PR/push", fast)
+              + summarize("Fast Gate (ci.yml) — PR/push", fast)
               + "\n"
-              + summarize("🔵 Heavy Validation (ci-heavy.yml) — nightly", heavy)
+              + summarize("Heavy Validation (ci-heavy.yml) — nightly", heavy)
               + "\n"
-              + summarize("🚀 CD Release (cd.yml) — tag-triggered", cd)
+              + summarize("CD Release (cd.yml) — tag-triggered", cd)
               + "\n---\n[View all workflow runs](https://github.com/${{ github.repository }}/actions)\n"
           )
 

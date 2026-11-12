@@ -33,7 +33,7 @@ env:
 
 jobs:
   build-and-release:
-    name: 🚀 Build & Release
+    name: Build & Release
     runs-on: ${{ matrix.os }}
     timeout-minutes: 50
     strategy:
@@ -135,13 +135,13 @@ jobs:
           elif [ -d ghidra_decompiler ]; then
             cp -r ghidra_decompiler release_pkg/
           else
-            echo "ℹ️  No ghidra resource directory found; skipping copy"
+            echo "INFO: No ghidra resource directory found; skipping copy"
           fi
           
           # Runtime resources (sleigh / signatures / ghidra-data). utils/ is
           # committed, so the checkout has it and setup-utils only verifies.
           if [ ! -d utils/sleigh-specs ]; then
-            echo "❌ utils/sleigh-specs missing — the archive would not decompile anything"
+            echo "ERROR: utils/sleigh-specs missing — the archive would not decompile anything"
             exit 1
           fi
           slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
@@ -213,7 +213,7 @@ jobs:
 
   # Release validation job
   release-summary:
-    name: ✅ Release Summary
+    name: Release Summary
     needs: [build-and-release]
     runs-on: ubuntu-latest
     if: always()
@@ -223,10 +223,10 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           if [ "${{ needs.build-and-release.result }}" != "success" ]; then
-            echo "❌ Release build failed"
+            echo "ERROR: Release build failed"
             exit 1
           fi
-          echo "✅ Release artifacts created successfully!"
+          echo "OK: Release artifacts created successfully!"
           echo ""
           echo "Tag: ${RELEASE_TAG}"
           echo "Assets include:"
