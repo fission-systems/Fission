@@ -43,6 +43,11 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   ties-away), and saturation is unchanged. Re-apply with
   `scripts/sleigh/apply_aarch64_fcvt_rounding.py` (needs a `sleigh` compiler of the same
   Ghidra release), then recompile the three `.sla` and refresh `MANIFEST.sha256.json`.
+  The same file also gives each FRINT{A,I,M,N,P,X,Z} mode its own semantics: upstream lifts
+  all seven to `trunc`, a float-to-integer conversion, although FRINT yields a float. Now
+  `floor` for M, `ceil` for P, `round` for A/I/N/X (approximations: no ties-to-even or
+  ties-away, FPCR mode not modelled) and `int2float(trunc(x))` for Z (loses precision for
+  magnitudes at or above 2^63). Re-apply with `scripts/sleigh/apply_aarch64_frint_rounding.py`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 
