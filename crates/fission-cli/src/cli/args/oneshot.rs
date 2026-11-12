@@ -56,6 +56,8 @@ pub struct OneShotArgs {
     pub strings_contains: Option<String>,
     pub strings_sections: Vec<String>,
     pub hex_addr: Option<u64>,
+    /// `decomp --name`: resolved to `address` once the binary is loaded.
+    pub function_name: Option<String>,
     pub search: Option<crate::cli::oneshot::SearchQuery>,
     pub patch: Option<crate::cli::oneshot::PatchRequest>,
     pub arch: Option<String>,
@@ -168,6 +170,7 @@ impl Default for OneShotArgs {
             strings_contains: None,
             strings_sections: Vec::new(),
             hex_addr: None,
+            function_name: None,
             search: None,
             patch: None,
             arch: None,

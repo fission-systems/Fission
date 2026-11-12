@@ -111,6 +111,18 @@ pub const ERROR_CODES: &[CodeInfo] = &[
         summary: "The command terminated abnormally (panic or crash).",
     },
     CodeInfo {
+        code: "function_not_found",
+        kind: ErrorKind::Input,
+        retryable: false,
+        summary: "No discovered function has the requested name.",
+    },
+    CodeInfo {
+        code: "function_ambiguous",
+        kind: ErrorKind::Input,
+        retryable: false,
+        summary: "The requested name stands for several function addresses; pass --addr.",
+    },
+    CodeInfo {
         code: "quality_budget_exceeded",
         kind: ErrorKind::Failed,
         retryable: false,
@@ -159,6 +171,18 @@ impl std::fmt::Display for QualityBudgetExceeded {
 
 impl std::error::Error for QualityBudgetExceeded {}
 
+/// A `--name` selector that did not resolve to exactly one function.
+#[derive(Debug)]
+pub(crate) struct FunctionSelectorError(pub crate::cli::oneshot::NameLookupError);
+
+impl std::fmt::Display for FunctionSelectorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for FunctionSelectorError {}
+
 /// Pick a registry code for an error raised inside the CLI.
 ///
 /// Classification is by error type first and message text second. Text
@@ -171,6 +195,12 @@ pub fn classify_error(error: &anyhow::Error) -> &'static str {
         {
             return "input_not_found";
         }
+    }
+    if let Some(selector) = error.downcast_ref::<FunctionSelectorError>() {
+        return match selector.0 {
+            crate::cli::oneshot::NameLookupError::NotFound(_) => "function_not_found",
+            crate::cli::oneshot::NameLookupError::Ambiguous(..) => "function_ambiguous",
+        };
     }
     if error.downcast_ref::<QualityBudgetExceeded>().is_some() {
         return "quality_budget_exceeded";

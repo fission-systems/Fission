@@ -36,6 +36,7 @@ pub use callgraph::build_protocol_callgraph;
 use callgraph::run_callgraph;
 pub use disasm::to_disasm_response;
 use disasm::{disassemble, disassemble_function};
+pub(crate) use function_select::NameLookupError;
 use functions::print_function_list;
 pub use functions::{build_functions_response, function_info_to_fn_entry};
 use hex::print_hex;
@@ -959,6 +960,21 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             cli.json,
         )?);
     }
+
+    let by_name;
+    let cli = match cli.function_name.as_deref() {
+        Some(name) => {
+            let address = function_select::select_function_address_by_name(&binary, name)
+                .map_err(crate::cli::contract::FunctionSelectorError)?;
+            by_name = OneShotArgs {
+                address: Some(address),
+                function_name: None,
+                ..cli.clone()
+            };
+            &by_name
+        }
+        None => cli,
+    };
 
     if cli.address.is_some() || cli.decomp_all {
         if cli.debug_decomp && !cli.json && !cli.benchmark {

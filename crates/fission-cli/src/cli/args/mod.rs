@@ -1253,6 +1253,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Decomp(decomp) => {
                     let mut args = OneShotArgs::with_binary(decomp.binary);
                     args.address = decomp.addr;
+                    args.function_name = decomp.name;
                     args.project = decomp.project;
                     args.decomp_all =
                         decomp.all || decomp.project || decomp.addresses_file.is_some();
