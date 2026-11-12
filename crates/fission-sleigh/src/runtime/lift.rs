@@ -1265,6 +1265,71 @@ pub(super) mod tests {
         );
     }
 
+    /// Every float operation an AArch64 instruction word lifts to, in p-code order.
+    fn aarch64_float_ops(word: u32) -> Vec<PcodeOpcode> {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&word.to_le_bytes(), 0x100000)
+            .unwrap_or_else(|error| panic!("lift {word:#010x}: {error:#}"));
+        assert_eq!(len, 4);
+        ops.iter()
+            .map(|op| op.opcode)
+            .filter(|opcode| {
+                matches!(
+                    opcode,
+                    PcodeOpcode::FloatFloor
+                        | PcodeOpcode::FloatCeil
+                        | PcodeOpcode::FloatRound
+                        | PcodeOpcode::FloatTrunc
+                        | PcodeOpcode::FloatInt2Float
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn aarch64_frint_rounds_to_a_float_not_to_an_integer() {
+        use PcodeOpcode::{FloatCeil, FloatFloor, FloatInt2Float, FloatRound, FloatTrunc};
+        // `frint<mode> s0, s0`. FRINT rounds to an integral *float*; upstream lifted
+        // every mode to FLOAT_TRUNC, a float-to-integer conversion.
+        let cases: [(&str, u32, &[PcodeOpcode]); 7] = [
+            ("frintm s0, s0", 0x1e25_4000, &[FloatFloor]),
+            ("frintp s0, s0", 0x1e24_c000, &[FloatCeil]),
+            ("frintn s0, s0", 0x1e24_4000, &[FloatRound]),
+            ("frinta s0, s0", 0x1e26_4000, &[FloatRound]),
+            ("frinti s0, s0", 0x1e27_c000, &[FloatRound]),
+            ("frintx s0, s0", 0x1e27_4000, &[FloatRound]),
+            // toward zero has no float-to-float operation: through an integer
+            ("frintz s0, s0", 0x1e25_c000, &[FloatTrunc, FloatInt2Float]),
+        ];
+        for (name, word, expected) in cases {
+            assert_eq!(aarch64_float_ops(word), expected, "{name} ({word:#010x})");
+        }
+    }
+
+    #[test]
+    fn aarch64_frint_vector_rounds_every_lane() {
+        use PcodeOpcode::{FloatCeil, FloatFloor, FloatTrunc};
+        // `frintm v0.4s, v0.4s`, `frintp v0.4s, v0.4s`, `frintz v0.4s, v0.4s`.
+        assert_eq!(
+            aarch64_float_ops(0x4e21_9800),
+            [FloatFloor; 4],
+            "frintm v0.4s"
+        );
+        assert_eq!(
+            aarch64_float_ops(0x4ea1_8800),
+            [FloatCeil; 4],
+            "frintp v0.4s"
+        );
+        let z = aarch64_float_ops(0x4ea1_9800);
+        assert_eq!(
+            z.iter().filter(|op| **op == FloatTrunc).count(),
+            4,
+            "frintz v0.4s: {z:?}"
+        );
+    }
+
     #[test]
     fn aarch64_ands_immediate_decodes_repeated_high_bit_mask() {
         let frontend =
