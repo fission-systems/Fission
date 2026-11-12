@@ -10,7 +10,8 @@ resident session: every call loads and analyses the binary again (median 0.24 s 
 small files, seconds on binaries with thousands of functions). The one thing it
 saves is the optional analyst database described under "Keep your decisions".
 
-In a checkout the built CLI is `target/release/fission_cli`
+`fission_cli skill` prints this guide from the binary you are about to drive, so it
+matches that version. In a checkout the built CLI is `target/release/fission_cli`
 (`cargo build -p fission-cli --release`).
 
 Primary target is x86 and x86-64 ELF, PE and Mach-O. Other architectures decode but
@@ -36,16 +37,17 @@ fission_cli --contract v1 list ./target.bin --json
 | Exit | Meaning | Next step |
 |------|---------|-----------|
 | 0 | Done. A batch with some good items still exits 0; failures are listed in `data`. | Check each item's `error` and `fell_back`. |
-| 1 | No usable result (`all_items_failed`, `unclassified`) | Read `error.message` and the item `error` fields. |
+| 1 | No usable result (`all_items_failed`, `quality_budget_exceeded`, `unclassified`) | Read `error.message` and the item `error` fields. |
 | 2 | Bad arguments (`usage_error`, `json_required`) | Fix the call; `--help` on the subcommand. |
-| 3 | Input missing, unreadable or unsupported | Check the path and the file type. |
-| 4 | Some items failed and `--fail-on-partial` was given | Retry the failed addresses one by one. |
+| 3 | Input missing, unreadable or unsupported (`input_not_found`, `input_unsupported_format`), or a `--name` that did not resolve (`function_not_found`, `function_ambiguous`) | Check the path and the file type; for names, `list` and pass `--addr`. |
+| 4 | Some items failed and `--fail-on-partial` was given (`partial_failure`) | Retry the failed addresses one by one. |
 | 5 | Time limit hit (`function_timeout`, retryable) | Raise `--timeout-ms` or narrow the scope. |
 | 6 | Resources missing (`resource_root_missing`) | Set `--resource-root` or `FISSION_RESOURCE_ROOT`; `fission_cli resources status` shows what resolved. |
 | 70 | The command crashed | Record the command and report it; try another address. |
 
-A file that is not a binary can exit 1 with `unclassified` rather than 3. Read the
-message, not only the code.
+A text file, a truncated header or an empty file is `input_unsupported_format`
+(exit 3). `unclassified` is what is left when no specific code applies yet: read
+`error.message`.
 
 ## Orient, then choose the scope
 
@@ -96,10 +98,13 @@ fission_cli --contract v1 disasm ./target.bin --addr 0x401230 --function --json
 
 ## Decompile
 
-`decomp --addr` takes a hex address only, never a name. Resolve names to addresses
-with `list` first.
+`--addr` takes a hex address. To select by name, use `--name` (exact match; a name
+that stands for several addresses fails with `function_ambiguous` and lists them,
+and a missing one with `function_not_found`). Stripped binaries have no names, so
+use `list` and `--addr` there.
 
 ```bash
+fission_cli --contract v1 decomp ./target.bin --name main --json
 fission_cli --contract v1 decomp ./target.bin --addr 0x401230 --json
 fission_cli --contract v1 decomp ./target.bin --all --limit 20 --json > funcs.json
 fission_cli --contract v1 decomp ./target.bin --addresses-file addrs.txt --json
@@ -136,8 +141,8 @@ fission_cli --contract v1 sandbox ./target.bin --json --max-inst 100000 \
 
 - The budget flags make the run fail when the guest touches libc or syscalls the
   emulator does not model: a small program that calls `fopen` and `fprintf` failed
-  with `unclassified` and "HLE quality budget exceeded" under
-  `--max-hle-misses 0`. Drop the budget flags to see the output, and report the
+  with `quality_budget_exceeded` under `--max-hle-misses 0`; the report is still
+  printed. Drop the budget flags to see the output, and report the
   modelled gaps instead of the verdict.
 - A zero process exit means the sandbox completed, not that the guest accepted the
   input. Read `halt_requested`, the guest `exit_code` and `guest_output.stdout`
