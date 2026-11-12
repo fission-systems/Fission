@@ -27,7 +27,7 @@ jobs:
   #   ci       — .github/**, CI meta, or mixed CI/script edits → pass-gate + sanity
   #   rust     — crates/utils/Cargo/* → affected-package Linux checks (and macOS on main)
   changes:
-    name: 🔎 Detect changes
+    name: Detect changes
     runs-on: ubuntu-latest
     outputs:
       lane: ${{ steps.filter.outputs.lane }}
@@ -210,13 +210,13 @@ jobs:
 
   # Step 1: Security & Lint
   security-check:
-    name: 🔒 Security Check
+    name: Security Check
     needs: [changes]
     if: needs.changes.outputs.run_security == 'true'
     uses: ./.github/workflows/reusable-security-check.yml
 
   lint-format:
-    name: 📋 Lint & Format
+    name: Lint & Format
     needs: [changes]
     if: needs.changes.outputs.run_lint == 'true'
     uses: ./.github/workflows/reusable-lint-format.yml
@@ -227,7 +227,7 @@ jobs:
 
   # scripts/ci-only / scripts-only: syntax + owner boundary scripts (no cargo test matrix)
   script-checks:
-    name: 🧰 Script Checks
+    name: Script Checks
     needs: [changes]
     if: needs.changes.outputs.run_script_checks == 'true'
     runs-on: ubuntu-latest
@@ -247,7 +247,7 @@ jobs:
             exit 0
           fi
           python3 -m py_compile "${py[@]}"
-          echo "✅ py_compile ok (${#py[@]} files)"
+          echo "OK: py_compile ok (${#py[@]} files)"
 
       - name: Shell syntax (scripts/**/*.sh)
         shell: bash
@@ -261,7 +261,7 @@ jobs:
           for f in "${shs[@]}"; do
             bash -n "$f"
           done
-          echo "✅ bash -n ok (${#shs[@]} files)"
+          echo "OK: bash -n ok (${#shs[@]} files)"
 
       - name: Workflow YAML parse (.github/workflows)
         shell: bash
@@ -288,7 +288,7 @@ jobs:
 
   # Anti-overfitting / owner-boundary lint
   pass-gate-lint:
-    name: 🛡️ Pass-Gate Lint (anti-overfitting)
+    name: Pass-Gate Lint (anti-overfitting)
     needs: [changes]
     if: needs.changes.outputs.run_pass_gate == 'true'
     runs-on: ubuntu-latest
@@ -311,22 +311,22 @@ jobs:
             crates/fission-midend-structuring/src/ \
             crates/fission-midend-normalize/src/ 2>/dev/null || true)
           if [ -n "$PATTERN_HITS" ]; then
-            echo "❌ Function/address-specific pattern detected in NIR pipeline:"
+            echo "ERROR: Function/address-specific pattern detected in NIR pipeline:"
             echo "$PATTERN_HITS"
             exit 1
           fi
-          echo "✅ No function/address-specific patterns found in NIR pipeline."
+          echo "OK: No function/address-specific patterns found in NIR pipeline."
 
       - name: Verify MAX_STRUCTURING_PASSES constant is declared
         run: |
           set -euo pipefail
           if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/midend/pass/manager.rs; then
-            echo "❌ MAX_STRUCTURING_PASSES constant missing from midend/pass/manager.rs"
+            echo "ERROR: MAX_STRUCTURING_PASSES constant missing from midend/pass/manager.rs"
             exit 1
           fi
           CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/midend/pass/manager.rs \
                 | grep -oE '[0-9]+' | head -1)
-          echo "✅ MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
+          echo "OK: MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
 
       - name: Owner boundary scan (ADR 0008 / 0011 / 0012)
         run: |
@@ -392,13 +392,13 @@ jobs:
           set -euo pipefail
           if [ "$NIR_RENDER_MIDEND_CHANGED" = "true" ]; then
             if [ "$HAS_TARGETED_TEST" = "true" ]; then
-              echo "✅ Targeted tests included."
+              echo "OK: Targeted tests included."
             else
-              echo "❌ Targeted test missing for NIR/render/midend changes."
+              echo "ERROR: Targeted test missing for NIR/render/midend changes."
               exit 1
             fi
           else
-            echo "ℹ️ No NIR/render/midend changes detected."
+            echo "INFO: No NIR/render/midend changes detected."
           fi
 
       - name: Enforce Sleigh Exact Match Parity
@@ -408,14 +408,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$SLEIGH_CHANGED" = "true" ]; then
-            echo "🔍 Sleigh changes detected. Parity enforcement active via fission-sleigh tests."
+            echo "INFO: Sleigh changes detected. Parity enforcement active via fission-sleigh tests."
           else
-            echo "ℹ️ No Sleigh changes detected."
+            echo "INFO: No Sleigh changes detected."
           fi
 
   # Step 2: Core Tests (Linux)
   test-linux:
-    name: 🧪 Tests (Linux)
+    name: Tests (Linux)
     needs: [changes]
     if: needs.changes.outputs.run_tests == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
@@ -435,7 +435,7 @@ jobs:
   # Keep them out of unrelated Rust changes, but always run them when the
   # dynamic debugger, its CLI surface, or its ELF loader facts change.
   test-linux-debugger:
-    name: 🐛 Native Debugger Tests (Linux)
+    name: Native Debugger Tests (Linux)
     needs: [changes]
     if: needs.changes.outputs.run_debugger_tests == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
@@ -446,7 +446,7 @@ jobs:
       profile: debug
 
   cli-smoke-linux:
-    name: 🧭 CLI Smoke (Linux · PE sample)
+    name: CLI Smoke (Linux · PE sample)
     needs: [changes, test-linux]
     if: needs.changes.outputs.run_cli_smoke == 'true'
     uses: ./.github/workflows/reusable-cli-smoke.yml
@@ -457,7 +457,7 @@ jobs:
   # Release CLI builds are owned by CI Heavy; these jobs keep platform test
   # coverage without compiling the same CLI a second time in Fast Gate.
   test-macos:
-    name: 🧪 Tests (macOS)
+    name: Tests (macOS)
     needs: [changes]
     if: needs.changes.outputs.run_macos_test == 'true'
     uses: ./.github/workflows/reusable-run-tests.yml
@@ -468,7 +468,7 @@ jobs:
 
   # Final summary — lane-aware required jobs
   ci-summary:
-    name: ✅ CI Summary
+    name: CI Summary
     needs:
       [
         changes,
@@ -489,7 +489,7 @@ jobs:
           set -euo pipefail
           CHANGES_RESULT="${{ needs.changes.result }}"
           if [ "$CHANGES_RESULT" != "success" ]; then
-            echo "❌ Change detection failed (result=${CHANGES_RESULT})"
+            echo "ERROR: Change detection failed (result=${CHANGES_RESULT})"
             exit 1
           fi
 
@@ -497,7 +497,7 @@ jobs:
           case "$LANE" in
             docs|scripts|ci|rust) ;;
             *)
-              echo "❌ Change detection returned an unknown lane: '${LANE}'"
+              echo "ERROR: Change detection returned an unknown lane: '${LANE}'"
               exit 1
               ;;
           esac
@@ -508,22 +508,22 @@ jobs:
             local name="$2"
             local result="$3"
             if [ "$enabled" != "true" ]; then
-              echo "ℹ️  ${name} not required (result=${result})"
+              echo "INFO: ${name} not required (result=${result})"
               return 0
             fi
             if [ "$result" = "skipped" ]; then
-              echo "❌ ${name} was required but skipped"
+              echo "ERROR: ${name} was required but skipped"
               return 1
             fi
             if [ "$result" != "success" ]; then
-              echo "❌ ${name} failed (result=${result})"
+              echo "ERROR: ${name} failed (result=${result})"
               return 1
             fi
-            echo "✅ ${name}"
+            echo "OK: ${name}"
           }
 
           if [ "$LANE" = "docs" ]; then
-            echo "✅ docs lane — short-circuit green"
+            echo "OK: docs lane — short-circuit green"
             exit 0
           fi
 
@@ -540,5 +540,5 @@ jobs:
           if [ "$FAILED" -ne 0 ]; then
             exit 1
           fi
-          echo "✅ Fast Gate passed for lane=${LANE}"
-          echo "ℹ️  PR platform tests are deferred to main L0 + L1 Heavy when applicable."
+          echo "OK: Fast Gate passed for lane=${LANE}"
+          echo "INFO: PR platform tests are deferred to main L0 + L1 Heavy when applicable."

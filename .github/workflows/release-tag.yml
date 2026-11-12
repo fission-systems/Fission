@@ -205,7 +205,7 @@ jobs:
           echo "Waiting for fission-linux-x64.tar.gz on ${TAG} (up to ~30m)..."
           for attempt in $(seq 1 60); do
             if gh release view "${TAG}" --repo "${{ github.repository }}"                  --json assets                  --jq '.assets[].name' 2>/dev/null                | grep -qx "fission-linux-x64.tar.gz"; then
-              echo "✓ asset present after ${attempt} attempt(s)"
+              echo "ok: asset present after ${attempt} attempt(s)"
               exit 0
             fi
             sleep 30

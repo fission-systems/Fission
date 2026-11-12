@@ -101,7 +101,7 @@ jobs:
         run: |
           MSRV="${{ steps.msrv.outputs.msrv }}"
           if [ -z "$MSRV" ]; then
-            echo "ℹ️ MSRV not declared in Cargo.toml — check skipped"
+            echo "INFO: MSRV not declared in Cargo.toml — check skipped"
           else
             echo "MSRV validated: Rust $MSRV"
           fi

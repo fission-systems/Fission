@@ -92,7 +92,7 @@ jobs:
 
           lcov = Path("coverage/lcov.info")
           if not lcov.exists():
-              print("⚠️ coverage/lcov.info not found, skipping threshold check")
+              print("WARNING: coverage/lcov.info not found, skipping threshold check")
               sys.exit(0)
 
           # Sum lines for fission-pcode
@@ -111,17 +111,17 @@ jobs:
                       hit_lines += int(line[3:])
 
           if found_lines == 0:
-              print("⚠️ No coverage data found for fission-pcode")
+              print("WARNING: No coverage data found for fission-pcode")
               sys.exit(0)
 
           pct = (hit_lines / found_lines) * 100
           threshold = ${{ inputs.warn_threshold_pct }}
           print(f"fission-pcode coverage: {pct:.1f}% ({hit_lines}/{found_lines} lines)")
           if pct < threshold:
-              print(f"⚠️ Coverage {pct:.1f}% is below warn threshold {threshold}%")
+              print(f"WARNING: Coverage {pct:.1f}% is below warn threshold {threshold}%")
               print("This is a WARNING only — not blocking the build.")
           else:
-              print(f"✅ Coverage {pct:.1f}% meets threshold {threshold}%")
+              print(f"OK: Coverage {pct:.1f}% meets threshold {threshold}%")
           PY
 
       - name: Publish coverage summary
@@ -167,7 +167,7 @@ jobs:
                   pct = (hit / total) * 100
                   lines.append(f"| `{crate}` | {hit} | {total} | {pct:.1f}% |")
           else:
-              lines.append("⚠️ No LCOV data found.")
+              lines.append("WARNING: No LCOV data found.")
 
           if step_summary:
               with open(step_summary, "a", encoding="utf-8") as f:

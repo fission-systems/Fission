@@ -90,9 +90,9 @@ jobs:
             echo "binary_path=$BINARY_PATH" >> $GITHUB_OUTPUT
             echo "binary_name=$BINARY_NAME" >> $GITHUB_OUTPUT
             echo "size=$SIZE" >> $GITHUB_OUTPUT
-            echo "✓ Binary ready: $BINARY_PATH ($SIZE)"
+            echo "ok: Binary ready: $BINARY_PATH ($SIZE)"
           else
-            echo "✗ Binary not found: $BINARY_PATH"
+            echo "error: Binary not found: $BINARY_PATH"
             exit 1
           fi
 
