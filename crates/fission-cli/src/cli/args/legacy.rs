@@ -234,6 +234,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         strings_contains: None,
         strings_sections: Vec::new(),
         hex_addr: None,
+        function_name: None,
         search: None,
         patch: None,
         arch: None,

@@ -28,6 +28,7 @@ The CLI is intentionally split into explicit subcommands:
 - `script` (Rhai)
 - `debug` (headless emulation and platform-native debugger commands)
 - `db` (saved analyst decisions, history, undo/redo, and comparison)
+- `skill` (the agent usage guide, compiled into the binary)
 
 Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
 
@@ -199,6 +200,17 @@ Use `--function` when you want function boundaries instead of a fixed number of 
 ```bash
 fission_cli decomp app.exe --addr 0x140001000
 ```
+
+A function the binary names can be selected by exact name instead of address:
+
+```bash
+fission_cli decomp app.exe --name main
+```
+
+`--name` cannot be combined with `--addr`. A name that no discovered function
+has fails with `function_not_found`; a name that stands for several addresses
+fails with `function_ambiguous` and lists them, and you pass one with `--addr`.
+Stripped binaries have no names to select by; use `list` and `--addr`.
 
 Common variants:
 
@@ -1086,6 +1098,18 @@ deletion remaps physical lines and abstains on ambiguous repeated text. No code 
 `line_mappings_hir` JSON fields were removed with the NIR/HIR split
 ([ADR 0015](adr/0015-single-output-surface.md)); `--layer` is still accepted
 and ignored.
+
+## Agent guide (`skill`)
+
+```bash
+fission_cli skill
+```
+
+Prints `skills/fission/SKILL.md`, compiled into the binary, so an agent reads the
+guide that matches the version it is about to drive. A unit test checks every
+`fission_cli ...` line in the guide against the real command tree (subcommands,
+nested subcommands, flags) and every error code it names against the registry,
+so a renamed flag fails CI instead of an agent's session.
 
 ## Machine contract (`--contract v1`)
 

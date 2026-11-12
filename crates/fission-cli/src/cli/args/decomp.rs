@@ -11,11 +11,11 @@ use std::path::PathBuf;
         // `--addresses-file`, which names a different set of functions to
         // assemble.
         .multiple(true)
-        .args(["addr", "all", "addresses_file", "project"])
+        .args(["addr", "name", "all", "addresses_file", "project"])
 ))]
 #[command(
-    long_about = "Decompile one function, an explicit address file, or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` for focused analysis and `--addresses-file` for benchmark/operator batches that should reuse one loaded binary. Use `--all` only for bounded batch-style local runs.\n\nBy default, batch selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
-    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --addresses-file addrs.txt --json\n  fission_cli decomp app.exe --all --limit 10 --json\n  fission_cli decomp app.exe --all --include-nonuser-functions --json"
+    long_about = "Decompile one function, an explicit address file, or all discovered functions.\n\nThis is the canonical human-facing decompilation entrypoint. Use `--addr` (or `--name` for a symbol the binary carries) for focused analysis and `--addresses-file` for benchmark/operator batches that should reuse one loaded binary. Use `--all` only for bounded batch-style local runs.\n\nBy default, batch selection filters imported functions and the zero-size `register_frame_ctor` runtime wrapper. Use `--include-nonuser-functions` to restore compatibility/forensics coverage.",
+    after_help = "Examples:\n  fission_cli decomp app.exe --addr 0x140001000\n  fission_cli decomp app.exe --name main\n  fission_cli decomp app.exe --addr 0x140001000 --ghidra-compat\n  fission_cli decomp app.exe --addresses-file addrs.txt --json\n  fission_cli decomp app.exe --all --limit 10 --json\n  fission_cli decomp app.exe --all --include-nonuser-functions --json"
 )]
 pub struct DecompArgs {
     /// Path to the binary file to analyze
@@ -25,6 +25,11 @@ pub struct DecompArgs {
     /// Decompile function at specific address
     #[arg(long, value_parser = parse_hex_address)]
     pub addr: Option<u64>,
+
+    /// Decompile the function with this exact name (see `list`); a name that
+    /// is not found, or that stands for several addresses, is an error
+    #[arg(long, value_name = "NAME", conflicts_with = "addr")]
+    pub name: Option<String>,
 
     /// Decompile all discovered functions
     #[arg(long)]

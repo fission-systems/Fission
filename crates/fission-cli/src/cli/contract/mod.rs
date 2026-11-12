@@ -11,6 +11,7 @@ mod schema;
 mod supervisor;
 
 pub use errors::{ERROR_CODES, ErrorKind, classify_error};
+pub(crate) use errors::{FunctionSelectorError, QualityBudgetExceeded};
 pub use schema::run_schema;
 pub use supervisor::{emit_child_error, is_child, maybe_supervise};
 

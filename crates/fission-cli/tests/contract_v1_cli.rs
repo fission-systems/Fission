@@ -114,3 +114,92 @@ fn schema_subcommand_describes_the_envelope_and_error_codes() {
 
     assert_ne!(cli(&["schema", "no-such-command"]).status.code(), Some(0));
 }
+
+#[test]
+fn a_file_that_is_not_an_executable_is_an_unsupported_input_with_exit_3() {
+    let dir = std::env::temp_dir().join(format!("fission-contract-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("not_a_binary.txt");
+    std::fs::write(&path, b"hello, this is text\n").expect("write input");
+
+    let output = cli(&[
+        "--contract",
+        "v1",
+        "list",
+        path.to_str().expect("utf-8 path"),
+        "--json",
+    ]);
+    let body = envelope(&output);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["error"]["code"], "input_unsupported_format");
+    assert_eq!(body["error"]["kind"], "input");
+    assert_eq!(output.status.code(), Some(3));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn switch_fixture() -> String {
+    format!(
+        "{}/../fission-sleigh/testdata/x64_pie_relative_switch.elf",
+        env!("CARGO_MANIFEST_DIR")
+    )
+}
+
+fn decompiled_code(args: &[&str]) -> (String, String) {
+    let body = envelope(&cli(args));
+    assert_eq!(body["ok"], true, "{body}");
+    let item = &body["data"][0];
+    (
+        item["address"].as_str().expect("address").to_string(),
+        item["code"].as_str().expect("code").to_string(),
+    )
+}
+
+#[test]
+fn decomp_by_name_is_decomp_by_the_address_that_name_stands_for() {
+    let fixture = switch_fixture();
+    let by_name = decompiled_code(&[
+        "--contract",
+        "v1",
+        "decomp",
+        &fixture,
+        "--name",
+        "dispatch",
+        "--json",
+    ]);
+    let by_addr = decompiled_code(&[
+        "--contract",
+        "v1",
+        "decomp",
+        &fixture,
+        "--addr",
+        "0x1000",
+        "--json",
+    ]);
+    assert_eq!(by_name.0, "0x1000");
+    assert_eq!(by_name, by_addr);
+}
+
+#[test]
+fn decomp_of_an_unknown_name_is_function_not_found_with_exit_3() {
+    let fixture = switch_fixture();
+    let output = cli(&[
+        "--contract",
+        "v1",
+        "decomp",
+        &fixture,
+        "--name",
+        "no_such_function",
+        "--json",
+    ]);
+    let body = envelope(&output);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["error"]["code"], "function_not_found");
+    assert_eq!(output.status.code(), Some(3));
+}
+
+#[test]
+fn name_and_addr_together_are_a_usage_error() {
+    let fixture = switch_fixture();
+    let output = cli(&["decomp", &fixture, "--name", "dispatch", "--addr", "0x1000"]);
+    assert_eq!(output.status.code(), Some(2));
+}

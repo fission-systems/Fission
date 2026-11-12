@@ -111,6 +111,24 @@ pub const ERROR_CODES: &[CodeInfo] = &[
         summary: "The command terminated abnormally (panic or crash).",
     },
     CodeInfo {
+        code: "function_not_found",
+        kind: ErrorKind::Input,
+        retryable: false,
+        summary: "No discovered function has the requested name.",
+    },
+    CodeInfo {
+        code: "function_ambiguous",
+        kind: ErrorKind::Input,
+        retryable: false,
+        summary: "The requested name stands for several function addresses; pass --addr.",
+    },
+    CodeInfo {
+        code: "quality_budget_exceeded",
+        kind: ErrorKind::Failed,
+        retryable: false,
+        summary: "A sandbox run exceeded a quality budget (unmodelled libc or syscalls); the report was still printed.",
+    },
+    CodeInfo {
         code: "unclassified",
         kind: ErrorKind::Failed,
         retryable: false,
@@ -139,6 +157,32 @@ pub fn registry_json() -> Value {
     json!({ "contract": super::CONTRACT_ID, "error_codes": codes })
 }
 
+/// A `--fail-on-budget` sandbox run went over its HLE or opcode budget.
+///
+/// Carried as a typed error so the code does not depend on the message text.
+#[derive(Debug)]
+pub(crate) struct QualityBudgetExceeded(pub String);
+
+impl std::fmt::Display for QualityBudgetExceeded {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for QualityBudgetExceeded {}
+
+/// A `--name` selector that did not resolve to exactly one function.
+#[derive(Debug)]
+pub(crate) struct FunctionSelectorError(pub crate::cli::oneshot::NameLookupError);
+
+impl std::fmt::Display for FunctionSelectorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl std::error::Error for FunctionSelectorError {}
+
 /// Pick a registry code for an error raised inside the CLI.
 ///
 /// Classification is by error type first and message text second. Text
@@ -152,7 +196,33 @@ pub fn classify_error(error: &anyhow::Error) -> &'static str {
             return "input_not_found";
         }
     }
-    classify_message(&format!("{error:#}"))
+    if let Some(selector) = error.downcast_ref::<FunctionSelectorError>() {
+        return match selector.0 {
+            crate::cli::oneshot::NameLookupError::NotFound(_) => "function_not_found",
+            crate::cli::oneshot::NameLookupError::Ambiguous(..) => "function_ambiguous",
+        };
+    }
+    if error.downcast_ref::<QualityBudgetExceeded>().is_some() {
+        return "quality_budget_exceeded";
+    }
+    let by_text = classify_message(&format!("{error:#}"));
+    if by_text != "unclassified" {
+        return by_text;
+    }
+    // The loader is the only owner of `FissionError::Loader`: it means the bytes
+    // could not be turned into a binary (unknown magic, truncated header, a range
+    // outside the file). That is a property of the input, whatever the wording.
+    let loader_rejected = error.chain().any(|cause| {
+        matches!(
+            cause.downcast_ref::<fission_core::FissionError>(),
+            Some(fission_core::FissionError::Loader(_))
+        )
+    });
+    if loader_rejected {
+        "input_unsupported_format"
+    } else {
+        "unclassified"
+    }
 }
 
 pub(crate) fn classify_message(message: &str) -> &'static str {
@@ -218,6 +288,42 @@ mod tests {
             "function_timeout"
         );
         assert_eq!(classify_message("something else entirely"), "unclassified");
+    }
+
+    #[test]
+    fn loader_rejections_are_unsupported_input_not_unclassified() {
+        // The loader raises `FissionError::Loader` with these texts for a file that
+        // is not a loadable executable; the CLI wraps them in "failed to parse
+        // binary". None of them contains a phrase the text classifier knows.
+        for message in [
+            "UnsupportedFormat: unknown binary format",
+            "Binary too small",
+            "byte range out of bounds at 0x14",
+        ] {
+            let error = anyhow::Error::new(fission_core::FissionError::loader(message))
+                .context("failed to parse binary `/tmp/x`");
+            assert_eq!(
+                classify_error(&error),
+                "input_unsupported_format",
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_loader_error_stays_unclassified() {
+        let error = anyhow::Error::new(fission_core::FissionError::Other("boom".into()));
+        assert_eq!(classify_error(&error), "unclassified");
+    }
+
+    #[test]
+    fn a_sandbox_budget_overrun_has_its_own_code() {
+        let error = anyhow::Error::new(QualityBudgetExceeded(
+            "HLE quality budget exceeded: hle_misses=5 (max 0)".into(),
+        ));
+        assert_eq!(classify_error(&error), "quality_budget_exceeded");
+        let info = lookup("quality_budget_exceeded").expect("registered");
+        assert_eq!(info.kind, ErrorKind::Failed);
     }
 
     #[test]
