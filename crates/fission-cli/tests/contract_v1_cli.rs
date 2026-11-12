@@ -114,3 +114,25 @@ fn schema_subcommand_describes_the_envelope_and_error_codes() {
 
     assert_ne!(cli(&["schema", "no-such-command"]).status.code(), Some(0));
 }
+
+#[test]
+fn a_file_that_is_not_an_executable_is_an_unsupported_input_with_exit_3() {
+    let dir = std::env::temp_dir().join(format!("fission-contract-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let path = dir.join("not_a_binary.txt");
+    std::fs::write(&path, b"hello, this is text\n").expect("write input");
+
+    let output = cli(&[
+        "--contract",
+        "v1",
+        "list",
+        path.to_str().expect("utf-8 path"),
+        "--json",
+    ]);
+    let body = envelope(&output);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["error"]["code"], "input_unsupported_format");
+    assert_eq!(body["error"]["kind"], "input");
+    assert_eq!(output.status.code(), Some(3));
+    let _ = std::fs::remove_dir_all(&dir);
+}

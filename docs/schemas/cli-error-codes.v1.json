@@ -72,6 +72,13 @@
       "summary": "The command terminated abnormally (panic or crash)."
     },
     {
+      "code": "quality_budget_exceeded",
+      "exit_code": 1,
+      "kind": "failed",
+      "retryable": false,
+      "summary": "A sandbox run exceeded a quality budget (unmodelled libc or syscalls); the report was still printed."
+    },
+    {
       "code": "unclassified",
       "exit_code": 1,
       "kind": "failed",
