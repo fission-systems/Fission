@@ -694,7 +694,9 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
             .as_ref()
             .and_then(|b| b.error.clone())
             .unwrap_or_else(|| "quality budget exceeded".into());
-        anyhow::bail!("{err}");
+        return Err(anyhow::Error::new(
+            crate::cli::contract::QualityBudgetExceeded(err),
+        ));
     }
 
     if let Some(path) = args.srd_out {

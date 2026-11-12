@@ -10,6 +10,7 @@ mod errors;
 mod schema;
 mod supervisor;
 
+pub(crate) use errors::QualityBudgetExceeded;
 pub use errors::{ERROR_CODES, ErrorKind, classify_error};
 pub use schema::run_schema;
 pub use supervisor::{emit_child_error, is_child, maybe_supervise};

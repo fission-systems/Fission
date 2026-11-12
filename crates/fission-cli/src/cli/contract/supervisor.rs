@@ -376,6 +376,12 @@ fn hint_for(code: &str) -> Option<&'static str> {
         }
         "resource_root_missing" => Some("Set --resource-root or FISSION_RESOURCE_ROOT."),
         "function_timeout" => Some("Retry with a larger --timeout-ms."),
+        "input_unsupported_format" => Some(
+            "The file is not a loadable executable; use --language for raw images, or unpack/extract it first.",
+        ),
+        "quality_budget_exceeded" => Some(
+            "The guest used libc or syscalls the emulator does not model; rerun without the budget flags to see the output.",
+        ),
         _ => None,
     }
 }
