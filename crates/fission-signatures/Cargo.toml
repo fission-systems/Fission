@@ -24,4 +24,3 @@ once_cell = "1.21"
 quick-xml = "0.41"
 
 [dev-dependencies]
-criterion = "0.5"
