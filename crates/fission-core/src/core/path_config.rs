@@ -715,24 +715,43 @@ impl PathConfig {
     /// listing everything and letting that answer decide uses the whole bundle
     /// and cannot load an AArch64 database for an x86 program.
     pub fn all_fid_database_paths(&self) -> Vec<PathBuf> {
-        let Some(ref dir) = self.fid_dir else {
-            return Vec::new();
-        };
+        let mut paths = self
+            .fid_dir
+            .as_deref()
+            .map(Self::fid_databases_in_dir)
+            .unwrap_or_default();
+        // The user's own directories come after the bundle, so a database the
+        // bundle names keeps its position; the language check downstream still
+        // decides which of them apply to the program.
+        for dir in crate::resource_roots::user_signature_dirs() {
+            for path in Self::fid_databases_in_dir(&dir) {
+                if !paths.contains(&path) {
+                    paths.push(path);
+                }
+            }
+        }
+        paths
+    }
+
+    /// The FID databases in one directory: a packed `<stem>.fn.fpk` (named by the
+    /// `.fidbf` the loaders expect, which resolves its packed siblings) or a bare
+    /// `.fidbf`. Sorted, so the order never depends on the filesystem.
+    pub(crate) fn fid_databases_in_dir(dir: &Path) -> Vec<PathBuf> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return Vec::new();
         };
         let mut paths: Vec<PathBuf> = entries
             .flatten()
             .filter_map(|entry| {
-                // `<stem>.fn.fpk` is the table every database has; the others
-                // are optional. Name the `.fidbf` the loaders expect -- they
-                // resolve the packed siblings from it.
                 let name = entry.file_name().into_string().ok()?;
-                let stem = name.strip_suffix(".fn.fpk")?;
-                Some(dir.join(format!("{stem}.fidbf")))
+                if let Some(stem) = name.strip_suffix(".fn.fpk") {
+                    return Some(dir.join(format!("{stem}.fidbf")));
+                }
+                name.ends_with(".fidbf").then(|| dir.join(&name))
             })
             .collect();
         paths.sort();
+        paths.dedup();
         paths
     }
 

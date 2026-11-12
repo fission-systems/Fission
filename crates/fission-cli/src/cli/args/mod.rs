@@ -112,6 +112,13 @@ struct CliArgs {
     #[arg(long = "resource-root", global = true, value_name = "DIR")]
     resource_root: Option<PathBuf>,
 
+    /// Add a directory of FID signature databases (`*.fn.fpk` packs or `*.fidbf`),
+    /// searched after the bundled ones. Repeatable. Also read from
+    /// FISSION_SIGNATURE_PATH (a platform path list). A directory that does not
+    /// exist is an error, not a silent no-op.
+    #[arg(long = "signature-path", global = true, value_name = "DIR")]
+    signature_path: Vec<PathBuf>,
+
     /// Force a specific SLEIGH language ID (`processor:endian:size:variant`,
     /// e.g. `PIC:LE:16:default`) instead of auto-detecting one from the
     /// binary's container format. Every language Fission's own lifter can
@@ -1062,6 +1069,7 @@ where
     if should_use_canonical_parser(&argv) {
         let cli = CliArgs::parse_from(argv);
         fission_core::resource_roots::set_cli_resource_bundle_root(cli.resource_root.clone());
+        fission_core::resource_roots::set_cli_signature_paths(cli.signature_path.clone());
         let language_override = cli.language.clone();
         let arch = cli.arch.clone();
         let analysis_db = cli.analysis_db.clone();

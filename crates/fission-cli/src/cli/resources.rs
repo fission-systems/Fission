@@ -16,6 +16,17 @@ pub fn print_resources_status(json: bool) -> Result<()> {
         println!("  [{}] {} ({})", r.kind, r.path, state);
     }
 
+    if !snap.signature_paths.is_empty() {
+        println!("\nUser signature paths:");
+        for p in &snap.signature_paths {
+            let state = if p.exists { "exists" } else { "MISSING" };
+            println!(
+                "  {} ({}, {} FID databases)",
+                p.path, state, p.fid_databases
+            );
+        }
+    }
+
     println!("\nResolved resources:");
     let res = &snap.resources;
     println!("  signatures_base: {:?}", res.signatures_base);

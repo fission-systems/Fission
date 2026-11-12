@@ -227,7 +227,10 @@ pub fn classify_error(error: &anyhow::Error) -> &'static str {
 
 pub(crate) fn classify_message(message: &str) -> &'static str {
     let lower = message.to_lowercase();
-    if lower.contains("does not exist") || lower.contains("no such file") {
+    if lower.contains("does not exist")
+        || lower.contains("no such file")
+        || lower.contains("is not a directory")
+    {
         "input_not_found"
     } else if lower.contains("not in recognized object file format")
         || lower.contains("unknown file magic")

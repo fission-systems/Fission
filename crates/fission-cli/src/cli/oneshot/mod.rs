@@ -238,6 +238,8 @@ pub fn main() -> Result<()> {
 
 fn run() -> Result<()> {
     let parsed = parse_oneshot_args();
+    fission_core::resource_roots::validate_user_signature_dirs()
+        .map_err(|message| anyhow::anyhow!(message))?;
     match parsed {
         ParsedInvocation::ResourcesStatus { json, verbose } => {
             let mut logging_options =
