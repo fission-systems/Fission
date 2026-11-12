@@ -614,7 +614,7 @@ fn infer_branchind_jump_table_targets(
     memory_context: &DecodeMemoryContext,
     little_endian: bool,
 ) -> Vec<u64> {
-    const MAX_JUMP_TABLE_CASES: u64 = 256;
+    const MAX_JUMP_TABLE_CASES: u64 = 4096;
 
     let defs = collect_defs(decoded, current_ops);
     jump_table_targets_from(
@@ -645,7 +645,7 @@ fn jump_table_targets_from(
     little_endian: bool,
     current_ops: &[PcodeOp],
 ) -> Vec<u64> {
-    const MAX_JUMP_TABLE_CASES: u64 = 256;
+    const MAX_JUMP_TABLE_CASES: u64 = 4096;
     // A scaled-offset table first: its shape starts with an `IntAdd`, which
     // the address-table walker below does not descend, so ARM's `tbb`/`tbh`
     // produced no targets at all and the decode stopped at the dispatch --
@@ -948,7 +948,7 @@ pub fn resolve_indirect_branch_targets(
     memory_context: &DecodeMemoryContext,
     little_endian: bool,
 ) -> BTreeMap<u64, Vec<u64>> {
-    const MAX_JUMP_TABLE_CASES: u64 = 256;
+    const MAX_JUMP_TABLE_CASES: u64 = 4096;
     // Keyed by the `BranchInd` instruction's own address, not flattened, so
     // the caller can wire each dispatch's *own* targets as its CFG successors
     // (`attach_inferred_indirect_edges`) rather than only seeding the decode
