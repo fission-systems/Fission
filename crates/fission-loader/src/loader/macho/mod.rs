@@ -73,7 +73,8 @@ impl MachoLoader {
         let cputype = header.cputype;
 
         let mut sections_info = Vec::new();
-        let mut section_exec_map: Vec<bool> = Vec::new(); // 1-based n_sect -> is_executable
+        // 1-based n_sect -> the address range of an instruction section, `None` otherwise.
+        let mut section_code_ranges: Vec<Option<(u64, u64)>> = Vec::new();
         let mut section_relocs = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
@@ -115,7 +116,7 @@ impl MachoLoader {
                     // the same segment. Section instruction flags are the code
                     // ownership signal Ghidra's symbol classifiers rely on.
                     let is_executable = macho_section_has_instructions(sect.flags);
-                    section_exec_map.push(is_executable);
+                    section_code_ranges.push(is_executable.then_some((sect.addr, sect.size)));
                     section_relocs.push(MachoSectionRelocInfo {
                         virtual_address: sect.addr,
                         virtual_size: sect.size,
@@ -184,7 +185,7 @@ impl MachoLoader {
                 bytes,
                 symtab,
                 endian,
-                &section_exec_map,
+                &section_code_ranges,
                 &mut functions_info,
                 &mut global_symbols,
             );
@@ -288,7 +289,7 @@ impl MachoLoader {
         let is_64bit = false;
         let cputype = header.cputype;
         let mut sections_info = Vec::new();
-        let mut section_exec_map = Vec::new();
+        let mut section_code_ranges = Vec::new();
         let mut section_relocs = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
@@ -314,7 +315,8 @@ impl MachoLoader {
                     let sect = Section32::parse(&reader, section_offset)?;
                     section_offset += Section32::SIZE;
                     let is_executable = macho_section_has_instructions(sect.flags);
-                    section_exec_map.push(is_executable);
+                    section_code_ranges
+                        .push(is_executable.then_some((sect.addr as u64, sect.size as u64)));
                     section_relocs.push(MachoSectionRelocInfo {
                         virtual_address: sect.addr as u64,
                         virtual_size: sect.size as u64,
@@ -364,7 +366,7 @@ impl MachoLoader {
                 bytes,
                 symtab,
                 endian,
-                &section_exec_map,
+                &section_code_ranges,
                 &mut functions_info,
                 &mut global_symbols,
             );
@@ -410,7 +412,7 @@ impl MachoLoader {
         data: &[u8],
         symtab: &SymtabCommand,
         endian: Endian,
-        section_exec_map: &[bool],
+        section_code_ranges: &[Option<(u64, u64)>],
         out: &mut Vec<FunctionInfo>,
         global_symbols: &mut HashMap<u64, String>,
     ) {
@@ -435,7 +437,7 @@ impl MachoLoader {
                     // Only keep symbols that belong to executable sections.
                     // n_sect is 1-based across all sections in Mach-O.
                     let sect_index = nlist.n_sect as usize;
-                    if sect_index == 0 || sect_index > section_exec_map.len() {
+                    if sect_index == 0 || sect_index > section_code_ranges.len() {
                         continue;
                     }
                     // Extract name using shared utility function
@@ -454,7 +456,10 @@ impl MachoLoader {
                     };
 
                     let is_external = (nlist.n_type & 0x01) != 0;
-                    if section_exec_map[sect_index - 1] {
+                    if symbol_is_inside_code_section(
+                        section_code_ranges[sect_index - 1],
+                        nlist.n_value,
+                    ) {
                         out.push(FunctionInfo {
                             name: final_name,
                             address: nlist.n_value,
@@ -585,7 +590,7 @@ impl MachoLoader {
         data: &[u8],
         symtab: &SymtabCommand,
         endian: Endian,
-        section_exec_map: &[bool],
+        section_code_ranges: &[Option<(u64, u64)>],
         out: &mut Vec<FunctionInfo>,
         global_symbols: &mut HashMap<u64, String>,
     ) {
@@ -601,7 +606,7 @@ impl MachoLoader {
                 continue;
             }
             let sect_index = nlist.n_sect as usize;
-            if sect_index == 0 || sect_index > section_exec_map.len() {
+            if sect_index == 0 || sect_index > section_code_ranges.len() {
                 continue;
             }
             let name_offset = (symtab.stroff as usize).checked_add(nlist.n_strx as usize);
@@ -615,7 +620,10 @@ impl MachoLoader {
                 normalize_macho_symbol_name(&extracted_name)
             };
             let is_external = (nlist.n_type & 0x01) != 0;
-            if section_exec_map[sect_index - 1] {
+            if symbol_is_inside_code_section(
+                section_code_ranges[sect_index - 1],
+                nlist.n_value as u64,
+            ) {
                 out.push(FunctionInfo {
                     name: final_name,
                     address: nlist.n_value as u64,
@@ -756,6 +764,14 @@ impl MachoLoader {
         }
         String::new()
     }
+}
+
+/// A symbol names code only if it points inside its instruction section.
+/// `__mh_execute_header` is the counterexample that motivates this: it is
+/// defined in `__text`'s section number but at the segment start, on the Mach-O
+/// header, so it was listed as a function that could not be decompiled.
+fn symbol_is_inside_code_section(range: Option<(u64, u64)>, address: u64) -> bool {
+    range.is_some_and(|(start, size)| address >= start && address - start < size)
 }
 
 fn normalize_macho_symbol_name(name: &str) -> String {
@@ -1206,7 +1222,7 @@ mod tests {
             &data,
             &symtab,
             Endian::Little,
-            &[true, false],
+            &[Some((0, 0x40)), None],
             &mut functions,
             &mut globals,
         );
@@ -1219,6 +1235,39 @@ mod tests {
             globals.get(&0xa0).map(String::as_str),
             Some("llvm_smoke_sink")
         );
+    }
+
+    #[test]
+    fn macho_header_symbol_numbered_in_text_is_not_a_function() {
+        // `__mh_execute_header` carries `__text`'s section number but sits at
+        // the segment start, on the Mach-O header, before `__text` begins.
+        let mut data = Vec::new();
+        push_nlist64(&mut data, 1, 0x0f, 1, 0x1_0000_0000);
+        push_nlist64(&mut data, 21, 0x0f, 1, 0x1_0000_04b0);
+        let stroff = data.len() as u32;
+        data.extend_from_slice(b"\0__mh_execute_header\0_sum_to\0");
+        let symtab = SymtabCommand {
+            cmd: 0,
+            cmdsize: 0,
+            symoff: 0,
+            nsyms: 2,
+            stroff,
+            strsize: (data.len() as u32).saturating_sub(stroff),
+        };
+        let mut functions = Vec::<FunctionInfo>::new();
+        let mut globals = HashMap::new();
+
+        MachoLoader::parse_symbols_64(
+            &data,
+            &symtab,
+            Endian::Little,
+            &[Some((0x1_0000_04b0, 0x100))],
+            &mut functions,
+            &mut globals,
+        );
+
+        let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["sum_to"], "{functions:?}");
     }
 
     #[test]
@@ -1247,7 +1296,7 @@ mod tests {
             &data,
             &symtab,
             Endian::Little,
-            &[false, false],
+            &[None, None],
             &mut functions,
             &mut globals,
         );
@@ -1436,7 +1485,7 @@ mod tests {
         data.resize(str_off, 0);
         data.extend_from_slice(b"\0_exported_fn\0_local_fn\0_stab_sym\0");
 
-        let section_exec_map = vec![true];
+        let section_code_ranges = vec![Some((0x1000, 0x2000))];
         let mut functions = Vec::new();
         let mut global_symbols = HashMap::new();
 
@@ -1453,7 +1502,7 @@ mod tests {
             &data,
             &symtab,
             Endian::Little,
-            &section_exec_map,
+            &section_code_ranges,
             &mut functions,
             &mut global_symbols,
         );
