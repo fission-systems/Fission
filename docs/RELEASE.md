@@ -17,7 +17,7 @@ A tagged release is eligible when:
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
   - `fission-<target>.tar.gz` (`.zip` on Windows) for the five targets below, each `bin/fission_cli` plus `share/fission/`
   - `fission-resources.tar.gz` (the `share/fission/` tree alone, for `cargo install` users)
-  - `fission-cli.rb` (the Homebrew formula for the tag; pushed to `fission-systems/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set)
+  - `fission-cli.rb` (the Homebrew formula for the tag; [`fission-systems/homebrew-tap`](https://github.com/fission-systems/homebrew-tap) copies it from the latest release hourly; run its *Update formula* workflow to publish immediately)
   - Linux benchmark CLI: `fission_cli-x86_64-unknown-linux-gnu` (binary-only convenience asset)
   - a `.sha256` beside every file
 - The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.

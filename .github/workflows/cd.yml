@@ -256,29 +256,6 @@ jobs:
           draft: false
           prerelease: false
 
-      # Optional: needs a token with contents:write on the tap repository.
-      # Without it the formula is still attached to the release.
-      - name: Update Homebrew tap (optional)
-        if: env.PUBLISH == 'true'
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${TAP_TOKEN:-}" ]]; then
-            echo "HOMEBREW_TAP_TOKEN not set; fission-cli.rb is on the release for a manual tap update."
-            exit 0
-          fi
-          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/fission-systems/homebrew-tap.git" tap
-          mkdir -p tap/Formula
-          cp dist/fission-cli.rb tap/Formula/fission-cli.rb
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Formula/fission-cli.rb
-          if git diff --cached --quiet; then
-            echo "formula unchanged"
-            exit 0
-          fi
-          git commit -m "fission-cli ${RELEASE_TAG}"
-          git push origin HEAD
+      # fission-systems/homebrew-tap pulls fission-cli.rb from the latest
+      # release on its own schedule (its update-formula.yml), so publishing
+      # the formula here needs no cross-repository credential.
