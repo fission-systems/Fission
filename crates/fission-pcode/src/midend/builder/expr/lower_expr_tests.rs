@@ -3642,3 +3642,286 @@ fn setcc_after_a_call_reads_the_post_call_register() {
         "the post-call setcc must reach the and, not the pre-call constant:\n{code}"
     );
 }
+
+/// `sete dl` keeps the ZF of the compare before it; a later instruction
+/// rewrites ZF before EDX is read whole. Lane reassembly rebuilt DL from the
+/// `sete`'s input and so read the *later* ZF at the wide read (compiler-rt's
+/// `__floatunsisf`: `sete %dl; shr; xor; not %edx` computed `~ZF(shr)`).
+#[test]
+fn setcc_lane_keeps_the_flag_it_captured() {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let rax = register(0x0, 8);
+    let eax = register(0x0, 4);
+    let rdx = register(0x10, 8);
+    let edx = register(0x10, 4);
+    let dl = register(0x10, 1);
+    let edi = register(0x38, 4);
+    let esi = register(0x30, 4);
+    let zf = register(0x206, 1);
+    let diff = Varnode {
+        size: 4,
+        ..varnode(0x9000)
+    };
+    let shift_zero = Varnode {
+        size: 1,
+        ..varnode(0x9100)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // xor edx, edx
+            op(
+                0,
+                PcodeOpcode::IntXor,
+                Some(edx.clone()),
+                vec![edx.clone(), edx.clone()],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(rdx.clone()),
+                vec![edx.clone()],
+            ),
+            // cmp edi, esi ; sete dl
+            op(
+                2,
+                PcodeOpcode::IntSub,
+                Some(diff.clone()),
+                vec![edi.clone(), esi.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntEqual,
+                Some(zf.clone()),
+                vec![diff, constant_sized(0, 4)],
+            ),
+            op(4, PcodeOpcode::Copy, Some(dl), vec![zf.clone()]),
+            // shr edi, 1 -- rewrites ZF
+            op(
+                5,
+                PcodeOpcode::IntRight,
+                Some(eax.clone()),
+                vec![edi, constant_sized(1, 4)],
+            ),
+            // A shift by a register count keeps the old ZF when the count
+            // is zero, so its ZF reads the previous one.
+            op(
+                6,
+                PcodeOpcode::IntEqual,
+                Some(shift_zero.clone()),
+                vec![eax.clone(), constant_sized(0, 4)],
+            ),
+            op(
+                13,
+                PcodeOpcode::BoolAnd,
+                Some(zf.clone()),
+                vec![zf.clone(), shift_zero],
+            ),
+            op(7, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax]),
+            // a branch reads the new ZF, so it is materialized
+            op(
+                8,
+                PcodeOpcode::CBranch,
+                None,
+                vec![
+                    Varnode {
+                        space_id: 3,
+                        offset: 0x2000,
+                        size: 8,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                    zf,
+                ],
+            ),
+            // not edx ; add rax, rdx
+            op(
+                9,
+                PcodeOpcode::IntNegate,
+                Some(edx.clone()),
+                vec![edx.clone()],
+            ),
+            op(10, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+            op(
+                11,
+                PcodeOpcode::IntAdd,
+                Some(rax.clone()),
+                vec![rax.clone(), rdx],
+            ),
+            op(12, PcodeOpcode::Return, None, vec![rax]),
+        ],
+    )]);
+
+    let code =
+        render_nir_with_context_output(&pcode, "captured_flag", 0x1000, &options, None, None)
+            .expect("render setcc lane after a flag rewrite")
+            .code;
+
+    // The `not` must take the compare of the two arguments alone. Reading the
+    // later ZF gives `~(rdi == rsi && shifted == 0)`: the shift's flag, which
+    // folds the old one in.
+    let not_at = code
+        .find('~')
+        .unwrap_or_else(|| panic!("no `not` in the output:\n{code}"));
+    // Skip casts like `(uint)`, then take one balanced group.
+    let mut rest = &code[not_at + 1..];
+    while let Some(after) = rest
+        .strip_prefix('(')
+        .and_then(|inner| inner.split_once(')'))
+        .filter(|(ty, _)| {
+            ty.chars()
+                .all(|c| c.is_alphanumeric() || c == ' ' || c == '_')
+        })
+        .map(|(_, after)| after)
+    {
+        rest = after;
+    }
+    let mut depth = 0usize;
+    let mut end = rest.len();
+    for (i, c) in rest.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    end = i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let operand = &rest[..end];
+    assert!(
+        operand.matches("==").count() == 1 && !operand.contains("&&") && !operand.contains(">>"),
+        "the setcc lane must keep the flag it captured, not the later one \
+         (operand {operand:?}):\n{code}"
+    );
+}
+
+/// A SLEIGH-lifted `BSR`: the scan loop is inside one instruction, closed by
+/// a branch back to an earlier op of it.
+fn bit_scan_reverse_pcode() -> (crate::pcode::PcodeFunction, MlilPreviewOptions) {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let rax = register(0x0, 8);
+    let eax = register(0x0, 4);
+    let edi = register(0x38, 4);
+    let idx = Varnode {
+        size: 4,
+        ..varnode(0x9100)
+    };
+    let zero = Varnode {
+        size: 1,
+        ..varnode(0x9200)
+    };
+    let shifted = Varnode {
+        size: 4,
+        ..varnode(0x9300)
+    };
+    let found = Varnode {
+        size: 1,
+        ..varnode(0x9400)
+    };
+    let at = |seq: u32, opcode, output, inputs| PcodeOp {
+        address: 0x1000,
+        ..op(seq, opcode, output, inputs)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            at(
+                0,
+                PcodeOpcode::Copy,
+                Some(idx.clone()),
+                vec![constant_sized(31, 4)],
+            ),
+            at(
+                1,
+                PcodeOpcode::IntEqual,
+                Some(zero.clone()),
+                vec![edi.clone(), constant_sized(0, 4)],
+            ),
+            // zero input: skip the scan
+            at(
+                2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant_sized(6, 4), zero],
+            ),
+            // loop head
+            at(
+                3,
+                PcodeOpcode::IntRight,
+                Some(shifted.clone()),
+                vec![edi, idx.clone()],
+            ),
+            at(
+                4,
+                PcodeOpcode::IntNotEqual,
+                Some(found.clone()),
+                vec![shifted, constant_sized(0, 4)],
+            ),
+            at(
+                5,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant_sized(3, 4), found],
+            ),
+            at(
+                6,
+                PcodeOpcode::IntSub,
+                Some(idx.clone()),
+                vec![idx.clone(), constant_sized(1, 4)],
+            ),
+            // back edge
+            at(
+                7,
+                PcodeOpcode::Branch,
+                None,
+                vec![constant_sized(-4_i64 as u32 as i64, 4)],
+            ),
+            at(8, PcodeOpcode::Copy, Some(eax.clone()), vec![idx]),
+            PcodeOp {
+                address: 0x1004,
+                ..op(9, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax])
+            },
+            PcodeOp {
+                address: 0x1005,
+                ..op(10, PcodeOpcode::Return, None, vec![rax])
+            },
+        ],
+    )]);
+    (pcode, options)
+}
+
+#[test]
+fn bit_scan_loop_inside_one_instruction_is_a_loop() {
+    let (pcode, options) = bit_scan_reverse_pcode();
+    let code = render_nir_with_context_output(&pcode, "highest_bit", 0x1000, &options, None, None)
+        .expect("render bit scan")
+        .code;
+
+    // The old lowering ran the body once: `if (x) idx = 30;`.
+    assert!(
+        !code.contains("30"),
+        "the scan must not fold to one step of the loop:\n{code}"
+    );
+    assert!(
+        code.contains("while") || code.contains("for ("),
+        "the scan must stay a loop:\n{code}"
+    );
+    assert!(
+        code.contains(">>"),
+        "the loop must test the shifted input:\n{code}"
+    );
+}

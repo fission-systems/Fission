@@ -218,9 +218,44 @@ pub fn block_terminator_op(block: &crate::pcode::PcodeBasicBlock) -> Option<&Pco
                 | PcodeOpcode::BranchInd
                 | PcodeOpcode::Return
         );
-        is_control && !is_instruction_local_forward_branch(block, idx, op)
+        is_control && !is_instruction_local_branch(block, idx, op)
     })?;
     block.ops.get(idx)
+}
+
+/// Whether a branch stays inside its own instruction, forward (a conditional
+/// move's skip) or backward (the scan loop of a bit-scan instruction).
+/// Neither is a basic-block terminator.
+pub fn is_instruction_local_branch(
+    block: &crate::pcode::PcodeBasicBlock,
+    op_idx: usize,
+    op: &PcodeOp,
+) -> bool {
+    is_instruction_local_forward_branch(block, op_idx, op)
+        || (matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch)
+            && op.inputs.first().is_some_and(|target| {
+                same_block_backward_branch_target_op_idx(block, op_idx, op, target).is_some()
+            }))
+}
+
+/// Resolve a branch back to an earlier op of the same instruction, the loop
+/// edge SLEIGH emits for instructions that iterate internally (x86 `BSR`,
+/// `BSF`, `TZCNT`, `LZCNT`).
+pub fn same_block_backward_branch_target_op_idx(
+    block: &crate::pcode::PcodeBasicBlock,
+    from_op_idx: usize,
+    op: &PcodeOp,
+    target_vn: &Varnode,
+) -> Option<usize> {
+    let target_seq = instruction_local_branch_target_seq(op, target_vn)?;
+    if target_seq >= op.seq_num {
+        return None;
+    }
+    block
+        .ops
+        .get(..from_op_idx)?
+        .iter()
+        .rposition(|candidate| candidate.address == op.address && candidate.seq_num == target_seq)
 }
 
 /// Whether a branch is an instruction-local skip rather than a basic-block

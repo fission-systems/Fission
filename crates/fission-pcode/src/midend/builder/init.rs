@@ -285,6 +285,9 @@ impl<'a> PreviewBuilder<'a> {
             call_result_types: HashMap::default(),
             selector_representatives: BuilderCacheMap::default(),
             current_lowering_site: None,
+            instruction_loops: HashMap::default(),
+            instruction_loops_present: None,
+            instruction_loop_exit: None,
             register_param_aliases,
             entry_arity,
             declared_variadic_fixed_arity,
@@ -333,6 +336,11 @@ impl<'a> PreviewBuilder<'a> {
             explicit_def_sites: None,
             diamond_select_depth: 0,
         };
+        let mut b = b;
+        // Before any isolated builder is forked from this one: each fork
+        // allocates temps from the shared counter, so a name first handed
+        // out inside a fork can be handed out again by its sibling.
+        b.prepare_instruction_loops();
         b
     }
 }

@@ -133,6 +133,15 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) call_result_types: HashMap<LoweringSite, NirType>,
     pub(crate) selector_representatives: BuilderCacheMap<(usize, u64, u64), PreHirExpr>,
     pub(crate) current_lowering_site: Option<LoweringSite>,
+    /// Loops inside one instruction, by `(block, instruction address)`;
+    /// `None` once an instruction has been found not to have one.
+    pub(crate) instruction_loops:
+        HashMap<(usize, u64), Option<super::materialize::InstructionLoop>>,
+    /// Whether any instruction of the function loops internally.
+    pub(crate) instruction_loops_present: Option<bool>,
+    /// While lowering an instruction loop's body: the op a branch reaches to
+    /// leave the loop.
+    pub(crate) instruction_loop_exit: Option<usize>,
     pub(crate) register_param_aliases: HashMap<u64, usize>,
     pub(crate) entry_arity: usize,
     /// Declaration-level fixed prefix for a variadic function, cached from

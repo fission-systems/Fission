@@ -6,9 +6,10 @@ pub use fission_pcode_ir::block_cfg::{
     build_address_to_index_map, build_block_target_keys, build_layout_fallthrough_map,
     build_predecessor_index_map, build_successor_index_map, canonical_block_index_for_address,
     canonical_block_start_for_address, const_offset, duplicate_block_start_count,
-    encode_duplicate_block_key, instruction_local_branch_target_seq,
+    encode_duplicate_block_key, instruction_local_branch_target_seq, is_instruction_local_branch,
     is_instruction_local_forward_branch, resolve_branch_target_index,
-    same_block_forward_branch_target_op_idx, structuring_cfg_edges,
+    same_block_backward_branch_target_op_idx, same_block_forward_branch_target_op_idx,
+    structuring_cfg_edges,
 };
 
 /// Extra `(from_block_idx, to_block_idx)` edges for C++ exception-handling
