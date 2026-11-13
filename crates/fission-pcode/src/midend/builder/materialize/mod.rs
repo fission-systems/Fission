@@ -1032,8 +1032,21 @@ impl<'a> PreviewBuilder<'a> {
         };
         let mut lhs_name_is_proven_loop_carried = false;
         let mut lhs_name = if let Some(name) =
-            loop_carried_lhs_name.filter(|n| name_claim_is_safe(self, n))
+            self.instruction_select_half_binding_name(block, op_idx, output)
         {
+            // The guarded half of one instruction's select must write the
+            // variable its default half wrote; any other name splits the
+            // select and leaves one path reading something else. This comes
+            // before every naming heuristic below, which choose a name for a
+            // value, not for one half of a value.
+            self.bind_materialized_output_to_existing_name(
+                op,
+                output,
+                &name,
+                preserve_materialization,
+            );
+            name
+        } else if let Some(name) = loop_carried_lhs_name.filter(|n| name_claim_is_safe(self, n)) {
             self.seed_loop_carried_binding_initializer_from_edge_zero(block, output, &name);
             self.bind_materialized_output_to_existing_name(
                 op,

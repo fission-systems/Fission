@@ -39,7 +39,7 @@ fn address_of(name: &str) -> String {
 
 #[test]
 fn a_select_agrees_with_the_machine_code_and_calls_nothing() {
-    for name in ["sel_zero", "sel_two", "sel_inc", "sel_cst"] {
+    for name in ["sel_zero", "sel_two", "sel_inc", "sel_cst", "count_char"] {
         let address = address_of(name);
         let body: Value = serde_json::from_slice(&cli(&[
             "decomp", FIXTURE, "--addr", &address, "--json", "--no-db",
