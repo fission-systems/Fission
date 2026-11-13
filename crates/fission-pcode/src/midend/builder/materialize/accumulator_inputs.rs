@@ -67,6 +67,13 @@ impl<'a> PreviewBuilder<'a> {
         let Some(input) = input else {
             return expr;
         };
+        // Only the block's entry value comes from a merge. Once the block has
+        // written the register, a later read is that write: an accumulator
+        // updated twice in one join block would otherwise restart from the
+        // merged value at every update and lose all but the last one.
+        if self.has_prior_local_def_for_varnode(input, LoweringSite { block_idx, op_idx }) {
+            return expr;
+        }
         if let Some(explicit_expr) = self.current_explicit_merge_binding_expr(block_idx, input) {
             return explicit_expr;
         }
