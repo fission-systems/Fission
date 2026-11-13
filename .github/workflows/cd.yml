@@ -223,6 +223,8 @@ jobs:
           mkdir -p "${root}/bin" "${root}/share/fission"
           tar -C "${root}/share/fission" -xzf dist/fission-resources.tar.gz
           cp dist/fission_cli-x86_64-unknown-linux-gnu "${root}/bin/fission_cli"
+          # upload/download-artifact does not keep the executable bit.
+          chmod +x "${root}/bin/fission_cli"
           (cd "$(mktemp -d)" && env -u FISSION_ROOT "${root}/bin/fission_cli" \
             decomp "${GITHUB_WORKSPACE}/crates/fission-sleigh/testdata/a64_csel_select.so" --all \
             | grep -q "Function:")
