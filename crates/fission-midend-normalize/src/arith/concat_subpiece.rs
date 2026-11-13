@@ -124,7 +124,14 @@ pub fn recognize_dumpty_hump_cast(expr: &PreHirExpr) -> Option<PreHirExpr> {
     })
 }
 
-/// `Shl(And(x, mask), n)` where `mask << n == 0` → `Shl(Cast(w, x), n)` (DumptyHumpLate).
+/// `Shl(And(x, mask), n)` → `Shl(Cast(w, x), n)` when the mask is redundant
+/// (DumptyHumpLate).
+///
+/// At width `w` a left shift by `n` keeps only the low `w - n` bits of its
+/// operand, so the mask says nothing exactly when it keeps all of them. The
+/// mask is first narrowed to the And's own width, since bits the And cannot
+/// hold are cleared whatever the constant says. Any other mask selects a
+/// field, as in a byte swap's `(x & 0xff0000) << 24`, and must stay.
 pub fn recognize_dumpty_hump_late(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let PreHirExpr::Binary {
         op: PreHirBinaryOp::Shl,
@@ -145,7 +152,7 @@ pub fn recognize_dumpty_hump_late(expr: &PreHirExpr) -> Option<PreHirExpr> {
         op: PreHirBinaryOp::And,
         lhs: and_lhs,
         rhs: and_rhs,
-        ..
+        ty: and_ty,
     } = lhs.as_ref()
     else {
         return None;
@@ -155,7 +162,19 @@ pub fn recognize_dumpty_hump_late(expr: &PreHirExpr) -> Option<PreHirExpr> {
         (PreHirExpr::Const(m, _), x) => (x, *m as u64),
         _ => return None,
     };
-    if (mask as u64) >= (1u64 << *n) {
+    let width = int_type_bits(ty)?;
+    let shift = u32::try_from(*n).ok()?;
+    if width > 64 || shift >= width {
+        return None;
+    }
+    let surviving = low_bits_u64(width - shift);
+    let mask = match int_type_bits(and_ty) {
+        Some(and_bits) if and_bits < 64 => mask & low_bits_u64(and_bits),
+        Some(_) => mask,
+        // An And of unknown width may clear bits the constant keeps.
+        None => return None,
+    };
+    if mask & surviving != surviving {
         return None;
     }
     let cast_ty = ty.clone();
@@ -308,6 +327,15 @@ fn peel_unsigned_zext_cast(expr: &PreHirExpr) -> Option<(PreHirExpr, NirType)> {
     Some(((*inner).as_ref().clone(), ty.clone()))
 }
 
+/// The low `bits` bits set, for `1..=64`.
+fn low_bits_u64(bits: u32) -> u64 {
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    }
+}
+
 fn scalar_cast_signature(ty: &NirType) -> Option<(u32, bool)> {
     match ty {
         NirType::Bool => Some((1, false)),
@@ -372,6 +400,75 @@ mod tests {
             }
             other => panic!("unexpected humpty result: {other:?}"),
         }
+    }
+
+    fn u8_ty() -> NirType {
+        NirType::Int {
+            bits: 8,
+            signed: false,
+        }
+    }
+
+    /// `(x & mask) << n`, the And typed `and_ty` and the shift typed `ty`.
+    fn masked_shl(mask: i64, n: i64, and_ty: NirType, ty: NirType) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(var("x")),
+                rhs: Box::new(PreHirExpr::Const(mask, and_ty.clone())),
+                ty: and_ty,
+            }),
+            rhs: Box::new(PreHirExpr::Const(n, ty.clone())),
+            ty,
+        }
+    }
+
+    #[test]
+    fn dumpty_hump_late_drops_a_mask_the_shift_makes_redundant() {
+        // (x & 0xff) << 56 at 64 bits: only x's low 8 bits survive the shift,
+        // and the mask keeps exactly those, so it says nothing.
+        let normalized = recognize_dumpty_hump_late(&masked_shl(0xff, 56, u64_ty(), u64_ty()))
+            .expect("mask covers every surviving bit");
+        assert_eq!(
+            normalized,
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty(),
+                    expr: Box::new(var("x")),
+                }),
+                rhs: Box::new(PreHirExpr::Const(56, u64_ty())),
+                ty: u64_ty(),
+            }
+        );
+        // A wider mask than needed is just as redundant.
+        assert!(recognize_dumpty_hump_late(&masked_shl(0xffff, 16, u32_ty(), u32_ty())).is_some());
+    }
+
+    #[test]
+    fn dumpty_hump_late_keeps_a_mask_that_clears_surviving_bits() {
+        // One half of a 64-bit byte swap: (x & 0xff0000) << 24 moves byte 2
+        // to byte 5 and nothing else. x << 24 would carry bytes 0..4 along.
+        // The old guard (`mask < 1 << n`) accepted this.
+        assert!(
+            recognize_dumpty_hump_late(&masked_shl(0xff_0000, 24, u64_ty(), u64_ty())).is_none()
+        );
+        assert!(recognize_dumpty_hump_late(&masked_shl(0xff00, 40, u64_ty(), u64_ty())).is_none());
+    }
+
+    #[test]
+    fn dumpty_hump_late_counts_only_the_mask_bits_the_and_keeps() {
+        // 0xffffffff covers the 24 bits a shift by 8 keeps at 32 bits, but the
+        // And is 8 bits wide, so it keeps only x's low byte.
+        assert!(
+            recognize_dumpty_hump_late(&masked_shl(0xffff_ffff, 8, u8_ty(), u32_ty())).is_none()
+        );
+        // Positive control: the same 8-bit And is redundant once the shift
+        // keeps no more than 8 bits.
+        assert!(
+            recognize_dumpty_hump_late(&masked_shl(0xffff_ffff, 24, u8_ty(), u32_ty())).is_some()
+        );
     }
 
     #[test]
