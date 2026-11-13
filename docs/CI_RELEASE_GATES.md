@@ -185,14 +185,16 @@ without anyone being able to see it.
 
 | Asset | How it is published | Who uses it |
 |-------|---------------------|-------------|
-| **Inside platform archives** (`fission-linux-x64.tar.gz`, …) | `cd.yml` copies a verified `utils/` into each OS package | End-user installs that unpack the full release |
+| **Inside platform archives** (`fission-<target>.tar.gz` / `.zip`) | `cd.yml` copies a verified `utils/` into each archive as `share/fission/`, beside `bin/fission_cli` | Homebrew, `install.sh`, anyone unpacking a release |
+| **`fission-resources.tar.gz`** | The same `share/fission/` contents on their own | `cargo install` users, who unpack it into `~/.cargo/share/fission` |
 | **The `utils/` tree itself** | Committed; changed like any other source | CI — [`.github/actions/setup-utils`](../.github/actions/setup-utils) verifies the checkout rather than downloading anything |
 
 Rules:
 
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
-2. There is no standalone resource bundle any more; `utils/` reaches consumers through the clone or through the platform archive.
+2. `utils/` reaches consumers through the clone, the platform archive, or `fission-resources.tar.gz`; all three are cut from the same tagged checkout.
 3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](../scripts) and commit them; there is no separate publish step for CI to pick them up.
+4. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](../scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
 
 ## Related files
 

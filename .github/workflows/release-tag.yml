@@ -202,9 +202,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Waiting for fission-linux-x64.tar.gz on ${TAG} (up to ~30m)..."
+          echo "Waiting for fission-x86_64-unknown-linux-gnu.tar.gz on ${TAG} (up to ~30m)..."
           for attempt in $(seq 1 60); do
-            if gh release view "${TAG}" --repo "${{ github.repository }}"                  --json assets                  --jq '.assets[].name' 2>/dev/null                | grep -qx "fission-linux-x64.tar.gz"; then
+            if gh release view "${TAG}" --repo "${{ github.repository }}"                  --json assets                  --jq '.assets[].name' 2>/dev/null                | grep -qx "fission-x86_64-unknown-linux-gnu.tar.gz"; then
               echo "ok: asset present after ${attempt} attempt(s)"
               exit 0
             fi

@@ -19,6 +19,19 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// `PTRACE_GETREGS` fills the host's `user_regs_struct`, whose layout is
+/// per-architecture; this backend reads and writes the x86-64 one only. On any
+/// other Linux host the register operations fail with this error rather than
+/// the crate failing to build, which kept every non-x86-64 Linux release from
+/// compiling with the (default) debugger feature.
+#[cfg(not(target_arch = "x86_64"))]
+fn unsupported_host_registers() -> FissionError {
+    FissionError::debug(format!(
+        "native register access on Linux is implemented for x86-64 hosts only (this host is {})",
+        std::env::consts::ARCH
+    ))
+}
+
 /// Linux debugger implementation using ptrace
 pub struct LinuxDebugger {
     /// Current debug state
@@ -71,6 +84,13 @@ impl LinuxDebugger {
     }
 
     /// Move the tracee's instruction pointer.
+    #[cfg(not(target_arch = "x86_64"))]
+    fn set_pc(_pid: u32, _pc: u64) -> FissionResult<()> {
+        Err(unsupported_host_registers())
+    }
+
+    /// Move the tracee's instruction pointer.
+    #[cfg(target_arch = "x86_64")]
     fn set_pc(pid: u32, pc: u64) -> FissionResult<()> {
         use nix::sys::ptrace;
         use nix::unistd::Pid;
@@ -974,6 +994,12 @@ impl ExecutionBackend for LinuxDebugger {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "x86_64"))]
+    fn fetch_registers(&mut self, _thread_id: u32) -> FissionResult<RegisterState> {
+        Err(unsupported_host_registers())
+    }
+
+    #[cfg(target_arch = "x86_64")]
     fn fetch_registers(&mut self, _thread_id: u32) -> FissionResult<RegisterState> {
         use nix::sys::ptrace;
         use nix::unistd::Pid;

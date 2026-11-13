@@ -15,8 +15,11 @@ A tagged release is eligible when:
 - **L2** [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml) succeeds on that commit (enforced by [release-tag.yml](../.github/workflows/release-tag.yml) before the tag is created).
 - Prefer creating tags only via Actions → **Release Tag (CI green)** so the above are machine-checked and the tag points at the verified SHA.
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
-  - `fission-linux-x64` / `fission-macos-arm64` / `fission-windows-x64` (each archive includes a verified `utils/` tree)
+  - `fission-<target>.tar.gz` (`.zip` on Windows) for the five targets below, each `bin/fission_cli` plus `share/fission/`
+  - `fission-resources.tar.gz` (the `share/fission/` tree alone, for `cargo install` users)
+  - `fission-cli.rb` (the Homebrew formula for the tag; pushed to `fission-systems/homebrew-tap` when `HOMEBREW_TAP_TOKEN` is set)
   - Linux benchmark CLI: `fission_cli-x86_64-unknown-linux-gnu` (binary-only convenience asset)
+  - a `.sha256` beside every file
 - The **30-minute** evaluation path in [`docs/EVALUATION.md`](EVALUATION.md) passes on at least **one** Windows x64 sample binary.
 - If corpus-wide quality is claimed, attach or link `benchmark_compact_summary.json` and confirm:
   - `release_promotion_allowed` is `true`, **or**
@@ -34,16 +37,26 @@ The numbered sections below expand this gate into operational detail.
 
 `cd.yml` currently builds **`fission-cli`** in **release** mode for:
 
-| Platform | Rust target | Published asset prefix |
-|----------|-------------|-------------------------|
-| Linux x64 | `x86_64-unknown-linux-gnu` | `fission-linux-x64` |
-| macOS Apple Silicon | `aarch64-apple-darwin` | `fission-macos-arm64` |
-| Windows x64 | `x86_64-pc-windows-msvc` | `fission-windows-x64` |
+| Platform | Rust target | Runner |
+|----------|-------------|--------|
+| Linux x64 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` (glibc 2.35 floor) |
+| Linux arm64 | `aarch64-unknown-linux-gnu` | `ubuntu-22.04-arm` |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `macos-latest` |
+| macOS Intel | `x86_64-apple-darwin` | `macos-15-intel` |
+| Windows x64 | `x86_64-pc-windows-msvc` | `windows-latest` |
 
-Local dry-run:
+The asset is `fission-<target>.tar.gz` (`.zip` on Windows). Names carry no
+version, so `releases/latest/download/<name>` always resolves. A pull request
+that touches `cd.yml`, `scripts/release/` or `install.sh` runs the whole matrix,
+packaging and smoke tests included, without uploading anything.
+
+Local dry-run of one target:
 
 ```bash
 cargo build -p fission-cli --locked --release
+scripts/release/package.sh binary aarch64-apple-darwin target/release/fission_cli dist
+scripts/release/smoke_package.sh dist/fission-aarch64-apple-darwin.tar.gz \
+  crates/fission-sleigh/testdata/a64_csel_select.so
 ```
 
 Cross-target developers should mirror the matrix with `rustup target add …` as needed.

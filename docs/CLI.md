@@ -89,6 +89,8 @@ fission_cli inventory <SUBCOMMAND> ...
 
 FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through **`fission_core::PATHS`** (`PathConfig::detect` in [`crates/fission-core/src/core/path_config.rs`](../crates/fission-core/src/core/path_config.rs), with bundle-root probing in [`resource_roots.rs`](../crates/fission-core/src/core/resource_roots.rs)). In this repository the canonical checked-in tree remains **`utils/signatures`**; installs may ship the same layout under a bundle root such as **`{bundle}/signatures/`**.
 
+Every install channel uses one layout, `<prefix>/bin/fission_cli` beside `<prefix>/share/fission/{sleigh-specs,signatures,ghidra-data}`, which the binary finds as `exe_parent/../share/fission` with no configuration: Homebrew (`<cellar>/share/fission`), `install.sh` (`~/.local`), an unpacked release archive, and `cargo install` plus `fission-resources.tar.gz` unpacked into `~/.cargo/share/fission`.
+
 ### Overrides
 
 | Mechanism | Notes |
