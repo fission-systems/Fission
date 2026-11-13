@@ -1245,13 +1245,30 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#support-matrix-to-decide" class="md-nav__link">
+  <a href="#support-matrix-measured-2026-11-13" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Support matrix to decide
+        Support matrix, measured (2026-11-13)
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Support matrix, measured (2026-11-13)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#recommended-matrix-for-10-for-the-maintainer-to-accept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended matrix for 1.0 (for the maintainer to accept)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1408,50 +1425,162 @@ parity across every architecture and file format.</p>
   issues describe WOW64/32-bit defects (unverified individually). Either fix them
   or keep Windows live debugging out of the 1.0 promise.</li>
 </ul>
-<h2 id="support-matrix-to-decide">Support matrix to decide<a class="headerlink" href="#support-matrix-to-decide" title="Permanent link">&para;</a></h2>
-<p>Unmeasured cells should not be promised.</p>
+<h2 id="support-matrix-measured-2026-11-13">Support matrix, measured (2026-11-13)<a class="headerlink" href="#support-matrix-measured-2026-11-13" title="Permanent link">&para;</a></h2>
+<p>Unmeasured cells should not be promised, so every cell was measured. One small
+C program (<code>scripts/quality/support_matrix_prog.c</code>: a loop, a switch, a byte
+scan, recursion, a string, a libc call) was cross-compiled at <code>-O1</code> for each
+cell with mingw-w64 (PE x64/x86), zig (PE ARM64, MIPS, PPC, RISC-V, ARM) and the
+host clang (Mach-O). <code>scripts/quality/support_matrix_probe.py</code> then ran <code>info</code>,
+<code>list</code>, <code>strings</code>, <code>disasm</code> and <code>decomp --all</code> on each under <code>--contract v1</code>.</p>
+<p>This measures <strong>"does it work at all"</strong>, never "is the pseudocode right". The one
+content check counts functions whose output calls a tiny-address <code>sub_N()</code>
+(address <code>0x1</code>-<code>0xfff</code>): that is never real code, it is a p-code internal branch
+that was read as a machine address.</p>
 <table>
 <thead>
 <tr>
-<th></th>
-<th>x86-64</th>
-<th>x86-32</th>
-<th>AArch64</th>
-<th>ARM/Thumb</th>
-<th>MIPS/PPC/other</th>
+<th>cell</th>
+<th>loads, lists, disassembles</th>
+<th><code>decomp --all</code> returns code</th>
+<th>functions calling a tiny <code>sub_N()</code></th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>ELF</td>
-<td>measured (DecBench)</td>
-<td>measured (6 rows)</td>
-<td>measured</td>
-<td>measured (71 rows)</td>
-<td><strong>unmeasured</strong></td>
+<td>ELF x86-64</td>
+<td>yes</td>
+<td>54/54</td>
+<td>0</td>
 </tr>
 <tr>
-<td>PE</td>
-<td>measured (checked-in samples)</td>
-<td><strong>unmeasured</strong></td>
-<td><strong>unmeasured</strong></td>
-<td>-</td>
-<td>-</td>
+<td>ELF x86-32</td>
+<td>yes</td>
+<td>56/56</td>
+<td>1 (<code>__udivmoddi4</code>)</td>
 </tr>
 <tr>
-<td>Mach-O</td>
-<td><strong>unmeasured</strong></td>
-<td>-</td>
-<td><strong>unmeasured</strong></td>
-<td>-</td>
-<td>-</td>
+<td>ELF ARM32</td>
+<td>yes</td>
+<td>69/69</td>
+<td>0</td>
+</tr>
+<tr>
+<td>ELF AArch64</td>
+<td>yes</td>
+<td>66/66</td>
+<td>24/66 -&gt; 0 (#842)</td>
+</tr>
+<tr>
+<td>ELF MIPS32 BE / LE</td>
+<td>yes</td>
+<td>66/67</td>
+<td>21/67 -&gt; 0 (#842)</td>
+</tr>
+<tr>
+<td>ELF PPC32</td>
+<td>yes</td>
+<td>67/67</td>
+<td>1</td>
+</tr>
+<tr>
+<td>ELF PPC64 LE</td>
+<td>yes</td>
+<td>53/53</td>
+<td>0</td>
+</tr>
+<tr>
+<td>ELF RISC-V 64</td>
+<td>yes, but <strong>names lost</strong> (below)</td>
+<td>3158/3158</td>
+<td>3</td>
+</tr>
+<tr>
+<td>PE x64</td>
+<td>yes</td>
+<td>77/77</td>
+<td>0</td>
+</tr>
+<tr>
+<td>PE x86</td>
+<td>yes</td>
+<td>76/76</td>
+<td>0</td>
+</tr>
+<tr>
+<td>PE ARM64</td>
+<td>yes (no symbols: the linker strips them)</td>
+<td>531/531</td>
+<td>239/531 -&gt; 0 (#842)</td>
+</tr>
+<tr>
+<td>Mach-O x86-64</td>
+<td>yes</td>
+<td>5/6</td>
+<td>0</td>
+</tr>
+<tr>
+<td>Mach-O arm64</td>
+<td>yes</td>
+<td>5/6</td>
+<td>3/6 -&gt; 0 (#842)</td>
 </tr>
 </tbody>
 </table>
-<p>"Measured" means it appears in the DecBench sample set or the checked-in samples,
-not that its output is good. Loaders for NE, a.out, Intel HEX and Motorola HEX
-exist (verified) with open defect reports (#432-#434); they are good candidates
-for "best effort, not promised".</p>
+<p>What the table shows:</p>
+<ul>
+<li><strong>Every cell loads and decompiles without a hard failure.</strong> None of the
+  "unmeasured" cells is broken at the container level.</li>
+<li><strong>x86-64, x86-32, ARM32 and PPC64 (ELF), and PE x64/x86, are clean</strong> on this
+  probe. ELF x86-64, x86-32, ARM and PE x64 are also the cells DecBench or the
+  checked-in samples cover.</li>
+<li><strong>AArch64, MIPS and PE ARM64 had a real defect, fixed in #842.</strong> The
+  tiny-address calls came from one cause: an instruction-internal conditional
+  (AArch64 <code>csel</code>, <code>cinc</code>, <code>cset</code>; MIPS equivalents) lifted to a <code>CBranch</code> whose
+  destination had been rewritten from the constant space to a code address, so
+  the CFG read "branch 2 ops forward" as "branch to address 2". The visible result
+  was a phantom <code>sub_2()</code> call <strong>and a lost select</strong>. After the fix the same
+  binaries show 0 phantom calls (AArch64 24 -&gt; 0, MIPS 21 -&gt; 0, PE ARM64 239 -&gt; 0,
+  Mach-O arm64 3 -&gt; 0), and <code>fission_cli verify</code> ground truth (the emulated machine
+  code) agrees with the decompiled select functions. What remains on AArch64:
+  <code>count_char</code> (<code>cinc x0, x0, eq</code>, where <code>x0</code> is both the pointer parameter and the
+  counter) decompiles with the parameter and counter sharing a name and <code>verify</code>
+  reports it <code>Diverged</code>. <code>verify</code> can evaluate only the functions without loads,
+  stores or calls (8 of 58 on the probe's AArch64 ELF), so "agrees" covers a small
+  part of the cell.</li>
+<li><strong>RISC-V symbol names are lost</strong> when the binary comes from LLVM tooling. The
+  ELF symbol table has 11,220 entries, 11,075 of them <code>NOTYPE LOCAL</code> (<code>.L0</code>,
+  <code>.Lpcrel_hiN</code>, <code>$x</code>). They are listed as 3,158 "functions", and a local label
+  wins the name at an address where a real <code>FUNC</code> symbol sits (<code>classify</code> at
+  <code>0x1001e38</code> is listed as <code>.L0</code>; <code>main</code> is absent). Not fixed here.</li>
+<li><strong>Mach-O lists <code>__mh_execute_header</code> as a function</strong>, and that is the one
+  function without code in both Mach-O rows.</li>
+</ul>
+<p>Caveats: -O1 only; one tiny program; the toolchains are zig/mingw/clang, not
+each platform's native compiler; "returns code" includes wrong code (the AArch64
+<code>csel</code> case above returns code).</p>
+<h3 id="recommended-matrix-for-10-for-the-maintainer-to-accept">Recommended matrix for 1.0 (for the maintainer to accept)<a class="headerlink" href="#recommended-matrix-for-10-for-the-maintainer-to-accept" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>tier</th>
+<th>cells</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Promised</strong></td>
+<td>ELF x86-64, x86-32, ARM32/Thumb; PE x64, x86</td>
+</tr>
+<tr>
+<td><strong>Best effort (documented, not promised)</strong></td>
+<td>ELF AArch64, MIPS, PPC32/64, RISC-V; PE ARM64; Mach-O x86-64, arm64; NE, a.out, Intel HEX, Motorola HEX</td>
+</tr>
+</tbody>
+</table>
+<p>AArch64 is the first candidate for "promised": the <code>csel</code> defect is fixed
+(#842), what is left is the <code>x0</code> parameter/counter naming above, and the probe
+cannot yet say how many other functions share it. It is the most common non-x86
+target, so it is worth one more measured pass before the decision.</p>
 <h2 id="out-of-scope-for-10-proposed">Out of scope for 1.0 (proposed)<a class="headerlink" href="#out-of-scope-for-10-proposed" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Any GUI/TUI (by design).</li>
@@ -1477,11 +1606,23 @@ areas with the most open defect reports are loader (30), emulator JIT (21), pcod
 support matrix above and has a reproduction.</p>
 <h2 id="decisions-needed-from-the-maintainer">Decisions needed from the maintainer<a class="headerlink" href="#decisions-needed-from-the-maintainer" title="Permanent link">&para;</a></h2>
 <ol>
-<li>Is <code>--contract v1</code> the default in 1.0?</li>
-<li>Which matrix cells are promised?</li>
+<li><strong>Is <code>--contract v1</code> the default in 1.0?</strong> Recommended: <strong>no, keep it
+   opt-in, and say so in the promise.</strong> Facts: contract mode requires the
+   command's own <code>--json</code> (without it the supervisor fails with <code>json_required</code>),
+   so making it the default would break every invocation that does not pass
+   <code>--json</code>. 12 scripts, 4 workflows and 15 integration-test files reference
+   the CLI (not counted: which of them already pass <code>--json</code>), and every human at
+   a terminal runs it without. An agent loses
+   nothing by opting in once (<code>FISSION_CONTRACT=v1</code>, which <code>fission_cli skill</code>
+   documents). The 1.0 promise would be: <em><code>--contract v1 --json</code> output, its
+   envelope, exit codes and error codes are stable; the human-readable form is
+   not covered.</em> That also leaves room to make v1 the default in a later major
+   version without having promised the opposite.</li>
+<li><strong>Which matrix cells are promised?</strong> Recommended: the table above.</li>
 <li>Resident session, on-disk cache, or neither, for call cost?</li>
 <li>Plugin API: remove, hide, or keep out of the promise?</li>
-<li>Does Windows live debugging ship in 1.0?</li>
+<li>Does Windows live debugging ship in 1.0? (The two failing Windows debugger
+   tests are fixed as of #840; the WOW64 issue list is closed.)</li>
 </ol>
 
 
