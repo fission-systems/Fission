@@ -148,6 +148,22 @@ impl<'a> PreviewBuilder<'a> {
             let SsaValueDefinition::Operation(def_site) = value.definition else {
                 return Ok(None);
             };
+            // Lanes are stitched only from definitions in the use's own block
+            // with no call in between. Scalar SSA does not kill a register's
+            // lanes at a call, so a pre-call definition can still reach a
+            // post-call read of a clobbered register (`mov edx,0x1200; call;
+            // setg dl; and eax,edx` would claim EDX kept 0x1200 above DL).
+            if def_site.block != block
+                || def_site.op >= op_idx
+                || self.pcode.blocks[use_site.block_idx].ops
+                    [def_site.op as usize + 1..use_site.op_idx]
+                    .iter()
+                    .any(|between| {
+                        matches!(between.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                    })
+            {
+                return Ok(None);
+            }
             let Some(def_op) = self
                 .pcode
                 .blocks
@@ -157,24 +173,114 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 return Ok(None);
             };
-            if !def_op.output.as_ref().is_some_and(|output| {
-                !output.is_constant
-                    && output.space_id == value.storage.space_id
-                    && output.offset == value.storage.offset
-                    && output.size == value.storage.size
-            }) {
+            // A piece is either a whole definition or a lane of a wider one:
+            // after `RDX = zext(EDX); DL = flag`, a read of RDX is DL from the
+            // narrow write plus bytes 1..8 of the wide one. Scalar SSA has
+            // already partitioned the storage that way; refusing the lane
+            // dropped the narrow write and resolved the read to the stale wide
+            // definition alone (x86 `setcc` after a zeroing `xor`).
+            let Some(lane_shift_bytes) = def_op.output.as_ref().and_then(|output| {
+                let storage = &value.storage;
+                let contained = !output.is_constant
+                    && output.space_id == storage.space_id
+                    && storage.offset >= output.offset
+                    && storage.offset + u64::from(storage.size)
+                        <= output.offset + u64::from(output.size);
+                contained.then(|| {
+                    // Bytes below the lane within the definition's value.
+                    let bytes = if self.options.is_big_endian {
+                        (output.offset + u64::from(output.size))
+                            - (storage.offset + u64::from(storage.size))
+                    } else {
+                        storage.offset - output.offset
+                    };
+                    (bytes, output.size)
+                })
+            }) else {
                 return Ok(None);
-            }
+            };
             expected_byte_offset = expected_byte_offset.saturating_add(value.storage.size);
-            plan.push((piece.byte_offset, value.storage.size, def_site, def_op));
+            plan.push((
+                piece.byte_offset,
+                value.storage.size,
+                lane_shift_bytes,
+                def_site,
+                def_op,
+            ));
         }
-        if expected_byte_offset != vn.size || !visiting.insert(key.clone()) {
+        if expected_byte_offset != vn.size {
             return Ok(None);
         }
+        // Adjacent lanes of one definition are one lane. Storage is split at
+        // every boundary any access uses, so a read of ECX after `movzx ecx,
+        // byte [..]; test cl,cl` arrives as [CL][bytes 1..4] of the same
+        // write; reassembling that rebuilds the write from its own pieces.
+        let mut merged: Vec<(u32, u32, (u64, u32), SsaOpSite, PcodeOp)> =
+            Vec::with_capacity(plan.len());
+        for entry in plan {
+            if let Some(last) = merged.last_mut()
+                && last.3 == entry.3
+                && last.2.1 == entry.2.1
+                && last.0 + last.1 == entry.0
+                && (if self.options.is_big_endian {
+                    entry.2.0 + u64::from(entry.1) == last.2.0
+                } else {
+                    last.2.0 + u64::from(last.1) == entry.2.0
+                })
+            {
+                last.1 += entry.1;
+                if self.options.is_big_endian {
+                    last.2.0 = entry.2.0;
+                }
+                continue;
+            }
+            merged.push(entry);
+        }
+        // One definition covering the whole read is not a reassembly; the
+        // ordinary lowering of that definition handles it.
+        if merged.len() < 2 {
+            return Ok(None);
+        }
+        // Each piece is rebuilt from its definition, often as a reference to
+        // the variable that definition was materialized into. If two of the
+        // definitions share that variable (one register family, one name),
+        // the later write has already replaced the earlier value, and a
+        // reference to it would read the wrong lane contents: `mov eax,[p];
+        // and ah,imm` would rebuild EAX with the `and` result in every byte.
+        let mut names = HashSet::default();
+        for (_, _, _, _, def_op) in &merged {
+            let Some(output) = def_op.output.as_ref() else {
+                continue;
+            };
+            if let Some(name) = self
+                .materialized_vns
+                .get(&MaterializedVarnodeKey::new(output, def_op))
+                && !names.insert(name.clone())
+            {
+                return Ok(None);
+            }
+        }
+        if !visiting.insert(key.clone()) {
+            return Ok(None);
+        }
+        let plan = merged;
 
         let result_ty = type_from_size(vn.size, false);
         let mut combined = None;
-        for (byte_offset, piece_size, def_site, def_op) in plan {
+        for (byte_offset, piece_size, (lane_shift_bytes, def_size), def_site, def_op) in plan {
+            // A lane wholly above a zero-extended value is zero; leaving it out
+            // keeps `movzx eax,byte; shr al,4` from rebuilding the zeroed
+            // bytes as `(x / 256) << 8`.
+            let site = LoweringSite {
+                block_idx: def_site.block as usize,
+                op_idx: def_site.op as usize,
+            };
+            if self
+                .significant_bytes_of_definition(&def_op, site, 4)
+                .is_some_and(|bytes| bytes <= lane_shift_bytes)
+            {
+                continue;
+            }
             let piece_expr = match self.with_lowering_site(
                 LoweringSite {
                     block_idx: def_site.block as usize,
@@ -188,13 +294,51 @@ impl<'a> PreviewBuilder<'a> {
                     return Ok(None);
                 }
             };
-            let narrowed = PreHirExpr::Cast {
-                ty: type_from_size(piece_size, false),
-                expr: Box::new(piece_expr),
+            if matches!(piece_expr, PreHirExpr::Const(0, _)) {
+                continue;
+            }
+            // SubPiece: move the lane to the bottom of the definition's value.
+            let piece_expr = if lane_shift_bytes == 0 {
+                piece_expr
+            } else {
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Shr,
+                    lhs: Box::new(piece_expr),
+                    rhs: Box::new(PreHirExpr::Const(
+                        (lane_shift_bytes * 8) as i64,
+                        NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                    )),
+                    ty: type_from_size(def_size, false),
+                }
             };
-            let widened = PreHirExpr::Cast {
-                ty: result_ty.clone(),
-                expr: Box::new(narrowed),
+            let narrow_ty = type_from_size(piece_size, false);
+            let widened = if narrow_ty == NirType::Unknown && piece_size < 8 {
+                // A 3-, 5-, 6- or 7-byte lane has no C type; cut it with a
+                // mask instead of a cast to an untyped value, which nothing
+                // downstream can fold.
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs: Box::new(PreHirExpr::Cast {
+                        ty: result_ty.clone(),
+                        expr: Box::new(piece_expr),
+                    }),
+                    rhs: Box::new(PreHirExpr::Const(
+                        ((1u64 << (piece_size * 8)) - 1) as i64,
+                        result_ty.clone(),
+                    )),
+                    ty: result_ty.clone(),
+                }
+            } else {
+                PreHirExpr::Cast {
+                    ty: result_ty.clone(),
+                    expr: Box::new(PreHirExpr::Cast {
+                        ty: narrow_ty,
+                        expr: Box::new(piece_expr),
+                    }),
+                }
             };
             let shift_bytes = if self.options.is_big_endian {
                 vn.size
@@ -229,7 +373,54 @@ impl<'a> PreviewBuilder<'a> {
             });
         }
         visiting.remove(key);
-        Ok(combined)
+        Ok(Some(combined.unwrap_or_else(|| {
+            PreHirExpr::Const(0, result_ty.clone())
+        })))
+    }
+
+    /// How many low bytes of `def_op`'s output can be non-zero, following
+    /// zero-extensions and copies back through their inputs' reaching
+    /// definitions. `None` when nothing narrower is known.
+    fn significant_bytes_of_definition(
+        &self,
+        def_op: &PcodeOp,
+        site: LoweringSite,
+        depth: u32,
+    ) -> Option<u64> {
+        let output = def_op.output.as_ref()?;
+        let own = u64::from(output.size);
+        match def_op.opcode {
+            // `xor r,r`: the whole value is zero.
+            PcodeOpcode::IntXor
+                if def_op.inputs.len() == 2
+                    && VarnodeKey::from(&def_op.inputs[0])
+                        == VarnodeKey::from(&def_op.inputs[1]) =>
+            {
+                Some(0)
+            }
+            PcodeOpcode::IntZExt | PcodeOpcode::Copy => {
+                let input = def_op.inputs.first()?;
+                if input.is_constant {
+                    let value = input.constant_val as u64;
+                    return Some(u64::from(u64::BITS - value.leading_zeros()).div_ceil(8));
+                }
+                let narrow = u64::from(input.size).min(own);
+                let deeper = (depth > 0)
+                    .then(|| self.lookup_def_site_at(input, Some(site)))
+                    .flatten()
+                    .filter(|(_, inner)| {
+                        inner
+                            .output
+                            .as_ref()
+                            .is_some_and(|out| VarnodeKey::from(out) == VarnodeKey::from(input))
+                    })
+                    .and_then(|(inner_site, inner)| {
+                        self.significant_bytes_of_definition(inner, inner_site, depth - 1)
+                    });
+                Some(deeper.map_or(narrow, |bytes| bytes.min(narrow)))
+            }
+            _ => None,
+        }
     }
 
     pub(super) fn current_store_value_read_at_join(&self, vn: &Varnode) -> bool {

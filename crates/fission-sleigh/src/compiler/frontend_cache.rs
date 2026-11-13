@@ -110,8 +110,13 @@ pub(super) fn write(path: &Path, compiled: &mut CompiledFrontend) -> Result<()> 
     }
 
     // Beside the target and renamed into place, so a process reading while
-    // another writes sees the old complete file or the new one.
-    let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+    // another writes sees the old complete file or the new one. The name is
+    // unique per write, not per process: threads of one process miss the
+    // cache for the same entry together, and a shared `tmp<pid>` let the
+    // first rename pull the file out from under the rest.
+    static WRITE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = WRITE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = path.with_extension(format!("tmp{}-{seq}", std::process::id()));
     fs::write(&tmp, &out).with_context(|| format!("write {}", tmp.display()))?;
     fs::rename(&tmp, path).inspect_err(|_| {
         let _ = fs::remove_file(&tmp);
@@ -244,5 +249,79 @@ mod tests {
         fs::write(&path, b"").unwrap();
         assert!(read(&path).is_none());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn minimal_frontend() -> CompiledFrontend {
+        CompiledFrontend {
+            arch: "test".to_string(),
+            default_context: Default::default(),
+            default_context_known_mask: Default::default(),
+            entry_spec: "test.slaspec".to_string(),
+            entry_id: "test".to_string(),
+            include_manifest: Vec::new(),
+            defines: Vec::new(),
+            definitions: Vec::new(),
+            macros: Vec::new(),
+            constructors: Vec::new(),
+            subtables: BTreeMap::new(),
+            language_layout: super::super::ir::CompiledLanguageLayout {
+                address_spaces: Vec::new(),
+                registers: Vec::new(),
+                token_fields: Vec::new(),
+                context_fields: Vec::new(),
+                subtables: Vec::new(),
+                display_templates: Vec::new(),
+            },
+            construct_templates: Vec::new(),
+            pcode_ops: Vec::new(),
+            pattern_nodes: Vec::new(),
+            sla_spaces: BTreeMap::new(),
+            sla_unique_space_index: 0,
+            sla_register_space_index: 0,
+            sla_uniqbase: 0,
+            sla_uniqmask: 0,
+            userops: std::sync::Arc::new(BTreeMap::new()),
+        }
+    }
+
+    /// Threads of one process that miss the cache for the same entry all
+    /// write it. A temp name of `tmp<pid>` was shared by all of them: the
+    /// first rename moved it away and every other rename failed with "No
+    /// such file or directory" -- the warning every installed (non-checkout)
+    /// run printed on its first decompile.
+    #[test]
+    fn concurrent_writers_in_one_process_all_succeed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("entry.bin");
+        let writers = 8;
+        let barrier = std::sync::Barrier::new(writers);
+        let results: Vec<Result<()>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..writers)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let mut compiled = minimal_frontend();
+                        barrier.wait();
+                        write(&path, &mut compiled)
+                    })
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for result in &results {
+            assert!(
+                result.is_ok(),
+                "a concurrent cache write failed: {result:?}"
+            );
+        }
+        assert!(read(&path) == Some(minimal_frontend()));
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|name| name != "entry.bin")
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temp files left behind: {leftovers:?}"
+        );
     }
 }

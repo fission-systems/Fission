@@ -3404,3 +3404,241 @@ fn narrow_subtraction_reads_integer_view_of_full_register_carrier() {
         );
     }
 }
+
+/// x86 `xor edx,edx; cmp dil,sil; setz dl; add rax,rdx` -- the standard
+/// branchless "count matches" idiom. `setz dl` writes only the low byte of a
+/// register the `xor` just zeroed, and the add reads all of RDX. Losing the
+/// narrow write folds the add to `rax + 0`: the decompiled function counted
+/// nothing, and `verify` reported the divergence against the emulator.
+#[test]
+fn setcc_into_low_byte_after_zeroing_xor_reaches_the_wide_read() {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let rax = register(0x0, 8);
+    let rdx = register(0x10, 8);
+    let edx = register(0x10, 4);
+    let dl = register(0x10, 1);
+    let dil = register(0x38, 1);
+    let sil = register(0x30, 1);
+    let zf = Varnode {
+        size: 1,
+        ..varnode(0x9000)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(5)]),
+            op(
+                1,
+                PcodeOpcode::IntXor,
+                Some(edx.clone()),
+                vec![edx.clone(), edx.clone()],
+            ),
+            op(2, PcodeOpcode::IntZExt, Some(rdx.clone()), vec![edx]),
+            op(3, PcodeOpcode::IntEqual, Some(zf.clone()), vec![dil, sil]),
+            op(4, PcodeOpcode::Copy, Some(dl), vec![zf]),
+            op(
+                5,
+                PcodeOpcode::IntAdd,
+                Some(rax.clone()),
+                vec![rax.clone(), rdx],
+            ),
+            op(6, PcodeOpcode::Return, None, vec![rax]),
+        ],
+    )]);
+
+    let output =
+        render_nir_with_context_output(&pcode, "count_match", 0x1000, &options, None, None)
+            .expect("render setcc low-byte write");
+    let code = output.code;
+
+    assert!(
+        code.contains("=="),
+        "the comparison setz wrote into DL must reach the add:\n{code}"
+    );
+    assert!(
+        !code.contains("return 5;"),
+        "the add must not fold to rax + 0:\n{code}"
+    );
+}
+
+fn high_byte_update_pcode() -> (crate::pcode::PcodeFunction, MlilPreviewOptions) {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let rdi = register(0x38, 8);
+    let rax = register(0x0, 8);
+    let eax = register(0x0, 4);
+    let ah = register(0x1, 1);
+    let loaded = Varnode {
+        size: 4,
+        ..varnode(0x9000)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Load,
+                Some(loaded.clone()),
+                vec![constant_sized(3, 4), rdi.clone()],
+            ),
+            op(1, PcodeOpcode::Copy, Some(eax.clone()), vec![loaded]),
+            op(
+                2,
+                PcodeOpcode::IntZExt,
+                Some(rax.clone()),
+                vec![eax.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::IntAnd,
+                Some(ah.clone()),
+                vec![ah, constant_sized(0xdf, 1)],
+            ),
+            op(
+                4,
+                PcodeOpcode::Store,
+                None,
+                vec![constant_sized(3, 4), rdi, eax],
+            ),
+            op(5, PcodeOpcode::Return, None, vec![rax]),
+        ],
+    )]);
+    (pcode, options)
+}
+
+/// x86 `mov eax, [p]; and ah, 0xdf; mov [p], eax` clears one bit of a
+/// stored word. The read of EAX is three lanes: AL and bytes 2..4 from the
+/// load, AH from the `and`. Materialization binds the load and the `and` to
+/// one variable, so that variable no longer holds the load's bytes by the
+/// time EAX is read; rebuilding EAX from it put the `and` result in every
+/// lane. Lane reassembly must decline when its pieces share a variable.
+#[test]
+fn high_byte_update_is_not_rebuilt_from_a_shared_variable() {
+    let (pcode, options) = high_byte_update_pcode();
+    let code = render_nir_with_context_output(&pcode, "clear_bit", 0x1000, &options, None, None)
+        .expect("render high-byte update")
+        .code;
+
+    assert!(
+        !code.contains("<< 8 |"),
+        "the stored word must not be rebuilt from the and's result in every lane:\n{code}"
+    );
+}
+
+/// What the same function should produce: the loaded word with bit 13
+/// cleared. Fission still stores only the high byte's new value
+/// (`*rdi = (uchar)(*rdi / 256) & 223`), which predates lane reassembly;
+/// fixing it needs the load's value at the use, not the reused variable.
+#[test]
+#[ignore = "pre-existing: an AH read-modify-write stores only the high byte (needs the load's value, not the shared variable)"]
+fn high_byte_update_keeps_the_other_bytes_of_the_loaded_word() {
+    let (pcode, options) = high_byte_update_pcode();
+    let code = render_nir_with_context_output(&pcode, "clear_bit", 0x1000, &options, None, None)
+        .expect("render high-byte update")
+        .code;
+
+    assert!(
+        ["4294959103", "0xffffdfff", "-8193", "<< 8"]
+            .iter()
+            .any(|form| code.contains(form)),
+        "the stored value must keep the loaded word's other bytes:\n{code}"
+    );
+}
+
+fn setcc_after_call_pcode() -> (crate::pcode::PcodeFunction, MlilPreviewOptions) {
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+
+    let rdx = register(0x10, 8);
+    let edx = register(0x10, 4);
+    let dl = register(0x10, 1);
+    let edi = register(0x38, 4);
+    let rax = register(0x0, 8);
+    let eax = register(0x0, 4);
+    let flag = Varnode {
+        size: 1,
+        ..varnode(0x9000)
+    };
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(edx.clone()),
+                vec![constant_sized(0x1200, 4)],
+            ),
+            op(
+                1,
+                PcodeOpcode::IntZExt,
+                Some(rdx.clone()),
+                vec![edx.clone()],
+            ),
+            op(2, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                3,
+                PcodeOpcode::IntSLess,
+                Some(flag.clone()),
+                vec![constant_sized(0, 4), edi],
+            ),
+            op(4, PcodeOpcode::Copy, Some(dl), vec![flag]),
+            op(
+                5,
+                PcodeOpcode::IntAnd,
+                Some(eax.clone()),
+                vec![eax.clone(), edx],
+            ),
+            op(6, PcodeOpcode::IntZExt, Some(rax.clone()), vec![eax]),
+            op(7, PcodeOpcode::Return, None, vec![rax]),
+        ],
+    )]);
+
+    (pcode, options)
+}
+
+/// `mov edx, 0x1200; call f; setg dl; ...; and eax, edx`: the call
+/// clobbers EDX, so its upper bytes at the `and` are not the 0x1200 written
+/// before the call. Scalar SSA does not kill lanes at a call, so lane
+/// reassembly must not stitch a pre-call definition into a post-call read.
+#[test]
+fn lane_reassembly_does_not_reach_across_a_call() {
+    let (pcode, options) = setcc_after_call_pcode();
+    let code = render_nir_with_context_output(&pcode, "after_call", 0x1000, &options, None, None)
+        .expect("render lane read after a call")
+        .code;
+
+    assert!(
+        !code.contains("| 4608"),
+        "the setcc lane must not be stitched onto the register's pre-call value:\n{code}"
+    );
+}
+
+/// The whole answer: the `and` reads DL from the setcc and unknown upper
+/// bytes. Fission resolves EDX to its pre-call definition and drops the
+/// setcc (`return rax & 4608`); reaching definitions do not treat a call as
+/// clobbering caller-saved registers. Predates lane reassembly.
+#[test]
+#[ignore = "pre-existing: reaching definitions cross a call without clobbering caller-saved registers"]
+fn setcc_after_a_call_reads_the_post_call_register() {
+    let (pcode, options) = setcc_after_call_pcode();
+    let code = render_nir_with_context_output(&pcode, "after_call", 0x1000, &options, None, None)
+        .expect("render lane read after a call")
+        .code;
+
+    assert!(
+        !code.contains("4608") && code.contains('>'),
+        "the post-call setcc must reach the and, not the pre-call constant:\n{code}"
+    );
+}

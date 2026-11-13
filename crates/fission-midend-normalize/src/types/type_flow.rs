@@ -490,7 +490,9 @@ fn type_specificity(ty: &NirType) -> u8 {
         NirType::Int { signed: false, .. } => 1,
         NirType::Int { signed: true, .. } => 2,
         NirType::Float { .. } | NirType::Bool => 3,
-        NirType::Ptr(pointee) => 4 + type_specificity(pointee),
+        // Saturating: candidates are capped at MAX_PTR_NESTING_DEPTH, but a
+        // seeded binding type comes from other passes and is not.
+        NirType::Ptr(pointee) => type_specificity(pointee).saturating_add(4),
         NirType::Aggregate { .. } => 8,
     }
 }
@@ -511,9 +513,10 @@ fn compatible_width(current: &NirType, candidate: &NirType, pointer_bits: u32) -
 /// into itself and re-wrapping it each solver pass). Rejecting the update
 /// once the cap is hit stops the cycle from growing further without having
 /// to special-case every graph shape that can produce one.
-const MAX_PTR_NESTING_DEPTH: u32 = 8;
+/// Shared with `constraint.rs`, whose unifier has the same cycle hazard.
+pub(super) const MAX_PTR_NESTING_DEPTH: u32 = 8;
 
-fn ptr_nesting_depth(ty: &NirType) -> u32 {
+pub(super) fn ptr_nesting_depth(ty: &NirType) -> u32 {
     match ty {
         NirType::Ptr(inner) => 1 + ptr_nesting_depth(inner),
         _ => 0,

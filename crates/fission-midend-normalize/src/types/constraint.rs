@@ -1,3 +1,4 @@
+use super::type_flow::{MAX_PTR_NESTING_DEPTH, ptr_nesting_depth};
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
@@ -102,13 +103,23 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
                         loop_changed = true;
                     }
                 }
-                // Back-propagation to Deref pointer variable if RHS is a Load
+                // Back-propagation to Deref pointer variable if RHS is a Load.
+                //
+                // Occurs check: in `p = *p` the equation is `type(p) =
+                // Ptr(type(p))`, which has no finite solution; each round
+                // would wrap one more `Ptr` around p. Longer cycles
+                // (`a = *b; b = a`) do the same through several names, so the
+                // shared nesting cap bounds them too.
                 if let PreHirExpr::Load { ptr, .. } = rhs {
-                    if let PreHirExpr::Var(ptr_var) = ptr.as_ref() {
+                    if let PreHirExpr::Var(ptr_var) = ptr.as_ref()
+                        && ptr_var != lhs
+                    {
                         let prev_ptr_ty =
                             var_types.get(ptr_var).cloned().unwrap_or(NirType::Unknown);
                         let ptr_constraint = NirType::Ptr(Box::new(unified.clone()));
-                        if let Some(unified_ptr) = unify_types(&prev_ptr_ty, &ptr_constraint) {
+                        if let Some(unified_ptr) = unify_types(&prev_ptr_ty, &ptr_constraint)
+                            .filter(|ty| ptr_nesting_depth(ty) <= MAX_PTR_NESTING_DEPTH)
+                        {
                             if unified_ptr != prev_ptr_ty {
                                 var_types.insert(ptr_var.clone(), unified_ptr);
                                 loop_changed = true;
@@ -1459,5 +1470,85 @@ mod tests {
             "pointer struct accessed via deref must be Ptr(Aggregate): got {:?}",
             p_ty
         );
+    }
+
+    fn pointer_depth(ty: &NirType) -> u32 {
+        match ty {
+            NirType::Ptr(inner) => 1 + pointer_depth(inner),
+            _ => 0,
+        }
+    }
+
+    /// `p = *p` (a list walk reusing one variable) says p's type is a pointer
+    /// to p's type -- an equation with no finite solution. Back-propagating
+    /// the load onto its own pointer added one `Ptr` per solver round and one
+    /// more per call; the pipeline calls this pass repeatedly, so real
+    /// functions reached depths past 60 and overflowed `type_specificity` in
+    /// type_flow (a debug-build panic; release silently wrapped the u8).
+    #[test]
+    fn pointer_chase_through_one_variable_does_not_nest_pointers_without_bound() {
+        let ptr_unknown = NirType::Ptr(Box::new(NirType::Unknown));
+        let mut func = PreHirFunction {
+            locals: vec![binding("p", ptr_unknown.clone())],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("p".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                    ty: ptr_unknown,
+                },
+            }],
+            ..Default::default()
+        };
+
+        for _ in 0..8 {
+            apply_type_constraint_propagation(&mut func);
+        }
+
+        let depth = pointer_depth(&func.locals[0].ty);
+        assert!(
+            depth <= 1,
+            "p = *p must not wrap p in a pointer to itself; depth {depth}: {:?}",
+            func.locals[0].ty
+        );
+    }
+
+    /// The same equation through two names (`a = *b; b = a`) has no occurs
+    /// check to catch it; the nesting cap shared with type_flow bounds it.
+    #[test]
+    fn pointer_chase_through_two_variables_stays_under_the_nesting_cap() {
+        let ptr_unknown = NirType::Ptr(Box::new(NirType::Unknown));
+        let mut func = PreHirFunction {
+            locals: vec![
+                binding("a", ptr_unknown.clone()),
+                binding("b", ptr_unknown.clone()),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("a".to_owned()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("b".to_owned())),
+                        ty: ptr_unknown,
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("b".to_owned()),
+                    rhs: PreHirExpr::Var("a".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        for _ in 0..8 {
+            apply_type_constraint_propagation(&mut func);
+        }
+
+        for local in &func.locals {
+            let depth = pointer_depth(&local.ty);
+            assert!(
+                depth <= MAX_PTR_NESTING_DEPTH,
+                "{} reached pointer depth {depth}",
+                local.name
+            );
+        }
     }
 }
