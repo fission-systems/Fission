@@ -147,11 +147,10 @@ artifacts/
 │
 └── releases/
     └── v{version}/
-        ├── fission-linux-x64.tar.gz
-        ├── fission-macos-arm64.tar.gz
-        ├── fission-windows-x64.zip
-        ├── SHA256SUMS
-        └── RELEASE-NOTES.md
+        ├── fission-{target}.tar.gz / .zip   (+ .sha256 each)
+        ├── fission-resources.tar.gz
+        ├── fission-cli.rb                   (Homebrew formula)
+        └── fission_cli-x86_64-unknown-linux-gnu
 ```
 
 ### Retention periods

@@ -7,11 +7,26 @@ name: CD Release
 #   1) push tags (v*.*.* / X.Y.Z) — natural git tag push (operator credentials)
 #   2) workflow_dispatch — GitHub CLI / Release Tag (CI green) after GITHUB_TOKEN
 #      tag push (token tag pushes do not re-fire push workflows)
+#   3) pull_request touching packaging — builds, packages and smoke-tests every
+#      target exactly as a release would, and uploads nothing. This is the only
+#      way to exercise the release matrix before a tag exists.
+#
+# Assets (names carry no version, so releases/latest/download/<name> is stable):
+#   fission-<target>.tar.gz / .zip   bin/fission_cli + share/fission/ (prefix layout)
+#   fission-resources.tar.gz         share/fission contents, for `cargo install` users
+#   fission-cli.rb                   Homebrew formula for this tag
+#   fission_cli-x86_64-unknown-linux-gnu   bare Linux binary (benchmark consumers)
+#   each with a .sha256
 on:
   push:
     tags:
       - "v*.*.*"
       - "[0-9]*.[0-9]*.[0-9]*"
+  pull_request:
+    paths:
+      - ".github/workflows/cd.yml"
+      - "scripts/release/**"
+      - "install.sh"
   workflow_dispatch:
     inputs:
       tag:
@@ -28,35 +43,36 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Prefer explicit dispatch tag; otherwise tag-push ref name.
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # Prefer explicit dispatch tag; otherwise tag-push ref name. Empty on PRs.
+  RELEASE_TAG: ${{ github.event_name != 'pull_request' && (inputs.tag || github.ref_name) || '' }}
+  PUBLISH: ${{ github.event_name != 'pull_request' }}
 
 jobs:
   build-and-release:
-    name: Build & Release
+    name: Build & Release (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 50
+    timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # Linux builds on the oldest supported Ubuntu so the glibc floor is
+          # 2.35 (Debian 12, Ubuntu 22.04 and newer), not the runner's latest.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            artifact_name: fission_cli
-            asset_name: fission-linux-x64
-            benchmark_asset_name: fission_cli-x86_64-unknown-linux-gnu
-            archive_ext: tar.gz
+            exe: fission_cli
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            exe: fission_cli
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact_name: fission_cli
-            asset_name: fission-macos-arm64
-            benchmark_asset_name: ""
-            archive_ext: tar.gz
+            exe: fission_cli
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            exe: fission_cli
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact_name: fission_cli.exe
-            asset_name: fission-windows-x64
-            benchmark_asset_name: ""
-            archive_ext: zip
+            exe: fission_cli.exe
 
     steps:
       - name: Resolve release tag
@@ -64,18 +80,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          t="${RELEASE_TAG:-}"
-          t="$(echo -n "$t" | xargs)"
-          if [[ -z "$t" ]]; then
+          t="$(echo -n "${RELEASE_TAG:-}" | xargs)"
+          if [[ "${PUBLISH}" == "true" && -z "$t" ]]; then
             echo "error: empty RELEASE_TAG"
             exit 1
           fi
           echo "tag=${t}" >> "$GITHUB_OUTPUT"
-          echo "Building CD assets for tag: ${t}"
+          echo "Building CD assets for tag: ${t:-<pull request dry run>}"
 
       - uses: actions/checkout@v7
         with:
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ steps.tag.outputs.tag || github.sha }}
           submodules: recursive
 
       - name: Setup Utils
@@ -87,20 +102,22 @@ jobs:
 
       - name: Cache Rust Build
         uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
       - name: Build fission-cli (Release)
-        run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }} --verbose
+        run: cargo build -p fission-cli --locked --release --target ${{ matrix.target }}
 
       - name: Release CLI smoke
         shell: bash
         run: |
           set -euo pipefail
-          CLI="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          CLI="target/${{ matrix.target }}/release/${{ matrix.exe }}"
           test -s "${CLI}"
           "${CLI}" --version
 
-      - name: Benchmark consumer smoke (Linux)
-        if: runner.os == 'Linux'
+      - name: Benchmark consumer smoke (Linux x64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
         env:
           FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
         shell: bash
@@ -113,7 +130,7 @@ jobs:
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
             .github/fixtures/test_functions.c \
             -o "${BIN}"
-          CLI="target/${{ matrix.target }}/release/${{ matrix.artifact_name }}"
+          CLI="target/${{ matrix.target }}/release/${{ matrix.exe }}"
           "${CLI}" info "${BIN}"
           "${CLI}" list "${BIN}" --json
           ADDR="$("${CLI}" list "${BIN}" --json | python3 .github/scripts/pick_pe_smoke_decomp_addr.py)"
@@ -122,115 +139,144 @@ jobs:
           SESSION=$("${CLI}" debug --emulator session "${BIN}" -c step -c step -c regs --json)
           echo "${SESSION}" | python3 .github/scripts/check_debug_session.py
 
-      - name: Prepare Package Directory
+      - name: Package
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release_pkg
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} release_pkg/
-          
-          # Copy Resources (Ghidra data)
-          if [ -d ghidra ]; then
-            cp -r ghidra release_pkg/
-          elif [ -d ghidra_decompiler ]; then
-            cp -r ghidra_decompiler release_pkg/
-          else
-            echo "INFO: No ghidra resource directory found; skipping copy"
-          fi
-          
-          # Runtime resources (sleigh / signatures / ghidra-data). utils/ is
-          # committed, so the checkout has it and setup-utils only verifies.
-          if [ ! -d utils/sleigh-specs ]; then
-            echo "ERROR: utils/sleigh-specs missing — the archive would not decompile anything"
-            exit 1
-          fi
-          slaspec_count=$(find utils/sleigh-specs -name "*.slaspec" 2>/dev/null | wc -l | tr -d ' ')
-          echo "Packaging utils/ (.slaspec count=${slaspec_count})"
-          test "${slaspec_count}" -gt 10
-          cp -a utils release_pkg/
+          bash scripts/release/package.sh binary "${{ matrix.target }}" \
+            "target/${{ matrix.target }}/release/${{ matrix.exe }}" dist
 
-      - name: Create benchmark raw CLI asset (Linux)
-        if: runner.os == 'Linux'
+      # Unpacked outside the checkout, run from an unrelated directory with
+      # no FISSION_* environment: what a user does. The v0.2.x flat layout
+      # failed exactly this and nothing ran it.
+      - name: Packaged archive smoke
         shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} "${{ matrix.benchmark_asset_name }}"
-          chmod +x "${{ matrix.benchmark_asset_name }}"
-          "./${{ matrix.benchmark_asset_name }}" --version
-          shasum -a 256 "${{ matrix.benchmark_asset_name }}" > "${{ matrix.benchmark_asset_name }}.sha256"
-          cat "${{ matrix.benchmark_asset_name }}.sha256"
+          ext=tar.gz
+          if [[ "${TARGET}" == *windows* ]]; then ext=zip; fi
+          bash scripts/release/smoke_package.sh "dist/fission-${TARGET}.${ext}" \
+            crates/fission-sleigh/testdata/a64_csel_select.so
 
-      - name: Create Archive (Unix)
+      - name: install.sh smoke (Unix)
         if: runner.os != 'Windows'
-        run: |
-          cd release_pkg
-          tar -czf ../${{ matrix.asset_name }}.tar.gz *
-          cd ..
-          ls -lh ${{ matrix.asset_name }}.tar.gz
-
-      - name: Create Archive (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cd release_pkg
-          7z a ../${{ matrix.asset_name }}.zip *
-          cd ..
-          dir ${{ matrix.asset_name }}.zip
-
-      - name: Generate SHA256 Checksum
         shell: bash
         run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            certutil -hashfile ${{ matrix.asset_name }}.${{ matrix.archive_ext }} SHA256 | head -1 > ${{ matrix.asset_name }}.sha256
-          else
-            shasum -a 256 ${{ matrix.asset_name }}.${{ matrix.archive_ext }} > ${{ matrix.asset_name }}.sha256
-          fi
-          cat ${{ matrix.asset_name }}.sha256
+          set -euo pipefail
+          prefix="$(mktemp -d)/prefix"
+          (cd "$(mktemp -d)" && FISSION_PREFIX="${prefix}" \
+            FISSION_ARCHIVE="${GITHUB_WORKSPACE}/dist/fission-${{ matrix.target }}.tar.gz" \
+            sh "${GITHUB_WORKSPACE}/install.sh")
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT "${prefix}/bin/fission_cli" \
+            decomp "${GITHUB_WORKSPACE}/crates/fission-sleigh/testdata/a64_csel_select.so" --all \
+            | grep -q "Function:")
 
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Bare Linux CLI asset (benchmark consumers)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=fission_cli-x86_64-unknown-linux-gnu
+          cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" "dist/${name}"
+          chmod +x "dist/${name}"
+          (cd dist && sha256sum "${name}" > "${name}.sha256")
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          files: |
-            ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
-            ${{ matrix.asset_name }}.sha256
-          draft: false
-          prerelease: false
+          name: dist-${{ matrix.target }}
+          path: dist/
+          retention-days: 7
 
-      - name: Upload Benchmark CLI Asset
-        uses: softprops/action-gh-release@v1
-        if: runner.os == 'Linux'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          files: |
-            ${{ matrix.benchmark_asset_name }}
-            ${{ matrix.benchmark_asset_name }}.sha256
-          draft: false
-          prerelease: false
-
-  # Release validation job
-  release-summary:
-    name: Release Summary
+  resources-and-formula:
+    name: Resource bundle & Homebrew formula
     needs: [build-and-release]
     runs-on: ubuntu-latest
-    if: always()
+    timeout-minutes: 20
     steps:
-      - name: Check Release Status
-        env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ (github.event_name != 'pull_request' && (inputs.tag || github.ref_name)) || github.sha }}
+
+      - name: Setup Utils
+        uses: ./.github/actions/setup-utils
+
+      - name: Collect archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Resource bundle
+        run: bash scripts/release/package.sh resources dist
+
+      # A cargo-install user's layout: the binary in <root>/bin, resources
+      # unpacked into <root>/share/fission.
+      - name: Resource bundle smoke
+        shell: bash
         run: |
-          if [ "${{ needs.build-and-release.result }}" != "success" ]; then
-            echo "ERROR: Release build failed"
-            exit 1
+          set -euo pipefail
+          root="$(mktemp -d)"
+          mkdir -p "${root}/bin" "${root}/share/fission"
+          tar -C "${root}/share/fission" -xzf dist/fission-resources.tar.gz
+          cp dist/fission_cli-x86_64-unknown-linux-gnu "${root}/bin/fission_cli"
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT "${root}/bin/fission_cli" \
+            decomp "${GITHUB_WORKSPACE}/crates/fission-sleigh/testdata/a64_csel_select.so" --all \
+            | grep -q "Function:")
+
+      - name: Homebrew formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${RELEASE_TAG:-v0.0.0-dryrun}"
+          python3 scripts/release/render_homebrew_formula.py "${tag}" dist > dist/fission-cli.rb
+          (cd dist && sha256sum fission-cli.rb > fission-cli.rb.sha256)
+          ruby -c dist/fission-cli.rb
+          ls -l dist
+
+      - name: Upload Release Assets
+        if: env.PUBLISH == 'true'
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: |
+            dist/fission-*.tar.gz
+            dist/fission-*.zip
+            dist/fission-*.sha256
+            dist/fission-cli.rb
+            dist/fission_cli-x86_64-unknown-linux-gnu
+            dist/fission_cli-x86_64-unknown-linux-gnu.sha256
+          draft: false
+          prerelease: false
+
+      # Optional: needs a token with contents:write on the tap repository.
+      # Without it the formula is still attached to the release.
+      - name: Update Homebrew tap (optional)
+        if: env.PUBLISH == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${TAP_TOKEN:-}" ]]; then
+            echo "HOMEBREW_TAP_TOKEN not set; fission-cli.rb is on the release for a manual tap update."
+            exit 0
           fi
-          echo "OK: Release artifacts created successfully!"
-          echo ""
-          echo "Tag: ${RELEASE_TAG}"
-          echo "Assets include:"
-          echo "  - fission-linux-x64 / macos-arm64 / windows-x64 (CLI + utils inside archive)"
-          echo "  - fission_cli-x86_64-unknown-linux-gnu (Linux CLI only, for benchmark consumers)"
-          echo "Release assets will be available at:"
-          echo "https://github.com/${{ github.repository }}/releases/tag/${RELEASE_TAG}"
+          git clone --depth 1 "https://x-access-token:${TAP_TOKEN}@github.com/fission-systems/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp dist/fission-cli.rb tap/Formula/fission-cli.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/fission-cli.rb
+          if git diff --cached --quiet; then
+            echo "formula unchanged"
+            exit 0
+          fi
+          git commit -m "fission-cli ${RELEASE_TAG}"
+          git push origin HEAD
