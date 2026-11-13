@@ -96,25 +96,11 @@ Manual CD re-run for an existing tag:
 gh workflow run "CD Release" -f tag=v0.1.4
 ```
 
-Official benchmark bake (after release assets exist):
-
-```bash
-# Preferred: bake GHCR then auto-chain official Benchmark & Deploy
-gh workflow run "Publish Images" --repo fission-systems/fission-benchmark \
-  -f services=fission -f fission_version=v0.1.4
-
-# Or repository_dispatch (Publish Images only; chains benchmark itself):
-gh api repos/fission-systems/fission-benchmark/dispatches --input - <<'EOF'
-{
-  "event_type": "fission-release",
-  "client_payload": { "fission_version": "v0.1.4" }
-}
-EOF
-```
-
-Optional: set repo secret `FISSION_BENCHMARK_DISPATCH_TOKEN` (PAT with
-`actions:write` on `fission-benchmark`) so **Release Tag** auto-runs the bake
-after CD is queued.
+Benchmark measurement is not part of tagging. The docker image bake that
+`Release Tag` used to dispatch in `fission-benchmark` ("Publish Images") was
+retired with the docker loop; quality numbers for a release are measured
+locally on DecBench ([`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)) and
+recorded in its changelog.
 
 Optional: run **Release E2E Gate** alone (dispatch) to pre-validate a SHA without tagging.
 
