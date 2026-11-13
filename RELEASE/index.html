@@ -1516,7 +1516,7 @@
 <li><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a> publishes all expected <strong><code>fission-cli</code></strong> assets:</li>
 <li><code>fission-&lt;target&gt;.tar.gz</code> (<code>.zip</code> on Windows) for the five targets below, each <code>bin/fission_cli</code> plus <code>share/fission/</code></li>
 <li><code>fission-resources.tar.gz</code> (the <code>share/fission/</code> tree alone, for <code>cargo install</code> users)</li>
-<li><code>fission-cli.rb</code> (the Homebrew formula for the tag; pushed to <code>fission-systems/homebrew-tap</code> when <code>HOMEBREW_TAP_TOKEN</code> is set)</li>
+<li><code>fission-cli.rb</code> (the Homebrew formula for the tag; <a href="https://github.com/fission-systems/homebrew-tap"><code>fission-systems/homebrew-tap</code></a> copies it from the latest release hourly; run its <em>Update formula</em> workflow to publish immediately)</li>
 <li>Linux benchmark CLI: <code>fission_cli-x86_64-unknown-linux-gnu</code> (binary-only convenience asset)</li>
 <li>a <code>.sha256</code> beside every file</li>
 <li>The <strong>30-minute</strong> evaluation path in <a href="../EVALUATION/"><code>docs/EVALUATION.md</code></a> passes on at least <strong>one</strong> Windows x64 sample binary.</li>
