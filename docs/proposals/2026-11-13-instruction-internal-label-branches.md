@@ -95,3 +95,23 @@ instruction and keeps the Cover test. `count_char` (`cinc x0, x0, eq`, where `x0
 is both the pointer parameter and the counter) now decompiles and `verify` reports
 `Diverged`: the parameter and the counter share a name. That defect was already
 there, behind the phantom call.
+
+## 6. Follow-up: one rule instead of two (2026-11-13)
+
+`count_char` (`cinc x0, x0, eq`) showed that the builder half of the fix above was
+placed too late. A naming heuristic earlier in the chain
+(`live_register_lhs_name_for_passthrough_join_store_producer`) named the guarded
+half of the select after the register it is copied into -- `x0`, whose ABI
+parameter name it picked even though `x0` had been reassigned before the loop -- so
+the two halves were split again and the function returned the pointer parameter.
+
+Both earlier builder rules (a unique temporary allowed in
+`prove_same_block_register_join`, and the Cover bypass there) are replaced by one
+rule at the head of the naming chain: the guarded half of one instruction's select
+takes the binding of its default half. Removing either earlier rule with this in
+place leaves every measured function `Equivalent`, so they are gone.
+
+- `verify` ground truth on the probe's AArch64 ELF: 9 `Equivalent`, 0 `Diverged`
+  (after the first fix: 8 and 1; before it: 7 and 0, the rest `Unsupported`).
+- DecBench sample set against the first fix: no GED row moved (total distance 7575,
+  perfect 68/233); types perfect 16/222 -> 17/222.
