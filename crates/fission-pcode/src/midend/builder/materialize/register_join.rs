@@ -235,7 +235,15 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Option<SameBlockRegisterJoinProof> {
-        if output.is_constant || !is_register_space_id(output.space_id) {
+        // A register is the usual carrier. A unique temporary is one too when
+        // the write sits in an instruction-local skip: SLEIGH builds a
+        // conditional select as `tmp = a; if (cond) goto L; tmp = b; L:`, and
+        // the two writes to `tmp` are one logical value (AArch64 `csel`).
+        if output.is_constant
+            || !(is_register_space_id(output.space_id)
+                || (is_unique_space_id(output.space_id)
+                    && self.op_is_inside_same_block_forward_cmov_body(block, op_idx)))
+        {
             return None;
         }
         let current_definition_reads_prior_value = block.ops[op_idx]
@@ -286,9 +294,27 @@ impl<'a> PreviewBuilder<'a> {
             // Cover positively proves the two definitions' live ranges
             // interfere, and keep searching further back for one that
             // doesn't.
-            if self.cover_proves_distinct_and_interfering(
-                block_idx, op_idx, output, prior_idx, prior_out,
-            ) {
+            // The Cover test is about *unrelated* reuse of a name. It cannot
+            // apply when the two writes are the halves of one instruction's
+            // select: SLEIGH lowers `csel` to `tmp = a; if (cond) goto L;
+            // tmp = b; L:`, and the SSA has no join for an instruction-local
+            // skip, so it reports the default value live across the guarded
+            // write -- which is the select's own shape. Both writes to one
+            // storage, separated only by that skip and made by the same machine
+            // instruction, are one value. (An x86 `cmov` has no first write of
+            // its own: its default comes from an earlier instruction, which is
+            // a different question and keeps the Cover test.)
+            let select_halves = prior_key == output_key
+                && block.ops[prior_idx].address == block.ops[op_idx].address
+                && Self::is_overwritten_only_inside_instruction_local_skip(
+                    block, prior_idx, prior_out,
+                )
+                && Self::op_is_inside_instruction_local_skip(block, op_idx);
+            if !select_halves
+                && self.cover_proves_distinct_and_interfering(
+                    block_idx, op_idx, output, prior_idx, prior_out,
+                )
+            {
                 continue;
             }
             let name = self

@@ -84,6 +84,64 @@ impl<'a> PreviewBuilder<'a> {
         uses
     }
 
+    /// Whether the op at `idx` sits strictly inside an instruction-local skip:
+    /// a `Branch`/`CBranch` earlier in the block whose target is a later op of
+    /// the same block. A write there happens only on the path that did not take
+    /// the skip, so it does not end the lifetime of an earlier definition of
+    /// the same storage: on the skipped path that earlier value is still the
+    /// one a later read sees.
+    ///
+    /// SLEIGH builds a conditional select this way (AArch64 `csel` is
+    /// `tmp = a; if (cond) goto L; tmp = b; L:`), and x86 `cmov` is the same
+    /// shape without the first write.
+    pub(in crate::midend::builder) fn op_is_inside_instruction_local_skip(
+        block: &crate::pcode::PcodeBasicBlock,
+        idx: usize,
+    ) -> bool {
+        block
+            .ops
+            .iter()
+            .enumerate()
+            .take(idx)
+            .any(|(branch_idx, op)| {
+                matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch)
+                    && op.inputs.first().is_some_and(|target| {
+                        crate::midend::cfg::same_block_forward_branch_target_op_idx(
+                            block,
+                            branch_idx,
+                            block.ops.len(),
+                            op,
+                            target,
+                        )
+                        .is_some_and(|target_idx| target_idx > idx)
+                    })
+            })
+    }
+
+    /// Whether the definition at `op_idx` is shadowed by a write to the same
+    /// storage that sits inside a later instruction-local skip, with no
+    /// unconditional write to it in between. Then the definition still reaches
+    /// whatever follows the skip on the path that took it.
+    pub(in crate::midend::builder) fn is_overwritten_only_inside_instruction_local_skip(
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        let key = VarnodeKey::from(output);
+        let mut guarded_write = false;
+        for (idx, candidate) in block.ops.iter().enumerate().skip(op_idx + 1) {
+            if !Self::op_kills_varnode_definition(candidate, &key) {
+                continue;
+            }
+            if Self::op_is_inside_instruction_local_skip(block, idx) {
+                guarded_write = true;
+            } else {
+                return guarded_write;
+            }
+        }
+        guarded_write
+    }
+
     pub(super) fn first_output_redefinition_in_block<'b>(
         block: &'b crate::pcode::PcodeBasicBlock,
         op_idx: usize,
