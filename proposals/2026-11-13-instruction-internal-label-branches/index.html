@@ -1255,6 +1255,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#6-follow-up-one-rule-instead-of-two-2026-11-13" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Follow-up: one rule instead of two (2026-11-13)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1389,6 +1400,24 @@ instruction and keeps the Cover test. <code>count_char</code> (<code>cinc x0, x0
 is both the pointer parameter and the counter) now decompiles and <code>verify</code> reports
 <code>Diverged</code>: the parameter and the counter share a name. That defect was already
 there, behind the phantom call.</p>
+<h2 id="6-follow-up-one-rule-instead-of-two-2026-11-13">6. Follow-up: one rule instead of two (2026-11-13)<a class="headerlink" href="#6-follow-up-one-rule-instead-of-two-2026-11-13" title="Permanent link">&para;</a></h2>
+<p><code>count_char</code> (<code>cinc x0, x0, eq</code>) showed that the builder half of the fix above was
+placed too late. A naming heuristic earlier in the chain
+(<code>live_register_lhs_name_for_passthrough_join_store_producer</code>) named the guarded
+half of the select after the register it is copied into -- <code>x0</code>, whose ABI
+parameter name it picked even though <code>x0</code> had been reassigned before the loop -- so
+the two halves were split again and the function returned the pointer parameter.</p>
+<p>Both earlier builder rules (a unique temporary allowed in
+<code>prove_same_block_register_join</code>, and the Cover bypass there) are replaced by one
+rule at the head of the naming chain: the guarded half of one instruction's select
+takes the binding of its default half. Removing either earlier rule with this in
+place leaves every measured function <code>Equivalent</code>, so they are gone.</p>
+<ul>
+<li><code>verify</code> ground truth on the probe's AArch64 ELF: 9 <code>Equivalent</code>, 0 <code>Diverged</code>
+  (after the first fix: 8 and 1; before it: 7 and 0, the rest <code>Unsupported</code>).</li>
+<li>DecBench sample set against the first fix: no GED row moved (total distance 7575,
+  perfect 68/233); types perfect 16/222 -&gt; 17/222.</li>
+</ul>
 
 
 

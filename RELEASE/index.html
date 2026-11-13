@@ -1486,8 +1486,11 @@
 <li><strong>L2</strong> <a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a> succeeds on that commit (enforced by <a href="../.github/workflows/release-tag.yml">release-tag.yml</a> before the tag is created).</li>
 <li>Prefer creating tags only via Actions → <strong>Release Tag (CI green)</strong> so the above are machine-checked and the tag points at the verified SHA.</li>
 <li><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a> publishes all expected <strong><code>fission-cli</code></strong> assets:</li>
-<li><code>fission-linux-x64</code> / <code>fission-macos-arm64</code> / <code>fission-windows-x64</code> (each archive includes a verified <code>utils/</code> tree)</li>
+<li><code>fission-&lt;target&gt;.tar.gz</code> (<code>.zip</code> on Windows) for the five targets below, each <code>bin/fission_cli</code> plus <code>share/fission/</code></li>
+<li><code>fission-resources.tar.gz</code> (the <code>share/fission/</code> tree alone, for <code>cargo install</code> users)</li>
+<li><code>fission-cli.rb</code> (the Homebrew formula for the tag; pushed to <code>fission-systems/homebrew-tap</code> when <code>HOMEBREW_TAP_TOKEN</code> is set)</li>
 <li>Linux benchmark CLI: <code>fission_cli-x86_64-unknown-linux-gnu</code> (binary-only convenience asset)</li>
+<li>a <code>.sha256</code> beside every file</li>
 <li>The <strong>30-minute</strong> evaluation path in <a href="../EVALUATION/"><code>docs/EVALUATION.md</code></a> passes on at least <strong>one</strong> Windows x64 sample binary.</li>
 <li>If corpus-wide quality is claimed, attach or link <code>benchmark_compact_summary.json</code> and confirm:</li>
 <li><code>release_promotion_allowed</code> is <code>true</code>, <strong>or</strong></li>
@@ -1507,29 +1510,46 @@
 <tr>
 <th>Platform</th>
 <th>Rust target</th>
-<th>Published asset prefix</th>
+<th>Runner</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Linux x64</td>
 <td><code>x86_64-unknown-linux-gnu</code></td>
-<td><code>fission-linux-x64</code></td>
+<td><code>ubuntu-22.04</code> (glibc 2.35 floor)</td>
+</tr>
+<tr>
+<td>Linux arm64</td>
+<td><code>aarch64-unknown-linux-gnu</code></td>
+<td><code>ubuntu-22.04-arm</code></td>
 </tr>
 <tr>
 <td>macOS Apple Silicon</td>
 <td><code>aarch64-apple-darwin</code></td>
-<td><code>fission-macos-arm64</code></td>
+<td><code>macos-latest</code></td>
+</tr>
+<tr>
+<td>macOS Intel</td>
+<td><code>x86_64-apple-darwin</code></td>
+<td><code>macos-15-intel</code></td>
 </tr>
 <tr>
 <td>Windows x64</td>
 <td><code>x86_64-pc-windows-msvc</code></td>
-<td><code>fission-windows-x64</code></td>
+<td><code>windows-latest</code></td>
 </tr>
 </tbody>
 </table>
-<p>Local dry-run:</p>
+<p>The asset is <code>fission-&lt;target&gt;.tar.gz</code> (<code>.zip</code> on Windows). Names carry no
+version, so <code>releases/latest/download/&lt;name&gt;</code> always resolves. A pull request
+that touches <code>cd.yml</code>, <code>scripts/release/</code> or <code>install.sh</code> runs the whole matrix,
+packaging and smoke tests included, without uploading anything.</p>
+<p>Local dry-run of one target:</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--locked<span class="w"> </span>--release
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>scripts/release/package.sh<span class="w"> </span>binary<span class="w"> </span>aarch64-apple-darwin<span class="w"> </span>target/release/fission_cli<span class="w"> </span>dist
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>scripts/release/smoke_package.sh<span class="w"> </span>dist/fission-aarch64-apple-darwin.tar.gz<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>crates/fission-sleigh/testdata/a64_csel_select.so
 </span></code></pre></div>
 <p>Cross-target developers should mirror the matrix with <code>rustup target add …</code> as needed.</p>
 <h2 id="3-smoke-validation-evaluation-path">3. Smoke validation (evaluation path)<a class="headerlink" href="#3-smoke-validation-evaluation-path" title="Permanent link">&para;</a></h2>

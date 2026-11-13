@@ -1525,9 +1525,14 @@ without anyone being able to see it.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Inside platform archives</strong> (<code>fission-linux-x64.tar.gz</code>, …)</td>
-<td><code>cd.yml</code> copies a verified <code>utils/</code> into each OS package</td>
-<td>End-user installs that unpack the full release</td>
+<td><strong>Inside platform archives</strong> (<code>fission-&lt;target&gt;.tar.gz</code> / <code>.zip</code>)</td>
+<td><code>cd.yml</code> copies a verified <code>utils/</code> into each archive as <code>share/fission/</code>, beside <code>bin/fission_cli</code></td>
+<td>Homebrew, <code>install.sh</code>, anyone unpacking a release</td>
+</tr>
+<tr>
+<td><strong><code>fission-resources.tar.gz</code></strong></td>
+<td>The same <code>share/fission/</code> contents on their own</td>
+<td><code>cargo install</code> users, who unpack it into <code>~/.cargo/share/fission</code></td>
 </tr>
 <tr>
 <td><strong>The <code>utils/</code> tree itself</strong></td>
@@ -1539,8 +1544,9 @@ without anyone being able to see it.</p>
 <p>Rules:</p>
 <ol>
 <li>Platform packages <strong>fail the release</strong> if <code>utils/sleigh-specs</code> is missing/incomplete.</li>
-<li>There is no standalone resource bundle any more; <code>utils/</code> reaches consumers through the clone or through the platform archive.</li>
+<li><code>utils/</code> reaches consumers through the clone, the platform archive, or <code>fission-resources.tar.gz</code>; all three are cut from the same tagged checkout.</li>
 <li>Regenerate packed artifacts (<code>.fpk</code>) with the scripts in <a href="../scripts"><code>scripts/</code></a> and commit them; there is no separate publish step for CI to pick them up.</li>
+<li>Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by <a href="../scripts/release/smoke_package.sh"><code>scripts/release/smoke_package.sh</code></a>. The v0.2.x archives put <code>utils/</code> beside the binary, a place the binary never looks, and only worked from inside a source tree.</li>
 </ol>
 <h2 id="related-files">Related files<a class="headerlink" href="#related-files" title="Permanent link">&para;</a></h2>
 <ul>

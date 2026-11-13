@@ -3474,6 +3474,7 @@
 <hr />
 <h2 id="runtime-resource-bundle">Runtime resource bundle<a class="headerlink" href="#runtime-resource-bundle" title="Permanent link">&para;</a></h2>
 <p>FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through <strong><code>fission_core::PATHS</code></strong> (<code>PathConfig::detect</code> in <a href="../crates/fission-core/src/core/path_config.rs"><code>crates/fission-core/src/core/path_config.rs</code></a>, with bundle-root probing in <a href="../crates/fission-core/src/core/resource_roots.rs"><code>resource_roots.rs</code></a>). In this repository the canonical checked-in tree remains <strong><code>utils/signatures</code></strong>; installs may ship the same layout under a bundle root such as <strong><code>{bundle}/signatures/</code></strong>.</p>
+<p>Every install channel uses one layout, <code>&lt;prefix&gt;/bin/fission_cli</code> beside <code>&lt;prefix&gt;/share/fission/{sleigh-specs,signatures,ghidra-data}</code>, which the binary finds as <code>exe_parent/../share/fission</code> with no configuration: Homebrew (<code>&lt;cellar&gt;/share/fission</code>), <code>install.sh</code> (<code>~/.local</code>), an unpacked release archive, and <code>cargo install</code> plus <code>fission-resources.tar.gz</code> unpacked into <code>~/.cargo/share/fission</code>.</p>
 <h3 id="overrides">Overrides<a class="headerlink" href="#overrides" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
