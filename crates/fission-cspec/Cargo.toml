@@ -1,6 +1,6 @@
 [package]
 name = "fission-cspec"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Calling-convention (cspec), language definition and register model for Fission"
