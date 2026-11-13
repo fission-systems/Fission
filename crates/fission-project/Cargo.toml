@@ -1,6 +1,6 @@
 [package]
 name = "fission-project"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "What an analyst decided about a binary, kept between runs"

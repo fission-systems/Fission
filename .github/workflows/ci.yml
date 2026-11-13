@@ -356,7 +356,10 @@ jobs:
           HAS_TARGETED_TEST=false
           SLEIGH_CHANGED=false
 
-          if printf '%s\n' "$CHANGED" | grep -e "^crates/fission-pcode/src/midend/" \
+          # Rust sources only: a manifest edit (a version bump, a dependency
+          # drop) changes no NIR semantics, and counting it blocked release
+          # PRs for want of a test there is nothing to write for.
+          if printf '%s\n' "$CHANGED" | grep '\.rs$' | grep -e "^crates/fission-pcode/src/midend/" \
               -e "^crates/fission-pcode/src/render/" \
               -e "^crates/fission-midend-structuring/" \
               -e "^crates/fission-midend-normalize/" \
