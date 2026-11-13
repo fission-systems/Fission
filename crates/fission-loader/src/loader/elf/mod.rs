@@ -60,6 +60,7 @@ const SHN_ABS: u16 = 0xfff1;
 const STT_NOTYPE: u8 = 0;
 const STT_OBJECT: u8 = 1;
 const STT_FUNC: u8 = 2;
+const STB_LOCAL: u8 = 0;
 const STB_GLOBAL: u8 = 1;
 const STB_WEAK: u8 = 2;
 const EM_PPC64: u16 = 21;
@@ -888,6 +889,7 @@ impl ElfLoader {
         }
 
         let reader = ByteReader::new(full_data, endian);
+        let mut deferred_labels: Vec<FunctionInfo> = Vec::new();
         for index in 0..count {
             let Some(offset) = entry_offset(full_data.len(), sym_start, index, entry_size) else {
                 break;
@@ -969,36 +971,46 @@ impl ElfLoader {
             if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
                 continue;
             }
+            if sym_type == STT_NOTYPE && is_assembler_local_label(&name, binding) {
+                continue;
+            }
             let address = function_descriptors
                 .get(&raw_address)
                 .copied()
                 .unwrap_or(raw_address);
 
-            push_unique_function(
-                out_funcs,
-                existing_addresses,
-                existing_imports,
-                FunctionInfo {
-                    name,
-                    address,
-                    size: sym.st_size,
-                    is_export: externally_visible,
-                    is_import: false,
-                    origin: Some(
-                        if is_dynamic_table {
-                            "elf-dynsym"
-                        } else {
-                            "elf-symtab"
-                        }
-                        .to_string(),
-                    ),
-                    kind: Some("code".to_string()),
-                    source_section: section_names.get(section_index).cloned(),
-                    external_library: None,
-                    is_thunk_like: false,
-                    thunk_target: None,
-                },
-            );
+            let function = FunctionInfo {
+                name,
+                address,
+                size: sym.st_size,
+                is_export: externally_visible,
+                is_import: false,
+                origin: Some(
+                    if is_dynamic_table {
+                        "elf-dynsym"
+                    } else {
+                        "elf-symtab"
+                    }
+                    .to_string(),
+                ),
+                kind: Some("code".to_string()),
+                source_section: section_names.get(section_index).cloned(),
+                external_library: None,
+                is_thunk_like: false,
+                thunk_target: None,
+            };
+            // A `NOTYPE` label waits until every `FUNC` symbol of the table
+            // has claimed its address: locals come first in an ELF symbol
+            // table, so a label at a function's entry would otherwise take
+            // the function's name.
+            if sym_type == STT_NOTYPE {
+                deferred_labels.push(function);
+            } else {
+                push_unique_function(out_funcs, existing_addresses, existing_imports, function);
+            }
+        }
+        for function in deferred_labels {
+            push_unique_function(out_funcs, existing_addresses, existing_imports, function);
         }
     }
 
@@ -1056,6 +1068,7 @@ impl ElfLoader {
         let mut mapping_symbols: Vec<(u64, bool)> = Vec::new();
         let functions_before = out_funcs.len();
         let reader = ByteReader::new(full_data, endian);
+        let mut deferred_labels: Vec<FunctionInfo> = Vec::new();
         for index in 0..count {
             let Some(offset) = entry_offset(full_data.len(), sym_start, index, entry_size) else {
                 break;
@@ -1157,32 +1170,42 @@ impl ElfLoader {
             if sym_type != STT_FUNC && !(sym_type == STT_NOTYPE && section_is_exec) {
                 continue;
             }
+            if sym_type == STT_NOTYPE && is_assembler_local_label(&name, binding) {
+                continue;
+            }
 
-            push_unique_function(
-                out_funcs,
-                existing_addresses,
-                existing_imports,
-                FunctionInfo {
-                    name,
-                    address,
-                    size: sym.st_size as u64,
-                    is_export: externally_visible,
-                    is_import: false,
-                    origin: Some(
-                        if is_dynamic_table {
-                            "elf-dynsym"
-                        } else {
-                            "elf-symtab"
-                        }
-                        .to_string(),
-                    ),
-                    kind: Some("code".to_string()),
-                    source_section: section_names.get(section_index).cloned(),
-                    external_library: None,
-                    is_thunk_like: false,
-                    thunk_target: None,
-                },
-            );
+            let function = FunctionInfo {
+                name,
+                address,
+                size: sym.st_size as u64,
+                is_export: externally_visible,
+                is_import: false,
+                origin: Some(
+                    if is_dynamic_table {
+                        "elf-dynsym"
+                    } else {
+                        "elf-symtab"
+                    }
+                    .to_string(),
+                ),
+                kind: Some("code".to_string()),
+                source_section: section_names.get(section_index).cloned(),
+                external_library: None,
+                is_thunk_like: false,
+                thunk_target: None,
+            };
+            // A `NOTYPE` label waits until every `FUNC` symbol of the table
+            // has claimed its address: locals come first in an ELF symbol
+            // table, so a label at a function's entry would otherwise take
+            // the function's name.
+            if sym_type == STT_NOTYPE {
+                deferred_labels.push(function);
+            } else {
+                push_unique_function(out_funcs, existing_addresses, existing_imports, function);
+            }
+        }
+        for function in deferred_labels {
+            push_unique_function(out_funcs, existing_addresses, existing_imports, function);
         }
 
         // A function whose symbol carries no Thumb bit (a `NOTYPE` label, or a
@@ -1686,6 +1709,15 @@ fn push_unique_function(
         existing_imports.insert(function.name.clone());
     }
     out.push(function);
+}
+
+/// An assembler-local label (`.L` prefix, local binding) names a point inside
+/// code -- a branch target, a `%pcrel_hi` anchor -- never a function entry.
+/// GNU `as` drops them; LLVM keeps them in the symbol table on some targets
+/// (RISC-V keeps thousands), where they would each become a "function" and,
+/// sitting at a real function's entry, replace its name.
+fn is_assembler_local_label(name: &str, binding: u8) -> bool {
+    binding == STB_LOCAL && name.starts_with(".L")
 }
 
 fn is_elf_mapping_symbol(name: &str) -> bool {
