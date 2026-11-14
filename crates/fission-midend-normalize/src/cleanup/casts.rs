@@ -634,12 +634,23 @@ fn canonicalize_unsigned_compare_binding_casts_in_stmt(
         | PreHirStmt::Return(Some(expr)) => {
             canonicalize_unsigned_compare_binding_casts_in_expr(expr, binding_types)
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. } => canonicalize_unsigned_compare_binding_casts_in_stmts(
+        PreHirStmt::Block(body) => canonicalize_unsigned_compare_binding_casts_in_stmts(
             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
             binding_types,
         ),
+        // A loop condition is a comparison boundary exactly like an `if`
+        // condition. Loop-condition inlining moves a compare out of the body
+        // and into `cond` after every other cast pass has run, so skipping it
+        // here printed an unsigned `IntLess` as a signed C `<`.
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            let mut changed =
+                canonicalize_unsigned_compare_binding_casts_in_expr(cond, binding_types);
+            changed |= canonicalize_unsigned_compare_binding_casts_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                binding_types,
+            );
+            changed
+        }
         PreHirStmt::If {
             cond,
             then_body,
@@ -1091,6 +1102,70 @@ mod tests {
                 if *ty == int(32, false)
                     && matches!(expr.as_ref(), PreHirExpr::Var(name) if name == "iVar18"))
         ));
+    }
+
+    fn signed_local(name: &str) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_string(),
+            ty: int(32, true),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }
+    }
+
+    fn unsigned_lt_const(name: &str, bound: i64) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Var(name.to_string())),
+            rhs: Box::new(PreHirExpr::Const(bound, int(32, false))),
+            ty: NirType::Bool,
+        }
+    }
+
+    fn compares_through_unsigned_cast(cond: &PreHirExpr, name: &str) -> bool {
+        matches!(cond, PreHirExpr::Binary { lhs, .. }
+            if matches!(lhs.as_ref(), PreHirExpr::Cast { ty, expr }
+                if *ty == int(32, false)
+                    && matches!(expr.as_ref(), PreHirExpr::Var(var) if var == name)))
+    }
+
+    #[test]
+    fn restores_unsigned_cast_in_a_while_condition() {
+        let mut func = PreHirFunction {
+            name: "unsigned_compare_while".to_string(),
+            locals: vec![signed_local("i")],
+            body: vec![PreHirStmt::While {
+                cond: unsigned_lt_const("i", 10),
+                body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+            }],
+            ..Default::default()
+        };
+
+        assert!(canonicalize_unsigned_compare_binding_casts(&mut func));
+        let PreHirStmt::While { cond, .. } = &func.body[0] else {
+            panic!("loop kept");
+        };
+        assert!(compares_through_unsigned_cast(cond, "i"), "{cond:?}");
+    }
+
+    #[test]
+    fn restores_unsigned_cast_in_a_do_while_condition() {
+        let mut func = PreHirFunction {
+            name: "unsigned_compare_do_while".to_string(),
+            locals: vec![signed_local("i")],
+            body: vec![PreHirStmt::DoWhile {
+                body: std::rc::Rc::new(vec![PreHirStmt::Continue]),
+                cond: unsigned_lt_const("i", 10),
+            }],
+            ..Default::default()
+        };
+
+        assert!(canonicalize_unsigned_compare_binding_casts(&mut func));
+        let PreHirStmt::DoWhile { cond, .. } = &func.body[0] else {
+            panic!("loop kept");
+        };
+        assert!(compares_through_unsigned_cast(cond, "i"), "{cond:?}");
     }
 }
 
