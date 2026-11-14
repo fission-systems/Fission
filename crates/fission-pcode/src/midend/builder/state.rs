@@ -48,6 +48,9 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) lookup_site_cache:
         RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
     pub(crate) peel_cache: RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
+    /// `lookup_candidate_def_keys` per key; `def_sites` never changes.
+    pub(crate) candidate_def_keys_cache:
+        RefCell<BuilderCacheMap<VarnodeKey, std::rc::Rc<[VarnodeKey]>>>,
     pub(crate) terminator_cache: BuilderCacheMap<usize, LoweredTerminator>,
     pub(crate) x86_branch_recovery_attempts: usize,
     pub(crate) address_to_index: HashMap<u64, usize>,

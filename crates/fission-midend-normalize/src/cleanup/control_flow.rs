@@ -384,53 +384,68 @@ pub fn fuse_single_predecessor_boundaries(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
     while idx < stmts.len() {
-        let Some((label_idx, label_name)) = next_label_index_and_name(stmts, idx + 1) else {
+        // Only an `if` with a lone `goto` in one arm can be rewritten, and
+        // only when the next label is that goto's target. Decide both before
+        // touching the statements in between: this used to deep-copy the
+        // whole run up to the next label for every statement of the list.
+        let Some((target, negate)) = lone_goto_guard(&stmts[idx]) else {
             idx += 1;
             continue;
         };
-        let fused_segment = stmts[idx + 1..label_idx].to_vec();
-        if fused_segment.is_empty() || !stmts_are_fuseable_linear_segment(&fused_segment) {
+        let Some(label_idx) = stmts
+            .iter()
+            .enumerate()
+            .skip(idx + 1)
+            .find_map(|(at, stmt)| matches!(stmt, PreHirStmt::Label(_)).then_some(at))
+        else {
+            idx += 1;
+            continue;
+        };
+        let reaches_target =
+            matches!(&stmts[label_idx], PreHirStmt::Label(label) if label == target);
+        let segment = &stmts[idx + 1..label_idx];
+        if !reaches_target || segment.is_empty() || !stmts_are_fuseable_linear_segment(segment) {
             idx += 1;
             continue;
         }
 
-        let replacement = match &stmts[idx] {
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } if matches_single_goto(then_body, &label_name) && else_body.is_empty() => {
-                Some(PreHirStmt::If {
-                    cond: negate_expr(cond.clone()),
-                    then_body: fused_segment.clone().into(),
-                    else_body: Vec::new().into(),
-                })
-            }
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } if then_body.is_empty() && matches_single_goto(else_body, &label_name) => {
-                Some(PreHirStmt::If {
-                    cond: cond.clone(),
-                    then_body: fused_segment.clone().into(),
-                    else_body: Vec::new().into(),
-                })
-            }
-            _ => None,
+        let fused_segment: Vec<PreHirStmt> = stmts.drain(idx + 1..label_idx).collect();
+        let PreHirStmt::If { cond, .. } = &stmts[idx] else {
+            unreachable!("lone_goto_guard only accepts an `if`");
         };
-
-        let Some(replacement) = replacement else {
-            idx += 1;
-            continue;
+        let cond = if negate {
+            negate_expr(cond.clone())
+        } else {
+            cond.clone()
         };
-
-        stmts[idx] = replacement;
-        stmts.drain(idx + 1..label_idx);
+        stmts[idx] = PreHirStmt::If {
+            cond,
+            then_body: fused_segment.into(),
+            else_body: Vec::new().into(),
+        };
         changed = true;
         idx += 1;
     }
     changed
+}
+
+/// The label an `if` jumps to when one arm is a lone `goto` and the other is
+/// empty, and whether running the skipped statements needs the condition
+/// negated (the `goto` is in the `then` arm).
+fn lone_goto_guard(stmt: &PreHirStmt) -> Option<(&str, bool)> {
+    let PreHirStmt::If {
+        then_body,
+        else_body,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    match (then_body.as_slice(), else_body.as_slice()) {
+        ([PreHirStmt::Goto(target)], []) => Some((target.as_str(), true)),
+        ([], [PreHirStmt::Goto(target)]) => Some((target.as_str(), false)),
+        _ => None,
+    }
 }
 
 fn stmts_are_fuseable_linear_segment(stmts: &[PreHirStmt]) -> bool {

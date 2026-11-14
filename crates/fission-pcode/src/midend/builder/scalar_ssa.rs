@@ -1361,6 +1361,8 @@ fn build_out_of_ssa_facts(
             (guard, reachable)
         })
         .collect();
+    let guard_crossing = GuardCrossing::new(&guards, dominance);
+    let mut crossing_marks = CrossingMarks::new(guards.len());
     let mut high_variables = Vec::with_capacity(member_groups.len());
     let mut value_high_variables = vec![SsaHighVariableId(0); ssa.values.len()];
     for members in member_groups {
@@ -1371,22 +1373,35 @@ fn build_out_of_ssa_facts(
             .collect::<Vec<_>>();
         storage_family.sort_unstable();
         storage_family.dedup();
-        let crossing_guards = guards
-            .iter()
-            .filter(|(guard, reachable)| {
-                members.iter().any(|member| {
-                    value_crosses_guard(
-                        ssa,
-                        dominance,
-                        *member,
-                        *guard,
-                        uses.get(member).map_or(&[], Vec::as_slice),
-                        reachable,
-                    )
+        for member in &members {
+            guard_crossing.mark(
+                ssa,
+                *member,
+                uses.get(member).map_or(&[], Vec::as_slice),
+                &mut crossing_marks,
+            );
+        }
+        let crossing_guards: Vec<SsaOpSite> = crossing_marks.drain_into_guards(&guards);
+        debug_assert_eq!(
+            crossing_guards,
+            guards
+                .iter()
+                .filter(|(guard, reachable)| {
+                    members.iter().any(|member| {
+                        value_crosses_guard(
+                            ssa,
+                            dominance,
+                            *member,
+                            *guard,
+                            uses.get(member).map_or(&[], Vec::as_slice),
+                            reachable,
+                        )
+                    })
                 })
-            })
-            .map(|(guard, _)| *guard)
-            .collect();
+                .map(|(guard, _)| *guard)
+                .collect::<Vec<_>>(),
+            "block-wise guard crossing disagrees with the per-guard test"
+        );
         let cover = merge_covers(
             members
                 .iter()
@@ -1845,6 +1860,183 @@ fn guard_reachability(
         });
     }
     result
+}
+
+/// Which guards a value's live range crosses, decided a guard *block* at a
+/// time.
+///
+/// [`value_crosses_guard`] answers for one value and one guard, and asking
+/// it for every pair walked the dominator chain once per pair: the largest
+/// single cost of a decompile. Guards of one block share everything but
+/// their position, so for a value and a block the crossed guards are a
+/// contiguous run of the block's guards:
+///
+/// - the definition reaches every guard of a block it strictly dominates,
+///   and the guards after it in its own block;
+/// - a use lies after every guard of the block when the use's block is
+///   reachable from the guard block, and otherwise after the guards that
+///   precede the last use inside the block.
+struct GuardCrossing<'a> {
+    guards: &'a [(SsaOpSite, &'a BTreeSet<usize>)],
+    /// Guard blocks in order: block, its guards' index range, and the blocks
+    /// reachable after it.
+    blocks: Vec<(u32, usize, usize, &'a BTreeSet<usize>)>,
+    block_slot: BTreeMap<u32, usize>,
+    /// For a block, the guard blocks it strictly dominates.
+    strictly_dominated: BTreeMap<usize, Vec<usize>>,
+}
+
+impl<'a> GuardCrossing<'a> {
+    fn new(guards: &'a [(SsaOpSite, &'a BTreeSet<usize>)], dominance: &Dominance) -> Self {
+        let mut blocks: Vec<(u32, usize, usize, &'a BTreeSet<usize>)> = Vec::new();
+        for (index, (guard, reachable)) in guards.iter().enumerate() {
+            match blocks.last_mut() {
+                Some(last) if last.0 == guard.block => last.2 = index + 1,
+                _ => blocks.push((guard.block, index, index + 1, *reachable)),
+            }
+        }
+        let block_slot = blocks
+            .iter()
+            .enumerate()
+            .map(|(slot, block)| (block.0, slot))
+            .collect();
+        let mut strictly_dominated: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (slot, block) in blocks.iter().enumerate() {
+            let block = block.0 as usize;
+            if !dominance.reachable.contains(&block) {
+                continue;
+            }
+            let mut dominator = dominance.idom.get(block).copied().flatten();
+            while let Some(current) = dominator {
+                strictly_dominated.entry(current).or_default().push(slot);
+                dominator = dominance.idom.get(current).copied().flatten();
+            }
+        }
+        Self {
+            guards,
+            blocks,
+            block_slot,
+            strictly_dominated,
+        }
+    }
+
+    fn mark(
+        &self,
+        ssa: &NirScalarSsa,
+        value_id: SsaValueId,
+        uses: &[ValueUsePoint],
+        marks: &mut CrossingMarks,
+    ) {
+        if uses.is_empty() || self.guards.is_empty() {
+            return;
+        }
+        // Per block holding a use: one past the last guard position a use in
+        // that block lies after. A use with no position lies after them all.
+        let mut use_blocks: Vec<(u32, u64)> = Vec::new();
+        for use_point in uses {
+            let bound = use_point.op.map_or(u64::MAX, u64::from);
+            match use_blocks
+                .iter_mut()
+                .find(|(block, _)| *block == use_point.block)
+            {
+                Some(entry) => entry.1 = entry.1.max(bound),
+                None => use_blocks.push((use_point.block, bound)),
+            }
+        }
+        let mut mark_block = |slot: usize, after: Option<u32>| {
+            let (block, start, end, reachable) = self.blocks[slot];
+            let before = if use_blocks
+                .iter()
+                .any(|(use_block, _)| reachable.contains(&(*use_block as usize)))
+            {
+                u64::MAX
+            } else {
+                match use_blocks.iter().find(|(use_block, _)| *use_block == block) {
+                    Some((_, bound)) => *bound,
+                    None => return,
+                }
+            };
+            let run = &self.guards[start..end];
+            let from = after.map_or(0, |after| {
+                run.partition_point(|(guard, _)| guard.op <= after)
+            });
+            let to = run.partition_point(|(guard, _)| u64::from(guard.op) < before);
+            if from < to {
+                marks.set(start + from, start + to);
+            }
+        };
+        match ssa.value(value_id).expect("known value").definition {
+            SsaValueDefinition::Input => {
+                for slot in 0..self.blocks.len() {
+                    mark_block(slot, None);
+                }
+            }
+            SsaValueDefinition::Operation(definition) => {
+                if let Some(&slot) = self.block_slot.get(&definition.block) {
+                    mark_block(slot, Some(definition.op));
+                }
+                for &slot in self
+                    .strictly_dominated
+                    .get(&(definition.block as usize))
+                    .into_iter()
+                    .flatten()
+                {
+                    mark_block(slot, None);
+                }
+            }
+            SsaValueDefinition::Phi { block } => {
+                if let Some(&slot) = self.block_slot.get(&block) {
+                    mark_block(slot, None);
+                }
+                for &slot in self
+                    .strictly_dominated
+                    .get(&(block as usize))
+                    .into_iter()
+                    .flatten()
+                {
+                    mark_block(slot, None);
+                }
+            }
+        }
+    }
+}
+
+/// Guard indices marked for the high variable being built, reused across
+/// variables.
+struct CrossingMarks {
+    marked: Vec<bool>,
+    /// The index span touched since the last drain.
+    span: Option<(usize, usize)>,
+}
+
+impl CrossingMarks {
+    fn new(guard_count: usize) -> Self {
+        Self {
+            marked: vec![false; guard_count],
+            span: None,
+        }
+    }
+
+    fn set(&mut self, from: usize, to: usize) {
+        self.marked[from..to].fill(true);
+        self.span = Some(match self.span {
+            Some((low, high)) => (low.min(from), high.max(to)),
+            None => (from, to),
+        });
+    }
+
+    /// The marked guards in guard order; clears the marks.
+    fn drain_into_guards(&mut self, guards: &[(SsaOpSite, &BTreeSet<usize>)]) -> Vec<SsaOpSite> {
+        let Some((low, high)) = self.span.take() else {
+            return Vec::new();
+        };
+        let crossed = (low..high)
+            .filter(|&index| self.marked[index])
+            .map(|index| guards[index].0)
+            .collect();
+        self.marked[low..high].fill(false);
+        crossed
+    }
 }
 
 fn value_crosses_guard(

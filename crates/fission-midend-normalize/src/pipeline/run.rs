@@ -87,6 +87,13 @@ pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, p
         let (before_stmts, before_locals) = if perf { hir_shape(func) } else { (0, 0) };
         let round_start = if perf { Some(Instant::now()) } else { None };
 
+        // The four passes can undo one another inside a round -- one widens a
+        // binding, a later one narrows it back -- and then each reports a
+        // change although the round ends where it began. On the full DecBench
+        // dataset 90% of rounds did, so almost every fixed point ran to its
+        // cap. The passes read nothing but `func`, so a round that returns to
+        // its starting state would repeat itself identically: stop there.
+        let round_start_state = func.clone();
         let def_changed = run_pass_logged(func, "type_inference", perf, apply_type_inference_pass);
         let callsite_changed = run_pass_logged(
             func,
@@ -139,7 +146,7 @@ pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, p
             );
         }
 
-        if !round_changed {
+        if !round_changed || *func == round_start_state {
             break;
         }
     }
