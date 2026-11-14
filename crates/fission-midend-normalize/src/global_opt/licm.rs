@@ -69,7 +69,14 @@ fn hoist_in_stmts_with_live_after(
 
     // First, recurse into nested bodies (innermost-first / post-order).
     // We do this before extracting loop-level info from *this* level.
+    //
+    // `live_after_index` folds the whole suffix, so it is computed only for a
+    // statement that has a body to recurse into: doing it for every statement
+    // made this pass quadratic in the length of a statement list.
     for idx in 0..stmts.len() {
+        if !has_nested_body(&stmts[idx]) {
+            continue;
+        }
         let live_after = live_after_index(stmts, idx, inherited_live_after);
         match &mut stmts[idx] {
             PreHirStmt::While { body, .. } | PreHirStmt::DoWhile { body, .. } => {
@@ -145,9 +152,12 @@ fn hoist_in_stmts_with_live_after(
     // Now process *this* level: find loops and try to hoist.
     let mut i = 0;
     while i < stmts.len() {
-        let live_after = live_after_index(stmts, i, inherited_live_after);
+        // Only a `DoWhile` can give up an invariant (see
+        // `extract_invariants_from_loop`), so only it needs the suffix's
+        // liveness.
         let hoisted = match &stmts[i] {
-            PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. } => {
+            PreHirStmt::DoWhile { .. } => {
+                let live_after = live_after_index(stmts, i, inherited_live_after);
                 extract_invariants_from_loop(&mut stmts[i], &live_after)
             }
             _ => vec![],
@@ -165,6 +175,20 @@ fn hoist_in_stmts_with_live_after(
     }
 
     changed
+}
+
+/// Whether `stmt` holds a statement list the first loop of
+/// `hoist_in_stmts_with_live_after` recurses into.
+fn has_nested_body(stmt: &PreHirStmt) -> bool {
+    matches!(
+        stmt,
+        PreHirStmt::While { .. }
+            | PreHirStmt::DoWhile { .. }
+            | PreHirStmt::For { .. }
+            | PreHirStmt::If { .. }
+            | PreHirStmt::Block(_)
+            | PreHirStmt::Switch { .. }
+    )
 }
 
 fn live_after_index(
@@ -427,6 +451,67 @@ mod tests {
 
         assert!(!apply_licm_pass(&mut func));
         assert!(matches!(&func.body[0], PreHirStmt::DoWhile { body, .. } if body.len() == 1));
+    }
+
+    fn guarded(body: Vec<PreHirStmt>) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("guard".to_owned()),
+            then_body: Rc::new(body),
+            else_body: Rc::new(vec![]),
+        }
+    }
+
+    /// The pass reaches a loop nested in a branch that sits among plain
+    /// statements, and hoists within that branch.
+    #[test]
+    fn hoists_from_a_loop_nested_in_a_branch() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("before", PreHirExpr::Const(0, u32_ty())),
+                guarded(vec![do_while(vec![assign(
+                    "invariant",
+                    PreHirExpr::Const(7, u32_ty()),
+                )])]),
+                assign("after", PreHirExpr::Const(0, u32_ty())),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_licm_pass(&mut func));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::If { then_body, .. } if matches!(
+                &then_body[..],
+                [PreHirStmt::Assign { .. }, PreHirStmt::DoWhile { body, .. }] if body.is_empty()
+            )
+        ));
+    }
+
+    /// A read after the enclosing branch is a read after the loop: the
+    /// liveness handed into the branch must carry it.
+    #[test]
+    fn keeps_a_value_observed_after_the_enclosing_branch() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("before", PreHirExpr::Const(0, u32_ty())),
+                guarded(vec![do_while(vec![assign(
+                    "value",
+                    PreHirExpr::Const(1, u32_ty()),
+                )])]),
+                assign("after", PreHirExpr::Const(0, u32_ty())),
+                PreHirStmt::Return(Some(PreHirExpr::Var("value".to_owned()))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_licm_pass(&mut func));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::If { then_body, .. } if matches!(
+                &then_body[..],
+                [PreHirStmt::DoWhile { body, .. }] if body.len() == 1
+            )
+        ));
     }
 
     #[test]

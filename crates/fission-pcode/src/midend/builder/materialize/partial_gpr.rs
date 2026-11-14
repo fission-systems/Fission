@@ -216,29 +216,41 @@ impl<'a> PreviewBuilder<'a> {
             return needs_binding;
         }
 
+        // A join block needs the binding when some op reads a partial lane
+        // of the family before any call or write to the family in that block.
+        // Both conditions only become true moving forward, so one pass per
+        // block decides it; checking every op's prefix again was quadratic.
         let needs_binding = self
             .pcode
             .blocks
             .iter()
             .enumerate()
             .any(|(block_idx, block)| {
-                self.predecessors
+                if !self
+                    .predecessors
                     .get(block_idx)
                     .is_some_and(|preds| preds.len() >= 2)
-                    && block.ops.iter().enumerate().any(|(op_idx, op)| {
-                        !self.has_call_between_ops(block, 0, op_idx)
-                            && !block.ops.iter().take(op_idx).any(|candidate| {
-                                self.op_defines_x86_gpr_family(candidate, family_idx)
-                            })
-                            && op.inputs.iter().any(|input| {
-                                !input.is_constant
-                                    && input.size < self.options.pointer_size
-                                    && is_register_space_id(input.space_id)
-                                    && self
-                                        .canonical_x86_gpr64_name_for_value(input)
-                                        .is_some_and(|(_, input_family)| input_family == family_idx)
-                            })
-                    })
+                {
+                    return false;
+                }
+                for op in &block.ops {
+                    if op.inputs.iter().any(|input| {
+                        !input.is_constant
+                            && input.size < self.options.pointer_size
+                            && is_register_space_id(input.space_id)
+                            && self
+                                .canonical_x86_gpr64_name_for_value(input)
+                                .is_some_and(|(_, input_family)| input_family == family_idx)
+                    }) {
+                        return true;
+                    }
+                    if self.op_is_effectful_call(op)
+                        || self.op_defines_x86_gpr_family(op, family_idx)
+                    {
+                        return false;
+                    }
+                }
+                false
             });
 
         self.partial_gpr_live_binding_cache

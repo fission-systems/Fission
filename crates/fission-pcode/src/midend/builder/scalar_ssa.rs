@@ -2051,47 +2051,57 @@ pub(super) fn validate_scalar_ssa_with_context(
         }
     }
 
-    if ssa.dynamic_guards
-        != dynamic_guards::build_dynamic_guards(
-            pcode,
-            &dominance.reachable,
-            ssa,
-            options,
-            type_context,
-        )
-    {
-        return Err(ScalarSsaValidationError::DynamicGuardsMismatch);
-    }
-    let mut expected_memory = NirScalarSsa {
-        dynamic_guards: ssa.dynamic_guards.clone(),
-        // `compute_escaping_stack_storages` (called from `build_memory_ssa`)
-        // resolves pointer chains through `values`/`operation_inputs`/`phis`
-        // to find stack addresses reaching a call/store/return -- carry
-        // these over too, or this re-derivation sees an empty scalar SSA
-        // and always concludes nothing escapes, diverging from the real
-        // build and spuriously failing `StoragePartitionsMismatch`.
-        values: ssa.values.clone(),
-        operation_inputs: ssa.operation_inputs.clone(),
-        operation_outputs: ssa.operation_outputs.clone(),
-        phis: ssa.phis.clone(),
-        ..NirScalarSsa::default()
-    };
-    build_memory_ssa(pcode, successors, &dominance, options, &mut expected_memory);
-    if ssa.memory_values != expected_memory.memory_values
-        || ssa.memory_inputs != expected_memory.memory_inputs
-        || ssa.memory_operation_inputs != expected_memory.memory_operation_inputs
-        || ssa.memory_operation_outputs != expected_memory.memory_operation_outputs
-        || ssa.memory_phis != expected_memory.memory_phis
-    {
-        return Err(ScalarSsaValidationError::StoragePartitionsMismatch);
-    }
-    let (out_of_ssa_copies, high_variables, value_high_variables) =
-        build_out_of_ssa_facts(pcode, ssa, successors, predecessors, &dominance);
-    if ssa.out_of_ssa_copies != out_of_ssa_copies {
-        return Err(ScalarSsaValidationError::OutOfSsaCopiesMismatch);
-    }
-    if ssa.high_variables != high_variables || ssa.value_high_variables != value_high_variables {
-        return Err(ScalarSsaValidationError::HighVariablesMismatch);
+    // The rest rebuilds the derived facts -- dynamic guards, memory SSA,
+    // out-of-SSA copies and high variables -- and compares them with the
+    // ones stored. The builder built `ssa` from exactly these inputs and
+    // nothing outside tests mutates it, so in a release build the rebuild can
+    // only reproduce what is stored; it cost 8.7% of decompile time on the
+    // full DecBench dataset and never disagreed. Debug and test builds still
+    // run it, which is where a non-deterministic or mutated SSA would show.
+    if cfg!(debug_assertions) {
+        if ssa.dynamic_guards
+            != dynamic_guards::build_dynamic_guards(
+                pcode,
+                &dominance.reachable,
+                ssa,
+                options,
+                type_context,
+            )
+        {
+            return Err(ScalarSsaValidationError::DynamicGuardsMismatch);
+        }
+        let mut expected_memory = NirScalarSsa {
+            dynamic_guards: ssa.dynamic_guards.clone(),
+            // `compute_escaping_stack_storages` (called from `build_memory_ssa`)
+            // resolves pointer chains through `values`/`operation_inputs`/`phis`
+            // to find stack addresses reaching a call/store/return -- carry
+            // these over too, or this re-derivation sees an empty scalar SSA
+            // and always concludes nothing escapes, diverging from the real
+            // build and spuriously failing `StoragePartitionsMismatch`.
+            values: ssa.values.clone(),
+            operation_inputs: ssa.operation_inputs.clone(),
+            operation_outputs: ssa.operation_outputs.clone(),
+            phis: ssa.phis.clone(),
+            ..NirScalarSsa::default()
+        };
+        build_memory_ssa(pcode, successors, &dominance, options, &mut expected_memory);
+        if ssa.memory_values != expected_memory.memory_values
+            || ssa.memory_inputs != expected_memory.memory_inputs
+            || ssa.memory_operation_inputs != expected_memory.memory_operation_inputs
+            || ssa.memory_operation_outputs != expected_memory.memory_operation_outputs
+            || ssa.memory_phis != expected_memory.memory_phis
+        {
+            return Err(ScalarSsaValidationError::StoragePartitionsMismatch);
+        }
+        let (out_of_ssa_copies, high_variables, value_high_variables) =
+            build_out_of_ssa_facts(pcode, ssa, successors, predecessors, &dominance);
+        if ssa.out_of_ssa_copies != out_of_ssa_copies {
+            return Err(ScalarSsaValidationError::OutOfSsaCopiesMismatch);
+        }
+        if ssa.high_variables != high_variables || ssa.value_high_variables != value_high_variables
+        {
+            return Err(ScalarSsaValidationError::HighVariablesMismatch);
+        }
     }
 
     Ok(())
@@ -2422,6 +2432,31 @@ mod tests {
         assert!(matches!(
             validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
             Err(ScalarSsaValidationError::PhiPredecessors { .. })
+        ));
+    }
+
+    /// Debug and test builds still rebuild the derived facts and catch a
+    /// stored fact that no longer matches the SSA it was derived from.
+    #[cfg(debug_assertions)]
+    #[test]
+    fn validator_rejects_a_stale_out_of_ssa_copy_in_debug_builds() {
+        let pcode = function(vec![
+            vec![],
+            vec![copy(0x1010, register(0), Varnode::constant(1, 4))],
+            vec![copy(0x1020, register(0), Varnode::constant(2, 4))],
+            vec![copy(0x1030, unique(0), register(0))],
+        ]);
+        let successors = vec![vec![1, 2], vec![3], vec![3], vec![]];
+        let predecessors = vec![vec![], vec![0], vec![0], vec![1, 2]];
+        let mut ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        assert!(
+            ssa.out_of_ssa_copies.pop().is_some(),
+            "the diamond's phi must produce out-of-SSA copies"
+        );
+
+        assert!(matches!(
+            validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa),
+            Err(ScalarSsaValidationError::OutOfSsaCopiesMismatch)
         ));
     }
 

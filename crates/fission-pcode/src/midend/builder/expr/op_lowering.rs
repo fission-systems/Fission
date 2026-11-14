@@ -600,29 +600,34 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn opaque_global_containing(&self, input: &Varnode) -> Option<(String, u64, u32)> {
+        // Only a 16-byte object qualifies, so every candidate has the same
+        // size and "narrowest first" reduces to lowest base, then name.
+        const OPAQUE_SIZE: u32 = 16;
         let input_end = input.offset.checked_add(u64::from(input.size))?;
-        let mut candidates = self
-            .options
-            .global_names
-            .iter()
-            .filter_map(|(base, name)| {
-                let size = u32::try_from(*self.options.global_sizes.get(base)?).ok()?;
-                if size != 16 {
-                    return None;
-                }
-                let end = base.checked_add(u64::from(size))?;
-                (input.offset >= *base && input_end <= end).then(|| (name.clone(), *base, size))
-            })
-            .collect::<Vec<_>>();
-        // Prefer the narrowest containing object; ties are deterministic by
-        // address/name so duplicate-symbol maps cannot change the rendering.
-        candidates.sort_by(|lhs, rhs| {
-            lhs.2
-                .cmp(&rhs.2)
-                .then_with(|| lhs.1.cmp(&rhs.1))
-                .then_with(|| lhs.0.cmp(&rhs.0))
+        let index = self.opaque_global_index.get_or_init(|| {
+            let mut globals: Vec<(u64, String)> = self
+                .options
+                .global_names
+                .iter()
+                .filter(|(base, _)| {
+                    self.options.global_sizes.get(base).is_some_and(|&size| {
+                        size == u64::from(OPAQUE_SIZE) && base.checked_add(size).is_some()
+                    })
+                })
+                .map(|(base, name)| (*base, name.clone()))
+                .collect();
+            globals.sort();
+            globals.into()
         });
-        candidates.into_iter().next()
+        // A containing object starts at most `OPAQUE_SIZE` before the end of
+        // the input and at or before its start.
+        let lowest_base = input_end.saturating_sub(u64::from(OPAQUE_SIZE));
+        let first = index.partition_point(|(base, _)| *base < lowest_base);
+        index[first..]
+            .iter()
+            .take_while(|(base, _)| *base <= input.offset)
+            .find(|(base, _)| input_end <= base + u64::from(OPAQUE_SIZE))
+            .map(|(base, name)| (name.clone(), *base, OPAQUE_SIZE))
     }
 
     fn opaque_global_source_lane(&self, input: &Varnode) -> Option<Varnode> {
