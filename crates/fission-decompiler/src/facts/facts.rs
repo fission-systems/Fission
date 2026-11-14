@@ -1586,6 +1586,13 @@ fn build_preview_callee_summaries_uncached(
             true,
             true,
         )
+        // A callee shorter than the prefix limit decodes to the same body
+        // either way, and the preview is a function of the p-code alone (the
+        // evidence kind only labels diagnostics): it would reproduce the
+        // complete preview, whose pointees `merge_preview_pointer_evidence`
+        // already keeps. 14-59% of prefix previews on the full DecBench
+        // dataset were such repeats, each a raw-HIR build plus a normalize.
+        && stable_prefix_pcode != *pcode
         && let Some(stable_prefix) = infer_prototype(
             &stable_prefix_pcode,
             DirectCalleePrototypeEvidence::StablePrefix,
