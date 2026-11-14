@@ -225,46 +225,51 @@ impl<'a> PreviewBuilder<'a> {
         start: usize,
         end: usize,
     ) -> bool {
-        let res = block.ops[start..end.min(block.ops.len())].iter().any(|op| {
-            if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
-                let mut target_name = None;
-                if op.opcode == PcodeOpcode::Call {
-                    if let Some(name) = self
-                        .options
-                        .relocation_names
-                        .get(&op.address)
-                        .filter(|name| !name.is_empty())
-                    {
-                        target_name = Some(name.as_str());
-                    }
+        block.ops[start..end.min(block.ops.len())]
+            .iter()
+            .any(|op| self.op_is_effectful_call(op))
+    }
+
+    /// Whether `op` is a call other than a known pure intrinsic -- the op
+    /// `has_call_between_ops` looks for.
+    pub(super) fn op_is_effectful_call(&self, op: &PcodeOp) -> bool {
+        if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd) {
+            let mut target_name = None;
+            if op.opcode == PcodeOpcode::Call {
+                if let Some(name) = self
+                    .options
+                    .relocation_names
+                    .get(&op.address)
+                    .filter(|name| !name.is_empty())
+                {
+                    target_name = Some(name.as_str());
                 }
-                if target_name.is_none() {
-                    if let Some(target_vn) = op.inputs.first() {
-                        if target_vn.is_constant {
-                            let addr = if target_vn.offset != 0 {
-                                target_vn.offset
-                            } else {
-                                target_vn.constant_val as u64
-                            };
-                            if let Some(ctx) = self.type_context {
-                                if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
-                                    target_name = Some(target_ref.symbol.as_str());
-                                }
+            }
+            if target_name.is_none() {
+                if let Some(target_vn) = op.inputs.first() {
+                    if target_vn.is_constant {
+                        let addr = if target_vn.offset != 0 {
+                            target_vn.offset
+                        } else {
+                            target_vn.constant_val as u64
+                        };
+                        if let Some(ctx) = self.type_context {
+                            if let Some(target_ref) = ctx.call_target_refs.get(&addr) {
+                                target_name = Some(target_ref.symbol.as_str());
                             }
                         }
                     }
                 }
-                if let Some(name) = target_name {
-                    if Self::materialize_call_target_is_known_pure_intrinsic(name) {
-                        return false;
-                    }
-                }
-                true
-            } else {
-                false
             }
-        });
-        res
+            if let Some(name) = target_name {
+                if Self::materialize_call_target_is_known_pure_intrinsic(name) {
+                    return false;
+                }
+            }
+            true
+        } else {
+            false
+        }
     }
 
     pub(super) fn varnode_known_const_zero(&self, value: &Varnode, budget: usize) -> bool {

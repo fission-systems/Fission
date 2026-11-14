@@ -278,6 +278,7 @@ impl<'a> PreviewBuilder<'a> {
             materialized_vns: HashMap::default(),
             active_materialized_rhs_keys: BuilderCacheSet::default(),
             runtime_space_numbering: std::cell::Cell::new(None),
+            opaque_global_index: std::sync::OnceLock::new(),
             load_address_bindings: HashSet::default(),
             load_value_bindings: HashSet::default(),
             explicit_merge_bindings: HashMap::default(),
