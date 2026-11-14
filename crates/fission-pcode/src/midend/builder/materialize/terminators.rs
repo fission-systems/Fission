@@ -102,7 +102,7 @@ impl<'a> PreviewBuilder<'a> {
                     | PcodeOpcode::BranchInd
                     | PcodeOpcode::Return
             );
-            is_control && !crate::midend::cfg::is_instruction_local_forward_branch(block, idx, op)
+            is_control && !crate::midend::cfg::is_instruction_local_branch(block, idx, op)
         })
     }
 

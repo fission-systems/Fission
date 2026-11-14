@@ -528,6 +528,21 @@ impl<'a> PreviewBuilder<'a> {
             ));
         }
 
+        // A temporary carried around a loop inside one instruction lives in a
+        // variable; SSA, which cannot see that loop, would hand back the
+        // definition before it in op order instead.
+        if let Some(site) = self.current_lowering_site
+            && let Some(address) = self
+                .pcode
+                .blocks
+                .get(site.block_idx)
+                .and_then(|block| block.ops.get(site.op_idx))
+                .map(|op| op.address)
+            && let Some(name) = self.instruction_loop_var(site.block_idx, address, vn)
+        {
+            return Ok(PreHirExpr::Var(name));
+        }
+
         if self.stack_frame_backing.is_some()
             && let Some(address) = self.fixed_frame_address_for_varnode(vn)
         {

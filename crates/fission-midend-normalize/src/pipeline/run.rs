@@ -975,6 +975,75 @@ mod tests {
             func.body
         );
     }
+
+    /// A copy made inside one branch and read again after the branch: the
+    /// later read keeps the copy alive, so it must not be folded into the
+    /// branch's own condition and deleted.
+    #[test]
+    fn cleanup_keeps_a_copy_read_after_its_enclosing_branch() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let at_least_24 = || PreHirExpr::Binary {
+            op: PreHirBinaryOp::Le,
+            lhs: Box::new(PreHirExpr::Const(24, u8_ty.clone())),
+            rhs: Box::new(PreHirExpr::Var("xVar16".into())),
+            ty: NirType::Bool,
+        };
+        let mut func = empty_func();
+        func.body = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("param_1".into()),
+                then_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("xVar16".into()),
+                        rhs: PreHirExpr::Cast {
+                            ty: u8_ty.clone(),
+                            expr: Box::new(PreHirExpr::Var("param_2".into())),
+                        },
+                    },
+                    PreHirStmt::If {
+                        cond: at_least_24(),
+                        then_body: vec![PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("a".into()),
+                            rhs: PreHirExpr::Const(1, u32_ty.clone()),
+                        }]
+                        .into(),
+                        else_body: vec![PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("b".into()),
+                            rhs: PreHirExpr::Const(2, u32_ty.clone()),
+                        }]
+                        .into(),
+                    },
+                ]
+                .into(),
+                else_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                    0,
+                    u32_ty.clone(),
+                )))]
+                .into(),
+            },
+            PreHirStmt::Return(Some(PreHirExpr::Select {
+                cond: Box::new(at_least_24()),
+                then_expr: Box::new(PreHirExpr::Var("a".into())),
+                else_expr: Box::new(PreHirExpr::Var("b".into())),
+                ty: u32_ty,
+            })),
+        ];
+
+        cleanup_func_stmt_list(&mut func);
+
+        let printed = format!("{:?}", func.body);
+        assert!(
+            printed.contains("Assign { lhs: Var(\"xVar16\")"),
+            "the copy read after its branch was deleted: {printed}"
+        );
+    }
 }
 
 pub fn run_cleanup_block<F>(
@@ -1808,7 +1877,11 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("collapse_temp_self_square_assigns");
         }
-        if collapse_adjacent_pure_copy_into_if(stmts) {
+        // Like the two passes above, this one counts uses over the list it is
+        // given and recurses into nested lists itself. Called on a nested list
+        // it cannot see a use after that list -- a join reading a copy made
+        // inside one branch -- and would delete a definition still in use.
+        if depth == 0 && collapse_adjacent_pure_copy_into_if(stmts) {
             changed = true;
             last_changed_pass = Some("collapse_adjacent_pure_copy_into_if");
         }

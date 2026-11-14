@@ -8,6 +8,7 @@ mod cover_diagnostics;
 mod cross_block;
 mod gpr_names;
 mod incremental;
+mod instruction_loops;
 mod load_roles;
 mod loop_carried;
 mod loop_proofs;
@@ -24,6 +25,8 @@ mod terminators;
 #[cfg(test)]
 pub(super) mod test_support;
 mod trace;
+
+pub(crate) use instruction_loops::InstructionLoop;
 
 pub(in crate::midend::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
@@ -199,6 +202,62 @@ impl<'a> PreviewBuilder<'a> {
         let mut op_idx = start_idx;
         while op_idx < end_idx {
             let op = &block.ops[op_idx];
+            let site = LoweringSite { block_idx, op_idx };
+
+            // A loop inside one instruction: `while (1) { .. }` over the
+            // region its back edge closes (see `instruction_loops`).
+            if let Some(found) = self.instruction_loop(block_idx, op.address)
+                && op_idx == found.head
+                && found.back < end_idx
+                && self.instruction_loop_exit != Some(found.back + 1)
+            {
+                let outer_exit = self.instruction_loop_exit.replace(found.back + 1);
+                let loop_body = self.lower_block_ops_range(block, found.head, found.back, None);
+                self.instruction_loop_exit = outer_exit;
+                body.push(PreHirStmt::While {
+                    cond: PreHirExpr::Const(1, NirType::Bool),
+                    body: loop_body?.into(),
+                });
+                op_idx = found.back + 1;
+                continue;
+            }
+            // Inside that loop, a branch to the op after the back edge leaves it.
+            if let Some(exit) = self.instruction_loop_exit
+                && op.opcode == PcodeOpcode::CBranch
+                && op.inputs.len() >= 2
+                && crate::midend::cfg::instruction_local_branch_target_seq(op, &op.inputs[0])
+                    .is_some_and(|seq| {
+                        block.ops.get(exit).is_some_and(|target| {
+                            target.seq_num == seq && target.address == op.address
+                        })
+                    })
+            {
+                let cond = self.with_lowering_site(site, |this| {
+                    this.lower_varnode(&op.inputs[1], &mut HashSet::default())
+                })?;
+                body.push(PreHirStmt::If {
+                    cond,
+                    then_body: vec![PreHirStmt::Break].into(),
+                    else_body: Vec::new().into(),
+                });
+                op_idx += 1;
+                continue;
+            }
+            // Every write of a loop-carried temporary assigns its variable.
+            if let Some(output) = op.output.as_ref()
+                && let Some(name) = self.instruction_loop_var(block_idx, op.address, output)
+            {
+                let rhs = self.with_lowering_site(site, |this| {
+                    this.lower_def_op(op, &mut HashSet::default())
+                })?;
+                body.push(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    rhs,
+                });
+                op_idx += 1;
+                continue;
+            }
+
             // Bare-skip real CFG terminators, but keep same-block-forward CBranch
             // tails (x86 cmov body after absolute CBranch to next BB). Those must
             // lower as guarded skips; skipping them drops INT_MIN/INT_MAX arms or

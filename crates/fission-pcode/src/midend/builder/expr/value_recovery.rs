@@ -281,17 +281,31 @@ impl<'a> PreviewBuilder<'a> {
             {
                 continue;
             }
-            let piece_expr = match self.with_lowering_site(
-                LoweringSite {
-                    block_idx: def_site.block as usize,
-                    op_idx: def_site.op as usize,
-                },
-                |this| this.lower_def_op(&def_op, visiting),
-            ) {
-                Ok(expr) => expr,
-                Err(_) => {
-                    visiting.remove(key);
-                    return Ok(None);
+            // A definition already materialized is read through its variable,
+            // which holds the value it wrote. Rebuilding it from its inputs
+            // places them at the wide read, where a flag or register the
+            // definition read may have been written since: `sete dl; ..; shr
+            // edi,cl; not edx` rebuilt DL as the ZF of the `shr`.
+            let materialized = def_op.output.as_ref().and_then(|output| {
+                self.materialized_vns
+                    .get(&MaterializedVarnodeKey::new(output, &def_op))
+                    .cloned()
+            });
+            let piece_expr = if let Some(name) = materialized {
+                PreHirExpr::Var(name)
+            } else {
+                match self.with_lowering_site(
+                    LoweringSite {
+                        block_idx: def_site.block as usize,
+                        op_idx: def_site.op as usize,
+                    },
+                    |this| this.lower_def_op(&def_op, visiting),
+                ) {
+                    Ok(expr) => expr,
+                    Err(_) => {
+                        visiting.remove(key);
+                        return Ok(None);
+                    }
                 }
             };
             if matches!(piece_expr, PreHirExpr::Const(0, _)) {

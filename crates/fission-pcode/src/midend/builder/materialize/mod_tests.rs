@@ -1963,6 +1963,71 @@ fn block_entry_accumulator_read_projects_full_width_explicit_merge_for_partial_r
     );
 }
 
+/// The merge binding is a join block's entry value. An accumulator updated
+/// twice in that block must read the first update at the second, not
+/// restart from the entry value: `eax += ecx; eax += C` lost `+ ecx`.
+#[test]
+fn block_entry_accumulator_read_after_a_local_write_keeps_that_write() {
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x0, 4);
+    let ecx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x8, 4);
+    let first = op(
+        1,
+        PcodeOpcode::IntAdd,
+        Some(eax.clone()),
+        vec![eax.clone(), ecx.clone()],
+    );
+    let second = op(
+        2,
+        PcodeOpcode::IntAdd,
+        Some(eax.clone()),
+        vec![eax.clone(), constant(0x3f80_0000)],
+    );
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![first.clone(), second.clone()],
+    )]);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let binding = builder.ensure_explicit_merge_binding_for_block(0, &eax);
+    let rewrite_at = |builder: &mut PreviewBuilder<'_>, op_idx: usize, op: &PcodeOp| {
+        let lowered = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("iVar7".to_string())),
+            rhs: Box::new(PreHirExpr::Var("ecx".to_string())),
+            ty: int(32),
+        };
+        builder.with_lowering_site(
+            LoweringSite {
+                block_idx: 0,
+                op_idx,
+            },
+            |builder| {
+                builder.rewrite_block_entry_accumulator_rhs_with_live_gpr(
+                    pcode.blocks[0].start_address,
+                    op,
+                    lowered,
+                )
+            },
+        )
+    };
+    let lhs_of = |expr: &PreHirExpr| match expr {
+        PreHirExpr::Binary { lhs, .. } => (**lhs).clone(),
+        other => panic!("expected a binary rhs, got {other:?}"),
+    };
+
+    // The first update reads the entry value: the merge.
+    let entry = rewrite_at(&mut builder, 0, &first);
+    assert_eq!(lhs_of(&entry), PreHirExpr::Var(binding.name.clone()));
+    // The second reads the first update, whatever it was lowered to.
+    let after_write = rewrite_at(&mut builder, 1, &second);
+    assert_eq!(
+        lhs_of(&after_write),
+        PreHirExpr::Var("iVar7".to_string()),
+        "a read after the block's own write restarted from the merge"
+    );
+}
+
 #[test]
 fn block_entry_partial_gpr_read_uses_pred_restore_binding() {
     let rsi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x30, 8);
