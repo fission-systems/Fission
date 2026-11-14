@@ -3714,6 +3714,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn substitution_reaches_every_call_argument() {
+        let var = |name: &str| PreHirExpr::Var(name.to_string());
+        let mut expr = PreHirExpr::Call {
+            origin: None,
+            target: "observe".to_string(),
+            args: vec![var("old"), var("other"), var("old")],
+            ty: NirType::Unknown,
+        };
+
+        assert!(substitute_var_in_expr(&mut expr, "old", &var("new")));
+        let PreHirExpr::Call { args, .. } = &expr else {
+            panic!("call kept");
+        };
+        assert_eq!(args, &[var("new"), var("other"), var("new")]);
+    }
+
     fn goto_if(cond: &str, label: &str) -> PreHirStmt {
         PreHirStmt::If {
             cond: PreHirExpr::Var(cond.to_string()),
@@ -3781,9 +3798,11 @@ fn substitute_var_in_expr(expr: &mut PreHirExpr, name: &str, replacement: &PreHi
             substitute_var_in_expr(lhs, name, replacement)
                 | substitute_var_in_expr(rhs, name, replacement)
         }
-        PreHirExpr::Call { args, .. } => args
-            .iter_mut()
-            .any(|arg| substitute_var_in_expr(arg, name, replacement)),
+        // Not `.any()`: it stops at the first argument that named the
+        // variable and left the old name in every argument after it.
+        PreHirExpr::Call { args, .. } => args.iter_mut().fold(false, |changed, arg| {
+            substitute_var_in_expr(arg, name, replacement) | changed
+        }),
         PreHirExpr::PtrOffset { base, .. } => substitute_var_in_expr(base, name, replacement),
         PreHirExpr::Index { base, index, .. } => {
             substitute_var_in_expr(base, name, replacement)
