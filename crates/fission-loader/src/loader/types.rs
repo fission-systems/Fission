@@ -633,6 +633,24 @@ impl LoadedBinary {
         self.load_spec.as_ref()
     }
 
+    /// A token for the inner data exactly as it is now, for memoizing
+    /// values derived from it.
+    ///
+    /// The inner data is copy-on-write behind an `Arc`. While a `Weak` to an
+    /// allocation exists, that allocation can be neither freed -- so no other
+    /// snapshot can take its address -- nor mutated in place: `Arc::get_mut`
+    /// refuses and `Arc::make_mut` moves the data to a new allocation. A
+    /// value stored beside the token is therefore current for a binary
+    /// exactly when [`Self::is_inner_snapshot`] accepts the token.
+    pub fn inner_snapshot(&self) -> std::sync::Weak<LoadedBinaryInner> {
+        Arc::downgrade(&self.inner)
+    }
+
+    /// Whether `token` was taken from the inner data this binary has now.
+    pub fn is_inner_snapshot(&self, token: &std::sync::Weak<LoadedBinaryInner>) -> bool {
+        std::ptr::eq(token.as_ptr(), Arc::as_ptr(&self.inner))
+    }
+
     /// Get mutable reference with COW semantics
     /// Clones the inner data only if there are other references
     #[inline]
