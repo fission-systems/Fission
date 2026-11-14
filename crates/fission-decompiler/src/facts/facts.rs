@@ -1303,6 +1303,19 @@ static CALLEE_SUMMARY_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64, u64), Ca
         ))
     });
 
+/// Summaries being computed right now, so that workers needing the same
+/// summary at the same time wait for one computation instead of each running
+/// it. Decompile workers start together and share popular callees: on the
+/// full DecBench dataset 16% of `ssh-sk-helper`'s and 11% of `ssh`'s summary
+/// misses were a key another worker was already computing.
+///
+/// Only threads outside the rayon pool wait. A rayon worker blocked here can
+/// be the one the computing thread's own rayon work needs, so it computes
+/// the summary itself, as before.
+static CALLEE_SUMMARY_IN_FLIGHT: LazyLock<
+    Mutex<HashMap<(String, u64, u64), Arc<std::sync::OnceLock<CalleeSummary>>>>,
+> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
 /// Callee decodes, keyed by address alone.
 ///
 /// The decode depends on the binary and the address and nothing else, so
@@ -1399,22 +1412,46 @@ fn build_preview_callee_summaries(
     {
         return hit;
     }
-    let computed = build_preview_callee_summaries_uncached(
-        binary,
-        target_addr,
-        target_name,
-        type_context,
-        function,
-        max_bytes,
-        instruction_limit,
-        next_function,
-        &decoded.pcode,
-        decoded.complete_decode,
+    let compute = || {
+        build_preview_callee_summaries_uncached(
+            binary,
+            target_addr,
+            target_name,
+            type_context,
+            function,
+            max_bytes,
+            instruction_limit,
+            next_function,
+            &decoded.pcode,
+            decoded.complete_decode,
+        )
+    };
+    if rayon::current_thread_index().is_some() {
+        let computed = compute();
+        CALLEE_SUMMARY_CACHE
+            .lock()
+            .expect("callee summary cache poisoned")
+            .put(cache_key, computed.clone());
+        return computed;
+    }
+    let cell = Arc::clone(
+        CALLEE_SUMMARY_IN_FLIGHT
+            .lock()
+            .expect("callee summary in-flight map poisoned")
+            .entry(cache_key.clone())
+            .or_default(),
     );
+    let computed = cell.get_or_init(compute).clone();
+    // Cache before leaving the in-flight map, so a late arrival finds the
+    // summary in one place or the other.
     CALLEE_SUMMARY_CACHE
         .lock()
         .expect("callee summary cache poisoned")
-        .put(cache_key, computed.clone());
+        .put(cache_key.clone(), computed.clone());
+    CALLEE_SUMMARY_IN_FLIGHT
+        .lock()
+        .expect("callee summary in-flight map poisoned")
+        .remove(&cache_key);
     computed
 }
 
