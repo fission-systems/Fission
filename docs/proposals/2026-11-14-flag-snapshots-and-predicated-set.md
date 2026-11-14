@@ -127,6 +127,14 @@ x86-64 (`strrchr`, `fileno` chains) and Thumb.
     becoming one `if`/`else`.
   - A dead default/override pair directly followed by the select that
     recomputes it: 9 occurrences in the sweep, 2 before.
+  - `tail_dup` duplicates a tail that contains a branch. Removing the dead
+    flag writes brought more ARM tails under its six-statement limit (see
+    the `unoptimized` rows in section 5). A limit on what a duplicated tail
+    may contain is a separate change with its own measurement.
+  - An unsigned compare moved into a loop condition prints without its
+    `(uint)` cast (`while (i < 10)` for an `int i` compared unsigned). The
+    cast-restoring pass skips loop conditions and stops at the first
+    statement it changes; both are on `main` and are fixed separately.
 
 ## 5. Validation
 
@@ -163,7 +171,43 @@ x86-64 (`strrchr`, `fileno` chains) and Thumb.
       `rax = xsum(); if (rax >= 0) rax = xsum();` into a select with two equal
       arms. The others are a dead `zf` write removed with the branch shape it
       happened to supply, and two flag tests printed inline.
-- [ ] `unoptimized` full config: not measured.
+- [x] Full `unoptimized` config, same 31,987 measured rows on both sides,
+      caches off, no decompile failure on either side:
+
+  | | main | this change |
+  |---|---|---|
+  | total structure distance | 394,148 | 393,462 (-686) |
+  | perfect | 12,976 | 13,007 (+31) |
+  | Union (of 34,406) | 15,131 | 15,166 |
+  | type perfect / byte perfect | 3,383 / 780 | 3,387 / 780 |
+  | functions naming a temporary flag | 1,467 | 129 |
+
+  509 rows moved: 284 down (-2,454) and 225 up (+1,768). By project the
+  gain is betaflight (-440, +35 perfect) and cleanflight (-286, +14); the
+  loss is crazyflie (+302, -10 perfect) and openssh-portable (+234, -9).
+
+  36 rows lose a perfect score, 17 distinct functions. All read:
+  - 14 were perfect with wrong text on `main`: a select that reads its own
+    result before defining it (one function linked into ten binaries, and
+    one more), `return v ? 1 : r0` for a `v` that is always 0 (2), an `if`
+    whose whole body was two dead flag writes (1).
+  - 5 now print a store or a branch `main` dropped and the source has
+    (`result = 0` before an early return, a stack argument computed by an
+    `if`).
+  - 12 are the default/override merge, which `main` already applied on x86,
+    now reaching ARM because the flag between the two statements is gone:
+    `x = a; if (c) x = b;` prints as `x = c ? b : a`. The source wrote an
+    `if`.
+  - 5 are return-tail duplication, below.
+
+  The largest family among the rows that got worse is return-tail
+  duplication (18 rows, +392; one function goes 20 -> 120).
+  `tail_dup` copies a label's tail into each jump when the tail is at most
+  six statements. In the function traced pass by pass, `main`'s tail held
+  four dead flag assignments and was nine statements long, so the rule did
+  not fire; with them gone it is four statements and is copied into six
+  arms, `if` included. The pass is untouched here and already behaves this
+  way on x86.
 
 The reason the output is better without the metric: the old text tested a
 value on the far side of the write that changed it, and named registers the
