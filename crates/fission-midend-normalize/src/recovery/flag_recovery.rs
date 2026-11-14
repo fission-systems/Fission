@@ -1,6 +1,7 @@
-use crate::analysis::defuse::{DefUseMap, collect_expr_vars};
+use crate::analysis::defuse::{DefUseMap, collect_address_taken_locals, collect_expr_vars};
 use crate::analysis::liveness::LivenessTransfer;
-use crate::cleanup::expr_has_side_effects;
+use crate::cleanup::{expr_has_side_effects, expr_reads_memory, stmt_may_write_memory};
+use crate::global_opt::collect_written_vars;
 /// x86 EFLAGS condition-code recovery pass.
 ///
 /// After HIR building, branch conditions that reference raw flag variables
@@ -30,9 +31,16 @@ use crate::cleanup::expr_has_side_effects;
 /// 1. Walk straight-line statement streams with a local reaching-definition map
 ///    for raw flags. Conditions use the most recent flag definitions in that
 ///    stream. Labels and terminating control-flow statements clear the map so
-///    definitions never cross a possible non-linear predecessor.
+///    definitions never cross a possible non-linear predecessor. A recorded
+///    definition is a snapshot of an expression, so it is also dropped as soon
+///    as anything that expression reads may have been written
+///    (`kill_clobbered_defs`): substituting it past that point would read the
+///    new value where the flag held the old one.
 /// 2. Also keep the older single-definition scan as a whole-function fallback
-///    for already-structured shapes where a flag has only one definition.
+///    for already-structured shapes where a flag has only one definition. It
+///    has no notion of position, so it only takes definitions whose value
+///    cannot depend on where they are evaluated
+///    (`definition_is_position_independent`).
 /// 3. Reconstruct the high-level expression using the flag definitions.
 /// 4. Return `true` if any substitution was made (caller re-runs cleanup passes).
 use crate::prelude::*;
@@ -54,7 +62,19 @@ fn flag_family(name: &str) -> Option<&str> {
     }
     matches!(
         base,
-        "cf" | "pf" | "af" | "zf" | "sf" | "of" | "ng" | "zr" | "cy" | "ov"
+        "cf" | "pf"
+            | "af"
+            | "zf"
+            | "sf"
+            | "of"
+            | "ng"
+            | "zr"
+            | "cy"
+            | "ov"
+            | "tmpng"
+            | "tmpzr"
+            | "tmpcy"
+            | "tmpov"
     )
     .then_some(base)
 }
@@ -107,6 +127,13 @@ fn count_flag_defs(stmts: &[PreHirStmt], counts: &mut HashMap<String, usize>) {
             _ => {}
         }
     }
+}
+
+/// Every flag variable the body assigns.
+pub(crate) fn assigned_flag_vars(stmts: &[PreHirStmt]) -> HashSet<String> {
+    let mut counts = HashMap::default();
+    count_flag_defs(stmts, &mut counts);
+    counts.into_keys().collect()
 }
 
 /// Collect definitions for flags that have exactly ONE assignment in the body.
@@ -529,19 +556,152 @@ fn recover_flag_value_use(
     }
 }
 
+/// What executing a statement may change underneath a recorded flag
+/// definition.
+struct Clobbers {
+    /// Variables the statement may assign, including locals whose address it
+    /// hands to a call.
+    vars: HashSet<String>,
+    /// Whether it may write memory.
+    memory: bool,
+    /// Whether control can enter it at a label, from somewhere other than
+    /// the statement before it.
+    side_entry: bool,
+}
+
+fn stmt_clobbers(stmt: &PreHirStmt) -> Clobbers {
+    let stmt = std::slice::from_ref(stmt);
+    let mut vars = HashSet::default();
+    collect_written_vars(stmt, &mut vars);
+    Clobbers {
+        vars,
+        memory: stmt.iter().any(stmt_may_write_memory),
+        side_entry: contains_label(stmt),
+    }
+}
+
+fn contains_label(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => contains_label(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_label(then_body) || contains_label(else_body),
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref()
+                .is_some_and(|stmt| contains_label(std::slice::from_ref(stmt)))
+                || update
+                    .as_deref()
+                    .is_some_and(|stmt| contains_label(std::slice::from_ref(stmt)))
+                || contains_label(body)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|case| contains_label(&case.body)) || contains_label(default)
+        }
+        _ => false,
+    })
+}
+
+/// Drop every recorded definition `clobbers` may have invalidated.
+///
+/// A definition is a snapshot: substituting it at a later use re-evaluates
+/// its expression there, which is the flag's value only while nothing the
+/// expression reads has been written in between. `cmp r0, #1; movne r0, #1;
+/// moveq r0, #0` is the shape that needs this: the second predicate tests
+/// the flags of the compare, not the register the first one just replaced.
+///
+/// `escaped` are the locals whose address is taken somewhere in the
+/// function; a memory write may reach those without naming them.
+fn kill_clobbered_defs(
+    defs: &mut HashMap<String, PreHirExpr>,
+    clobbers: &Clobbers,
+    escaped: &HashSet<String>,
+) {
+    if clobbers.side_entry {
+        defs.clear();
+        return;
+    }
+    if clobbers.vars.is_empty() && !clobbers.memory {
+        return;
+    }
+    defs.retain(|flag, def| {
+        if clobbers.vars.contains(flag) {
+            return false;
+        }
+        let mut reads = HashSet::default();
+        collect_expr_vars(def, &mut reads);
+        if reads.iter().any(|name| clobbers.vars.contains(name)) {
+            return false;
+        }
+        !(clobbers.memory
+            && (expr_reads_memory(def) || reads.iter().any(|name| escaped.contains(name))))
+    });
+}
+
+/// Whether evaluating a flag definition a second time would repeat an
+/// effect. The overflow primitives this pass reads comparisons out of
+/// (`extract_sborrow_args`) are computations under every name it accepts.
+fn flag_def_has_effects(def: &PreHirExpr) -> bool {
+    match def {
+        PreHirExpr::Call { args, .. } if extract_sborrow_args(def).is_some() => {
+            args.iter().any(expr_has_side_effects)
+        }
+        _ => expr_has_side_effects(def),
+    }
+}
+
+/// Whether `rhs` can be recorded as the definition of `flag`: evaluating it
+/// again must be free, and it must not describe the flag in terms of the
+/// value the flag held before the assignment.
+fn is_recordable_flag_def(flag: &str, rhs: &PreHirExpr) -> bool {
+    if flag_def_has_effects(rhs) {
+        return false;
+    }
+    let mut reads = HashSet::default();
+    collect_expr_vars(rhs, &mut reads);
+    !reads.contains(flag)
+}
+
 fn recover_in_stmts_with_reaching_defs(
     stmts: &mut Vec<PreHirStmt>,
     defs: &mut HashMap<String, PreHirExpr>,
+    escaped: &HashSet<String>,
     changed: &mut bool,
 ) {
     for stmt in stmts.iter_mut() {
+        // Taken before the statement is rewritten: substitution changes what
+        // a statement reads, never what it writes. With nothing recorded
+        // there is nothing to invalidate.
+        let clobbers = (!defs.is_empty()).then(|| stmt_clobbers(stmt));
+        // A loop body runs again after itself and a switch arm can be
+        // entered from the arm above it, so what they clobber is already
+        // in effect at their own entry.
+        if let (
+            Some(clobbers),
+            PreHirStmt::While { .. }
+            | PreHirStmt::DoWhile { .. }
+            | PreHirStmt::For { .. }
+            | PreHirStmt::Switch { .. },
+        ) = (&clobbers, &*stmt)
+        {
+            kill_clobbered_defs(defs, clobbers, escaped);
+        }
+        let mut new_def = None;
         match stmt {
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var(name),
                 rhs,
             } if is_flag_var(name) => {
                 recover_flag_value_use(rhs, defs, changed);
-                defs.insert(name.clone(), rhs.clone());
+                if is_recordable_flag_def(name, rhs) {
+                    new_def = Some((name.clone(), rhs.clone()));
+                }
             }
             PreHirStmt::Assign { lhs, rhs } => {
                 match lhs {
@@ -564,6 +724,7 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut nested_defs,
+                    escaped,
                     changed,
                 );
             }
@@ -573,16 +734,23 @@ fn recover_in_stmts_with_reaching_defs(
                 else_body,
             } => {
                 recover_in_cond(cond, defs, changed);
+                if let Some(clobbers) = &clobbers
+                    && expr_has_side_effects(cond)
+                {
+                    kill_clobbered_defs(defs, clobbers, escaped);
+                }
                 let mut then_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                     &mut then_defs,
+                    escaped,
                     changed,
                 );
                 let mut else_defs = defs.clone();
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     &mut else_defs,
+                    escaped,
                     changed,
                 );
             }
@@ -592,6 +760,7 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut body_defs,
+                    escaped,
                     changed,
                 );
             }
@@ -600,6 +769,7 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut body_defs,
+                    escaped,
                     changed,
                 );
                 recover_in_cond(cond, &body_defs, changed);
@@ -612,7 +782,7 @@ fn recover_in_stmts_with_reaching_defs(
             } => {
                 let mut loop_defs = defs.clone();
                 if let Some(init) = init {
-                    recover_in_stmts_box_with_reaching_defs(init, &mut loop_defs, changed);
+                    recover_in_stmts_box_with_reaching_defs(init, &mut loop_defs, escaped, changed);
                 }
                 if let Some(cond) = cond {
                     recover_in_cond(cond, &loop_defs, changed);
@@ -621,10 +791,16 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut body_defs,
+                    escaped,
                     changed,
                 );
                 if let Some(update) = update {
-                    recover_in_stmts_box_with_reaching_defs(update, &mut body_defs, changed);
+                    recover_in_stmts_box_with_reaching_defs(
+                        update,
+                        &mut body_defs,
+                        escaped,
+                        changed,
+                    );
                 }
             }
             PreHirStmt::Switch {
@@ -638,6 +814,7 @@ fn recover_in_stmts_with_reaching_defs(
                     recover_in_stmts_with_reaching_defs(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         &mut case_defs,
+                        escaped,
                         changed,
                     );
                 }
@@ -645,6 +822,7 @@ fn recover_in_stmts_with_reaching_defs(
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     &mut default_defs,
+                    escaped,
                     changed,
                 );
             }
@@ -661,16 +839,31 @@ fn recover_in_stmts_with_reaching_defs(
                 defs.clear();
             }
         }
+        if let Some(clobbers) = &clobbers {
+            kill_clobbered_defs(defs, clobbers, escaped);
+        }
+        if let Some((name, def)) = new_def {
+            defs.insert(name, def);
+        } else if let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            ..
+        } = &*stmt
+        {
+            // An assignment that could not be recorded still ends the
+            // previous definition of that flag.
+            defs.remove(name.as_str());
+        }
     }
 }
 
 fn recover_in_stmts_box_with_reaching_defs(
     stmt: &mut Box<PreHirStmt>,
     defs: &mut HashMap<String, PreHirExpr>,
+    escaped: &HashSet<String>,
     changed: &mut bool,
 ) {
     let mut tmp = vec![*stmt.clone()];
-    recover_in_stmts_with_reaching_defs(&mut tmp, defs, changed);
+    recover_in_stmts_with_reaching_defs(&mut tmp, defs, escaped, changed);
     if let Some(s) = tmp.into_iter().next() {
         **stmt = s;
     }
@@ -1150,6 +1343,27 @@ fn remove_dead_flag_assigns(func: &mut PreHirFunction) {
     });
 }
 
+/// Whether a flag's only definition has the same value wherever it is
+/// evaluated, which is what substituting it into every condition of the
+/// function -- with no regard for what runs between the two -- requires:
+/// nothing it reads is ever assigned, it reads no memory, and evaluating it
+/// has no effect.
+fn definition_is_position_independent(
+    flag: &str,
+    def: &PreHirExpr,
+    written: &HashSet<String>,
+    escaped: &HashSet<String>,
+) -> bool {
+    if flag_def_has_effects(def) || expr_reads_memory(def) {
+        return false;
+    }
+    let mut reads = HashSet::default();
+    collect_expr_vars(def, &mut reads);
+    !reads
+        .iter()
+        .any(|name| name == flag || written.contains(name) || escaped.contains(name))
+}
+
 // ── Public entry point ────────────────────────────────────────────────────────
 
 /// Apply the x86 EFLAGS condition-code recovery pass to `func`.
@@ -1160,10 +1374,21 @@ fn remove_dead_flag_assigns(func: &mut PreHirFunction) {
 /// compare was already high-level while CF/OF/SF/ZF/PF stores remain).
 pub fn apply_flag_recovery_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
+    // Only consulted once a definition is recorded, which takes a flag write.
+    let escaped = if flag_assign_count(&func.body) == 0 {
+        HashSet::default()
+    } else {
+        collect_address_taken_locals(&func.body)
+    };
     let mut reaching_defs = HashMap::default();
-    recover_in_stmts_with_reaching_defs(&mut func.body, &mut reaching_defs, &mut changed);
+    recover_in_stmts_with_reaching_defs(&mut func.body, &mut reaching_defs, &escaped, &mut changed);
 
-    let defs = collect_single_defs(&func.body);
+    let mut defs = collect_single_defs(&func.body);
+    if !defs.is_empty() {
+        let mut written = HashSet::default();
+        collect_written_vars(&func.body, &mut written);
+        defs.retain(|flag, def| definition_is_position_independent(flag, def, &written, &escaped));
+    }
     if !defs.is_empty() {
         recover_in_stmts(&mut func.body, &defs, &mut changed);
     }
@@ -1314,6 +1539,160 @@ mod tests {
         );
     }
 
+    fn guarded(cond: PreHirExpr, body: Vec<PreHirStmt>) -> PreHirStmt {
+        PreHirStmt::If {
+            cond,
+            then_body: body.into(),
+            else_body: Vec::new().into(),
+        }
+    }
+
+    fn if_conds(func: &PreHirFunction) -> Vec<&PreHirExpr> {
+        func.body
+            .iter()
+            .filter_map(|stmt| match stmt {
+                PreHirStmt::If { cond, .. } => Some(cond),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn load(ptr: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(ptr),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        }
+    }
+
+    /// `cmp r0, #1; movne r0, #1; moveq r0, #0`: both predicates test the
+    /// flags of the compare. Substituting the compare into the second one
+    /// would test the register the first one just replaced, and the pair
+    /// would always leave zero.
+    #[test]
+    fn reaching_flag_recovery_stops_at_a_redefined_operand() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("tmpzr", eq(var("r0"), int(1))),
+                guarded(not(var("tmpzr")), vec![assign("r0", int(1))]),
+                guarded(var("tmpzr"), vec![assign("r0", int(0))]),
+                PreHirStmt::Return(Some(var("r0"))),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        assert!(apply_flag_recovery_pass(&mut func));
+        assert_eq!(
+            if_conds(&func),
+            [
+                &bool_binary(PreHirBinaryOp::Ne, var("r0"), int(1)),
+                &var("tmpzr")
+            ]
+        );
+        assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    #[test]
+    fn reaching_flag_recovery_stops_at_a_memory_write() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("zf", eq(load(var("p")), int(0))),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(var("q")),
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    },
+                    rhs: int(1),
+                },
+                guarded(var("zf"), Vec::new()),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        apply_flag_recovery_pass(&mut func);
+        assert_eq!(if_conds(&func), [&var("zf")]);
+        assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    /// After the branch the flag holds one of two values; the definition
+    /// before it is no longer the one that reaches.
+    #[test]
+    fn reaching_flag_recovery_stops_at_a_branch_that_redefines_the_flag() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("zf", eq(var("a"), var("b"))),
+                guarded(var("c"), vec![assign("zf", eq(var("a"), var("d")))]),
+                guarded(var("zf"), Vec::new()),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        apply_flag_recovery_pass(&mut func);
+        assert_eq!(if_conds(&func), [&var("c"), &var("zf")]);
+        assert_eq!(flag_assign_count(&func.body), 2);
+    }
+
+    /// Substituting a definition evaluates it again; one that calls would
+    /// call twice, since its own assignment has to stay for the effect.
+    #[test]
+    fn a_flag_definition_with_a_call_is_not_substituted() {
+        let call = PreHirExpr::Call {
+            origin: None,
+            target: "probe".to_string(),
+            args: Vec::new(),
+            ty: NirType::Int {
+                bits: 32,
+                signed: false,
+            },
+        };
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("zf", eq(call, int(0))),
+                guarded(var("zf"), Vec::new()),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        apply_flag_recovery_pass(&mut func);
+        assert_eq!(if_conds(&func), [&var("zf")]);
+        assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    /// The whole-function fallback reaches across a label, where the local
+    /// walk gives up. It may do so only for a definition that reads nothing
+    /// the function ever assigns.
+    #[test]
+    fn single_definition_fallback_requires_a_position_independent_definition() {
+        let body = |clobber: Option<PreHirStmt>| {
+            let mut body = vec![
+                assign("zf", eq(var("a"), var("b"))),
+                PreHirStmt::Label("join".to_string()),
+            ];
+            body.extend(clobber);
+            body.push(guarded(var("zf"), Vec::new()));
+            body
+        };
+
+        let mut stable = PreHirFunction {
+            body: body(None),
+            ..PreHirFunction::default()
+        };
+        assert!(apply_flag_recovery_pass(&mut stable));
+        assert_eq!(if_conds(&stable), [&eq(var("a"), var("b"))]);
+
+        let mut clobbered = PreHirFunction {
+            body: body(Some(assign("a", int(7)))),
+            ..PreHirFunction::default()
+        };
+        apply_flag_recovery_pass(&mut clobbered);
+        assert_eq!(if_conds(&clobbered), [&var("zf")]);
+    }
+
     #[test]
     fn local_reaching_flag_recovery_does_not_cross_label_boundary() {
         let mut func = PreHirFunction {
@@ -1335,6 +1714,36 @@ mod tests {
         assert!(apply_flag_recovery_pass(&mut func));
         assert_eq!(first_if_cond(&func), &not(var("zf")));
         assert_eq!(flag_assign_count(&func.body), 1);
+    }
+
+    /// ARM's SLEIGH computes `tmpNG`/`tmpZR`/`tmpCY`/`tmpOV` and copies them
+    /// into the architectural flags only for flag-setting forms; a predicated
+    /// `movne` inside an IT block writes the temporaries and nothing reads
+    /// them. They are flags, so their dead writes go the same way.
+    #[test]
+    fn dead_flag_cleanup_removes_dead_sleigh_temporary_flag_writes() {
+        let mut func = PreHirFunction {
+            body: vec![
+                assign("tmpzr", eq(var("value"), int(0))),
+                PreHirStmt::If {
+                    cond: not(var("tmpzr")),
+                    then_body: vec![
+                        assign("value", int(1)),
+                        assign("tmpzr", eq(var("value"), int(0))),
+                    ]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(var("value"))),
+            ],
+            ..PreHirFunction::default()
+        };
+
+        assert!(apply_dead_flag_cleanup_pass(&mut func));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::If { then_body, .. } if then_body.len() == 1
+        ));
     }
 
     #[test]

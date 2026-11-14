@@ -32,19 +32,35 @@
 //!
 //! The pass is fail-closed: a statement form it does not model aborts the whole
 //! function rather than deleting dataflow across semantics it cannot read.
-use crate::analysis::defuse::collect_expr_vars;
+use crate::analysis::defuse::{collect_address_taken_locals, collect_expr_vars};
 use crate::prelude::*;
+use crate::recovery::assigned_flag_vars;
 use crate::{HashMap, HashSet};
+use fission_midend_core::is_pure_intrinsic_call;
 
 /// Remove scratch assignments outside the observable dependency closure.
 /// Returns `true` if anything was removed.
 pub fn prune_unobservable_scratch(func: &mut PreHirFunction) -> bool {
-    let scratch: HashSet<String> = func
+    let mut scratch: HashSet<String> = func
         .locals
         .iter()
         .filter(|b| b.is_temp_like() && is_builder_minted_temp(&b.name))
         .map(|b| b.name.clone())
         .collect();
+    // A condition-code register is scratch in the same sense: a machine
+    // instruction writes it whether or not anything tests it, so its value
+    // matters only where something observable reads it. The shape that needs
+    // reachability rather than a use count is a flag an instruction carries
+    // through itself, `of = keep ? of : new`, where every write has a reader
+    // and none of them is ever tested.
+    let mut flags = assigned_flag_vars(&func.body);
+    if !flags.is_empty() {
+        let escaped = collect_address_taken_locals(&func.body);
+        flags.retain(|name| {
+            !escaped.contains(name) && !func.params.iter().any(|param| &param.name == name)
+        });
+        scratch.extend(flags);
+    }
     if scratch.is_empty() {
         return false;
     }
@@ -239,9 +255,13 @@ pub(super) fn is_builder_minted_temp(name: &str) -> bool {
     })
 }
 
+/// Whether evaluating `expr` calls something. The flag primitives
+/// (`__carry`, `__sborrow`, ...) are spelled as calls and are computations.
 fn expr_contains_call(expr: &PreHirExpr) -> bool {
     match expr {
-        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Call { target, args, .. } => {
+            !is_pure_intrinsic_call(target) || args.iter().any(expr_contains_call)
+        }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
         | PreHirExpr::AddressOfLocal(_)
@@ -428,6 +448,65 @@ mod tests {
         assert!(prune_unobservable_scratch(&mut f));
         assert_eq!(names(&f), vec!["local_4"], "{:?}", f.body);
         assert!(f.locals.iter().all(|b| !b.name.starts_with("xVar")));
+    }
+
+    fn flag_primitive(target: &str, a: PreHirExpr, b: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Call {
+            origin: None,
+            target: target.to_string(),
+            args: vec![a, b],
+            ty: NirType::Bool,
+        }
+    }
+
+    fn or(lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: u32_ty(),
+        }
+    }
+
+    /// A flag an instruction carries through itself -- a shift by a count
+    /// that may be zero leaves `of` as it was -- has a reader for every
+    /// write, and none of them is a test. Nothing observes the chain.
+    #[test]
+    fn retires_a_flag_chain_that_only_feeds_itself() {
+        let mut f = func(
+            vec![local("of"), temp("xVar1"), local("local_4")],
+            vec![
+                set("of", flag_primitive("__scarry", var("a"), konst(1))),
+                set("xVar1", var("of")),
+                set("of", or(var("xVar1"), konst(0))),
+                set("local_4", konst(7)),
+                PreHirStmt::Return(Some(var("local_4"))),
+            ],
+        );
+        assert!(prune_unobservable_scratch(&mut f));
+        assert_eq!(names(&f), vec!["local_4"], "{:?}", f.body);
+        assert!(f.locals.iter().all(|b| b.name == "local_4"));
+    }
+
+    /// The same chain is observable as soon as a branch tests the flag.
+    #[test]
+    fn keeps_a_flag_chain_a_condition_reads() {
+        let mut f = func(
+            vec![local("of"), temp("xVar1")],
+            vec![
+                set("of", flag_primitive("__scarry", var("a"), konst(1))),
+                set("xVar1", var("of")),
+                set("of", or(var("xVar1"), konst(0))),
+                PreHirStmt::If {
+                    cond: var("of"),
+                    then_body: Rc::new(vec![PreHirStmt::Return(Some(konst(1)))]),
+                    else_body: Rc::new(vec![]),
+                },
+                PreHirStmt::Return(Some(konst(0))),
+            ],
+        );
+        assert!(!prune_unobservable_scratch(&mut f));
+        assert_eq!(names(&f), vec!["of", "xVar1", "of"]);
     }
 
     /// A scratch value that reaches a returned expression is observable.

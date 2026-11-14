@@ -772,7 +772,7 @@ fn extract_constraints(
     }
 }
 
-fn collect_written_vars(stmts: &[PreHirStmt], written: &mut HashSet<String>) {
+pub(crate) fn collect_written_vars(stmts: &[PreHirStmt], written: &mut HashSet<String>) {
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => {
