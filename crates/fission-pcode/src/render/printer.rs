@@ -1720,17 +1720,21 @@ fn try_elide_hir_cast(
     ) = (ty, expr)
     {
         // Eliding both casts is safe only when the source is already
-        // unsigned.  For a signed source, `(u64)(u32)x` performs a required
-        // zero-extension at 32 bits; printing just `x` would sign-extend a
-        // negative lane when it is widened to 64 bits.
-        if *outer_bits >= *inner_bits && expr_integer_signedness(inner, ctx) == Some(false) {
+        // unsigned and no wider than the inner cast.  For a signed source,
+        // `(u64)(u32)x` performs a required zero-extension at 32 bits;
+        // printing just `x` would sign-extend a negative lane when it is
+        // widened to 64 bits.  For a wider source the inner cast truncates.
+        if *outer_bits >= *inner_bits
+            && expr_unsigned_integer_width(inner, ctx).is_some_and(|bits| bits <= *inner_bits)
+        {
             return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
         }
     }
     None
 }
 
-fn expr_integer_signedness(expr: &HirExpr, ctx: &PrintCtx<'_>) -> Option<bool> {
+/// The width of `expr` when it is an unsigned integer, `None` otherwise.
+fn expr_unsigned_integer_width(expr: &HirExpr, ctx: &PrintCtx<'_>) -> Option<u32> {
     let ty = match expr {
         HirExpr::Var(name) => ctx.var_types.get(name.as_str()).copied(),
         HirExpr::Const(_, ty)
@@ -1748,7 +1752,10 @@ fn expr_integer_signedness(expr: &HirExpr, ctx: &PrintCtx<'_>) -> Option<bool> {
         | HirExpr::AggregateCopy { .. } => None,
     }?;
     match ty {
-        NirType::Int { signed, .. } => Some(*signed),
+        NirType::Int {
+            bits,
+            signed: false,
+        } => Some(*bits),
         _ => None,
     }
 }

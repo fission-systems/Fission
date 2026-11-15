@@ -120,13 +120,16 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
                     },
                 ) = (&*ty, inner_ty)
                 {
-                    // Removing both casts is safe only when the expression
-                    // underneath the inner cast is already unsigned.  A
-                    // signed 32-bit value needs the inner u32 conversion
-                    // before the outer u64 widening, otherwise a negative
-                    // lane is sign-extended to 64 bits.
+                    // Removing the inner cast is safe only when it changes
+                    // nothing: the expression underneath is already unsigned
+                    // and no wider than the cast.  A signed 32-bit value
+                    // needs the inner u32 conversion before the outer u64
+                    // widening, otherwise a negative lane is sign-extended to
+                    // 64 bits; a wider value needs it because the cast is a
+                    // truncation (`(uint)(uchar)x` for a 32-bit `x`).
                     if outer_bits >= inner_bits
-                        && integer_expr_signedness(deeper, var_types) == Some(false)
+                        && unsigned_integer_width(deeper, var_types)
+                            .is_some_and(|bits| bits <= *inner_bits)
                     {
                         *inner = deeper.clone();
                     }
@@ -181,7 +184,8 @@ fn simplify_casts_in_expr(expr: &mut HirExpr, var_types: &HashMap<String, NirTyp
     }
 }
 
-fn integer_expr_signedness(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> Option<bool> {
+/// The width of `expr` when it is an unsigned integer, `None` otherwise.
+fn unsigned_integer_width(expr: &HirExpr, var_types: &HashMap<String, NirType>) -> Option<u32> {
     let ty = match expr {
         HirExpr::Var(name) => var_types.get(name.as_str()),
         HirExpr::Const(_, ty)
@@ -199,7 +203,10 @@ fn integer_expr_signedness(expr: &HirExpr, var_types: &HashMap<String, NirType>)
         | HirExpr::AggregateCopy { .. } => None,
     }?;
     match ty {
-        NirType::Int { signed, .. } => Some(*signed),
+        NirType::Int {
+            bits,
+            signed: false,
+        } => Some(*bits),
         _ => None,
     }
 }
