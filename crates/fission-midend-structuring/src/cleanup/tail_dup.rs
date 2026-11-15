@@ -50,6 +50,19 @@
 //!    by at most [`MAX_TAIL_REFS`] gotos, and the function stays within
 //!    [`MAX_DUPLICATED_STMTS`] copied statements overall -- the growth bound
 //!    the reference owners also impose.
+//! 5. A region that would end up in more than one place is *straight-line*:
+//!    nothing in it decides anything. angr's duplicator admits only a
+//!    return-only block (`_is_simple_return_graph`: one path, no branch) for
+//!    the same reason -- a compiler merges the function's `return`, so
+//!    splitting it restores something the source may have written, but a tail
+//!    that contains an `if` is code the program has once, reached by
+//!    fallthrough or by the source's own `goto out;`. Printing it N times
+//!    makes the reader prove N copies equal to learn what the binary already
+//!    says. The one branch that does not count is the stack-protector check
+//!    ([`super::stack_protector::stack_protector_pass_arm`]): it is the
+//!    compiler's, it sits in front of every `return` of a protected function,
+//!    and the last cleanup pass removes it. A single-reference region that is
+//!    *moved* rather than copied is exempt -- it still appears once.
 //!
 //! The original `Label(L)` and its region are removed only when the preceding
 //! sibling proves ordinary control cannot fall into it *and* nothing targets
@@ -196,6 +209,7 @@ fn split_fallthrough_return_tails(
         let admissible = !tail.is_empty()
             && region_leaves(&tail)
             && region_is_relocatable(&tail, false)
+            && region_is_straight_line(&tail)
             && cost <= MAX_TAIL_STMTS
             && cost <= *budget
             && (is_pure_return_tail || region_free_reads(&tail) > 0);
@@ -495,6 +509,10 @@ fn duplicable_region_at(
         };
         region.push(stmt.clone());
         if terminal {
+            let moves = refs == 1 && droppable;
+            if !moves && !region_is_straight_line(&region) {
+                return None;
+            }
             return region_is_relocatable(&region, allow_goto_tail).then_some(region);
         }
     }
@@ -522,6 +540,19 @@ fn stmt_is_relocatable(stmt: &PreHirStmt, allow_goto: bool) -> bool {
             .into_iter()
             .all(|seq| seq.iter().all(|s| stmt_is_relocatable(s, allow_goto))),
     }
+}
+
+/// Whether `region` is one basic block's worth of statements: nothing in it
+/// decides anything.
+fn region_is_straight_line(region: &[PreHirStmt]) -> bool {
+    region.iter().all(|stmt| match stmt {
+        PreHirStmt::Block(body) => region_is_straight_line(body),
+        other => {
+            child_sequences(other).is_empty()
+                || super::stack_protector::stack_protector_pass_arm(other)
+                    .is_some_and(region_is_straight_line)
+        }
+    })
 }
 
 fn statement_count(stmt: &PreHirStmt) -> usize {
@@ -1037,5 +1068,221 @@ mod tests {
             !out.iter().any(|s| matches!(s, PreHirStmt::Break)),
             "must never inject top-level Break"
         );
+    }
+
+    fn canary_call() -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: "__stack_chk_fail".to_string(),
+            args: Vec::new(),
+            ty: fission_midend_core::ir::NirType::Unknown,
+        })
+    }
+
+    fn assign(name: &str, rhs: &str) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: var(rhs),
+        }
+    }
+
+    fn goto_if(cond: &str, label: &str) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: var(cond),
+            then_body: vec![PreHirStmt::Goto(label.into())].into(),
+            else_body: Vec::new().into(),
+        }
+    }
+
+    /// `if (d) { e; }` -- a decision the program makes.
+    fn deciding_stmt() -> PreHirStmt {
+        PreHirStmt::If {
+            cond: var("d"),
+            then_body: vec![expr_stmt("e")].into(),
+            else_body: Vec::new().into(),
+        }
+    }
+
+    fn count_stmts(stmts: &[PreHirStmt], want: &PreHirStmt) -> usize {
+        stmts
+            .iter()
+            .map(|stmt| {
+                usize::from(stmt == want)
+                    + child_sequences(stmt)
+                        .into_iter()
+                        .map(|seq| count_stmts(seq, want))
+                        .sum::<usize>()
+            })
+            .sum()
+    }
+
+    #[test]
+    fn gotoless_split_leaves_a_tail_that_decides_in_one_place() {
+        // if (c) { a; } else { b; }
+        // if (d) { e; }
+        // return x;
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![expr_stmt("a")].into(),
+                else_body: vec![expr_stmt("b")].into(),
+            },
+            deciding_stmt(),
+            PreHirStmt::Return(Some(var("x"))),
+        ];
+        let (out, count) = duplicate_terminal_tails(body.clone(), &HashSet::default());
+        assert_eq!(count, 0, "a tail with a branch must not be split");
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn gotoless_split_still_takes_a_straight_line_tail() {
+        // if (c) { a; } else { b; }
+        // y = z;
+        // return y;
+        let tail = [assign("y", "z"), PreHirStmt::Return(Some(var("y")))];
+        let mut body = vec![PreHirStmt::If {
+            cond: var("c"),
+            then_body: vec![expr_stmt("a")].into(),
+            else_body: vec![expr_stmt("b")].into(),
+        }];
+        body.extend(tail.iter().cloned());
+        let (out, count) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(count, 1);
+        assert_eq!(count_stmts(&out, &tail[0]), 2);
+        assert_eq!(out.len(), 1, "the shared copy is gone: {out:?}");
+    }
+
+    #[test]
+    fn gotoless_split_sees_through_the_stack_protector_check() {
+        // The epilogue of a protected function, in the two-armed shape it has
+        // when this pass runs:
+        //
+        // if (c) { a; } else { b; }
+        // x = canary_diff;
+        // if (x) { __stack_chk_fail(); return; } else { return rax; }
+        let check = PreHirStmt::If {
+            cond: var("x"),
+            then_body: vec![canary_call(), PreHirStmt::Return(None)].into(),
+            else_body: vec![PreHirStmt::Return(Some(var("rax")))].into(),
+        };
+        let body = vec![
+            PreHirStmt::If {
+                cond: var("c"),
+                then_body: vec![expr_stmt("a")].into(),
+                else_body: vec![expr_stmt("b")].into(),
+            },
+            assign("x", "canary_diff"),
+            check.clone(),
+        ];
+        let (out, count) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(count, 1, "the compiler's check is not the program's branch");
+        assert_eq!(count_stmts(&out, &check), 2);
+    }
+
+    #[test]
+    fn clone_leaves_a_tail_that_decides_in_one_place() {
+        // if (c1) { goto L; }
+        // if (c2) { goto L; }
+        // return a;
+        // L:
+        // if (d) { e; }
+        // return b;
+        let body = vec![
+            goto_if("c1", "L"),
+            goto_if("c2", "L"),
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            deciding_stmt(),
+            PreHirStmt::Return(Some(var("b"))),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body.clone(), &HashSet::default());
+        assert_eq!(removed, 0, "a tail with a branch must not be copied twice");
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn clone_still_copies_a_straight_line_tail_to_every_site() {
+        // Same as above with `y = z;` where the `if` was.
+        let body = vec![
+            goto_if("c1", "L"),
+            goto_if("c2", "L"),
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            assign("y", "z"),
+            PreHirStmt::Return(Some(var("y"))),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(removed, 2);
+        assert_eq!(count_gotos(&out), 0);
+        assert_eq!(count_stmts(&out, &assign("y", "z")), 2);
+    }
+
+    #[test]
+    fn a_single_reference_tail_that_decides_is_still_moved() {
+        // if (c) { goto L; }
+        // return a;
+        // L:
+        // if (d) { e; }
+        // return b;
+        //
+        // One reference and no fallthrough: the tail moves to its only user
+        // and still appears once, so its branch is no obstacle.
+        let body = vec![
+            goto_if("c", "L"),
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            deciding_stmt(),
+            PreHirStmt::Return(Some(var("b"))),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(removed, 1);
+        assert_eq!(count_gotos(&out), 0);
+        assert_eq!(count_stmts(&out, &deciding_stmt()), 1);
+        assert!(!out.contains(&PreHirStmt::Label("L".into())));
+    }
+
+    #[test]
+    fn clone_sees_through_the_stack_protector_check() {
+        // if (c1) { goto L; }
+        // if (c2) { goto L; }
+        // return a;
+        // L:
+        // x = canary_diff;
+        // if (x) { __stack_chk_fail(); }
+        // return rax;
+        let check = PreHirStmt::If {
+            cond: var("x"),
+            then_body: vec![canary_call()].into(),
+            else_body: Vec::new().into(),
+        };
+        let body = vec![
+            goto_if("c1", "L"),
+            goto_if("c2", "L"),
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            assign("x", "canary_diff"),
+            check.clone(),
+            PreHirStmt::Return(Some(var("rax"))),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(
+            removed, 2,
+            "the compiler's check is not the program's branch"
+        );
+        assert_eq!(count_stmts(&out, &check), 2);
+    }
+
+    #[test]
+    fn a_branch_inside_the_canary_pass_arm_still_counts() {
+        // if (x) { __stack_chk_fail(); } else { if (d) { e; } return rax; }
+        //
+        // Seeing through the check must not hide what the pass arm decides.
+        let check = PreHirStmt::If {
+            cond: var("x"),
+            then_body: vec![canary_call()].into(),
+            else_body: vec![deciding_stmt(), PreHirStmt::Return(Some(var("rax")))].into(),
+        };
+        assert!(!region_is_straight_line(&[check]));
     }
 }
