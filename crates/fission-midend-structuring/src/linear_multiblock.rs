@@ -285,6 +285,7 @@ pub fn build_linear_multiblock_body(
                     min_val,
                     proof.as_ref(),
                 )? && switch_join_advances(idx, skip_to)
+                    && crate::switch::switch_owns_what_it_skips(host, idx, skip_to, &switch_stmt)
                 {
                     body.push(switch_stmt);
                     idx = skip_to;

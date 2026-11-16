@@ -565,6 +565,29 @@ pub fn linear_exit_from(
     }
 }
 
+/// Where the layout resumes after an `if` at `origin_idx` one of whose arms is
+/// the join itself.
+///
+/// `arm_skip` is what lowering the other arm reported. An arm that runs into
+/// the join reports the join. An arm that ends in a `return` reports the
+/// block after the returning one, and when that block lies past the join --
+/// the arm reached it by a forward branch over the join -- that is the wrong
+/// place: the caller owns `[start, skip)`, so the blocks from the join up to
+/// the copied `return` are handed to this `if` and printed nowhere.
+///
+/// The `if` as a whole always reaches the join, through its empty arm, so the
+/// layout never resumes past a join ahead of it. It may resume earlier: an arm
+/// that stopped short of the join leaves the blocks in between to the walk,
+/// and what it reported is kept. A join behind the `if` is a loop header, and
+/// there the reported position is how the loop rules tell a body that falls
+/// back into the header from one that leaves; it is left alone.
+fn skip_past_one_armed_if(exit: LinearExit, origin_idx: usize, arm_skip: usize) -> usize {
+    match exit {
+        LinearExit::Join(join_idx) if join_idx > origin_idx => join_idx.min(arm_skip),
+        _ => arm_skip,
+    }
+}
+
 pub fn can_inline_linear_successor(
     host: &impl StructuringHost,
     idx: usize,
@@ -718,7 +741,7 @@ pub fn lower_conditional_tail(
                     then_body: false_body,
                     else_body: Rc::new(Vec::new()),
                 },
-                skip_to,
+                skip_past_one_armed_if(exit, origin_idx, skip_to),
             )));
         }
 
@@ -739,7 +762,7 @@ pub fn lower_conditional_tail(
                     then_body: true_body,
                     else_body: Rc::new(Vec::new()),
                 },
-                skip_to,
+                skip_past_one_armed_if(exit, origin_idx, skip_to),
             )));
         }
 
@@ -858,14 +881,24 @@ pub fn lower_conditional_tail(
             (
                 LinearBodyLoweringOutcome::Lowered((then_body, then_skip)),
                 LinearBodyLoweringOutcome::Lowered((else_body, else_skip)),
-            ) => Ok(ConditionalTailLoweringResult::Lowered((
-                PreHirStmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                },
-                then_skip.max(else_skip),
-            ))),
+            ) => {
+                // An arm that lowered to nothing is the join itself, so
+                // this is a one-armed `if` and resumes there, whatever the
+                // other arm reported.
+                let skip_to = if then_body.is_empty() || else_body.is_empty() {
+                    skip_past_one_armed_if(exit, origin_idx, then_skip.max(else_skip))
+                } else {
+                    then_skip.max(else_skip)
+                };
+                Ok(ConditionalTailLoweringResult::Lowered((
+                    PreHirStmt::If {
+                        cond,
+                        then_body,
+                        else_body,
+                    },
+                    skip_to,
+                )))
+            }
             (LinearBodyLoweringOutcome::Rejected(_), LinearBodyLoweringOutcome::Rejected(_)) => {
                 Ok(ConditionalTailLoweringResult::Mismatch(
                     if fallback_mismatch_subtype
@@ -1256,4 +1289,40 @@ pub fn canonicalize_region_target_for_exit_for_test(
     exit: LinearExit,
 ) -> Option<usize> {
     canonicalize_region_target_for_exit(host, origin_idx, target_idx, exit)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An `if` with an empty arm falls into the join through that arm, so the
+    /// join is where the layout resumes -- not behind a `return` the other
+    /// arm reached by branching over it.
+    #[test]
+    fn a_one_armed_if_resumes_at_the_join_ahead_of_it() {
+        assert_eq!(skip_past_one_armed_if(LinearExit::Join(2), 1, 5), 2);
+        assert_eq!(skip_past_one_armed_if(LinearExit::Join(2), 1, 2), 2);
+    }
+
+    /// A join that is not ahead is a loop header. What the arm reported is
+    /// how the loop rules tell whether the body falls back into it.
+    #[test]
+    fn a_join_behind_the_if_leaves_the_reported_position_alone() {
+        assert_eq!(skip_past_one_armed_if(LinearExit::Join(0), 1, 3), 3);
+        assert_eq!(skip_past_one_armed_if(LinearExit::Join(1), 1, 3), 3);
+    }
+
+    /// An arm that stopped before the join did not print the blocks between
+    /// where it stopped and the join; the walk still has to.
+    #[test]
+    fn an_arm_that_stops_short_of_the_join_leaves_the_rest_to_the_walk() {
+        assert_eq!(skip_past_one_armed_if(LinearExit::Join(6), 1, 3), 3);
+    }
+
+    /// With no join there is nothing to resume at but what the arm reported.
+    #[test]
+    fn without_a_join_the_arm_decides_where_to_resume() {
+        assert_eq!(skip_past_one_armed_if(LinearExit::Return, 1, 5), 5);
+        assert_eq!(skip_past_one_armed_if(LinearExit::End, 1, 5), 5);
+    }
 }

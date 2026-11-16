@@ -120,18 +120,129 @@ pub fn try_lower_switch(
         LinearExit::Join(join_idx) => join_idx,
         LinearExit::Return | LinearExit::End => max_skip,
     };
+    let stmt = PreHirStmt::Switch {
+        expr: parsed.selector,
+        cases,
+        default: std::rc::Rc::new(default_body),
+    };
+    if !switch_owns_what_it_skips(host, idx, skip_to, &stmt) {
+        return Ok(None);
+    }
+    let mut compare_block_stmts = Vec::with_capacity(parsed.compare_blocks.len());
+    for block in &parsed.compare_blocks {
+        compare_block_stmts.push(host.lower_block_stmts(*block)?);
+    }
+    let Some(head_stmts) = statements_ahead_of_a_compare_chain(compare_block_stmts) else {
+        return Ok(None);
+    };
     wave_stats::add_compare_chain_dispatcher_count(1);
     wave_stats::add_dispatcher_proof_units(1);
     wave_stats::add_dispatcher_proof_completed(1);
     wave_stats::add_dispatcher_shape_recoveries(1);
-    Ok(Some((
-        PreHirStmt::Switch {
-            expr: parsed.selector,
-            cases,
-            default: std::rc::Rc::new(default_body),
+    Ok(Some((switch_behind_its_head(head_stmts, stmt), skip_to)))
+}
+
+/// A recovered switch with the statements of the block that dispatches in
+/// front of it.
+///
+/// The switch replaces a block's *terminator*. The block's statements -- what
+/// it computes before it dispatches, which is often the selector itself -- are
+/// not part of that and are printed nowhere else: the caller owns the region
+/// from this block on and resumes behind it.
+fn switch_behind_its_head(head_stmts: Vec<PreHirStmt>, switch: PreHirStmt) -> PreHirStmt {
+    if head_stmts.is_empty() {
+        return switch;
+    }
+    let mut wrapped = head_stmts;
+    wrapped.push(switch);
+    PreHirStmt::Block(std::rc::Rc::new(wrapped))
+}
+
+/// The statements to print in front of a switch recovered from a chain of
+/// compares, given the statements of each compare block in chain order -- or
+/// `None` when the chain is not a switch.
+///
+/// The first block's statements run on every path, so they go in front. A
+/// later compare block's statements run only when the compares before it
+/// failed; a `switch` has no place for that, so a chain with any is left to
+/// lower as the `if`s it is.
+fn statements_ahead_of_a_compare_chain(
+    mut compare_block_stmts: Vec<Vec<PreHirStmt>>,
+) -> Option<Vec<PreHirStmt>> {
+    if compare_block_stmts.is_empty() {
+        return Some(Vec::new());
+    }
+    let head = compare_block_stmts.remove(0);
+    compare_block_stmts
+        .iter()
+        .all(|stmts| stmts.is_empty())
+        .then_some(head)
+}
+
+/// Whether a recovered switch at `idx` holds every block the walk steps over
+/// when it resumes at `skip_to`.
+///
+/// The caller owns `[idx, skip_to)` once it accepts the switch: those blocks
+/// are printed inside the statement or not at all. When the arms share a join
+/// the range ends there. When every arm leaves the function there is no join,
+/// and the range runs to the last block any arm reached -- which says nothing
+/// about the blocks in between. Two things have to hold for them:
+///
+/// - each is reached only through the switch (`idx` dominates it), so nothing
+///   outside jumps to a block that is no longer printed;
+/// - no `goto` inside the statement names one of them without the statement
+///   also defining that label: an arm that could not inline a block leaves a
+///   `goto` to it, expecting the walk to print the block later.
+///
+/// A switch that fails either is not one this layout can express, and its
+/// blocks lower the ordinary way.
+pub(crate) fn switch_owns_what_it_skips(
+    host: &impl StructuringHost,
+    idx: usize,
+    skip_to: usize,
+    stmt: &PreHirStmt,
+) -> bool {
+    let end = skip_to.min(host.block_count());
+    let owned = skipped_blocks_are_owned(
+        idx + 1..end,
+        &|block| {
+            host.predecessors()
+                .get(block)
+                .is_some_and(|preds| preds.is_empty())
+                || host.dom_tree().dominates(idx, block)
         },
-        skip_to,
-    )))
+        &|block| block_label(host.block_start_address(block)),
+        stmt,
+    );
+    if !owned && structuring_diag_enabled() {
+        eprintln!(
+            "[DIAG] switch at block {idx} rejected: skips to {skip_to} over blocks it does not hold"
+        );
+    }
+    owned
+}
+
+/// The two conditions of [`switch_owns_what_it_skips`] over the skipped
+/// `blocks`, with the graph facts passed in.
+fn skipped_blocks_are_owned(
+    blocks: std::ops::Range<usize>,
+    entered_only_through_switch: &dyn Fn(usize) -> bool,
+    label_of: &dyn Fn(usize) -> String,
+    stmt: &PreHirStmt,
+) -> bool {
+    if blocks.is_empty() {
+        return true;
+    }
+    if !blocks.clone().all(entered_only_through_switch) {
+        return false;
+    }
+    let stmts = std::slice::from_ref(stmt);
+    let referenced = crate::cleanup::collect_referenced_labels(stmts);
+    let defined = crate::cleanup::collect_defined_labels(stmts);
+    blocks.into_iter().all(|block| {
+        let label = label_of(block);
+        !referenced.contains(&label) || defined.contains(&label)
+    })
 }
 
 pub fn try_lower_direct_dispatcher_switch(
@@ -276,17 +387,19 @@ pub fn try_lower_direct_dispatcher_switch(
     if used_proof_payload {
         host.bump_proof_payload_direct_emit();
     }
+    let stmt = PreHirStmt::Switch {
+        expr,
+        cases,
+        default,
+    };
+    if !switch_owns_what_it_skips(host, idx, skip_to, &stmt) {
+        return Ok(None);
+    }
+    let head_stmts = host.lower_block_stmts(idx)?;
     wave_stats::add_dispatcher_proof_units(1);
     wave_stats::add_dispatcher_proof_completed(1);
     wave_stats::add_dispatcher_shape_recoveries(1);
-    Ok(Some((
-        PreHirStmt::Switch {
-            expr,
-            cases,
-            default,
-        },
-        skip_to,
-    )))
+    Ok(Some((switch_behind_its_head(head_stmts, stmt), skip_to)))
 }
 
 pub fn parse_switch_chain(
@@ -300,6 +413,7 @@ pub fn parse_switch_chain(
     let mut guarded_default_idx: Option<usize> = None;
     let mut saw_range_guard = false;
     let mut visited = HashSet::default();
+    let mut compare_blocks = Vec::new();
     let max_chain_steps = host
         .successors()
         .len()
@@ -310,6 +424,7 @@ pub fn parse_switch_chain(
         if !visited.insert(current_idx) {
             return Ok(None);
         }
+        compare_blocks.push(current_idx);
 
         let LoweredTerminator::Cond {
             cond,
@@ -435,6 +550,7 @@ pub fn parse_switch_chain(
                     selector,
                     cases,
                     default_idx,
+                    compare_blocks,
                     proof,
                 }));
             }
@@ -482,6 +598,9 @@ pub struct ParsedSwitch {
     pub selector: PreHirExpr,
     pub cases: Vec<(i64, usize)>,
     pub default_idx: usize,
+    /// The blocks whose terminators were read as the chain's compares, in
+    /// chain order; the first is the block the chain starts at.
+    pub compare_blocks: Vec<usize>,
     pub proof: DispatcherProofUnit,
 }
 
@@ -546,6 +665,112 @@ pub fn build_compare_chain_proof(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn label(block: usize) -> String {
+        format!("block_{block}")
+    }
+
+    fn switch_whose_cases_are(bodies: Vec<Vec<PreHirStmt>>) -> PreHirStmt {
+        PreHirStmt::Switch {
+            expr: PreHirExpr::Var("x".to_string()),
+            cases: bodies
+                .into_iter()
+                .enumerate()
+                .map(|(value, body)| PreHirSwitchCase {
+                    values: vec![value as i64],
+                    body: std::rc::Rc::new(body),
+                })
+                .collect(),
+            default: std::rc::Rc::new(Vec::new()),
+        }
+    }
+
+    /// Arms that hold their blocks: each skipped block is reached only
+    /// through the switch, and nothing is left behind a `goto`.
+    #[test]
+    fn a_switch_that_holds_every_skipped_block_owns_them() {
+        let stmt = switch_whose_cases_are(vec![
+            vec![PreHirStmt::Label(label(2)), PreHirStmt::Return(None)],
+            vec![PreHirStmt::Label(label(3)), PreHirStmt::Return(None)],
+        ]);
+        assert!(skipped_blocks_are_owned(2..4, &|_| true, &label, &stmt));
+    }
+
+    /// An arm that could not inline a block leaves a `goto` to it. The walk
+    /// was going to print that block; stepping over it leaves the `goto`
+    /// pointing at nothing.
+    #[test]
+    fn a_goto_to_a_skipped_block_the_switch_does_not_define_is_not_owned() {
+        let stmt = switch_whose_cases_are(vec![
+            vec![PreHirStmt::Goto(label(3))],
+            vec![PreHirStmt::Label(label(2)), PreHirStmt::Return(None)],
+        ]);
+        assert!(!skipped_blocks_are_owned(2..5, &|_| true, &label, &stmt));
+    }
+
+    /// The same `goto` is fine when the statement defines the label itself,
+    /// or when it leaves the skipped range altogether.
+    #[test]
+    fn a_goto_the_switch_resolves_or_that_leaves_the_range_is_owned() {
+        let inside = switch_whose_cases_are(vec![
+            vec![PreHirStmt::Goto(label(3))],
+            vec![PreHirStmt::Label(label(3)), PreHirStmt::Return(None)],
+        ]);
+        assert!(skipped_blocks_are_owned(2..5, &|_| true, &label, &inside));
+        let outside = switch_whose_cases_are(vec![
+            vec![PreHirStmt::Goto(label(9))],
+            vec![PreHirStmt::Return(None)],
+        ]);
+        assert!(skipped_blocks_are_owned(2..5, &|_| true, &label, &outside));
+    }
+
+    /// A skipped block something outside the switch also reaches is not the
+    /// switch's to take, whatever the statement looks like.
+    fn work(name: &str) -> PreHirStmt {
+        PreHirStmt::Goto(name.to_string())
+    }
+
+    #[test]
+    fn the_first_compare_block_s_statements_go_in_front_of_the_switch() {
+        let ahead = statements_ahead_of_a_compare_chain(vec![vec![work("a")], vec![], vec![]]);
+        assert_eq!(ahead.map(|stmts| stmts.len()), Some(1));
+    }
+
+    #[test]
+    fn a_later_compare_block_with_statements_is_not_a_switch() {
+        let ahead = statements_ahead_of_a_compare_chain(vec![vec![], vec![work("b")]]);
+        assert!(ahead.is_none());
+    }
+
+    #[test]
+    fn a_switch_with_nothing_ahead_of_it_is_not_wrapped() {
+        let bare = switch_behind_its_head(Vec::new(), switch_whose_cases_are(vec![vec![]]));
+        assert!(matches!(bare, PreHirStmt::Switch { .. }));
+        let wrapped = switch_behind_its_head(vec![work("a")], switch_whose_cases_are(vec![vec![]]));
+        let PreHirStmt::Block(stmts) = wrapped else {
+            panic!("expected the head and the switch in one block");
+        };
+        assert!(matches!(
+            stmts.as_slice(),
+            [PreHirStmt::Goto(_), PreHirStmt::Switch { .. }]
+        ));
+    }
+
+    #[test]
+    fn a_skipped_block_entered_from_elsewhere_is_not_owned() {
+        let stmt = switch_whose_cases_are(vec![
+            vec![PreHirStmt::Return(None)],
+            vec![PreHirStmt::Return(None)],
+        ]);
+        assert!(!skipped_blocks_are_owned(
+            2..5,
+            &|block| block != 3,
+            &label,
+            &stmt
+        ));
+        // Nothing is skipped when the walk resumes at the next block.
+        assert!(skipped_blocks_are_owned(2..2, &|_| false, &label, &stmt));
+    }
     use crate::helpers::extract_eq_const_operands;
     use fission_midend_core::ir::NirType;
     use fission_midend_prehir::{PreHirBinaryOp, PreHirUnaryOp};
