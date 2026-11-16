@@ -3,7 +3,7 @@
 //! Entry points take [`crate::host::StructuringHost`]. Production host is
 //! `PreviewBuilder` in `fission-pcode`.
 
-use crate::HashSet;
+use crate::guarded_tail_pure::{count_var_reads_expr, count_var_reads_stmt};
 use crate::helpers::{
     block_label, detect_and_patch_case_fallthrough, extract_eq_const_for_case,
     extract_range_guard_for_chain, merge_equivalent_switch_cases, recovered_switch_case_values,
@@ -11,6 +11,7 @@ use crate::helpers::{
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearExit, LoweredTerminator, structuring_diag_enabled};
 use crate::regions::EmitReadyDecision;
+use crate::{HashMap, HashSet};
 use fission_midend_core::SWITCH_FALLTHROUGH_SENTINEL;
 use fission_midend_core::ir::{
     DispatcherCaseMapSource, DispatcherLegality, DispatcherProofScope, DispatcherProofUnit,
@@ -19,7 +20,7 @@ use fission_midend_core::ir::{
 use fission_midend_core::wave_stats;
 use fission_midend_prehir::util::format_expr_key;
 use fission_midend_prehir::util::strip_casts;
-use fission_midend_prehir::{PreHirExpr, PreHirStmt, PreHirSwitchCase};
+use fission_midend_prehir::{PreHirExpr, PreHirLValue, PreHirStmt, PreHirSwitchCase};
 
 /// Soft budget for compare-chain switch parsing steps.
 pub const SWITCH_CHAIN_PARSE_BUDGET_MAX: usize = 16;
@@ -128,12 +129,29 @@ pub fn try_lower_switch(
     if !switch_owns_what_it_skips(host, idx, skip_to, &stmt) {
         return Ok(None);
     }
-    let mut compare_block_stmts = Vec::with_capacity(parsed.compare_blocks.len());
-    for block in &parsed.compare_blocks {
-        compare_block_stmts.push(host.lower_block_stmts(*block)?);
-    }
-    let Some(head_stmts) = statements_ahead_of_a_compare_chain(compare_block_stmts) else {
+    // The later compare blocks are only looked at, on a copy of the host:
+    // lowering a block ahead of its turn would fix what it lowers to.
+    let later_compare_blocks = parsed.compare_blocks.get(1..).unwrap_or_default().to_vec();
+    let doing_work = host.lower_observed(|observed| {
+        for block in later_compare_blocks {
+            let stmts = observed.lower_block_stmts(block)?;
+            if !stmts.is_empty() && !compare_block_work_goes_unread(observed, block, &stmts)? {
+                return Ok(Some(block));
+            }
+        }
+        Ok(None)
+    })?;
+    if let Some(block) = doing_work {
+        if structuring_diag_enabled() {
+            eprintln!(
+                "[DIAG] switch at block {idx} rejected: compare block {block} does work something reads"
+            );
+        }
         return Ok(None);
+    }
+    let head_stmts = match parsed.compare_blocks.first() {
+        Some(head) => host.lower_block_stmts(*head)?,
+        None => Vec::new(),
     };
     wave_stats::add_compare_chain_dispatcher_count(1);
     wave_stats::add_dispatcher_proof_units(1);
@@ -158,25 +176,155 @@ fn switch_behind_its_head(head_stmts: Vec<PreHirStmt>, switch: PreHirStmt) -> Pr
     PreHirStmt::Block(std::rc::Rc::new(wrapped))
 }
 
-/// The statements to print in front of a switch recovered from a chain of
-/// compares, given the statements of each compare block in chain order -- or
-/// `None` when the chain is not a switch.
+/// How many blocks the search for a reader of a compare block's work may
+/// enter before it stops and answers that there is one.
+const COMPARE_WORK_READER_SEARCH_BLOCKS: usize = 128;
+
+/// Whether dropping the statements of a compare block behind the first
+/// changes nothing.
 ///
-/// The first block's statements run on every path, so they go in front. A
-/// later compare block's statements run only when the compares before it
-/// failed; a `switch` has no place for that, so a chain with any is left to
-/// lower as the `if`s it is.
-fn statements_ahead_of_a_compare_chain(
-    mut compare_block_stmts: Vec<Vec<PreHirStmt>>,
-) -> Option<Vec<PreHirStmt>> {
-    if compare_block_stmts.is_empty() {
-        return Some(Vec::new());
-    }
-    let head = compare_block_stmts.remove(0);
-    compare_block_stmts
+/// The first compare block's statements run on every path and go in front of
+/// the switch. A later one's run only when the compares before it failed, and
+/// a `switch` has no place for that. What such a block usually holds is the
+/// compare itself -- the loaded operand and the flags -- which the selector
+/// already stands for and nothing reads again. That can be dropped; anything
+/// else cannot, and the chain is left to lower as the `if`s it is.
+///
+/// Two things make it droppable: the block writes registers and temporaries
+/// only (no store, no call), so every later read of what it wrote is a read of
+/// a name; and no path from it reads one of those names before writing it.
+fn compare_block_work_goes_unread(
+    host: &mut impl StructuringHost,
+    block: usize,
+    stmts: &[PreHirStmt],
+) -> Result<bool, MlilPreviewError> {
+    Ok(
+        host.head_has_only_discardable_pure_ops(block)
+            && assignments_go_unread(host, block, stmts)?,
+    )
+}
+
+/// Whether `stmts`, the statements of `block`, are assignments to variables
+/// that no path from the block reads before writing them again.
+///
+/// The caller has to know the block writes registers and temporaries only;
+/// a name stands for the whole of what was written only then.
+fn assignments_go_unread(
+    host: &mut impl StructuringHost,
+    block: usize,
+    stmts: &[PreHirStmt],
+) -> Result<bool, MlilPreviewError> {
+    let Some(names) = names_a_block_assigns(stmts) else {
+        return Ok(false);
+    };
+    let starts = host.successors().get(block).cloned().unwrap_or_default();
+    let read = something_reads_before_writing(&starts, &names, &mut |idx| {
+        if idx >= host.block_count() {
+            return Ok(None);
+        }
+        let stmts = host.lower_block_stmts(idx)?;
+        let terminator = host.lower_block_terminator(idx)?;
+        let successors = host.successors().get(idx).cloned().unwrap_or_default();
+        Ok(Some((stmts, terminator, successors)))
+    })?;
+    Ok(!read)
+}
+
+/// The variables `stmts` assign, when assigning variables is all they do.
+fn names_a_block_assigns(stmts: &[PreHirStmt]) -> Option<Vec<&str>> {
+    stmts
         .iter()
-        .all(|stmts| stmts.is_empty())
-        .then_some(head)
+        .map(|stmt| match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } => Some(name.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A block as the reader search sees it: its statements, how it ends, and
+/// the blocks it leads to.
+type BlockForReaderSearch = (Vec<PreHirStmt>, LoweredTerminator, Vec<usize>);
+
+/// Whether some path from one of `starts` reads one of `names` before
+/// writing it.
+///
+/// A name stops being followed down a path at the first statement that
+/// assigns it outright; a write inside a branch or a loop does not count. A
+/// block `block_at` cannot supply, a terminator that is not understood, and a
+/// search that runs past its budget all answer `true`.
+fn something_reads_before_writing(
+    starts: &[usize],
+    names: &[&str],
+    block_at: &mut dyn FnMut(usize) -> Result<Option<BlockForReaderSearch>, MlilPreviewError>,
+) -> Result<bool, MlilPreviewError> {
+    let mut followed_into: HashMap<usize, HashSet<&str>> = HashMap::default();
+    let mut pending: Vec<(usize, Vec<&str>)> = starts
+        .iter()
+        .map(|start| (*start, names.to_vec()))
+        .collect();
+    let mut entered = 0usize;
+    while let Some((idx, arriving)) = pending.pop() {
+        let already = followed_into.entry(idx).or_default();
+        let mut unwritten: Vec<&str> = arriving
+            .into_iter()
+            .filter(|name| already.insert(*name))
+            .collect();
+        if unwritten.is_empty() {
+            continue;
+        }
+        entered += 1;
+        if entered > COMPARE_WORK_READER_SEARCH_BLOCKS {
+            return Ok(true);
+        }
+        let Some((stmts, terminator, successors)) = block_at(idx)? else {
+            return Ok(true);
+        };
+        for stmt in &stmts {
+            if unwritten
+                .iter()
+                .any(|name| count_var_reads_stmt(stmt, name) > 0)
+            {
+                return Ok(true);
+            }
+            if let PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(written),
+                ..
+            } = stmt
+            {
+                unwritten.retain(|name| name != written);
+            }
+        }
+        if unwritten.is_empty() {
+            continue;
+        }
+        if terminator_reads(&terminator, &unwritten) {
+            return Ok(true);
+        }
+        for successor in successors {
+            pending.push((successor, unwritten.clone()));
+        }
+    }
+    Ok(false)
+}
+
+/// Whether the way a block ends reads one of `names`. An ending that is not
+/// understood is taken to read all of them.
+fn terminator_reads(terminator: &LoweredTerminator, names: &[&str]) -> bool {
+    let expr = match terminator {
+        LoweredTerminator::Fallthrough(_)
+        | LoweredTerminator::Goto(_)
+        | LoweredTerminator::Return(None) => return false,
+        LoweredTerminator::Cond { cond, .. } => cond,
+        LoweredTerminator::Switch { expr, .. } => expr,
+        LoweredTerminator::Return(Some(expr)) => expr,
+        LoweredTerminator::Unsupported { .. } => return true,
+    };
+    names
+        .iter()
+        .any(|name| count_var_reads_expr(expr, name) > 0)
 }
 
 /// Whether a recovered switch at `idx` holds every block the walk steps over
@@ -560,6 +708,12 @@ pub fn parse_switch_chain(
     Ok(None)
 }
 
+/// The block a switch arm really starts at: `start_idx`, or the block behind
+/// the forwarding blocks it leads through.
+///
+/// A forwarding block that is stepped over is printed nowhere, so one is
+/// stepped over only when it writes nothing. An arm that sets the value the
+/// function returns and jumps to the shared exit stays the arm's first block.
 pub fn canonicalize_switch_target(host: &impl StructuringHost, start_idx: usize) -> usize {
     const MAX_SWITCH_TARGET_CANON_STEPS: usize = 32;
     let mut current = start_idx;
@@ -572,7 +726,9 @@ pub fn canonicalize_switch_target(host: &impl StructuringHost, start_idx: usize)
             break;
         }
         let next_idx = host.successors()[current][0];
-        if !host.is_trivial_forwarding_block(current, next_idx) {
+        if !host.is_trivial_forwarding_block(current, next_idx)
+            || !host.block_writes_nothing(current)
+        {
             break;
         }
         current = next_idx;
@@ -730,16 +886,178 @@ mod tests {
         PreHirStmt::Goto(name.to_string())
     }
 
-    #[test]
-    fn the_first_compare_block_s_statements_go_in_front_of_the_switch() {
-        let ahead = statements_ahead_of_a_compare_chain(vec![vec![work("a")], vec![], vec![]]);
-        assert_eq!(ahead.map(|stmts| stmts.len()), Some(1));
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_string())
+    }
+
+    fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs,
+        }
+    }
+
+    /// Runs the reader search over `blocks`, each a list of statements, an
+    /// ending and its successors, starting at block 0.
+    fn read_before_written(names: &[&str], blocks: Vec<BlockForReaderSearch>) -> bool {
+        something_reads_before_writing(&[0], names, &mut |idx| Ok(blocks.get(idx).cloned()))
+            .expect("the search itself does not fail")
     }
 
     #[test]
-    fn a_later_compare_block_with_statements_is_not_a_switch() {
-        let ahead = statements_ahead_of_a_compare_chain(vec![vec![], vec![work("b")]]);
-        assert!(ahead.is_none());
+    fn a_block_that_only_assigns_variables_names_them() {
+        let stmts = vec![assign("zf", var("a")), assign("tmp", var("b"))];
+        assert_eq!(names_a_block_assigns(&stmts), Some(vec!["zf", "tmp"]));
+    }
+
+    #[test]
+    fn a_block_that_does_anything_else_names_nothing() {
+        let stmts = vec![assign("zf", var("a")), work("elsewhere")];
+        assert_eq!(names_a_block_assigns(&stmts), None);
+        let store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(var("p")),
+                ty: fission_midend_core::ir::NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            },
+            rhs: var("a"),
+        };
+        assert_eq!(names_a_block_assigns(&[store]), None);
+    }
+
+    #[test]
+    fn a_name_nothing_reads_is_not_read() {
+        let blocks = vec![
+            (
+                vec![assign("x", var("y"))],
+                LoweredTerminator::Goto(1),
+                vec![1],
+            ),
+            (
+                Vec::new(),
+                LoweredTerminator::Return(Some(var("x"))),
+                Vec::new(),
+            ),
+        ];
+        assert!(!read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_read_on_one_of_two_paths_is_a_read() {
+        let cond = LoweredTerminator::Cond {
+            cond: var("c"),
+            true_target: 1,
+            false_target: Some(2),
+        };
+        let blocks = vec![
+            (Vec::new(), cond, vec![1, 2]),
+            (Vec::new(), LoweredTerminator::Return(None), Vec::new()),
+            (
+                vec![assign("x", var("zf"))],
+                LoweredTerminator::Return(None),
+                Vec::new(),
+            ),
+        ];
+        assert!(read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_write_ends_the_search_down_that_path() {
+        let blocks = vec![
+            (
+                vec![assign("zf", var("a"))],
+                LoweredTerminator::Goto(1),
+                vec![1],
+            ),
+            (
+                vec![assign("x", var("zf"))],
+                LoweredTerminator::Return(None),
+                Vec::new(),
+            ),
+        ];
+        assert!(!read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_statement_that_reads_the_name_it_writes_is_a_read() {
+        let blocks = vec![(
+            vec![assign("zf", var("zf"))],
+            LoweredTerminator::Return(None),
+            Vec::new(),
+        )];
+        assert!(read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_write_inside_a_branch_does_not_end_the_search() {
+        let guarded = PreHirStmt::If {
+            cond: var("c"),
+            then_body: std::rc::Rc::new(vec![assign("zf", var("a"))]),
+            else_body: std::rc::Rc::new(Vec::new()),
+        };
+        let blocks = vec![
+            (vec![guarded], LoweredTerminator::Goto(1), vec![1]),
+            (
+                Vec::new(),
+                LoweredTerminator::Return(Some(var("zf"))),
+                Vec::new(),
+            ),
+        ];
+        assert!(read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn the_way_a_block_ends_can_be_the_read() {
+        let cond = LoweredTerminator::Cond {
+            cond: var("zf"),
+            true_target: 1,
+            false_target: None,
+        };
+        assert!(read_before_written(
+            &["zf"],
+            vec![(Vec::new(), cond, Vec::new())]
+        ));
+    }
+
+    #[test]
+    fn a_loop_with_no_reader_ends() {
+        let blocks = vec![(Vec::new(), LoweredTerminator::Goto(0), vec![0])];
+        assert!(!read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_block_that_cannot_be_looked_at_counts_as_a_read() {
+        let blocks = vec![(Vec::new(), LoweredTerminator::Goto(7), vec![7])];
+        assert!(read_before_written(&["zf"], blocks));
+    }
+
+    #[test]
+    fn a_search_past_its_budget_counts_as_a_read() {
+        let long = COMPARE_WORK_READER_SEARCH_BLOCKS + 1;
+        let blocks: Vec<BlockForReaderSearch> = (0..long)
+            .map(|idx| {
+                let next = if idx + 1 < long {
+                    vec![idx + 1]
+                } else {
+                    Vec::new()
+                };
+                (Vec::new(), LoweredTerminator::Goto(0), next)
+            })
+            .collect();
+        assert!(read_before_written(&["zf"], blocks));
+        let short: Vec<BlockForReaderSearch> = (0..COMPARE_WORK_READER_SEARCH_BLOCKS)
+            .map(|idx| {
+                let next = if idx + 1 < COMPARE_WORK_READER_SEARCH_BLOCKS {
+                    vec![idx + 1]
+                } else {
+                    Vec::new()
+                };
+                (Vec::new(), LoweredTerminator::Goto(0), next)
+            })
+            .collect();
+        assert!(!read_before_written(&["zf"], short));
     }
 
     #[test]

@@ -510,6 +510,13 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn region_has_external_entry(&self, region: &HashSet<usize>, header_idx: usize) -> bool {
         PreviewBuilder::region_has_external_entry(self, region, header_idx)
     }
+    fn block_writes_nothing(&self, block_idx: usize) -> bool {
+        let pcode_idx = PreviewBuilder::pcode_block_idx(self, block_idx);
+        self.pcode
+            .blocks
+            .get(pcode_idx)
+            .is_some_and(|block| block.ops.iter().all(|op| op.output.is_none()))
+    }
     fn head_has_only_discardable_pure_ops(&self, block_idx: usize) -> bool {
         let pcode_idx = PreviewBuilder::pcode_block_idx(self, block_idx);
         let Some(block) = self.pcode.blocks.get(pcode_idx) else {

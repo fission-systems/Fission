@@ -1192,3 +1192,165 @@ fn a_block_between_the_arms_that_the_switch_does_not_hold_is_still_printed() {
     assert!(body.contains("return 3;"), "{code}");
     assert!(!body.contains("goto "), "{code}");
 }
+
+fn raw_op(
+    address: u64,
+    opcode: PcodeOpcode,
+    output: Option<Varnode>,
+    inputs: Vec<Varnode>,
+) -> PcodeOp {
+    PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    }
+}
+
+fn raw_block(index: u32, start_address: u64, mut ops: Vec<PcodeOp>) -> PcodeBasicBlock {
+    for (seq, op) in ops.iter_mut().enumerate() {
+        op.seq_num = seq as u32;
+    }
+    PcodeBasicBlock {
+        index,
+        start_address,
+        successors: vec![],
+        ops,
+    }
+}
+
+/// What a compare block usually holds besides its branch is the compare: a
+/// register nothing reads again. That is no reason to give up the switch.
+#[test]
+fn a_later_compare_that_leaves_a_register_nobody_reads_is_still_a_switch() {
+    let scratch = raw_op(
+        0x5010,
+        PcodeOpcode::Copy,
+        Some(reg(0x40, 4)),
+        vec![reg(0x08, 4)],
+    );
+    let func = compare_chain_with_work(Vec::new(), vec![scratch]);
+    let code =
+        render_mlil_preview(&func, "switchy", 0x5000, &preview_options()).expect("preview render");
+    let body = &code[code.find("switchy(").expect(&code)..];
+    assert!(body.contains("switch ("), "{code}");
+    assert!(body.contains("return 2;"), "{code}");
+}
+
+/// A register the later compare block sets and the arm behind it returns:
+/// the write is read, so the chain is not turned into a switch that has no
+/// place for it.
+#[test]
+fn a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch() {
+    let carried = raw_op(
+        0x5010,
+        PcodeOpcode::Copy,
+        Some(reg(0x00, 4)),
+        vec![cst(77, 4)],
+    );
+    let mut func = compare_chain_with_work(Vec::new(), vec![carried]);
+    func.blocks[4].ops[0].inputs[1] = reg(0x00, 4);
+    func.blocks[2].ops.insert(
+        0,
+        raw_op(
+            0x5020,
+            PcodeOpcode::Copy,
+            Some(reg(0x00, 4)),
+            vec![cst(55, 4)],
+        ),
+    );
+    func.blocks[2].ops[1].inputs[1] = reg(0x00, 4);
+    let code =
+        render_mlil_preview(&func, "switchy", 0x5000, &preview_options()).expect("preview render");
+    let body = &code[code.find("switchy(").expect(&code)..];
+    assert!(!body.contains("switch ("), "{code}");
+    assert!(body.contains("return 77;"), "{code}");
+    assert!(body.contains("return 55;"), "{code}");
+}
+
+/// Two arms that call something and meet at a block that sets the return
+/// value, and a default that sets its own and jumps past that block to the
+/// return.
+fn chain_whose_default_sets_its_own_return_value() -> PcodeFunction {
+    fn compare(address: u64, value: i64, target: u64) -> Vec<PcodeOp> {
+        let cond = uniq(0x500 + value as u64, 1);
+        vec![
+            raw_op(
+                address,
+                PcodeOpcode::IntEqual,
+                Some(cond.clone()),
+                vec![reg(0x08, 4), cst(value, 4)],
+            ),
+            raw_op(
+                address + 1,
+                PcodeOpcode::CBranch,
+                None,
+                vec![cst(target as i64, 8), cond],
+            ),
+        ]
+    }
+    fn jumps(address: u64, target: u64) -> PcodeOp {
+        raw_op(
+            address,
+            PcodeOpcode::Branch,
+            None,
+            vec![cst(target as i64, 8)],
+        )
+    }
+    fn sets_return_value(address: u64, value: i64) -> PcodeOp {
+        raw_op(
+            address,
+            PcodeOpcode::Copy,
+            Some(reg(0x00, 4)),
+            vec![cst(value, 4)],
+        )
+    }
+    PcodeFunction {
+        blocks: vec![
+            raw_block(0, 0x5000, compare(0x5000, 1, 0x5030)),
+            raw_block(1, 0x5010, compare(0x5010, 2, 0x5040)),
+            raw_block(
+                2,
+                0x5020,
+                vec![sets_return_value(0x5020, 90), jumps(0x5021, 0x5060)],
+            ),
+            raw_block(
+                3,
+                0x5030,
+                vec![call_to(0x5030, 0x6000), jumps(0x5031, 0x5050)],
+            ),
+            raw_block(
+                4,
+                0x5040,
+                vec![call_to(0x5040, 0x7000), jumps(0x5041, 0x5050)],
+            ),
+            raw_block(5, 0x5050, vec![sets_return_value(0x5050, 40)]),
+            raw_block(
+                6,
+                0x5060,
+                vec![raw_op(
+                    0x5060,
+                    PcodeOpcode::Return,
+                    None,
+                    vec![cst(0, 8), reg(0x00, 4)],
+                )],
+            ),
+        ],
+    }
+}
+
+/// A default that is one block setting the return value and jumping to the
+/// return is still an arm: stepping over it to the return loses what it set.
+#[test]
+fn a_default_that_only_sets_the_return_value_keeps_it() {
+    let func = chain_whose_default_sets_its_own_return_value();
+    let code =
+        render_mlil_preview(&func, "switchy", 0x5000, &preview_options()).expect("preview render");
+    let body = &code[code.find("switchy(").expect(&code)..];
+    assert!(body.contains("90"), "{code}");
+    assert!(body.contains("40"), "{code}");
+    assert_eq!(body.matches("sub_6000(").count(), 1, "{code}");
+    assert_eq!(body.matches("sub_7000(").count(), 1, "{code}");
+}
