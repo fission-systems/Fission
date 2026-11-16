@@ -73,7 +73,7 @@ fn is_diverging_call_with(stmt: &PreHirStmt, proven: &dyn Fn(&str) -> bool) -> b
 }
 
 /// [`is_diverging_call_with`] with only the name list to go on.
-fn is_diverging_call(stmt: &PreHirStmt) -> bool {
+pub(super) fn is_diverging_call(stmt: &PreHirStmt) -> bool {
     is_diverging_call_with(stmt, &|_| false)
 }
 

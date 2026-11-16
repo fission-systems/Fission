@@ -114,21 +114,33 @@ pub fn finalize_post_layout_body_with(
             break;
         }
     }
-    // Once, after the loop has settled, never inside it. The rewrites above
-    // read the shape of the body they are given, and a tail this removes is
-    // one of the shapes they read: taking it away mid-fixpoint changed what
-    // the next round matched and cost a `select` that the diamond-join tests
-    // pin. Reachability is a property of the finished body, so this is the
-    // right place to decide it.
+    settle_finished_body(body, proven_no_return)
+}
+
+/// What the finished layout loses: statements nothing reaches, the check the
+/// compiler inserted, and an `else` around code that needs none.
+///
+/// Once, after the loop has settled, never inside it. The rewrites above
+/// read the shape of the body they are given, and a tail this removes is
+/// one of the shapes they read: taking it away mid-fixpoint changed what
+/// the next round matched and cost a `select` that the diamond-join tests
+/// pin. Reachability is a property of the finished body, so this is the
+/// right place to decide it.
+fn settle_finished_body(
+    body: Vec<PreHirStmt>,
+    proven_no_return: &dyn Fn(&str) -> bool,
+) -> Vec<PreHirStmt> {
     let referenced = collect_referenced_label_counts(&body);
     let (body, _) = unreachable_tail::drop_unreachable_tails(body, &referenced);
+    // The check `-fstack-protector` inserted is not in the source, but every
+    // rewrite in the loop should see the body the compiler actually produced,
+    // so it goes here. It goes before the `else` unwrap, though: that pass
+    // reads "this arm ends in a call that never returns", and the handler
+    // call is one. Left in, it unwraps an `else` the source wrote as one.
+    let (body, _) = stack_protector::drop_stack_protector_guards(body);
     // After the dead tail is gone, and not before: an `else` is only
     // unwrappable once the `then` arm's real last statement is visible.
     let (body, _) = unreachable_tail::unwrap_else_after_diverging_then_with(body, proven_no_return);
-    // Last: the guard `-fstack-protector` inserted is not in the source, so
-    // every rewrite above should see the body the compiler actually produced,
-    // and only the finished layout should lose it.
-    let (body, _) = stack_protector::drop_stack_protector_guards(body);
     body
 }
 
