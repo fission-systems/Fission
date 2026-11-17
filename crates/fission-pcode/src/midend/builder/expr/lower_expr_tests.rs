@@ -3925,3 +3925,473 @@ fn bit_scan_loop_inside_one_instruction_is_a_loop() {
         "the loop must test the shifted input:\n{code}"
     );
 }
+
+/// `rbx = 0; if (!c) rbx = 7; <read rbx>` -- two writes reach the read and
+/// the first of them dominates it.
+fn one_arm_overwrite_then_read() -> (crate::pcode::PcodeFunction, Varnode) {
+    let rbx = register(0x18, 8);
+    let rax = register(0, 8);
+    let cond = varnode(0x80);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rbx.clone()), vec![constant(0)]),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(2, PcodeOpcode::Copy, Some(rbx.clone()), vec![constant(7)]),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rax.clone()), vec![rbx.clone()]),
+                op(5, PcodeOpcode::Return, None, vec![rax]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![2];
+    (pcode_function(blocks), rbx)
+}
+
+#[test]
+fn a_dominating_write_joined_by_another_is_not_the_value_read() {
+    let (pcode, rbx) = one_arm_overwrite_then_read();
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let read = LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    };
+    builder.current_lowering_site = Some(read);
+
+    assert_eq!(
+        builder.lookup_def_site(&rbx).map(|(site, _)| site),
+        None,
+        "the entry write is one of two reaching the join"
+    );
+    assert_eq!(
+        builder
+            .lookup_dominating_def_site(&rbx)
+            .map(|(site, _)| site),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 0
+        }),
+        "it is still the write a name or a seed is looked up by"
+    );
+    let lowered = builder
+        .lower_varnode(&rbx, &mut HashSet::default())
+        .expect("merged read lowers");
+    assert!(
+        !matches!(lowered, PreHirExpr::Const(..)),
+        "the read is not the constant one path assigns: {lowered:?}"
+    );
+}
+
+#[test]
+fn a_join_above_the_read_counts_as_much_as_one_at_it() {
+    // The same two writes, but the join only branches on and the read sits
+    // in the block below it -- which has one predecessor and no merge of its
+    // own.
+    let (mut pcode, rbx) = one_arm_overwrite_then_read();
+    let read_block = pcode.blocks.pop().expect("read block");
+    pcode.blocks.push(block_at(
+        0x1020,
+        2,
+        vec![op(6, PcodeOpcode::Branch, None, vec![constant(0x1030)])],
+    ));
+    pcode.blocks[2].successors = vec![3];
+    pcode.blocks.push(crate::pcode::PcodeBasicBlock {
+        index: 3,
+        start_address: 0x1030,
+        ..read_block
+    });
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+
+    assert_eq!(builder.lookup_def_site(&rbx).map(|(site, _)| site), None);
+}
+
+#[test]
+fn a_dominating_write_nothing_joins_is_still_the_value_read() {
+    let rbx = register(0x18, 8);
+    let rcx = register(0x8, 8);
+    let rax = register(0, 8);
+    let cond = varnode(0x80);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rbx.clone()), vec![constant(5)]),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x1020), cond]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                // Another register is written on the arm; `rbx` is not.
+                op(2, PcodeOpcode::Copy, Some(rcx), vec![constant(7)]),
+                op(3, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rax.clone()), vec![rbx.clone()]),
+                op(5, PcodeOpcode::Return, None, vec![rax]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![2];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    assert_eq!(
+        builder.lookup_def_site(&rbx).map(|(site, _)| site),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 0
+        })
+    );
+}
+
+/// `ebx = 0; while (c) { ebx = esi; if (!d) break; } <test bl>` -- the write
+/// before the loop dominates everything after it, and the loop's own write
+/// reaches there too. The loop does not update the register from itself, so
+/// nothing treats it as an accumulator and names it.
+fn scan_loop_then_branch_on_what_it_read() -> (crate::pcode::PcodeFunction, Varnode) {
+    let rbx = register(0x18, 8);
+    let ebx = register(0x18, 4);
+    let bl = register(0x18, 1);
+    let esi = register(0x30, 4);
+    let rax = register(0, 8);
+    let more = varnode(0x80);
+    let again = varnode(0x88);
+    let anded = Varnode {
+        size: 1,
+        ..varnode(0x90)
+    };
+    let zf = register(0x206, 1);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                // `mov ebx, 0` lifts as one write of the whole register.
+                op(0, PcodeOpcode::Copy, Some(rbx.clone()), vec![constant(0)]),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1030), more],
+            )],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(ebx.clone()), vec![esi]),
+                op(
+                    5,
+                    PcodeOpcode::IntZExt,
+                    Some(rbx.clone()),
+                    vec![ebx.clone()],
+                ),
+                op(6, PcodeOpcode::CBranch, None, vec![constant(0x1010), again]),
+            ],
+        ),
+        block_at(
+            0x1030,
+            3,
+            vec![
+                // `test bl, bl; je`
+                op(
+                    7,
+                    PcodeOpcode::IntAnd,
+                    Some(anded.clone()),
+                    vec![bl.clone(), bl.clone()],
+                ),
+                op(
+                    13,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![anded, constant_sized(0, 1)],
+                ),
+                op(8, PcodeOpcode::CBranch, None, vec![constant(0x1050), zf]),
+            ],
+        ),
+        block_at(
+            0x1040,
+            4,
+            vec![
+                op(9, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(111)]),
+                op(10, PcodeOpcode::Return, None, vec![rax.clone()]),
+            ],
+        ),
+        block_at(
+            0x1050,
+            5,
+            vec![
+                op(
+                    11,
+                    PcodeOpcode::Copy,
+                    Some(rax.clone()),
+                    vec![constant(222)],
+                ),
+                op(12, PcodeOpcode::Return, None, vec![rax]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2, 3];
+    blocks[2].successors = vec![1, 3];
+    blocks[3].successors = vec![4, 5];
+    (pcode_function(blocks), bl)
+}
+
+#[test]
+fn a_write_before_a_loop_is_not_the_value_read_after_it() {
+    let (pcode, bl) = scan_loop_then_branch_on_what_it_read();
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+
+    assert_eq!(
+        builder.lookup_def_site(&bl).map(|(site, _)| site),
+        None,
+        "the loop's own write reaches the exit as well"
+    );
+    assert_eq!(
+        builder
+            .lookup_dominating_def_site(&bl)
+            .map(|(site, _)| site.block_idx),
+        Some(0),
+        "the loop is still seeded by the write before it"
+    );
+}
+
+#[test]
+fn a_branch_on_what_a_loop_read_keeps_both_of_its_arms() {
+    let (pcode, _) = scan_loop_then_branch_on_what_it_read();
+    let options = test_options();
+
+    let code = crate::midend::render_mechanical_preview(&pcode, "scan_then_test", 0x1000, &options)
+        .expect("render");
+
+    // Read as the `0` written before the loop, the test is always true and
+    // the arm returning 111 is deleted as unreachable.
+    assert!(
+        code.contains("111") && code.contains("222"),
+        "both outcomes of the test after the loop are reachable:\n{code}"
+    );
+}
+
+/// `cursor = p; limit = p + n; while (c) { cursor = limit; if (!d) break; }
+/// if (cursor < limit) ...` -- `limit` is written once and read after the
+/// loop, where one of the two edges coming in has just copied it into
+/// `cursor`, a register the function was entered with.
+#[test]
+fn a_copy_on_one_edge_does_not_rename_a_register_one_write_reaches() {
+    let rdi = register(0x38, 8);
+    let rsi = register(0x30, 8);
+    let r15 = register(0xb8, 8);
+    let rbp = register(0x28, 8);
+    let rax = register(0, 8);
+    let more = varnode(0x80);
+    let again = varnode(0x88);
+    let below = Varnode {
+        size: 1,
+        ..varnode(0x90)
+    };
+    let copy_in_loop = op(4, PcodeOpcode::Copy, Some(r15.clone()), vec![rbp.clone()]);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(r15.clone()), vec![rdi.clone()]),
+                op(1, PcodeOpcode::IntAdd, Some(rbp.clone()), vec![rdi, rsi]),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1010)]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![op(
+                3,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1030), more],
+            )],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                copy_in_loop.clone(),
+                op(5, PcodeOpcode::CBranch, None, vec![constant(0x1010), again]),
+            ],
+        ),
+        block_at(
+            0x1030,
+            3,
+            vec![
+                op(
+                    6,
+                    PcodeOpcode::IntLess,
+                    Some(below.clone()),
+                    vec![r15.clone(), rbp.clone()],
+                ),
+                op(7, PcodeOpcode::CBranch, None, vec![constant(0x1050), below]),
+            ],
+        ),
+        block_at(
+            0x1040,
+            4,
+            vec![
+                op(8, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(111)]),
+                op(9, PcodeOpcode::Return, None, vec![rax.clone()]),
+            ],
+        ),
+        block_at(
+            0x1050,
+            5,
+            vec![
+                op(
+                    10,
+                    PcodeOpcode::Copy,
+                    Some(rax.clone()),
+                    vec![constant(222)],
+                ),
+                op(11, PcodeOpcode::Return, None, vec![rax]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1];
+    blocks[1].successors = vec![2, 3];
+    blocks[2].successors = vec![1, 3];
+    blocks[3].successors = vec![4, 5];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    // What the heuristic looks for: the copy's destination is a register the
+    // function was entered with, and it already has a name.
+    builder.register_param_aliases.insert(r15.offset, 0);
+    builder.materialized_vns.insert(
+        MaterializedVarnodeKey::new(&r15, &copy_in_loop),
+        "cursor".to_string(),
+    );
+    builder.temps.insert(
+        "cursor".to_string(),
+        PreHirBinding {
+            name: "cursor".to_string(),
+            ty: type_from_size(8, false),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        },
+    );
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+
+    let lowered = builder
+        .lower_varnode(&rbp, &mut HashSet::default())
+        .expect("limit lowers");
+
+    assert_ne!(
+        lowered,
+        PreHirExpr::Var("cursor".to_string()),
+        "`limit` is `cursor` on the edge that copied it and not on the other"
+    );
+}
+
+/// Blocks the entry cannot reach have no dominators and no SSA values. A
+/// loop among them used to send the walk up the dominator chain round it
+/// for ever; what is asked there is answered as it always was.
+#[test]
+fn a_read_the_entry_cannot_reach_keeps_the_write_found_for_it() {
+    let rbx = register(0x18, 8);
+    let rax = register(0, 8);
+    let again = varnode(0x80);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![op(0, PcodeOpcode::Return, None, vec![rax.clone()])],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(1, PcodeOpcode::Copy, Some(rbx.clone()), vec![constant(5)]),
+                op(2, PcodeOpcode::Branch, None, vec![constant(0x1020)]),
+            ],
+        ),
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(3, PcodeOpcode::Copy, Some(rax), vec![rbx.clone()]),
+                op(4, PcodeOpcode::CBranch, None, vec![constant(0x1010), again]),
+            ],
+        ),
+        block_at(
+            0x1030,
+            3,
+            vec![op(5, PcodeOpcode::Branch, None, vec![constant(0x1010)])],
+        ),
+    ];
+    blocks[1].successors = vec![2];
+    blocks[2].successors = vec![1, 3];
+    blocks[3].successors = vec![1];
+    let pcode = pcode_function(blocks);
+    let options = test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 2,
+        op_idx: 0,
+    });
+
+    assert_eq!(
+        builder.lookup_def_site(&rbx).map(|(site, _)| site),
+        Some(LoweringSite {
+            block_idx: 1,
+            op_idx: 0
+        })
+    );
+}

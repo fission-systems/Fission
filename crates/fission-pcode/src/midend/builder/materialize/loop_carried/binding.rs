@@ -13,7 +13,7 @@ impl<'a> PreviewBuilder<'a> {
             self.current_lowering_site
                 .map(|site| (site.block_idx, site.op_idx))
         );
-        let (site, op) = self.lookup_def_site(output)?;
+        let (site, op) = self.lookup_dominating_def_site(output)?;
         if Some(site) == self.current_lowering_site {
             return None;
         }
@@ -120,7 +120,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> Option<String> {
-        let (site, op) = self.lookup_def_site(output)?;
+        let (site, op) = self.lookup_dominating_def_site(output)?;
         if site.block_idx != block_idx || site.op_idx >= op_idx {
             return None;
         }

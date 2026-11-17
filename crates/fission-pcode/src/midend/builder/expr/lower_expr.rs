@@ -68,6 +68,15 @@ fn expr_exceeds_node_cap(e: &PreHirExpr, cap: usize) -> bool {
     walk(e, &mut left)
 }
 
+/// What a caller is going to do with a definition it looks up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DefinitionRole {
+    /// Read its operation as the value at the use.
+    Value,
+    /// Find the name its storage is emitted under, or a loop's seed.
+    Name,
+}
+
 impl<'a> PreviewBuilder<'a> {
     pub(in crate::midend::builder) fn stack_pointer_register_name(
         &self,
@@ -299,6 +308,31 @@ impl<'a> PreviewBuilder<'a> {
         vn: &Varnode,
         scope: Option<LoweringSite>,
     ) -> Option<(LoweringSite, &'a PcodeOp)> {
+        self.lookup_def_site_for(vn, scope, DefinitionRole::Value)
+    }
+
+    /// The nearest write of `vn` that dominates the current site, whether or
+    /// not other writes reach it too.
+    ///
+    /// Two questions are answered by that and not by [`Self::lookup_def_site`]:
+    /// what a read is *called* -- every write reaching a merge is emitted
+    /// under one name, so any of them finds it -- and what a loop is *seeded*
+    /// with, where the write before the loop is one of two reaching its head
+    /// by definition. Its expression is the value on one path only, and must
+    /// not be read as the value at the site.
+    pub(in crate::midend::builder) fn lookup_dominating_def_site(
+        &self,
+        vn: &Varnode,
+    ) -> Option<(LoweringSite, &'a PcodeOp)> {
+        self.lookup_def_site_for(vn, self.current_lowering_site, DefinitionRole::Name)
+    }
+
+    fn lookup_def_site_for(
+        &self,
+        vn: &Varnode,
+        scope: Option<LoweringSite>,
+        role: DefinitionRole,
+    ) -> Option<(LoweringSite, &'a PcodeOp)> {
         let key = VarnodeKey::from(vn);
         let cache_key = (scope, key.clone());
         if let Some(scope) = scope
@@ -309,11 +343,16 @@ impl<'a> PreviewBuilder<'a> {
             let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
             return Some((site, op));
         }
+        let admit = |resolved: Option<(LoweringSite, bool)>| {
+            resolved
+                .filter(|(_, sole)| *sole || role == DefinitionRole::Name)
+                .map(|(site, _)| {
+                    let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
+                    (site, op)
+                })
+        };
         if let Some(cached_site) = self.lookup_site_cache.borrow().get(&cache_key).copied() {
-            return cached_site.map(|site| {
-                let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
-                (site, op)
-            });
+            return admit(cached_site);
         }
 
         let candidate_keys = self.lookup_candidate_def_keys(&key);
@@ -407,14 +446,18 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
+        // The scan above walks up the dominator tree, so what it finds
+        // reaches the use on every path -- which is not the same as being the
+        // only write that does.
+        let resolved = resolved_site.map(|site| {
+            let sole =
+                scope.is_none_or(|use_site| self.definition_is_sole_reaching(vn, site, use_site));
+            (site, sole)
+        });
         self.lookup_site_cache
             .borrow_mut()
-            .insert(cache_key, resolved_site);
-
-        resolved_site.map(|site| {
-            let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
-            (site, op)
-        })
+            .insert(cache_key, resolved);
+        admit(resolved)
     }
 
     /// `key` and every defined key that aliases it.
@@ -517,6 +560,79 @@ impl<'a> PreviewBuilder<'a> {
             self.active_trace_id = None;
         }
         result
+    }
+
+    /// The variable a definition's value was emitted under, if it was.
+    ///
+    /// Only names: nothing here rebuilds the definition's expression, so the
+    /// result is right for any read the definition's storage name is right
+    /// for, merged or not.
+    fn name_emitted_for_definition(
+        &self,
+        vn: &Varnode,
+        site: LoweringSite,
+        op: &PcodeOp,
+    ) -> Option<PreHirExpr> {
+        if op.output.is_none()
+            && matches!(
+                op.opcode,
+                PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
+            )
+            && self.register_namer().is_primary_return_register(vn)
+            && let Some(name) = self.call_result_bindings.get(&site)
+        {
+            return Some(PreHirExpr::Var(name.clone()));
+        }
+        let materialized_key = MaterializedVarnodeKey::new(vn, op);
+        if let Some(name) = self.materialized_vns.get(&materialized_key) {
+            return Some(PreHirExpr::Var(name.clone()));
+        }
+        // Look-through passthrough: when the best def op is a widening passthrough
+        // (ZExt/SExt/Copy/Cast) that reads exactly `vn` (same space/offset/size), the
+        // passthrough was only picked over the real narrow-register def because it has a
+        // higher op_idx in the same block (x86-64 implicit zero-extension pattern).
+        // Scan backwards to find the actual narrow-register definition and return its
+        // materialized name, avoiding projection through the wider temp (e.g. "xVar27")
+        // instead of the accumulated register name (e.g. "rax").
+        if matches!(
+            op.opcode,
+            PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Copy | PcodeOpcode::Cast
+        ) && op.inputs.first().is_some_and(|input| {
+            !input.is_constant
+                && input.space_id == vn.space_id
+                && input.offset == vn.offset
+                && input.size == vn.size
+        }) {
+            {
+                if let Some(block) = self.pcode.blocks.get(site.block_idx) {
+                    for prior_idx in (0..site.op_idx).rev() {
+                        let prior_op = &block.ops[prior_idx];
+                        if let Some(prior_output) = prior_op.output.as_ref() {
+                            if prior_output.space_id == vn.space_id
+                                && prior_output.offset == vn.offset
+                                && prior_output.size == vn.size
+                            {
+                                let narrow_key =
+                                    MaterializedVarnodeKey::new(prior_output, prior_op);
+                                if let Some(name) = self.materialized_vns.get(&narrow_key) {
+                                    return Some(PreHirExpr::Var(name.clone()));
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(output) = op.output.as_ref()
+            && self.varnode_aliases_value(output, vn)
+        {
+            let output_materialized_key = MaterializedVarnodeKey::new(output, op);
+            if let Some(name) = self.materialized_vns.get(&output_materialized_key) {
+                return Some(self.project_alias_def_expr(vn, op, PreHirExpr::Var(name.clone())));
+            }
+        }
+        None
     }
 
     fn lower_varnode_inner(
@@ -681,13 +797,19 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         let def_site = self.lookup_def_site(vn);
+        // A write that dominates this read without being the only one to
+        // reach it: `x = 0; if (c) x = 1; use(x)`. Its name is this read's
+        // name, because every write reaching a merge is emitted under one.
+        // Its expression is the value on one path only.
+        let naming_def_site = def_site.or_else(|| self.lookup_dominating_def_site(vn));
+        let merged_read = def_site.is_none() && naming_def_site.is_some();
         // The definition reaching this use was settled as explicit before any
         // lowering began, so it ships as its own statement and this use is a
         // reference to it. Returning here is the point of the whole exercise:
         // rebuilding the definition is what duplicates a value once per path,
         // which is what Ghidra's explicit marking prevents and what Fission's
         // work budgets exist to survive without it.
-        if let Some((site, def_op)) = def_site.map(|(site, def)| (site, def.clone()))
+        if let Some((site, def_op)) = naming_def_site.map(|(site, def)| (site, def.clone()))
             && let Some(output) = def_op.output.clone()
             && self.def_site_is_explicit(site.block_idx, site.op_idx)
         {
@@ -719,7 +841,14 @@ impl<'a> PreviewBuilder<'a> {
             let name = self.ensure_live_register_binding(&name, vn.size);
             return Ok(PreHirExpr::Var(name));
         }
-        if let Some(expr) = self.loop_exit_materialized_register_binding(vn) {
+        // This rebuilds a merge at a loop's exit from the shape of the
+        // blocks leading into it -- an entry seed on one edge, a carried
+        // update or a copy into an alias on the other. A read that exactly
+        // one write reaches has no merge to rebuild, and taking one edge's
+        // copy for its value is wrong on the other edge.
+        if def_site.is_none()
+            && let Some(expr) = self.loop_exit_materialized_register_binding(vn)
+        {
             return Ok(expr);
         }
         if let Some(expr) = self.try_lower_zero_extended_partial_register(vn, visiting)? {
@@ -734,10 +863,20 @@ impl<'a> PreviewBuilder<'a> {
         // on resolves to `Operation(SsaOpSite { .. })` in the same block --
         // SSA has an answer and this rebuilds it anyway, once per use, which
         // is where the ternaries come from.
-        if !(def_site.is_some() && !std::env::var("FISSION_DIAMOND_ALWAYS").is_ok())
+        if !(naming_def_site.is_some() && !std::env::var("FISSION_DIAMOND_ALWAYS").is_ok())
             && let Some(expr) = self.try_lower_diamond_select_for_varnode(vn, visiting)?
         {
             return Ok(expr);
+        }
+        if merged_read && let Some((site, op)) = naming_def_site {
+            if let Some(name) = self.stack_pointer_register_name(vn)
+                && matches!(name.as_str(), "rsp" | "esp" | "sp")
+            {
+                return Ok(PreHirExpr::Var(name));
+            }
+            if let Some(expr) = self.name_emitted_for_definition(vn, site, op) {
+                return Ok(expr);
+            }
         }
         if def_site.is_none() {
             if is_register_space_id(vn.space_id)
@@ -768,7 +907,10 @@ impl<'a> PreviewBuilder<'a> {
                 self.ensure_live_register_binding(&name, vn.size);
                 return Ok(PreHirExpr::Var(name));
             }
-            if let Some(param) = self.register_param(vn) {
+            // An entry alias (`mov ebx, edi`) names the register by the
+            // parameter it was copied from, which is true until the first
+            // other write. A merged read is past one.
+            if !merged_read && let Some(param) = self.register_param(vn) {
                 return Ok(PreHirExpr::Var(param));
             }
             if is_unique_space_id(vn.space_id)
@@ -823,67 +965,10 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(PreHirExpr::Var(name));
         }
-        if let Some((_, op)) = def_site {
-            if op.output.is_none()
-                && matches!(
-                    op.opcode,
-                    PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-                )
-                && self.register_namer().is_primary_return_register(vn)
-                && let Some((site, _)) = def_site
-                && let Some(name) = self.call_result_bindings.get(&site)
-            {
-                return Ok(PreHirExpr::Var(name.clone()));
-            }
-            let materialized_key = MaterializedVarnodeKey::new(vn, op);
-            if let Some(name) = self.materialized_vns.get(&materialized_key) {
-                return Ok(PreHirExpr::Var(name.clone()));
-            }
-            // Look-through passthrough: when the best def op is a widening passthrough
-            // (ZExt/SExt/Copy/Cast) that reads exactly `vn` (same space/offset/size), the
-            // passthrough was only picked over the real narrow-register def because it has a
-            // higher op_idx in the same block (x86-64 implicit zero-extension pattern).
-            // Scan backwards to find the actual narrow-register definition and return its
-            // materialized name, avoiding projection through the wider temp (e.g. "xVar27")
-            // instead of the accumulated register name (e.g. "rax").
-            if matches!(
-                op.opcode,
-                PcodeOpcode::IntZExt | PcodeOpcode::IntSExt | PcodeOpcode::Copy | PcodeOpcode::Cast
-            ) && op.inputs.first().is_some_and(|input| {
-                !input.is_constant
-                    && input.space_id == vn.space_id
-                    && input.offset == vn.offset
-                    && input.size == vn.size
-            }) {
-                if let Some((site, _)) = def_site {
-                    if let Some(block) = self.pcode.blocks.get(site.block_idx) {
-                        for prior_idx in (0..site.op_idx).rev() {
-                            let prior_op = &block.ops[prior_idx];
-                            if let Some(prior_output) = prior_op.output.as_ref() {
-                                if prior_output.space_id == vn.space_id
-                                    && prior_output.offset == vn.offset
-                                    && prior_output.size == vn.size
-                                {
-                                    let narrow_key =
-                                        MaterializedVarnodeKey::new(prior_output, prior_op);
-                                    if let Some(name) = self.materialized_vns.get(&narrow_key) {
-                                        return Ok(PreHirExpr::Var(name.clone()));
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if let Some(output) = op.output.as_ref()
-                && self.varnode_aliases_value(output, vn)
-            {
-                let output_materialized_key = MaterializedVarnodeKey::new(output, op);
-                if let Some(name) = self.materialized_vns.get(&output_materialized_key) {
-                    return Ok(self.project_alias_def_expr(vn, op, PreHirExpr::Var(name.clone())));
-                }
-            }
+        if let Some((site, op)) = def_site
+            && let Some(expr) = self.name_emitted_for_definition(vn, site, op)
+        {
+            return Ok(expr);
         }
         const VARNODE_REDIRECT_DEPTH_CAP: u32 = 64;
         self.varnode_lowering_work += 1;

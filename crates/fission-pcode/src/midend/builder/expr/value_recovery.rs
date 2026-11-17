@@ -37,6 +37,70 @@ impl<'a> PreviewBuilder<'a> {
             .then_some(value.id)
     }
 
+    /// Whether `definition` is the only write of `vn`'s storage that reaches
+    /// `use_site`.
+    ///
+    /// A definition found by walking up the dominator tree reaches the use on
+    /// every path, but so may others: `x = 0; if (c) x = 1; use(x)` has two,
+    /// and the first one dominates. Scalar SSA already knows where storage
+    /// values merge -- it placed a phi there -- so the definition stands
+    /// alone exactly when no phi for an overlapping piece sits on the
+    /// dominator chain from the use back to it. Phi placement here is not
+    /// pruned by liveness, so this holds at any program point, not only at an
+    /// operation that reads `vn`.
+    ///
+    /// Naming a storage by its shared variable needs none of this. Replacing
+    /// the read with the definition's *expression* does.
+    pub(in crate::midend::builder) fn definition_is_sole_reaching(
+        &self,
+        vn: &Varnode,
+        definition: LoweringSite,
+        use_site: LoweringSite,
+    ) -> bool {
+        let definition_block = self.pcode_block_idx(definition.block_idx);
+        let use_block = self.pcode_block_idx(use_site.block_idx);
+        if definition_block == use_block {
+            return true;
+        }
+        let vn_end = vn.offset.saturating_add(u64::from(vn.size));
+        let merges_here = |block: usize| {
+            let Some(phis) = u32::try_from(block)
+                .ok()
+                .and_then(|block| self.scalar_ssa.phis.get(&block))
+            else {
+                return false;
+            };
+            // Sorted by storage, and the pieces of one space are disjoint.
+            let first = phis.partition_point(|phi| {
+                phi.storage.space_id < vn.space_id
+                    || (phi.storage.space_id == vn.space_id
+                        && phi
+                            .storage
+                            .offset
+                            .saturating_add(u64::from(phi.storage.size))
+                            <= vn.offset)
+            });
+            phis.get(first).is_some_and(|phi| {
+                phi.storage.space_id == vn.space_id && phi.storage.offset < vn_end
+            })
+        };
+        let mut block = use_block;
+        loop {
+            if merges_here(block) {
+                return false;
+            }
+            match self.heritage_idom.get(block).copied().flatten() {
+                Some(parent) if parent == definition_block => return true,
+                Some(parent) => block = parent,
+                // The entry block: the definition does not dominate the use
+                // in the lifted program. Any other block without a dominator
+                // is one the entry cannot reach, where SSA holds no values
+                // and there is nothing to be wrong about.
+                None => return block != 0,
+            }
+        }
+    }
+
     /// SSA operation identity is stronger than "the nearest dominating
     /// storage write". Instruction-local conditional writes are not scalar
     /// CFG nodes, so they deliberately keep the guarded lowering path.

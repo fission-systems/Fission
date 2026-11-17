@@ -299,7 +299,7 @@ impl<'a> PreviewBuilder<'a> {
             // Reusing `register_param` in that case drops the seed and makes
             // the loop recompute from the immutable argument on every
             // iteration.
-            && self.lookup_def_site(vn).is_none()
+            && self.lookup_dominating_def_site(vn).is_none()
             // An entry alias (for example RAX seeded from the first argument's
             // RCX slot) already has a materialized carrier binding. Reusing
             // `register_param` here would replace that carrier with the
@@ -486,7 +486,7 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn loop_carried_output_has_prior_definition(&self, output: &Varnode) -> bool {
-        let Some((_, op)) = self.lookup_def_site(output) else {
+        let Some((_, op)) = self.lookup_dominating_def_site(output) else {
             return false;
         };
         let Some(prior_output) = op.output.as_ref() else {
@@ -571,7 +571,7 @@ impl<'a> PreviewBuilder<'a> {
         // find a stack-parameter load that feeds this register at function entry.
         let mut current = output.clone();
         for _ in 0..6 {
-            let Some((site, op)) = self.lookup_def_site(&current) else {
+            let Some((site, op)) = self.lookup_dominating_def_site(&current) else {
                 return None;
             };
             if let Some(name) = self.stack_param_name_from_register_defining_op(op, &current) {
@@ -616,7 +616,7 @@ impl<'a> PreviewBuilder<'a> {
             PcodeOpcode::Load => self.stack_param_name_from_load_op(op),
             PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
                 let input = op.inputs.first()?;
-                let (_, src_op) = self.lookup_def_site(input)?;
+                let (_, src_op) = self.lookup_dominating_def_site(input)?;
                 if src_op.opcode == PcodeOpcode::Load {
                     self.stack_param_name_from_load_op(src_op)
                 } else {

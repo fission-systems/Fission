@@ -440,9 +440,27 @@ pub(super) fn build_scalar_ssa_with_context(
     options: &MlilPreviewOptions,
     type_context: Option<&PreviewTypeContext>,
 ) -> NirScalarSsa {
+    build_scalar_ssa_with_dominators(pcode, successors, predecessors, options, type_context).0
+}
+
+/// Scalar SSA together with the immediate dominators its phis were placed
+/// on: `None` for the entry block and for a block the entry cannot reach.
+///
+/// A reader asking "does a phi sit between this write and that read" has to
+/// walk the same tree the phis came from. The structuring dominator tree is
+/// not it -- it follows a CFG with irreducible edges removed, and its
+/// immediate-dominator form gives every block a parent, including the ones
+/// nothing reaches, where the parents form cycles.
+pub(super) fn build_scalar_ssa_with_dominators(
+    pcode: &PcodeFunction,
+    successors: &[Vec<usize>],
+    predecessors: &[Vec<usize>],
+    options: &MlilPreviewOptions,
+    type_context: Option<&PreviewTypeContext>,
+) -> (NirScalarSsa, Vec<Option<usize>>) {
     let dominance = Dominance::analyze(successors, predecessors);
     if pcode.blocks.is_empty() || dominance.reachable.is_empty() {
-        return NirScalarSsa::default();
+        return (NirScalarSsa::default(), dominance.idom);
     }
 
     let layout = StorageLayout::build(pcode, &dominance.reachable);
@@ -582,7 +600,7 @@ pub(super) fn build_scalar_ssa_with_context(
     ssa.value_memory_high_variables = value_memory_high_variables;
     ssa.memory_value_covers = memory_value_covers;
 
-    ssa
+    (ssa, dominance.idom)
 }
 
 #[allow(clippy::too_many_arguments)]

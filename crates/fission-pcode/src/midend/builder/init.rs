@@ -164,7 +164,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut predecessors = build_predecessor_index_map(&successors);
         let heritage_successors = successors.clone();
         let heritage_predecessors = predecessors.clone();
-        let scalar_ssa = super::scalar_ssa::build_scalar_ssa_with_context(
+        let (scalar_ssa, heritage_idom) = super::scalar_ssa::build_scalar_ssa_with_dominators(
             pcode,
             &heritage_successors,
             &heritage_predecessors,
@@ -254,6 +254,7 @@ impl<'a> PreviewBuilder<'a> {
             layout_fallthrough,
             heritage_successors,
             heritage_predecessors,
+            heritage_idom,
             scalar_ssa,
             ssa_emission: super::ssa_emission::SsaEmissionPlan::default(),
             successors,
