@@ -1,6 +1,6 @@
 # Proposal: a recovered statement owns only the blocks it prints
 
-Status: implemented; `-O0` measured, `-O2` pending. Filled from
+Status: implemented; `-O0` and `-O2` measured. Filled from
 [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../templates/DECOMPILER_CHANGE_PROPOSAL.md).
 
 ## 1. Baseline Row Anchor
@@ -101,9 +101,17 @@ to that position: they are printed inside it or not at all.
    the statement runs before the statement writes the name. An assignment
    does; a block, branch or loop that writes the name may not, and the
    promotion is rejected.
+6. A jump-table switch replaces the indirect branch *and* what computed its
+   target. Of the statements rule 1 puts in front of it, the trailing run
+   that only finds the target is not printed: an assignment to a name, whose
+   right side calls nothing (a flag helper over call-free operands counts as
+   computing), which the selector does not read, and which no path from the
+   block reads before assigning it again. The run ends at the first statement
+   that fails any of these; everything before it is kept. Applied only to a
+   block that stores nothing and calls nothing.
 ```
 
-All five read the CFG (dominance, block order), the block's p-code, or the
+All six read the CFG (dominance, block order), the block's p-code, or the
 statement tree. No ISA,
 calling convention, compiler or function identity is consulted.
 
@@ -126,6 +134,16 @@ and answers "read". It can refuse a switch that would have been fine -- when
 the real lowering resolves the read to the value instead of the name -- and
 the chain then prints as `if`s, which is correct.
 
+Rule 6 exists because rule 1 alone was measured to print too much. A block
+that ends in `jmp [table + index*8]` lowers to the bounds test's leftovers,
+the scaled index, the table load and the flag helpers of the compare; the
+`switch (selector)` already says all of it. One `-O2` function (`fx2txt`,
+four programs) printed 13 such statements in front of its switch, and the
+table load through its first parameter made the type pass call that
+parameter a pointer (type perfect 624 -> 620 over the config). The reader
+search is the one rule 1 uses, with the same budget and the same failure
+mode: when it cannot tell, the statement is kept.
+
 Rule 5 rejects more than it has to: a statement whose reads all sit *behind*
 its own write needs no merge at all. Telling the two apart needs a
 path-sensitive walk of the statement; rejecting is sound and its cost is
@@ -141,6 +159,10 @@ measured below.
   output), so rule 4 can be asked without lowering the block.
 - Rule 1 reuses `head_has_only_discardable_pure_ops`, the for-loop path's
   test for "no store, no call".
+- `StructuringHost` gains `block_only_computes` (no `Store`, `Call`,
+  `CallInd` or `CallOther` in the block) for rule 6, which reuses the
+  guarded-tail module's `guarded_tail_call_target_is_known_pure_helper` and
+  `suffix_expr_contains_call` for "calls nothing".
 - Interaction: a switch that used to be recovered and is now refused lowers
   through the `if` rules. A guarded-tail promotion that is now refused leaves
   the `goto` it would have removed.
@@ -170,6 +192,11 @@ measured below.
   | `if`: rule off | `a_one_armed_if_resumes_at_the_join_ahead_of_it` |
   | guarded tail: compound statement rewritten | `a_read_behind_the_tail_s_own_definition_keeps_its_name` |
   | guarded tail: an assignment no longer reads first | `a_read_in_front_of_the_tail_s_definition_takes_the_merged_value` |
+  | jump table: nothing dropped from the head | `what_only_finds_the_jump_target_is_not_kept` |
+  | jump table: reads behind the block ignored | `a_name_read_after_the_block_is_kept_with_all_before_it`, `a_jump_table_switch_keeps_a_value_its_block_sets_for_later` |
+  | jump table: the selector's reads ignored | `what_the_selector_reads_is_kept` |
+  | jump table: every right side counts as computing | `a_call_is_kept_and_so_is_what_feeds_it`, `a_flag_helper_on_the_result_of_a_call_is_kept` |
+  | jump table: a flag helper's operands not looked at | `a_flag_helper_on_the_result_of_a_call_is_kept` |
 
   The reader search itself is a pure function over blocks with eleven unit
   tests (a read on one of two paths, a write that ends the search, a write
@@ -182,7 +209,15 @@ measured below.
   rule is a pure function with five unit tests); and the "no store, no call"
   precondition of rule 1 (removing it fails nothing: a call is already
   refused because it is not an assignment, and no test builds a store to a
-  stack slot in a compare block).
+  stack slot in a compare block); and rule 6's "stores nothing, calls
+  nothing" gate on the block (removing it fails nothing: the statement-level
+  test already refuses a call, and a store is not an assignment to a name).
+
+  Rule 6 is tested on the pure function that picks the run
+  (`statements_ahead_of_the_target_computation`) and by one end-to-end
+  function. An end-to-end test that the target computation is *not* printed
+  was written and thrown away: it passed with the rule switched off, because
+  in a hand-built block the table load is already dead before structuring.
 
   `a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch` checks that
   the chain is refused, not that accepting it would print a wrong value: in
@@ -191,7 +226,7 @@ measured below.
   a later compare block's write changed a printed value.
 
 - [x] Crate-level gate: `cargo nextest run -p fission-midend-structuring -p fission-pcode -p fission-midend-normalize`,
-  debug (2,171) and `--release` (2,170);
+  debug (2,178) and `--release` (2,177);
   `cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity`;
   `cargo fmt --all --check`; `scripts/check/owner_boundaries.sh`.
 
@@ -209,20 +244,35 @@ measured below.
   Switches printed on the same sample: baseline 215 (`-O0`) / 173 (`-O2`),
   this change 239 / 166.
 
-- [x] Full-config measurement, `-O0` (`unoptimized`, 33,899 functions, 31,987
-  scored for structure), against the baseline build, caches off:
+  The probe was run on rules 1-5. Rule 6 removes only assignments that call
+  nothing, and the full configs below were checked for lost callees with
+  rule 6 in.
+
+- [x] Full-config measurement, `-O0` (`unoptimized`, 33,899 functions),
+  against the baseline build, caches off. Four large functions (`yyparse`,
+  `inflate`, `poly1305_auth` x2) produced no output in this run and are left
+  out of both columns; run alone, each prints in 7-16 s and the same text as
+  before rule 6, so they ran out of time under the sweep's load. With them
+  (measured before rule 6) the distance row reads 392,625 -> 392,115 and
+  every other row is the same.
 
   | | baseline | this change |
   |---|---|---|
-  | structure distance, total | 392,625 | 392,115 |
+  | functions scored for structure in both | 31,983 | 31,983 |
+  | structure distance, total | 392,261 | 391,751 |
   | structure perfect | 12,994 | 13,068 |
   | type perfect | 3,383 | 3,381 |
+  | type distance over the 49 functions whose type score changed | 137 | 109 |
   | byte perfect | 780 | 792 |
   | Union | 15,146 | 15,158 |
-  | functions whose text changed | | 572 |
+  | functions whose text changed | | 570 |
   | score better / worse | | 194 (-1,604) / 117 (+1,094) |
   | new perfect / lost perfect | | 88 / 14 |
   | changed functions that lost a callee name | | 0 (5 lose the `__sborrow` intrinsic, the corrected flag merge of section 1) |
+
+  Rule 6 changes two `-O0` functions (`simple_strtod_fatal`,
+  `selinux_set_callback`: a parameter prints as `uint`, not `int`, and the
+  bounds test in front of the switch loses its cast). No score moves.
 
   Read, not only scored:
 
@@ -245,9 +295,44 @@ measured below.
     chose. The baseline's output for it is wrong too, differently; see "Not
     fixed".
 
-- [ ] Full-config measurement, `-O2` (`inlined`): not run for this version.
-  The first version of rule 1 was swept at `-O2`: distance 616,056 ->
-  616,024, perfect 7,409 -> 7,405, Union 7,858 -> 7,850.
+  - The two type perfects lost net are `is_colored` (4 programs lost, 2
+    other functions gained). The baseline switched on a variable nothing set
+    and printed no load at all; the head now prints, and its load address is
+    wrong (`rax = 176256; rax = *(unsigned long long *)(352512);` for
+    `color_indicator[type].len`). See "Not fixed".
+
+- [x] Full-config measurement, `-O2` (`inlined`, 26,012 functions, 24,186
+  scored for structure), against the baseline build, caches off:
+
+  | | baseline | rules 1-5 | rules 1-6 (this change) |
+  |---|---|---|---|
+  | structure distance, total | 616,056 | 616,032 | 616,032 |
+  | structure perfect | 7,409 | 7,409 | 7,409 |
+  | type perfect | 624 | 620 | 624 |
+  | byte perfect | 500 | 500 | 500 |
+  | Union | 7,858 | 7,854 | 7,858 |
+  | functions whose text changed | | 195 | 190 |
+  | score better / worse | | 39 (-243) / 28 (+219) | 39 (-243) / 28 (+219) |
+  | new perfect / lost perfect | | 0 / 0 | 0 / 0 |
+  | changed functions that lost a callee name | | 0 | 0 |
+
+  At `-O2` this is not a measured improvement: the distance moves by 24 in
+  616,056 and nothing else moves. The type score changes in 3 functions, all
+  up (distance 23 -> 19).
+
+  Read, not only scored:
+
+  - `fallible_read_node` (u-boot, +20): the baseline lost the function's
+    first call and switched on a register nothing set; the call and the test
+    of its result are now printed.
+  - `gnutls-cli-debug::main` (+25): the baseline printed a second copy of a
+    block behind `return 0;`, where nothing reaches it. It is gone.
+  - `groups::main`, `no_options`: an `if` chain becomes a `switch` with the
+    same meaning.
+  - `fx2txt` (4 programs), `pred_newerXY`: baseline text again (rule 6).
+  - `sshkey_size` (9 openssh programs, distance 18 -> 18) is **worse**: it is
+    now a `switch`, and one arm tests `rdi`, which nothing assigns; the
+    baseline read `param_1->field_8` there. See "Not fixed".
 
 ## 6. AI Review / Prompt Firewall
 
@@ -271,6 +356,28 @@ measured below.
   one of three values and prints one; `should_dereference` prints a ternary
   on the last condition tested. The lowered `Return` resolves the return
   register to one reaching value. Builder (register join), not structuring.
+- **A block's statements lowered after its terminator name a register
+  differently.** The builder caches a block's terminator and its statements
+  separately. When the terminator is lowered first, a register it reads is
+  named after the incoming value, and the statements lowered afterwards
+  assign another name; the output then reads a register nothing assigns.
+  On the sample (15,296 functions) 1,115 functions read a never-assigned
+  register-named local on the baseline and 1,110 with this change: 7 gone
+  and 2 new, both from switches that are now recovered (`sshkey_size` at
+  `-O2`, `if (rdi)`; one `-O0` function of `sshd`, `if (rdx)`, where the
+  baseline was a correct `if` chain). Two fixes were measured and neither
+  shipped: lowering the statements first inside `lower_block_terminator`
+  changes 7,503 of the sample's functions (1,110 -> 1,039, 105 switches
+  lost, 19 gained), far outside this change; lowering each arm's first block
+  before the switch changes 464, fixes the `-O2` function and breaks the
+  `-O0` one differently. Builder, own change.
+- **A copy read after its source is overwritten.** `mov rdx, rax; lea rax,
+  [table]; mov rax, [rdx + rax]` prints as `rax = 176256; rax = *(352512)`:
+  the copy is resolved by name to the register's later value. The baseline
+  has it in 4 `-O0` functions (among them `compat_banner`'s loop head); the switch
+  heads rule 1 now prints add `is_colored` (4 programs), where the baseline
+  printed no head. Whether this is the defect above or a second one was not
+  established. Builder.
 - **Rule 5 is wider than it has to be** (section 3).
 - On the sample, 333 functions miss a reachable call site on the baseline
   and with this change alike. Not looked at.
