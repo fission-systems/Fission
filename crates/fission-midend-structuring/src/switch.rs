@@ -3,6 +3,9 @@
 //! Entry points take [`crate::host::StructuringHost`]. Production host is
 //! `PreviewBuilder` in `fission-pcode`.
 
+use crate::guarded_tail::{
+    guarded_tail_call_target_is_known_pure_helper, suffix_expr_contains_call,
+};
 use crate::guarded_tail_pure::{count_var_reads_expr, count_var_reads_stmt};
 use crate::helpers::{
     block_label, detect_and_patch_case_fallthrough, extract_eq_const_for_case,
@@ -174,6 +177,108 @@ fn switch_behind_its_head(head_stmts: Vec<PreHirStmt>, switch: PreHirStmt) -> Pr
     let mut wrapped = head_stmts;
     wrapped.push(switch);
     PreHirStmt::Block(std::rc::Rc::new(wrapped))
+}
+
+/// The statements of the block a jump-table switch dispatches from, without
+/// the ones that only work out where to jump.
+///
+/// Such a block ends in an indirect branch, and the last thing it computes is
+/// that branch's target: the table entry it loads and the address it makes of
+/// it. The switch is that computation, written as source writes it. Left in
+/// front of the switch it is a second copy nothing reads -- and a load from a
+/// table indexed by the selector, which is not something the function does to
+/// its selector and misleads whatever reads the body for what a value is.
+///
+/// That holds for a block that stores nothing and calls nothing, where a
+/// name is all a later read can reach what a statement wrote by; any other
+/// block keeps every statement. In such a block the run of assignments at
+/// the end is looked at, last first, and one is dropped only if it does
+/// nothing but compute and neither the switch's selector nor any path out of
+/// the block reads the name before writing it. The statements behind it in
+/// the block have been dropped by then, so a read there is no read.
+fn dispatch_head_without_its_target(
+    host: &mut impl StructuringHost,
+    idx: usize,
+    mut head_stmts: Vec<PreHirStmt>,
+    switch: &PreHirStmt,
+) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+    let PreHirStmt::Switch { expr: selector, .. } = switch else {
+        return Ok(head_stmts);
+    };
+    if !host.block_only_computes(idx) {
+        return Ok(head_stmts);
+    }
+    let starts = host.successors().get(idx).cloned().unwrap_or_default();
+    let keep = host.lower_observed(|observed| {
+        statements_ahead_of_the_target_computation(&head_stmts, selector, &mut |name| {
+            something_reads_before_writing(&starts, &[name], &mut |block| {
+                if block >= observed.block_count() {
+                    return Ok(None);
+                }
+                let stmts = observed.lower_block_stmts(block)?;
+                let terminator = observed.lower_block_terminator(block)?;
+                let successors = observed
+                    .successors()
+                    .get(block)
+                    .cloned()
+                    .unwrap_or_default();
+                Ok(Some((stmts, terminator, successors)))
+            })
+        })
+    })?;
+    if keep < head_stmts.len() && structuring_diag_enabled() {
+        eprintln!(
+            "[DIAG] direct switch at block {idx}: {} head statement(s) only computed the branch target",
+            head_stmts.len() - keep
+        );
+    }
+    head_stmts.truncate(keep);
+    Ok(head_stmts)
+}
+
+/// How many of `head`, the statements of a dispatch block, come before the
+/// run at its end that only works out where to jump.
+///
+/// The run is found from the end: an assignment to a variable belongs to it
+/// if it only computes, `selector` does not read the variable, and
+/// `read_after_the_block` says no path out of the block reads it before
+/// writing it. The first statement that fails any of those ends the run, and
+/// it and everything before it are kept.
+fn statements_ahead_of_the_target_computation(
+    head: &[PreHirStmt],
+    selector: &PreHirExpr,
+    read_after_the_block: &mut dyn FnMut(&str) -> Result<bool, MlilPreviewError>,
+) -> Result<usize, MlilPreviewError> {
+    let mut keep = head.len();
+    while keep > 0 {
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } = &head[keep - 1]
+        else {
+            break;
+        };
+        if !only_computes(rhs)
+            || count_var_reads_expr(selector, name) > 0
+            || read_after_the_block(name)?
+        {
+            break;
+        }
+        keep -= 1;
+    }
+    Ok(keep)
+}
+
+/// Whether evaluating `expr` only computes a value: it calls nothing, or
+/// calls one of the flag helpers on operands that call nothing.
+fn only_computes(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { target, args, .. } => {
+            guarded_tail_call_target_is_known_pure_helper(target)
+                && !args.iter().any(suffix_expr_contains_call)
+        }
+        other => !suffix_expr_contains_call(other),
+    }
 }
 
 /// How many blocks the search for a reader of a compare block's work may
@@ -544,6 +649,7 @@ pub fn try_lower_direct_dispatcher_switch(
         return Ok(None);
     }
     let head_stmts = host.lower_block_stmts(idx)?;
+    let head_stmts = dispatch_head_without_its_target(host, idx, head_stmts, &stmt)?;
     wave_stats::add_dispatcher_proof_units(1);
     wave_stats::add_dispatcher_proof_completed(1);
     wave_stats::add_dispatcher_shape_recoveries(1);
@@ -902,6 +1008,96 @@ mod tests {
     fn read_before_written(names: &[&str], blocks: Vec<BlockForReaderSearch>) -> bool {
         something_reads_before_writing(&[0], names, &mut |idx| Ok(blocks.get(idx).cloned()))
             .expect("the search itself does not fail")
+    }
+
+    fn call(target: &str, args: Vec<PreHirExpr>) -> PreHirExpr {
+        PreHirExpr::Call {
+            origin: None,
+            target: target.to_string(),
+            args,
+            ty: NirType::Bool,
+        }
+    }
+
+    fn load(ptr: PreHirExpr) -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(ptr),
+            ty: NirType::Bool,
+        }
+    }
+
+    /// How many statements of `head` stay in front of a switch on `selector`
+    /// when the names in `read_later` are the ones a path out of the block
+    /// reads.
+    fn kept_ahead_of_the_dispatch(
+        head: &[PreHirStmt],
+        selector: &PreHirExpr,
+        read_later: &[&str],
+    ) -> usize {
+        statements_ahead_of_the_target_computation(head, selector, &mut |name| {
+            Ok(read_later.contains(&name))
+        })
+        .expect("the search itself does not fail")
+    }
+
+    /// The table load in front of an indirect jump, flags and all: the
+    /// selector scaled, the entry loaded, the target made of it.
+    fn table_load_by(selector: &str) -> Vec<PreHirStmt> {
+        vec![
+            assign("entry", load(var(selector))),
+            assign("cf", call("__carry", vec![var("entry"), var("base")])),
+            assign("target", var("entry")),
+        ]
+    }
+
+    #[test]
+    fn what_only_finds_the_jump_target_is_not_kept() {
+        let head = table_load_by("sel");
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &[]), 0);
+    }
+
+    #[test]
+    fn a_name_read_after_the_block_is_kept_with_all_before_it() {
+        let head = table_load_by("sel");
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &["cf"]), 2);
+    }
+
+    #[test]
+    fn what_the_selector_reads_is_kept() {
+        let head = vec![assign("sel", var("a")), assign("target", var("sel"))];
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &[]), 1);
+    }
+
+    #[test]
+    fn a_call_is_kept_and_so_is_what_feeds_it() {
+        let head = vec![
+            assign("a", var("b")),
+            assign("r", call("sub_7000", vec![var("a")])),
+            assign("target", var("r")),
+        ];
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &[]), 2);
+    }
+
+    #[test]
+    fn a_flag_helper_on_the_result_of_a_call_is_kept() {
+        let head = vec![assign(
+            "cf",
+            call("__carry", vec![call("sub_7000", vec![]), var("b")]),
+        )];
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &[]), 1);
+    }
+
+    #[test]
+    fn a_store_ends_the_run() {
+        let store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(var("p")),
+                ty: NirType::Bool,
+            },
+            rhs: var("a"),
+        };
+        let head = vec![assign("a", var("b")), store, assign("target", var("a"))];
+        assert_eq!(kept_ahead_of_the_dispatch(&head, &var("sel"), &[]), 2);
     }
 
     #[test]

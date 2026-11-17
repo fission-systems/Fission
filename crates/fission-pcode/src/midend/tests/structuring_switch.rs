@@ -1354,3 +1354,22 @@ fn a_default_that_only_sets_the_return_value_keeps_it() {
     assert_eq!(body.matches("sub_6000(").count(), 1, "{code}");
     assert_eq!(body.matches("sub_7000(").count(), 1, "{code}");
 }
+
+/// A register the dispatch block sets and the join returns is not part of
+/// finding the target: something reads it, so it stays in front.
+#[test]
+fn a_jump_table_switch_keeps_a_value_its_block_sets_for_later() {
+    let sets_result = raw_op(
+        0x5ff0,
+        PcodeOpcode::Copy,
+        Some(reg(0x00, 4)),
+        vec![cst(77, 4)],
+    );
+    let mut func = direct_dispatcher_with_join(vec![sets_result]);
+    let join = func.blocks.last_mut().expect("join block");
+    join.ops[0].inputs = vec![cst(0, 8), reg(0x00, 4)];
+    let code = render_mlil_preview(&func, "direct_switch", 0x6000, &preview_options_x86())
+        .expect("preview render");
+    assert!(code.contains("switch ("), "{code}");
+    assert!(code.contains("77"), "{code}");
+}
