@@ -2584,6 +2584,155 @@ fn condexe_folding_still_merges_a_pure_condition_with_an_unrelated_assignment() 
     assert_eq!(body.len(), 1);
 }
 
+fn if_else(cond: PreHirExpr, then_body: Vec<PreHirStmt>, else_body: Vec<PreHirStmt>) -> PreHirStmt {
+    PreHirStmt::If {
+        cond,
+        then_body: then_body.into(),
+        else_body: else_body.into(),
+    }
+}
+
+fn load_through(pointer: &str) -> PreHirExpr {
+    PreHirExpr::Load {
+        ptr: Box::new(PreHirExpr::Var(pointer.to_string())),
+        ty: int(32),
+    }
+}
+
+fn store_through(pointer: &str, value: i64) -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Deref {
+            ptr: Box::new(PreHirExpr::Var(pointer.to_string())),
+            ty: int(32),
+        },
+        rhs: PreHirExpr::Const(value, int(32)),
+    }
+}
+
+fn call_to(target: &str) -> PreHirExpr {
+    PreHirExpr::Call {
+        origin: None,
+        target: target.to_string(),
+        args: Vec::new(),
+        ty: int(32),
+    }
+}
+
+/// `if (cond) { stop(); return; } else { <between>; if (cond) y = 2; }`, and
+/// whether the pass left the inner test where it was.
+fn inner_test_survives(cond: impl Fn() -> PreHirExpr, between: Vec<PreHirStmt>) -> bool {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    let mut else_body = between;
+    let inner_at = else_body.len();
+    else_body.push(if_then(cond(), vec![assign_var("y", 2)]));
+    let mut body = vec![if_else(
+        cond(),
+        vec![PreHirStmt::Expr(call_to("stop")), PreHirStmt::Return(None)],
+        else_body,
+    )];
+    apply_condexe_folding_pass(&mut body);
+    let PreHirStmt::If { else_body, .. } = &body[0] else {
+        panic!("the outer test is gone");
+    };
+    matches!(else_body.get(inner_at), Some(PreHirStmt::If { .. }))
+}
+
+#[test]
+fn condexe_folding_drops_a_test_already_decided_on_the_way_in() {
+    // Positive control for the tests below: with nothing in between that
+    // could change `a`, the inner `if (a)` sits where `a` is known false.
+    assert!(!inner_test_survives(
+        || PreHirExpr::Var("a".to_string()),
+        vec![assign_var("x", 1)]
+    ));
+    // The same for a condition that reads memory nothing has written since.
+    assert!(!inner_test_survives(
+        || load_through("p"),
+        vec![assign_var("x", 1)]
+    ));
+}
+
+#[test]
+fn condexe_folding_keeps_a_test_of_memory_written_since_the_first() {
+    // `if (*p) { stop(); return; } *p = 0; if (*p) y = 2;` -- one expression,
+    // two values. The shape is `argc--; if (argc == 0) usage();` behind an
+    // earlier `if (argc == 0) usage();` on a frame slot.
+    assert!(inner_test_survives(
+        || load_through("p"),
+        vec![store_through("p", 0)]
+    ));
+}
+
+#[test]
+fn condexe_folding_keeps_a_test_of_memory_behind_a_call() {
+    // The callee may have written what the condition reads.
+    assert!(inner_test_survives(
+        || load_through("p"),
+        vec![PreHirStmt::Expr(call_to("g"))]
+    ));
+}
+
+#[test]
+fn condexe_folding_keeps_a_test_behind_a_label() {
+    // A `goto` from outside the arm reaches the label without having taken
+    // the branch, so nothing is known about `a` there.
+    assert!(inner_test_survives(
+        || PreHirExpr::Var("a".to_string()),
+        vec![PreHirStmt::Label("L".to_string())]
+    ));
+    // A label nested in a statement is one too: control leaves that
+    // statement having come in at the label.
+    assert!(inner_test_survives(
+        || PreHirExpr::Var("a".to_string()),
+        vec![if_then(
+            PreHirExpr::Var("b".to_string()),
+            vec![PreHirStmt::Label("L".to_string())]
+        )]
+    ));
+}
+
+#[test]
+fn condexe_folding_keeps_a_second_call_in_a_nested_condition() {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    // `if (f()) { if (f()) x = 1; }` calls `f` twice.
+    let mut body = vec![if_then(
+        call_to("f"),
+        vec![if_then(call_to("f"), vec![assign_var("x", 1)])],
+    )];
+
+    assert!(!apply_condexe_folding_pass(&mut body));
+}
+
+#[test]
+fn condexe_folding_keeps_a_test_of_memory_the_loop_around_it_writes() {
+    use crate::cleanup::apply_condexe_folding_pass;
+
+    let looped = |after_the_test: PreHirStmt| {
+        vec![if_then(
+            load_through("p"),
+            vec![PreHirStmt::While {
+                cond: PreHirExpr::Var("c".to_string()),
+                body: vec![
+                    if_then(load_through("p"), vec![assign_var("y", 2)]),
+                    after_the_test,
+                ]
+                .into(),
+            }],
+        )]
+    };
+
+    // `if (*p) while (c) { if (*p) y = 2; *p = 0; }` -- the second time
+    // round, the store has run.
+    let mut body = looped(store_through("p", 0));
+    assert!(!apply_condexe_folding_pass(&mut body));
+
+    // Positive control: a body that writes no memory leaves `*p` as it was.
+    let mut body = looped(assign_var("x", 1));
+    assert!(apply_condexe_folding_pass(&mut body));
+}
+
 #[test]
 fn deindirect_resolves_const_address_to_symbol() {
     use crate::cleanup::apply_deindirect_pass;
