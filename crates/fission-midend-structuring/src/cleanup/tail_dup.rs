@@ -545,11 +545,11 @@ fn stmt_is_relocatable(stmt: &PreHirStmt, allow_goto: bool) -> bool {
 /// Whether `region` is one basic block's worth of statements: nothing in it
 /// decides anything.
 fn region_is_straight_line(region: &[PreHirStmt]) -> bool {
-    region.iter().all(|stmt| match stmt {
+    region.iter().enumerate().all(|(idx, stmt)| match stmt {
         PreHirStmt::Block(body) => region_is_straight_line(body),
         other => {
             child_sequences(other).is_empty()
-                || super::stack_protector::stack_protector_pass_arm(other)
+                || super::stack_protector::stack_protector_pass_arm(region, idx)
                     .is_some_and(region_is_straight_line)
         }
     })
@@ -1271,6 +1271,46 @@ mod tests {
             "the compiler's check is not the program's branch"
         );
         assert_eq!(count_stmts(&out, &check), 2);
+    }
+
+    #[test]
+    fn clone_sees_through_a_check_laid_out_before_the_handler() {
+        // if (c1) { goto L; }
+        // if (c2) { goto L; }
+        // return a;
+        // L:
+        // x = canary_diff;
+        // if (ok) { return rax; }
+        // __stack_chk_fail();
+        // return;
+        //
+        // The same check with the handler block after the `if` instead of
+        // inside it. The last `return` is the lifter's: at this point in the
+        // pipeline nothing has said the handler does not come back.
+        let check = PreHirStmt::If {
+            cond: var("ok"),
+            then_body: vec![PreHirStmt::Return(Some(var("rax")))].into(),
+            else_body: Vec::new().into(),
+        };
+        let body = vec![
+            goto_if("c1", "L"),
+            goto_if("c2", "L"),
+            PreHirStmt::Return(Some(var("a"))),
+            PreHirStmt::Label("L".into()),
+            assign("x", "canary_diff"),
+            check.clone(),
+            canary_call(),
+            PreHirStmt::Return(None),
+        ];
+        let (out, removed) = duplicate_terminal_tails(body, &HashSet::default());
+        assert_eq!(
+            removed, 2,
+            "the compiler's check is not the program's branch"
+        );
+        assert_eq!(count_stmts(&out, &check), 2);
+        // An `if` that returns in front of anything else is the program's.
+        let ordinary = [check, expr_stmt("e"), canary_call()];
+        assert!(!region_is_straight_line(&ordinary));
     }
 
     #[test]
