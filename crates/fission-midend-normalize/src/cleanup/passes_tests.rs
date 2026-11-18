@@ -2982,6 +2982,143 @@ fn fuse_if_goto_allows_returns_in_segment() {
     );
 }
 
+/// The implementation `fuse_single_predecessor_boundaries` replaced: it
+/// copied the run up to the next label for every statement before looking at
+/// the statement. Kept as the oracle the rewrite must agree with.
+fn fuse_single_predecessor_boundaries_reference(stmts: &mut Vec<PreHirStmt>) -> bool {
+    fn next_label(stmts: &[PreHirStmt], start: usize) -> Option<(usize, String)> {
+        stmts
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find_map(|(idx, stmt)| match stmt {
+                PreHirStmt::Label(label) => Some((idx, label.clone())),
+                _ => None,
+            })
+    }
+    fn lone_goto(body: &[PreHirStmt], label: &str) -> bool {
+        matches!(body, [PreHirStmt::Goto(target)] if target == label)
+    }
+    fn linear(stmt: &PreHirStmt) -> bool {
+        match stmt {
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::VaStart { .. }
+            | PreHirStmt::Return(_) => true,
+            PreHirStmt::Block(body) => body.iter().all(linear),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => then_body.iter().all(linear) && else_body.iter().all(linear),
+            _ => false,
+        }
+    }
+    let mut changed = false;
+    let mut idx = 0usize;
+    while idx < stmts.len() {
+        let Some((label_idx, label_name)) = next_label(stmts, idx + 1) else {
+            idx += 1;
+            continue;
+        };
+        let fused_segment = stmts[idx + 1..label_idx].to_vec();
+        if fused_segment.is_empty() || !fused_segment.iter().all(linear) {
+            idx += 1;
+            continue;
+        }
+        let replacement = match &stmts[idx] {
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } if lone_goto(then_body, &label_name) && else_body.is_empty() => {
+                Some(PreHirStmt::If {
+                    cond: fission_midend_prehir::util::negate_expr(cond.clone()),
+                    then_body: fused_segment.clone().into(),
+                    else_body: Vec::new().into(),
+                })
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } if then_body.is_empty() && lone_goto(else_body, &label_name) => {
+                Some(PreHirStmt::If {
+                    cond: cond.clone(),
+                    then_body: fused_segment.clone().into(),
+                    else_body: Vec::new().into(),
+                })
+            }
+            _ => None,
+        };
+        let Some(replacement) = replacement else {
+            idx += 1;
+            continue;
+        };
+        stmts[idx] = replacement;
+        stmts.drain(idx + 1..label_idx);
+        changed = true;
+        idx += 1;
+    }
+    changed
+}
+
+#[test]
+fn fuse_if_goto_agrees_with_the_implementation_it_replaced() {
+    // Statement lists generated from a fixed seed: guards jumping to the
+    // next label, to a later one, or to none; in either arm; over runs that
+    // are linear, empty, or interrupted by a loop.
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let guard = |label: String, in_then: bool| {
+        let goto: Vec<PreHirStmt> = vec![PreHirStmt::Goto(label)];
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("c".to_string()),
+            then_body: if in_then { goto.clone() } else { Vec::new() }.into(),
+            else_body: if in_then { Vec::new() } else { goto }.into(),
+        }
+    };
+    let mut fused_cases = 0;
+    for case in 0..4000 {
+        let len = 2 + (next() % 9) as usize;
+        let mut stmts: Vec<PreHirStmt> = (0..len)
+            .map(|_| match next() % 9 {
+                0 | 1 => guard(format!("L{}", next() % 3), next() % 2 == 0),
+                2 | 3 => PreHirStmt::Label(format!("L{}", next() % 3)),
+                4 => PreHirStmt::Return(Some(PreHirExpr::Const(1, int(32)))),
+                5 => PreHirStmt::While {
+                    cond: PreHirExpr::Var("w".to_string()),
+                    body: Vec::new().into(),
+                },
+                6 => PreHirStmt::If {
+                    cond: PreHirExpr::Var("d".to_string()),
+                    then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("x".to_string()))].into(),
+                    else_body: Vec::new().into(),
+                },
+                _ => PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(format!("v{}", next() % 4)),
+                    rhs: PreHirExpr::Const((next() % 7) as i64, int(32)),
+                },
+            })
+            .collect();
+        let mut expected = stmts.clone();
+        let expected_changed = fuse_single_predecessor_boundaries_reference(&mut expected);
+        let changed = fuse_single_predecessor_boundaries(&mut stmts);
+        assert_eq!(changed, expected_changed, "case {case}");
+        assert_eq!(stmts, expected, "case {case}");
+        fused_cases += usize::from(changed);
+    }
+    assert!(
+        fused_cases > 50,
+        "the generator must exercise the rewrite: {fused_cases}"
+    );
+}
+
 #[test]
 fn collapse_trivial_assign_returns_folds_eax_const() {
     use super::utils::is_abi_return_register_name;

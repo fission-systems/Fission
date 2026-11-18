@@ -322,7 +322,7 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(defs_in_block) = self.block_defs.get(site.block_idx) {
                 // Find the most recent definition among all candidate keys (exact and aliased) block-locally
                 let mut best_def_idx: Option<usize> = None;
-                for candidate_key in &candidate_keys {
+                for candidate_key in candidate_keys.iter() {
                     if let Some(def_indices) = defs_in_block.get(candidate_key) {
                         let prior_count = def_indices.partition_point(|idx| *idx < site.op_idx);
                         if prior_count > 0 {
@@ -417,7 +417,28 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn lookup_candidate_def_keys(&self, key: &VarnodeKey) -> Vec<VarnodeKey> {
+    /// `key` and every defined key that aliases it.
+    ///
+    /// The answer depends on the definition table and the register model,
+    /// neither of which changes after the builder is created, so it is kept
+    /// per key: recomputing it walked every defined key on each lookup.
+    fn lookup_candidate_def_keys(&self, key: &VarnodeKey) -> std::rc::Rc<[VarnodeKey]> {
+        if let Some(hit) = self.candidate_def_keys_cache.borrow().get(key) {
+            debug_assert_eq!(
+                hit.as_ref(),
+                self.lookup_candidate_def_keys_uncached(key).as_slice(),
+                "definition table changed under the candidate-key cache"
+            );
+            return std::rc::Rc::clone(hit);
+        }
+        let keys: std::rc::Rc<[VarnodeKey]> = self.lookup_candidate_def_keys_uncached(key).into();
+        self.candidate_def_keys_cache
+            .borrow_mut()
+            .insert(key.clone(), std::rc::Rc::clone(&keys));
+        keys
+    }
+
+    fn lookup_candidate_def_keys_uncached(&self, key: &VarnodeKey) -> Vec<VarnodeKey> {
         let mut candidates = vec![key.clone()];
         if key.is_constant {
             return candidates;

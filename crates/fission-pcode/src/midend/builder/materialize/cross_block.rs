@@ -12,6 +12,11 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<(usize, u64, usize, u32, bool, usize, String)> {
         let mut best_prior_def: Option<(usize, u64, usize, u32, bool, usize, String)> = None;
+        // Every candidate asks for its distance to the same block, so one
+        // backward search from that block answers them all; a forward search
+        // per candidate was a BFS of the function for each block that writes
+        // the register.
+        let mut distances_to_pred: Option<HashMap<usize, usize>> = None;
         for candidate_idx in 0..self.pcode.blocks.len() {
             if candidate_idx == pred_idx {
                 continue;
@@ -27,9 +32,17 @@ impl<'a> PreviewBuilder<'a> {
             if !self.block_can_reach(candidate_idx, pred_idx, pred_idx) {
                 continue;
             }
-            let distance = self
-                .shortest_forward_distance(candidate_idx, pred_idx)
+            let distance = distances_to_pred
+                .get_or_insert_with(|| self.forward_distances_to(pred_idx))
+                .get(&candidate_idx)
+                .copied()
                 .unwrap_or(usize::MAX);
+            debug_assert_eq!(
+                distance,
+                self.shortest_forward_distance(candidate_idx, pred_idx)
+                    .unwrap_or(usize::MAX),
+                "backward search disagrees with the forward one"
+            );
             let dominates = self.dom_tree.dominates(candidate_idx, pred_idx);
             let candidate = (
                 candidate_idx,
@@ -144,6 +157,30 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
         false
+    }
+
+    /// [`Self::shortest_forward_distance`] to `target_idx` from every block
+    /// that reaches it, by one search over the reversed successor edges.
+    fn forward_distances_to(&self, target_idx: usize) -> HashMap<usize, usize> {
+        let mut reversed: HashMap<usize, Vec<usize>> = HashMap::default();
+        for (from, succs) in self.successors.iter().enumerate() {
+            for &to in succs {
+                reversed.entry(to).or_default().push(from);
+            }
+        }
+        let mut distances: HashMap<usize, usize> = HashMap::default();
+        distances.insert(target_idx, 0);
+        let mut queue = std::collections::VecDeque::from([target_idx]);
+        while let Some(idx) = queue.pop_front() {
+            let next = distances[&idx] + 1;
+            for &pred in reversed.get(&idx).map(Vec::as_slice).unwrap_or_default() {
+                if let std::collections::hash_map::Entry::Vacant(slot) = distances.entry(pred) {
+                    slot.insert(next);
+                    queue.push_back(pred);
+                }
+            }
+        }
+        distances
     }
 
     fn shortest_forward_distance(&self, start_idx: usize, target_idx: usize) -> Option<usize> {

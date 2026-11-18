@@ -295,6 +295,52 @@ fn group_sla_map_by_offset(map: &HashMap<(u64, u32), String>) -> HashMap<u64, Ve
     by_offset
 }
 
+/// The two maps a namer derives from an options' register map, for the
+/// register maps seen most recently.
+///
+/// A namer is built several times per function (builder, entry analysis,
+/// scalar SSA, callee previews) from options that carry the same register
+/// map every time, and each build copied every name twice. Entries are
+/// matched by content, so a caller that edits its map gets its own entry.
+static SLA_MAPS_BY_SOURCE: RwLock<Vec<DerivedSlaMaps>> = RwLock::new(Vec::new());
+
+type DerivedSlaMaps = (
+    Arc<HashMap<(u64, u32), String>>,
+    Arc<HashMap<u64, Vec<(u32, String)>>>,
+);
+
+/// Register maps kept: one per language in use, with room for a few edits.
+const SLA_MAPS_KEPT: usize = 8;
+
+fn sla_maps_for_source<S: std::hash::BuildHasher>(
+    source: &std::collections::HashMap<(u64, u32), String, S>,
+) -> DerivedSlaMaps {
+    let same = |kept: &HashMap<(u64, u32), String>| {
+        kept.len() == source.len() && source.iter().all(|(key, name)| kept.get(key) == Some(name))
+    };
+    if let Some((map, by_offset)) = SLA_MAPS_BY_SOURCE
+        .read()
+        .expect("sla map cache poisoned")
+        .iter()
+        .find(|(map, _)| same(map))
+    {
+        return (Arc::clone(map), Arc::clone(by_offset));
+    }
+    let map: Arc<HashMap<(u64, u32), String>> = Arc::new(
+        source
+            .iter()
+            .map(|(&key, name)| (key, name.clone()))
+            .collect(),
+    );
+    let by_offset = Arc::new(group_sla_map_by_offset(&map));
+    let mut cache = SLA_MAPS_BY_SOURCE.write().expect("sla map cache poisoned");
+    if cache.len() >= SLA_MAPS_KEPT {
+        cache.remove(0);
+    }
+    cache.push((Arc::clone(&map), Arc::clone(&by_offset)));
+    (map, by_offset)
+}
+
 type SlaMaps = (
     Option<std::sync::Arc<HashMap<(u64, u32), String>>>,
     Option<std::sync::Arc<HashMap<u64, Vec<(u32, String)>>>>,
@@ -420,13 +466,13 @@ impl RegisterNamer {
     pub fn from_options(options: &crate::NirRenderOptions) -> Self {
         let model = super::apply::default_cspec_pair(options)
             .and_then(|(lang, _)| register_model_for_language(&lang));
-        let sla_map: Option<std::sync::Arc<HashMap<(u64, u32), String>>> = options
-            .sla_register_map
-            .as_ref()
-            .map(|m| std::sync::Arc::new(m.iter().map(|(&k, v)| (k, v.clone())).collect()));
-        let sla_map_by_offset = sla_map
-            .as_ref()
-            .map(|map| std::sync::Arc::new(group_sla_map_by_offset(map)));
+        let (sla_map, sla_map_by_offset) = match options.sla_register_map.as_ref() {
+            Some(source) => {
+                let (map, by_offset) = sla_maps_for_source(source);
+                (Some(map), Some(by_offset))
+            }
+            None => (None, None),
+        };
         Self {
             abi: options.calling_convention,
             sla_map,
@@ -1254,6 +1300,40 @@ mod tests {
         assert!(namer.is_return_target_register(&reg(0x5c)), "pc");
         // r0 carries the value, and must not be mistaken for the target.
         assert!(!namer.is_return_target_register(&reg(0x20)), "r0");
+    }
+
+    /// Derived register maps are reused by content: options carrying a
+    /// different map must get maps built from it, not the ones kept for an
+    /// earlier caller.
+    #[test]
+    fn derived_register_maps_follow_the_map_they_were_built_from() {
+        let first: std::collections::HashMap<(u64, u32), String> = [
+            ((0x1000, 4), "alpha".to_string()),
+            ((0x2000, 4), "beta".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let mut second = first.clone();
+        second.insert((0x1000, 4), "gamma".to_string());
+
+        let (first_map, first_by_offset) = super::sla_maps_for_source(&first);
+        let (second_map, second_by_offset) = super::sla_maps_for_source(&second);
+        let (again_map, _) = super::sla_maps_for_source(&first);
+
+        assert_eq!(
+            first_map.get(&(0x1000, 4)).map(String::as_str),
+            Some("alpha")
+        );
+        assert_eq!(
+            second_map.get(&(0x1000, 4)).map(String::as_str),
+            Some("gamma")
+        );
+        assert_eq!(first_by_offset[&0x1000], vec![(4, "alpha".to_string())]);
+        assert_eq!(second_by_offset[&0x1000], vec![(4, "gamma".to_string())]);
+        assert!(
+            Arc::ptr_eq(&first_map, &again_map),
+            "the same content is reused"
+        );
     }
 
     #[test]
