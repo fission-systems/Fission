@@ -74,6 +74,39 @@ fn is_stack_protector_guard(stmt: &PreHirStmt) -> bool {
     empty.is_empty() && taken.len() == 1 && is_stack_chk_fail_call(&taken[0])
 }
 
+/// The arm taken when the canary is intact, when `stmt` is the stack-protector
+/// check in a shape it can have *before* the layout settles.
+///
+/// [`is_stack_protector_guard`] matches the finished form, a one-armed `if`
+/// around the call. Earlier the same check is a two-armed `if`: one arm calls
+/// the handler (and may carry the `return` the lifter put after a call it
+/// does not know diverges), the other is everything the function does next.
+/// A pass that asks "does this region decide anything?" has to see through
+/// both, because this decision is the compiler's and is about to be removed.
+pub(super) fn stack_protector_pass_arm(stmt: &PreHirStmt) -> Option<&[PreHirStmt]> {
+    let PreHirStmt::If {
+        then_body,
+        else_body,
+        ..
+    } = stmt
+    else {
+        return None;
+    };
+    let is_fail_arm = |arm: &[PreHirStmt]| {
+        arm.first().is_some_and(is_stack_chk_fail_call)
+            && arm[1..]
+                .iter()
+                .all(|stmt| matches!(stmt, PreHirStmt::Return(_)))
+    };
+    if is_fail_arm(then_body) {
+        Some(else_body.as_slice())
+    } else if is_fail_arm(else_body) {
+        Some(then_body.as_slice())
+    } else {
+        None
+    }
+}
+
 /// Remove every stack-protector guard in `body`, reporting whether any went.
 pub fn drop_stack_protector_guards(body: Vec<PreHirStmt>) -> (Vec<PreHirStmt>, bool) {
     let mut changed = false;
@@ -221,5 +254,40 @@ mod tests {
             panic!("expected the loop to survive");
         };
         assert_eq!(body.as_ref(), &vec![call("f")]);
+    }
+
+    #[test]
+    fn the_pass_arm_is_found_in_either_arm_and_past_a_trailing_return() {
+        let ret = || PreHirStmt::Return(Some(PreHirExpr::Var("rax".to_string())));
+        // if (x) { __stack_chk_fail(); return; } else { return rax; }
+        let then_fails = guard(
+            vec![call("__stack_chk_fail"), PreHirStmt::Return(None)],
+            vec![ret()],
+        );
+        assert_eq!(stack_protector_pass_arm(&then_fails), Some(&[ret()][..]));
+        // if (!x) { return rax; } else { __stack_chk_fail(); }
+        let else_fails = guard(vec![ret()], vec![call("__stack_chk_fail")]);
+        assert_eq!(stack_protector_pass_arm(&else_fails), Some(&[ret()][..]));
+        // The settled one-armed guard: the pass arm is the empty one.
+        let settled = guard(vec![call("__stack_chk_fail")], Vec::new());
+        assert_eq!(stack_protector_pass_arm(&settled), Some(&[][..]));
+    }
+
+    #[test]
+    fn an_arm_that_does_more_than_fail_is_not_the_check() {
+        let ret = || PreHirStmt::Return(None);
+        // A source-written abort path is a real decision.
+        let abort = guard(vec![call("abort"), ret()], vec![ret()]);
+        assert_eq!(stack_protector_pass_arm(&abort), None);
+        // Work after the handler call is not scaffolding.
+        let works = guard(
+            vec![call("__stack_chk_fail"), call("cleanup"), ret()],
+            vec![ret()],
+        );
+        assert_eq!(stack_protector_pass_arm(&works), None);
+        // Nor is work before it.
+        let works_first = guard(vec![call("log"), call("__stack_chk_fail")], vec![ret()]);
+        assert_eq!(stack_protector_pass_arm(&works_first), None);
+        assert_eq!(stack_protector_pass_arm(&call("__stack_chk_fail")), None);
     }
 }
