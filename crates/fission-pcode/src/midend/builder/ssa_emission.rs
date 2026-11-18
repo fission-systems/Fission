@@ -1127,7 +1127,11 @@ impl<'a> PreviewBuilder<'a> {
         combined
     }
 
-    pub(super) fn ssa_emitted_definition(&self, block: usize, op: usize) -> Option<String> {
+    pub(in crate::midend) fn ssa_emitted_definition(
+        &self,
+        block: usize,
+        op: usize,
+    ) -> Option<String> {
         let site = SsaOpSite {
             block: block as u32,
             op: op as u32,

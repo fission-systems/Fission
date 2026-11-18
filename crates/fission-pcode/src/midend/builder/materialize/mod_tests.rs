@@ -6601,3 +6601,56 @@ fn a_register_name_that_touches_emitted_storage_stays_checked() {
     // plan never assigns.
     assert!(builder.ssa_initialization_tracked_names().contains(&name));
 }
+
+#[test]
+fn a_definition_named_in_pieces_joins_its_block_as_statements() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    // `r12 = zext(r12d)` is one op and two emitted halves.
+    let halves = builder.ssa_definition_piece_stmts(0, 1, "whole");
+    assert_eq!(halves.len(), 2, "{halves:?}");
+    let entry = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    assert!(
+        entry
+            .iter()
+            .all(|stmt| matches!(stmt, PreHirStmt::Assign { .. })),
+        "{entry:?}"
+    );
+    for half in &halves {
+        let PreHirStmt::Assign { lhs, .. } = half else {
+            panic!("{half:?}");
+        };
+        assert!(
+            entry
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: found, .. } if found == lhs)),
+            "{lhs:?} {entry:?}"
+        );
+    }
+}
+
+#[test]
+fn a_block_of_copies_the_plan_names_is_not_stepped_over() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    // `r12d = 7; r12 = zext(r12d); goto merge` is a copy, an extension and a
+    // branch: nothing the legacy path prints.
+    let legacy = PreviewBuilder::new(&pcode, &options, None);
+    assert!(legacy.is_trivial_forwarding_block(1, 2));
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    // Under the plan the same block assigns the merge's value on this path.
+    assert!(
+        !builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!builder.is_trivial_forwarding_block(1, 2));
+}

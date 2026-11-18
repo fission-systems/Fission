@@ -513,11 +513,23 @@ impl<'a> PreviewBuilder<'a> {
                     }
                 },
             )?;
-            if let Some(stmt) = maybe_stmt {
+            match maybe_stmt {
+                // An op whose output the emission plan names in pieces lowers
+                // to several assignments. They join the block as statements
+                // of their own: wrapped, the passes that fold a temporary
+                // into its one reader do not see through the wrapper, and a
+                // loop header keeps statements a condition would have held.
+                Some(PreHirStmt::Block(pieces)) => body.extend(
+                    pieces
+                        .iter()
+                        .filter(|piece| !crate::midend::is_identity_var_assign_stmt(piece))
+                        .cloned(),
+                ),
                 // Skip pure `x = x` when multiple p-code ops share one binding.
-                if !crate::midend::is_identity_var_assign_stmt(&stmt) {
+                Some(stmt) if !crate::midend::is_identity_var_assign_stmt(&stmt) => {
                     body.push(stmt);
                 }
+                _ => {}
             }
             op_idx += 1;
         }
