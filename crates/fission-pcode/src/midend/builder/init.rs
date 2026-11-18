@@ -245,6 +245,7 @@ impl<'a> PreviewBuilder<'a> {
             block_defs,
             lookup_site_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
+            candidate_def_keys_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             terminator_cache: BuilderCacheMap::default(),
             x86_branch_recovery_attempts: 0,
             address_to_index,

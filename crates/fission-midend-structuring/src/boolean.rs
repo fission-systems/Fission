@@ -121,30 +121,77 @@ fn collect(e: &PreHirExpr, out: &mut Vec<PreHirExpr>) -> Option<()> {
     }
 }
 
-fn eval(e: &PreHirExpr, atoms: &[PreHirExpr], row: usize) -> bool {
+/// A formula with each atom resolved to its column once.
+///
+/// Evaluating the `PreHirExpr` directly looked every atom up by structural
+/// equality against the atom list on every row -- up to 4,096 rows times
+/// every leaf, each a deep comparison -- which made truth tables a fifth of
+/// structuring's time on the full DecBench dataset. Resolved, a table is a
+/// few word operations per node.
+enum Formula {
+    Const(bool),
+    Atom(usize),
+    Not(Box<Formula>),
+    And(Box<Formula>, Box<Formula>),
+    Or(Box<Formula>, Box<Formula>),
+}
+
+fn compile(e: &PreHirExpr, atoms: &[PreHirExpr]) -> Formula {
     match e {
         PreHirExpr::Binary {
             op: PreHirBinaryOp::LogicalAnd,
             lhs,
             rhs,
             ..
-        } => eval(lhs, atoms, row) && eval(rhs, atoms, row),
+        } => Formula::And(Box::new(compile(lhs, atoms)), Box::new(compile(rhs, atoms))),
         PreHirExpr::Binary {
             op: PreHirBinaryOp::LogicalOr,
             lhs,
             rhs,
             ..
-        } => eval(lhs, atoms, row) || eval(rhs, atoms, row),
+        } => Formula::Or(Box::new(compile(lhs, atoms)), Box::new(compile(rhs, atoms))),
         PreHirExpr::Unary {
             op: PreHirUnaryOp::Not,
             expr,
             ..
-        } => !eval(expr, atoms, row),
-        PreHirExpr::Const(v, _) => *v != 0,
+        } => Formula::Not(Box::new(compile(expr, atoms))),
+        PreHirExpr::Const(v, _) => Formula::Const(*v != 0),
+        // An atom missing from the list reads as false, as it always has.
         atom => atoms
             .iter()
             .position(|a| a == atom)
-            .is_some_and(|i| row >> i & 1 == 1),
+            .map_or(Formula::Const(false), Formula::Atom),
+    }
+}
+
+/// Rows `64 * word ..` of atom `index`'s column: row `r` holds bit `index`
+/// of `r`.
+fn atom_column(index: usize, word: usize) -> u64 {
+    const LOW: [u64; 6] = [
+        0xAAAA_AAAA_AAAA_AAAA,
+        0xCCCC_CCCC_CCCC_CCCC,
+        0xF0F0_F0F0_F0F0_F0F0,
+        0xFF00_FF00_FF00_FF00,
+        0xFFFF_0000_FFFF_0000,
+        0xFFFF_FFFF_0000_0000,
+    ];
+    if index < 6 {
+        LOW[index]
+    } else if (word >> (index - 6)) & 1 == 1 {
+        u64::MAX
+    } else {
+        0
+    }
+}
+
+fn eval_word(f: &Formula, word: usize) -> u64 {
+    match f {
+        Formula::Const(true) => u64::MAX,
+        Formula::Const(false) => 0,
+        Formula::Atom(index) => atom_column(*index, word),
+        Formula::Not(inner) => !eval_word(inner, word),
+        Formula::And(lhs, rhs) => eval_word(lhs, word) & eval_word(rhs, word),
+        Formula::Or(lhs, rhs) => eval_word(lhs, word) | eval_word(rhs, word),
     }
 }
 
@@ -157,10 +204,14 @@ pub fn tabulate(expr: &PreHirExpr) -> Option<TruthTable> {
 fn tabulate_over(expr: &PreHirExpr, atoms: &[PreHirExpr]) -> TruthTable {
     let rows = 1usize << atoms.len();
     let mut table = TruthTable::zeros(rows);
-    for row in 0..rows {
-        if eval(expr, atoms, row) {
-            table.set(row);
-        }
+    let formula = compile(expr, atoms);
+    let valid = if rows < 64 {
+        (1u64 << rows) - 1
+    } else {
+        u64::MAX
+    };
+    for (word, slot) in table.words.iter_mut().enumerate() {
+        *slot = eval_word(&formula, word) & valid;
     }
     table
 }
@@ -302,6 +353,75 @@ mod tests {
             ty: NirType::Bool,
         };
         assert!(is_tautology(&or(cmp.clone(), negate_expr(cmp))));
+    }
+
+    /// The row-at-a-time evaluation the word-parallel one replaced, kept as
+    /// the oracle it must agree with.
+    fn eval_row(e: &PreHirExpr, atoms: &[PreHirExpr], row: usize) -> bool {
+        match e {
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
+                lhs,
+                rhs,
+                ..
+            } => eval_row(lhs, atoms, row) && eval_row(rhs, atoms, row),
+            PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
+                lhs,
+                rhs,
+                ..
+            } => eval_row(lhs, atoms, row) || eval_row(rhs, atoms, row),
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr,
+                ..
+            } => !eval_row(expr, atoms, row),
+            PreHirExpr::Const(v, _) => *v != 0,
+            atom => atoms
+                .iter()
+                .position(|a| a == atom)
+                .is_some_and(|i| row >> i & 1 == 1),
+        }
+    }
+
+    #[test]
+    fn word_parallel_tables_agree_with_row_evaluation() {
+        // A deterministic pseudo-random formula generator over up to twelve
+        // atoms, so every column shape -- inside one word and across words --
+        // and both constants are exercised.
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        fn build(next: &mut dyn FnMut() -> u64, depth: u32, atoms: u64) -> PreHirExpr {
+            let pick = next() % if depth == 0 { 2 } else { 5 };
+            match pick {
+                0 => var(&format!("a{}", next() % atoms)),
+                1 if next() % 7 == 0 => PreHirExpr::Const((next() % 2) as i64, NirType::Bool),
+                1 => var(&format!("a{}", next() % atoms)),
+                2 => negate_expr(build(next, depth - 1, atoms)),
+                3 => and(build(next, depth - 1, atoms), build(next, depth - 1, atoms)),
+                _ => or(build(next, depth - 1, atoms), build(next, depth - 1, atoms)),
+            }
+        }
+        for case in 0..400 {
+            let atom_count = 1 + (case % MAX_ATOMS) as u64;
+            let expr = build(&mut next, 6, atom_count);
+            let Some(table) = tabulate(&expr) else {
+                continue;
+            };
+            let atoms = atoms_of(&[&expr]).expect("tabulated");
+            for row in 0..table.rows {
+                assert_eq!(
+                    table.get(row),
+                    eval_row(&expr, &atoms, row),
+                    "row {row} of {expr:?}"
+                );
+            }
+        }
     }
 
     #[test]
