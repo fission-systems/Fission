@@ -1,0 +1,2002 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-11-17-structuring-owned-blocks/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Proposal: a recovered statement owns only the blocks it prints - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#proposal-a-recovered-statement-owns-only-the-blocks-it-prints" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Proposal: a recovered statement owns only the blocks it prints
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.3.0/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.3.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.3.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-baseline-row-anchor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Baseline Row Anchor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner Proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-generality-invariant-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Generality / Invariant Proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-risk-and-ownership-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Risk And Ownership Check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-validation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Validation Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ai-review-prompt-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. AI Review / Prompt Firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-review-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Review Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not fixed
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="proposal-a-recovered-statement-owns-only-the-blocks-it-prints">Proposal: a recovered statement owns only the blocks it prints<a class="headerlink" href="#proposal-a-recovered-statement-owns-only-the-blocks-it-prints" title="Permanent link">&para;</a></h1>
+<p>Status: implemented; <code>-O0</code> and <code>-O2</code> measured. Filled from
+<a href="../../templates/DECOMPILER_CHANGE_PROPOSAL/"><code>docs/templates/DECOMPILER_CHANGE_PROPOSAL.md</code></a>.</p>
+<h2 id="1-baseline-row-anchor">1. Baseline Row Anchor<a class="headerlink" href="#1-baseline-row-anchor" title="Permanent link">&para;</a></h2>
+<p>Not one row: four places where the output loses code or reads the wrong
+value, found while reading the output of a different change (cutting flow
+behind a call that never returns), and all present on the baseline
+<code>a4358919e</code> (PR #903). Read on a 16-binary sample of the local DecBench
+configs (8 <code>-O0</code>, 8 <code>-O2</code>; 15,290 functions), caches disabled.</p>
+<p>A structuring rule returns a statement and the block index the walk resumes
+at. The walk treats every block in between as printed.</p>
+<table>
+<thead>
+<tr>
+<th>defect</th>
+<th>function</th>
+<th>config</th>
+<th>what the baseline prints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>switch drops its block's statements</td>
+<td>gnulib <code>hash_insert</code> (<code>sort</code>, <code>tar</code>)</td>
+<td><code>-O0</code></td>
+<td><code>switch (local_14)</code> on a variable never set; the <code>hash_insert_if_absent</code> call is gone</td>
+</tr>
+<tr>
+<td></td>
+<td>gnulib <code>gettext_quote</code> (<code>sort</code>, <code>tar</code>)</td>
+<td><code>-O2</code></td>
+<td><code>switch (rax-&gt;field_0 &amp; ~0x20)</code> on a pointer never set; the <code>locale_charset</code> call is gone</td>
+</tr>
+<tr>
+<td></td>
+<td><code>no_options</code> (bash)</td>
+<td><code>-O0</code>, <code>-O2</code></td>
+<td>2 of its 4 calls</td>
+</tr>
+<tr>
+<td>switch steps over an arm that only sets a register</td>
+<td><code>rsa_hash_alg_oid</code> (9 openssh programs)</td>
+<td><code>-O0</code></td>
+<td><code>default: return rax;</code> on a variable never set, where the source returns <code>-10</code></td>
+</tr>
+<tr>
+<td></td>
+<td><code>rl_set_keymap_from_edit_mode</code> (bash)</td>
+<td><code>-O2</code></td>
+<td><code>case 0: return rl_editing_mode;</code> -- the arm's store to <code>_rl_keymap</code> is gone</td>
+</tr>
+<tr>
+<td>merge variable replaces a read behind the tail's own write</td>
+<td><code>rl_history_search_forward</code>, <code>_backward</code>, <code>rl_history_substr_search_forward</code>, <code>_backward</code> (bash)</td>
+<td><code>-O0</code></td>
+<td><code>jle</code> after <code>cmp count, 0</code> printed with the overflow flag of an earlier pointer compare: <code>zf \|\| bVar56 != (count &lt; 0)</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Failure category: lost statements; wrong value in a condition.</li>
+<li>Measured by the call instructions that reach the output (section 5): the
+  baseline prints 112,188 call sites on the sample and misses 55 that this
+  change prints, in 34 functions of 5 programs at both optimisation levels.</li>
+</ul>
+<p>Why the output is wrong, without a metric: <code>hash_insert</code> is one call and a
+three-way return, and the baseline output has no call in it. A reader is shown
+a <code>switch</code> on a variable nothing assigns.</p>
+<h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] Structuring: <code>crates/fission-midend-structuring/src/switch.rs</code>,
+  <code>linear_body.rs</code>, <code>guarded_tail/bodies.rs</code>.</li>
+</ul>
+<p>Each is the first place the fact goes wrong:</p>
+<ul>
+<li><strong>Switch head.</strong> <code>try_lower_switch</code> and
+  <code>try_lower_direct_dispatcher_switch</code> return <code>PreHirStmt::Switch</code>. Their three
+  callers (<code>sese_driver::apply_collapse_rule</code>, the linear walk in
+  <code>linear_multiblock.rs</code>, the loop-body reducer in <code>loops.rs</code>) push that
+  statement and resume at <code>skip_to</code>; none lowers the dispatching block's
+  statements. Every <code>if</code> rule does (<code>cond_prefix</code>), which is why the same
+  block printed as an <code>if</code> keeps them.</li>
+<li><strong>Switch skip.</strong> With no shared join the two functions resume at
+  <code>max_skip</code>, the furthest block any arm reached. Nothing checks that the
+  blocks below it belong to an arm.</li>
+<li><strong>Switch arm.</strong> <code>canonicalize_switch_target</code> follows an arm through
+  "trivial forwarding blocks" to the block behind them and takes that as the
+  arm. A forwarding block may hold register copies (<code>mov eax, -10; jmp exit</code>);
+  the arm then starts behind them and they are printed nowhere.</li>
+<li><strong>Later compare blocks.</strong> A compare chain is several blocks. The statements
+  of every one but the first were dropped with the first's.</li>
+<li><strong>One-armed <code>if</code>.</strong> <code>lower_conditional_tail</code> returns the arm's own resume
+  position. An arm that returns from a block past the join reports a position
+  past the join.</li>
+<li><strong>Guarded tail.</strong> <code>collect_guarded_tail_exported_bindings</code> records a read
+  site per <em>statement</em>, and <code>apply_guarded_tail_replacement_read</code> replaces the
+  name throughout that statement. The loop already stops at the first
+  top-level statement that redefines the name; a block or a branch that
+  redefines it and then reads it is one statement.</li>
+</ul>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a># baseline, hash_insert                 # this change
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>switch (local_14) {                     uVar0 = sub_11bdd(param_1, param_2, &amp;local_10, param_2);
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    case -1:                            local_14 = uVar0;
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>block_11fa8:                            ...
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        return uVar0;
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    case 0:
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>        goto block_11fa8;
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>    default:
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>        goto block_11fa8;
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>}
+</span></code></pre></div>
+<h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>A statement returned with a resume position owns the blocks from its own up
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>to that position: they are printed inside it or not at all.
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>1. A switch replaces a block's terminator. The block's statements go in
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>   front of it. For a compare chain, a later compare block's statements run
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>   only when the earlier compares failed, and a switch has no place for them.
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>   They may be dropped only if that changes nothing: the block writes
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>   registers and temporaries only (no store, no call), and no path from it
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>   reads one of the names it assigns before assigning it again. Otherwise the
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>   chain is not a switch.
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>2. A switch with no join owns [idx, max_skip) only if every block in it is
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>   entered through the switch (idx dominates it) and no goto inside the
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>   statement names a block of the range the statement does not define.
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>3. An `if` with an empty arm reaches the join through that arm, so it never
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>   resumes past a join ahead of it. It may resume earlier.
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>4. An arm starts at the block the dispatch jumps to. A forwarding block in
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>   front of it is stepped over only if it writes nothing.
+</span><span id="__span-1-18"><a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>5. A read site may be rewritten to the merge variable only if every read in
+</span><span id="__span-1-19"><a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>   the statement runs before the statement writes the name. An assignment
+</span><span id="__span-1-20"><a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>   does; a block, branch or loop that writes the name may not, and the
+</span><span id="__span-1-21"><a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>   promotion is rejected.
+</span><span id="__span-1-22"><a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>6. A jump-table switch replaces the indirect branch *and* what computed its
+</span><span id="__span-1-23"><a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>   target. Of the statements rule 1 puts in front of it, the trailing run
+</span><span id="__span-1-24"><a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>   that only finds the target is not printed: an assignment to a name, whose
+</span><span id="__span-1-25"><a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>   right side calls nothing (a flag helper over call-free operands counts as
+</span><span id="__span-1-26"><a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>   computing), which the selector does not read, and which no path from the
+</span><span id="__span-1-27"><a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>   block reads before assigning it again. The run ends at the first statement
+</span><span id="__span-1-28"><a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a>   that fails any of these; everything before it is kept. Applied only to a
+</span><span id="__span-1-29"><a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>   block that stores nothing and calls nothing.
+</span></code></pre></div>
+<p>All six read the CFG (dominance, block order), the block's p-code, or the
+statement tree. No ISA,
+calling convention, compiler or function identity is consulted.</p>
+<ul>
+<li>[x] Not gated on an ISA / calling convention.</li>
+<li>[x] No ISA data involved.</li>
+<li>[x] Synthetic tests state the CFG / statement shape only.</li>
+</ul>
+<p>Rule 1 was first written as "a chain with any statement in a later compare
+block is not a switch". Measured on the full configs that was wrong in the
+other direction: at <code>-O0</code> every compare re-loads its operand and sets the
+flags, so 171 functions stopped being switches (distance 392,625 -&gt; 393,372,
+perfect 12,994 -&gt; 12,981). The statements were the compare itself. The rule
+above keeps those switches and still refuses a chain that does something
+between its compares.</p>
+<p>The search for a reader in rule 1 works on names in lowered statements, on a
+copy of the lowering state (<code>lower_observed</code>), so that looking at a block
+ahead of its turn does not fix what it lowers to. It stops after 128 blocks
+and answers "read". It can refuse a switch that would have been fine -- when
+the real lowering resolves the read to the value instead of the name -- and
+the chain then prints as <code>if</code>s, which is correct.</p>
+<p>Rule 6 exists because rule 1 alone was measured to print too much. A block
+that ends in <code>jmp [table + index*8]</code> lowers to the bounds test's leftovers,
+the scaled index, the table load and the flag helpers of the compare; the
+<code>switch (selector)</code> already says all of it. One <code>-O2</code> function (<code>fx2txt</code>,
+four programs) printed 13 such statements in front of its switch, and the
+table load through its first parameter made the type pass call that
+parameter a pointer (type perfect 624 -&gt; 620 over the config). The reader
+search is the one rule 1 uses, with the same budget and the same failure
+mode: when it cannot tell, the statement is kept.</p>
+<p>Rule 5 rejects more than it has to: a statement whose reads all sit <em>behind</em>
+its own write needs no merge at all. Telling the two apart needs a
+path-sensitive walk of the statement; rejecting is sound and its cost is
+measured below.</p>
+<h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Existing owners, extended in place. No new pass, crate or metric.</li>
+<li><code>ParsedSwitch</code> gains <code>compare_blocks</code> (the chain's blocks in order), so the
+  caller can ask for their statements.</li>
+<li><code>cleanup::collect_referenced_labels</code> becomes <code>pub(crate)</code> for rule 2.</li>
+<li><code>StructuringHost</code> gains <code>block_writes_nothing</code> (no op of the block has an
+  output), so rule 4 can be asked without lowering the block.</li>
+<li>Rule 1 reuses <code>head_has_only_discardable_pure_ops</code>, the for-loop path's
+  test for "no store, no call".</li>
+<li><code>StructuringHost</code> gains <code>block_only_computes</code> (no <code>Store</code>, <code>Call</code>,
+  <code>CallInd</code> or <code>CallOther</code> in the block) for rule 6, which reuses the
+  guarded-tail module's <code>guarded_tail_call_target_is_known_pure_helper</code> and
+  <code>suffix_expr_contains_call</code> for "calls nothing".</li>
+<li>Interaction: a switch that used to be recovered and is now refused lowers
+  through the <code>if</code> rules. A guarded-tail promotion that is now refused leaves
+  the <code>goto</code> it would have removed.</li>
+<li>Interaction: an arm that used to be stepped over can leave the arms without
+  a shared exit; the chain then lowers through the <code>if</code> rules.</li>
+<li>Must not change: a switch whose head block has no statements; a chain with
+  none between its compares; a chain whose later compares only compute what
+  nothing reads; a promotion whose tail reads the name only in simple
+  statements. All tested.</li>
+</ul>
+<h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] Targeted tests, each checked against the line it guards by breaking
+  that line and confirming the test fails:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>broken</th>
+<th>failing test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>chain: head statements not carried</td>
+<td><code>a_switch_chain_keeps_what_its_first_block_does</code></td>
+</tr>
+<tr>
+<td>jump table: head statements not carried</td>
+<td><code>a_jump_table_switch_keeps_what_its_block_does_first</code></td>
+</tr>
+<tr>
+<td>chain: later compare blocks never count as doing work</td>
+<td><code>a_chain_that_does_work_between_its_compares_is_not_a_switch</code>, <code>a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch</code></td>
+</tr>
+<tr>
+<td>chain: later compare blocks always count as doing work</td>
+<td><code>a_later_compare_that_leaves_a_register_nobody_reads_is_still_a_switch</code></td>
+</tr>
+<tr>
+<td>chain: the reader search always answers "not read"</td>
+<td><code>a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch</code></td>
+</tr>
+<tr>
+<td>arm: a forwarding block that writes is stepped over</td>
+<td><code>a_default_that_only_sets_the_return_value_keeps_it</code> (prints <code>default: return rax;</code>, the baseline's output)</td>
+</tr>
+<tr>
+<td>chain: ownership not checked</td>
+<td><code>a_block_between_the_arms_that_the_switch_does_not_hold_is_still_printed</code></td>
+</tr>
+<tr>
+<td><code>if</code>: a join behind counted as ahead</td>
+<td><code>a_join_behind_the_if_leaves_the_reported_position_alone</code>, <code>multiblock_loop_rewrites_all_exits_to_breaks</code></td>
+</tr>
+<tr>
+<td><code>if</code>: always resumes at the join</td>
+<td><code>an_arm_that_stops_short_of_the_join_leaves_the_rest_to_the_walk</code></td>
+</tr>
+<tr>
+<td><code>if</code>: rule off</td>
+<td><code>a_one_armed_if_resumes_at_the_join_ahead_of_it</code></td>
+</tr>
+<tr>
+<td>guarded tail: compound statement rewritten</td>
+<td><code>a_read_behind_the_tail_s_own_definition_keeps_its_name</code></td>
+</tr>
+<tr>
+<td>guarded tail: an assignment no longer reads first</td>
+<td><code>a_read_in_front_of_the_tail_s_definition_takes_the_merged_value</code></td>
+</tr>
+<tr>
+<td>jump table: nothing dropped from the head</td>
+<td><code>what_only_finds_the_jump_target_is_not_kept</code></td>
+</tr>
+<tr>
+<td>jump table: reads behind the block ignored</td>
+<td><code>a_name_read_after_the_block_is_kept_with_all_before_it</code>, <code>a_jump_table_switch_keeps_a_value_its_block_sets_for_later</code></td>
+</tr>
+<tr>
+<td>jump table: the selector's reads ignored</td>
+<td><code>what_the_selector_reads_is_kept</code></td>
+</tr>
+<tr>
+<td>jump table: every right side counts as computing</td>
+<td><code>a_call_is_kept_and_so_is_what_feeds_it</code>, <code>a_flag_helper_on_the_result_of_a_call_is_kept</code></td>
+</tr>
+<tr>
+<td>jump table: a flag helper's operands not looked at</td>
+<td><code>a_flag_helper_on_the_result_of_a_call_is_kept</code></td>
+</tr>
+</tbody>
+</table>
+<p>The reader search itself is a pure function over blocks with eleven unit
+  tests (a read on one of two paths, a write that ends the search, a write
+  inside a branch that does not, the terminator as the reader, a loop, a
+  block that cannot be looked at, the budget).</p>
+<p>Not covered by a failing test: the ownership check at the jump-table and
+  terminator call sites (removing either fails nothing; the predicate itself
+  has four unit tests); the three call sites of the one-armed-<code>if</code> rule (the
+  rule is a pure function with five unit tests); and the "no store, no call"
+  precondition of rule 1 (removing it fails nothing: a call is already
+  refused because it is not an assignment, and no test builds a store to a
+  stack slot in a compare block); and rule 6's "stores nothing, calls
+  nothing" gate on the block (removing it fails nothing: the statement-level
+  test already refuses a call, and a store is not an assignment to a name).</p>
+<p>Rule 6 is tested on the pure function that picks the run
+  (<code>statements_ahead_of_the_target_computation</code>) and by one end-to-end
+  function. An end-to-end test that the target computation is <em>not</em> printed
+  was written and thrown away: it passed with the rule switched off, because
+  in a hand-built block the table load is already dead before structuring.</p>
+<p><code>a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch</code> checks that
+  the chain is refused, not that accepting it would print a wrong value: in
+  that synthetic function the lowering resolves the arm's read to the value,
+  so the switch would have been right. No function was found where dropping
+  a later compare block's write changed a printed value.</p>
+<ul>
+<li>
+<p>[x] Crate-level gate: <code>cargo nextest run -p fission-midend-structuring -p fission-pcode -p fission-midend-normalize</code>,
+  debug (2,178) and <code>--release</code> (2,177);
+  <code>cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity</code>;
+  <code>cargo fmt --all --check</code>; <code>scripts/check/owner_boundaries.sh</code>.</p>
+</li>
+<li>
+<p>[x] Call-site coverage on the sample. Every call expression carries the
+  address of the instruction it came from; a temporary probe printed, per
+  function, the set of those addresses present in the final output.</p>
+</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>-O0</code> (8,129 functions)</th>
+<th><code>-O2</code> (7,161 functions)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>call sites printed, baseline</td>
+<td>54,972</td>
+<td>57,216</td>
+</tr>
+<tr>
+<td>call sites printed, this change</td>
+<td>55,003</td>
+<td>57,240</td>
+</tr>
+<tr>
+<td>printed by the baseline and not by this change</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>printed by this change and not by the baseline</td>
+<td>31 (18 functions)</td>
+<td>24 (16 functions)</td>
+</tr>
+</tbody>
+</table>
+<p>Switches printed on the same sample: baseline 215 (<code>-O0</code>) / 173 (<code>-O2</code>),
+  this change 239 / 166.</p>
+<p>The probe was run on rules 1-5. Rule 6 removes only assignments that call
+  nothing, and the full configs below were checked for lost callees with
+  rule 6 in.</p>
+<ul>
+<li>[x] Full-config measurement, <code>-O0</code> (<code>unoptimized</code>, 33,899 functions),
+  against the baseline build, caches off. Four large functions (<code>yyparse</code>,
+  <code>inflate</code>, <code>poly1305_auth</code> x2) produced no output in this run and are left
+  out of both columns; run alone, each prints in 7-16 s and the same text as
+  before rule 6, so they ran out of time under the sweep's load. With them
+  (measured before rule 6) the distance row reads 392,625 -&gt; 392,115 and
+  every other row is the same.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>baseline</th>
+<th>this change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>functions scored for structure in both</td>
+<td>31,983</td>
+<td>31,983</td>
+</tr>
+<tr>
+<td>structure distance, total</td>
+<td>392,261</td>
+<td>391,751</td>
+</tr>
+<tr>
+<td>structure perfect</td>
+<td>12,994</td>
+<td>13,068</td>
+</tr>
+<tr>
+<td>type perfect</td>
+<td>3,383</td>
+<td>3,381</td>
+</tr>
+<tr>
+<td>type distance over the 49 functions whose type score changed</td>
+<td>137</td>
+<td>109</td>
+</tr>
+<tr>
+<td>byte perfect</td>
+<td>780</td>
+<td>792</td>
+</tr>
+<tr>
+<td>Union</td>
+<td>15,146</td>
+<td>15,158</td>
+</tr>
+<tr>
+<td>functions whose text changed</td>
+<td></td>
+<td>570</td>
+</tr>
+<tr>
+<td>score better / worse</td>
+<td></td>
+<td>194 (-1,604) / 117 (+1,094)</td>
+</tr>
+<tr>
+<td>new perfect / lost perfect</td>
+<td></td>
+<td>88 / 14</td>
+</tr>
+<tr>
+<td>changed functions that lost a callee name</td>
+<td></td>
+<td>0 (5 lose the <code>__sborrow</code> intrinsic, the corrected flag merge of section 1)</td>
+</tr>
+</tbody>
+</table>
+<p>Rule 6 changes two <code>-O0</code> functions (<code>simple_strtod_fatal</code>,
+  <code>selinux_set_callback</code>: a parameter prints as <code>uint</code>, not <code>int</code>, and the
+  bounds test in front of the switch loses its cast). No score moves.</p>
+<p>Read, not only scored:</p>
+<ul>
+<li>142 functions print one more <code>switch</code> (distance -938). Their arms are one
+    block that sets the return value and jumps to the exit. The baseline
+    stepped over every arm to the same exit block, found one target and
+    printed <code>if</code>s; the arms are now distinct. <code>sig2name</code>, <code>mode_to_filetype</code>
+    and 3 other rows were perfect as <code>if</code> chains and are not as switches
+    (+60, +30, ...): the two forms mean the same and the binary does not say
+    which the source used.</li>
+<li>35 functions print one <code>switch</code> fewer (distance +341). In the ones read
+    (<code>rsa_hash_alg_oid</code> x9, <code>parse_absolute_time</code> x12; 21 of the 35) the baseline's
+    <code>default:</code> returned a variable nothing set; the default sets its value in
+    a block that jumps past the arms' join, the arms then share no exit, and
+    the chain prints as <code>if</code>s with the right value. 9 of the 14 lost perfects
+    are <code>rsa_hash_alg_oid</code>, perfect on the baseline while switching on an
+    unset variable.</li>
+<li>
+<p>3 of the 88 new perfects are not right: <code>should_dereference</code> (cp,
+    ginstall, mv) returns <code>!command_line_arg ? 0 : 1</code> whatever the switch
+    chose. The baseline's output for it is wrong too, differently; see "Not
+    fixed".</p>
+</li>
+<li>
+<p>The two type perfects lost net are <code>is_colored</code> (4 programs lost, 2
+    other functions gained). The baseline switched on a variable nothing set
+    and printed no load at all; the head now prints, and its load address is
+    wrong (<code>rax = 176256; rax = *(unsigned long long *)(352512);</code> for
+    <code>color_indicator[type].len</code>). See "Not fixed".</p>
+</li>
+<li>
+<p>[x] Full-config measurement, <code>-O2</code> (<code>inlined</code>, 26,012 functions, 24,186
+  scored for structure), against the baseline build, caches off:</p>
+</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>baseline</th>
+<th>rules 1-5</th>
+<th>rules 1-6 (this change)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>structure distance, total</td>
+<td>616,056</td>
+<td>616,032</td>
+<td>616,032</td>
+</tr>
+<tr>
+<td>structure perfect</td>
+<td>7,409</td>
+<td>7,409</td>
+<td>7,409</td>
+</tr>
+<tr>
+<td>type perfect</td>
+<td>624</td>
+<td>620</td>
+<td>624</td>
+</tr>
+<tr>
+<td>byte perfect</td>
+<td>500</td>
+<td>500</td>
+<td>500</td>
+</tr>
+<tr>
+<td>Union</td>
+<td>7,858</td>
+<td>7,854</td>
+<td>7,858</td>
+</tr>
+<tr>
+<td>functions whose text changed</td>
+<td></td>
+<td>195</td>
+<td>190</td>
+</tr>
+<tr>
+<td>score better / worse</td>
+<td></td>
+<td>39 (-243) / 28 (+219)</td>
+<td>39 (-243) / 28 (+219)</td>
+</tr>
+<tr>
+<td>new perfect / lost perfect</td>
+<td></td>
+<td>0 / 0</td>
+<td>0 / 0</td>
+</tr>
+<tr>
+<td>changed functions that lost a callee name</td>
+<td></td>
+<td>0</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p>At <code>-O2</code> this is not a measured improvement: the distance moves by 24 in
+  616,056 and nothing else moves. The type score changes in 3 functions, all
+  up (distance 23 -&gt; 19).</p>
+<p>Read, not only scored:</p>
+<ul>
+<li><code>fallible_read_node</code> (u-boot, +20): the baseline lost the function's
+    first call and switched on a register nothing set; the call and the test
+    of its result are now printed.</li>
+<li><code>gnutls-cli-debug::main</code> (+25): the baseline printed a second copy of a
+    block behind <code>return 0;</code>, where nothing reaches it. It is gone.</li>
+<li><code>groups::main</code>, <code>no_options</code>: an <code>if</code> chain becomes a <code>switch</code> with the
+    same meaning.</li>
+<li><code>fx2txt</code> (4 programs), <code>pred_newerXY</code>: baseline text again (rule 6).</li>
+<li><code>sshkey_size</code> (9 openssh programs, distance 18 -&gt; 18) is <strong>worse</strong>: it is
+    now a <code>switch</code>, and one arm tests <code>rdi</code>, which nothing assigns; the
+    baseline read <code>param_1-&gt;field_8</code> there. See "Not fixed".</li>
+</ul>
+<h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Was an AI model asked for implementation advice? [x] No external prompt.</li>
+<li>Unseen or synthetic validation evidence: the full configs, of which the
+  scored sample set is 233 rows; the synthetic tests above.</li>
+</ul>
+<h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] No binary/function/address/corpus guards in production code.</li>
+<li>[x] No claim from dashboard-only edits.</li>
+<li>[x] No new pass, helper crate or metric.</li>
+</ul>
+<h2 id="not-fixed">Not fixed<a class="headerlink" href="#not-fixed" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>A default that leaves past the arms' join.</strong> <code>default: x = -10; goto
+  exit</code> where the cases meet one block earlier (<code>x = 0; exit: return x</code>) has
+  no shared exit as the rules compute it, so the chain prints as <code>if</code>s. It
+  could be a <code>switch</code> whose default returns. 35 <code>-O0</code> functions.</li>
+<li><strong>A return value merged on the wrong condition.</strong> <code>hash_insert</code> returns
+  one of three values and prints one; <code>should_dereference</code> prints a ternary
+  on the last condition tested. The lowered <code>Return</code> resolves the return
+  register to one reaching value. Builder (register join), not structuring.</li>
+<li><strong>A block's statements lowered after its terminator name a register
+  differently.</strong> The builder caches a block's terminator and its statements
+  separately. When the terminator is lowered first, a register it reads is
+  named after the incoming value, and the statements lowered afterwards
+  assign another name; the output then reads a register nothing assigns.
+  On the sample (15,296 functions) 1,115 functions read a never-assigned
+  register-named local on the baseline and 1,110 with this change: 7 gone
+  and 2 new, both from switches that are now recovered (<code>sshkey_size</code> at
+  <code>-O2</code>, <code>if (rdi)</code>; one <code>-O0</code> function of <code>sshd</code>, <code>if (rdx)</code>, where the
+  baseline was a correct <code>if</code> chain). Two fixes were measured and neither
+  shipped: lowering the statements first inside <code>lower_block_terminator</code>
+  changes 7,503 of the sample's functions (1,110 -&gt; 1,039, 105 switches
+  lost, 19 gained), far outside this change; lowering each arm's first block
+  before the switch changes 464, fixes the <code>-O2</code> function and breaks the
+  <code>-O0</code> one differently. Builder, own change.</li>
+<li><strong>A copy read after its source is overwritten.</strong> <code>mov rdx, rax; lea rax,
+  [table]; mov rax, [rdx + rax]</code> prints as <code>rax = 176256; rax = *(352512)</code>:
+  the copy is resolved by name to the register's later value. The baseline
+  has it in 4 <code>-O0</code> functions (among them <code>compat_banner</code>'s loop head); the switch
+  heads rule 1 now prints add <code>is_colored</code> (4 programs), where the baseline
+  printed no head. Whether this is the defect above or a second one was not
+  established. Builder.</li>
+<li><strong>Rule 5 is wider than it has to be</strong> (section 3).</li>
+<li>On the sample, 333 functions miss a reachable call site on the baseline
+  and with this change alike. Not looked at.</li>
+<li>In one synthetic CFG a call in a return tail copied into two arms was not
+  printed, with and without this change. Not reproduced on a binary, not
+  chased.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
