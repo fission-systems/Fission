@@ -1,0 +1,1808 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+        <link rel="canonical" href="https://sjkim1127.github.io/Fission/proposals/2026-11-16-stack-protector-check-forms/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
+    
+    
+      
+        <title>Proposal: the stack-protector check is removed in every form it is laid out in - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#proposal-the-stack-protector-check-is-removed-in-every-form-it-is-laid-out-in" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Proposal: the stack-protector check is removed in every form it is laid out in
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../QUALITY_METRICS/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Quality Metrics
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.3.0/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    sjkim1127/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality Metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.3.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.3.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-baseline-row-anchor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Baseline Row Anchor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-owner-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Owner Proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-generality-invariant-proof" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Generality / Invariant Proof
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-risk-and-ownership-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Risk And Ownership Check
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-validation-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Validation Matrix
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-ai-review-prompt-firewall" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. AI Review / Prompt Firewall
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-review-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Review Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-fixed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Not fixed
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="proposal-the-stack-protector-check-is-removed-in-every-form-it-is-laid-out-in">Proposal: the stack-protector check is removed in every form it is laid out in<a class="headerlink" href="#proposal-the-stack-protector-check-is-removed-in-every-form-it-is-laid-out-in" title="Permanent link">&para;</a></h1>
+<p>Status: implemented; results below. Filled from
+<a href="../../templates/DECOMPILER_CHANGE_PROPOSAL/"><code>docs/templates/DECOMPILER_CHANGE_PROPOSAL.md</code></a>.
+Stacked on
+<a href="../2026-11-16-tail-dup-straight-line-tails/"><code>2026-11-16-tail-dup-straight-line-tails.md</code></a>,
+whose "Not fixed" list this closes the first item of.</p>
+<h2 id="1-baseline-row-anchor">1. Baseline Row Anchor<a class="headerlink" href="#1-baseline-row-anchor" title="Permanent link">&para;</a></h2>
+<p>Not one row: a repeating shape, read on the full local DecBench configs
+(<code>unoptimized</code>: 31,987 scored functions; <code>inlined</code> (<code>-O2</code>): 24,186), baseline
+<code>0d3eb0cf2</code> (the tail-dup change above), caches disabled.</p>
+<p><code>-fstack-protector</code> puts a check in front of every return of a function with a
+local buffer. The existing pass removed it in one layout only -- the handler
+call alone inside a one-armed <code>if</code>. The baseline still prints
+<code>__stack_chk_fail</code> in 44 <code>-O0</code> and 1,071 <code>-O2</code> functions. Read by what stands
+in front of the call, the checks among them have four layouts:</p>
+<table>
+<thead>
+<tr>
+<th>layout</th>
+<th>example (baseline output)</th>
+<th>function</th>
+<th>config</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a label inside the guard</td>
+<td><code>if (x) { block_f: __stack_chk_fail(); }</code> -- printed without the label when nothing refers to it</td>
+<td><code>plain_key_blob</code> (openssh), <code>rl_insert</code> (libedit)</td>
+<td><code>-O2</code></td>
+</tr>
+<tr>
+<td>the handler after the check</td>
+<td><code>if (!x) { return v; } __stack_chk_fail();</code></td>
+<td><code>decode_line_length</code> (coreutils), <code>inflate</code> (zlib), <code>start_header</code> (tar)</td>
+<td><code>-O0</code></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td><code>tilde_expand_filename</code> (openssh, 12 binaries), <code>_generate_request</code> (gnutls)</td>
+<td><code>-O2</code></td>
+</tr>
+<tr>
+<td>the check jumps</td>
+<td><code>if (x) goto block_f;</code> ... <code>block_f: __stack_chk_fail();</code></td>
+<td><code>do_ipnh</code> (iproute2; seven checks), <code>unary_operator</code> (bash)</td>
+<td><code>-O2</code></td>
+</tr>
+<tr>
+<td>the handler past the end of the arm the check is in</td>
+<td><code>if (c) { ...; if (!x) { return v; } } else { ... } __stack_chk_fail();</code></td>
+<td><code>lwt_print_encap</code> (iproute2), <code>env_modprobe_options_append</code> (kmod), <code>mergefiles</code> (coreutils)</td>
+<td><code>-O2</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Failure category: compiler scaffolding printed as program logic. The output
+  is correct; it shows a branch and an abort call the source does not have.</li>
+<li>The shape is not rare: the change alters 42 <code>-O0</code> and 708 <code>-O2</code> functions
+  (29 and 430 distinct names, 16 and 25 projects). Every one of them printed
+  the handler before; no function without it changes.</li>
+</ul>
+<p>Why the output is wrong, without a metric: the reader is shown a decision --
+"if this value is non-zero, abort" -- in front of each return, and has to
+recognise it as the canary and discard it. The source has no such decision and
+neither does an unprotected build of the same function. The pass that exists
+to remove it already agrees; it only failed to recognise the layout.</p>
+<h2 id="2-owner-proof">2. Owner Proof<a class="headerlink" href="#2-owner-proof" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] Structuring (cleanup): <code>crates/fission-midend-structuring/src/cleanup/stack_protector.rs</code>.</li>
+</ul>
+<p>The pass runs once on the finished layout and matched <code>If { then: [call], else: [] }</code>
+(either polarity). Observed on the anchors, at the pass's own input:</p>
+<ul>
+<li><code>plain_key_blob</code>: the arm is <code>[Label, call]</code>. An earlier clone left the
+  label; nothing refers to it by the time the pass runs, so it is not printed
+  and the output looks exactly like the form the pass claims to remove.</li>
+<li><code>decode_line_length</code>: the layout put the handler block after the <code>if</code>, so the
+  arm that fails is the one that is not there.</li>
+<li><code>do_ipnh</code>: one block calls the handler and every other check reaches it by
+  <code>goto</code>.</li>
+</ul>
+<p>All three are the same branch the pass already removes, in a layout decided by
+block order. Nothing upstream is wrong: the branch is real in the binary.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a># baseline (decode_line_length)           # this change
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>if ((uint)rax) {                          if (!(uint)rax) {
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>    if ((uint)rax == 1) {                     xVar6 = local_8 - *ptr;
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>        rax = 0;                              return rax;
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>        goto block_7054;                  }
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>    }                                     if ((uint)rax == 1) {
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>    rax = -1;                                 rax = 0;
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>}                                             xVar6 = local_8 - *ptr;
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>block_7054:                                   return rax;
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>if (!(local_8 - *(...)(fs_offset + 40))) {  }
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>    return rax;                           rax = -1;
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>}                                         xVar6 = local_8 - *ptr;
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>__stack_chk_fail();                       return rax;
+</span></code></pre></div>
+<p>With the check gone the tail is two straight-line statements, which is what
+<code>tail_dup</code> copies to each return (the previous proposal's rule, unchanged).</p>
+<h2 id="3-generality-invariant-proof">3. Generality / Invariant Proof<a class="headerlink" href="#3-generality-invariant-proof" title="Permanent link">&para;</a></h2>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>A branch exactly one side of which does nothing but reach the stack-protector
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>handler is the compiler's check. It is replaced by its other side.
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>"Reach the handler" is: the handler call (behind any labels, followed by at
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>most returns); a jump to a label standing on the call, or on such a jump; or,
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>for an arm that is not there, falling out of the `if` into the call. Falling
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>out of the last statement of an `if` arm or a plain block continues with what
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>follows the enclosing statement; falling out of a loop body or a switch case
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>does not.
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>A branch both of whose sides only reach the handler has no passing side and
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>stays.
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>After a check is removed, a handler block that nothing reaches -- the
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>statement before it leaves, and no jump names a label on it -- is removed.
+</span><span id="__span-1-16"><a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>Only the handler: no other statement is swept. A jump that is left pointing at
+</span><span id="__span-1-17"><a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>a removed label is replaced by the call it stood for.
+</span></code></pre></div>
+<p>The rule reads the statement tree and one callee name -- the handler names
+<code>stack_protector.rs</code> already owned. No ISA, calling convention, compiler or
+function identity is consulted.</p>
+<ul>
+<li>[x] Not gated on an ISA / calling convention.</li>
+<li>[x] No ISA data involved.</li>
+<li>[x] Synthetic tests state the statement shape only.</li>
+</ul>
+<p>Deliberately not a check, and left alone: a handler that control runs into
+from ordinary code.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sub_1f410();            // the compiler put nothing after this call
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>__stack_chk_fail();
+</span></code></pre></div>
+<p>The compiler laid the handler out behind a call it knew not to return. Fission
+does not know that, so here the handler call is the only thing that ends the
+path; removing it would make the code run on into the next label. Most of the
+529 <code>-O2</code> functions that still print the handler keep it for this reason
+("Not fixed"). That is a no-return-analysis gap, a different owner.</p>
+<p><code>tail_dup</code> uses the same definition (<code>stack_protector_pass_arm</code> now takes the
+statement and what follows it), so "a return behind the check is still the
+function's return" holds for the handler-after layout too.</p>
+<p>Comparable coverage:</p>
+<ul>
+<li>Similar shape 1: <code>key_sig_algorithm</code> (openssh <code>-O2</code>): one check that jumps
+  and one with the handler after it, in the same function.</li>
+<li>Similar shape 2: <code>jit_exec</code> (grep <code>-O2</code>): two checks that jump, plus one
+  fall-through into the handler behind a call -- the checks go, the
+  fall-through stays.</li>
+<li>Synthetic invariant tests: 15 new in <code>stack_protector.rs</code>, 1 in <code>tail_dup.rs</code> (section 5).</li>
+</ul>
+<h2 id="4-risk-and-ownership-check">4. Risk And Ownership Check<a class="headerlink" href="#4-risk-and-ownership-check" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Existing owner: <code>stack_protector</code> (what the check is), <code>tail_dup</code> (reads that
+  definition). Both extended in place; no new pass. The post-loop tail of
+  <code>finalize_post_layout_body_with</code> is now <code>settle_finished_body</code>, so tests can
+  run the three passes in their real order.</li>
+<li>Ordering change: the check is removed before
+  <code>unwrap_else_after_diverging_then</code>, not after. The handler is a call that
+  never returns; left in, an arm ending in it unwrapped an <code>else</code> the source
+  wrote as one (tested).</li>
+<li>Shared substrate: [x] none; owner-local rule on the statement tree.</li>
+<li>A mistake made and removed, recorded because the score rewarded it. The
+  first version re-ran <code>drop_unreachable_tails</code> to a fixpoint after removing a
+  check. That deleted dead code which had nothing to do with the canary and was
+  kept only by jumps from other dead code: <code>list_disks</code> (sysvinit <code>-O0</code>) went
+  from 371 lines to 13 and <code>do_one_pass</code> (e2fsprogs <code>-O2</code>) from 1,820 to 1,563. On
+  <code>-O2</code> that build measured <strong>1,593 better</strong> than the one proposed here
+  (614,463 against 616,056). It was found by reading the largest line drops,
+  not by the total. The replacement sweeps the handler only, and decides
+  "leaves" by the last statement of each arm -- <code>unreachable_tail</code> uses "any
+  statement", which is wrong for an arm entered again at a label (tested).</li>
+<li>New owner-to-owner dependency: [x] none new (<code>unreachable_tail::is_diverging_call</code>
+  becomes <code>pub(super)</code>; same module tree).</li>
+<li>Telemetry impact: none.</li>
+<li>Must not change: a function without the handler (measured: none changes); a
+  handler control still runs into (tested, and visible in the 529); code
+  that is dead for reasons other than the check (tested).</li>
+</ul>
+<h2 id="5-validation-matrix">5. Validation Matrix<a class="headerlink" href="#5-validation-matrix" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] Targeted invariant tests: <code>cargo nextest run -p fission-midend-structuring</code>
+  -- 351 pass. Each rule was checked against its tests by breaking that one
+  line and confirming those tests, and only those, fail:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>broken</th>
+<th>failing tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>an absent arm never fails</td>
+<td><code>a_check_with_the_handler_after_it_goes</code>, <code>a_check_sees_the_handler_past_...</code>, <code>a_branch_with_no_passing_side_stays</code>, <code>the_pass_arm_is_found_when_the_handler_follows_the_check</code>, <code>the_handler_does_not_unwrap_...</code>, <code>clone_sees_through_a_check_laid_out_before_the_handler</code></td>
+</tr>
+<tr>
+<td>the end of an arm never continues past the <code>if</code></td>
+<td><code>a_check_sees_the_handler_past_the_end_of_the_arm_it_is_in</code></td>
+</tr>
+<tr>
+<td>a loop body continues past the loop</td>
+<td><code>a_loop_body_does_not_run_into_what_follows_the_loop</code></td>
+</tr>
+<tr>
+<td>labels in the failing arm not skipped</td>
+<td><code>a_label_on_the_handler_does_not_hide_the_check</code>, <code>a_check_that_jumps_...</code>, <code>a_jump_that_was_not_a_check_...</code></td>
+</tr>
+<tr>
+<td>a jump is never the failing side</td>
+<td><code>a_check_that_jumps_to_the_handler_goes</code>, <code>a_label_on_a_jump_to_the_handler_is_followed</code></td>
+</tr>
+<tr>
+<td>fail labels collected in one pass</td>
+<td><code>a_label_on_a_jump_to_the_handler_is_followed</code></td>
+</tr>
+<tr>
+<td>jumps left dangling</td>
+<td><code>a_jump_that_was_not_a_check_gets_the_call_it_stood_for</code></td>
+</tr>
+<tr>
+<td>every jump to a fail label rewritten</td>
+<td><code>a_jump_to_a_handler_that_is_still_there_stays_a_jump</code></td>
+</tr>
+<tr>
+<td>a branch with two failing sides picks one</td>
+<td><code>a_branch_with_no_passing_side_stays</code></td>
+</tr>
+<tr>
+<td>check removed after the <code>else</code> unwrap</td>
+<td><code>the_handler_does_not_unwrap_an_else_the_source_wrote</code></td>
+</tr>
+<tr>
+<td>unreached handler never swept</td>
+<td><code>a_check_with_the_handler_after_it_goes</code>, <code>a_check_sees_the_handler_past_...</code>, <code>a_label_on_a_jump_...</code>, <code>the_handler_does_not_unwrap_...</code></td>
+</tr>
+<tr>
+<td>sweep ignores jumps to the handler</td>
+<td><code>a_jump_to_a_handler_that_is_still_there_stays_a_jump</code></td>
+</tr>
+<tr>
+<td>sweep ignores falling into the handler</td>
+<td><code>a_handler_control_still_runs_into_stays</code>, <code>an_arm_that_leaves_and_is_entered_again_...</code>, three more</td>
+</tr>
+<tr>
+<td>sweep takes any dead statement</td>
+<td><code>only_the_handler_is_swept_not_other_dead_code</code></td>
+</tr>
+<tr>
+<td>sweep runs once</td>
+<td><code>a_label_on_a_jump_to_the_handler_is_followed</code></td>
+</tr>
+<tr>
+<td>"leaves" decided by any statement of an arm</td>
+<td><code>an_arm_that_leaves_and_is_entered_again_does_not_hide_the_handler</code></td>
+</tr>
+<tr>
+<td>anything may follow the handler in the failing arm</td>
+<td><code>an_arm_that_does_more_than_fail_is_not_the_check</code></td>
+</tr>
+<tr>
+<td><code>tail_dup</code> looks at the <code>if</code> alone</td>
+<td><code>clone_sees_through_a_check_laid_out_before_the_handler</code></td>
+</tr>
+<tr>
+<td>a two-armed check needs an empty arm</td>
+<td><code>a_two_armed_check_becomes_its_passing_arm</code>, <code>the_pass_arm_is_found_in_either_arm_...</code>, <code>gotoless_split_sees_through_...</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>[x] Crate-level gate: <code>cargo nextest run -p fission-midend-structuring -p fission-pcode</code>,
+  debug and <code>--release</code>; <code>cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity</code>;
+  <code>cargo fmt --all --check</code>.</li>
+<li>[x] Full-config measurement (not the scored sample set), same rows, caches off:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th><code>-O0</code> base</th>
+<th><code>-O0</code> change</th>
+<th><code>-O2</code> base</th>
+<th><code>-O2</code> change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>total structure distance</td>
+<td>392,704</td>
+<td>392,625</td>
+<td>619,683</td>
+<td>616,056</td>
+</tr>
+<tr>
+<td>structure perfect</td>
+<td>12,994</td>
+<td>12,994</td>
+<td>7,379</td>
+<td>7,409</td>
+</tr>
+<tr>
+<td>Union / type / byte perfect</td>
+<td>15,146 / 3,383 / 780</td>
+<td>15,146 / 3,383 / 780</td>
+<td>7,828 / 624 / 500</td>
+<td>7,858 / 624 / 500</td>
+</tr>
+<tr>
+<td>rows better / worse</td>
+<td></td>
+<td>26 (-184) / 15 (+105)</td>
+<td></td>
+<td>508 (-4,806) / 158 (+1,179)</td>
+</tr>
+<tr>
+<td>new / lost perfect</td>
+<td></td>
+<td>0 / 0</td>
+<td></td>
+<td>30 / 0</td>
+</tr>
+<tr>
+<td>functions printing the handler</td>
+<td>44</td>
+<td>3</td>
+<td>1,071</td>
+<td>529</td>
+</tr>
+</tbody>
+</table>
+<p>No row's score moved on unchanged text, in either config.</p>
+<p>A second axis that does not see CFG shape -- recompile and compare bytes --
+  on the rows whose text changed: <code>-O0</code> +76 (22 better, 9 worse), <code>-O2</code>
+  -3,385 (369 better, 111 worse). The config totals (2,160,155 -&gt; 2,161,065;
+  1,403,771 -&gt; 1,400,780 on the common rows) also contain 7 <code>-O0</code> rows and 1
+  <code>-O2</code> row whose byte distance moved (+834, +394) on <strong>identical</strong> text, so
+  the <code>-O0</code> total is harness noise, not this change. Compilable: 17,170 -&gt;
+  17,170 and 11,531 -&gt; 11,533 (three gained, one lost:
+  <code>send_userauth_info_request</code>; the two texts give the same diagnostics under
+  a local syntax check, so the cause is not established).</p>
+<p>What the score does not show, in the changed functions only: lines
+  37,718 -&gt; 37,631 (<code>-O0</code>) and 182,014 -&gt; 178,231 (<code>-O2</code>); <code>goto</code>s
+  2,298 -&gt; 2,262 and 14,763 -&gt; 14,370. No output has a <code>goto</code> to a label that
+  is not there, before or after, and the count of labels printed directly
+  before a closing brace is unchanged (211 / 136).</p>
+<ul>
+<li>[x] Sample-set gate (the scored 233 rows): perfect 67 -&gt; 67, total distance
+  7,611 -&gt; 7,592. Seven rows move: three better (-42 counting the row the
+  sample lists twice), four worse (+23), all four of the kind described next.</li>
+</ul>
+<p>Rows that got worse were read, not just counted. In every one read, the diff
+is the check and nothing else. By what moved:</p>
+<ol>
+<li><strong>The output already had fewer CFG nodes than the source, and now has fewer
+   still</strong>: all 15 <code>-O0</code> rows and 151 of the 158 <code>-O2</code> rows (+105, +1,020).
+   The check's two nodes were standing in for nodes Fission fails to recover
+   elsewhere in the function -- zlib <code>inflate</code> (source 416 nodes, output
+   366 -&gt; 363), <code>example::main</code> (11; 9 -&gt; 7), <code>unary_operator</code> (22; 19 -&gt; 15).
+   The distance was better for a reason that had nothing to do with the
+   source. The improving rows are the mirror image: of the 508, 433 go from
+   over the source's node count towards it, 44 cross it, 30 become isomorphic
+   and one was under already.</li>
+<li><strong>A lower bound replaced by a computed distance</strong>: <code>factor_using_pollard_rho2</code>
+   (+141, from a three-line change). The baseline's 222 was the scorer's
+   <code>size_lower_bound</code> approximation; the new 363 is <code>vj_ged</code>. Not comparable.</li>
+<li>Six <code>-O2</code> rows (+18 in total) where the output was over the source's node
+   count and the distance still rose by 1-5.</li>
+</ol>
+<p>The gains have the same asymmetry to keep in mind: 30 new perfects, 12 of them
+one function (<code>tilde_expand_filename</code>) in 12 openssh binaries.</p>
+<h2 id="6-ai-review-prompt-firewall">6. AI Review / Prompt Firewall<a class="headerlink" href="#6-ai-review-prompt-firewall" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Was an AI model asked for implementation advice? [x] No external prompt.</li>
+<li>Unseen or synthetic validation evidence: the measurement is on the full
+  configs, of which the scored sample set is 233 rows; synthetic tests above.</li>
+</ul>
+<h2 id="7-review-notes">7. Review Notes<a class="headerlink" href="#7-review-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li>[x] No binary/function/address/corpus guards in production code. The only
+  name consulted is the stack-protector handler, already owned by
+  <code>stack_protector.rs</code>.</li>
+<li>[x] No claim from dashboard-only edits.</li>
+<li>[x] No new pass, helper crate or metric.</li>
+</ul>
+<h2 id="not-fixed">Not fixed<a class="headerlink" href="#not-fixed" title="Permanent link">&para;</a></h2>
+<ul>
+<li>The handler that code runs into. Of the 529 <code>-O2</code> functions still printing
+  it: directly after a statement, a call not known to be no-return such as
+  <code>fatal_exit()</code> or <code>error(1, ...)</code> (438 functions; 1 at <code>-O0</code>); after a block
+  one path of which runs out of it -- an arm ending in such a call, a tail
+  call printed as <code>__fission_branchind</code>, a <code>switch</code> with no default, a
+  <code>while (1)</code> (79; 46 of the sites have the tail call in front). Correct to
+  keep until the code in front is known to diverge.</li>
+<li>A handler nothing reaches in a function where no check was recognised --
+  after a <code>goto</code> with no label (11 <code>-O2</code> functions; in a twelfth an
+  unconditional jump targets it), or after a block ending in
+  <code>return</code> whose check was already gone when the pass ran (2 <code>-O0</code>). The sweep
+  runs only after a removal; who removed those checks and left the handler is
+  not established.</li>
+<li>The canary arithmetic stays as a dead assignment
+  (<code>xVar6 = local_8 - *(...)(fs_offset + 40);</code>), as the module has always
+  documented. It is straight-line; removing it is dead-store elimination, not
+  this pass.</li>
+<li>The combination with the flag-snapshot change (#900) was not swept.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1277,6 +1277,14 @@
          <lastmod>2026-11-18</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-16-stack-protector-check-forms/</loc>
+         <lastmod>2026-11-18</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-16-tail-dup-straight-line-tails/</loc>
+         <lastmod>2026-11-18</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/reports/2026-10-05-ssa-value-emission/</loc>
          <lastmod>2026-11-18</lastmod>
     </url>
