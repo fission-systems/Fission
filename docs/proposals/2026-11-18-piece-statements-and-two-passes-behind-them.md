@@ -185,9 +185,31 @@ were read are corrections but for one. At `-O2` the distance is worse and
 the perfect count flat; the explanation read on the largest rows is code that
 used to be deleted, and that explanation was not checked on every row.
 
-**What it does not.** The baseline is `a4358919e`. `main` has since taken
-#899-#903, #918 and #919; this branch has not been rebased on it or measured
-against it.
+### Rebased on `main` (`26dff6bcc`, after #899-#903, #918 and #919 merged)
+
+The branch rebased without conflict. Both sides rebuilt and swept back to
+back on an otherwise idle machine; two rows hit the render limit on each
+side of each config.
+
+| all three changes, against `main` | `-O2` (`inlined`) | `-O0` (`unoptimized`) |
+|---|---|---|
+| rows scored on both sides | 24,188 | 31,989 |
+| total distance | 616,516 -> 619,863 (+0.54%) | 391,603 -> 389,747 (-0.47%) |
+| structure perfect | 7,484 -> 7,488 (5 new, 1 lost) | 13,105 -> 13,119 (43 new, 29 lost) |
+| type / byte perfect | 622 / 501 -> 622 / 500 | 3,385 -> 3,400 / 792 |
+| Union | 7,926 -> 7,930 | 15,199 -> 15,224 |
+| rows better / worse | 454 (-3,542) / 642 (+6,889) | 223 (-3,139) / 160 (+1,283) |
+
+The same shape as before the rebase. Of the 29 `-O0` perfects lost, the ones
+not already listed above are `should_dereference` (three binaries) and
+`all_digits`, both read: the old output returned an unassigned temporary on
+one `case`, and dropped the upper bound of a digit test; the new output has
+both right. `lseek_or_error` is the stale select the first proposal records.
+Rows that lose a callee name other than a flag intrinsic lose a fixed-address
+call that was a wrong devirtualization (`istrsenvisx`: `sub_26320()` becomes
+a call through the pointer it was loaded from).
+
+With #901 on `main`, sshd `0x42b21` prints its mask.
 
 ## 6. AI Review / Prompt Firewall
 
@@ -195,11 +217,8 @@ No external model prompt was used.
 
 ## 7. Review Notes
 
-- Not fixed and seen on the way: sshd `0x42b21` still loses its mask, because
-  `(uint)(uchar)x` prints as `x`; the IR holds the truncation through
-  normalize, and #901 ("peeling an inner unsigned cast must not drop a
-  truncation"), merged to `main` since, is not on this branch. That function's loop is also still a
-  label and a `goto`. `u32tochar` (above). The emission path is still more
+- Not fixed and seen on the way: sshd `0x42b21`'s loop is still a label and
+  a `goto`. `u32tochar` (above). The emission path is still more
   verbose than the legacy path on straight-line code (`uVar0 = rsi - 1; rsi
   = (uint)uVar0;`), because the low piece of an `IntZExt` is not coalesced
   with its source. `classify_base_object`'s name-based stack class still
