@@ -256,6 +256,13 @@ pub trait StructuringHost {
     fn take_extra_absorbed_members(&mut self) -> Vec<usize>;
     fn sese_region_proof_budget_exceeded(&self) -> bool;
     fn region_has_external_entry(&self, region: &HashSet<usize>, header_idx: usize) -> bool;
+    /// Whether no op of the block writes anything: stepping over it loses
+    /// nothing, and that can be said without lowering it.
+    fn block_writes_nothing(&self, block_idx: usize) -> bool;
+    /// Whether the block stores nothing and calls nothing: registers and
+    /// temporaries are all it writes, so a statement of it that assigns a
+    /// name has written nothing a later read could reach except by that name.
+    fn block_only_computes(&self, block_idx: usize) -> bool;
     /// Whether the condition head block has only pure ops discardable for for-loop form.
     fn head_has_only_discardable_pure_ops(&self, block_idx: usize) -> bool;
     /// Peek cached terminator branch targets for label pre-seeding (no lowering).

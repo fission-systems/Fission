@@ -1586,7 +1586,6 @@ pub fn collect_guarded_tail_exported_bindings(
         }
         if !always_terminates {
             for (stmt_idx, stmt) in follow_tail.iter().enumerate() {
-                let _ = stmt;
                 let reads_here = tail_read_kinds[stmt_idx]
                     .get(binding_name.as_str())
                     .copied();
@@ -1601,6 +1600,17 @@ pub fn collect_guarded_tail_exported_bindings(
                     continue;
                 }
                 if let Some(kind) = reads_here {
+                    if defs_here > 0 && !reads_precede_the_definition(stmt, binding_name) {
+                        // Some reads in this statement see the middle's
+                        // value and some may see the statement's own. One
+                        // name cannot stand for both, and leaving the reads
+                        // alone would drop the ones that need the merge.
+                        host.bump_structuring_counter(
+                            StructuringCounter::guarded_tail_replacement_read_rejected_nondominated_count,
+                            (read_sites.len() + 1) as usize,
+                        );
+                        return Err(GuardedTailExecutionRejection::ReplacementIncomplete);
+                    }
                     read_sites.push(GuardedTailReplacementRead { stmt_idx, kind });
                 }
                 if defs_here > 0 {
@@ -1655,6 +1665,24 @@ pub fn collect_guarded_tail_exported_bindings(
         });
     }
     Ok(bindings)
+}
+
+/// Whether every read of `name` in a statement that also writes `name` runs
+/// before the write.
+///
+/// A read site is rewritten by replacing the name throughout the statement, so
+/// this is what makes that rewrite mean "the value the middle left". An
+/// assignment evaluates its right-hand side first. A block, a branch or a loop
+/// that writes the name may read it afterwards -- `{ x = f(); if (x) .. }` --
+/// and those reads see the statement's own value, not the middle's.
+fn reads_precede_the_definition(stmt: &PreHirStmt, name: &str) -> bool {
+    matches!(
+        stmt,
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs),
+            ..
+        } if lhs == name
+    )
 }
 
 pub fn map_guarded_tail_canonicalization_rejection(

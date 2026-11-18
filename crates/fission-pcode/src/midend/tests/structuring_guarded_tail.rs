@@ -296,6 +296,116 @@ fn structuring_guarded_tail_execute_rewrites_descendant_reads_with_dominating_el
     assert_ne!(replacement_name, "tmp");
 }
 
+/// `tmp = seed; if (reg) goto tail; tmp = probe; tail: <tail>`
+fn guarded_middle_that_sets_tmp(tail: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+    let mut body = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("seed".to_string()),
+        },
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("reg".to_string()),
+            then_body: vec![PreHirStmt::Goto("block_tail".to_string())].into(),
+            else_body: Vec::new().into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Var("probe".to_string()),
+        },
+        PreHirStmt::Label("block_tail".to_string()),
+    ];
+    body.extend(tail);
+    body
+}
+
+fn reads_of(body: &[PreHirStmt], name: &str) -> usize {
+    body.iter()
+        .map(|stmt| fission_midend_structuring::guarded_tail_pure::count_var_reads_stmt(stmt, name))
+        .sum()
+}
+
+/// The tail is one statement that gives `tmp` a new value and then tests it.
+/// That test reads the tail's value, whichever way the tail was reached, and
+/// must go on reading `tmp`.
+#[test]
+fn a_read_behind_the_tail_s_own_definition_keeps_its_name() {
+    let tail = vec![
+        PreHirStmt::Block(
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("tmp".to_string()),
+                    rhs: PreHirExpr::Var("fresh".to_string()),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("tmp".to_string()),
+                    then_body: vec![PreHirStmt::Expr(PreHirExpr::Var("side".to_string()))].into(),
+                    else_body: Vec::new().into(),
+                },
+            ]
+            .into(),
+        ),
+        PreHirStmt::Return(None),
+    ];
+    let mut body = guarded_middle_that_sets_tmp(tail);
+
+    promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    let Some(PreHirStmt::Block(tail)) = body
+        .iter()
+        .find(|stmt| matches!(stmt, PreHirStmt::Block(_)))
+    else {
+        panic!("expected the tail block to survive, got {body:#?}");
+    };
+    assert!(
+        matches!(
+            tail.as_slice(),
+            [
+                PreHirStmt::Assign { lhs: PreHirLValue::Var(def), rhs: PreHirExpr::Var(value) },
+                PreHirStmt::If { cond: PreHirExpr::Var(read), .. },
+            ] if def == "tmp" && value == "fresh" && read == "tmp"
+        ),
+        "{body:#?}"
+    );
+}
+
+/// An assignment reads before it writes, so `tmp = tmp` still takes the value
+/// the middle left, through the merge.
+#[test]
+fn a_read_in_front_of_the_tail_s_definition_takes_the_merged_value() {
+    let tail = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("tmp".to_string()),
+            rhs: PreHirExpr::Unary {
+                op: PreHirUnaryOp::Not,
+                expr: Box::new(PreHirExpr::Var("tmp".to_string())),
+                ty: NirType::Bool,
+            },
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("other".to_string()))),
+    ];
+    let mut body = guarded_middle_that_sets_tmp(tail);
+
+    let stats = promote_single_entry_guarded_tail_regions_for_test(&mut body);
+
+    assert_eq!(stats.guarded_tail_promoted_count, 1, "{stats:#?}");
+    let merge = body
+        .iter()
+        .find_map(|stmt| match stmt {
+            PreHirStmt::If { then_body, .. } => match then_body.last() {
+                Some(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    ..
+                }) => Some(name.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .expect("a merge variable");
+    assert_ne!(merge, "tmp", "{body:#?}");
+    assert_eq!(reads_of(&body, &merge), 1, "{body:#?}");
+    assert_eq!(reads_of(&body, "tmp"), 0, "{body:#?}");
+}
+
 #[test]
 fn structuring_guarded_tail_execute_rewrite_survives_dead_prefix_padding() {
     let mut body = vec![

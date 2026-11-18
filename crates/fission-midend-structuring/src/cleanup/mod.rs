@@ -1087,7 +1087,7 @@ fn rewrite_stmt_label(stmt: PreHirStmt, aliases: &HashMap<String, String>) -> Pr
     }
 }
 
-fn collect_referenced_labels(body: &[PreHirStmt]) -> HashSet<String> {
+pub(crate) fn collect_referenced_labels(body: &[PreHirStmt]) -> HashSet<String> {
     let mut referenced = HashSet::default();
     for stmt in body {
         collect_stmt_referenced_labels(stmt, &mut referenced);
