@@ -6,6 +6,7 @@ mod iv_recovery;
 mod phi_recovery;
 mod variable_merge;
 
+pub(crate) use flag_recovery::assigned_flag_vars;
 pub use flag_recovery::{apply_dead_flag_cleanup_pass, apply_flag_recovery_pass};
 pub use for_loops::apply_for_loop_folding;
 pub use iv_recovery::{apply_break_continue_pass, apply_iv_recovery_pass};

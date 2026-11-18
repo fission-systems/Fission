@@ -1,6 +1,6 @@
 use crate::HashMap;
 use crate::analysis::defuse::DefUseMap;
-use crate::cleanup::expr_has_side_effects;
+use crate::cleanup::{expr_has_side_effects, expr_reads_memory};
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
 
@@ -140,14 +140,30 @@ fn rewrite_stmts(
                     expr_type(&default_val)
                 }
             });
-            stmts[i] = PreHirStmt::Assign {
-                lhs: PreHirLValue::Var(var_name),
-                rhs: PreHirExpr::Select {
+            // The `if` runs after `var = default`, so its condition and its
+            // override read the defaulted `var`. A `Select` in place of the
+            // default runs before it and would read the previous value.
+            let reads_var =
+                expr_reads_var(&cond, &var_name) || expr_reads_var(&override_val, &var_name);
+            let rhs = if reads_var {
+                default_override_is_nonzero_test(&var_name, &cond, &override_val, &default_val, &ty)
+            } else if default_survives_select(&cond, &default_val) {
+                Some(PreHirExpr::Select {
                     cond: Box::new(cond),
                     then_expr: Box::new(override_val),
                     else_expr: Box::new(default_val),
                     ty,
-                },
+                })
+            } else {
+                None
+            };
+            let Some(rhs) = rhs else {
+                i += 1;
+                continue;
+            };
+            stmts[i] = PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(var_name),
+                rhs,
             };
             for _ in 0..consumed {
                 stmts.remove(i + 1);
@@ -160,6 +176,102 @@ fn rewrite_stmts(
     }
 
     changed
+}
+
+/// `var = default; if (cond) { var = override; }` evaluates `default` every
+/// time, and before `cond`. The `Select` evaluates `cond` first and
+/// `default` only when it is false. The two agree when `default` has no
+/// effect to lose, and `cond` has none that could change what `default`
+/// reads.
+fn default_survives_select(cond: &PreHirExpr, default_val: &PreHirExpr) -> bool {
+    if expr_has_side_effects(default_val) {
+        return false;
+    }
+    if !expr_has_side_effects(cond) {
+        return true;
+    }
+    let mut reads = crate::HashSet::default();
+    crate::analysis::defuse::collect_expr_vars(default_val, &mut reads);
+    reads.is_empty() && !expr_reads_memory(default_val)
+}
+
+fn expr_reads_var(expr: &PreHirExpr, name: &str) -> bool {
+    let mut vars = crate::HashSet::default();
+    crate::analysis::defuse::collect_expr_vars(expr, &mut vars);
+    vars.contains(name)
+}
+
+fn strip_casts(expr: &PreHirExpr) -> &PreHirExpr {
+    match expr {
+        PreHirExpr::Cast { expr, .. } => strip_casts(expr),
+        other => other,
+    }
+}
+
+fn is_var(expr: &PreHirExpr, name: &str) -> bool {
+    matches!(strip_casts(expr), PreHirExpr::Var(v) if v == name)
+}
+
+fn is_zero(expr: &PreHirExpr) -> bool {
+    matches!(strip_casts(expr), PreHirExpr::Const(0, _))
+}
+
+/// `var = d; if (var != 0) { var = 1; }` leaves `var` at 1 when `d` is
+/// nonzero and at `d`, which is then 0, when it is not -- so `var = d != 0`.
+/// It is how a target without a set-on-condition instruction computes a
+/// boolean, e.g. ARM's `cmp` + predicated `movne r0, #1`. The condition reads
+/// `var`, so the general merge does not apply; this shape needs no
+/// substitution because `d` stays evaluated exactly once.
+fn default_override_is_nonzero_test(
+    var: &str,
+    cond: &PreHirExpr,
+    override_val: &PreHirExpr,
+    default_val: &PreHirExpr,
+    ty: &NirType,
+) -> Option<PreHirExpr> {
+    if !matches!(strip_casts(override_val), PreHirExpr::Const(1, _)) {
+        return None;
+    }
+    if expr_reads_var(default_val, var) {
+        return None;
+    }
+    let tests_var_nonzero = match strip_casts(cond) {
+        PreHirExpr::Var(name) => name == var,
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
+            lhs,
+            rhs,
+            ..
+        } => (is_var(lhs, var) && is_zero(rhs)) || (is_zero(lhs) && is_var(rhs, var)),
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr,
+            ..
+        } => matches!(
+            strip_casts(expr),
+            PreHirExpr::Binary { op: PreHirBinaryOp::Eq, lhs, rhs, .. }
+                if (is_var(lhs, var) && is_zero(rhs)) || (is_zero(lhs) && is_var(rhs, var))
+        ),
+        _ => false,
+    };
+    if !tests_var_nonzero {
+        return None;
+    }
+    let default_ty = expr_type(default_val);
+    let zero_ty = if default_ty == NirType::Unknown {
+        ty.clone()
+    } else {
+        default_ty
+    };
+    Some(PreHirExpr::Cast {
+        ty: ty.clone(),
+        expr: Box::new(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Ne,
+            lhs: Box::new(default_val.clone()),
+            rhs: Box::new(PreHirExpr::Const(0, zero_ty)),
+            ty: NirType::Bool,
+        }),
+    })
 }
 
 /// Matches the "Default-Override" shape at `stmts[i]`:
@@ -386,5 +498,158 @@ fn match_if_then_else(
         Some((var_then, expr_then, expr_else))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::rc::Rc;
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn var(name: &str) -> PreHirExpr {
+        PreHirExpr::Var(name.to_owned())
+    }
+
+    fn assign(name: &str, rhs: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_owned()),
+            rhs,
+        }
+    }
+
+    fn guarded(cond: PreHirExpr, then: PreHirStmt) -> PreHirStmt {
+        PreHirStmt::If {
+            cond,
+            then_body: Rc::new(vec![then]),
+            else_body: Rc::new(vec![]),
+        }
+    }
+
+    fn load() -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(var("p")),
+            ty: u32_ty(),
+        }
+    }
+
+    fn run(body: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+        let mut func = PreHirFunction {
+            body,
+            ..Default::default()
+        };
+        apply_conditional_move_pass(&mut func);
+        func.body
+    }
+
+    /// A default/override pair whose condition does not read the variable
+    /// still merges into a select.
+    #[test]
+    fn merges_an_override_whose_condition_reads_something_else() {
+        let body = run(vec![
+            assign("x", PreHirExpr::Const(3, u32_ty())),
+            guarded(var("c"), assign("x", PreHirExpr::Const(7, u32_ty()))),
+        ]);
+        assert!(matches!(
+            &body[..],
+            [PreHirStmt::Assign {
+                rhs: PreHirExpr::Select { .. },
+                ..
+            }]
+        ));
+    }
+
+    /// The `if` tests the value the default just stored. A select in the
+    /// default's place would test whatever `x` held before.
+    #[test]
+    fn keeps_an_override_whose_condition_reads_the_defaulted_variable() {
+        let gt5 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Gt,
+            lhs: Box::new(var("x")),
+            rhs: Box::new(PreHirExpr::Const(5, u32_ty())),
+            ty: NirType::Bool,
+        };
+        let body = run(vec![
+            assign("x", load()),
+            guarded(gt5, assign("x", PreHirExpr::Const(7, u32_ty()))),
+        ]);
+        assert_eq!(
+            body.len(),
+            2,
+            "merged into a select that reads the old x: {body:?}"
+        );
+        assert!(matches!(&body[1], PreHirStmt::If { .. }));
+    }
+
+    fn call(target: &str) -> PreHirExpr {
+        PreHirExpr::Call {
+            origin: None,
+            target: target.to_owned(),
+            args: Vec::new(),
+            ty: u32_ty(),
+        }
+    }
+
+    /// The default runs whether or not the override fires. As the else arm
+    /// of a select, its call would be skipped whenever `c` holds.
+    #[test]
+    fn keeps_an_override_whose_default_has_an_effect() {
+        let body = run(vec![
+            assign("x", call("produce")),
+            guarded(var("c"), assign("x", PreHirExpr::Const(7, u32_ty()))),
+        ]);
+        assert_eq!(body.len(), 2, "the call became conditional: {body:?}");
+        assert!(matches!(&body[1], PreHirStmt::If { .. }));
+    }
+
+    /// The default is read before the condition runs. Behind a condition
+    /// that calls, only a default the call cannot reach may move.
+    #[test]
+    fn keeps_a_default_a_calling_condition_could_change() {
+        let body = run(vec![
+            assign("x", load()),
+            guarded(call("probe"), assign("x", PreHirExpr::Const(1, u32_ty()))),
+        ]);
+        assert_eq!(body.len(), 2, "the load moved past the call: {body:?}");
+
+        let body = run(vec![
+            assign("x", PreHirExpr::Const(0, u32_ty())),
+            guarded(call("probe"), assign("x", PreHirExpr::Const(1, u32_ty()))),
+        ]);
+        assert!(matches!(
+            &body[..],
+            [PreHirStmt::Assign {
+                rhs: PreHirExpr::Select { .. },
+                ..
+            }]
+        ));
+    }
+
+    /// `x = d; if (x) x = 1;` is `x = d != 0`: the override fires exactly
+    /// when `d` is nonzero, and otherwise `x` keeps `d`, which is 0.
+    #[test]
+    fn folds_a_set_to_one_when_nonzero_override_into_a_nonzero_test() {
+        let body = run(vec![
+            assign("x", load()),
+            guarded(var("x"), assign("x", PreHirExpr::Const(1, u32_ty()))),
+        ]);
+        let [PreHirStmt::Assign { rhs, .. }] = &body[..] else {
+            panic!("expected one assignment, got {body:?}");
+        };
+        let PreHirExpr::Cast { expr, .. } = rhs else {
+            panic!("expected a cast of the nonzero test, got {rhs:?}");
+        };
+        assert!(matches!(
+            expr.as_ref(),
+            PreHirExpr::Binary { op: PreHirBinaryOp::Ne, lhs, rhs, .. }
+                if matches!(lhs.as_ref(), PreHirExpr::Load { .. })
+                    && matches!(rhs.as_ref(), PreHirExpr::Const(0, _))
+        ));
     }
 }

@@ -2647,6 +2647,74 @@ mod tests {
     }
 
     #[test]
+    fn hir_presentation_keeps_a_truncation_under_a_widening_cast() {
+        // `(uint)(uchar)wide` for a 32-bit unsigned `wide` reads its low
+        // byte. Both casts are unsigned and the outer is the wider one, but
+        // the inner is not width sugar.
+        let mut wide = param("wide");
+        wide.ty = int_ty(32, false);
+        let mut func = HirFunction {
+            name: "low_byte".into(),
+            params: vec![wide],
+            return_type: int_ty(32, false),
+            body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(32, false),
+                expr: Box::new(HirExpr::Cast {
+                    ty: int_ty(8, false),
+                    expr: Box::new(HirExpr::Var("wide".into())),
+                }),
+            }))],
+            ..Default::default()
+        };
+
+        apply_hir_presentation(&mut func);
+        let code = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+
+        assert!(
+            code.hir.contains("(uchar)wide"),
+            "the truncation must survive:\n{}",
+            code.hir
+        );
+    }
+
+    #[test]
+    fn hir_presentation_peels_a_widening_cast_over_a_narrower_unsigned_value() {
+        // The rule the test above bounds still fires where it is sound:
+        // `(unsigned long long)(uint)(narrow + 1)` for a 32-bit unsigned sum.
+        // (A bare variable would be peeled by the declared-type rule instead.)
+        let mut narrow = param("narrow");
+        narrow.ty = int_ty(32, false);
+        let sum = HirExpr::Binary {
+            op: HirBinaryOp::Add,
+            lhs: Box::new(HirExpr::Var("narrow".into())),
+            rhs: Box::new(HirExpr::Const(1, int_ty(32, false))),
+            ty: int_ty(32, false),
+        };
+        let mut func = HirFunction {
+            name: "widen".into(),
+            params: vec![narrow],
+            return_type: int_ty(64, false),
+            body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                ty: int_ty(64, false),
+                expr: Box::new(HirExpr::Cast {
+                    ty: int_ty(32, false),
+                    expr: Box::new(sum),
+                }),
+            }))],
+            ..Default::default()
+        };
+
+        apply_hir_presentation(&mut func);
+        let code = render_layered_pseudocode(&func, &MlilPreviewOptions::default());
+
+        assert!(
+            code.hir.contains("narrow + 1") && !code.hir.contains("(uint)"),
+            "the inner cast is width sugar:\n{}",
+            code.hir
+        );
+    }
+
+    #[test]
     fn hir_presentation_recovers_signum_goto_diamond() {
         let func = HirFunction {
             name: "signum".into(),

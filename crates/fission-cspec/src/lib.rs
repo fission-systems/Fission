@@ -1089,8 +1089,121 @@ mod arm_stack_pentry_tests {
 ///
 /// Prefer this over bare [`NirRenderOptions::from_loaded_binary`] when register
 /// naming / cspec data is needed (the core constructor stays resource-free).
+///
+/// The seeded options are a function of the binary's inner data: its symbol,
+/// string and function tables become `global_names`, which is thousands of
+/// entries on a real binary. Every function render and every callee preview
+/// asked for them, so they are kept per inner-data snapshot and copied out.
 pub fn seed_nir_render_options(binary: &fission_loader::loader::LoadedBinary) -> NirRenderOptions {
-    let mut options = NirRenderOptions::from_loaded_binary(binary);
-    apply::ensure_sla_register_map(&mut options);
+    let cached = SEEDED_OPTIONS
+        .lock()
+        .expect("seeded options cache poisoned")
+        .iter()
+        .find(|(snapshot, _)| binary.is_inner_snapshot(snapshot))
+        .map(|(_, options)| std::sync::Arc::clone(options));
+    let seeded = match cached {
+        Some(seeded) => seeded,
+        None => {
+            let mut options = NirRenderOptions::from_loaded_binary(binary);
+            apply::ensure_sla_register_map(&mut options);
+            let seeded = std::sync::Arc::new(options);
+            let mut cache = SEEDED_OPTIONS
+                .lock()
+                .expect("seeded options cache poisoned");
+            // A snapshot nobody holds any more can never be asked for again.
+            cache.retain(|(snapshot, _)| snapshot.strong_count() > 0);
+            if cache.len() >= SEEDED_OPTIONS_KEPT {
+                cache.remove(0);
+            }
+            cache.push((binary.inner_snapshot(), std::sync::Arc::clone(&seeded)));
+            seeded
+        }
+    };
+    let mut options = (*seeded).clone();
+    // Read from the environment per call, as `from_loaded_binary` does.
+    options.selection_axis = fission_midend_core::ir::SelectionAxis::from_env();
     options
+}
+
+type SeededOptions = (
+    std::sync::Weak<fission_loader::loader::types::LoadedBinaryInner>,
+    std::sync::Arc<NirRenderOptions>,
+);
+
+/// Snapshots kept: a session works on one binary at a time, a few at most.
+const SEEDED_OPTIONS_KEPT: usize = 4;
+
+static SEEDED_OPTIONS: std::sync::Mutex<Vec<SeededOptions>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+mod seeded_options_tests {
+    use super::seed_nir_render_options;
+    use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    fn binary() -> fission_loader::loader::LoadedBinary {
+        let mut binary = LoadedBinaryBuilder::new("seeded.elf".into(), DataBuffer::Heap(vec![]))
+            .format("ELF")
+            .build()
+            .expect("fixture should build");
+        binary.global_symbols.insert(0x4000, "first".to_string());
+        binary
+    }
+
+    /// Asking twice for an unchanged binary gives the same options.
+    #[test]
+    fn an_unchanged_binary_seeds_the_same_options() {
+        let binary = binary();
+        let first = seed_nir_render_options(&binary);
+        let second = seed_nir_render_options(&binary);
+        assert_eq!(first, second);
+        assert_eq!(
+            first.global_names.get(&0x4000).map(String::as_str),
+            Some("first")
+        );
+    }
+
+    /// The kept options belong to one snapshot of the binary: a symbol added
+    /// afterwards must show up, and a clone taken before the change must
+    /// keep seeing the options of its own snapshot.
+    #[test]
+    fn a_changed_binary_is_seeded_again() {
+        let mut binary = binary();
+        let before = binary.clone();
+        let stale = seed_nir_render_options(&binary);
+        assert!(!stale.global_names.contains_key(&0x5000));
+
+        binary.global_symbols.insert(0x5000, "second".to_string());
+
+        let fresh = seed_nir_render_options(&binary);
+        assert_eq!(
+            fresh.global_names.get(&0x5000).map(String::as_str),
+            Some("second")
+        );
+        assert!(
+            !seed_nir_render_options(&before)
+                .global_names
+                .contains_key(&0x5000)
+        );
+    }
+
+    /// The same change made while no other handle shares the data mutates in
+    /// place as far as the caller can tell; the snapshot token must still
+    /// tell the two states apart.
+    #[test]
+    fn an_in_place_change_is_seeded_again() {
+        let mut binary = binary();
+        assert!(
+            !seed_nir_render_options(&binary)
+                .global_names
+                .contains_key(&0x6000)
+        );
+        binary.global_symbols.insert(0x6000, "third".to_string());
+        assert_eq!(
+            seed_nir_render_options(&binary)
+                .global_names
+                .get(&0x6000)
+                .map(String::as_str),
+            Some("third")
+        );
+    }
 }

@@ -388,7 +388,7 @@ fn stmt_defines_a_label(stmt: &PreHirStmt) -> bool {
 }
 
 /// True when evaluating `expr` reads memory (as opposed to registers/locals).
-fn expr_reads_memory(expr: &PreHirExpr) -> bool {
+pub(crate) fn expr_reads_memory(expr: &PreHirExpr) -> bool {
     match expr {
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -415,7 +415,7 @@ fn expr_reads_memory(expr: &PreHirExpr) -> bool {
 /// True unless `stmt` provably writes no memory: only plain local assignments
 /// and control flow around them qualify, anything else (a store through a
 /// pointer, a call, an unknown statement) may.
-fn stmt_may_write_memory(stmt: &PreHirStmt) -> bool {
+pub(crate) fn stmt_may_write_memory(stmt: &PreHirStmt) -> bool {
     match stmt {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var(_),

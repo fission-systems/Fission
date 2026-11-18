@@ -50,6 +50,7 @@ pub use temp_var::{
 // Re-export utility functions used by other modules outside cleanup.
 pub use byte_sum_index::apply_byte_sum_index_trunc;
 pub use condexe::{apply_condexe_folding_pass, apply_iblock_phi_elimination};
+pub(crate) use condexe::{expr_reads_memory, stmt_may_write_memory};
 pub use deindirect::apply_deindirect_pass;
 pub use expand_load::apply_expand_load_pass;
 pub use overwritten_assign::eliminate_overwritten_assigns;

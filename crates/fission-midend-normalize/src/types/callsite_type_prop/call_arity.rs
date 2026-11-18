@@ -29,7 +29,42 @@ pub(super) fn drop_unused_call_receivers(func: &mut PreHirFunction) -> usize {
             })
             .map(|binding| binding.name.clone()),
     );
+    // The walk below folds liveness bottom-up at every nesting level, and it
+    // runs inside the type fixed point of every function and callee preview.
+    // It can only rewrite an unprotected receiver of a known API call outside
+    // loops; when there is none, its answer is already known.
+    if !has_droppable_receiver_candidate(&func.body, &protected) {
+        return 0;
+    }
     drop_unused_call_receivers_in_stmts(&mut func.body, &HashSet::default(), &protected)
+}
+
+/// Whether any statement `drop_unused_call_receivers_in_stmts` visits is a
+/// receiver it may drop. Loop bodies are left out because the walk never
+/// enters them.
+fn has_droppable_receiver_candidate(stmts: &[PreHirStmt], protected: &HashSet<String>) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name),
+            rhs,
+        } => !protected.contains(name) && expr_is_known_api_call_result(rhs),
+        PreHirStmt::Block(body) => has_droppable_receiver_candidate(body, protected),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            has_droppable_receiver_candidate(then_body, protected)
+                || has_droppable_receiver_candidate(else_body, protected)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| has_droppable_receiver_candidate(&case.body, protected))
+                || has_droppable_receiver_candidate(default, protected)
+        }
+        _ => false,
+    })
 }
 
 fn drop_unused_call_receivers_in_stmts(
