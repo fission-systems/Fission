@@ -192,9 +192,14 @@ fn fold_conditions(
                 } = &mut stmts[idx]
                 {
                     // Inside then_body: cond is True
+                    // A condition that calls something may answer
+                    // differently the next time it is asked.
+                    let repeatable = !expr_has_side_effects(cond);
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
-                    nested_true.push(cond.clone());
+                    if repeatable {
+                        nested_true.push(cond.clone());
+                    }
                     changed |= fold_conditions(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                         &mut nested_true,
@@ -204,7 +209,9 @@ fn fold_conditions(
                     // Inside else_body: cond is False
                     let mut nested_true = true_conds.clone();
                     let mut nested_false = false_conds.clone();
-                    nested_false.push(cond.clone());
+                    if repeatable {
+                        nested_false.push(cond.clone());
+                    }
                     changed |= fold_conditions(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                         &mut nested_true,
@@ -232,6 +239,15 @@ fn fold_conditions(
                     for var in assigned_in_body {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
                     }
+                    // The body runs again after itself: what it writes or
+                    // lets a `goto` into is already in effect at its top.
+                    for stmt in body.iter() {
+                        forget_what_the_statement_may_have_changed(
+                            stmt,
+                            &mut nested_true,
+                            &mut nested_false,
+                        );
+                    }
                     changed |= fold_conditions(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                         &mut nested_true,
@@ -255,6 +271,18 @@ fn fold_conditions(
                     let mut nested_false = false_conds.clone();
                     for var in assigned {
                         invalidate_variable(&var, &mut nested_true, &mut nested_false);
+                    }
+                    for stmt in init
+                        .iter()
+                        .chain(update.iter())
+                        .map(|stmt| &**stmt)
+                        .chain(body.iter())
+                    {
+                        forget_what_the_statement_may_have_changed(
+                            stmt,
+                            &mut nested_true,
+                            &mut nested_false,
+                        );
                     }
                     changed |= fold_conditions(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
@@ -290,11 +318,73 @@ fn fold_conditions(
         for var in assigned_vars {
             invalidate_variable(&var, true_conds, false_conds);
         }
+        forget_what_the_statement_may_have_changed(&stmts[idx], true_conds, false_conds);
 
         idx += 1;
     }
 
     changed
+}
+
+/// Drops the proven conditions `stmt` may have made untrue.
+///
+/// A condition is recorded when the walk enters an arm of the `if` that
+/// tested it, and it is used to fold a later `if` on the same expression. It
+/// stays true only while every way of reaching the current statement came
+/// through that arm and nothing since could change what the expression
+/// evaluates to. Assignments to the variables it names are handled by the
+/// caller. Two more things end it:
+///
+/// - a write to memory, for a condition that reads memory. `if (*p == 0)
+///   stop(); *p = *p - 1; if (*p == 0) ...` tests two different values with
+///   one expression;
+/// - a label, for every condition. A `goto` from outside the arm arrives
+///   there without having taken the branch.
+fn forget_what_the_statement_may_have_changed(
+    stmt: &PreHirStmt,
+    true_conds: &mut Vec<PreHirExpr>,
+    false_conds: &mut Vec<PreHirExpr>,
+) {
+    if true_conds.is_empty() && false_conds.is_empty() {
+        return;
+    }
+    if stmt_defines_a_label(stmt) {
+        true_conds.clear();
+        false_conds.clear();
+        return;
+    }
+    let reads_memory = |conds: &[PreHirExpr]| conds.iter().any(expr_reads_memory);
+    if (reads_memory(true_conds) || reads_memory(false_conds)) && stmt_may_write_memory(stmt) {
+        true_conds.retain(|cond| !expr_reads_memory(cond));
+        false_conds.retain(|cond| !expr_reads_memory(cond));
+    }
+}
+
+/// Whether `stmt` is a label or holds one at any depth.
+fn stmt_defines_a_label(stmt: &PreHirStmt) -> bool {
+    let any = |body: &[PreHirStmt]| body.iter().any(stmt_defines_a_label);
+    match stmt {
+        PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => any(body),
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref().is_some_and(stmt_defines_a_label)
+                || update.as_deref().is_some_and(stmt_defines_a_label)
+                || any(body)
+        }
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => any(then_body) || any(else_body),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|case| any(&case.body)) || any(default)
+        }
+        _ => false,
+    }
 }
 
 /// True when evaluating `expr` reads memory (as opposed to registers/locals).
