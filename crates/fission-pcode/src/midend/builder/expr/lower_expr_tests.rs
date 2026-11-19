@@ -2119,6 +2119,109 @@ fn x64_call_float_return_uses_xmm0_carrier_and_type() {
     );
 }
 
+/// `mov rdi, [g]; test rdi, rdi; je skip; call f; skip: ret` tests `g`. The
+/// tested register's copy had no binding of its own, and the test fell back
+/// to the register's name, which nothing assigned: `if (rdi)`, then
+/// `if (param_1)` once entry-parameter promotion named it.
+#[test]
+fn a_test_of_a_register_loaded_from_a_global_tests_the_global() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let tested = varnode(0xd5700);
+    let zf = register(0x206, 1);
+    let ret_addr = register(0x288, 8);
+    let rsp = register(0x20, 8);
+    let global = Varnode {
+        space_id: 3,
+        offset: 0x1400_1000,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options
+        .global_names
+        .insert(0x1400_1000, "prompt".to_string());
+    options.global_sizes.insert(0x1400_1000, 8);
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rdi.clone()), vec![global]),
+                op(
+                    1,
+                    PcodeOpcode::IntAnd,
+                    Some(tested.clone()),
+                    vec![rdi.clone(), rdi],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![tested, constant(0)],
+                ),
+                op(3, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![op(4, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+        ),
+        // ret
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    5,
+                    PcodeOpcode::Load,
+                    Some(ret_addr.clone()),
+                    vec![constant(3), rsp.clone()],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(rsp.clone()),
+                    vec![rsp, constant(8)],
+                ),
+                op(7, PcodeOpcode::Return, None, vec![ret_addr]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![2];
+    let mut pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "test_global", 0x1000, &options).expect("render");
+    assert!(code.contains("if (prompt)"), "{code}");
+    assert!(!code.contains("param_1"), "{code}");
+
+    // `mov rdi, [g]; mov qword [g], 0; test rdi, rdi` tests the old value:
+    // reading `g` at the test would read the store.
+    pcode.blocks[0].ops.insert(
+        1,
+        op(
+            9,
+            PcodeOpcode::Copy,
+            Some(Varnode {
+                space_id: 3,
+                offset: 0x1400_1000,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            }),
+            vec![constant(0)],
+        ),
+    );
+    let code = render_mlil_preview(&pcode, "test_after_store", 0x1000, &options).expect("render");
+    assert!(!code.contains("if (prompt)"), "{code}");
+}
+
 /// The calls to `sub_2000` printed in the function body (not its declaration).
 fn printed_calls_of_sub_2000(code: &str) -> Vec<&str> {
     code.lines()
