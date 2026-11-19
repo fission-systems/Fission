@@ -2464,6 +2464,68 @@ fn a_jump_after_zeroing_an_argument_register_passes_zero() {
     assert!(code.contains("sub_3000(param_2 + 1)"), "{code}");
 }
 
+/// `mov rbx, rdx; sub rbx, 8; ...; mov rdi, rbx; pop rbx; jmp f` passes
+/// `rdx - 8`. The tail-call scan prefers the register a copy reads, and named
+/// it by its entry alias (`param_3`) although it had been written since, or
+/// read it at the jump, after the `pop` restored the caller's value.
+#[test]
+fn a_jump_passes_a_register_copied_before_it_is_restored() {
+    let rbx = register(0x18, 8);
+    let rdi = register(0x38, 8);
+    let rdx = register(0x10, 8);
+    let rsp = register(0x20, 8);
+    let zf = register(0x206, 1);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rbx.clone()), vec![rdx.clone()]),
+                op(
+                    1,
+                    PcodeOpcode::IntSub,
+                    Some(rbx.clone()),
+                    vec![rbx.clone(), constant(8)],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rdx, constant(0)],
+                ),
+                op(3, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rdi), vec![rbx.clone()]),
+                // pop rbx
+                op(
+                    5,
+                    PcodeOpcode::Load,
+                    Some(rbx),
+                    vec![constant(3), rsp.clone()],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(rsp.clone()),
+                    vec![rsp, constant(8)],
+                ),
+                op(7, PcodeOpcode::Branch, None, vec![code_address(0x3000)]),
+            ],
+        ),
+        block_at(0x1020, 2, x64_ret_ops(8)),
+    ];
+    blocks[0].successors = vec![2, 1];
+    let pcode = pcode_function(blocks);
+    let code =
+        render_mlil_preview(&pcode, "tail_restore", 0x1000, &sysv_options()).expect("render");
+    assert!(code.contains("sub_3000(param_3 - 8)"), "{code}");
+}
+
 /// `xor esi, esi; call g; mov edi, 7; jmp f`: the call clobbers `esi`, so
 /// it is not an argument of `f`. Carriers written anywhere in the block were
 /// counted, and `f(7, 0)` passed `g`'s second argument along.
@@ -2928,9 +2990,11 @@ fn x64_branchind_register_fp_tail_call() {
         "must not null-check staged arg param_2:\n{code}"
     );
     // Args must be the staged sources (param_2, param_3), not the ABI slot
-    // names of the destinations (param_1 / overwritten rcx).
+    // names of the destinations (param_1 / overwritten rcx). `edx` is
+    // written again after the copy, so the first argument is read through
+    // `rcx`, the zero-extension of the copied `edx`.
     assert!(
-        code.contains("(param_2") || code.contains(", param_2") || code.contains("(param_2,"),
+        code.contains("param_2, param_3)"),
         "expected first staged arg param_2:\n{code}"
     );
     assert!(

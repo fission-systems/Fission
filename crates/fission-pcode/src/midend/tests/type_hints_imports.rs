@@ -197,6 +197,91 @@ fn variadic_named_parameters_recover_a_dominating_predecessor_register_slot() {
     assert!(!rendered.contains("two_named(11"), "{rendered}");
 }
 
+/// `jmp two_args` after the epilogue, with `rdi` set in the block before the
+/// one that stages `rsi`. A declaration proved the leading slots of a `call`
+/// but was not looked up for a tail call, so the jump printed `two_args()`
+/// (no contiguous prefix in its own block).
+#[test]
+fn exact_call_arity_recovers_a_tail_call_slot_from_the_preceding_block() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let cond = uniq(0x100, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401000,
+                        output: Some(rdi),
+                        inputs: vec![cst(11, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x401004,
+                        output: None,
+                        inputs: vec![cst(0x401020, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401010,
+                        output: Some(rsi),
+                        inputs: vec![cst(22, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x401014,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x401020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401020,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+    let context = exact_import_context(target, "two_args", 2);
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "caller",
+        0x401000,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+    assert!(rendered.contains("two_args(11, 22)"), "{rendered}");
+}
+
 /// At a join where each arm loads a different value into `rdx`, no single
 /// definition reaches the call -- but `rdx` was written. Taking "no reaching
 /// definition" for "the entry value" printed the caller's third parameter

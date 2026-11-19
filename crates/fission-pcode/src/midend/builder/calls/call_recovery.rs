@@ -941,6 +941,18 @@ impl<'a> PreviewBuilder<'a> {
             PcodeOpcode::CallInd => {
                 self.resolve_iat_load_call_target_without_telemetry(op.inputs.first()?)?
             }
+            // `jmp f` out of the function is a tail call, named by the same
+            // lookup `recover_known_external_tail_call_expr` uses.
+            PcodeOpcode::Branch => {
+                let address = branch_target_address(op.inputs.first()?)?;
+                if self.address_to_index.contains_key(&address) {
+                    return None;
+                }
+                sanitize_c_identifier(&super::super::dynamic_guards::resolve_call_target_address(
+                    address,
+                    self.type_context,
+                )?)
+            }
             _ => return None,
         };
         // The named parameters of a variadic declaration are as certain as an
@@ -1045,7 +1057,7 @@ impl<'a> PreviewBuilder<'a> {
         scan_block: &crate::pcode::PcodeBasicBlock,
         before_op_idx: usize,
         seed: &Varnode,
-    ) -> (Varnode, bool) {
+    ) -> (Varnode, usize) {
         let mut cursor = seed.clone();
         let mut limit = before_op_idx.min(scan_block.ops.len());
         for _ in 0..6 {
@@ -1065,7 +1077,7 @@ impl<'a> PreviewBuilder<'a> {
                         | PcodeOpcode::IntSExt
                         | PcodeOpcode::Cast
                 ) {
-                    return (cursor, true);
+                    break;
                 }
                 let Some(input) = prev.inputs.first() else {
                     break;
@@ -1082,7 +1094,7 @@ impl<'a> PreviewBuilder<'a> {
                 break;
             }
         }
-        (cursor, false)
+        (cursor, limit)
     }
 
     /// True when `def` writes the same register family that `vn` reads
@@ -1224,43 +1236,45 @@ impl<'a> PreviewBuilder<'a> {
                 } else {
                     self.try_lower_materialized_output_rhs(scan_block.start_address, prev)?
                 };
-                // Whether the source is computed in this block before the
-                // copy that reads it, rather than live into it.
-                let mut source_computed_here = false;
-                let source = if prefer_source_values {
-                    // Only a copy has a source to prefer: `xor edi, edi` is
-                    // `edi = edi ^ edi`, and its first input is not its value.
-                    let seed = match prev.opcode {
+                // A tail call prefers the register a copy reads (`mov ecx,
+                // edx; jmp rax` passes `edx`, not the slot's own entry
+                // value), read where the copy reads it: the register may be
+                // written again before the jump (`mov rdi, rbx; pop rbx; jmp
+                // f`). Only a copy has a source to prefer -- `xor edi, edi`
+                // is `edi = edi ^ edi`, whose first input is not its value --
+                // so any other definition is read just after itself.
+                let (source, source_site) = if prefer_source_values {
+                    let copies = matches!(
+                        prev.opcode,
                         PcodeOpcode::Copy
-                        | PcodeOpcode::Cast
-                        | PcodeOpcode::IntZExt
-                        | PcodeOpcode::IntSExt => prev.inputs.first().unwrap_or(output),
-                        _ => {
-                            source_computed_here = true;
-                            output
+                            | PcodeOpcode::Cast
+                            | PcodeOpcode::IntZExt
+                            | PcodeOpcode::IntSExt
+                    );
+                    let (source, read_at) = match prev.inputs.first() {
+                        Some(seed) if copies => {
+                            self.peel_prefer_source_arg_varnode(scan_block, prev_idx, seed)
                         }
+                        _ => (output.clone(), prev_idx + 1),
                     };
-                    // Clone so we can peel without borrowing `prev` across the
-                    // subsequent lower/surface calls.
-                    let (source, computed) =
-                        self.peel_prefer_source_arg_varnode(scan_block, prev_idx, seed);
-                    source_computed_here |= computed;
-                    source
+                    let site = LoweringSite {
+                        block_idx: scan_block.index as usize,
+                        op_idx: read_at,
+                    };
+                    (source, Some(site))
                 } else {
-                    output.clone()
+                    (output.clone(), None)
                 };
                 let expr = if let Some(expr) = direct_rhs {
                     expr
-                } else if prefer_source_values
-                    // A carrier's name is its value on entry to the block;
-                    // once written there it holds something else (`xor edi,
-                    // edi` is not `param_1`).
-                    && !source_computed_here
-                    && let Some(name) = self.surface_call_carrier_name(&source)
-                {
-                    PreHirExpr::Var(name)
                 } else {
-                    match self.lower_varnode(&source, &mut HashSet::default()) {
+                    let lowered = match source_site {
+                        Some(site) => self.with_lowering_site(site, |this| {
+                            this.lower_varnode(&source, &mut HashSet::default())
+                        }),
+                        None => self.lower_varnode(&source, &mut HashSet::default()),
+                    };
+                    match lowered {
                         Ok(expr) => expr,
                         Err(MlilPreviewError::UnsupportedPattern("opcode"))
                             if self.surface_call_carrier_name(output).is_some() =>
