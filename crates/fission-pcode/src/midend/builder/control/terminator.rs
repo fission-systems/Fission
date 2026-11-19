@@ -129,11 +129,12 @@ impl<'a> PreviewBuilder<'a> {
                 )
             })
         })?;
-        let args = if self.pcode.blocks.len() <= 2 {
-            self.recover_tail_call_args(block_idx, block, term_idx)
-        } else {
-            Vec::new()
-        };
+        // Arguments are staged in the jumping block or the single predecessor
+        // that falls into it -- a property of the call site, which
+        // `recover_tail_call_args` checks. Gating it on the whole function
+        // having two blocks or fewer dropped every argument of `jmp f` in a
+        // function with a branch anywhere else.
+        let args = self.recover_tail_call_args(block_idx, block, term_idx);
         Some(PreHirExpr::Call {
             origin: Self::tail_call_origin(block, term_idx),
             target,
@@ -1107,7 +1108,38 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
     ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
-        self.lower_return_terminator_impl(idx, block, term_idx)
+        let expr = self.lower_return_terminator_impl(idx, block, term_idx)?;
+        Ok(expr.filter(|expr| !self.expr_repeats_an_emitted_call(expr)))
+    }
+
+    /// Whether `expr` is a call instruction lowered a second time.
+    ///
+    /// Every call instruction is emitted as its own statement. When the return
+    /// register's reaching definition is a call nothing bound a result for --
+    /// the function shows no other evidence of returning a value, so the call
+    /// was not observed -- lowering that register rebuilds the call, without
+    /// its arguments: `f(x); ... return f();` runs `f` twice. Such a return
+    /// has no value the function is known to produce, and is left bare.
+    /// A tail call's origin is a jump, which is not emitted anywhere else, so
+    /// `return f(x)` built from one stays.
+    fn expr_repeats_an_emitted_call(&self, expr: &PreHirExpr) -> bool {
+        let mut expr = expr;
+        while let PreHirExpr::Cast { expr: inner, .. } = expr {
+            expr = inner;
+        }
+        let PreHirExpr::Call {
+            origin: Some(origin),
+            ..
+        } = expr
+        else {
+            return false;
+        };
+        self.pcode.blocks.iter().any(|block| {
+            block.ops.iter().any(|op| {
+                op.address == origin.instruction_address
+                    && matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+            })
+        })
     }
 
     fn lower_return_terminator_impl(
