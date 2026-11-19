@@ -1014,7 +1014,12 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
         })
         .map(|binding| binding.name.clone())
         .collect();
-    let copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
+    let mut copy_merge_barriers = collect_copy_merge_barrier_vars(&func.body, stack_state_vars);
+    // A global is storage outside the function: renaming a copy of it onto
+    // the global turns every later write to the copy into a store the
+    // program never made (`u = g; u &= 0x51;` became `g &= 0x51;`), and
+    // renaming the global onto a local drops stores that are its effect.
+    copy_merge_barriers.extend(crate::pipeline::global_storage_names());
     // Pairs that appear together in one expression (e.g. `eax = ecx + edx`) must
     // never be unified — applies to both copy-alias and disjoint live-range merge.
     let mut copy_merge_blocked_pairs = collect_cooccurring_var_pairs(&func.body);
@@ -2006,6 +2011,73 @@ mod tests {
                 signed: false
             }
         );
+    }
+
+    /// `u = g; u = u & 0x51; return u == 1;` with `g` an unnamed global the
+    /// builder declared among the locals. Merging the copy renamed `u` onto
+    /// `g`, so the mask became a store to the global (`g &= 0x51`) that the
+    /// program never makes.
+    #[test]
+    fn a_copy_of_a_global_is_not_merged_onto_the_global() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let binding = |name: &str| PreHirBinding {
+            name: name.to_string(),
+            ty: u32_ty.clone(),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::TempPreserved),
+            initializer: None,
+        };
+        let function = || PreHirFunction {
+            name: "mask_of_a_global".to_string(),
+            locals: vec![binding("tmp_14af44"), binding("uVar1")],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("uVar1".to_string()),
+                    rhs: PreHirExpr::Var("tmp_14af44".to_string()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("uVar1".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("uVar1".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(0x51, u32_ty.clone())),
+                        ty: u32_ty.clone(),
+                    },
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("uVar1".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+                    ty: NirType::Bool,
+                })),
+            ],
+            ..Default::default()
+        };
+        let writes_global =
+            |func: &PreHirFunction| format!("{:?}", func.body).contains("lhs: Var(\"tmp_14af44\")");
+
+        let context = crate::pipeline::NormalizeContext {
+            global_symbols: Some(crate::pipeline::GlobalSymbolContext {
+                storage_names: ["tmp_14af44".to_string()].into_iter().collect(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut func = function();
+        {
+            let _guard = crate::pipeline::NormalizeContextGuard::install(&context);
+            apply_variable_merge_pass(&mut func);
+        }
+        assert!(!writes_global(&func), "{:?}", func.body);
+
+        // Control: with nothing saying `tmp_14af44` is a global, the copy is
+        // merged as between two locals, which is the rename above.
+        let mut unmarked = function();
+        apply_variable_merge_pass(&mut unmarked);
+        assert!(writes_global(&unmarked), "{:?}", unmarked.body);
     }
 
     #[test]

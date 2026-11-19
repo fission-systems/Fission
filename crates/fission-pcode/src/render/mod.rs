@@ -74,6 +74,7 @@ pub use variables::{
 };
 
 pub use layered::PrintedGlobal;
+pub(crate) use layered::file_scope_storage_names;
 pub(crate) use layered::printed_globals;
 #[cfg(test)]
 pub(crate) use layered::render_layered_pseudocode_with_provenance;

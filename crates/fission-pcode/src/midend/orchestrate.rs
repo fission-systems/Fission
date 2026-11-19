@@ -323,6 +323,13 @@ fn render_mlil_preview_with_binary_and_context_output(
         GlobalSymbolContext {
             names: options.global_names.clone(),
             sizes: options.global_sizes.clone(),
+            storage_names: crate::render::file_scope_storage_names(
+                hir.params.iter().map(|binding| binding.name.as_str()),
+                hir.locals.iter().map(|binding| binding.name.as_str()),
+                options,
+            )
+            .into_iter()
+            .collect(),
         },
         builder.lsda_landing_pad_labels(),
     );

@@ -2274,7 +2274,11 @@ fn constant_ptr_recovery_recovers_symbolic_addresses() {
     sizes.insert(0x140003000, 100);
     sizes.insert(0x140004000, 10);
 
-    let context = GlobalSymbolContext { names, sizes };
+    let context = GlobalSymbolContext {
+        names,
+        sizes,
+        ..Default::default()
+    };
     GLOBAL_SYMBOL_CONTEXT.with(|ctx| {
         *ctx.borrow_mut() = Some(context);
     });

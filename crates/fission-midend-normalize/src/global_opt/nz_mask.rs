@@ -236,12 +236,26 @@ pub fn compute_nz_masks(func: &PreHirFunction) -> HashMap<String, u64> {
         type_map.insert(binding.name.clone(), binding.ty.clone());
     }
 
+    // A local starts with no bits and gains those its assignments can
+    // store. That is only its whole value set if no read can see what it
+    // held on entry -- a global, a register live into the function, a slot
+    // written through its address. Those hold any value of their type, like
+    // a parameter.
+    let mut entry_values = crate::analysis::entry_values::names_reading_entry_values(&func.body);
+    // A global also changes where no assignment here shows it: in a callee,
+    // in another thread, before any read.
+    entry_values.extend(crate::pipeline::global_storage_names());
     let mut var_masks = HashMap::default();
     for param in &func.params {
         var_masks.insert(param.name.clone(), type_mask(&param.ty));
     }
     for local in &func.locals {
-        var_masks.insert(local.name.clone(), 0);
+        let entry = if entry_values.contains(&local.name) {
+            type_mask(&local.ty)
+        } else {
+            0
+        };
+        var_masks.insert(local.name.clone(), entry);
     }
 
     let mut iterations = 0;
@@ -459,6 +473,56 @@ mod tests {
 
     fn var(name: &str) -> PreHirExpr {
         PreHirExpr::Var(name.into())
+    }
+
+    fn local(name: &str, ty: NirType) -> PreHirBinding {
+        PreHirBinding {
+            name: name.into(),
+            ty,
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }
+    }
+
+    /// `u = g; u = u & 0xf000; if (u == 0x8000) ...` with `g` a global the
+    /// body reads but never writes (the `S_ISREG` test on a `stat` buffer).
+    /// `g` holds any value, so the mask is not redundant. It used to start
+    /// at "no bits" like a local nothing assigned, and the `& 0xf000` was
+    /// deleted, turning the test into `g == 0x8000`.
+    #[test]
+    fn a_mask_over_a_value_read_on_entry_is_kept() {
+        let u32_ty = int(32, false);
+        let masked = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(var("u")),
+            rhs: Box::new(PreHirExpr::Const(0xf000, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        let assign = |rhs| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("u".into()),
+            rhs,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![local("g", u32_ty.clone()), local("u", u32_ty.clone())],
+            body: vec![assign(var("g")), assign(masked.clone())],
+            ..PreHirFunction::default()
+        };
+        apply_nz_mask_simplification_pass(&mut func);
+        assert_eq!(func.body[1], assign(masked.clone()), "{:?}", func.body);
+
+        // Control: when every value `u` can hold is the constant 0x8000, the
+        // mask really is redundant and still goes.
+        let mut narrow = PreHirFunction {
+            locals: vec![local("u", u32_ty.clone())],
+            body: vec![
+                assign(PreHirExpr::Const(0x8000, u32_ty.clone())),
+                assign(masked),
+            ],
+            ..PreHirFunction::default()
+        };
+        assert!(apply_nz_mask_simplification_pass(&mut narrow));
+        assert_eq!(narrow.body[1], assign(var("u")));
     }
 
     /// A width past 64 bits has no sign bit in a `u64` mask. Asking for one
