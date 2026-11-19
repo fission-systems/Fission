@@ -247,6 +247,7 @@ impl<'a> PreviewBuilder<'a> {
             peel_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             candidate_def_keys_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             terminator_cache: BuilderCacheMap::default(),
+            fixed_memory_space_id: fixed_memory_space_id(pcode),
             x86_branch_recovery_attempts: 0,
             address_to_index,
             block_target_keys,
@@ -346,4 +347,26 @@ impl<'a> PreviewBuilder<'a> {
         b.prepare_instruction_loops();
         b
     }
+}
+
+/// RAM's space id when the function's p-code uses the Rust-Sleigh numbering
+/// (registers in 4 or 5, temporaries in 2), where RAM is 3. The legacy
+/// numbering uses 3 for temporaries, so nothing there is known to be memory.
+fn fixed_memory_space_id(pcode: &PcodeFunction) -> Option<u64> {
+    use fission_pcode_ir::space::{
+        RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID,
+        RUST_SLEIGH_UNIQUE_SPACE_ID,
+    };
+    let rust_sleigh = pcode.blocks.iter().flat_map(|block| &block.ops).any(|op| {
+        op.output.iter().chain(&op.inputs).any(|vn| {
+            !vn.is_constant
+                && matches!(
+                    vn.space_id,
+                    RUST_SLEIGH_REGISTER_SPACE_ID
+                        | RUST_SLEIGH_ALT_REGISTER_SPACE_ID
+                        | RUST_SLEIGH_UNIQUE_SPACE_ID
+                )
+        })
+    });
+    rust_sleigh.then_some(3)
 }

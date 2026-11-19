@@ -46,14 +46,21 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) materialized_output_names: HashMap<(usize, usize, VarnodeKey), String>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     /// Per (use site, storage): the definition the legacy scan settles on,
-    /// and whether it is the only one reaching the use.
-    pub(crate) lookup_site_cache:
-        RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<(LoweringSite, bool)>>>,
+    /// whether it is the only one reaching the use, and whether a call may
+    /// have overwritten it (global storage) before the use.
+    pub(crate) lookup_site_cache: RefCell<
+        BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<(LoweringSite, bool, bool)>>,
+    >,
     pub(crate) peel_cache: RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
     /// `lookup_candidate_def_keys` per key; `def_sites` never changes.
     pub(crate) candidate_def_keys_cache:
         RefCell<BuilderCacheMap<VarnodeKey, std::rc::Rc<[VarnodeKey]>>>,
     pub(crate) terminator_cache: BuilderCacheMap<usize, LoweredTerminator>,
+    /// The space id of memory at fixed addresses (globals) in this
+    /// function's p-code, or `None` when the numbering cannot tell it from
+    /// temporaries. Rust-Sleigh puts RAM at 3; the legacy numbering puts
+    /// unique space there.
+    pub(crate) fixed_memory_space_id: Option<u64>,
     pub(crate) x86_branch_recovery_attempts: usize,
     pub(crate) address_to_index: HashMap<u64, usize>,
     pub(crate) block_target_keys: Vec<u64>,
