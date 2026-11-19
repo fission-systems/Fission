@@ -428,7 +428,13 @@ pub(super) fn expr_result_type(expr: &HirExpr) -> NirType {
 
 /// Fold null-check join sugar:
 /// `x = c ? a : b; return ~c ? x : a` → `return x` (then collapse even with call).
-pub(super) fn fold_redundant_select_return_join(stmts: &mut Vec<HirStmt>) -> bool {
+///
+/// Neither fold touches an assignment to a global: it is a store the program
+/// makes, which `g = e; return g;` -> `return e;` would delete.
+pub(super) fn fold_redundant_select_return_join(
+    stmts: &mut Vec<HirStmt>,
+    globals: &std::collections::HashSet<String>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
         match stmt {
@@ -436,21 +442,21 @@ pub(super) fn fold_redundant_select_return_join(stmts: &mut Vec<HirStmt>) -> boo
             | HirStmt::While { body: b, .. }
             | HirStmt::DoWhile { body: b, .. }
             | HirStmt::For { body: b, .. } => {
-                changed |= fold_redundant_select_return_join(b);
+                changed |= fold_redundant_select_return_join(b, globals);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= fold_redundant_select_return_join(then_body);
-                changed |= fold_redundant_select_return_join(else_body);
+                changed |= fold_redundant_select_return_join(then_body, globals);
+                changed |= fold_redundant_select_return_join(else_body, globals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= fold_redundant_select_return_join(&mut case.body);
+                    changed |= fold_redundant_select_return_join(&mut case.body, globals);
                 }
-                changed |= fold_redundant_select_return_join(default);
+                changed |= fold_redundant_select_return_join(default, globals);
             }
             _ => {}
         }
@@ -478,6 +484,10 @@ pub(super) fn fold_redundant_select_return_join(stmts: &mut Vec<HirStmt>) -> boo
                 })),
             ) => {
                 let x_var = |e: &HirExpr| matches!(e, HirExpr::Var(n) if n == x);
+                if globals.contains(x) {
+                    i += 1;
+                    continue;
+                }
                 // apply_binop: x = !p ? 0 : call; return !(p==0) ? x : 0
                 // c1 nullish, c2 non-nullish, t2=x, e2=t1
                 (cond_are_negations(c1, c2) && x_var(t2) && t1.as_ref() == e2.as_ref())
@@ -508,7 +518,7 @@ pub(super) fn fold_redundant_select_return_join(stmts: &mut Vec<HirStmt>) -> boo
             HirStmt::Return(Some(HirExpr::Var(ret_name))),
         ) = (&stmts[i], &stmts[i + 1])
         {
-            if name == ret_name {
+            if name == ret_name && !globals.contains(name) {
                 stmts[i] = HirStmt::Return(Some(rhs.clone()));
                 stmts.remove(i + 1);
                 changed = true;

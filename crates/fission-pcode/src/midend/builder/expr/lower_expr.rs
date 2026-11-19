@@ -642,6 +642,16 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
+    /// A load of the global `vn` names, spelled as a read with no reaching
+    /// definition is: its symbol, else its address.
+    fn global_memory_read(&mut self, vn: &Varnode) -> PreHirExpr {
+        if let Some(name) = self.options.global_names.get(&vn.offset) {
+            return PreHirExpr::Var(name.clone());
+        }
+        let name = format!("tmp_{:x}", vn.offset);
+        PreHirExpr::Var(self.ensure_live_register_binding(&name, vn.size))
+    }
+
     fn lower_varnode_inner(
         &mut self,
         vn: &Varnode,
@@ -802,6 +812,28 @@ impl<'a> PreviewBuilder<'a> {
                     });
                 }
             }
+        }
+        // A global this function updated in place is read back from memory.
+        // The update was emitted as its own store statement, so memory holds
+        // its value; rebuilding the update's expression instead re-reads the
+        // global at the use, after the store. `sub [g], 1; jnz` tests the new `g` against
+        // zero, and rebuilding `g - 1` from the global printed `g--;
+        // if (g != 1)`: the old value no longer exists by then.
+        if self.output_is_mapped_global_memory(vn)
+            && let Some((_, def_op)) = self.lookup_def_site(vn)
+            && def_op
+                .output
+                .as_ref()
+                .is_some_and(|output| VarnodeKey::from(output) == key)
+            // Only a read-modify-write: a store of a constant or of a register
+            // has inputs that still hold their value at the read, and
+            // forwarding them is the existing (and better-named) answer.
+            && def_op
+                .inputs
+                .iter()
+                .any(|input| VarnodeKey::from(input) == key)
+        {
+            return Ok(self.global_memory_read(vn));
         }
         let def_site = self.lookup_def_site(vn);
         // A write that dominates this read without being the only one to

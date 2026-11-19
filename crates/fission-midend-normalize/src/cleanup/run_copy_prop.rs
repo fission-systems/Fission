@@ -328,6 +328,21 @@ fn writes_of(s: &PreHirStmt, out: &mut HashSet<String>) {
         } => {
             out.insert(n.clone());
         }
+        // A store to a global is spelled `*&g = v` while its reads are `g`:
+        // it writes `g` all the same. Missing it carried `x = g` across the
+        // store, so `x = g; *&g = x + 1; buf[x] = c` printed `buf[g]`.
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { ptr, .. },
+            ..
+        } => {
+            let mut target = ptr.as_ref();
+            while let PreHirExpr::Cast { expr, .. } = target {
+                target = expr;
+            }
+            if let PreHirExpr::AddressOfGlobal(n) = target {
+                out.insert(n.clone());
+            }
+        }
         PreHirStmt::If {
             then_body,
             else_body,
@@ -771,6 +786,49 @@ mod tests {
         );
         propagate_copies_in_runs(&mut f);
         assert!(render(&f).contains("xVar1"), "{}", render(&f));
+    }
+
+    /// A store to a global is spelled `*&g = v`. It rewrites `g` as surely
+    /// as `g = v` does: `x = g; *&g = x + 1; out = x` keeps `x`, the value
+    /// before the store (gzip `send_bits`' `outbuf[outcnt++]`).
+    #[test]
+    fn a_store_to_a_global_invalidates_a_copy_of_it() {
+        let store_g = |rhs| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::AddressOfGlobal("g".into())),
+                ty: ty(),
+            },
+            rhs,
+        };
+        let body =
+            |write: PreHirStmt| vec![set("xVar1", var("g")), write, set("local_8", var("xVar1"))];
+        let mut f = func(
+            vec![temp("xVar1"), local("g"), local("local_8")],
+            body(store_g(add(var("xVar1"), k(1)))),
+        );
+        propagate_copies_in_runs(&mut f);
+        assert!(
+            render(&f).contains(r#"lhs: Var("local_8"), rhs: Var("xVar1")"#),
+            "{}",
+            render(&f)
+        );
+        // Control: a store elsewhere leaves the copy free to fold.
+        let mut elsewhere = func(
+            vec![temp("xVar1"), local("g"), local("local_8")],
+            body(PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::AddressOfGlobal("h".into())),
+                    ty: ty(),
+                },
+                rhs: k(1),
+            }),
+        );
+        propagate_copies_in_runs(&mut elsewhere);
+        assert!(
+            render(&elsewhere).contains(r#"lhs: Var("local_8"), rhs: Var("g")"#),
+            "{}",
+            render(&elsewhere)
+        );
     }
 
     /// Rewriting the source invalidates the carried copy.

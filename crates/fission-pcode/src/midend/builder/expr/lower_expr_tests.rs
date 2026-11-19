@@ -4792,3 +4792,128 @@ fn a_global_read_after_a_call_is_a_load_not_the_value_stored_before_it() {
         assert!(code.contains("return g;"), "{shape}:\n{code}");
     }
 }
+
+/// Global `g` at a mapped address, under the runtime's space numbering.
+fn mapped_global(size: u32) -> Varnode {
+    Varnode {
+        space_id: 3,
+        offset: 0x1400_1800,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+fn global_test_options() -> MlilPreviewOptions {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.global_names.insert(0x1400_1800, "g".to_string());
+    options.global_sizes.insert(0x1400_1800, 4);
+    apply_preview_cspec(&mut options);
+    options
+}
+
+fn ret_ops(seq: u32, address: u64) -> Vec<PcodeOp> {
+    let rsp = register(0x20, 8);
+    let ret_addr = register(0x288, 8);
+    let at = |seq, opcode, output, inputs| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    vec![
+        at(
+            seq,
+            PcodeOpcode::Load,
+            Some(ret_addr.clone()),
+            vec![constant(3), rsp.clone()],
+        ),
+        at(
+            seq + 1,
+            PcodeOpcode::IntAdd,
+            Some(rsp.clone()),
+            vec![rsp, constant(8)],
+        ),
+        at(seq + 2, PcodeOpcode::Return, None, vec![ret_addr]),
+    ]
+}
+
+/// `x = g; f(); return x;` held in a callee-saved register:
+/// `mov ebx, [g]; call f; mov eax, ebx; ret`. The value is the one read before
+/// the call. Inlining the read at the return, after the call, printed
+/// `f(); return g;` -- a load the callee may have changed.
+#[test]
+fn a_global_read_before_a_call_is_kept_as_a_snapshot() {
+    let g = mapped_global(4);
+    let ebx = register(0x18, 4);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let at = |seq, address, opcode, output, inputs| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let mut ops = vec![
+        at(0, 0x1000, PcodeOpcode::Copy, Some(ebx.clone()), vec![g]),
+        at(1, 0x1006, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        at(2, 0x100b, PcodeOpcode::Copy, Some(eax.clone()), vec![ebx]),
+        at(3, 0x100b, PcodeOpcode::IntZExt, Some(rax), vec![eax]),
+    ];
+    ops.extend(ret_ops(4, 0x1010));
+    let pcode = pcode_function(vec![block_at(0x1000, 0, ops)]);
+    let code = render_mlil_preview(&pcode, "read_before_call", 0x1000, &global_test_options())
+        .expect("render");
+    assert!(code.contains("sub_2000("), "the call stays:\n{code}");
+    assert!(
+        !code.contains("return g;"),
+        "the value read before the call is returned:\n{code}"
+    );
+}
+
+/// `--g; return g;` spelled `sub [g], 1; mov eax, [g]; ret`: the read after
+/// the store is the stored value, a load of `g`. Rebuilding the store's
+/// expression `g - 1` there re-read `g` after it had been decremented.
+#[test]
+fn a_global_read_after_storing_it_reads_memory_not_the_stored_expression() {
+    let g = mapped_global(4);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let at = |seq, address, opcode, output, inputs| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let mut ops = vec![
+        at(
+            0,
+            0x1000,
+            PcodeOpcode::IntSub,
+            Some(g.clone()),
+            vec![g.clone(), constant_sized(1, 4)],
+        ),
+        at(1, 0x1007, PcodeOpcode::Copy, Some(eax.clone()), vec![g]),
+        at(2, 0x1007, PcodeOpcode::IntZExt, Some(rax), vec![eax]),
+    ];
+    ops.extend(ret_ops(3, 0x1010));
+    let pcode = pcode_function(vec![block_at(0x1000, 0, ops)]);
+    let code = render_mlil_preview(&pcode, "pre_decrement", 0x1000, &global_test_options())
+        .expect("render");
+    assert!(
+        code.contains("g--") || code.contains("g = "),
+        "the store stays:\n{code}"
+    );
+    assert!(
+        code.contains("return g;"),
+        "the read is the stored value:\n{code}"
+    );
+}
