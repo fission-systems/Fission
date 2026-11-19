@@ -143,6 +143,19 @@ impl<'a> PreviewBuilder<'a> {
                 redefined = true;
                 break;
             }
+            // `call f; leave; ret` in one block. The `Return`'s p-code input
+            // is the return address, so nothing above reads the result
+            // register, but return recovery reads it whenever the function
+            // returns a value -- and a call whose result has no binding is
+            // then lowered again at the `return`, without its arguments
+            // (`f(x); return f();`). Same evidence the successor scan below
+            // requires; without it, the checks after the loop decide.
+            if candidate.opcode == PcodeOpcode::Return {
+                if self.function_has_primary_return_def() {
+                    return true;
+                }
+                break;
+            }
         }
         if redefined {
             return false;

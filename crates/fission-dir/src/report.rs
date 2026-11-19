@@ -21,6 +21,12 @@ pub enum UnsupportedReason {
     /// Emulator tier only: couldn't resolve the calling convention / build
     /// the emulator for this binary.
     EmulatorSetup(String),
+    /// The interpreter refused the body, with its own words for why -- the
+    /// first refusal met, so a batch can count what stops the tier most.
+    Interpreter(String),
+    /// Every sample the interpreter could run made the emulator call fail or
+    /// end some way other than returning: the harness, not the decompiler.
+    Harness(String),
 }
 
 impl fmt::Display for UnsupportedReason {
@@ -30,6 +36,8 @@ impl fmt::Display for UnsupportedReason {
             UnsupportedReason::UnsupportedType(what) => write!(f, "unsupported type: {what}"),
             UnsupportedReason::ContainsLoop => write!(f, "contains a loop (symbolic tier)"),
             UnsupportedReason::EmulatorSetup(msg) => write!(f, "emulator setup failed: {msg}"),
+            UnsupportedReason::Interpreter(msg) => write!(f, "interpreter: {msg}"),
+            UnsupportedReason::Harness(msg) => write!(f, "harness: {msg}"),
         }
     }
 }
@@ -45,6 +53,8 @@ pub struct Divergence {
     /// Ground-truth tier only: what the real emulator actually returned for
     /// these same args. `None` for tiers that don't run the emulator.
     pub emulator_result: Option<i64>,
+    /// What else differed, in words: a call, an argument, a stored byte.
+    pub detail: Option<String>,
 }
 
 /// Outcome of checking one function at one verification tier.
@@ -68,6 +78,19 @@ pub enum VerifyOutcome {
 }
 
 impl VerifyOutcome {
+    /// One word for the outcome, for counting a batch: `equivalent`,
+    /// `diverged`, `unsupported`, `harness` or `inconclusive`.
+    pub fn category(&self) -> &'static str {
+        match self {
+            VerifyOutcome::Equivalent { .. } => "equivalent",
+            VerifyOutcome::Diverged(_) => "diverged",
+            VerifyOutcome::Unsupported(UnsupportedReason::Harness(_))
+            | VerifyOutcome::Unsupported(UnsupportedReason::EmulatorSetup(_)) => "harness",
+            VerifyOutcome::Unsupported(_) => "unsupported",
+            VerifyOutcome::Inconclusive { .. } => "inconclusive",
+        }
+    }
+
     pub fn is_equivalent(&self) -> bool {
         matches!(self, VerifyOutcome::Equivalent { .. })
     }

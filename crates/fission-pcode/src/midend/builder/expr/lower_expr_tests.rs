@@ -2119,6 +2119,282 @@ fn x64_call_float_return_uses_xmm0_carrier_and_type() {
     );
 }
 
+/// The calls to `sub_2000` printed in the function body (not its declaration).
+fn printed_calls_of_sub_2000(code: &str) -> Vec<&str> {
+    code.lines()
+        .filter(|line| !line.trim_start().starts_with("extern"))
+        .filter(|line| line.contains("sub_2000("))
+        .collect()
+}
+
+/// `if (x) { return 7; } return f(x);` compiled as `call f; leave; ret` in one
+/// block. The `Return` reads the result register only through return
+/// recovery, so the call used to be emitted bare and lowered a second time at
+/// the return, without its arguments: `sub_2000(x); return sub_2000();`.
+/// (The fixture gives the callee no recoverable arity, so neither call has
+/// arguments here; the count is what distinguishes the two outputs.)
+#[test]
+fn a_call_returned_from_its_own_block_is_printed_once() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let ret_addr = register(0x288, 8);
+    let rsp = register(0x20, 8);
+    // `ret`: the return address comes off the stack, as SLEIGH lifts it.
+    let ret = |seq: u32| {
+        vec![
+            op(
+                seq,
+                PcodeOpcode::Load,
+                Some(ret_addr.clone()),
+                vec![constant(3), rsp.clone()],
+            ),
+            op(
+                seq + 1,
+                PcodeOpcode::IntAdd,
+                Some(rsp.clone()),
+                vec![rsp.clone(), constant(8)],
+            ),
+            op(seq + 2, PcodeOpcode::Return, None, vec![ret_addr.clone()]),
+        ]
+    };
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rdi.clone(), constant(0)],
+                ),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        // x != 0: return 7
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant_sized(7, 4)],
+                ),
+                op(3, PcodeOpcode::IntZExt, Some(rax), vec![eax]),
+            ]
+            .into_iter()
+            .chain(ret(4))
+            .collect(),
+        ),
+        // x == 0: return f(x)
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(7, PcodeOpcode::Copy, Some(rdi.clone()), vec![constant(5)]),
+                op(8, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            ]
+            .into_iter()
+            .chain(ret(9))
+            .collect(),
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "tail_call", 0x1000, &options).expect("render");
+    let calls = printed_calls_of_sub_2000(&code);
+    assert_eq!(calls.len(), 1, "the call runs once:\n{code}");
+    assert!(
+        calls[0].contains("return"),
+        "its result is returned:\n{code}"
+    );
+}
+
+/// `if (n == 0) n = 1; return f(p, n);` -- one arm writes the result register
+/// (`mov rax, [n]` to copy `n`), and both arms reach a join holding the call
+/// and the `ret`. A call gives the join no p-code output, so the join was
+/// taken for a frame-only epilogue whose return value comes from the arms:
+/// that arm printed `return 1;` and the call vanished from its path.
+#[test]
+fn a_join_that_calls_does_not_return_the_value_an_arm_left_in_the_register() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let rsi = register(0x30, 8);
+    let rax = register(0, 8);
+    let ret_addr = register(0x288, 8);
+    let rsp = register(0x20, 8);
+    // `ret`: the return address comes off the stack, as SLEIGH lifts it.
+    let ret = |seq: u32| {
+        vec![
+            op(
+                seq,
+                PcodeOpcode::Load,
+                Some(ret_addr.clone()),
+                vec![constant(3), rsp.clone()],
+            ),
+            op(
+                seq + 1,
+                PcodeOpcode::IntAdd,
+                Some(rsp.clone()),
+                vec![rsp.clone(), constant(8)],
+            ),
+            op(seq + 2, PcodeOpcode::Return, None, vec![ret_addr.clone()]),
+        ]
+    };
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rsi.clone(), constant(0)],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::BoolNegate,
+                    Some(zf.clone()),
+                    vec![zf.clone()],
+                ),
+                op(2, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        // n == 0: n = 1, by way of rax
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(3, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(1)]),
+                op(4, PcodeOpcode::Copy, Some(rsi.clone()), vec![rax]),
+            ],
+        ),
+        // join: return f(p, n)
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(5, PcodeOpcode::Copy, Some(rdi.clone()), vec![rsi.clone()]),
+                op(6, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            ]
+            .into_iter()
+            .chain(ret(7))
+            .collect(),
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![2];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "join_call", 0x1000, &options).expect("render");
+    assert!(
+        !code.contains("return 1;"),
+        "the arm's register value is not the return value:\n{code}"
+    );
+    let calls = printed_calls_of_sub_2000(&code);
+    assert!(!calls.is_empty(), "the call is on every path:\n{code}");
+    assert!(
+        calls.iter().all(|call| call.contains("return")),
+        "each path returns the call's result:\n{code}"
+    );
+}
+
+/// `f(c ? 5 : 6)` returned: each arm leaves a different value in the result
+/// register, and the join passes it to a call before `ret`. The join was
+/// taken for a frame-only epilogue (the call gives it no p-code output) whose
+/// return value comes from the arms, so each arm printed `return 5;` /
+/// `return 6;` and the call vanished.
+#[test]
+fn a_join_that_calls_does_not_return_what_each_arm_left_in_the_register() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let rax = register(0, 8);
+    let ret_addr = register(0x288, 8);
+    let rsp = register(0x20, 8);
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    apply_preview_cspec(&mut options);
+    let arm = |seq: u32, start: u64, index: u32, value: i64| {
+        block_at(
+            start,
+            index,
+            vec![
+                op(
+                    seq,
+                    PcodeOpcode::Copy,
+                    Some(rax.clone()),
+                    vec![constant(value)],
+                ),
+                op(seq + 1, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+            ],
+        )
+    };
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rdi.clone(), constant(0)],
+                ),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        arm(2, 0x1010, 1, 5),
+        arm(4, 0x1020, 2, 6),
+        block_at(
+            0x1030,
+            3,
+            vec![
+                op(7, PcodeOpcode::Copy, Some(rdi.clone()), vec![rax.clone()]),
+                op(8, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(
+                    9,
+                    PcodeOpcode::Load,
+                    Some(ret_addr.clone()),
+                    vec![constant(3), rsp.clone()],
+                ),
+                op(
+                    10,
+                    PcodeOpcode::IntAdd,
+                    Some(rsp.clone()),
+                    vec![rsp, constant(8)],
+                ),
+                op(11, PcodeOpcode::Return, None, vec![ret_addr]),
+            ],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![3];
+    blocks[2].successors = vec![3];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "agreed_arms", 0x1000, &options).expect("render");
+    let calls = printed_calls_of_sub_2000(&code);
+    assert!(
+        !calls.is_empty() && calls.iter().all(|call| call.contains("return")),
+        "the call's result is returned:\n{code}"
+    );
+}
+
 /// Diamond: null → eax=0; non-null → CallInd result in rax. Join return must
 /// prefer the call-result binding over the pre-call arg write to EAX.
 #[test]
