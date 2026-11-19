@@ -1700,6 +1700,104 @@ fn inline_single_use_temps_preserves_rhs_across_dependency_redefinition() {
     assert!(expr_contains_var(rhs, "xVar0"));
 }
 
+/// `t = <value>; if (rax) { <arm_prefix>; rax = f(t); }` -- the shape a
+/// path-joining `if` takes around a call whose argument was read before it.
+fn copy_used_in_an_if_arm(value: PreHirExpr, arm_prefix: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+    let mut arm = arm_prefix;
+    arm.push(PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("rax".to_string()),
+        rhs: PreHirExpr::Call {
+            origin: None,
+            target: "f".to_string(),
+            args: vec![PreHirExpr::Var("xVar0".to_string())],
+            ty: int(64),
+        },
+    });
+    vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("xVar0".to_string()),
+            rhs: value,
+        },
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("rax".to_string()),
+            then_body: arm.into(),
+            else_body: Vec::new().into(),
+        },
+    ]
+}
+
+/// The argument `f` receives, after cleanup.
+fn argument_of_f(stmts: &[PreHirStmt]) -> PreHirExpr {
+    let PreHirStmt::If { then_body, .. } = stmts.last().expect("an if") else {
+        panic!("expected the if last: {stmts:?}");
+    };
+    let Some(PreHirStmt::Assign {
+        rhs: PreHirExpr::Call { args, .. },
+        ..
+    }) = then_body.last()
+    else {
+        panic!("expected the call last in the arm: {then_body:?}");
+    };
+    args[0].clone()
+}
+
+/// A copy used in an `if`'s arm reads its source where the copy is, not
+/// where the arm uses it. `t = rax; if (rax) { rax = 0; f(t); }` passes the
+/// old `rax`; inlining it passed 0 (`open(ttyname(..))` printed `open(0, ..)`).
+#[test]
+fn a_copy_is_not_inlined_into_an_if_arm_past_a_write_to_its_source() {
+    let zero_rax = || PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("rax".to_string()),
+        rhs: PreHirExpr::Const(0, int(64)),
+    };
+    for pass in [
+        |stmts: &mut Vec<PreHirStmt>| inline_single_use_temps(stmts, &HashSet::default()),
+        collapse_adjacent_pure_copy_into_if,
+    ] {
+        let mut stmts =
+            copy_used_in_an_if_arm(PreHirExpr::Var("rax".to_string()), vec![zero_rax()]);
+        pass(&mut stmts);
+        assert_eq!(
+            argument_of_f(&stmts),
+            PreHirExpr::Var("xVar0".to_string()),
+            "{stmts:?}"
+        );
+
+        // Control: with nothing in between, the copy folds.
+        let mut stmts = copy_used_in_an_if_arm(PreHirExpr::Var("rax".to_string()), Vec::new());
+        assert!(pass(&mut stmts));
+        assert_eq!(argument_of_f(&stmts), PreHirExpr::Var("rax".to_string()));
+    }
+}
+
+/// The same for a load: a store in the arm ahead of the use may change it.
+#[test]
+fn a_load_is_not_inlined_into_an_if_arm_past_a_store() {
+    let load = || PreHirExpr::Load {
+        ptr: Box::new(PreHirExpr::Var("p".to_string())),
+        ty: int(64),
+    };
+    let store = PreHirStmt::Assign {
+        lhs: PreHirLValue::Deref {
+            ptr: Box::new(PreHirExpr::Var("q".to_string())),
+            ty: int(64),
+        },
+        rhs: PreHirExpr::Const(1, int(64)),
+    };
+    let mut stmts = copy_used_in_an_if_arm(load(), vec![store]);
+    inline_single_use_temps(&mut stmts, &HashSet::default());
+    assert_eq!(
+        argument_of_f(&stmts),
+        PreHirExpr::Var("xVar0".to_string()),
+        "{stmts:?}"
+    );
+
+    // Control: no store, and the load moves to its use.
+    let mut stmts = copy_used_in_an_if_arm(load(), Vec::new());
+    assert!(inline_single_use_temps(&mut stmts, &HashSet::default()));
+    assert_eq!(argument_of_f(&stmts), load());
+}
+
 #[test]
 fn inline_single_use_temps_inlines_flag_intrinsic_into_predicate() {
     let mut stmts = vec![

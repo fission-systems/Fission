@@ -319,7 +319,12 @@ fn collapse_adjacent_pure_copy_into_if_linear(
             i += 1;
             continue;
         }
-        // Free vars of rhs must not be redefined between def and if (adjacent: none).
+        // Free vars of rhs must not be redefined between def and if (adjacent:
+        // none), nor in an arm ahead of a use there.
+        if if_arm_use_sees_changed_inputs(&stmts[i + 1], &t_name, &stmts[i]) {
+            i += 1;
+            continue;
+        }
         replace_var_in_stmt(&mut stmts[i + 1], &t_name, &rhs);
         stmts.remove(i);
         changed = true;
@@ -661,6 +666,9 @@ fn find_inline_forward_target(
             return None;
         }
         if uses > 0 && stmt_allows_inline_target(stmt) {
+            if if_arm_use_sees_changed_inputs(stmt, name, &stmts[def_idx]) {
+                return None;
+            }
             return Some(scan_idx);
         }
         if uses == 0 {
@@ -682,6 +690,163 @@ fn find_inline_forward_target(
         return None;
     }
     None
+}
+
+/// Whether a use of `name` inside an arm of the `if` `stmt` runs after its
+/// definition's inputs may have changed.
+///
+/// The scan that reaches the `if` checks only the statements between the
+/// definition and the `if`. A use in the condition is evaluated next, but a
+/// use in an arm runs after whatever precedes it there: `t = rax; if (rax) {
+/// rax = 0; f(t); }` passes the old `rax`, and substituting `rax` passes 0.
+fn if_arm_use_sees_changed_inputs(
+    stmt: &PreHirStmt,
+    name: &str,
+    defining_stmt: &PreHirStmt,
+) -> bool {
+    let PreHirStmt::If {
+        cond,
+        then_body,
+        else_body,
+    } = stmt
+    else {
+        return false;
+    };
+    let PreHirStmt::Assign { rhs, .. } = defining_stmt else {
+        return false;
+    };
+    let mut inputs = HashSet::default();
+    collect_all_body_names_expr(rhs, &mut inputs);
+    let check = InputWriteOrder {
+        name,
+        inputs,
+        reads_memory: super::condexe::expr_reads_memory(rhs) || expr_has_side_effects(rhs),
+    };
+    // A label in an arm can be a loop's head: a `goto` back to it runs the
+    // use again after the writes that follow it.
+    if [then_body, else_body].into_iter().any(|arm| {
+        arm.iter()
+            .any(|arm_stmt| count_var_uses_in_stmt(arm_stmt, name) > 0)
+            && !collect_defined_labels(arm).is_empty()
+    }) {
+        return true;
+    }
+    let written = check.expr_writes(cond);
+    check.stmts(then_body, written).is_none() || check.stmts(else_body, written).is_none()
+}
+
+/// Walks statements in execution order, asking whether a use of `name` runs
+/// after a write to one of the inputs of its definition -- a variable it
+/// reads, or memory when it reads memory.
+struct InputWriteOrder<'a> {
+    name: &'a str,
+    inputs: HashSet<String>,
+    reads_memory: bool,
+}
+
+impl InputWriteOrder<'_> {
+    fn writes(&self, stmt: &PreHirStmt) -> bool {
+        self.inputs
+            .iter()
+            .any(|input| stmt_defines_var(stmt, input))
+            || (self.reads_memory && stmt_may_write_memory(stmt))
+    }
+
+    fn expr_writes(&self, expr: &PreHirExpr) -> bool {
+        self.reads_memory && expr_has_side_effects(expr)
+    }
+
+    /// `None` when a use sees a write; otherwise whether an input has been
+    /// written by the end of `stmts`, given `written` on entry.
+    fn stmts(&self, stmts: &[PreHirStmt], mut written: bool) -> Option<bool> {
+        for stmt in stmts {
+            written = self.stmt(stmt, written)?;
+        }
+        Some(written)
+    }
+
+    fn stmt(&self, stmt: &PreHirStmt, written: bool) -> Option<bool> {
+        if count_var_uses_in_stmt(stmt, self.name) == 0 {
+            return Some(written || self.writes(stmt));
+        }
+        if written {
+            return None;
+        }
+        match stmt {
+            // A statement reads its operands before its own write lands.
+            PreHirStmt::Assign { .. }
+            | PreHirStmt::Expr(_)
+            | PreHirStmt::Return(_)
+            | PreHirStmt::VaStart { .. } => Some(self.writes(stmt)),
+            PreHirStmt::Block(body) => self.stmts(body, false),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                let written = self.expr_writes(cond);
+                let then_written = self.stmts(then_body, written)?;
+                let else_written = self.stmts(else_body, written)?;
+                Some(then_written || else_written)
+            }
+            // A later iteration runs the use after this one's writes, and a
+            // case can fall through into the next.
+            PreHirStmt::While { .. }
+            | PreHirStmt::DoWhile { .. }
+            | PreHirStmt::For { .. }
+            | PreHirStmt::Switch { .. } => (!self.writes(stmt)).then_some(false),
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => Some(false),
+        }
+    }
+}
+
+/// Whether `stmt`, or anything nested in it, stores to memory or makes a call.
+fn stmt_may_write_memory(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            !matches!(lhs, PreHirLValue::Var(_)) || expr_has_side_effects(rhs)
+        }
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => expr_has_side_effects(expr),
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => body.iter().any(stmt_may_write_memory),
+        PreHirStmt::For {
+            init, update, body, ..
+        } => {
+            init.as_deref().is_some_and(stmt_may_write_memory)
+                || update.as_deref().is_some_and(stmt_may_write_memory)
+                || body.iter().any(stmt_may_write_memory)
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_has_side_effects(cond)
+                || then_body.iter().any(stmt_may_write_memory)
+                || else_body.iter().any(stmt_may_write_memory)
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_has_side_effects(expr)
+                || cases
+                    .iter()
+                    .any(|case| case.body.iter().any(stmt_may_write_memory))
+                || default.iter().any(stmt_may_write_memory)
+        }
+        PreHirStmt::VaStart { .. } => true,
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Return(None)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => false,
+    }
 }
 
 fn stmt_redefines_expr_dependency(stmt: &PreHirStmt, defining_stmt: &PreHirStmt) -> bool {
