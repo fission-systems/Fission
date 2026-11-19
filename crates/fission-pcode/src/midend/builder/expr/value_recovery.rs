@@ -110,17 +110,19 @@ impl<'a> PreviewBuilder<'a> {
     /// after it reads: `[g] = x; f(); y = [g]` must read `g` again, not `x`.
     /// Registers are not memory and are left to their own rules.
     ///
-    /// The two lifter numberings give id 3 to RAM in one and to unique space
-    /// in the other, so the space is taken from the function's own numbering
-    /// (`fixed_memory_space_id`). Only calls in a later instruction than the
-    /// definition count: no instruction stores a global and then calls.
+    /// Which varnodes are global memory is the materializer's own answer
+    /// (`output_is_mapped_global_memory`): RAM under the runtime's space
+    /// numbering, at a mapped address -- the two lifter numberings give id 3
+    /// to RAM in one and to unique space in the other. Only calls in a later
+    /// instruction than the definition count: no instruction stores a global
+    /// and then calls.
     pub(in crate::midend::builder) fn call_may_write_global_between(
         &self,
         vn: &Varnode,
         definition: LoweringSite,
         use_site: LoweringSite,
     ) -> bool {
-        if vn.is_constant || self.fixed_memory_space_id != Some(vn.space_id) {
+        if !self.output_is_mapped_global_memory(vn) {
             return false;
         }
         let blocks = &self.pcode.blocks;

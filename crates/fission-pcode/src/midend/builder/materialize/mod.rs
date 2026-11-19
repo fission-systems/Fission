@@ -564,7 +564,10 @@ impl<'a> PreviewBuilder<'a> {
     /// The offset is the discriminator the space id cannot be: a legacy unique
     /// offset is a small slot index, while this is an address the loader
     /// actually mapped, and one no legacy unique register name claims.
-    fn output_is_mapped_global_memory(&self, output: &Varnode) -> bool {
+    pub(in crate::midend::builder) fn output_is_mapped_global_memory(
+        &self,
+        output: &Varnode,
+    ) -> bool {
         !output.is_constant
             && output.space_id == UNIQUE_SPACE_ID
             && self.pcode_uses_runtime_space_numbering()

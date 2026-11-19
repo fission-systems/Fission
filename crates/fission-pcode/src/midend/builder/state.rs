@@ -56,11 +56,6 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) candidate_def_keys_cache:
         RefCell<BuilderCacheMap<VarnodeKey, std::rc::Rc<[VarnodeKey]>>>,
     pub(crate) terminator_cache: BuilderCacheMap<usize, LoweredTerminator>,
-    /// The space id of memory at fixed addresses (globals) in this
-    /// function's p-code, or `None` when the numbering cannot tell it from
-    /// temporaries. Rust-Sleigh puts RAM at 3; the legacy numbering puts
-    /// unique space there.
-    pub(crate) fixed_memory_space_id: Option<u64>,
     pub(crate) x86_branch_recovery_attempts: usize,
     pub(crate) address_to_index: HashMap<u64, usize>,
     pub(crate) block_target_keys: Vec<u64>,
