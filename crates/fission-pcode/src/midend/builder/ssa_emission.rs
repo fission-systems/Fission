@@ -398,7 +398,7 @@ impl<'a> PreviewBuilder<'a> {
         bodies: &[Vec<PreHirStmt>],
         terminators: &[LoweredTerminator],
     ) -> bool {
-        let tracked: BTreeSet<_> = self.temps.keys().cloned().collect();
+        let tracked = self.ssa_initialization_tracked_names();
         let seed: BTreeSet<_> = self
             .params
             .values()
@@ -919,6 +919,76 @@ impl<'a> PreviewBuilder<'a> {
             .copied()
     }
 
+    /// Whether the plan names any part of `vn`. A wider or narrower view of
+    /// an emitted storage is still its value: `r12 = zext(r12d)` writes two
+    /// emitted pieces under one output that is not itself a storage key.
+    pub(super) fn ssa_emission_owns(&self, vn: &Varnode) -> bool {
+        let Some(end) = vn.offset.checked_add(u64::from(vn.size)) else {
+            return false;
+        };
+        !vn.is_constant
+            && self.ssa_emission.storages.iter().any(|storage| {
+                storage.space_id == vn.space_id
+                    && storage.offset < end
+                    && vn.offset < storage.offset.saturating_add(u64::from(storage.size))
+            })
+    }
+
+    /// Temporaries whose every read the plan must find initialized.
+    ///
+    /// All of them, with one exception: a binding named after a register
+    /// the plan does not name. That name is the register itself, and a read
+    /// of it before the function writes it is what the caller left there --
+    /// the legacy path's own reading of a live-in, which the plan neither
+    /// introduces nor changes. Declining for it keeps that read exactly as
+    /// it is and throws away every name the plan had right.
+    pub(super) fn ssa_initialization_tracked_names(&self) -> BTreeSet<String> {
+        let emitted: BTreeSet<&String> = self
+            .ssa_emission
+            .bindings
+            .values()
+            .chain(self.ssa_emission.operation_bindings.values())
+            .chain(
+                self.ssa_emission
+                    .conditional_edges
+                    .values()
+                    .map(|branch| &branch.snapshot),
+            )
+            .collect();
+        // Register name -> whether any access under that name touches an
+        // emitted storage. One touching access is enough to keep it tracked:
+        // the plan then owes that name a definition on every path. The
+        // return registers are read by return recovery without an op.
+        let returned = self.register_namer().return_registers();
+        let accesses: BTreeSet<(u64, u64, u32)> = self
+            .pcode
+            .blocks
+            .iter()
+            .flat_map(|block| &block.ops)
+            .flat_map(|op| op.inputs.iter().chain(op.output.iter()))
+            .chain(&returned)
+            .filter(|vn| !vn.is_constant && is_register_varnode(vn))
+            .map(|vn| (vn.space_id, vn.offset, vn.size))
+            .collect();
+        let mut register_names = BTreeMap::<String, bool>::new();
+        for (space_id, offset, size) in accesses {
+            if let Some(name) = self.sla_hw_name(offset, size) {
+                *register_names.entry(name).or_default() |= self.ssa_emission_owns(&Varnode {
+                    space_id,
+                    offset,
+                    size,
+                    is_constant: false,
+                    constant_val: 0,
+                });
+            }
+        }
+        self.temps
+            .keys()
+            .filter(|name| emitted.contains(name) || register_names.get(*name) != Some(&false))
+            .cloned()
+            .collect()
+    }
+
     pub(super) fn ssa_emitted_read(&self, vn: &Varnode) -> Option<PreHirExpr> {
         let site = self.current_lowering_site?;
         let block = self.pcode_block_idx(site.block_idx);
@@ -1057,7 +1127,11 @@ impl<'a> PreviewBuilder<'a> {
         combined
     }
 
-    pub(super) fn ssa_emitted_definition(&self, block: usize, op: usize) -> Option<String> {
+    pub(in crate::midend) fn ssa_emitted_definition(
+        &self,
+        block: usize,
+        op: usize,
+    ) -> Option<String> {
         let site = SsaOpSite {
             block: block as u32,
             op: op as u32,

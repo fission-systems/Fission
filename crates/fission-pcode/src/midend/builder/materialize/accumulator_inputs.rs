@@ -74,6 +74,12 @@ impl<'a> PreviewBuilder<'a> {
         if self.has_prior_local_def_for_varnode(input, LoweringSite { block_idx, op_idx }) {
             return expr;
         }
+        // The plan resolved this read to the name every write reaching it
+        // carries; a merge binding for a wider view of the register is not
+        // a better answer.
+        if self.ssa_emission_owns(input) {
+            return expr;
+        }
         if let Some(explicit_expr) = self.current_explicit_merge_binding_expr(block_idx, input) {
             return explicit_expr;
         }

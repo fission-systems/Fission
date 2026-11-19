@@ -2,6 +2,7 @@ use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
 use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
 use super::typed_facts::collect_typed_fact_inventory;
+use crate::analysis::defuse::{collect_assigned_names, collect_expr_vars};
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
 use fission_midend_core::wave_stats::add_surface_binding_promotions;
@@ -73,6 +74,9 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: 
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::default();
     collect_memory_slot_candidates(func, &mut candidates);
     let alias_defs = collect_single_var_aliases(&func.body);
+    let mut assigned = HashSet::default();
+    collect_assigned_names(&func.body, &mut assigned);
+    let assigned: HashSet<String> = assigned.into_iter().map(str::to_string).collect();
     let mut ordered_candidates = candidates.values().collect::<Vec<_>>();
     ordered_candidates.sort_by(|lhs, rhs| {
         lhs.first_seen.cmp(&rhs.first_seen).then_with(|| {
@@ -129,6 +133,14 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: 
         }
         let display_base = resolve_slot_alias_base(func, &alias_defs, &candidate.base);
         if !is_surface_stable_slot_display_base(func, &inventory, &display_base, candidate.offset) {
+            continue;
+        }
+        // The alias is a declaration with an initializer, which runs before
+        // the body. A base the body assigns -- a cursor walked through a
+        // loop -- has no single value for it to read.
+        let mut read = HashSet::default();
+        collect_expr_vars(&display_base, &mut read);
+        if read.iter().any(|name| assigned.contains(name.as_str())) {
             continue;
         }
         let family_base = family_base_offsets
@@ -196,13 +208,16 @@ fn collect_single_var_aliases(stmts: &[PreHirStmt]) -> HashMap<String, PreHirExp
         defs: &mut HashMap<String, PreHirExpr>,
     ) {
         match stmt {
+            // Every assignment counts, whatever it assigns: `p = q` followed
+            // by `p = p + 16` in a loop leaves `p` an alias of `q` for one
+            // iteration only.
             PreHirStmt::Assign {
                 lhs: PreHirLValue::Var(name),
                 rhs,
-            } if matches!(rhs, PreHirExpr::Var(_)) => {
+            } => {
                 let entry = counts.entry(name.clone()).or_insert(0);
                 *entry += 1;
-                if *entry == 1 {
+                if *entry == 1 && matches!(rhs, PreHirExpr::Var(_)) {
                     defs.insert(name.clone(), rhs.clone());
                 } else {
                     defs.remove(name);
@@ -970,5 +985,129 @@ mod tests {
         collect_address_parts(&expr, &mut parts, 1).expect("collect parts");
         assert_eq!(parts.const_offset, 8); // 2 elements * 4 bytes = 8
         assert_eq!(parts.base, Some(PreHirExpr::Var("arr".to_string())));
+    }
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn pointer_local(name: &str) -> PreHirBinding {
+        PreHirBinding {
+            name: name.to_string(),
+            ty: NirType::Ptr(Box::new(u32_ty())),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::StackOffset(-8)),
+            initializer: None,
+        }
+    }
+
+    fn surfacing_func(body: Vec<PreHirStmt>) -> PreHirFunction {
+        PreHirFunction {
+            variadic_fixed_arity: None,
+            name: "f".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            params: vec![PreHirBinding {
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                ..pointer_local("param_1")
+            }],
+            locals: vec![pointer_local("local_8")],
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            is_big_endian: false,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    /// `*(local_8 + 4) |= bit` -- a field read and written through the same
+    /// pointer, the shape the pass gives a `slot_4` alias.
+    fn field_update(bit: i64) -> [PreHirStmt; 2] {
+        let field = || PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("local_8".to_string())),
+            offset: 4,
+        };
+        [
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("v".to_string()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(field()),
+                    ty: u32_ty(),
+                },
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(field()),
+                    ty: u32_ty(),
+                },
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    lhs: Box::new(PreHirExpr::Var("v".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(bit, u32_ty())),
+                    ty: u32_ty(),
+                },
+            },
+        ]
+    }
+
+    fn cursor_from_param() -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("local_8".to_string()),
+            rhs: PreHirExpr::Var("param_1".to_string()),
+        }
+    }
+
+    fn slot_initializers(func: &PreHirFunction) -> Vec<String> {
+        func.locals
+            .iter()
+            .filter(|binding| binding.name.starts_with("slot_"))
+            .map(|binding| format!("{:?}", binding.initializer))
+            .collect()
+    }
+
+    /// Control for the test below: a pointer copied once out of its
+    /// parameter gets the alias, rooted at the parameter.
+    #[test]
+    fn a_pointer_assigned_once_gets_a_slot_alias_rooted_at_its_source() {
+        let mut body = vec![cursor_from_param()];
+        body.extend(field_update(1));
+        let mut func = surfacing_func(body);
+        assert!(apply_memory_slot_surfacing(&mut func), "{:?}", func.body);
+        let initializers = slot_initializers(&func);
+        assert_eq!(initializers.len(), 1, "{initializers:?}");
+        assert!(initializers[0].contains("param_1"), "{initializers:?}");
+        assert!(!initializers[0].contains("local_8"), "{initializers:?}");
+    }
+
+    /// `p = param; while (..) { p->f |= 1; p = p + 16; }`. The alias is a
+    /// declaration whose initializer runs once, before the loop: rooted at
+    /// the parameter it names the first element on every iteration, rooted
+    /// at the cursor it reads the cursor before anything assigned it.
+    #[test]
+    fn a_cursor_the_body_advances_gets_no_slot_alias() {
+        let mut loop_body = field_update(1).to_vec();
+        loop_body.push(PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("local_8".to_string()),
+            rhs: PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("local_8".to_string())),
+                offset: 16,
+            },
+        });
+        let mut func = surfacing_func(vec![
+            cursor_from_param(),
+            PreHirStmt::While {
+                cond: PreHirExpr::Var("more".to_string()),
+                body: loop_body.into(),
+            },
+        ]);
+        apply_memory_slot_surfacing(&mut func);
+        assert!(slot_initializers(&func).is_empty(), "{:?}", func.locals);
     }
 }

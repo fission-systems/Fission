@@ -6436,3 +6436,221 @@ fn ssa_multiple_backedges_keep_the_final_value_and_decline_unproven_clones() {
         );
     }
 }
+
+/// `r12d = 5; r12 = zext(r12d); if (..) { r12d = 7; r12 = zext(r12d); }` and
+/// then a read of `r12d` -- the shape a 32-bit move into a 64-bit register
+/// takes around a branch. `merge_extra` is one more operand for that read.
+fn ssa_widened_register_triangle(merge_extra: Option<Varnode>) -> crate::pcode::PcodeFunction {
+    let low = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 4);
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let condition = crate::midend::builder::materialize::test_support::varnode(0x900);
+    let tested = crate::midend::builder::materialize::test_support::varnode(0x908);
+    let summed = crate::midend::builder::materialize::test_support::varnode(0x910);
+    let write = |seq: u32, value: i64| {
+        [
+            op(
+                seq,
+                PcodeOpcode::Copy,
+                Some(low.clone()),
+                vec![constant(value)],
+            ),
+            op(
+                seq + 1,
+                PcodeOpcode::IntZExt,
+                Some(wide.clone()),
+                vec![low.clone()],
+            ),
+        ]
+    };
+    let mut head_ops = write(0, 5).to_vec();
+    head_ops.push(op(
+        2,
+        PcodeOpcode::IntEqual,
+        Some(condition.clone()),
+        vec![low.clone(), constant(0)],
+    ));
+    head_ops.push(op(
+        3,
+        PcodeOpcode::CBranch,
+        None,
+        vec![constant(0x3000), condition],
+    ));
+    let mut head = block_at(0x1000, 0, head_ops);
+    head.successors = vec![1, 2];
+    let mut arm_ops = write(4, 7).to_vec();
+    arm_ops.push(op(6, PcodeOpcode::Branch, None, vec![constant(0x3000)]));
+    let mut arm = block_at(0x2000, 1, arm_ops);
+    arm.successors = vec![2];
+    let mut merge_ops = vec![op(
+        7,
+        PcodeOpcode::IntAnd,
+        Some(tested.clone()),
+        vec![low.clone(), low.clone()],
+    )];
+    let returned = match merge_extra {
+        Some(extra) => {
+            merge_ops.push(op(
+                8,
+                PcodeOpcode::IntAdd,
+                Some(summed.clone()),
+                vec![tested, extra],
+            ));
+            summed
+        }
+        None => tested,
+    };
+    merge_ops.push(op(9, PcodeOpcode::Return, None, vec![returned]));
+    let merge = block_at(0x3000, 2, merge_ops);
+    pcode_function(vec![head, arm, merge])
+}
+
+#[test]
+fn a_merge_the_plan_names_gets_no_second_select_for_its_wider_view() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    // The plan names the two halves, not the 8-byte output that wrote them.
+    assert!(builder.ssa_emission_owns(&wide));
+    assert!(!builder.ssa_emission.storages.contains(&SsaStorageKey {
+        space_id: wide.space_id,
+        offset: wide.offset,
+        size: wide.size
+    }));
+    let merge = builder.lower_block_stmts(&pcode.blocks[2]).unwrap();
+    assert!(
+        !merge.iter().any(|stmt| matches!(
+            stmt,
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Select { .. },
+                ..
+            }
+        )),
+        "{merge:?}"
+    );
+    assert!(
+        !builder
+            .explicit_merge_bindings
+            .keys()
+            .any(|(block, _)| *block == 2)
+    );
+}
+
+#[test]
+fn a_live_in_register_the_plan_does_not_name_does_not_decline_it() {
+    // `r10d` is read and never written: its name is the register, and what
+    // it holds is the caller's.
+    let live_in = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x90, 4);
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(Some(live_in.clone()));
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    assert!(!builder.ssa_emission_owns(&live_in));
+    for block in &pcode.blocks {
+        builder.lower_block_stmts(block).unwrap();
+        builder
+            .lower_block_terminator(block.index as usize)
+            .unwrap();
+    }
+    let name = builder.sla_hw_name(live_in.offset, live_in.size).unwrap();
+    // Only registers are let off -- this one and the one the function
+    // returns in, which nothing here writes either. A numbered temporary is
+    // no register, and one read before its assignment is a fault whoever
+    // emitted it.
+    let returned = builder.sla_hw_name(0x0, 8).unwrap();
+    let tracked = builder.ssa_initialization_tracked_names();
+    let mut unchecked: Vec<_> = builder
+        .temps
+        .keys()
+        .filter(|temp| !tracked.contains(*temp))
+        .collect();
+    unchecked.sort();
+    assert_eq!(unchecked, [&name, &returned], "{:?}", builder.temps.keys());
+    let emitted: Vec<_> = builder.ssa_emission.bindings.values().collect();
+    assert!(
+        tracked.iter().any(|temp| !emitted.contains(&temp)),
+        "{tracked:?} {emitted:?}"
+    );
+}
+
+#[test]
+fn a_register_name_that_touches_emitted_storage_stays_checked() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    // The register's own name is taken before the plan picks its names, so
+    // the plan carries the value under another one.
+    let name = builder.sla_hw_name(wide.offset, wide.size).unwrap();
+    builder.ensure_live_register_binding(&name, wide.size);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    assert!(
+        !builder
+            .ssa_emission
+            .bindings
+            .values()
+            .any(|bound| *bound == name),
+        "{:?}",
+        builder.ssa_emission.bindings
+    );
+    // A read that still prints the register would be reading a variable the
+    // plan never assigns.
+    assert!(builder.ssa_initialization_tracked_names().contains(&name));
+}
+
+#[test]
+fn a_definition_named_in_pieces_joins_its_block_as_statements() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    // `r12 = zext(r12d)` is one op and two emitted halves.
+    let halves = builder.ssa_definition_piece_stmts(0, 1, "whole");
+    assert_eq!(halves.len(), 2, "{halves:?}");
+    let entry = builder.lower_block_stmts(&pcode.blocks[0]).unwrap();
+    assert!(
+        entry
+            .iter()
+            .all(|stmt| matches!(stmt, PreHirStmt::Assign { .. })),
+        "{entry:?}"
+    );
+    for half in &halves {
+        let PreHirStmt::Assign { lhs, .. } = half else {
+            panic!("{half:?}");
+        };
+        assert!(
+            entry
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Assign { lhs: found, .. } if found == lhs)),
+            "{lhs:?} {entry:?}"
+        );
+    }
+}
+
+#[test]
+fn a_block_of_copies_the_plan_names_is_not_stepped_over() {
+    let wide = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0xa0, 8);
+    let pcode = ssa_widened_register_triangle(None);
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    // `r12d = 7; r12 = zext(r12d); goto merge` is a copy, an extension and a
+    // branch: nothing the legacy path prints.
+    let legacy = PreviewBuilder::new(&pcode, &options, None);
+    assert!(legacy.is_trivial_forwarding_block(1, 2));
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.prepare_ssa_emission();
+    assert!(builder.ssa_emission_owns(&wide));
+    // Under the plan the same block assigns the merge's value on this path.
+    assert!(
+        !builder
+            .lower_block_stmts(&pcode.blocks[1])
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!builder.is_trivial_forwarding_block(1, 2));
+}

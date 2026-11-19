@@ -1057,11 +1057,10 @@ impl<'a> PreviewBuilder<'a> {
                 let Some(output) = &op.output else {
                     continue;
                 };
-                if self.ssa_emission.storages.contains(&SsaStorageKey {
-                    space_id: output.space_id,
-                    offset: output.offset,
-                    size: output.size,
-                }) {
+                // The plan already carries every write reaching this merge
+                // under one name; a select rebuilt from two of them would be
+                // a second, unsynchronized copy of the same value.
+                if self.ssa_emission_owns(output) {
                     continue;
                 }
                 if !matches!(

@@ -23,7 +23,11 @@ impl<'a> PreviewBuilder<'a> {
     // Linear free-fns are invoked via StructuringHost (host_impl) or tests
     // (`fission_midend_structuring::lower_linear_body`, etc.). No inherent thin wraps.
 
-    pub(super) fn is_trivial_forwarding_block(&self, idx: usize, next_idx: usize) -> bool {
+    pub(in crate::midend) fn is_trivial_forwarding_block(
+        &self,
+        idx: usize,
+        next_idx: usize,
+    ) -> bool {
         if idx >= next_idx {
             return false;
         }
@@ -47,6 +51,14 @@ impl<'a> PreviewBuilder<'a> {
             .iter()
             .all(|op| self.is_trivial_forwarding_op(op.opcode))
         {
+            return false;
+        }
+        // A copy is trivial because nothing is printed for it: its reader
+        // looks the value up. A copy the emission plan names is printed, as
+        // the assignment that gives a merge its value on this path, and a
+        // block holding one cannot be stepped over.
+        let pcode_idx = self.pcode_block_idx(idx);
+        if (0..block.ops.len()).any(|op| self.ssa_emitted_definition(pcode_idx, op).is_some()) {
             return false;
         }
         self.is_linear_tail_terminator(idx, last.opcode)

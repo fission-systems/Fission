@@ -707,6 +707,46 @@ pub fn collect_address_taken_locals(stmts: &[PreHirStmt]) -> HashSet<String> {
     out
 }
 
+/// Every name some statement of `stmts` assigns as a variable, at any depth.
+pub fn collect_assigned_names<'a>(stmts: &'a [PreHirStmt], assigned: &mut HashSet<&'a str>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } => {
+                assigned.insert(name.as_str());
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => collect_assigned_names(body, assigned),
+            PreHirStmt::For {
+                init, body, update, ..
+            } => {
+                for part in [init, update].into_iter().flatten() {
+                    collect_assigned_names(std::slice::from_ref(part.as_ref()), assigned);
+                }
+                collect_assigned_names(body, assigned);
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                collect_assigned_names(then_body, assigned);
+                collect_assigned_names(else_body, assigned);
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    collect_assigned_names(&case.body, assigned);
+                }
+                collect_assigned_names(default, assigned);
+            }
+            _ => {}
+        }
+    }
+}
+
 pub fn collect_expr_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
     match expr {
         PreHirExpr::Var(name) | PreHirExpr::AddressOfLocal(name) => {

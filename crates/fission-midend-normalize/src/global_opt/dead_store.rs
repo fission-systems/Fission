@@ -19,6 +19,7 @@
 /// - LLVM `DeadStoreElimination.cpp`
 /// - RetDec `reaching_definitions.h`: UD/DU chain based DSE
 use super::mem_ssa::{AliasKey, MemDef, build_mem_ssa};
+use crate::analysis::defuse::collect_assigned_names;
 use crate::prelude::*;
 
 /// Apply dead store elimination and return `true` if any stores were removed.
@@ -35,6 +36,14 @@ pub fn apply_dead_store_elimination(func: &mut PreHirFunction) -> bool {
         .flat_map(|p| p.inputs.iter().copied())
         .collect();
 
+    // A partition is keyed by the name its address is built on, and a name
+    // that came from a stack slot is classed as the slot. A name this
+    // function assigns is not a slot's address, it is a variable: `p =
+    // p->next; p->x = 1; return;` writes wherever `p` points, which is not
+    // this frame however `p` is named.
+    let mut assigned = crate::HashSet::default();
+    collect_assigned_names(&func.body, &mut assigned);
+
     let dead_def_ids: crate::HashSet<usize> = mem_ssa
         .defs
         .iter()
@@ -42,7 +51,9 @@ pub fn apply_dead_store_elimination(func: &mut PreHirFunction) -> bool {
             def.use_count == 0
                 && !def.may_escape
                 && !phi_inputs.contains(&def.id)
-                && matches!(&def.key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                && matches!(&def.key, AliasKey::Partition(partition)
+                    if partition.is_promotable_stack_like()
+                        && !assigned.contains(partition.base_object.as_str()))
         })
         .map(|def| def.id)
         .collect();
@@ -487,6 +498,54 @@ mod tests {
             2,
             "the write must survive -- the callee reads it:\n{:?}",
             func.body
+        );
+    }
+
+    /// `p = q; p->x = 7; return;` where `p` lives in a stack slot and so is
+    /// named after it. The write goes wherever `q` points. Seen on a list walk
+    /// whose cursor was a stack local: the store after the loop was dropped
+    /// as a dead write to the cursor's own slot.
+    #[test]
+    fn dead_store_elimination_keeps_a_write_through_a_variable_named_after_a_slot() {
+        let through_slot_name = || PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("local_18".to_string())),
+                    offset: 4,
+                }),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            },
+            rhs: PreHirExpr::Const(
+                7,
+                NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            ),
+        };
+        // Control: with nothing assigning the name it is the slot's address,
+        // and a write nobody reads back is removed.
+        let mut slot = base_func(vec![through_slot_name()], vec![ptr_binding("local_18")]);
+        apply_dead_store_elimination(&mut slot);
+        assert!(slot.body.is_empty(), "{:?}", slot.body);
+
+        let assign = PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("local_18".to_string()),
+            rhs: PreHirExpr::Var("param_1".to_string()),
+        };
+        let mut variable = base_func(
+            vec![assign, through_slot_name()],
+            vec![ptr_binding("local_18")],
+        );
+        apply_dead_store_elimination(&mut variable);
+        assert_eq!(
+            variable.body.len(),
+            2,
+            "the write is to what the variable points at:\n{:?}",
+            variable.body
         );
     }
 

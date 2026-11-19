@@ -45,8 +45,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// name of that value.
     pub(crate) materialized_output_names: HashMap<(usize, usize, VarnodeKey), String>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
+    /// Per (use site, storage): the definition the legacy scan settles on,
+    /// and whether it is the only one reaching the use.
     pub(crate) lookup_site_cache:
-        RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<LoweringSite>>>,
+        RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<(LoweringSite, bool)>>>,
     pub(crate) peel_cache: RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
     /// `lookup_candidate_def_keys` per key; `def_sites` never changes.
     pub(crate) candidate_def_keys_cache:
@@ -62,6 +64,12 @@ pub(crate) struct PreviewBuilder<'a> {
     /// the semantic data-flow graph.
     pub(crate) heritage_successors: Vec<Vec<usize>>,
     pub(crate) heritage_predecessors: Vec<Vec<usize>>,
+    /// Immediate dominators of the heritage CFG, as scalar SSA computed them
+    /// to place its phis: `None` for the entry block and for a block the
+    /// entry cannot reach. `dom_tree` below follows the structuring CFG,
+    /// which has irreducible edges removed and so can call a block a
+    /// dominator that the lifted program can go around.
+    pub(crate) heritage_idom: Vec<Option<usize>>,
     pub(crate) scalar_ssa: NirScalarSsa,
     pub(super) ssa_emission: super::ssa_emission::SsaEmissionPlan,
     pub(crate) successors: Vec<Vec<usize>>,

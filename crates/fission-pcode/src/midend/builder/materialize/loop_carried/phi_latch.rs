@@ -193,7 +193,7 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         loop_head: usize,
     ) -> Option<String> {
-        let (definition, definition_op) = self.lookup_def_site(output)?;
+        let (definition, definition_op) = self.lookup_dominating_def_site(output)?;
         if self.current_lowering_site == Some(definition) {
             return None;
         }
@@ -266,7 +266,7 @@ impl<'a> PreviewBuilder<'a> {
                 op_idx: definition.op as usize,
             };
             let (source_site, source_op) = self.with_lowering_site(source_site, |this| {
-                this.lookup_def_site(input)
+                this.lookup_dominating_def_site(input)
                     .map(|(site, op)| (site, op.clone()))
             })?;
             let source_output = source_op.output.as_ref()?.clone();
