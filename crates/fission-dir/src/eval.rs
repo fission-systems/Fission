@@ -35,6 +35,7 @@
 //! only source of a visible side effect in this AST).
 
 use fission_midend_core::ir::NirType;
+use std::collections::HashMap;
 
 /// A single scalar value: the raw two's-complement bit pattern, meaningful
 /// in its low declared-type-width bits -- every value entering or leaving
@@ -78,6 +79,49 @@ pub fn normalize(raw: i64, ty: &NirType) -> i64 {
     }
 }
 
+/// One call the interpreted body made: where it was printed from, what it
+/// called, and the arguments as the body computed them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallEvent {
+    /// The call instruction's address, when the printed call carries it.
+    pub site: Option<u64>,
+    pub target: String,
+    pub args: Vec<Value>,
+    /// Each argument's declared width in bits, for comparing it with a
+    /// machine register that may carry garbage above it.
+    pub arg_bits: Vec<u32>,
+}
+
+/// What the interpreted body can see outside its own variables.
+///
+/// Every field is something the emulator running the same function is told
+/// as well; the two only agree because both were given the same world.
+#[derive(Default)]
+pub struct World<'a> {
+    /// Bytes placed in memory before the body runs (scratch buffers).
+    pub image: &'a [(u64, u8)],
+    /// Values for names the body reads and nothing declares (registers).
+    pub bound: &'a [(String, Value)],
+    /// Memory nobody wrote during this run: the program image as the
+    /// machine holds it. Without it every global read is a refusal.
+    pub backing: Option<&'a dyn Fn(u64) -> Option<u8>>,
+    /// Names that are globals, and their addresses. A read of one is a load
+    /// and an assignment to one is a store, as in the printed C.
+    pub globals: Option<&'a HashMap<String, u64>>,
+    /// The value the `n`th call (counting from zero) returns. `None`
+    /// refuses every call that is not a modeled intrinsic.
+    pub call_return: Option<&'a dyn Fn(usize) -> u64>,
+}
+
+/// The result of one interpreted run.
+#[derive(Debug, Clone, Default)]
+pub struct Run {
+    pub ret: Option<Value>,
+    pub calls: Vec<CallEvent>,
+    /// Every byte the body stored to memory, with its final value.
+    pub writes: std::collections::BTreeMap<u64, u8>,
+}
+
 /// Generates one interpreter module for a `Stmt`/`Expr`/`LValue`/`BinaryOp`/
 /// `UnaryOp`/`Binding`/`Function` family (either all `Dir*`, imported from
 /// `fission_midend_prehir`, or all `Hir*` plus the shared `NirBinding`,
@@ -94,9 +138,10 @@ macro_rules! define_interp {
             use anyhow::{Result, bail};
             use $ir_crate::{$BinaryOp, $Binding, $Expr, $Function, $LValue, $Stmt, $UnaryOp};
             use fission_midend_core::ir::NirType;
-            use std::collections::HashMap;
+            use rustc_hash::FxHashMap as HashMap;
+            use std::cell::RefCell;
 
-            use super::Value;
+            use super::{CallEvent, Run, Value, World};
 
             #[derive(Debug, Clone)]
             enum Flow {
@@ -127,12 +172,62 @@ macro_rules! define_interp {
             /// a stack slot or a buffer, then loads them back -- and still
             /// refuses globals and caller-owned pointers, whose contents this
             /// tier has no way to know.
-            #[derive(Default)]
-            struct Memory {
-                bytes: HashMap<u64, u8>,
+            /// Bytes per page of the interpreter's memory.
+            const PAGE: u64 = 4096;
+
+            /// One page: the bytes, which of them hold a value, and which
+            /// of those this run stored.
+            struct Page {
+                data: [u8; PAGE as usize],
+                present: [u64; (PAGE / 64) as usize],
+                written: [u64; (PAGE / 64) as usize],
             }
 
-            impl Memory {
+            impl Page {
+                fn new() -> Box<Self> {
+                    Box::new(Self {
+                        data: [0; PAGE as usize],
+                        present: [0; (PAGE / 64) as usize],
+                        written: [0; (PAGE / 64) as usize],
+                    })
+                }
+
+                fn bit(offset: u64) -> (usize, u64) {
+                    ((offset / 64) as usize, 1u64 << (offset % 64))
+                }
+            }
+
+            /// Sparse byte-addressable memory, in pages.
+            ///
+            /// Byte-keyed maps made memory the slowest thing in a batch:
+            /// a scratch image is two thousand bytes placed for every
+            /// sample, and every store hashed and inserted once per byte.
+            #[derive(Default)]
+            struct Memory<'w> {
+                pages: HashMap<u64, Box<Page>>,
+                /// What the machine holds where nothing here has been placed.
+                backing: Option<&'w dyn Fn(u64) -> Option<u8>>,
+            }
+
+            impl Memory<'_> {
+                fn byte(&self, at: u64) -> Option<u8> {
+                    let page = self.pages.get(&(at / PAGE))?;
+                    let offset = at % PAGE;
+                    let (word, bit) = Page::bit(offset);
+                    (page.present[word] & bit != 0).then(|| page.data[offset as usize])
+                }
+
+                fn put(&mut self, at: u64, value: u8, written: bool) {
+                    let page = self.pages.entry(at / PAGE).or_insert_with(Page::new);
+                    let offset = at % PAGE;
+                    let (word, bit) = Page::bit(offset);
+                    page.data[offset as usize] = value;
+                    page.present[word] |= bit;
+                    if written {
+                        page.written[word] |= bit;
+                    }
+                }
+
                 /// Little-endian, matching every target in the corpus this
                 /// verifies against.
                 fn read(&self, addr: u64, bits: u32) -> Result<Value> {
@@ -140,12 +235,15 @@ macro_rules! define_interp {
                     let mut raw: u64 = 0;
                     for i in 0..n {
                         let at = addr.wrapping_add(i as u64);
-                        let b = self.bytes.get(&at).copied().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "interp: load from never-written address {at:#x} -- this tier \
-                                 models only memory the body itself wrote"
-                            )
-                        })?;
+                        let b = self
+                            .byte(at)
+                            .or_else(|| self.backing.and_then(|read| read(at)))
+                            .ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "interp: load from unmapped address {at:#x} -- neither \
+                                     written by the body nor present in the program image"
+                                )
+                            })?;
                         raw |= (b as u64) << (8 * i);
                     }
                     Ok(raw as i64)
@@ -154,8 +252,24 @@ macro_rules! define_interp {
                 fn write(&mut self, addr: u64, bits: u32, value: Value) {
                     for i in 0..bytes_for(bits) {
                         let b = ((value as u64) >> (8 * i)) as u8;
-                        self.bytes.insert(addr.wrapping_add(i as u64), b);
+                        self.put(addr.wrapping_add(i as u64), b, true);
                     }
+                }
+
+                /// Every byte this run stored, with its final value.
+                fn stores(&self) -> std::collections::BTreeMap<u64, u8> {
+                    let mut out = std::collections::BTreeMap::new();
+                    for (number, page) in &self.pages {
+                        for (word, bits) in page.written.iter().enumerate() {
+                            let mut rest = *bits;
+                            while rest != 0 {
+                                let offset = word as u64 * 64 + u64::from(rest.trailing_zeros());
+                                rest &= rest - 1;
+                                out.insert(number * PAGE + offset, page.data[offset as usize]);
+                            }
+                        }
+                    }
+                    out
                 }
             }
 
@@ -164,10 +278,15 @@ macro_rules! define_interp {
                 bits.div_ceil(8).clamp(1, 8)
             }
 
-            struct Env {
+            struct Env<'w> {
                 values: HashMap<String, Value>,
                 types: HashMap<String, NirType>,
-                mem: Memory,
+                mem: Memory<'w>,
+                globals: Option<&'w std::collections::HashMap<String, u64>>,
+                call_return: Option<&'w dyn Fn(usize) -> u64>,
+                /// Calls made so far, in order. Behind a cell because
+                /// evaluating an expression is otherwise read-only.
+                calls: RefCell<Vec<CallEvent>>,
                 /// Statements left to execute before this call gives up.
                 ///
                 /// A decompiled body is not a program anyone has checked
@@ -190,11 +309,22 @@ macro_rules! define_interp {
             /// enough that a non-terminating one is noticed in milliseconds.
             const STEP_FUEL: u64 = 2_000_000;
 
-            impl Env {
+            impl Env<'_> {
+                /// The address of `name` when it is a global rather than a
+                /// variable of this body.
+                fn global(&self, name: &str) -> Option<u64> {
+                    self.globals.and_then(|globals| globals.get(name).copied())
+                }
+
                 fn get(&self, name: &str) -> Result<Value> {
-                    self.values.get(name).copied().ok_or_else(|| {
-                        anyhow::anyhow!("interp: read of undeclared variable '{name}'")
-                    })
+                    if let Some(v) = self.values.get(name) {
+                        return Ok(*v);
+                    }
+                    if let Some(addr) = self.global(name) {
+                        let ty = self.types.get(name).unwrap_or(&PTR_TY);
+                        return Ok(normalize(self.mem.read(addr, width_of(ty))?, ty));
+                    }
+                    bail!("interp: read of undeclared variable '{name}'")
                 }
 
                 fn ty(&self, name: &str) -> Result<&NirType> {
@@ -238,7 +368,9 @@ macro_rules! define_interp {
                     | $Expr::Load { ty, .. }
                     | $Expr::FieldAccess { ty, .. } => Ok(ty),
                     // An address is an address, whatever it points at.
-                    $Expr::PtrOffset { .. } | $Expr::Index { .. } => Ok(&PTR_TY),
+                    $Expr::PtrOffset { .. } => Ok(&PTR_TY),
+                    // `p[i]` is the element, as the printer writes it.
+                    $Expr::Index { elem_ty, .. } => Ok(elem_ty),
                     other => bail!("interp: cannot infer type of unsupported expr {other:?}"),
                 }
             }
@@ -312,6 +444,10 @@ macro_rules! define_interp {
                     $Expr::PtrOffset { base, offset } => {
                         Ok((eval_expr(base, env)?).wrapping_add(*offset))
                     }
+                    // `p[i]` and `p->f` read memory: the printer writes them
+                    // as C subscript and member access, and that is what the
+                    // printed code computes. Taking them as the element's
+                    // address made every field read return the pointer.
                     $Expr::Index {
                         base,
                         index,
@@ -319,12 +455,60 @@ macro_rules! define_interp {
                     } => {
                         let stride = bytes_for(width_of(elem_ty)) as i64;
                         let i = eval_expr(index, env)?;
-                        Ok((eval_expr(base, env)?).wrapping_add(i.wrapping_mul(stride)))
+                        let addr = (eval_expr(base, env)?).wrapping_add(i.wrapping_mul(stride));
+                        Ok(normalize(env.mem.read(addr as u64, width_of(elem_ty))?, elem_ty))
                     }
-                    $Expr::FieldAccess { base, offset, .. } => {
-                        Ok((eval_expr(base, env)?).wrapping_add(*offset as i64))
+                    $Expr::FieldAccess {
+                        base, offset, ty, ..
+                    } => {
+                        if !matches!(infer_ty(base, env)?, NirType::Ptr(_)) {
+                            bail!("interp: member access on a non-pointer base (a struct value)");
+                        }
+                        let addr = (eval_expr(base, env)?).wrapping_add(*offset as i64);
+                        Ok(normalize(env.mem.read(addr as u64, width_of(ty))?, ty))
                     }
-                    $Expr::Call { target, args, ty, .. } => eval_builtin_call(target, args, ty, env),
+                    $Expr::AddressOfGlobal(name) => env.global(name).map(|a| a as i64).ok_or_else(|| {
+                        anyhow::anyhow!("interp: no address for global '{name}'")
+                    }),
+                    $Expr::Call {
+                        origin,
+                        target,
+                        args,
+                        ty,
+                    } => {
+                        if is_modeled_intrinsic(target) {
+                            return eval_builtin_call(target, args, ty, env);
+                        }
+                        let Some(call_return) = env.call_return else {
+                            return eval_builtin_call(target, args, ty, env);
+                        };
+                        // A `__fission_*` name stands for something the
+                        // decompiler could not express, not a call the
+                        // machine makes.
+                        if target.starts_with("__fission_") {
+                            bail!("interp: pseudo-call '{target}' has no machine counterpart");
+                        }
+                        let arg_bits = args
+                            .iter()
+                            .map(|arg| infer_ty(arg, env).map(width_of).unwrap_or(64))
+                            .collect();
+                        let args = args
+                            .iter()
+                            .map(|arg| eval_expr(arg, env))
+                            .collect::<Result<Vec<_>>>()?;
+                        let mut calls = env.calls.borrow_mut();
+                        let n = calls.len();
+                        if n >= crate::emu_driver::MAX_STUBBED_CALLS {
+                            bail!("interp: more than {n} calls -- the same budget the machine side stops at");
+                        }
+                        calls.push(CallEvent {
+                            site: origin.as_ref().map(|o| o.instruction_address),
+                            target: target.clone(),
+                            args,
+                            arg_bits,
+                        });
+                        Ok(normalize(call_return(n) as i64, ty))
+                    }
                     other => bail!(
                         "interp: unsupported expr {other:?} -- no memory/call model at the \
                          concrete tier, see module docs"
@@ -343,6 +527,10 @@ macro_rules! define_interp {
             /// x86 function with a comparison in it. Any other `Call`
             /// target still bails -- a small, fixed, well-known whitelist
             /// of *pure* intrinsics, not general interprocedural support.
+            fn is_modeled_intrinsic(target: &str) -> bool {
+                matches!(target, "__carry" | "__scarry" | "__sborrow" | "__popcount")
+            }
+
             fn eval_builtin_call(
                 target: &str,
                 args: &[$Expr],
@@ -520,12 +708,21 @@ macro_rules! define_interp {
                 if b { 1 } else { 0 }
             }
 
-            fn exec_stmt(stmt: &$Stmt, env: &mut Env) -> Result<Flow> {
+            /// One unit of work. Charged per statement and per loop
+            /// iteration: a loop whose body is empty (or only `continue`)
+            /// executes no statement, so charging statements alone let
+            /// `while (c) {}` run forever.
+            fn charge(env: &mut Env) -> Result<()> {
                 env.fuel = env.fuel.checked_sub(1).ok_or_else(|| {
                     anyhow::anyhow!(
                         "interp: body did not finish within {STEP_FUEL} statements"
                     )
                 })?;
+                Ok(())
+            }
+
+            fn exec_stmt(stmt: &$Stmt, env: &mut Env) -> Result<Flow> {
+                charge(env)?;
                 match stmt {
                     $Stmt::Assign { lhs, rhs } => {
                         // Stores go to memory; only a plain variable falls
@@ -553,6 +750,11 @@ macro_rules! define_interp {
                             None => infer_ty(rhs, env)?.clone(),
                         };
                         let v = normalize(eval_expr(rhs, env)?, &ty);
+                        if let Some(addr) = env.global(name) {
+                            env.mem.write(addr, width_of(&ty), v);
+                            env.types.insert(name.clone(), ty);
+                            return Ok(Flow::Normal);
+                        }
                         env.types.insert(name.clone(), ty);
                         env.set(name, v);
                         Ok(Flow::Normal)
@@ -596,6 +798,7 @@ macro_rules! define_interp {
                         }
                     }
                     $Stmt::While { cond, body } => loop {
+                        charge(env)?;
                         if eval_expr(cond, env)? == 0 {
                             return Ok(Flow::Normal);
                         }
@@ -606,6 +809,7 @@ macro_rules! define_interp {
                         }
                     },
                     $Stmt::DoWhile { body, cond } => loop {
+                        charge(env)?;
                         match exec_block(body, env)? {
                             Flow::Normal | Flow::Continue => {}
                             Flow::Break => return Ok(Flow::Normal),
@@ -628,6 +832,7 @@ macro_rules! define_interp {
                             }
                         }
                         loop {
+                            charge(env)?;
                             if let Some(cond) = cond {
                                 if eval_expr(cond, env)? == 0 {
                                     return Ok(Flow::Normal);
@@ -898,20 +1103,45 @@ macro_rules! define_interp {
                 image: &[(u64, u8)],
                 bound: &[(String, Value)],
             ) -> Result<Option<Value>> {
+                let world = World {
+                    image,
+                    bound,
+                    ..World::default()
+                };
+                Ok(run(body, params, locals, args, &world)?.ret)
+            }
+
+            /// Interpret `body` in `world`: what it returns, every call it
+            /// makes and every byte it stores.
+            pub fn run(
+                body: &[$Stmt],
+                params: &[$Binding],
+                locals: &[$Binding],
+                args: &[i64],
+                world: &World<'_>,
+            ) -> Result<Run> {
+                let image = world.image;
+                let bound = world.bound;
                 anyhow::ensure!(
                     args.len() == params.len(),
                     "interp: {} args given, function has {} params",
                     args.len(),
                     params.len()
                 );
-                let mut mem = Memory::default();
+                let mut mem = Memory {
+                    backing: world.backing,
+                    ..Memory::default()
+                };
                 for (addr, byte) in image {
-                    mem.bytes.insert(*addr, *byte);
+                    mem.put(*addr, *byte, false);
                 }
                 let mut env = Env {
-                    values: HashMap::new(),
-                    types: HashMap::new(),
+                    values: HashMap::default(),
+                    types: HashMap::default(),
                     mem,
+                    globals: world.globals,
+                    call_return: world.call_return,
+                    calls: RefCell::new(Vec::new()),
                     fuel: STEP_FUEL,
                 };
                 // Machine state first, so a real declaration below wins.
@@ -942,11 +1172,24 @@ macro_rules! define_interp {
                         env.values.insert(l.name.clone(), v);
                     }
                 }
-                match exec_block(body, &mut env)? {
-                    Flow::Return(v) => Ok(v),
-                    Flow::Normal => Ok(None),
-                    other => bail!("interp: body ended in unexpected control state {other:?}"),
+                // A global the body names keeps its declared type for the
+                // width of its loads, but never a value of its own.
+                if let Some(globals) = world.globals {
+                    for name in globals.keys() {
+                        env.values.remove(name);
+                    }
                 }
+                let ret = match exec_block(body, &mut env)? {
+                    Flow::Return(v) => v,
+                    Flow::Normal => None,
+                    other => bail!("interp: body ended in unexpected control state {other:?}"),
+                };
+                let writes = env.mem.stores();
+                Ok(Run {
+                    ret,
+                    calls: env.calls.into_inner(),
+                    writes,
+                })
             }
 
             /// Interpret a whole `$Function`, using its own `params`/
@@ -993,10 +1236,12 @@ pub use hir::free_names as hir_free_names;
 pub use hir::interpret as interpret_hir;
 pub use hir::interpret_with_memory as interpret_hir_with_memory;
 pub use hir::interpret_with_state as interpret_hir_with_state;
+pub use hir::run as run_hir;
 pub use prehir::free_names as prehir_free_names;
 pub use prehir::interpret as interpret_prehir;
 pub use prehir::interpret_with_memory as interpret_prehir_with_memory;
 pub use prehir::interpret_with_state as interpret_prehir_with_state;
+pub use prehir::run as run_prehir;
 
 #[cfg(test)]
 mod tests {
@@ -1117,7 +1362,7 @@ mod tests {
     fn store_target_handles_index_lvalue() {
         // Allocate an address (e.g. 0x1000) into a local pointer `base`.
         // Perform `base[2] = 42` (where elem_ty is 32-bit int, stride = 4, target addr = 0x1008).
-        // Then read back `base[2]`.
+        // Then read back `base[2]` -- the element, not its address.
         let locals = vec![NirBinding {
             name: "base".to_string(),
             ty: NirType::Ptr(Box::new(NirType::Int {
@@ -1153,19 +1398,16 @@ mod tests {
                 },
                 rhs: HirExpr::Const(42, elem_ty.clone()),
             },
-            HirStmt::Return(Some(HirExpr::Load {
-                ptr: Box::new(HirExpr::Index {
-                    base: Box::new(HirExpr::Var("base".to_string())),
-                    index: Box::new(HirExpr::Const(
-                        2,
-                        NirType::Int {
-                            bits: 32,
-                            signed: true,
-                        },
-                    )),
-                    elem_ty: elem_ty.clone(),
-                }),
-                ty: elem_ty,
+            HirStmt::Return(Some(HirExpr::Index {
+                base: Box::new(HirExpr::Var("base".to_string())),
+                index: Box::new(HirExpr::Const(
+                    2,
+                    NirType::Int {
+                        bits: 32,
+                        signed: true,
+                    },
+                )),
+                elem_ty,
             })),
         ];
         let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
@@ -1204,18 +1446,160 @@ mod tests {
                 },
                 rhs: HirExpr::Const(99, ty.clone()),
             },
-            HirStmt::Return(Some(HirExpr::Load {
-                ptr: Box::new(HirExpr::FieldAccess {
-                    base: Box::new(HirExpr::Var("st".to_string())),
-                    field_name: "field".to_string(),
-                    offset: 16,
-                    ty: ty.clone(),
-                }),
+            HirStmt::Return(Some(HirExpr::FieldAccess {
+                base: Box::new(HirExpr::Var("st".to_string())),
+                field_name: "field".to_string(),
+                offset: 16,
                 ty,
             })),
         ];
         let val = interpret_hir(&body, &[], &locals, &[]).expect("interpret");
         assert_eq!(val, Some(99));
+    }
+}
+
+#[cfg(test)]
+mod world_tests {
+    use super::*;
+    use fission_midend_core::ir::{CallOrigin, HirExpr, HirLValue, HirStmt, NirBinding, NirType};
+
+    fn u32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        }
+    }
+
+    fn local(name: &str) -> NirBinding {
+        NirBinding {
+            name: name.to_string(),
+            ty: u32_ty(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }
+    }
+
+    /// `g += 1; return g;` where `g` is the global at 0x5000 holding 41 in
+    /// the program image: the read is a load from the image, the assignment
+    /// a store this run reports.
+    #[test]
+    fn a_global_is_memory_read_from_the_image_and_stored_back() {
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("g".to_string()),
+                rhs: HirExpr::Binary {
+                    op: fission_midend_core::ir::HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("g".to_string())),
+                    rhs: Box::new(HirExpr::Const(1, u32_ty())),
+                    ty: u32_ty(),
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Var("g".to_string()))),
+        ];
+        let image_byte = |addr: u64| (addr == 0x5000).then_some(41u8).or(Some(0));
+        let globals: HashMap<String, u64> = [("g".to_string(), 0x5000)].into_iter().collect();
+        let world = World {
+            backing: Some(&image_byte),
+            globals: Some(&globals),
+            ..World::default()
+        };
+        let run = run_hir(&body, &[], &[local("g")], &[], &world).expect("run");
+        assert_eq!(run.ret, Some(42));
+        assert_eq!(run.writes.get(&0x5000), Some(&42));
+        // Control: the same body without the globals map reads an
+        // unassigned variable and is refused rather than guessed.
+        assert!(run_hir(&body, &[], &[local("g")], &[], &World::default()).is_err());
+    }
+
+    /// `while (1) {}`, `do {} while (1);` and `for (;;) {}` execute no
+    /// statement per iteration; each must still run out of fuel and be
+    /// refused instead of spinning. Run on a thread so a regression fails
+    /// the test instead of hanging the suite.
+    #[test]
+    fn a_loop_with_an_empty_body_runs_out_of_fuel() {
+        let one = || HirExpr::Const(1, u32_ty());
+        let loops = vec![
+            HirStmt::While {
+                cond: one(),
+                body: vec![],
+            },
+            HirStmt::DoWhile {
+                body: vec![HirStmt::Continue],
+                cond: one(),
+            },
+            HirStmt::For {
+                init: None,
+                cond: None,
+                update: None,
+                body: vec![],
+            },
+        ];
+        for stmt in loops {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let body = vec![stmt, HirStmt::Return(Some(HirExpr::Const(0, u32_ty())))];
+                let _ = tx.send(run_hir(&body, &[], &[], &[], &World::default()).is_err());
+            });
+            let refused = rx
+                .recv_timeout(std::time::Duration::from_secs(20))
+                .expect("an empty-bodied infinite loop must not spin forever");
+            assert!(refused, "an infinite loop has no result to report");
+        }
+    }
+
+    /// `x = f(7); return x + g(x);`: both calls are recorded with their
+    /// sites and arguments, and each returns what the world says the nth
+    /// call returns.
+    #[test]
+    fn calls_are_recorded_in_order_and_return_the_stubbed_values() {
+        let call = |site: u64, target: &str, arg: HirExpr| HirExpr::Call {
+            origin: Some(CallOrigin {
+                instruction_address: site,
+                pcode_sequence: 0,
+            }),
+            target: target.to_string(),
+            args: vec![arg],
+            ty: u32_ty(),
+        };
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".to_string()),
+                rhs: call(0x100, "f", HirExpr::Const(7, u32_ty())),
+            },
+            HirStmt::Return(Some(HirExpr::Binary {
+                op: fission_midend_core::ir::HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("x".to_string())),
+                rhs: Box::new(call(0x108, "g", HirExpr::Var("x".to_string()))),
+                ty: u32_ty(),
+            })),
+        ];
+        let returns = |n: usize| [10u64, 20][n];
+        let world = World {
+            call_return: Some(&returns),
+            ..World::default()
+        };
+        let run = run_hir(&body, &[], &[local("x")], &[], &world).expect("run");
+        assert_eq!(run.ret, Some(30));
+        assert_eq!(
+            run.calls,
+            vec![
+                CallEvent {
+                    site: Some(0x100),
+                    target: "f".to_string(),
+                    args: vec![7],
+                    arg_bits: vec![32],
+                },
+                CallEvent {
+                    site: Some(0x108),
+                    target: "g".to_string(),
+                    args: vec![10],
+                    arg_bits: vec![32],
+                },
+            ]
+        );
+        // Control: without a call model the same body is refused.
+        assert!(run_hir(&body, &[], &[local("x")], &[], &World::default()).is_err());
     }
 }
 

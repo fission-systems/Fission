@@ -39,6 +39,17 @@ pub(crate) fn render_pseudocode_with_provenance(
     options: &MlilPreviewOptions,
     definitions: &HashMap<String, u64>,
 ) -> (String, Vec<RecoveredLineMapping>) {
+    let hir_tree = printed_hir_tree(hir, options);
+    render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions)
+}
+
+/// The tree [`render_pseudocode_with_provenance`] prints: `hir` after HIR
+/// presentation.
+///
+/// Anything that checks the output against the program has to check this
+/// tree, not `hir`: presentation folds, inlines and deletes assignments, so a
+/// fault it introduces is in the text and not in `hir`.
+pub(crate) fn printed_hir_tree(hir: &HirFunction, options: &MlilPreviewOptions) -> HirFunction {
     let mut hir_tree = hir.clone();
     // Presentation must know which names are file-scope, or its
     // dead-assignment pass deletes stores to globals -- the write is the
@@ -63,7 +74,7 @@ pub(crate) fn render_pseudocode_with_provenance(
     // whole reason the set exists.
     collect_address_named_globals(hir, options, &mut global_names);
     apply_hir_presentation_with_globals(&mut hir_tree, &global_names);
-    render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions)
+    hir_tree
 }
 
 /// Test helper: the mechanical print next to the final surface, so the
@@ -679,7 +690,7 @@ fn render_hir_function_with_profile(
     render_hir_function_with_provenance(hir, options, profile, &HashMap::new()).0
 }
 
-fn render_hir_function_with_provenance(
+pub(crate) fn render_hir_function_with_provenance(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
     profile: PrintProfile,

@@ -52,8 +52,11 @@ pub fn decompile_one(
         .render_output
         .ok_or(DecompileError::MissingRenderOutput)?;
     let prehir = output.prehir.ok_or(DecompileError::MissingPreHirSnapshot)?;
+    // The printed tree, not the earlier `hir_function` snapshot: type hints,
+    // global recovery and presentation all run after that snapshot and all
+    // change what the printed code computes.
     let hir = output
-        .hir_function
+        .printed_hir
         .ok_or(DecompileError::MissingHirSnapshot)?;
     Ok(PreHirHirPair { prehir, hir })
 }

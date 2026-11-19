@@ -82,6 +82,10 @@ pub struct NirDecompileOutput {
     pub raw_hir: Option<super::PreHirFunction>,
     pub prehir: Option<super::PreHirFunction>,
     pub hir_function: Option<super::HirFunction>,
+    /// The tree `code` was printed from: the final HIR after presentation.
+    /// `hir_function` is captured before type hints, global recovery and
+    /// presentation, all of which change what the printed code computes.
+    pub printed_hir: Option<super::HirFunction>,
     pub recovered_variables: Option<Vec<crate::render::RecoveredVariable>>,
     pub build_stats: Option<PreviewBuildStats>,
     pub hint_stats: Option<PreviewHintStats>,
@@ -522,8 +526,13 @@ fn render_mlil_preview_with_binary_and_context_output(
         .recovered_single_definition_addresses()
         .into_iter()
         .collect();
-    let (rendered, line_mappings) =
-        crate::render::render_pseudocode_with_provenance(&hir, options, &definitions);
+    let printed_hir = crate::render::printed_hir_tree(&hir, options);
+    let (rendered, line_mappings) = crate::render::render_hir_function_with_provenance(
+        &printed_hir,
+        options,
+        crate::render::PrintProfile::Hir,
+        &definitions,
+    );
     #[cfg(test)]
     MECHANICAL_PRINT.with(|slot| {
         *slot.borrow_mut() = Some(
@@ -551,6 +560,7 @@ fn render_mlil_preview_with_binary_and_context_output(
         raw_hir: Some(raw_hir),
         prehir: Some(prehir),
         hir_function: Some(hir_function),
+        printed_hir: Some(printed_hir),
         recovered_variables: Some(recovered_variables),
         build_stats: Some(build_stats),
         hint_stats,

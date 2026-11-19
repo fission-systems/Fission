@@ -407,6 +407,42 @@ before main; it does not implement full module TLS. Stack-check failure halts
 with conventional status 134 without simulating guest SIGABRT delivery. See the
 measured [crackme workflow](CRACKME_WORKFLOW.md) for a complete solve and replay.
 
+## Verify Command
+
+`verify` checks the printed pseudocode against the machine code it came from.
+
+```sh
+fission_cli verify ./a.out --addr 0x1139 --tier ground-truth --json
+fission_cli verify ./a.out --all --tier ground-truth > verify.jsonl
+fission_cli verify ./a.out --addresses-file addrs.txt --tier ground-truth > verify.jsonl
+```
+
+The ground-truth tier interprets the tree the pseudocode was printed from and
+calls the same function in the emulator, with the same arguments, the same
+memory and the same values returned from every call it makes, then compares:
+
+- the return value,
+- every call made, in order: the call instruction and the argument registers,
+- every byte stored outside the function's own stack frame.
+
+Calls are stubbed on both sides rather than run: the emulator stops at each
+call instruction the function's own decode lists, records its arguments and
+continues with a chosen return value (zero, or a pointer to a zeroed buffer,
+alternating between samples). A callee's own effects -- an out-parameter it
+would have written -- are therefore absent on both sides. Globals read from
+and write to the program image.
+
+Outcomes: `equivalent` (every sample agreed), `diverged` (with the first
+difference), `unsupported` (the interpreter refused the body; the reason is
+kept), `harness` (every sample the interpreter could run failed in the
+emulator). A batch prints one JSON line per function and a summary of
+outcomes and the most common reasons on stderr. `unsupported` is not a pass:
+report its count next to the `diverged` count.
+
+The `concrete` tier compares the pre-structuring tree with the printed one on
+boundary inputs, and `symbolic` asks the solver to prove them equivalent for
+loop-free bodies; neither consults the machine code.
+
 ## Decomp Command
 
 `decomp` is the canonical human-facing decompilation entrypoint.

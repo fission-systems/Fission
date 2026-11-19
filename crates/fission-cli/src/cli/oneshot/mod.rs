@@ -348,7 +348,10 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
 
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
-    logging_options.level = "warn".to_string();
+    let batch = args.addr.is_none();
+    // A batch runs thousands of emulator calls; the emulator's per-call
+    // warnings (an unmodeled libc routine) would bury the summary.
+    logging_options.level = if batch { "error" } else { "warn" }.to_string();
     fission_core::logging::init_with_options(logging_options);
 
     let binary = LoadedBinary::from_file(&args.binary)
@@ -357,69 +360,206 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
         fission_static::analysis::decomp::facts::FactStore::from_binary_without_signature_matches(
             &binary,
         );
-    let func = fission_loader::loader::FunctionInfo {
-        name: args.name.clone(),
-        address: args.addr,
-        ..Default::default()
-    };
 
-    let pair = fission_dir::decompile_one(&binary, &facts, &func)
-        .with_context(|| format!("failed to decompile function at 0x{:x}", args.addr))?;
+    let functions = if let Some(addr) = args.addr {
+        vec![fission_loader::loader::FunctionInfo {
+            name: args.name.clone(),
+            address: addr,
+            ..Default::default()
+        }]
+    } else if let Some(path) = &args.addresses_file {
+        function_select::select_functions_from_addresses_file(&binary, path)
+            .with_context(|| format!("failed to read {}", path.display()))?
+    } else {
+        function_select::select_batch_functions(&binary, false, None).functions
+    };
 
     let run_concrete = matches!(args.tier, VerifyTierArg::Concrete | VerifyTierArg::All);
     let run_ground_truth = matches!(args.tier, VerifyTierArg::GroundTruth | VerifyTierArg::All);
     let run_symbolic = matches!(args.tier, VerifyTierArg::Symbolic | VerifyTierArg::All);
 
-    let mut out = serde_json::Map::new();
+    // One emulator per binary: building it loads the whole image, and every
+    // call restores the same baseline, so functions cannot see each other.
+    let mut harness = if run_ground_truth {
+        Some(
+            fission_dir::EmulatorHarness::build(&args.binary, Some(args.max_inst))
+                .map_err(|err| err.to_string()),
+        )
+    } else {
+        None
+    };
 
-    if run_concrete {
-        let samples = fission_dir::default_samples(pair.hir.params.len());
-        let outcome = fission_dir::diff_prehir_hir(&pair.prehir, &pair.hir, &samples);
-        report_tier("concrete", &format!("{outcome:?}"), args.json, &mut out);
-    }
-    if run_ground_truth {
-        let samples = fission_dir::default_samples(pair.hir.params.len());
-        match fission_dir::EmulatorHarness::build(&args.binary, Some(args.max_inst)) {
-            Ok(mut harness) => {
-                let outcome = fission_dir::check_ground_truth(
-                    &mut harness,
-                    func.address,
-                    &pair.prehir,
-                    &pair.hir,
-                    &samples,
-                );
-                report_tier("ground_truth", &format!("{outcome:?}"), args.json, &mut out);
-            }
+    let mut counts: std::collections::BTreeMap<(String, String), usize> = Default::default();
+    let mut reasons: std::collections::BTreeMap<(String, String), usize> = Default::default();
+    for func in &functions {
+        let mut out = serde_json::Map::new();
+        if batch {
+            out.insert("address".into(), format!("0x{:x}", func.address).into());
+            out.insert("name".into(), func.name.clone().into());
+        }
+        let mut tiers: Vec<(&str, String, String, String)> = Vec::new();
+        match fission_dir::decompile_one(&binary, &facts, func) {
             Err(err) => {
-                report_tier(
-                    "ground_truth",
-                    &format!("EmulatorSetupFailed({err})"),
-                    args.json,
-                    &mut out,
-                );
+                if !batch {
+                    return Err(err).with_context(|| {
+                        format!("failed to decompile function at 0x{:x}", func.address)
+                    });
+                }
+                tiers.push((
+                    "decompile",
+                    "error".into(),
+                    err.to_string(),
+                    err.to_string(),
+                ));
+            }
+            Ok(pair) => {
+                if run_concrete {
+                    let samples = fission_dir::default_samples(pair.hir.params.len());
+                    let outcome = fission_dir::diff_prehir_hir(&pair.prehir, &pair.hir, &samples);
+                    tiers.push((
+                        "concrete",
+                        outcome.category().into(),
+                        format!("{outcome:?}"),
+                        verify_outcome_reason(&outcome),
+                    ));
+                }
+                if let Some(harness) = harness.as_mut() {
+                    match harness {
+                        Ok(harness) => {
+                            let samples = fission_dir::ground_samples(pair.hir.params.len());
+                            let grounding = fission_dir::Grounding::for_function(
+                                &binary,
+                                func.address,
+                                &pair.prehir,
+                                &pair.hir,
+                            );
+                            let outcome = fission_dir::check_ground_truth_with(
+                                harness,
+                                func.address,
+                                &pair.prehir,
+                                &pair.hir,
+                                &samples,
+                                &grounding,
+                            );
+                            tiers.push((
+                                "ground_truth",
+                                outcome.category().into(),
+                                format!("{outcome:?}"),
+                                verify_outcome_reason(&outcome),
+                            ));
+                        }
+                        Err(err) => tiers.push((
+                            "ground_truth",
+                            "harness".into(),
+                            format!("EmulatorSetupFailed({err})"),
+                            format!("emulator setup failed: {err}"),
+                        )),
+                    }
+                }
+                if run_symbolic {
+                    let outcome = fission_dir::check_symbolic_equivalence(&pair.prehir, &pair.hir);
+                    let (category, desc, reason) = match outcome {
+                        fission_dir::symbolic::SymbolicOutcome::Equivalent => (
+                            "equivalent",
+                            "Equivalent (proved, Unsat)".to_string(),
+                            String::new(),
+                        ),
+                        fission_dir::symbolic::SymbolicOutcome::Diverged(cx) => (
+                            "diverged",
+                            format!("Diverged (solver counterexample args={:?})", cx.args),
+                            "solver counterexample".to_string(),
+                        ),
+                        fission_dir::symbolic::SymbolicOutcome::Unsupported(reason) => (
+                            "unsupported",
+                            format!("Unsupported({reason})"),
+                            reason.to_string(),
+                        ),
+                    };
+                    tiers.push(("symbolic", category.into(), desc, reason));
+                }
             }
         }
-    }
-    if run_symbolic {
-        let outcome = fission_dir::check_symbolic_equivalence(&pair.prehir, &pair.hir);
-        let desc = match outcome {
-            fission_dir::symbolic::SymbolicOutcome::Equivalent => {
-                "Equivalent (proved, Unsat)".to_string()
+        for (tier, category, desc, reason) in tiers {
+            *counts
+                .entry((tier.to_string(), category.clone()))
+                .or_default() += 1;
+            if batch {
+                if category != "equivalent" {
+                    *reasons
+                        .entry((tier.to_string(), verify_reason_key(&reason)))
+                        .or_default() += 1;
+                }
+                out.insert(
+                    tier.to_string(),
+                    serde_json::json!({ "category": category, "detail": desc }),
+                );
+            } else {
+                report_tier(tier, &desc, args.json, &mut out);
             }
-            fission_dir::symbolic::SymbolicOutcome::Diverged(cx) => {
-                format!("Diverged (solver counterexample args={:?})", cx.args)
-            }
-            fission_dir::symbolic::SymbolicOutcome::Unsupported(reason) => {
-                format!("Unsupported({reason})")
-            }
-        };
-        report_tier("symbolic", &desc, args.json, &mut out);
+        }
+        if batch || args.json {
+            println!("{}", serde_json::Value::Object(out));
+        }
     }
 
-    if args.json {
-        println!("{}", serde_json::Value::Object(out));
+    if batch {
+        eprintln!("verified {} functions", functions.len());
+        for ((tier, category), n) in &counts {
+            eprintln!("  {tier:<13} {category:<12} {n}");
+        }
+        let mut top: Vec<_> = reasons.into_iter().collect();
+        top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        eprintln!("most common reasons:");
+        for ((tier, reason), n) in top.into_iter().take(25) {
+            eprintln!("  {n:>6}  {tier:<13} {reason}");
+        }
     }
     Ok(())
+}
+
+/// What made a tier say something other than "equivalent", in words.
+fn verify_outcome_reason(outcome: &fission_dir::VerifyOutcome) -> String {
+    match outcome {
+        fission_dir::VerifyOutcome::Equivalent { .. } => String::new(),
+        fission_dir::VerifyOutcome::Diverged(_) => "diverged".to_string(),
+        fission_dir::VerifyOutcome::Unsupported(reason) => reason.to_string(),
+        fission_dir::VerifyOutcome::Inconclusive { reason } => reason.clone(),
+    }
+}
+
+/// A reason with the parts that differ per function removed, so a batch can
+/// count them: numbers and single-quoted names become placeholders.
+fn verify_reason_key(desc: &str) -> String {
+    let mut key = String::with_capacity(desc.len().min(160));
+    let mut chars = desc.chars().peekable();
+    while let Some(c) = chars.next() {
+        if key.len() >= 160 {
+            break;
+        }
+        match c {
+            '\'' => {
+                key.push(c);
+                key.push('_');
+                for d in chars.by_ref() {
+                    if d == c {
+                        break;
+                    }
+                }
+                key.push(c);
+            }
+            '0'..='9' => {
+                key.push('N');
+                while chars
+                    .peek()
+                    .is_some_and(|d| d.is_ascii_hexdigit() || *d == 'x')
+                {
+                    chars.next();
+                }
+            }
+            _ => key.push(c),
+        }
+    }
+    key
 }
 
 fn report_tier(

@@ -23,6 +23,7 @@ fission-decompiler = { path = "../fission-decompiler" }
 fission-solver = { path = "../fission-solver" }
 fission-emulator = { path = "../fission-emulator" }
 fission-sleigh = { path = "../fission-sleigh" }
+rustc-hash = "2.1"
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"

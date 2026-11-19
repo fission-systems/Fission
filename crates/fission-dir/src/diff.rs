@@ -51,6 +51,7 @@ pub fn diff_prehir_hir(
                         prehir_result,
                         hir_result,
                         emulator_result: None,
+                        detail: None,
                     });
                 }
             }
@@ -65,6 +66,7 @@ pub fn diff_prehir_hir(
                     prehir_result,
                     hir_result: None,
                     emulator_result: None,
+                    detail: None,
                 });
             }
             (Err(prehir_err), Ok(hir_result)) => {
@@ -74,6 +76,7 @@ pub fn diff_prehir_hir(
                     prehir_result: None,
                     hir_result,
                     emulator_result: None,
+                    detail: None,
                 });
             }
         }
@@ -128,13 +131,38 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
     // For arity > 3, an unconstrained Cartesian product produces O(7^N) samples
     // (e.g. 117,649 for 6 args), exploding test runtimes. Instead, employ
     // pairwise and boundary coverage capped at MAX_DEFAULT_SAMPLES.
-    let mut out: Vec<Vec<i64>> = Vec::with_capacity(MAX_DEFAULT_SAMPLES);
+    pairwise_samples(arity, MAX_DEFAULT_SAMPLES)
+}
+
+/// Samples for the ground-truth tier: the same boundary values, at most
+/// `GROUND_SAMPLES` of them whatever the arity.
+///
+/// Every ground-truth sample runs two interpreters and an emulated call, and
+/// a body that loops on a stubbed call runs each to its budget; the full
+/// cross product for three parameters (343 samples) made one such function
+/// take minutes. The diagonal, single-parameter and pairwise variations
+/// below keep every boundary value of every parameter.
+pub fn ground_samples(arity: usize) -> Vec<Vec<i64>> {
+    if arity == 0 {
+        return vec![Vec::new()];
+    }
+    pairwise_samples(arity, GROUND_SAMPLES)
+}
+
+/// Ground-truth samples per function.
+pub const GROUND_SAMPLES: usize = 24;
+
+/// Boundary values in diagonal, single-parameter and pairwise variations,
+/// at most `cap` of them.
+fn pairwise_samples(arity: usize, cap: usize) -> Vec<Vec<i64>> {
+    let seeds: [i64; 7] = [0, 1, -1, 2, -2, i32::MIN as i64, i32::MAX as i64];
+    let mut out: Vec<Vec<i64>> = Vec::with_capacity(cap);
     let mut seen = std::collections::HashSet::new();
 
     let add = |sample: Vec<i64>,
                out: &mut Vec<Vec<i64>>,
                seen: &mut std::collections::HashSet<Vec<i64>>| {
-        if out.len() < MAX_DEFAULT_SAMPLES && seen.insert(sample.clone()) {
+        if out.len() < cap && seen.insert(sample.clone()) {
             out.push(sample);
         }
     };
@@ -171,7 +199,7 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
                     v[i] = s1;
                     v[j] = s2;
                     add(v, &mut out, &mut seen);
-                    if out.len() >= MAX_DEFAULT_SAMPLES {
+                    if out.len() >= cap {
                         return out;
                     }
                 }
