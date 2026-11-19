@@ -46,9 +46,11 @@ pub(crate) struct PreviewBuilder<'a> {
     pub(crate) materialized_output_names: HashMap<(usize, usize, VarnodeKey), String>,
     pub(crate) block_defs: Vec<HashMap<VarnodeKey, Vec<usize>>>,
     /// Per (use site, storage): the definition the legacy scan settles on,
-    /// and whether it is the only one reaching the use.
-    pub(crate) lookup_site_cache:
-        RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<(LoweringSite, bool)>>>,
+    /// whether it is the only one reaching the use, and whether a call may
+    /// have overwritten it (global storage) before the use.
+    pub(crate) lookup_site_cache: RefCell<
+        BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Option<(LoweringSite, bool, bool)>>,
+    >,
     pub(crate) peel_cache: RefCell<BuilderCacheMap<(Option<LoweringSite>, VarnodeKey), Varnode>>,
     /// `lookup_candidate_def_keys` per key; `def_sites` never changes.
     pub(crate) candidate_def_keys_cache:

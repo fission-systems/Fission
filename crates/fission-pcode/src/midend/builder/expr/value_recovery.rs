@@ -101,6 +101,93 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Whether a call can run between `definition` and `use_site` while
+    /// `vn` is memory at a fixed address -- a global.
+    ///
+    /// A call's p-code has no outputs, but the callee can write any global
+    /// (Ghidra gives a call an INDIRECT effect on every address-tied
+    /// storage). A store before the call is therefore not the value a load
+    /// after it reads: `[g] = x; f(); y = [g]` must read `g` again, not `x`.
+    /// Registers are not memory and are left to their own rules.
+    ///
+    /// Which varnodes are global memory is the materializer's own answer
+    /// (`output_is_mapped_global_memory`): RAM under the runtime's space
+    /// numbering, at a mapped address -- the two lifter numberings give id 3
+    /// to RAM in one and to unique space in the other. Only calls in a later
+    /// instruction than the definition count: no instruction stores a global
+    /// and then calls.
+    pub(in crate::midend::builder) fn call_may_write_global_between(
+        &self,
+        vn: &Varnode,
+        definition: LoweringSite,
+        use_site: LoweringSite,
+    ) -> bool {
+        if !self.output_is_mapped_global_memory(vn) {
+            return false;
+        }
+        let blocks = &self.pcode.blocks;
+        let def_block = self.pcode_block_idx(definition.block_idx);
+        let use_block = self.pcode_block_idx(use_site.block_idx);
+        let (Some(def_ops), Some(use_ops)) = (blocks.get(def_block), blocks.get(use_block)) else {
+            return true;
+        };
+        let Some(def_address) = def_ops.ops.get(definition.op_idx).map(|op| op.address) else {
+            return true;
+        };
+        let is_call = |op: &PcodeOp| {
+            matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                && op.address != def_address
+        };
+        if def_block == use_block && definition.op_idx < use_site.op_idx {
+            return def_ops.ops[definition.op_idx + 1..use_site.op_idx.min(def_ops.ops.len())]
+                .iter()
+                .any(is_call);
+        }
+        if def_ops.ops.iter().skip(definition.op_idx + 1).any(is_call)
+            || use_ops.ops.iter().take(use_site.op_idx).any(is_call)
+        {
+            return true;
+        }
+        // Any block on a path from the definition to the use.
+        let mut reaches_use = vec![false; blocks.len()];
+        let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); blocks.len()];
+        for (index, block) in blocks.iter().enumerate() {
+            for successor in &block.successors {
+                if let Some(list) = predecessors.get_mut(*successor as usize) {
+                    list.push(index);
+                }
+            }
+        }
+        let mut work = vec![use_block];
+        while let Some(block) = work.pop() {
+            for pred in &predecessors[block] {
+                if !reaches_use[*pred] {
+                    reaches_use[*pred] = true;
+                    work.push(*pred);
+                }
+            }
+        }
+        let mut seen = vec![false; blocks.len()];
+        let mut work: Vec<usize> = def_ops.successors.iter().map(|s| *s as usize).collect();
+        while let Some(block) = work.pop() {
+            if block >= blocks.len() || seen[block] {
+                continue;
+            }
+            seen[block] = true;
+            if block == use_block {
+                continue;
+            }
+            if !reaches_use[block] {
+                continue;
+            }
+            if blocks[block].ops.iter().any(is_call) {
+                return true;
+            }
+            work.extend(blocks[block].successors.iter().map(|s| *s as usize));
+        }
+        false
+    }
+
     /// SSA operation identity is stronger than "the nearest dominating
     /// storage write". Instruction-local conditional writes are not scalar
     /// CFG nodes, so they deliberately keep the guarded lowering path.

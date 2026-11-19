@@ -4671,3 +4671,124 @@ fn a_read_the_entry_cannot_reach_keeps_the_write_found_for_it() {
         })
     );
 }
+
+/// `g = 5; f(); return g;` with `g` the global at 0x1400_1800: the callee can
+/// write `g`, so the read after the call loads it again. Forwarding the store
+/// across the call made the function return the constant it stored on entry
+/// (bash `print_group_command`'s indentation counter read back as the value
+/// it held before six calls).
+#[test]
+fn a_global_read_after_a_call_is_a_load_not_the_value_stored_before_it() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let global = Varnode {
+        space_id: 3,
+        offset: 0x1400_1800,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let rsp = register(0x20, 8);
+    let ret_addr = register(0x288, 8);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.global_names.insert(0x1400_1800, "g".to_string());
+    options.global_sizes.insert(0x1400_1800, 4);
+    apply_preview_cspec(&mut options);
+    let ret = |seq: u32| {
+        vec![
+            op(
+                seq,
+                PcodeOpcode::Load,
+                Some(ret_addr.clone()),
+                vec![constant(3), rsp.clone()],
+            ),
+            op(
+                seq + 1,
+                PcodeOpcode::IntAdd,
+                Some(rsp.clone()),
+                vec![rsp.clone(), constant(8)],
+            ),
+            op(seq + 2, PcodeOpcode::Return, None, vec![ret_addr.clone()]),
+        ]
+    };
+    let store = |seq: u32, address: u64| {
+        vec![
+            PcodeOp {
+                seq_num: seq,
+                opcode: PcodeOpcode::Copy,
+                address,
+                output: Some(eax.clone()),
+                inputs: vec![constant_sized(5, 4)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: seq + 1,
+                opcode: PcodeOpcode::Copy,
+                address: address + 5,
+                output: Some(global.clone()),
+                inputs: vec![eax.clone()],
+                asm_mnemonic: None,
+            },
+        ]
+    };
+    let call = |seq: u32, address: u64| PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::Call,
+        address,
+        output: None,
+        inputs: vec![constant(0x2000)],
+        asm_mnemonic: None,
+    };
+    let load = |seq: u32, address: u64| {
+        vec![
+            PcodeOp {
+                seq_num: seq,
+                opcode: PcodeOpcode::Copy,
+                address,
+                output: Some(eax.clone()),
+                inputs: vec![global.clone()],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: seq + 1,
+                opcode: PcodeOpcode::IntZExt,
+                address,
+                output: Some(rax.clone()),
+                inputs: vec![eax.clone()],
+                asm_mnemonic: None,
+            },
+        ]
+    };
+
+    // One block: store, call, load, return.
+    let mut ops = store(0, 0x1000);
+    ops.push(call(2, 0x1010));
+    ops.extend(load(3, 0x1015));
+    ops.extend(ret(5));
+    let one_block = pcode_function(vec![block_at(0x1000, 0, ops)]);
+    // The store and the load in different blocks, the call between them.
+    let mut first = block_at(0x1000, 0, store(0, 0x1000));
+    first.successors = vec![1];
+    let mut middle = block_at(0x1010, 1, vec![call(2, 0x1010)]);
+    middle.successors = vec![2];
+    let mut last_ops = load(3, 0x1015);
+    last_ops.extend(ret(5));
+    let last = block_at(0x1015, 2, last_ops);
+    let three_blocks = pcode_function(vec![first, middle, last]);
+
+    for (shape, pcode) in [("one block", one_block), ("three blocks", three_blocks)] {
+        let code = render_mlil_preview(&pcode, "reads_g", 0x1000, &options).expect("render");
+        assert!(
+            code.contains("sub_2000("),
+            "{shape}: the call stays:\n{code}"
+        );
+        assert!(
+            !code.contains("return 5;"),
+            "{shape}: the read after the call is a load of g:\n{code}"
+        );
+        assert!(code.contains("return g;"), "{shape}:\n{code}");
+    }
+}

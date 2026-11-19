@@ -339,14 +339,19 @@ impl<'a> PreviewBuilder<'a> {
             && let Some(value) = self.scalar_ssa_value_at_use(vn, scope)
             && self.ssa_emission.bindings.contains_key(&value)
             && let Some(site) = self.scalar_ssa_definition_at_use(vn, scope)
+            && !self.call_may_write_global_between(vn, site, scope)
         {
             let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
             return Some((site, op));
         }
-        let admit = |resolved: Option<(LoweringSite, bool)>| {
+        // `(site, sole, clobbered)`: a definition a call may have overwritten
+        // since is neither the value read nor its name -- the read is a load.
+        let admit = |resolved: Option<(LoweringSite, bool, bool)>| {
             resolved
-                .filter(|(_, sole)| *sole || role == DefinitionRole::Name)
-                .map(|(site, _)| {
+                .filter(|(_, sole, clobbered)| {
+                    !clobbered && (*sole || role == DefinitionRole::Name)
+                })
+                .map(|(site, _, _)| {
                     let op = &self.pcode.blocks[site.block_idx].ops[site.op_idx];
                     (site, op)
                 })
@@ -452,7 +457,9 @@ impl<'a> PreviewBuilder<'a> {
         let resolved = resolved_site.map(|site| {
             let sole =
                 scope.is_none_or(|use_site| self.definition_is_sole_reaching(vn, site, use_site));
-            (site, sole)
+            let clobbered = scope
+                .is_some_and(|use_site| self.call_may_write_global_between(vn, site, use_site));
+            (site, sole, clobbered)
         });
         self.lookup_site_cache
             .borrow_mut()

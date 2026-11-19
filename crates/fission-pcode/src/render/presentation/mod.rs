@@ -130,7 +130,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         goto_recovery::collect_goto_targets(&func.body, &mut goto_targets);
         changed |=
             goto_recovery::prune_unreachable_after_total_return(&mut func.body, &goto_targets);
-        changed |= inline_single_use_pure_assigns(func);
+        changed |= inline_single_use_pure_assigns(func, globals);
         changed |= eliminate_pure_dead_assigns(func, globals);
         changed |= goto_recovery::remove_unreferenced_labels(&mut func.body);
         if !changed {
@@ -741,17 +741,22 @@ fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
 }
 
 /// Inline single-def, single-use pure assigns into their use site (temps + noise).
-fn inline_single_use_pure_assigns(func: &mut HirFunction) -> bool {
+///
+/// A global is memory, not a temporary: an assignment to one is a store this
+/// function makes, and a read of one is a load another function (a callee)
+/// can change. So `g = 5; f(); return g;` keeps both the store and the read.
+fn inline_single_use_pure_assigns(func: &mut HirFunction, globals: &HashSet<String>) -> bool {
     let formal: HashSet<&str> = func.params.iter().map(|b| b.name.as_str()).collect();
     let mut def_counts = HashMap::new();
     count_defs_in_stmts(&func.body, &mut def_counts);
-    inline_single_use_in_stmts(&mut func.body, &formal, &def_counts)
+    inline_single_use_in_stmts(&mut func.body, &formal, &def_counts, globals)
 }
 
 fn inline_single_use_in_stmts(
     stmts: &mut Vec<HirStmt>,
     formal: &HashSet<&str>,
     def_counts: &HashMap<String, usize>,
+    globals: &HashSet<String>,
 ) -> bool {
     let mut changed = false;
     let mut i = 0;
@@ -761,6 +766,7 @@ fn inline_single_use_in_stmts(
                 lhs: HirLValue::Var(name),
                 rhs,
             } if !formal.contains(name.as_str())
+                && !globals.contains(name.as_str())
                 && def_counts.get(name.as_str()).copied().unwrap_or(0) == 1
                 && (expr_is_presentation_pure(rhs) || expr_is_movable_read(rhs))
                 && !expr_mentions_var(rhs, name) =>
@@ -787,9 +793,9 @@ fn inline_single_use_in_stmts(
                     // is redefined before the use.
                     // A load may be moved to its use only across a span that
                     // writes no memory; a pure expression needs no such check.
-                    if !expr_is_presentation_pure(&rhs)
-                        && memory_clobbered_between(stmts, i + 1, target)
-                    {
+                    let reads_memory = !expr_is_presentation_pure(&rhs)
+                        || globals.iter().any(|global| expr_mentions_var(&rhs, global));
+                    if reads_memory && memory_clobbered_between(stmts, i + 1, target) {
                         i += 1;
                         continue;
                     }
@@ -810,36 +816,37 @@ fn inline_single_use_in_stmts(
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= inline_single_use_in_stmts(body, formal, def_counts);
+                changed |= inline_single_use_in_stmts(body, formal, def_counts, globals);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= inline_single_use_in_stmts(then_body, formal, def_counts);
-                changed |= inline_single_use_in_stmts(else_body, formal, def_counts);
+                changed |= inline_single_use_in_stmts(then_body, formal, def_counts, globals);
+                changed |= inline_single_use_in_stmts(else_body, formal, def_counts, globals);
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= inline_single_use_in_stmts(b, formal, def_counts);
+                        changed |= inline_single_use_in_stmts(b, formal, def_counts, globals);
                     }
                 }
                 if let Some(upd) = update {
                     if let HirStmt::Block(b) = upd.as_mut() {
-                        changed |= inline_single_use_in_stmts(b, formal, def_counts);
+                        changed |= inline_single_use_in_stmts(b, formal, def_counts, globals);
                     }
                 }
-                changed |= inline_single_use_in_stmts(body, formal, def_counts);
+                changed |= inline_single_use_in_stmts(body, formal, def_counts, globals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= inline_single_use_in_stmts(&mut case.body, formal, def_counts);
+                    changed |=
+                        inline_single_use_in_stmts(&mut case.body, formal, def_counts, globals);
                 }
-                changed |= inline_single_use_in_stmts(default, formal, def_counts);
+                changed |= inline_single_use_in_stmts(default, formal, def_counts, globals);
             }
             _ => {}
         }
