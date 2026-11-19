@@ -1753,9 +1753,27 @@ pub fn rescue_undeclared_bindings(func: &mut PreHirFunction) -> bool {
     // assignment RHS in the body. Sort before appending so rescuing multiple
     // lane aliases cannot make rendered declaration order depend on HashSet
     // iteration order.
+    // A file-scope object is declared at file scope, not here. The register
+    // test below admits any name starting with `r` or `e`, so `rl_point`
+    // and `expanding_redir` became uninitialised locals and their reads
+    // and writes stopped reaching the globals.
+    let global_names = crate::pipeline::GLOBAL_SYMBOL_CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|context| {
+                context
+                    .names
+                    .values()
+                    .chain(context.storage_names.iter())
+                    .cloned()
+                    .collect::<HashSet<_>>()
+            })
+            .unwrap_or_default()
+    });
     let mut undeclared_candidates = body_names
         .into_iter()
         .filter(|name| !declared.contains(name.as_str()))
+        .filter(|name| !global_names.contains(name.as_str()))
         .filter(|name| is_rescue_candidate_name(name))
         .collect::<Vec<_>>();
     undeclared_candidates.sort_unstable();

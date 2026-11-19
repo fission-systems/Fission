@@ -1196,7 +1196,18 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
         PreHirExpr::Load { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
-            if let NirType::Ptr(inner) = ptr_ty {
+            // A load's type is also how many bytes it reads. The pointee
+            // may refine it (signedness, pointer-ness) but not erase or
+            // resize it: `*(uint *)(&g + 8)` read as `Unknown` printed
+            // `*(undefined *)` and read the wrong number of bytes.
+            // (A pointer's width is the target's, which this table does
+            // not know, so a pointer on either side is not compared.)
+            if let NirType::Ptr(inner) = ptr_ty
+                && !matches!(*inner, NirType::Unknown)
+                && (matches!(*inner, NirType::Ptr(_))
+                    || matches!(ty, NirType::Ptr(_) | NirType::Unknown)
+                    || type_byte_size(&inner) == type_byte_size(ty))
+            {
                 *ty = *inner;
             }
         }
@@ -1260,6 +1271,49 @@ mod tests {
             size,
             fields: Vec::new(),
         }
+    }
+
+    /// `x = *(uint *)(&g + 8)`: the address of a field of an object whose
+    /// type is unknown has an unknown pointee. Taking it for the load's type
+    /// made
+    /// the load `Unknown` -- `*(undefined *)` in the text, and a read of no
+    /// particular width.
+    #[test]
+    fn a_load_keeps_its_width_when_the_pointee_is_unknown() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let load = |ty: NirType| PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::AddressOfGlobal("g".to_owned())),
+                offset: 8,
+            }),
+            ty,
+        };
+        let run = || -> PreHirExpr {
+            let mut func = PreHirFunction {
+                // `y` has a type to solve, so the pass rewrites the tree.
+                locals: vec![binding("x", u32_ty.clone()), binding("y", NirType::Unknown)],
+                body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".to_owned()),
+                        rhs: load(u32_ty.clone()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".to_owned()),
+                        rhs: PreHirExpr::Var("x".to_owned()),
+                    },
+                ],
+                ..Default::default()
+            };
+            apply_type_constraint_propagation(&mut func);
+            let PreHirStmt::Assign { rhs, .. } = &func.body[0] else {
+                panic!("expected the assignment");
+            };
+            rhs.clone()
+        };
+        assert_eq!(run(), load(u32_ty.clone()));
     }
 
     #[test]

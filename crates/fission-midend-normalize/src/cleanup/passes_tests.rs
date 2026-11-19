@@ -3376,6 +3376,47 @@ fn rescue_undeclared_bindings_declares_stack_local_names() {
     );
 }
 
+/// `rl_point` is a global and `rbx` a register. The register test admits
+/// any name that starts with `r` or `e`, and declaring the global as a local
+/// cut every read and write of it off from the object.
+#[test]
+fn rescue_undeclared_bindings_leaves_globals_to_file_scope() {
+    use crate::pipeline::{GLOBAL_SYMBOL_CONTEXT, GlobalSymbolContext};
+
+    let rescued = |known_global: bool| {
+        let mut names = std::collections::HashMap::default();
+        if known_global {
+            names.insert(0x1400_3000_u64, "rl_point".to_string());
+        }
+        GLOBAL_SYMBOL_CONTEXT.with(|slot| {
+            *slot.borrow_mut() = Some(GlobalSymbolContext {
+                names,
+                ..Default::default()
+            });
+        });
+        let mut func = PreHirFunction {
+            name: "f".to_string(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rl_point".to_string()),
+                    rhs: PreHirExpr::Var("rbx".to_string()),
+                },
+                PreHirStmt::Return(None),
+            ],
+            ..Default::default()
+        };
+        rescue_undeclared_bindings(&mut func);
+        GLOBAL_SYMBOL_CONTEXT.with(|slot| *slot.borrow_mut() = None);
+        func.locals
+            .iter()
+            .map(|binding| binding.name.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rescued(true), vec!["rbx".to_string()]);
+    // Control: a name nothing knows as a global is still rescued.
+    assert!(rescued(false).contains(&"rl_point".to_string()));
+}
+
 #[test]
 fn rescue_undeclared_bindings_declares_simd_lane_names() {
     let mut func = PreHirFunction {

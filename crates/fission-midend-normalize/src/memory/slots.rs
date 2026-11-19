@@ -319,9 +319,10 @@ fn resolve_slot_alias_base(
     }
 
     match base {
-        PreHirExpr::Var(name)
-        | PreHirExpr::AddressOfGlobal(name)
-        | PreHirExpr::AddressOfLocal(name) => resolve_var(func, alias_defs, name, 0),
+        // Only a variable has a value to trace back. `&g` is the object's
+        // address; resolving it as the variable `g` printed the object's
+        // contents where its address was meant.
+        PreHirExpr::Var(name) => resolve_var(func, alias_defs, name, 0),
         PreHirExpr::Cast { ty, expr } => PreHirExpr::Cast {
             ty: ty.clone(),
             expr: Box::new(resolve_slot_alias_base(func, alias_defs, expr)),
@@ -1070,6 +1071,35 @@ mod tests {
             .filter(|binding| binding.name.starts_with("slot_"))
             .map(|binding| format!("{:?}", binding.initializer))
             .collect()
+    }
+
+    /// Two reads of a field of the global object `g` get an alias whose
+    /// initializer is `&g + 32` -- the object's address. Resolving the base
+    /// as a variable made it `g + 32`, the object's contents plus 32.
+    #[test]
+    fn a_slot_alias_of_a_global_field_is_rooted_at_the_globals_address() {
+        let field = || PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::AddressOfGlobal("g".to_string())),
+                offset: 32,
+            }),
+            ty: u32_ty(),
+        };
+        let body = ["a", "b"]
+            .into_iter()
+            .map(|name| PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name.to_string()),
+                rhs: field(),
+            })
+            .collect();
+        let mut func = surfacing_func(body);
+        assert!(apply_memory_slot_surfacing(&mut func), "{:?}", func.body);
+        let initializers = slot_initializers(&func);
+        assert_eq!(initializers.len(), 1, "{initializers:?}");
+        assert!(
+            initializers[0].contains("AddressOfGlobal(\"g\")"),
+            "{initializers:?}"
+        );
     }
 
     /// Control for the test below: a pointer copied once out of its
