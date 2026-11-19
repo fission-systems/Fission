@@ -93,6 +93,22 @@ impl<'a> PreviewBuilder<'a> {
             .is_some_and(|target| self.call_result_is_proven_non_source(&target))
     }
 
+    /// A tail call's machine instruction is the jump that leaves the
+    /// function. Recorded like an ordinary call's, so a checker can match the
+    /// call to the instruction that makes it.
+    fn tail_call_origin(
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Option<fission_midend_core::ir::CallOrigin> {
+        block
+            .ops
+            .get(term_idx)
+            .map(|op| fission_midend_core::ir::CallOrigin {
+                instruction_address: op.address,
+                pcode_sequence: op.seq_num,
+            })
+    }
+
     fn recover_tail_call_expr_from_target_expr(
         &mut self,
         block_idx: usize,
@@ -119,7 +135,7 @@ impl<'a> PreviewBuilder<'a> {
             Vec::new()
         };
         Some(PreHirExpr::Call {
-            origin: None,
+            origin: Self::tail_call_origin(block, term_idx),
             target,
             args,
             ty: NirType::Unknown,
@@ -146,7 +162,7 @@ impl<'a> PreviewBuilder<'a> {
         let mut args = self.recover_tail_call_args(block_idx, block, term_idx);
         if let Some(target) = resolved_symbol {
             return PreHirExpr::Call {
-                origin: None,
+                origin: Self::tail_call_origin(block, term_idx),
                 target,
                 args,
                 ty: NirType::Unknown,
@@ -155,7 +171,7 @@ impl<'a> PreviewBuilder<'a> {
         // Unresolved fp: opaque form — printer casts to callable.
         args.insert(0, target_expr.clone());
         PreHirExpr::Call {
-            origin: None,
+            origin: Self::tail_call_origin(block, term_idx),
             target: "__fission_callind_opaque".to_string(),
             args,
             ty: NirType::Unknown,
@@ -300,7 +316,7 @@ impl<'a> PreviewBuilder<'a> {
         // the argument dropped.
         let args = self.recover_tail_call_args(block_idx, block, term_idx);
         Some(PreHirExpr::Call {
-            origin: None,
+            origin: Self::tail_call_origin(block, term_idx),
             target: resolved_target,
             args,
             ty: NirType::Unknown,

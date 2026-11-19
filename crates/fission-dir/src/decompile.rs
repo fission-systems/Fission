@@ -13,6 +13,8 @@ use fission_static::analysis::decomp::facts::FactStore;
 pub struct PreHirHirPair {
     pub prehir: PreHirFunction,
     pub hir: HirFunction,
+    /// The globals the printed code declares.
+    pub globals: Vec<fission_decompiler::PrintedGlobal>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -52,8 +54,15 @@ pub fn decompile_one(
         .render_output
         .ok_or(DecompileError::MissingRenderOutput)?;
     let prehir = output.prehir.ok_or(DecompileError::MissingPreHirSnapshot)?;
+    // The printed tree, not the earlier `hir_function` snapshot: type hints,
+    // global recovery and presentation all run after that snapshot and all
+    // change what the printed code computes.
     let hir = output
-        .hir_function
+        .printed_hir
         .ok_or(DecompileError::MissingHirSnapshot)?;
-    Ok(PreHirHirPair { prehir, hir })
+    Ok(PreHirHirPair {
+        prehir,
+        hir,
+        globals: output.printed_globals,
+    })
 }

@@ -40,6 +40,17 @@ fn typed_render_output_owns_all_pipeline_observations() {
     assert!(output.raw_hir.is_some());
     assert!(output.prehir.is_some());
     assert!(output.hir_function.is_some());
+    let printed_hir = output
+        .printed_hir
+        .as_ref()
+        .expect("typed preview render owns the final printed tree");
+    let (printed_code, _) = crate::render::render_hir_function_with_provenance(
+        printed_hir,
+        &options,
+        crate::render::PrintProfile::Hir,
+        &Default::default(),
+    );
+    assert_eq!(output.code, printed_code);
     assert!(output.recovered_variables.is_some());
     assert!(output.build_stats.is_some());
 }

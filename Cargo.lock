@@ -925,6 +925,7 @@ dependencies = [
  "fission-sleigh",
  "fission-solver",
  "fission-static",
+ "rustc-hash",
  "thiserror",
  "tracing",
 ]
