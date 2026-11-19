@@ -63,6 +63,10 @@ pub enum StubbedEnd {
     /// It reached a call the decoder found no fall-through for -- a call
     /// that does not return. The run stops there.
     NoReturnCall(u64),
+    /// Execution reached code the decode did not cover (a switch case it
+    /// did not resolve, an indirect tail jump). Calls there are not stubbed,
+    /// so the run says nothing about the tree.
+    LeftDecodedCode(u64),
     /// Anything else: budget, fault, exit.
     Other(CallOutcome),
 }
@@ -91,6 +95,32 @@ impl fission_emulator::observe::Observer for WriteLog {
     fn on_mem(&mut self, addr: u64, size: u32, write: bool, _value: u64) {
         if write {
             self.0.lock().expect("write log").push((addr, size));
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Records the first translation block that starts outside the function's
+/// decoded instructions.
+struct CoverageLog {
+    instructions: Arc<BTreeSet<u64>>,
+    stray: Arc<Mutex<Option<u64>>>,
+}
+
+impl fission_emulator::observe::Observer for CoverageLog {
+    fn interest(&self) -> fission_emulator::observe::ObserveMask {
+        fission_emulator::observe::ObserveMask {
+            block: true,
+            ..fission_emulator::observe::ObserveMask::NONE
+        }
+    }
+
+    fn on_block(&mut self, pc: u64) {
+        if pc != SENTINEL_RET && !self.instructions.contains(&pc) {
+            self.stray.lock().expect("coverage log").get_or_insert(pc);
         }
     }
 
@@ -294,6 +324,17 @@ impl EmulatorHarness {
     /// Read one byte of the restored baseline: the program image as every
     /// call starts from it. `None` where nothing is mapped.
     pub fn baseline_byte(&self, addr: u64) -> Option<u8> {
+        // The raw space read zero-fills a page nothing mapped, which would
+        // let a tree's stray load agree with machine code that never made it.
+        if self.baseline_state.enforce_page_faults
+            && self
+                .baseline_state
+                .page_map
+                .check_access(addr, fission_emulator::pcode::page_map::AccessKind::Read)
+                .is_err()
+        {
+            return None;
+        }
         let ram = self.baseline_state.ram_space();
         self.baseline_state
             .read_space_readonly(ram, addr, 1)
@@ -302,10 +343,11 @@ impl EmulatorHarness {
     }
 
     /// Call `address` as [`Self::call`] does, but stop at every call
-    /// instruction in `sites` instead of running the callee: record the
+    /// instruction in `flow` instead of running the callee: record the
     /// argument registers, put `call_return(n)` in the return register and
-    /// continue at the site's fall-through. A site mapped to `None` has no
-    /// fall-through and ends the run.
+    /// continue at the site's fall-through. A call mapped to `None` does not
+    /// return and ends the run. A tail jump is a call whose return is this
+    /// function's: it is recorded and stubbed the same way, then returns.
     ///
     /// Stubbing is what lets the decompiled body be compared at all: both
     /// sides see the same return values without either having to model the
@@ -315,7 +357,7 @@ impl EmulatorHarness {
         &mut self,
         address: u64,
         args: &[u64],
-        sites: &BTreeMap<u64, Option<u64>>,
+        flow: &crate::call_sites::MachineFlow,
         call_return: &dyn Fn(usize) -> u64,
     ) -> Result<StubbedRun> {
         self.prepare_call(address, args)?;
@@ -323,13 +365,47 @@ impl EmulatorHarness {
         let entry_sp = self.emu.read_register_u64(sp_reg)?;
         let log = Arc::new(Mutex::new(Vec::new()));
         self.emu.add_observer(Box::new(WriteLog(Arc::clone(&log))));
-        for site in sites.keys() {
+        let stray = Arc::new(Mutex::new(None));
+        self.emu.add_observer(Box::new(CoverageLog {
+            instructions: Arc::new(flow.instructions.clone()),
+            stray: Arc::clone(&stray),
+        }));
+        for site in flow.calls.keys().chain(&flow.tail_jumps) {
             self.emu.set_breakpoint(*site);
         }
         let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
         let return_reg = self.emu.arch.cc.return_reg();
         let mut calls = Vec::new();
         let end = loop {
+            // The emulator does not stop at a breakpoint on the PC it starts
+            // from -- a debugger has to be able to continue past one -- so a
+            // site at the entry, or one right after the previous stub's
+            // fall-through, is handled before resuming rather than run.
+            let pc = self.emu.pc;
+            let is_call = flow.calls.contains_key(&pc);
+            if is_call || flow.tail_jumps.contains(&pc) {
+                if calls.len() >= MAX_STUBBED_CALLS {
+                    break StubbedEnd::Other(CallOutcome::HitBudget);
+                }
+                let args = arg_regs
+                    .iter()
+                    .map(|reg| self.emu.read_register_u64(reg))
+                    .collect::<Result<Vec<_>>>()?;
+                let n = calls.len();
+                calls.push(ObservedCall { site: pc, args });
+                if is_call {
+                    let Some(next) = flow.calls[&pc] else {
+                        break StubbedEnd::NoReturnCall(pc);
+                    };
+                    self.emu.write_register_u64(return_reg, call_return(n))?;
+                    self.emu.pc = next;
+                } else {
+                    self.emu.write_register_u64(return_reg, call_return(n))?;
+                    // Return to this function's caller, as the callee would.
+                    self.emu.simulate_return_for("")?;
+                }
+                continue;
+            }
             let outcome = match self.emu.run_until_pc(SENTINEL_RET) {
                 Ok(outcome) => outcome,
                 Err(err) => {
@@ -337,23 +413,11 @@ impl EmulatorHarness {
                     return Err(err);
                 }
             };
+            if let Some(pc) = *stray.lock().expect("coverage log") {
+                break StubbedEnd::LeftDecodedCode(pc);
+            }
             match outcome {
-                RunOutcome::HitBreakpoint(pc) if sites.contains_key(&pc) => {
-                    if calls.len() >= MAX_STUBBED_CALLS {
-                        break StubbedEnd::Other(CallOutcome::HitBudget);
-                    }
-                    let args = arg_regs
-                        .iter()
-                        .map(|reg| self.emu.read_register_u64(reg))
-                        .collect::<Result<Vec<_>>>()?;
-                    let n = calls.len();
-                    calls.push(ObservedCall { site: pc, args });
-                    let Some(next) = sites[&pc] else {
-                        break StubbedEnd::NoReturnCall(pc);
-                    };
-                    self.emu.write_register_u64(return_reg, call_return(n))?;
-                    self.emu.pc = next;
-                }
+                RunOutcome::HitBreakpoint(_) => continue,
                 RunOutcome::Returned => {
                     break StubbedEnd::Returned(self.emu.read_register_u64(return_reg)?);
                 }

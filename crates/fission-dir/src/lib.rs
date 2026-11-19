@@ -46,7 +46,7 @@ pub mod product;
 pub mod report;
 pub mod symbolic;
 
-pub use call_sites::call_sites;
+pub use call_sites::{MachineFlow, call_sites};
 pub use decompile::{DecompileError, PreHirHirPair, decompile_one};
 pub use diff::{GROUND_SAMPLES, default_samples, diff_prehir_hir, ground_samples};
 pub use emu_driver::{CallOutcome, EmulatorHarness, ObservedCall, StubbedEnd, StubbedRun};

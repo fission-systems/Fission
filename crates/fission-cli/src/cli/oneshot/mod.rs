@@ -430,8 +430,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                             let grounding = fission_dir::Grounding::for_function(
                                 &binary,
                                 func.address,
-                                &pair.prehir,
-                                &pair.hir,
+                                &pair.globals,
                             );
                             let outcome = fission_dir::check_ground_truth_with(
                                 harness,

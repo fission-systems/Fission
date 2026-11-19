@@ -144,7 +144,9 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
 /// below keep every boundary value of every parameter.
 pub fn ground_samples(arity: usize) -> Vec<Vec<i64>> {
     if arity == 0 {
-        return vec![Vec::new()];
+        // Still two: the stub policy alternates by sample index, and one
+        // sample would only ever see every call fail.
+        return vec![Vec::new(), Vec::new()];
     }
     pairwise_samples(arity, GROUND_SAMPLES)
 }
@@ -480,5 +482,12 @@ mod tests {
         for s in &samples_6 {
             assert_eq!(s.len(), 6);
         }
+    }
+
+    /// A function without parameters still runs under both stub policies,
+    /// which alternate by sample index.
+    #[test]
+    fn a_parameterless_function_gets_one_sample_per_stub_policy() {
+        assert_eq!(ground_samples(0), vec![Vec::<i64>::new(), Vec::new()]);
     }
 }

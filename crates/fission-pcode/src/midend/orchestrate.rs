@@ -86,6 +86,9 @@ pub struct NirDecompileOutput {
     /// `hir_function` is captured before type hints, global recovery and
     /// presentation, all of which change what the printed code computes.
     pub printed_hir: Option<super::HirFunction>,
+    /// The file-scope objects `code` declares, with their types and
+    /// addresses.
+    pub printed_globals: Vec<crate::render::PrintedGlobal>,
     pub recovered_variables: Option<Vec<crate::render::RecoveredVariable>>,
     pub build_stats: Option<PreviewBuildStats>,
     pub hint_stats: Option<PreviewHintStats>,
@@ -560,6 +563,7 @@ fn render_mlil_preview_with_binary_and_context_output(
         raw_hir: Some(raw_hir),
         prehir: Some(prehir),
         hir_function: Some(hir_function),
+        printed_globals: crate::render::printed_globals(&printed_hir, options),
         printed_hir: Some(printed_hir),
         recovered_variables: Some(recovered_variables),
         build_stats: Some(build_stats),

@@ -428,9 +428,20 @@ memory and the same values returned from every call it makes, then compares:
 Calls are stubbed on both sides rather than run: the emulator stops at each
 call instruction the function's own decode lists, records its arguments and
 continues with a chosen return value (zero, or a pointer to a zeroed buffer,
-alternating between samples). A callee's own effects -- an out-parameter it
-would have written -- are therefore absent on both sides. Globals read from
-and write to the program image.
+alternating between samples). A direct `jmp` out of the function is a tail
+call and is stubbed the same way, then returns. A call statically proven not
+to return ends both runs there; stores made before it are still compared. A
+callee's own effects -- an out-parameter it would have written -- are absent
+on both sides. Globals are the ones the pseudocode declares, read and written
+at their declared width in the program image.
+
+Refused rather than guessed: a function whose decode is incomplete (cut off at
+its instruction limit, or a call whose continuation was not decoded and is not
+proven no-return) gets no call stubs; a sample in which the machine runs code
+outside the decoded function (an unresolved switch case, an indirect tail
+jump) is a harness failure; a call in the tree with no machine call
+instruction behind it, a global name shared by several objects, and 32-bit PE
+(callee-cleaned `__stdcall`) are reported unsupported.
 
 Outcomes: `equivalent` (every sample agreed), `diverged` (with the first
 difference), `unsupported` (the interpreter refused the body; the reason is

@@ -1778,6 +1778,57 @@ fn collect_assigned_names(stmts: &[HirStmt], consider: &mut impl FnMut(&str)) {
     }
 }
 
+/// A file-scope object the printed code declares.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrintedGlobal {
+    pub name: String,
+    /// The type of its declaration.
+    pub ty: NirType,
+    /// Where it lives: the address its name spells, or the one loader symbol
+    /// of that name. `None` when several symbols share the name -- the C has
+    /// one declaration for them, so the text does not say which is meant.
+    pub address: Option<u64>,
+}
+
+/// The globals `hir` is printed with, as the printer declares them.
+pub(crate) fn printed_globals(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> Vec<PrintedGlobal> {
+    if has_unknown_arity_declaration(hir) {
+        return Vec::new();
+    }
+    let mut addresses: HashMap<&str, Vec<u64>> = HashMap::new();
+    for (address, name) in &options.global_names {
+        addresses.entry(name.as_str()).or_default().push(*address);
+    }
+    collect_referenced_global_decls(hir, options)
+        .into_iter()
+        .map(|(name, ty)| {
+            let address = match addresses.get(name.as_str()).map(Vec::as_slice) {
+                Some([only]) => Some(*only),
+                // The loader also names a GOT slot or an import stub after
+                // the symbol it serves. In C the name is the object, so the
+                // one candidate that is a sized data definition is meant.
+                Some(candidates) => {
+                    let mut objects = candidates
+                        .iter()
+                        .filter(|address| options.global_sizes.contains_key(address));
+                    match (objects.next(), objects.next()) {
+                        (Some(object), None) => Some(*object),
+                        _ => None,
+                    }
+                }
+                None => name
+                    .strip_prefix("tmp_")
+                    .or_else(|| name.strip_prefix("DAT_"))
+                    .and_then(|hex| u64::from_str_radix(hex, 16).ok()),
+            };
+            PrintedGlobal { name, ty, address }
+        })
+        .collect()
+}
+
 fn collect_referenced_global_decls(
     hir: &HirFunction,
     options: &MlilPreviewOptions,

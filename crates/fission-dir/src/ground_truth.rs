@@ -12,13 +12,17 @@
 //! catches that class of bug.
 
 use fission_loader::loader::LoadedBinary;
-use fission_midend_core::ir::{HirExpr, HirFunction, HirLValue, HirStmt, NirType};
+use fission_midend_core::ir::{HirFunction, NirType};
 use fission_midend_prehir::PreHirFunction;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use crate::call_sites::MachineFlow;
 use crate::emu_driver::{EmulatorHarness, ObservedCall, StubbedEnd};
-use crate::eval::{CallEvent, World, hir_free_names, normalize, run_hir, run_prehir, width_of};
+use crate::eval::{
+    CallEvent, World, hir_free_names, hir_mentioned_names, normalize, run_hir, run_prehir, width_of,
+};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
+use fission_decompiler::PrintedGlobal;
 
 /// Size of the scratch region allocated for each pointer parameter.
 const SCRATCH_REGION_SIZE: usize = 128;
@@ -42,10 +46,18 @@ const MAX_REPORTED_DIVERGENCES: usize = 3;
 ///
 /// Allocates disjoint 128-byte regions for each pointer parameter so multiple
 /// pointer arguments (e.g. memcpy, strcmp) do not artificially alias.
-fn scratch_contents(num_regions: usize) -> Vec<u8> {
-    let num_regions = num_regions.max(1);
-    let mut bytes = vec![0u8; num_regions * SCRATCH_REGION_SIZE];
-    for (chunk, slot) in bytes.chunks_mut(16).enumerate() {
+///
+/// Only the parameter regions are seeded. The regions after them are what a
+/// stubbed call returns a pointer to, and those are all zero: a fresh result
+/// buffer whose first word read 65 sent bodies down paths, and chased
+/// pointers, that a zeroed one does not.
+fn scratch_contents(param_regions: usize, result_regions: usize) -> Vec<u8> {
+    let param_regions = param_regions.max(1);
+    let mut bytes = vec![0u8; (param_regions + result_regions) * SCRATCH_REGION_SIZE];
+    for (chunk, slot) in bytes[..param_regions * SCRATCH_REGION_SIZE]
+        .chunks_mut(16)
+        .enumerate()
+    {
         slot[..4].copy_from_slice(&((chunk as u32) + 1).to_le_bytes());
     }
     bytes
@@ -54,170 +66,54 @@ fn scratch_contents(num_regions: usize) -> Vec<u8> {
 /// What the comparison needs from outside the two trees and the emulator.
 #[derive(Debug, Clone, Default)]
 pub struct Grounding {
-    /// Call instructions in the function and where each continues
+    /// How the function's machine code calls out and where it runs
     /// ([`crate::call_sites`]). `None` refuses every call: the old tier.
-    pub call_sites: Option<BTreeMap<u64, Option<u64>>>,
-    /// Globals the bodies name, with their addresses.
+    pub flow: Option<MachineFlow>,
+    /// Why `flow` is `None`, when a decode was attempted.
+    pub flow_error: Option<String>,
+    /// The globals the printed code declares, with their addresses.
     pub globals: HashMap<String, u64>,
+    /// Their declared types: the width of every load and store.
+    pub global_types: HashMap<String, NirType>,
+    /// Declared globals the printed code cannot be tied to one address --
+    /// several loader symbols share the name.
+    pub ambiguous_globals: BTreeSet<String>,
 }
 
 impl Grounding {
     /// Everything [`check_ground_truth_with`] can use for the function at
-    /// `address`: its call sites, and an address for every global the two
-    /// trees name -- a symbol the loader knows, or an address-named one
-    /// (`tmp_1a004`, `DAT_1a004`).
-    pub fn for_function(
-        binary: &LoadedBinary,
-        address: u64,
-        prehir: &PreHirFunction,
-        hir: &HirFunction,
-    ) -> Self {
-        let call_sites = crate::call_sites::call_sites(binary, address).ok();
-        let by_name: HashMap<&str, u64> = binary
-            .global_symbols
-            .iter()
-            .map(|(addr, name)| (name.as_str(), *addr))
-            .collect();
-        let mut globals = HashMap::new();
-        let names = crate::eval::hir_free_names(hir)
-            .into_iter()
-            .chain(crate::eval::prehir_free_names(prehir))
-            .chain(hir.locals.iter().map(|l| l.name.clone()))
-            .chain(prehir.locals.iter().map(|l| l.name.clone()))
-            .chain(global_references(hir));
-        for name in names {
-            if globals.contains_key(&name)
-                || hir.params.iter().any(|p| p.name == name)
-                || prehir.params.iter().any(|p| p.name == name)
-            {
-                continue;
-            }
-            let address =
-                address_named_global(&name).or_else(|| by_name.get(name.as_str()).copied());
-            if let Some(address) = address {
-                globals.insert(name, address);
+    /// `address`: its machine control flow, and the globals its printed code
+    /// declares (`printed`, from the decompile that produced the tree).
+    ///
+    /// The global set is the printer's, not a guess from names: a builder
+    /// temporary can be spelled like an address (`tmp_1a004`), and a local
+    /// can shadow a symbol, and only the printer's declarations say which
+    /// names are file-scope storage in the text being checked.
+    pub fn for_function(binary: &LoadedBinary, address: u64, printed: &[PrintedGlobal]) -> Self {
+        let (flow, flow_error) = match crate::call_sites::call_sites(binary, address) {
+            Ok(flow) => (Some(flow), None),
+            Err(err) => (None, Some(format!("{err:#}"))),
+        };
+        let mut grounding = Self {
+            flow,
+            flow_error,
+            ..Self::default()
+        };
+        for global in printed {
+            grounding
+                .global_types
+                .insert(global.name.clone(), global.ty.clone());
+            match global.address {
+                Some(address) => {
+                    grounding.globals.insert(global.name.clone(), address);
+                }
+                None => {
+                    grounding.ambiguous_globals.insert(global.name.clone());
+                }
             }
         }
-        Self {
-            call_sites,
-            globals,
-        }
+        grounding
     }
-}
-
-/// `tmp_1a004` / `DAT_1a004`: a global the binary has no symbol for, printed
-/// under its address.
-fn address_named_global(name: &str) -> Option<u64> {
-    let hex = name
-        .strip_prefix("tmp_")
-        .or_else(|| name.strip_prefix("DAT_"))?;
-    if hex.is_empty() || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return None;
-    }
-    u64::from_str_radix(hex, 16).ok()
-}
-
-/// Names the body takes the address of as globals (`&name`).
-fn global_references(hir: &HirFunction) -> Vec<String> {
-    fn expr(e: &HirExpr, out: &mut Vec<String>) {
-        match e {
-            HirExpr::AddressOfGlobal(name) => out.push(name.clone()),
-            HirExpr::Cast { expr: inner, .. }
-            | HirExpr::Unary { expr: inner, .. }
-            | HirExpr::Load { ptr: inner, .. }
-            | HirExpr::PtrOffset { base: inner, .. }
-            | HirExpr::FieldAccess { base: inner, .. }
-            | HirExpr::AggregateCopy { src: inner, .. } => expr(inner, out),
-            HirExpr::Binary { lhs, rhs, .. } => {
-                expr(lhs, out);
-                expr(rhs, out);
-            }
-            HirExpr::Index { base, index, .. } => {
-                expr(base, out);
-                expr(index, out);
-            }
-            HirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                expr(cond, out);
-                expr(then_expr, out);
-                expr(else_expr, out);
-            }
-            HirExpr::Call { args, .. } => args.iter().for_each(|a| expr(a, out)),
-            _ => {}
-        }
-    }
-    fn lvalue(l: &HirLValue, out: &mut Vec<String>) {
-        match l {
-            HirLValue::Var(_) => {}
-            HirLValue::Deref { ptr, .. } => expr(ptr, out),
-            HirLValue::Index { base, index, .. } => {
-                expr(base, out);
-                expr(index, out);
-            }
-            HirLValue::FieldAccess { base, .. } => expr(base, out),
-        }
-    }
-    fn stmts(body: &[HirStmt], out: &mut Vec<String>) {
-        for s in body {
-            match s {
-                HirStmt::Assign { lhs, rhs } => {
-                    lvalue(lhs, out);
-                    expr(rhs, out);
-                }
-                HirStmt::Expr(e) | HirStmt::Return(Some(e)) => expr(e, out),
-                HirStmt::Block(b) => stmts(b, out),
-                HirStmt::If {
-                    cond,
-                    then_body,
-                    else_body,
-                } => {
-                    expr(cond, out);
-                    stmts(then_body, out);
-                    stmts(else_body, out);
-                }
-                HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
-                    expr(cond, out);
-                    stmts(body, out);
-                }
-                HirStmt::For {
-                    init,
-                    cond,
-                    update,
-                    body,
-                } => {
-                    if let Some(init) = init {
-                        stmts(std::slice::from_ref(init.as_ref()), out);
-                    }
-                    if let Some(cond) = cond {
-                        expr(cond, out);
-                    }
-                    if let Some(update) = update {
-                        stmts(std::slice::from_ref(update.as_ref()), out);
-                    }
-                    stmts(body, out);
-                }
-                HirStmt::Switch {
-                    expr: e,
-                    cases,
-                    default,
-                } => {
-                    expr(e, out);
-                    for case in cases {
-                        stmts(&case.body, out);
-                    }
-                    stmts(default, out);
-                }
-                _ => {}
-            }
-        }
-    }
-    let mut out = Vec::new();
-    stmts(&hir.body, &mut out);
-    out
 }
 
 /// For each `args` tuple, evaluate `prehir`/`hir` concretely and call the real
@@ -305,7 +201,7 @@ pub fn check_ground_truth_with(
     // installs its scratch once, so a size chosen per function would leave a
     // later function's regions outside the bytes the emulator holds. It also
     // holds the regions stubbed calls return pointers to.
-    let contents = scratch_contents(SCRATCH_REGIONS + RESULT_REGIONS);
+    let contents = scratch_contents(SCRATCH_REGIONS, RESULT_REGIONS);
     let scratch = match harness.install_scratch(&contents) {
         Ok(addr) => addr,
         Err(err) => {
@@ -324,14 +220,28 @@ pub fn check_ground_truth_with(
     // Registers the body reads without ever writing -- caller state the
     // interpreter has no other way to know. Taken from the machine that is
     // about to run the same call, so both sides see the same thing.
+    if let Some(name) = hir_mentioned_names(hir)
+        .into_iter()
+        .find(|name| grounding.ambiguous_globals.contains(name))
+    {
+        return VerifyOutcome::Unsupported(UnsupportedReason::Harness(format!(
+            "global '{name}' names several objects; the text does not say which"
+        )));
+    }
     let mut free = hir_free_names(hir);
     free.retain(|name| !grounding.globals.contains_key(name));
     let bound = harness.entry_registers(&free);
 
-    let empty_sites = BTreeMap::new();
-    let sites = grounding.call_sites.as_ref().unwrap_or(&empty_sites);
+    let empty_flow = MachineFlow::default();
+    let flow = grounding.flow.as_ref().unwrap_or(&empty_flow);
+    let no_return_sites: BTreeSet<u64> = flow
+        .calls
+        .iter()
+        .filter(|(_, next)| next.is_none())
+        .map(|(site, _)| *site)
+        .collect();
     let return_bits = width_of(&hir.return_type).clamp(1, 64);
-    let returns_value = !matches!(hir.return_type, NirType::Unknown)
+    let declares_value = !matches!(hir.return_type, NirType::Unknown)
         || !matches!(prehir.return_type, NirType::Unknown);
     let mut divergences = Vec::new();
     let mut checked = 0usize;
@@ -369,29 +279,32 @@ pub fn check_ground_truth_with(
                 bound: &bound,
                 backing: Some(&backing),
                 globals: Some(&grounding.globals),
+                global_types: Some(&grounding.global_types),
                 call_return: grounding
-                    .call_sites
+                    .flow
                     .as_ref()
                     .map(|_| &call_return as &dyn Fn(usize) -> u64),
+                no_return_sites: Some(&no_return_sites),
             };
             (
                 run_prehir(&prehir.body, &prehir.params, &prehir.locals, &args, &world),
                 run_hir(&hir.body, &hir.params, &hir.locals, &args, &world),
             )
         };
-        let (Ok(prehir_run), Ok(hir_run)) = (&prehir_r, &hir_r) else {
-            if first_interpreter_error.is_none() {
-                first_interpreter_error = Some(match (&hir_r, &prehir_r) {
-                    (Err(err), _) => format!("hir: {err}"),
-                    (_, Err(err)) => format!("prehir: {err}"),
-                    _ => unreachable!(),
-                });
+        // The printed tree is what is being checked. PreHIR is compared when
+        // it runs, but a PreHIR the interpreter cannot run (it can name storage
+        // the printed tree resolved) does not stop the printed tree's check.
+        let hir_run = match &hir_r {
+            Ok(run) => run,
+            Err(err) => {
+                first_interpreter_error.get_or_insert_with(|| format!("hir: {err}"));
+                continue;
             }
-            continue;
         };
+        let prehir_run = prehir_r.as_ref().ok();
 
         let u_args: Vec<u64> = args.iter().map(|&a| a as u64).collect();
-        let machine = match harness.call_stubbed(address, &u_args, sites, &call_return) {
+        let machine = match harness.call_stubbed(address, &u_args, flow, &call_return) {
             Ok(run) => run,
             Err(err) => {
                 tracing::debug!("emulator call failed for {args:?}: {err}");
@@ -403,6 +316,13 @@ pub fn check_ground_truth_with(
         let (machine_ret, ended_in_noreturn) = match &machine.end {
             StubbedEnd::Returned(raw) => (Some(*raw), false),
             StubbedEnd::NoReturnCall(_) => (None, true),
+            StubbedEnd::LeftDecodedCode(pc) => {
+                first_emulator_error.get_or_insert_with(|| {
+                    format!("machine ran {pc:#x}, outside the decoded function")
+                });
+                emulator_errors += 1;
+                continue;
+            }
             StubbedEnd::Other(other) => {
                 tracing::debug!("emulator call for {args:?} did not return normally: {other:?}");
                 first_emulator_error.get_or_insert_with(|| format!("{other:?}"));
@@ -414,27 +334,40 @@ pub fn check_ground_truth_with(
         checked += 1;
         let norm = |v: i64| normalize(mask_to_width(v as u64, return_bits), &hir.return_type);
         let emulator_val = machine_ret.map(|raw| norm(raw as i64));
-        let prehir_val = prehir_run.ret.map(norm);
+        let prehir_val = prehir_run.and_then(|run| run.ret).map(norm);
         let hir_val = hir_run.ret.map(norm);
         let mut detail = None;
-        for (side, run) in [("hir", hir_run), ("prehir", prehir_run)] {
+        let sides = std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
+        for (side, run) in sides {
             if detail.is_some() {
                 break;
             }
-            detail =
-                compare_calls(side, &run.calls, &machine.calls, ended_in_noreturn).or_else(|| {
-                    if ended_in_noreturn {
-                        None
-                    } else {
-                        compare_writes(side, &run.writes, &machine.writes, &placed, |a| {
-                            harness.baseline_byte(a)
-                        })
-                    }
+            // A run that ends at a call which does not return still made
+            // every store before it: those are compared, only the return
+            // value is not.
+            detail = compare_calls(side, &run.calls, &machine.calls)
+                .or_else(|| {
+                    (run.ended_in_no_return != ended_in_noreturn).then(|| {
+                        if ended_in_noreturn {
+                            format!("{side}: the machine stopped at a call that does not return; the tree went on")
+                        } else {
+                            format!("{side}: the tree stopped at a call that does not return; the machine went on")
+                        }
+                    })
+                })
+                .or_else(|| {
+                    compare_writes(side, &run.writes, &machine.writes, &placed, |a| {
+                        harness.baseline_byte(a)
+                    })
                 });
         }
+        // `Unknown` is not `void`: the printer declares it as an integer and
+        // the tree can return a value from it. Compare whenever a side
+        // produced one.
+        let returns_value = declares_value || hir_val.is_some() || prehir_val.is_some();
         let return_differs = !ended_in_noreturn
             && returns_value
-            && (prehir_val != emulator_val || hir_val != emulator_val);
+            && (hir_val != emulator_val || prehir_run.is_some() && prehir_val != emulator_val);
         if return_differs || detail.is_some() {
             divergences.push(Divergence {
                 args: args.to_vec(),
@@ -463,14 +396,9 @@ pub fn check_ground_truth_with(
 }
 
 /// The first way `calls` (what one tree did) differs from `machine`'s, or
-/// `None`. When the machine stopped at a call that does not return, the tree
-/// is only held to the calls up to it.
-fn compare_calls(
-    side: &str,
-    calls: &[CallEvent],
-    machine: &[ObservedCall],
-    machine_stopped: bool,
-) -> Option<String> {
+/// `None`. Both sides stop at a call that does not return, so the sequences
+/// are compared whole.
+fn compare_calls(side: &str, calls: &[CallEvent], machine: &[ObservedCall]) -> Option<String> {
     for (n, observed) in machine.iter().enumerate() {
         let Some(call) = calls.get(n) else {
             return Some(format!(
@@ -501,7 +429,7 @@ fn compare_calls(
             }
         }
     }
-    if !machine_stopped && calls.len() > machine.len() {
+    if calls.len() > machine.len() {
         let extra = &calls[machine.len()];
         return Some(format!(
             "{side}: tree calls {} ({} calls) where the machine made {}",
@@ -602,7 +530,7 @@ mod tests {
     fn matching_calls_agree_and_register_garbage_above_the_width_is_ignored() {
         let tree = [event(0x10, &[5, -1])];
         let machine = [observed(0x10, &[0xdead_0000_0005, 0xffff_ffff, 0x77])];
-        assert_eq!(compare_calls("hir", &tree, &machine, false), None);
+        assert_eq!(compare_calls("hir", &tree, &machine), None);
     }
 
     #[test]
@@ -614,17 +542,17 @@ mod tests {
             ..event(0x10, &[-1])
         }];
         assert_eq!(
-            compare_calls("hir", &tree, &[observed(0x10, &[0xffff_ffff])], false),
+            compare_calls("hir", &tree, &[observed(0x10, &[0xffff_ffff])]),
             None
         );
         // A different low half is still a different argument, and a 64-bit
         // value the machine really passed in full is compared in full.
-        assert!(compare_calls("hir", &tree, &[observed(0x10, &[0xffff_fffe])], false).is_some());
+        assert!(compare_calls("hir", &tree, &[observed(0x10, &[0xffff_fffe])]).is_some());
         let wide = [CallEvent {
             arg_bits: vec![64],
             ..event(0x10, &[0x1_0000_0001])
         }];
-        assert!(compare_calls("hir", &wide, &[observed(0x10, &[0x1])], false).is_some());
+        assert!(compare_calls("hir", &wide, &[observed(0x10, &[0x1])]).is_some());
     }
 
     #[test]
@@ -632,21 +560,18 @@ mod tests {
         let machine = [observed(0x10, &[5]), observed(0x20, &[6])];
         let dropped = [event(0x10, &[5])];
         assert!(
-            compare_calls("hir", &dropped, &machine, false)
+            compare_calls("hir", &dropped, &machine)
                 .unwrap()
                 .contains("missing")
         );
         let changed = [event(0x10, &[5]), event(0x20, &[7])];
         assert!(
-            compare_calls("hir", &changed, &machine, false)
+            compare_calls("hir", &changed, &machine)
                 .unwrap()
                 .contains("argument 0")
         );
         let extra = [event(0x10, &[5]), event(0x20, &[6]), event(0x30, &[1])];
-        assert!(compare_calls("hir", &extra, &machine, false).is_some());
-        // After a call that does not return, the tree is held only to the
-        // calls up to it.
-        assert_eq!(compare_calls("hir", &extra, &machine, true), None);
+        assert!(compare_calls("hir", &extra, &machine).is_some());
     }
 
     #[test]
@@ -670,12 +595,14 @@ mod tests {
         );
     }
 
+    /// The regions a stubbed call returns a pointer to start zeroed, as the
+    /// stub policy says; only the parameter regions carry seeded words.
     #[test]
-    fn address_named_globals_parse_and_ordinary_names_do_not() {
-        assert_eq!(address_named_global("tmp_1a004"), Some(0x1a004));
-        assert_eq!(address_named_global("DAT_dd048"), Some(0xdd048));
-        assert_eq!(address_named_global("tmp_"), None);
-        assert_eq!(address_named_global("tmp_count"), None);
-        assert_eq!(address_named_global("local_8"), None);
+    fn result_regions_are_zero_and_parameter_regions_are_seeded() {
+        let bytes = scratch_contents(2, 3);
+        assert_eq!(bytes.len(), 5 * SCRATCH_REGION_SIZE);
+        let (params, results) = bytes.split_at(2 * SCRATCH_REGION_SIZE);
+        assert!(results.iter().all(|b| *b == 0));
+        assert_eq!(&params[..4], &1u32.to_le_bytes());
     }
 }

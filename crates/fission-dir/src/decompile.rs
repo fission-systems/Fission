@@ -13,6 +13,8 @@ use fission_static::analysis::decomp::facts::FactStore;
 pub struct PreHirHirPair {
     pub prehir: PreHirFunction,
     pub hir: HirFunction,
+    /// The globals the printed code declares.
+    pub globals: Vec<fission_decompiler::PrintedGlobal>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -58,5 +60,9 @@ pub fn decompile_one(
     let hir = output
         .printed_hir
         .ok_or(DecompileError::MissingHirSnapshot)?;
-    Ok(PreHirHirPair { prehir, hir })
+    Ok(PreHirHirPair {
+        prehir,
+        hir,
+        globals: output.printed_globals,
+    })
 }

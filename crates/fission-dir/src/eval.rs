@@ -29,10 +29,8 @@
 //! verification with a clear reason rather than being silently skipped or
 //! falsely reported equivalent.
 //!
-//! `LogicalAnd`/`LogicalOr` are evaluated eagerly (both operands always
-//! evaluated), not short-circuited -- correct as long as neither operand can
-//! have a side effect, which holds given general `Call` is unsupported (the
-//! only source of a visible side effect in this AST).
+//! `LogicalAnd`/`LogicalOr` short-circuit as in C: the right operand of
+//! `flag && f()` must not run, or count as a call, when `flag` is zero.
 
 use fission_midend_core::ir::NirType;
 use std::collections::HashMap;
@@ -108,19 +106,39 @@ pub struct World<'a> {
     /// Names that are globals, and their addresses. A read of one is a load
     /// and an assignment to one is a store, as in the printed C.
     pub globals: Option<&'a HashMap<String, u64>>,
+    /// The declared type of each global in `globals`: the width of its
+    /// loads and stores, as the printed declaration says.
+    pub global_types: Option<&'a HashMap<String, NirType>>,
     /// The value the `n`th call (counting from zero) returns. `None`
     /// refuses every call that is not a modeled intrinsic.
     pub call_return: Option<&'a dyn Fn(usize) -> u64>,
+    /// Call sites that do not return. A call made from one ends the run, as
+    /// it ends the machine's.
+    pub no_return_sites: Option<&'a std::collections::BTreeSet<u64>>,
 }
 
 /// The result of one interpreted run.
 #[derive(Debug, Clone, Default)]
 pub struct Run {
     pub ret: Option<Value>,
+    /// The run ended at a call that does not return, the last of `calls`.
+    pub ended_in_no_return: bool,
     pub calls: Vec<CallEvent>,
     /// Every byte the body stored to memory, with its final value.
     pub writes: std::collections::BTreeMap<u64, u8>,
 }
+
+/// Unwinds a run that reached a call which does not return.
+#[derive(Debug)]
+struct NoReturnStop;
+
+impl std::fmt::Display for NoReturnStop {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("interp: reached a call that does not return")
+    }
+}
+
+impl std::error::Error for NoReturnStop {}
 
 /// Generates one interpreter module for a `Stmt`/`Expr`/`LValue`/`BinaryOp`/
 /// `UnaryOp`/`Binding`/`Function` family (either all `Dir*`, imported from
@@ -283,7 +301,9 @@ macro_rules! define_interp {
                 types: HashMap<String, NirType>,
                 mem: Memory<'w>,
                 globals: Option<&'w std::collections::HashMap<String, u64>>,
+                global_types: Option<&'w std::collections::HashMap<String, NirType>>,
                 call_return: Option<&'w dyn Fn(usize) -> u64>,
+                no_return_sites: Option<&'w std::collections::BTreeSet<u64>>,
                 /// Calls made so far, in order. Behind a cell because
                 /// evaluating an expression is otherwise read-only.
                 calls: RefCell<Vec<CallEvent>>,
@@ -321,16 +341,21 @@ macro_rules! define_interp {
                         return Ok(*v);
                     }
                     if let Some(addr) = self.global(name) {
-                        let ty = self.types.get(name).unwrap_or(&PTR_TY);
+                        // Its declaration's width: guessing eight bytes for a
+                        // 32-bit global read its neighbour into the value.
+                        let ty = self.ty(name)?;
                         return Ok(normalize(self.mem.read(addr, width_of(ty))?, ty));
                     }
                     bail!("interp: read of undeclared variable '{name}'")
                 }
 
                 fn ty(&self, name: &str) -> Result<&NirType> {
-                    self.types.get(name).ok_or_else(|| {
-                        anyhow::anyhow!("interp: no declared type for variable '{name}'")
-                    })
+                    self.types
+                        .get(name)
+                        .or_else(|| self.global_types.and_then(|types| types.get(name)))
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("interp: no declared type for variable '{name}'")
+                        })
                 }
 
                 fn set(&mut self, name: &str, v: Value) {
@@ -371,6 +396,8 @@ macro_rules! define_interp {
                     $Expr::PtrOffset { .. } => Ok(&PTR_TY),
                     // `p[i]` is the element, as the printer writes it.
                     $Expr::Index { elem_ty, .. } => Ok(elem_ty),
+                    $Expr::Call { ty, .. } => Ok(ty),
+                    $Expr::AddressOfGlobal(_) => Ok(&PTR_TY),
                     other => bail!("interp: cannot infer type of unsupported expr {other:?}"),
                 }
             }
@@ -488,6 +515,13 @@ macro_rules! define_interp {
                         if target.starts_with("__fission_") {
                             bail!("interp: pseudo-call '{target}' has no machine counterpart");
                         }
+                        // No call instruction behind it (a user p-code op, an
+                        // unmodeled intrinsic): the machine side never stops
+                        // there, so stubbing it would only shift every later
+                        // call's return value by one.
+                        let Some(site) = origin.as_ref().map(|o| o.instruction_address) else {
+                            bail!("interp: call to '{target}' has no machine call instruction");
+                        };
                         let arg_bits = args
                             .iter()
                             .map(|arg| infer_ty(arg, env).map(width_of).unwrap_or(64))
@@ -502,11 +536,14 @@ macro_rules! define_interp {
                             bail!("interp: more than {n} calls -- the same budget the machine side stops at");
                         }
                         calls.push(CallEvent {
-                            site: origin.as_ref().map(|o| o.instruction_address),
+                            site: Some(site),
                             target: target.clone(),
                             args,
                             arg_bits,
                         });
+                        if env.no_return_sites.is_some_and(|sites| sites.contains(&site)) {
+                            return Err(anyhow::Error::new(super::NoReturnStop));
+                        }
                         Ok(normalize(call_return(n) as i64, ty))
                     }
                     other => bail!(
@@ -626,6 +663,13 @@ macro_rules! define_interp {
                 env: &Env,
             ) -> Result<Value> {
                 let l = eval_expr(lhs, env)?;
+                // C's `&&` and `||` do not evaluate the right operand once
+                // the left decides: it may be a call or a guarded load.
+                match op {
+                    $BinaryOp::LogicalAnd if l == 0 => return Ok(normalize(0, ty)),
+                    $BinaryOp::LogicalOr if l != 0 => return Ok(normalize(1, ty)),
+                    _ => {}
+                }
                 let r = eval_expr(rhs, env)?;
                 // Comparisons need the *operands'* width (to mask correctly
                 // for unsigned comparisons); arithmetic/logical ops are
@@ -637,7 +681,9 @@ macro_rules! define_interp {
                     $BinaryOp::Sub => l.wrapping_sub(r),
                     $BinaryOp::Mul => l.wrapping_mul(r),
                     $BinaryOp::Div => {
-                        if r == 0 {
+                        // Zero at the operand width, not only as a whole
+                        // value: `x % (uint)0x100000000` divides by zero.
+                        if r == 0 || unsigned_masked(r, operand_bits) == 0 {
                             bail!("interp: division by zero");
                         }
                         if is_signed(ty) {
@@ -648,7 +694,9 @@ macro_rules! define_interp {
                         }
                     }
                     $BinaryOp::Mod => {
-                        if r == 0 {
+                        // Zero at the operand width, not only as a whole
+                        // value: `x % (uint)0x100000000` divides by zero.
+                        if r == 0 || unsigned_masked(r, operand_bits) == 0 {
                             bail!("interp: modulo by zero");
                         }
                         if is_signed(ty) {
@@ -745,9 +793,9 @@ macro_rules! define_interp {
                         // Rather than bailing on every such case, infer
                         // the type from the RHS and register it as a
                         // fresh variable the first time it's assigned.
-                        let ty = match env.types.get(name) {
-                            Some(ty) => ty.clone(),
-                            None => infer_ty(rhs, env)?.clone(),
+                        let ty = match env.ty(name) {
+                            Ok(ty) => ty.clone(),
+                            Err(_) => infer_ty(rhs, env)?.clone(),
                         };
                         let v = normalize(eval_expr(rhs, env)?, &ty);
                         if let Some(addr) = env.global(name) {
@@ -1079,6 +1127,17 @@ macro_rules! define_interp {
                 reads
             }
 
+            /// Every name the body reads or assigns.
+            pub fn mentioned_names(func: &$Function) -> Vec<String> {
+                let mut reads: Vec<String> = Vec::new();
+                let mut assigned: Vec<String> = Vec::new();
+                for stmt in &func.body {
+                    collect_stmt_names(stmt, &mut reads, &mut assigned);
+                }
+                reads.extend(assigned);
+                reads
+            }
+
             /// Interpret `body` with `args` bound to `params` in order and
             /// `locals` seeded from their initializer expression when they
             /// have one -- an uninitialized local stays unbound, so reading it
@@ -1140,7 +1199,9 @@ macro_rules! define_interp {
                     types: HashMap::default(),
                     mem,
                     globals: world.globals,
+                    global_types: world.global_types,
                     call_return: world.call_return,
+                    no_return_sites: world.no_return_sites,
                     calls: RefCell::new(Vec::new()),
                     fuel: STEP_FUEL,
                 };
@@ -1179,14 +1240,19 @@ macro_rules! define_interp {
                         env.values.remove(name);
                     }
                 }
-                let ret = match exec_block(body, &mut env)? {
-                    Flow::Return(v) => v,
-                    Flow::Normal => None,
-                    other => bail!("interp: body ended in unexpected control state {other:?}"),
+                let (ret, ended_in_no_return) = match exec_block(body, &mut env) {
+                    Ok(Flow::Return(v)) => (v, false),
+                    Ok(Flow::Normal) => (None, false),
+                    Ok(other) => {
+                        bail!("interp: body ended in unexpected control state {other:?}")
+                    }
+                    Err(err) if err.is::<super::NoReturnStop>() => (None, true),
+                    Err(err) => return Err(err),
                 };
                 let writes = env.mem.stores();
                 Ok(Run {
                     ret,
+                    ended_in_no_return,
                     calls: env.calls.into_inner(),
                     writes,
                 })
@@ -1236,6 +1302,7 @@ pub use hir::free_names as hir_free_names;
 pub use hir::interpret as interpret_hir;
 pub use hir::interpret_with_memory as interpret_hir_with_memory;
 pub use hir::interpret_with_state as interpret_hir_with_state;
+pub use hir::mentioned_names as hir_mentioned_names;
 pub use hir::run as run_hir;
 pub use prehir::free_names as prehir_free_names;
 pub use prehir::interpret as interpret_prehir;
@@ -1600,6 +1667,197 @@ mod world_tests {
         );
         // Control: without a call model the same body is refused.
         assert!(run_hir(&body, &[], &[local("x")], &[], &World::default()).is_err());
+    }
+
+    fn call_at(site: u64, target: &str) -> HirExpr {
+        HirExpr::Call {
+            origin: Some(CallOrigin {
+                instruction_address: site,
+                pcode_sequence: 0,
+            }),
+            target: target.to_string(),
+            args: vec![],
+            ty: u32_ty(),
+        }
+    }
+
+    fn binary(op: fission_midend_core::ir::HirBinaryOp, lhs: HirExpr, rhs: HirExpr) -> HirExpr {
+        HirExpr::Binary {
+            op,
+            lhs: Box::new(lhs),
+            rhs: Box::new(rhs),
+            ty: u32_ty(),
+        }
+    }
+
+    /// `return 0 && f();` and `return 1 || f();`: the right operand never
+    /// runs in C, so the call is not made and does not take a stub result.
+    #[test]
+    fn logical_operators_short_circuit_before_a_call() {
+        use fission_midend_core::ir::HirBinaryOp::{LogicalAnd, LogicalOr};
+        let returns = |n: usize| 7 + n as u64;
+        let world = World {
+            call_return: Some(&returns),
+            ..World::default()
+        };
+        for (op, left, value) in [(LogicalAnd, 0, 0), (LogicalOr, 1, 1)] {
+            let body = vec![HirStmt::Return(Some(binary(
+                op,
+                HirExpr::Const(left, u32_ty()),
+                call_at(0x100, "f"),
+            )))];
+            let run = run_hir(&body, &[], &[], &[], &world).expect("run");
+            assert_eq!(run.ret, Some(value));
+            assert!(run.calls.is_empty(), "{op:?}: {:?}", run.calls);
+        }
+        // Control: when the left operand does not decide, the call runs.
+        let body = vec![HirStmt::Return(Some(binary(
+            LogicalAnd,
+            HirExpr::Const(1, u32_ty()),
+            call_at(0x100, "f"),
+        )))];
+        assert_eq!(
+            run_hir(&body, &[], &[], &[], &world)
+                .expect("run")
+                .calls
+                .len(),
+            1
+        );
+    }
+
+    /// `x % d` where `d` is not zero but is at the operand's width (a 64-bit
+    /// `0x1_0000_0000` against a 32-bit `x`): refused, where it panicked.
+    #[test]
+    fn a_divisor_that_is_zero_at_the_operand_width_is_refused() {
+        let wide = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        for op in [
+            fission_midend_core::ir::HirBinaryOp::Mod,
+            fission_midend_core::ir::HirBinaryOp::Div,
+        ] {
+            let body = vec![HirStmt::Return(Some(binary(
+                op,
+                HirExpr::Const(5, u32_ty()),
+                HirExpr::Const(0x1_0000_0000, wide.clone()),
+            )))];
+            let outcome = std::panic::catch_unwind(|| {
+                run_hir(&body, &[], &[], &[], &World::default()).is_err()
+            });
+            assert_eq!(outcome.ok(), Some(true), "{op:?}");
+        }
+    }
+
+    /// `return f() == 7;` needs the call's type to compare at; it used to be
+    /// refused as an expression whose type cannot be inferred.
+    #[test]
+    fn a_call_result_has_the_type_the_call_declares() {
+        let returns = |_| 7;
+        let world = World {
+            call_return: Some(&returns),
+            ..World::default()
+        };
+        let body = vec![HirStmt::Return(Some(binary(
+            fission_midend_core::ir::HirBinaryOp::Eq,
+            call_at(0x100, "f"),
+            HirExpr::Const(7, u32_ty()),
+        )))];
+        assert_eq!(
+            run_hir(&body, &[], &[], &[], &world).expect("run").ret,
+            Some(1)
+        );
+    }
+
+    /// A call with no machine call instruction behind it (a user p-code op)
+    /// is refused: the machine never stops there, so stubbing it would shift
+    /// every later call's stub result.
+    #[test]
+    fn a_call_without_a_machine_call_instruction_is_refused() {
+        let returns = |_| 0;
+        let world = World {
+            call_return: Some(&returns),
+            ..World::default()
+        };
+        let pseudo = HirExpr::Call {
+            origin: None,
+            target: "user_op".to_string(),
+            args: vec![],
+            ty: u32_ty(),
+        };
+        assert!(run_hir(&[HirStmt::Expr(pseudo)], &[], &[], &[], &world).is_err());
+        // Control: the same call with an instruction behind it is stubbed.
+        assert!(run_hir(&[HirStmt::Expr(call_at(0x100, "f"))], &[], &[], &[], &world).is_ok());
+    }
+
+    /// `if (g) return 1; return 0;` with `g` a 32-bit global holding 0 next to
+    /// one holding 1: the read is four bytes, as declared. Reading a global
+    /// with no declared type as eight bytes made this branch taken.
+    #[test]
+    fn a_global_is_read_at_its_declared_width() {
+        let image_byte = |addr: u64| Some(if addr == 0x5004 { 1 } else { 0 });
+        let globals: HashMap<String, u64> = [("g".to_string(), 0x5000)].into_iter().collect();
+        let types: HashMap<String, NirType> = [("g".to_string(), u32_ty())].into_iter().collect();
+        let body = vec![
+            HirStmt::If {
+                cond: HirExpr::Var("g".to_string()),
+                then_body: vec![HirStmt::Return(Some(HirExpr::Const(1, u32_ty())))],
+                else_body: vec![],
+            },
+            HirStmt::Return(Some(HirExpr::Const(0, u32_ty()))),
+        ];
+        let world = World {
+            backing: Some(&image_byte),
+            globals: Some(&globals),
+            global_types: Some(&types),
+            ..World::default()
+        };
+        assert_eq!(
+            run_hir(&body, &[], &[], &[], &world).expect("run").ret,
+            Some(0)
+        );
+        // Control: with no declared type the read is refused, not guessed.
+        let untyped = World {
+            global_types: None,
+            ..world
+        };
+        assert!(run_hir(&body, &[], &[], &[], &untyped).is_err());
+    }
+
+    /// `*p = 1; exit(0); return 5;`: the run stops at the call that does not
+    /// return, as the machine's does, and keeps the store made before it.
+    #[test]
+    fn a_call_that_does_not_return_ends_the_run_and_keeps_earlier_stores() {
+        let returns = |_| 0;
+        let sites: std::collections::BTreeSet<u64> = [0x200].into_iter().collect();
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Deref {
+                    ptr: Box::new(HirExpr::Const(0x6000, u32_ty())),
+                    ty: u32_ty(),
+                },
+                rhs: HirExpr::Const(1, u32_ty()),
+            },
+            HirStmt::Expr(call_at(0x200, "exit")),
+            HirStmt::Return(Some(HirExpr::Const(5, u32_ty()))),
+        ];
+        let world = World {
+            call_return: Some(&returns),
+            no_return_sites: Some(&sites),
+            ..World::default()
+        };
+        let run = run_hir(&body, &[], &[], &[], &world).expect("run");
+        assert!(run.ended_in_no_return);
+        assert_eq!(run.ret, None);
+        assert_eq!(run.writes.get(&0x6000), Some(&1));
+        // Control: a call that returns lets the body go on to its return.
+        let returning = World {
+            no_return_sites: None,
+            ..world
+        };
+        let run = run_hir(&body, &[], &[], &[], &returning).expect("run");
+        assert!(!run.ended_in_no_return);
+        assert_eq!(run.ret, Some(5));
     }
 }
 
