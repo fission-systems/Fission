@@ -383,6 +383,73 @@ fn wide_register_lane_projection_respects_target_endianness() {
     }
 }
 
+/// `int pair[2]` known only as an 8-byte object `pair`: a name is the whole
+/// object, so `pair = v` writes 8 bytes and `pair` reads 8. The function
+/// below copies the second `int` into the first. Printed as `pair = tmp_1004`
+/// it wrote the high half too, and the second `int` became a variable of its
+/// own that nothing else knows aliases `pair`.
+#[test]
+fn a_part_of_a_named_global_is_accessed_through_its_address() {
+    let ram = |offset, size| Varnode {
+        space_id: 3,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let eax = register(0, 4);
+    let render = |sized: bool| {
+        let mut options = test_options();
+        options.global_names.insert(0x1400_1000, "pair".to_string());
+        if sized {
+            options.global_sizes.insert(0x1400_1000, 8);
+        }
+        let pcode = pcode_function(vec![block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![ram(0x1400_1004, 4)],
+                ),
+                op(
+                    1,
+                    PcodeOpcode::Copy,
+                    Some(ram(0x1400_1000, 4)),
+                    vec![eax.clone()],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(ram(0x1400_1000, 8)),
+                    vec![constant(-1)],
+                ),
+                op(3, PcodeOpcode::Return, None, vec![register(0x288, 8)]),
+            ],
+        )]);
+        render_mlil_preview(&pcode, "copy_half", 0x1000, &options).expect("render")
+    };
+
+    let code = render(true);
+    assert!(
+        code.contains("*(uint *)((uint8_t *)(&pair) + 4)"),
+        "the second half is read through the object's address:\n{code}"
+    );
+    assert!(
+        code.contains("*(uint *)(&pair) = "),
+        "the first half is written through the object's address:\n{code}"
+    );
+    assert!(!code.contains("tmp_14001004"), "{code}");
+    // A whole-object access keeps its name.
+    assert!(code.contains("pair = -1;"), "{code}");
+
+    // Control: with no known size there is no object to place the access in.
+    let code = render(false);
+    assert!(!code.contains("(&pair) + 4"), "{code}");
+}
+
 #[test]
 fn opaque_wide_store_does_not_create_integer_lane_projection() {
     let source = Varnode {

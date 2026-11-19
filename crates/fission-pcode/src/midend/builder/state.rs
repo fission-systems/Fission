@@ -140,6 +140,9 @@ pub(crate) struct PreviewBuilder<'a> {
     /// base address, then name. Built on first use from `options`, which
     /// never changes for a builder; a lookup was a scan of every global.
     pub(crate) opaque_global_index: std::sync::OnceLock<std::sync::Arc<[(u64, String)]>>,
+    /// Every named global with a known size, as `(base, size, name)` sorted
+    /// by base: the objects `global_view_pointer` can place an access in.
+    pub(crate) sized_global_index: std::sync::OnceLock<std::sync::Arc<[(u64, u64, String)]>>,
     pub(crate) load_address_bindings: HashSet<String>,
     pub(crate) load_value_bindings: HashSet<String>,
     pub(crate) explicit_merge_bindings: HashMap<(usize, VarnodeKey), String>,

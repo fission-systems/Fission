@@ -724,7 +724,7 @@ fn surface_array_declarator(surface: Option<&str>) -> Option<(&str, &str)> {
     (!base.is_empty()).then_some((base, &surface[open..]))
 }
 
-fn type_byte_size(ty: &NirType) -> Option<u32> {
+pub(crate) fn type_byte_size(ty: &NirType) -> Option<u32> {
     match ty {
         NirType::Bool => Some(1),
         NirType::Int { bits, .. } | NirType::Float { bits } if *bits > 0 && bits % 8 == 0 => {
@@ -1341,9 +1341,11 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
 
 fn peel_simple_deref_target(expr: &HirExpr) -> Option<&str> {
     match expr {
-        HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) | HirExpr::AddressOfLocal(name) => {
-            Some(name)
-        }
+        // `*&g` is `g` itself, not `*g`, which reads through `g`'s value.
+        // A same-width access was already spelled `g` by global symbol
+        // recovery; what reaches here reads part of `g`, and keeps its cast.
+        HirExpr::AddressOfGlobal(_) => None,
+        HirExpr::Var(name) | HirExpr::AddressOfLocal(name) => Some(name),
         HirExpr::Cast { expr, .. } => peel_simple_deref_target(expr),
         HirExpr::PtrOffset { base, offset } if *offset == 0 => peel_simple_deref_target(base),
         HirExpr::AggregateCopy { src, .. } => peel_simple_deref_target(src),

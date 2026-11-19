@@ -746,6 +746,63 @@ impl<'a> PreviewBuilder<'a> {
             && self.options.is_mapped_global(output.offset)
     }
 
+    /// The address an access of global memory `vn` makes inside a named
+    /// object of known size, when the access is not that whole object.
+    ///
+    /// A name is the object, so `g` reads and writes all of it: spelling a
+    /// 4-byte store to an 8-byte `g` as `g = v` writes the 4 bytes after it
+    /// too, and the second `int` of `int pgrp_pipe[2]` became its own
+    /// variable `tmp_13b73c`, which `pipe(&pgrp_pipe)` then never writes.
+    /// `None` when `vn` is exactly a named object (or lies in none), which is
+    /// spelled by its name as before.
+    pub(in crate::midend::builder) fn global_view_pointer(
+        &self,
+        vn: &Varnode,
+    ) -> Option<PreHirExpr> {
+        if !self.output_is_mapped_global_memory(vn) {
+            return None;
+        }
+        let end = vn.offset.checked_add(u64::from(vn.size))?;
+        if self.options.global_names.contains_key(&vn.offset)
+            && self
+                .options
+                .global_sizes
+                .get(&vn.offset)
+                .is_none_or(|&size| size == u64::from(vn.size))
+        {
+            return None;
+        }
+        let index = self.sized_global_index.get_or_init(|| {
+            let mut globals: Vec<(u64, u64, String)> = self
+                .options
+                .global_names
+                .iter()
+                .filter_map(|(base, name)| {
+                    let size = *self.options.global_sizes.get(base)?;
+                    (size > 0 && base.checked_add(size).is_some())
+                        .then(|| (*base, size, name.clone()))
+                })
+                .collect();
+            globals.sort();
+            globals.into()
+        });
+        let (base, size, name) =
+            index[..index.partition_point(|(base, _, _)| *base <= vn.offset)].last()?;
+        // A 16-byte object's lanes are projected from its value by
+        // `opaque_integer_scalar_view` (`(int)(g >> 32)`), which owns them.
+        if end > base + size || (*base == vn.offset && *size == u64::from(vn.size)) || *size == 16 {
+            return None;
+        }
+        let object = PreHirExpr::AddressOfGlobal(name.clone());
+        Some(match vn.offset - base {
+            0 => object,
+            offset => PreHirExpr::PtrOffset {
+                base: Box::new(object),
+                offset: i64::try_from(offset).ok()?,
+            },
+        })
+    }
+
     /// Whether this function's p-code came from the rust-sleigh runtime.
     ///
     /// Decided from the space ids the op stream actually uses: the runtime
@@ -1005,16 +1062,19 @@ impl<'a> PreviewBuilder<'a> {
             // undeclared names Temp locals but thereby turns this global write
             // into an automatic local. `AddressOfGlobal` is the existing
             // provenance-bearing representation used by the Store path.
-            let name = self
-                .options
-                .global_names
-                .get(&output.offset)
-                .cloned()
-                .unwrap_or_else(|| format!("tmp_{:x}", output.offset));
+            let ptr = self.global_view_pointer(output).unwrap_or_else(|| {
+                PreHirExpr::AddressOfGlobal(
+                    self.options
+                        .global_names
+                        .get(&output.offset)
+                        .cloned()
+                        .unwrap_or_else(|| format!("tmp_{:x}", output.offset)),
+                )
+            });
             if let Some(rhs) = self.try_lower_materialized_output_rhs(block_addr, op)? {
                 return Ok(Some(PreHirStmt::Assign {
                     lhs: PreHirLValue::Deref {
-                        ptr: Box::new(PreHirExpr::AddressOfGlobal(name)),
+                        ptr: Box::new(ptr),
                         ty: type_from_size(output.size, false),
                     },
                     rhs,

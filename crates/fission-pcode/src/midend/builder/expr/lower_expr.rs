@@ -645,6 +645,12 @@ impl<'a> PreviewBuilder<'a> {
     /// A load of the global `vn` names, spelled as a read with no reaching
     /// definition is: its symbol, else its address.
     fn global_memory_read(&mut self, vn: &Varnode) -> PreHirExpr {
+        if let Some(ptr) = self.global_view_pointer(vn) {
+            return PreHirExpr::Load {
+                ptr: Box::new(ptr),
+                ty: type_from_size(vn.size, false),
+            };
+        }
         if let Some(name) = self.options.global_names.get(&vn.offset) {
             return PreHirExpr::Var(name.clone());
         }
@@ -1066,7 +1072,18 @@ impl<'a> PreviewBuilder<'a> {
             }
         };
 
+        // Part of a named object, or a different width than it: read
+        // through its address, so the name keeps meaning the whole object.
+        let global_view = if def_site.is_none() {
+            self.global_view_pointer(vn)
+        } else {
+            None
+        };
         let result = match def_site {
+            None if global_view.is_some() => Ok(PreHirExpr::Load {
+                ptr: Box::new(global_view.expect("checked by the guard")),
+                ty: type_from_size(vn.size, false),
+            }),
             Some((site, op)) => self
                 .with_lowering_site(site, |this| this.lower_def_op(op, visiting))
                 .map(|expr| self.project_alias_def_expr(vn, op, expr))
