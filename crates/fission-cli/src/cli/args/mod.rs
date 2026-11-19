@@ -355,8 +355,22 @@ pub struct VerifyArgs {
     pub binary: PathBuf,
 
     /// Function address (hex, e.g. 0x140001530)
-    #[arg(long, value_parser = parse_hex_address, required = true)]
-    pub addr: u64,
+    #[arg(
+        long,
+        value_parser = parse_hex_address,
+        required_unless_present_any = ["addresses_file", "all"],
+        conflicts_with_all = ["addresses_file", "all"]
+    )]
+    pub addr: Option<u64>,
+
+    /// Verify every function named in this file (one hex address per line)
+    /// and print one JSON line per function, then a summary on stderr.
+    #[arg(long, value_name = "FILE", conflicts_with = "all")]
+    pub addresses_file: Option<PathBuf>,
+
+    /// Verify every discovered user function, as `--addresses-file` does.
+    #[arg(long)]
+    pub all: bool,
 
     /// Function name (used for decompilation; cosmetic if it doesn't match
     /// the binary's own symbol)

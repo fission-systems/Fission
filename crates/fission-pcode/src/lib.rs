@@ -55,4 +55,4 @@ pub use midend::{
     summarize_direct_tail_wrapper_from_ops, summarize_direct_tail_wrapper_from_pcode,
 };
 pub use pcode::optimizer::{PcodeOptimizer, PcodeOptimizerConfig};
-pub use render::{RecoveredLineMapping, RecoveredVariable, recovered_variables};
+pub use render::{PrintedGlobal, RecoveredLineMapping, RecoveredVariable, recovered_variables};
