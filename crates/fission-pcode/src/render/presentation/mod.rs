@@ -78,7 +78,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         changed |= fold_seed_transform(&mut func.body);
         // Shared `goto L; ... L: return e` → direct returns (enables if-else recovery).
         changed |= goto_recovery::expand_goto_shared_returns(&mut func.body);
-        changed |= collapse_trivial_assign_returns(&mut func.body);
+        changed |= collapse_trivial_assign_returns(&mut func.body, globals);
         // O0-style `if (c) goto L; body; L:` → structured if/else for readability.
         let mut global_goto_refs = HashMap::new();
         goto_recovery::collect_goto_ref_counts(&func.body, &mut global_goto_refs);
@@ -125,7 +125,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         // Prefer `x op k` over `k op x` in comparisons (and peel `!(eq/ne)` etc.).
         changed |= canonicalize_presentation_conditions(func);
         // `x = c ? a : b; return ~c ? x : a` (null-check join) → `return x` / fold.
-        changed |= fold_redundant_select_return_join(&mut func.body);
+        changed |= fold_redundant_select_return_join(&mut func.body, globals);
         let mut goto_targets = HashSet::new();
         goto_recovery::collect_goto_targets(&func.body, &mut goto_targets);
         changed |=
@@ -669,7 +669,10 @@ fn substitute_var(expr: &mut HirExpr, name: &str, value: &HirExpr) {
 
 /// Collapse `x = rhs; return x` → `return rhs` (labels between are skipped).
 /// Allows call/select RHS: single evaluation is preserved.
-fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
+/// `x = e; return x;` -> `return e;`. Not for a global: assigning one is a
+/// store the program makes, and `g = g - 1; return g;` folded to
+/// `return g - 1;` lost it.
+fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>, globals: &HashSet<String>) -> bool {
     let mut changed = false;
     let mut i = 0;
     while i < stmts.len() {
@@ -681,6 +684,10 @@ fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
             i += 1;
             continue;
         };
+        if globals.contains(name) {
+            i += 1;
+            continue;
+        }
         let name = name.clone();
         let rhs = rhs.clone();
         // Skip pure labels between assign and return.
@@ -703,36 +710,36 @@ fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>) -> bool {
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                changed |= collapse_trivial_assign_returns(body);
+                changed |= collapse_trivial_assign_returns(body, globals);
             }
             HirStmt::If {
                 then_body,
                 else_body,
                 ..
             } => {
-                changed |= collapse_trivial_assign_returns(then_body);
-                changed |= collapse_trivial_assign_returns(else_body);
+                changed |= collapse_trivial_assign_returns(then_body, globals);
+                changed |= collapse_trivial_assign_returns(else_body, globals);
             }
             HirStmt::For {
                 init, update, body, ..
             } => {
                 if let Some(init_stmt) = init {
                     if let HirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= collapse_trivial_assign_returns(b);
+                        changed |= collapse_trivial_assign_returns(b, globals);
                     }
                 }
                 if let Some(upd) = update {
                     if let HirStmt::Block(b) = upd.as_mut() {
-                        changed |= collapse_trivial_assign_returns(b);
+                        changed |= collapse_trivial_assign_returns(b, globals);
                     }
                 }
-                changed |= collapse_trivial_assign_returns(body);
+                changed |= collapse_trivial_assign_returns(body, globals);
             }
             HirStmt::Switch { cases, default, .. } => {
                 for case in cases {
-                    changed |= collapse_trivial_assign_returns(&mut case.body);
+                    changed |= collapse_trivial_assign_returns(&mut case.body, globals);
                 }
-                changed |= collapse_trivial_assign_returns(default);
+                changed |= collapse_trivial_assign_returns(default, globals);
             }
             _ => {}
         }
@@ -1615,6 +1622,40 @@ mod tests {
             origin: Some(NirBindingOrigin::ParamIndex(0)),
             initializer: None,
         }
+    }
+
+    /// `g = g - 1; return g;` with `g` a global: folding the pair into
+    /// `return g - 1;` deletes the store the program makes. Two passes did
+    /// that; the invariant check then restored the whole pre-polish tree, so
+    /// the store survived only by giving up every other presentation fold.
+    #[test]
+    fn return_folds_keep_a_store_to_a_global() {
+        let ty = int_ty(32, true);
+        let body = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("g".into()),
+                rhs: HirExpr::Binary {
+                    op: HirBinaryOp::Sub,
+                    lhs: Box::new(HirExpr::Var("g".into())),
+                    rhs: Box::new(HirExpr::Const(1, ty.clone())),
+                    ty: ty.clone(),
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Var("g".into()))),
+        ];
+        let globals: HashSet<String> = ["g".to_string()].into_iter().collect();
+        let mut collapsed = body.clone();
+        collapse_trivial_assign_returns(&mut collapsed, &globals);
+        assert_eq!(collapsed, body, "collapse_trivial_assign_returns");
+        let mut joined = body.clone();
+        fold_redundant_select_return_join(&mut joined, &globals);
+        assert_eq!(joined, body, "fold_redundant_select_return_join");
+        // Control: for a local the same pair folds.
+        let none = HashSet::new();
+        let mut local_fold = body.clone();
+        assert!(collapse_trivial_assign_returns(&mut local_fold, &none));
+        let mut local_join = body;
+        assert!(fold_redundant_select_return_join(&mut local_join, &none));
     }
 
     #[test]

@@ -564,6 +564,178 @@ impl<'a> PreviewBuilder<'a> {
     /// The offset is the discriminator the space id cannot be: a legacy unique
     /// offset is a small slot index, while this is an address the loader
     /// actually mapped, and one no legacy unique register name claims.
+    /// Whether a global that `op`'s value reads is written before `output` is
+    /// used.
+    ///
+    /// A global read prints as the global's name, which is a load wherever the
+    /// expression ends up. Inlined at a use after a write to that global, it
+    /// reads the new value: `mov eax, [n]; lea edx, [rax+1]; mov [n], edx;
+    /// mov edx, eax; mov [buf+rdx], cl` printed `n = n + 1; buf[n] = c`
+    /// (gzip `send_bits`). The definition is kept as a binding instead, a
+    /// snapshot taken where the machine read memory.
+    ///
+    /// The globals read are those `op` takes directly and, when its value has
+    /// been lowered (`rhs`), every global the expression names -- the read can
+    /// sit behind a widening (`rax = zext(eax)`, `eax = [n]`). A write is an op
+    /// whose output covers the global's address, or a call in a later
+    /// instruction (it may write any global). A store through a pointer is not
+    /// counted: nearly all of them are stack writes, and telling the rest
+    /// apart needs alias facts this does not have.
+    pub(in crate::midend::builder) fn def_reads_global_written_before_use(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        op: &PcodeOp,
+        output: &Varnode,
+        rhs: Option<&PreHirExpr>,
+    ) -> bool {
+        let mut addresses: Vec<u64> = op
+            .inputs
+            .iter()
+            .filter(|input| self.output_is_mapped_global_memory(input))
+            .map(|input| input.offset)
+            .collect();
+        if let Some(rhs) = rhs {
+            self.collect_global_read_addresses(rhs, &mut addresses);
+        }
+        if addresses.is_empty() {
+            return false;
+        }
+        let writes = |candidate: &PcodeOp| {
+            (matches!(candidate.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                && candidate.address != op.address)
+                || candidate.output.as_ref().is_some_and(|written| {
+                    !written.is_constant
+                        && self.output_is_mapped_global_memory(written)
+                        && addresses.iter().any(|address| {
+                            written.offset <= *address
+                                && *address < written.offset + u64::from(written.size)
+                        })
+                })
+        };
+        // Reads of any part of `output`, until a write covers all of it: the
+        // read that matters is often a narrower view (`mov edx, eax` after
+        // `rax = zext(eax)`), which an exact-key use scan does not see.
+        let overlaps = |vn: &Varnode| {
+            !vn.is_constant
+                && vn.space_id == output.space_id
+                && vn.offset < output.offset + u64::from(output.size)
+                && output.offset < vn.offset + u64::from(vn.size)
+        };
+        let mut last_use = None;
+        for (idx, candidate) in block.ops.iter().enumerate().skip(op_idx + 1) {
+            if candidate.inputs.iter().any(&overlaps) {
+                last_use = Some(idx);
+            }
+            if candidate.output.as_ref().is_some_and(|written| {
+                written.space_id == output.space_id
+                    && written.offset <= output.offset
+                    && output.offset + u64::from(output.size)
+                        <= written.offset + u64::from(written.size)
+            }) {
+                break;
+            }
+        }
+        if let Some(last_use) = last_use
+            && block.ops[op_idx + 1..last_use].iter().any(writes)
+        {
+            return true;
+        }
+        if !self.output_has_nonlocal_use(block, op_idx, output) {
+            return false;
+        }
+        // A use in another block: any write after the definition in this
+        // block, or in any block reachable from it, may come first.
+        if block.ops.iter().skip(op_idx + 1).any(writes) {
+            return true;
+        }
+        let Some(start) = self.address_to_index.get(&block.start_address).copied() else {
+            return true;
+        };
+        let start = self.pcode_block_idx(start);
+        let mut seen = vec![false; self.pcode.blocks.len()];
+        let mut work: Vec<usize> = self.pcode.blocks[start]
+            .successors
+            .iter()
+            .map(|successor| *successor as usize)
+            .collect();
+        while let Some(index) = work.pop() {
+            let Some(candidate) = self.pcode.blocks.get(index) else {
+                continue;
+            };
+            if std::mem::replace(&mut seen[index], true) {
+                continue;
+            }
+            if candidate.ops.iter().any(writes) {
+                return true;
+            }
+            work.extend(
+                candidate
+                    .successors
+                    .iter()
+                    .map(|successor| *successor as usize),
+            );
+        }
+        false
+    }
+
+    /// Addresses of the globals `expr` reads: a symbol name, or a name
+    /// spelled as a mapped address (`tmp_1a004`).
+    fn collect_global_read_addresses(&self, expr: &PreHirExpr, out: &mut Vec<u64>) {
+        match expr {
+            PreHirExpr::Var(name) => {
+                let by_symbol = self
+                    .options
+                    .global_names
+                    .iter()
+                    .filter(|(_, symbol)| *symbol == name)
+                    .map(|(address, _)| *address);
+                out.extend(by_symbol);
+                if let Some(address) = name
+                    .strip_prefix("tmp_")
+                    .and_then(|hex| u64::from_str_radix(hex, 16).ok())
+                    .filter(|address| self.options.is_mapped_global(*address))
+                {
+                    out.push(address);
+                }
+            }
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => {
+                self.collect_global_read_addresses(expr, out)
+            }
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                self.collect_global_read_addresses(lhs, out);
+                self.collect_global_read_addresses(rhs, out);
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                self.collect_global_read_addresses(base, out);
+                self.collect_global_read_addresses(index, out);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.collect_global_read_addresses(cond, out);
+                self.collect_global_read_addresses(then_expr, out);
+                self.collect_global_read_addresses(else_expr, out);
+            }
+            PreHirExpr::Call { args, .. } => {
+                for arg in args {
+                    self.collect_global_read_addresses(arg, out);
+                }
+            }
+            PreHirExpr::AddressOfGlobal(_)
+            | PreHirExpr::AddressOfLocal(_)
+            | PreHirExpr::Const(..) => {}
+        }
+    }
+
     pub(in crate::midend::builder) fn output_is_mapped_global_memory(
         &self,
         output: &Varnode,
@@ -853,6 +1025,8 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
+        let snapshot_required =
+            self.def_reads_global_written_before_use(block, op_idx, op, output, None);
         // Ordinary `sub/add rsp, N` prologue/epilogue adjustments are always
         // invisible bookkeeping (their effect is fully captured by the
         // stack-slot addressing model elsewhere), so this stays suppressed
@@ -877,10 +1051,11 @@ impl<'a> PreviewBuilder<'a> {
         if self.flag_def_is_stack_pointer_only(op, output) {
             return Ok(None);
         }
-        if self.output_used_only_by_single_store(block, op_idx, output) {
+        if !snapshot_required && self.output_used_only_by_single_store(block, op_idx, output) {
             return Ok(None);
         }
-        if Self::is_predicate_passthrough_to_terminator(op)
+        if !snapshot_required
+            && Self::is_predicate_passthrough_to_terminator(op)
             && self.output_used_only_by_block_terminator(block, op_idx, terminator_index, output)
         {
             return Ok(None);
@@ -892,6 +1067,7 @@ impl<'a> PreviewBuilder<'a> {
             })
             .or_else(|| self.loop_head_phi_latch_binding_name(block, op_idx, output));
         if loop_carried_lhs_name.is_none()
+            && !snapshot_required
             && self.output_used_only_by_passthrough_chain(block, op_idx, output)
         {
             return Ok(None);
@@ -969,6 +1145,8 @@ impl<'a> PreviewBuilder<'a> {
                 self.primary_return_name_from_live_out_proof(output, block_idx, op_idx, proof)
             });
         if replacement_plan.is_complete()
+            && !snapshot_required
+            && !self.def_reads_global_written_before_use(block, op_idx, op, output, Some(&rhs))
             && !block_idx_for_rhs
                 .is_some_and(|block_idx| self.output_exceeds_implied_ref_limit(block_idx, op_idx))
             && loop_carried_lhs_name.is_none()
