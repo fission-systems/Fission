@@ -356,12 +356,15 @@ impl<'a> PreviewBuilder<'a> {
             .unwrap_or_default()
     }
 
-    fn last_primary_return_def_after_barrier(
+    /// The last real call before `term_idx`: everything the ABI lets a callee
+    /// clobber, the primary return register first, holds what that call left
+    /// unless a later op in the block redefines it.
+    fn last_call_barrier(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         term_idx: usize,
-    ) -> Option<(usize, Varnode)> {
-        let start = block
+    ) -> Option<usize> {
+        block
             .ops
             .iter()
             .enumerate()
@@ -372,6 +375,15 @@ impl<'a> PreviewBuilder<'a> {
                     PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
                 ) && !self.call_is_return_target_artifact(block, idx)
             })
+    }
+
+    fn last_primary_return_def_after_barrier(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        term_idx: usize,
+    ) -> Option<(usize, Varnode)> {
+        let start = self
+            .last_call_barrier(block, term_idx)
             .map_or(0, |idx| idx + 1);
         block
             .ops
@@ -695,9 +707,15 @@ impl<'a> PreviewBuilder<'a> {
             return false;
         }
         // Join must not redefine the primary return register — value comes from preds.
+        // A call in the join redefines it as surely as a `mov`: p-code gives
+        // the call no output, so the search above (which starts after the
+        // last call) finds nothing, and the arms' values were taken for the
+        // return value with the join's own body -- the call -- dropped
+        // (`if (c) { x = 1; return 1; } return f(x);`).
         if self
             .last_primary_return_def_after_barrier(block, term_idx)
             .is_some()
+            || self.last_call_barrier(block, term_idx).is_some()
         {
             return false;
         }
@@ -1161,7 +1179,10 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
+        // The predecessors' value of the return register reaches the `ret`
+        // only if nothing in this block replaces it; a call does.
         if self.uses_primary_return_registers()
+            && self.last_call_barrier(block, term_idx).is_none()
             && (!self.side_effect_consumes_primary_return_register_before(block, term_idx)
                 || self.side_effect_consumes_exact_primary_return_register_before(block, term_idx))
             && let Some(expr) = self.predecessor_primary_return_expr(idx)?
