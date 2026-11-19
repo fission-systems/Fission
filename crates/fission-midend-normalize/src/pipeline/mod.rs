@@ -7,7 +7,9 @@ mod run;
 mod stages;
 
 pub use context::{GLOBAL_SYMBOL_CONTEXT, PROTECTED_LSDA_LABELS};
-pub use context::{GlobalSymbolContext, NormalizeContext, NormalizeContextGuard};
+pub use context::{
+    GlobalSymbolContext, NormalizeContext, NormalizeContextGuard, global_storage_names,
+};
 pub use groups::{build_normalize_pipeline, run_normalize_pipeline};
 pub use run::{
     is_large_hir_function, normalize_expr, normalize_function_body, normalize_hir_function,

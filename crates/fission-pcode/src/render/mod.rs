@@ -73,6 +73,7 @@ pub use variables::{
     RecoveredTypeField, RecoveredTypeShape, RecoveredVariable, recovered_variables,
 };
 
+pub(crate) use layered::file_scope_storage_names;
 #[cfg(test)]
 pub(crate) use layered::render_layered_pseudocode_with_provenance;
 pub(crate) use layered::render_pseudocode_with_provenance;

@@ -21,6 +21,22 @@ thread_local! {
 pub struct GlobalSymbolContext {
     pub names: std::collections::HashMap<u64, String>,
     pub sizes: std::collections::HashMap<u64, u64>,
+    /// Names in this function that denote file-scope storage, whether
+    /// spelled by symbol or by address. The builder declares an unnamed
+    /// global among the locals, so nothing else tells a pass that writing
+    /// it is observable outside the function, or that a call can change it.
+    pub storage_names: HashSet<String>,
+}
+
+/// The file-scope storage names of the function being normalized; empty
+/// when no context is installed.
+pub fn global_storage_names() -> HashSet<String> {
+    GLOBAL_SYMBOL_CONTEXT.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|context| context.storage_names.clone())
+            .unwrap_or_default()
+    })
 }
 
 /// Per-function inputs needed by normalize passes.
@@ -106,6 +122,7 @@ mod tests {
             GlobalSymbolContext {
                 names: HashMap::from([(0x1000, "outer_global".to_string())]),
                 sizes: HashMap::from([(0x1000, 4)]),
+                storage_names: HashSet::new(),
             },
             ["outer_landing_pad".to_string()],
         );
@@ -120,6 +137,7 @@ mod tests {
                 GlobalSymbolContext {
                     names: HashMap::from([(0x2000, "inner_global".to_string())]),
                     sizes: HashMap::from([(0x2000, 8)]),
+                    storage_names: HashSet::new(),
                 },
                 ["inner_landing_pad".to_string()],
             );

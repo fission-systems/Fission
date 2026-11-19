@@ -1688,6 +1688,45 @@ fn render_aggregate_typedef(size: u32, fields: &BTreeMap<u32, (String, NirType)>
     format!("typedef struct fission_agg{size} {{\n{members}}} fission_agg{size};\n")
 }
 
+/// The names in a function that denote file-scope storage, as presentation
+/// decides them: a symbol name the function does not also bind as a param
+/// or local, and a local spelled as a mapped address. Normalize needs the
+/// same answer before presentation runs, so both read it here.
+pub(crate) fn file_scope_storage_names<'a>(
+    params: impl IntoIterator<Item = &'a str>,
+    locals: impl IntoIterator<Item = &'a str>,
+    options: &MlilPreviewOptions,
+) -> HashSet<String> {
+    let params: HashSet<&str> = params.into_iter().collect();
+    let locals: Vec<&str> = locals.into_iter().collect();
+    let mut names: HashSet<String> = options
+        .global_names
+        .values()
+        .filter(|name| {
+            is_c_identifier(name)
+                && !params.contains(name.as_str())
+                && !locals.contains(&name.as_str())
+        })
+        .cloned()
+        .collect();
+    names.extend(
+        locals
+            .iter()
+            .filter(|name| !params.contains(*name) && is_address_named_global(name, options))
+            .map(|name| name.to_string()),
+    );
+    names
+}
+
+/// A name spelled as an address (`tmp_1a004`, `DAT_1a004`) that the loader
+/// mapped: the builder's name for a global the binary has no symbol for.
+pub(crate) fn is_address_named_global(name: &str, options: &MlilPreviewOptions) -> bool {
+    name.strip_prefix("tmp_")
+        .or_else(|| name.strip_prefix("DAT_"))
+        .and_then(|rest| u64::from_str_radix(rest, 16).ok())
+        .is_some_and(|address| options.is_mapped_global(address))
+}
+
 /// Names spelled as an address (`tmp_1a004`, `DAT_1a004`) that the loader
 /// mapped, added to the global set.
 ///
@@ -1700,15 +1739,7 @@ fn collect_address_named_globals(
     globals: &mut HashSet<String>,
 ) {
     let mut consider = |name: &str| {
-        let Some(rest) = name
-            .strip_prefix("tmp_")
-            .or_else(|| name.strip_prefix("DAT_"))
-        else {
-            return;
-        };
-        if let Ok(address) = u64::from_str_radix(rest, 16)
-            && options.is_mapped_global(address)
-        {
+        if is_address_named_global(name, options) {
             globals.insert(name.to_string());
         }
     };
