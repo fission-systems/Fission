@@ -17,7 +17,9 @@ use fission_emulator::{
     ArchInfo, Emulator, LinuxEnv, MachineState, OsEnvironment, RunOutcome, WindowsEnv,
 };
 use fission_loader::loader::LoadedBinary;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// A sentinel return address never mapped by the ELF/PE loaders. If control
 /// ever reaches it unexpectedly (a bug in the call-setup below, or the
@@ -43,6 +45,105 @@ pub enum CallOutcome {
     /// unsupported instruction, symbolic gate, interrupt, etc).
     Other(RunOutcome),
 }
+
+/// One call the function made, seen at the call instruction before it ran.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObservedCall {
+    /// The call instruction's address.
+    pub site: u64,
+    /// The calling convention's integer argument registers, in order.
+    pub args: Vec<u64>,
+}
+
+/// How a stubbed run ended.
+#[derive(Debug)]
+pub enum StubbedEnd {
+    /// The function returned: the return register's raw value.
+    Returned(u64),
+    /// It reached a call the decoder found no fall-through for -- a call
+    /// that does not return. The run stops there.
+    NoReturnCall(u64),
+    /// Execution reached code the decode did not cover (a switch case it
+    /// did not resolve, an indirect tail jump). Calls there are not stubbed,
+    /// so the run says nothing about the tree.
+    LeftDecodedCode(u64),
+    /// Anything else: budget, fault, exit.
+    Other(CallOutcome),
+}
+
+/// A call into one function with every call it makes stubbed out.
+#[derive(Debug)]
+pub struct StubbedRun {
+    pub end: StubbedEnd,
+    pub calls: Vec<ObservedCall>,
+    /// Every byte the function stored outside its own stack frame, with the
+    /// value it held when the run ended.
+    pub writes: BTreeMap<u64, u8>,
+}
+
+/// Records the address range of every RAM write.
+struct WriteLog(Arc<Mutex<Vec<(u64, u32)>>>);
+
+impl fission_emulator::observe::Observer for WriteLog {
+    fn interest(&self) -> fission_emulator::observe::ObserveMask {
+        fission_emulator::observe::ObserveMask {
+            mem: true,
+            ..fission_emulator::observe::ObserveMask::NONE
+        }
+    }
+
+    fn on_mem(&mut self, addr: u64, size: u32, write: bool, _value: u64) {
+        if write {
+            self.0.lock().expect("write log").push((addr, size));
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Records the first translation block that starts outside the function's
+/// decoded instructions.
+struct CoverageLog {
+    instructions: Arc<BTreeSet<u64>>,
+    stray: Arc<Mutex<Option<u64>>>,
+}
+
+impl fission_emulator::observe::Observer for CoverageLog {
+    fn interest(&self) -> fission_emulator::observe::ObserveMask {
+        fission_emulator::observe::ObserveMask {
+            block: true,
+            ..fission_emulator::observe::ObserveMask::NONE
+        }
+    }
+
+    fn on_block(&mut self, pc: u64) {
+        if pc != SENTINEL_RET && !self.instructions.contains(&pc) {
+            self.stray.lock().expect("coverage log").get_or_insert(pc);
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Stubbed calls one run may make before it is stopped as over budget.
+///
+/// A stub returns the same values whatever it is passed, so a loop that
+/// waits on a callee to make progress (`while (n) n -= read(..)`) never ends.
+/// Each call is a round trip out of compiled code; the instruction budget
+/// alone let such a loop run for minutes.
+pub const MAX_STUBBED_CALLS: usize = 4096;
+
+/// How far below the entry stack pointer a function's own frame may reach.
+/// Writes there are its locals, which the decompiled body keeps in variables.
+const FRAME_BELOW: u64 = 1 << 20;
+
+/// How far above the entry stack pointer still belongs to the call: the
+/// return address and the Win64 home slots a prologue spills arguments to.
+const FRAME_ABOVE: u64 = 64;
 
 /// A real emulator with a real, loaded process image, reusable across many
 /// concrete calls into the same binary. Restores to the post-image-setup
@@ -215,9 +316,163 @@ impl EmulatorHarness {
     /// for a boundary-value sweep without one sample's side effects leaking
     /// into the next.
     pub fn call(&mut self, address: u64, args: &[u64]) -> Result<CallOutcome> {
+        self.prepare_call(address, args)?;
+        let outcome = self.emu.run_until_pc(SENTINEL_RET)?;
+        self.finish_outcome(outcome)
+    }
+
+    /// Read one byte of the restored baseline: the program image as every
+    /// call starts from it. `None` where nothing is mapped.
+    pub fn baseline_byte(&self, addr: u64) -> Option<u8> {
+        // The raw space read zero-fills a page nothing mapped, which would
+        // let a tree's stray load agree with machine code that never made it.
+        if self.baseline_state.enforce_page_faults
+            && self
+                .baseline_state
+                .page_map
+                .check_access(addr, fission_emulator::pcode::page_map::AccessKind::Read)
+                .is_err()
+        {
+            return None;
+        }
+        let ram = self.baseline_state.ram_space();
+        self.baseline_state
+            .read_space_readonly(ram, addr, 1)
+            .ok()
+            .and_then(|bytes| bytes.first().copied())
+    }
+
+    /// Call `address` as [`Self::call`] does, but stop at every call
+    /// instruction in `flow` instead of running the callee: record the
+    /// argument registers, put `call_return(n)` in the return register and
+    /// continue at the site's fall-through. A call mapped to `None` does not
+    /// return and ends the run. A tail jump is a call whose return is this
+    /// function's: it is recorded and stubbed the same way, then returns.
+    ///
+    /// Stubbing is what lets the decompiled body be compared at all: both
+    /// sides see the same return values without either having to model the
+    /// callee. What it costs is the callee's own effects -- an out-parameter
+    /// it would have written stays as it was, on both sides alike.
+    pub fn call_stubbed(
+        &mut self,
+        address: u64,
+        args: &[u64],
+        flow: &crate::call_sites::MachineFlow,
+        call_return: &dyn Fn(usize) -> u64,
+    ) -> Result<StubbedRun> {
+        self.prepare_call(address, args)?;
+        let sp_reg = self.emu.arch.sp_reg;
+        let entry_sp = self.emu.read_register_u64(sp_reg)?;
+        let log = Arc::new(Mutex::new(Vec::new()));
+        self.emu.add_observer(Box::new(WriteLog(Arc::clone(&log))));
+        let stray = Arc::new(Mutex::new(None));
+        self.emu.add_observer(Box::new(CoverageLog {
+            instructions: Arc::new(flow.instructions.clone()),
+            stray: Arc::clone(&stray),
+        }));
+        for site in flow.calls.keys().chain(&flow.tail_jumps) {
+            self.emu.set_breakpoint(*site);
+        }
+        let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
+        let return_reg = self.emu.arch.cc.return_reg();
+        let mut calls = Vec::new();
+        let end = loop {
+            // The emulator does not stop at a breakpoint on the PC it starts
+            // from -- a debugger has to be able to continue past one -- so a
+            // site at the entry, or one right after the previous stub's
+            // fall-through, is handled before resuming rather than run.
+            let pc = self.emu.pc;
+            let is_call = flow.calls.contains_key(&pc);
+            if is_call || flow.tail_jumps.contains(&pc) {
+                if calls.len() >= MAX_STUBBED_CALLS {
+                    break StubbedEnd::Other(CallOutcome::HitBudget);
+                }
+                let args = arg_regs
+                    .iter()
+                    .map(|reg| self.emu.read_register_u64(reg))
+                    .collect::<Result<Vec<_>>>()?;
+                let n = calls.len();
+                calls.push(ObservedCall { site: pc, args });
+                if is_call {
+                    let Some(next) = flow.calls[&pc] else {
+                        break StubbedEnd::NoReturnCall(pc);
+                    };
+                    self.emu.write_register_u64(return_reg, call_return(n))?;
+                    self.emu.pc = next;
+                } else {
+                    self.emu.write_register_u64(return_reg, call_return(n))?;
+                    // Return to this function's caller, as the callee would.
+                    self.emu.simulate_return_for("")?;
+                }
+                continue;
+            }
+            let outcome = match self.emu.run_until_pc(SENTINEL_RET) {
+                Ok(outcome) => outcome,
+                Err(err) => {
+                    self.release_run();
+                    return Err(err);
+                }
+            };
+            if let Some(pc) = *stray.lock().expect("coverage log") {
+                break StubbedEnd::LeftDecodedCode(pc);
+            }
+            match outcome {
+                RunOutcome::HitBreakpoint(_) => continue,
+                RunOutcome::Returned => {
+                    break StubbedEnd::Returned(self.emu.read_register_u64(return_reg)?);
+                }
+                other => break StubbedEnd::Other(self.finish_outcome(other)?),
+            }
+        };
+        self.release_run();
+        let ram = self.emu.state.ram_space();
+        let frame = entry_sp.saturating_sub(FRAME_BELOW)..entry_sp.saturating_add(FRAME_ABOVE);
+        let mut written = BTreeSet::new();
+        for (addr, size) in log.lock().expect("write log").iter() {
+            for i in 0..u64::from(*size) {
+                let at = addr.wrapping_add(i);
+                if !frame.contains(&at) {
+                    written.insert(at);
+                }
+            }
+        }
+        let mut writes = BTreeMap::new();
+        for at in written {
+            if let Ok(bytes) = self.emu.state.read_space(ram, at, 1) {
+                writes.insert(at, bytes[0]);
+            }
+        }
+        Ok(StubbedRun { end, calls, writes })
+    }
+
+    /// Undo what [`Self::call_stubbed`] armed for one run.
+    fn release_run(&mut self) {
+        self.emu.clear_all_breakpoints();
+        drop(self.emu.take_observers());
+    }
+
+    fn finish_outcome(&mut self, outcome: RunOutcome) -> Result<CallOutcome> {
+        match outcome {
+            RunOutcome::Returned => {
+                let reg = self.emu.arch.cc.return_reg();
+                Ok(CallOutcome::Returned(self.emu.read_register_u64(reg)?))
+            }
+            RunOutcome::HitBudget => Ok(CallOutcome::HitBudget),
+            RunOutcome::ProcessExited => Ok(CallOutcome::ProcessExited),
+            other => Ok(CallOutcome::Other(other)),
+        }
+    }
+
+    /// Restore the baseline and set up a call of `address` with `args`,
+    /// stopped at its first instruction.
+    fn prepare_call(&mut self, address: u64, args: &[u64]) -> Result<()> {
         // Restore baseline -- a called function can mutate globals/heap.
         self.emu.state = self.baseline_state.clone();
         self.emu.pc = self.baseline_pc;
+        // The instruction budget is per call. The count lives on the
+        // emulator, not in the restored state, so without this every call
+        // spent what the earlier ones left and a batch ran out partway.
+        self.emu.inst_count = 0;
 
         // Set up the call like a real `call`/`bl`: write the sentinel
         // return address to the link register (ARM/MIPS/PPC) or push it on
@@ -272,16 +527,7 @@ impl EmulatorHarness {
             }
         }
 
-        let outcome = self.emu.run_until_pc(SENTINEL_RET)?;
-        match outcome {
-            RunOutcome::Returned => {
-                let reg = self.emu.arch.cc.return_reg();
-                Ok(CallOutcome::Returned(self.emu.read_register_u64(reg)?))
-            }
-            RunOutcome::HitBudget => Ok(CallOutcome::HitBudget),
-            RunOutcome::ProcessExited => Ok(CallOutcome::ProcessExited),
-            other => Ok(CallOutcome::Other(other)),
-        }
+        Ok(())
     }
 }
 
