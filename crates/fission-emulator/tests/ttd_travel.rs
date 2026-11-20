@@ -164,17 +164,13 @@ fn seeking_back_arrives_where_the_run_was() {
         );
     };
 
-    // What the machine was actually doing after `target` instructions.
-    //
-    // `max_inst` is a limit on instructions *entered*: the interpreter counts
-    // one, then checks, then executes. So stopping with `inst_count == N` means
-    // N-1 have run and the Nth is about to. A snapshot recorded when
-    // `inst_count == N` has all N behind it, so the reference needs one more.
-    let mut reference = build(target + 1, 0);
+    // What the machine was actually doing after `target` instructions. A
+    // budget of N runs exactly N, in either engine, and a snapshot recorded
+    // at `inst_count == N` has the same N behind it.
+    let mut reference = build(target, 0);
     let _ = reference.run();
     assert_eq!(
-        reference.inst_count,
-        target + 1,
+        reference.inst_count, target,
         "the reference run did not stop on the step being compared"
     );
     let (want_regs, want_stack) = state_of(&mut reference);
@@ -263,7 +259,7 @@ fn time_travel_works_on_an_architecture_that_is_not_x86() {
         .find(|step| *step >= 500)
         .expect("a snapshot at or after step 500");
 
-    let mut reference = build_aarch64(target + 1, 0).expect("the same binary");
+    let mut reference = build_aarch64(target, 0).expect("the same binary");
     let _ = reference.run();
     let want_pc = reference.pc;
     let want: Vec<(String, u64)> = snapshot
@@ -333,7 +329,7 @@ fn seeking_back_restores_vector_registers() {
     );
 
     // What the machine really held there.
-    let mut reference = build(target + 1, 0);
+    let mut reference = build(target, 0);
     let _ = reference.run();
     let want: Vec<(String, Vec<u8>)> = vectors
         .iter()
@@ -445,7 +441,7 @@ fn seeking_back_undoes_writes_to_all_writable_memory() {
         .find(|step| *step >= 400)
         .expect("a snapshot to seek to");
 
-    let mut reference = build(target + 1, 0);
+    let mut reference = build(target, 0);
     let _ = reference.run();
     let want = writable_memory(&mut reference);
 

@@ -107,11 +107,11 @@ fn the_interpreter_stops_at_a_breakpoint() {
     let stopped_after = stops_at_a_breakpoint(true);
 
     // And stopped *before* the instruction at the breakpoint, not after it.
-    // `max_inst` counts an instruction as it is entered, so a budget of N
-    // leaves the machine about to execute the Nth: a budget one larger than
-    // the breakpoint's count must land on the same address.
+    // A budget of N runs exactly N instructions and leaves the machine about
+    // to execute the next, so a budget equal to the breakpoint's count must
+    // land on the same address.
     let mut reference = build(true);
-    reference.max_inst = Some(stopped_after + 1);
+    reference.max_inst = Some(stopped_after);
     let _ = reference.run();
     assert_eq!(
         reference.pc,
