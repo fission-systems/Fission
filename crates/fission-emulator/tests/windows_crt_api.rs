@@ -1274,3 +1274,127 @@ fn feof_and_clearerr_semantics() {
 
     assert_eq!(call(&mut emu, "fclose", &[stream]), 0);
 }
+
+/// Zero from `GetSystemDirectoryA` means failure, and the Go runtime stops on
+/// it before `main`. A buffer that fits gets the path and its NUL, and the
+/// return value leaves the NUL out; one that does not gets nothing, and the
+/// return value is the size it needs, NUL included.
+#[test]
+fn the_system_directory_apis_answer_with_a_path() {
+    let mut emu = windows_emulator();
+    let system = "C:\\Windows\\System32";
+
+    let buf = SCRATCH + 0x100;
+    let n = call(&mut emu, "GetSystemDirectoryA", &[buf, 260]);
+    assert_eq!(n, system.len() as u64);
+    let mut expected = system.as_bytes().to_vec();
+    expected.push(0);
+    assert_eq!(read_back(&mut emu, buf, expected.len()), expected);
+
+    let small = SCRATCH + 0x300;
+    plant(&mut emu, small, "untouched");
+    let n = call(&mut emu, "GetSystemDirectoryA", &[small, 4]);
+    assert_eq!(
+        n,
+        system.len() as u64 + 1,
+        "the size it needs, NUL included"
+    );
+    assert_eq!(read_back(&mut emu, small, 4), b"unto");
+
+    let wide = SCRATCH + 0x400;
+    let n = call(&mut emu, "GetWindowsDirectoryW", &[wide, 260]);
+    assert_eq!(n, "C:\\Windows".len() as u64);
+    let expected: Vec<u8> = "C:\\Windows\0"
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
+    assert_eq!(read_back(&mut emu, wide, expected.len()), expected);
+}
+
+/// The environment block and the command line are pointers the guest reads
+/// straight away. They used to point at fixed addresses nothing mapped, so the
+/// guest's first read of them faulted.
+#[test]
+fn the_environment_and_command_line_point_at_readable_memory() {
+    let mut emu = windows_emulator();
+
+    let block = call(&mut emu, "GetEnvironmentStringsW", &[]);
+    let expected: Vec<u8> = "PATH=C:\\Windows\\System32\0\0"
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
+    assert_eq!(read_back(&mut emu, block, expected.len()), expected);
+
+    let line = call(&mut emu, "GetCommandLineA", &[]);
+    assert_eq!(read_back(&mut emu, line, 9), b"test.exe\0");
+
+    let wide = call(&mut emu, "GetCommandLineW", &[]);
+    let expected: Vec<u8> = "test.exe\0"
+        .encode_utf16()
+        .flat_map(|c| c.to_le_bytes())
+        .collect();
+    assert_eq!(read_back(&mut emu, wide, expected.len()), expected);
+}
+
+/// `KUSER_SHARED_DATA` is read without a call -- the Go runtime takes its
+/// clock from `InterruptTime` at `0x7FFE0008` -- so the page has to exist, and
+/// its clock has to be the one the time APIs answer from.
+#[test]
+fn the_shared_user_data_page_carries_the_process_clock() {
+    let mut emu = windows_emulator();
+    let page = 0x7FFE_0000u64;
+    let u32_at = |emu: &mut Emulator, offset: u64| {
+        u32::from_le_bytes(read_back(emu, page + offset, 4).try_into().unwrap())
+    };
+    let ksystem_time = |emu: &mut Emulator, offset: u64| {
+        let low = u32_at(emu, offset) as u64;
+        let high1 = u32_at(emu, offset + 4);
+        let high2 = u32_at(emu, offset + 8);
+        assert_eq!(high1, high2, "the two high words agree");
+        (u64::from(high1) << 32) | low
+    };
+
+    assert_eq!(u32_at(&mut emu, 0x26C), 10, "NtMajorVersion");
+    // Time since boot, which is never zero on a running machine; the Go
+    // runtime stops on a zero ("nanotime returning zero").
+    assert_ne!(ksystem_time(&mut emu, 0x008), 0, "InterruptTime at start");
+
+    let ms = call(&mut emu, "GetTickCount64", &[]);
+    assert_eq!(
+        ksystem_time(&mut emu, 0x008),
+        ms * 10_000,
+        "InterruptTime follows the clock GetTickCount64 answered from"
+    );
+    let mut file_time = [0u8; 8];
+    call(&mut emu, "GetSystemTimeAsFileTime", &[SCRATCH]);
+    file_time.copy_from_slice(&read_back(&mut emu, SCRATCH, 8));
+    assert_eq!(
+        ksystem_time(&mut emu, 0x014),
+        u64::from_le_bytes(file_time) + 10_000,
+        "SystemTime is GetSystemTimeAsFileTime's clock, one tick on"
+    );
+}
+
+/// Duplicating the current thread's pseudo-handle gives a real one, written
+/// where the caller asked; zero means failure, and the Go runtime stops on it
+/// ("runtime.minit: duplicatehandle failed") before `main`.
+#[test]
+fn duplicating_the_current_thread_gives_a_real_handle() {
+    let mut emu = windows_emulator();
+    let process = call(&mut emu, "GetCurrentProcess", &[]);
+    let thread = call(&mut emu, "GetCurrentThread", &[]);
+    let out = SCRATCH + 0x500;
+    let space = emu.state.ram_space();
+    emu.state.write_space(space, out, &[0u8; 8]).expect("clear");
+
+    // DUPLICATE_SAME_ACCESS
+    let ok = call(
+        &mut emu,
+        "DuplicateHandle",
+        &[process, thread, process, out, 0, 0, 2],
+    );
+    assert_eq!(ok, 1);
+    let handle = u64::from_le_bytes(read_back(&mut emu, out, 8).try_into().unwrap());
+    assert_ne!(handle, 0, "a handle was written");
+    assert_ne!(handle, thread, "not the pseudo-handle itself");
+}

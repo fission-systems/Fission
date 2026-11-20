@@ -126,7 +126,7 @@ fn a_mingw_pe_runs_its_crt_and_reaches_main() {
 /// were, so this pins the shape rather than one API.
 #[test]
 fn a_32_bit_mingw_pe_runs_its_crt_and_exits() {
-    let Some(path) = corpus("control_flow_gcc-m32_O0.exe") else {
+    let Some(path) = corpus("c/control_flow_gcc-m32_O0.exe") else {
         eprintln!("skipping: dev corpus not present");
         return;
     };

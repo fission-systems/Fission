@@ -52,6 +52,8 @@ pub fn setup_peb_teb(
         state.write_space(ram, teb_addr + self_off, &word(teb_addr))?;
     }
 
+    setup_shared_user_data(state)?;
+
     // Write PEB fields
     let ram = state.ram_space();
     if is_64bit {
@@ -75,6 +77,106 @@ pub fn setup_peb_teb(
     }
 
     Ok((teb_addr, peb_addr))
+}
+
+/// `KUSER_SHARED_DATA`: one read-only page the kernel maps at the same address
+/// into every process, 32- and 64-bit alike. Programs read the clock from it
+/// directly, with no API call -- the Go runtime's `nanotime` reads
+/// `InterruptTime` at `0x7FFE0008` before `main`, and an unmapped page stops it
+/// there.
+pub const SHARED_USER_DATA: u64 = 0x7FFE_0000;
+
+/// Field offsets, from the layout every Windows version since NT 4 keeps.
+const SUD_TICK_COUNT_MULTIPLIER: u64 = 0x004;
+const SUD_INTERRUPT_TIME: u64 = 0x008;
+const SUD_SYSTEM_TIME: u64 = 0x014;
+const SUD_NT_BUILD_NUMBER: u64 = 0x260;
+const SUD_NT_PRODUCT_TYPE: u64 = 0x264;
+const SUD_PRODUCT_TYPE_IS_VALID: u64 = 0x268;
+const SUD_NT_MAJOR_VERSION: u64 = 0x26C;
+const SUD_NT_MINOR_VERSION: u64 = 0x270;
+const SUD_TICK_COUNT: u64 = 0x320;
+
+/// `TickCountQuad * TickCountMultiplier >> 24` is milliseconds; this value is
+/// the one Windows uses, 15.625 ms per tick.
+const TICK_COUNT_MULTIPLIER: u32 = 0x0FA0_0000;
+
+/// Map the page and fill the fields the process may read: the version it was
+/// told it runs on and the clock at `tick_ms` milliseconds since start.
+pub fn setup_shared_user_data(state: &mut MachineState) -> Result<()> {
+    state.page_map.map_region(
+        SHARED_USER_DATA,
+        0x1000,
+        prot::VALID | prot::READ | prot::ANON,
+        true,
+    );
+    let ram = state.ram_space();
+    let page = SHARED_USER_DATA;
+    with_kernel_write(state, |state| {
+        state.write_space(
+            ram,
+            page + SUD_TICK_COUNT_MULTIPLIER,
+            &TICK_COUNT_MULTIPLIER.to_le_bytes(),
+        )?;
+        // Windows 10 22H2 workstation, which is what the rest of the HLE
+        // answers as.
+        state.write_space(ram, page + SUD_NT_BUILD_NUMBER, &19045u32.to_le_bytes())?;
+        state.write_space(ram, page + SUD_NT_PRODUCT_TYPE, &1u32.to_le_bytes())?;
+        state.write_space(ram, page + SUD_PRODUCT_TYPE_IS_VALID, &[1])?;
+        state.write_space(ram, page + SUD_NT_MAJOR_VERSION, &10u32.to_le_bytes())?;
+        state.write_space(ram, page + SUD_NT_MINOR_VERSION, &0u32.to_le_bytes())?;
+        Ok(())
+    })?;
+    write_shared_user_time(state, 0)
+}
+
+/// Bring the page's clock to `tick_ms` after process start -- the clock
+/// `GetTickCount` and `GetSystemTimeAsFileTime` answer from, so a program
+/// comparing them sees one time. `InterruptTime` and `TickCount` count from
+/// boot, as those APIs do; `SystemTime` is the wall clock.
+pub fn write_shared_user_time(state: &mut MachineState, tick_ms: u64) -> Result<()> {
+    if !state.page_map.is_mapped(SHARED_USER_DATA) {
+        return Ok(());
+    }
+    // `KSYSTEM_TIME` is `LowPart, High1Time, High2Time`; a reader retries
+    // until the two high words agree, so both carry the high half.
+    let ksystem_time = |value: u64| -> [u8; 12] {
+        let mut bytes = [0u8; 12];
+        bytes[0..4].copy_from_slice(&(value as u32).to_le_bytes());
+        bytes[4..8].copy_from_slice(&((value >> 32) as u32).to_le_bytes());
+        bytes[8..12].copy_from_slice(&((value >> 32) as u32).to_le_bytes());
+        bytes
+    };
+    let uptime_ms = crate::os::windows::hle::UPTIME_AT_START_MS.wrapping_add(tick_ms);
+    let interrupt_time = uptime_ms.wrapping_mul(10_000);
+    let system_time =
+        crate::os::windows::hle::FIXED_FILETIME_BASE.wrapping_add(tick_ms.wrapping_mul(10_000));
+    let tick_count = uptime_ms.wrapping_mul(1 << 24) / u64::from(TICK_COUNT_MULTIPLIER);
+    let ram = state.ram_space();
+    let page = SHARED_USER_DATA;
+    with_kernel_write(state, |state| {
+        state.write_space(
+            ram,
+            page + SUD_INTERRUPT_TIME,
+            &ksystem_time(interrupt_time),
+        )?;
+        state.write_space(ram, page + SUD_SYSTEM_TIME, &ksystem_time(system_time))?;
+        state.write_space(ram, page + SUD_TICK_COUNT, &ksystem_time(tick_count))?;
+        // The legacy 32-bit tick count at offset 0.
+        state.write_space(ram, page, &(tick_count as u32).to_le_bytes())?;
+        Ok(())
+    })
+}
+
+/// The page is read-only to the guest, not to the kernel that keeps it.
+fn with_kernel_write(
+    state: &mut MachineState,
+    write: impl FnOnce(&mut MachineState) -> Result<()>,
+) -> Result<()> {
+    let enforce = std::mem::replace(&mut state.enforce_page_faults, false);
+    let result = write(state);
+    state.enforce_page_faults = enforce;
+    result
 }
 
 /// Standalone / compatibility entry point for initializing PEB and TEB.
