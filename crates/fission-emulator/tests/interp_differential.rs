@@ -567,3 +567,37 @@ fn aarch64_dc_zva_zeroes_one_profiled_cache_block() {
     assert_eq!(&bytes[..64], &[0xA5; 64]);
     assert_eq!(&bytes[64..], &[0; 64]);
 }
+
+/// A budget of N runs exactly N instructions, in both engines, and stops in
+/// front of the next. The interpreter used to count an instruction and then
+/// return without running it (N-1, and none for a budget of one); the JIT ran
+/// whole blocks past the budget unless the block happened to carry the p-code
+/// fuse. `ttd_seek` and `sandbox --max-inst` both lean on this count.
+#[test]
+fn a_budget_of_n_runs_exactly_n_instructions_in_both_engines() {
+    let mut previous_pc = None;
+    for n in 1..=9u64 {
+        let mut jitted = build_simple(n, false);
+        let mut interpreted = build_simple(n, true);
+        let entry = jitted.pc;
+        let _ = jitted.run();
+        let _ = interpreted.run();
+        assert_eq!(jitted.inst_count, n, "JIT count for a budget of {n}");
+        assert_eq!(
+            interpreted.inst_count, n,
+            "interpreter count for a budget of {n}"
+        );
+        assert_eq!(
+            jitted.pc, interpreted.pc,
+            "the engines stopped in different places for a budget of {n}"
+        );
+        assert_ne!(jitted.pc, entry, "a budget of {n} ran nothing");
+        assert_ne!(
+            Some(jitted.pc),
+            previous_pc,
+            "a budget of {n} stopped where {} did",
+            n - 1
+        );
+        previous_pc = Some(jitted.pc);
+    }
+}

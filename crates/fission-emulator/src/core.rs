@@ -2134,6 +2134,29 @@ impl Emulator {
             return self.run_block_interpreted(&insns[..1]);
         }
 
+        // An instruction budget means exactly that many instructions. A block
+        // holds up to `MAX_TB_INSNS` and runs whole -- the p-code fuse that can
+        // end one early is compiled only into blocks with a backward branch or
+        // a checked memory access -- so with fewer left than a block holds,
+        // run only what is left. It is the last few instructions of a budgeted
+        // run, and the interpreter runs a slice of a block as the debugger's
+        // step already does.
+        if let Some(limit) = self.max_inst {
+            let remaining = limit.saturating_sub(self.inst_count);
+            if remaining < MAX_TB_INSNS as u64 {
+                let insns = self.collect_translation_block().map_err(|e| {
+                    self.metrics.decode_errors += 1;
+                    self.trace.push(TraceEntry::DecodeError {
+                        pc: self.pc,
+                        reason: e.to_string(),
+                    });
+                    e
+                })?;
+                let take = (remaining as usize).clamp(1, insns.len());
+                return self.run_block_interpreted(&insns[..take]);
+            }
+        }
+
         // ─── Multi-instruction TB path ────────────────────────────────────────
         //
         //   1. Cache hit  → run host TB (counts insns + soft-chains internally).

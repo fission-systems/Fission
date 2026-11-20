@@ -112,8 +112,9 @@ impl Emulator {
         while idx < flat.len() {
             for (pc, len) in starts_at[idx].clone() {
                 self.pc = pc;
-                self.note_guest_instruction(pc, len);
-                self.inst_count = self.inst_count.saturating_add(1);
+                // Before counting it: a budget of N runs N instructions. This
+                // checked after, and returned without running the one it had
+                // just counted -- N-1, and none at all for a budget of one.
                 if let Some(limit) = self.max_inst {
                     if self.inst_count >= limit {
                         if self.metrics.exit_reason.is_none() {
@@ -122,6 +123,8 @@ impl Emulator {
                         return Ok(InterpExit::Branch(pc));
                     }
                 }
+                self.note_guest_instruction(pc, len);
+                self.inst_count = self.inst_count.saturating_add(1);
                 if self.observe.insn {
                     self.notify_insn(pc);
                 }

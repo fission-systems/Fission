@@ -288,7 +288,10 @@ pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
         return 1;
     }
     if let Some(m) = emu.max_inst {
-        if emu.inst_count >= m {
+        // `jit_count_insn` counts an instruction as it starts, so the m-th
+        // instruction's own ops run with the count already at m. Stopping at
+        // `>= m` ended every budgeted block one instruction short.
+        if emu.inst_count > m {
             if emu.metrics.exit_reason.is_none() {
                 emu.metrics.exit_reason = Some("max_inst".into());
             }
