@@ -101,6 +101,7 @@ impl TTDRecorder {
         if self.max_snapshots == 0 {
             return false;
         }
+        let mut popped = 0u64;
         while let Some(back) = self.snapshots.back() {
             if back.step_index < step_index {
                 break;
@@ -108,7 +109,9 @@ impl TTDRecorder {
             let stale = back.step_index;
             self.snapshots.pop_back();
             self.snapshot_steps.remove(&stale);
+            popped += 1;
         }
+        self.current_step = self.current_step.saturating_sub(popped);
         self.enforce_max_snapshots();
         true
     }
@@ -368,5 +371,21 @@ mod tests {
         assert_eq!(rec.snapshot_at_or_after(10).map(|s| s.step_index), Some(15));
         assert_eq!(rec.snapshot_at_or_after(15).map(|s| s.step_index), Some(15));
         assert!(rec.snapshot_at_or_after(16).is_none());
+    }
+
+    #[test]
+    fn step_count_rolls_back_when_recording_rewound_steps() {
+        let mut rec = recording();
+        for step in [0, 10, 20] {
+            record(&mut rec, step);
+        }
+        assert_eq!(rec.step_count(), 3);
+
+        // Rewind to step 10 and record again (dropping old steps 10 and 20).
+        record(&mut rec, 10);
+        assert_eq!(rec.step_count(), 2);
+
+        rec.record_step_with_memory(10, RegisterState::at(0x1010), 0, Vec::new(), Vec::new());
+        assert_eq!(rec.step_count(), 2);
     }
 }
