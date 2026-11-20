@@ -2651,7 +2651,21 @@ impl<'a> PreviewBuilder<'a> {
                 if let Some(name) = self.materialized_vns.get(&key) {
                     return Ok(PreHirExpr::Var(name.clone()));
                 }
-                if let Some(name) = self.sla_hw_name(output.offset, output.size) {
+                // A copy of a global or a constant reads no register, so it
+                // means the same at the copy as at the test, and has no
+                // assignment to the register's name to fall back on: `mov
+                // rdi, [g]; test rdi, rdi` printed `rdi == 0`, which
+                // entry-parameter promotion then read as `param_1 == 0`. A
+                // store to `g` before the test already gives the copy a
+                // binding of its own. Any other source may read a register
+                // written by then -- `mov rdi, [rdi + 0x30]` writes its own
+                // base -- and keeps the register's name.
+                let source = &op.inputs[0];
+                let reads_no_register =
+                    source.is_constant || self.output_is_mapped_global_memory(source);
+                if !reads_no_register
+                    && let Some(name) = self.sla_hw_name(output.offset, output.size)
+                {
                     let name = self.ensure_live_register_binding(&name, output.size);
                     return Ok(PreHirExpr::Var(name));
                 }
