@@ -413,18 +413,24 @@ impl Project {
                     function.origin = Some("project".to_string());
                 }
             };
-            if let Some(&index) = inner.function_addr_index.get(address) {
+            let index = if let Some(&index) = inner.function_addr_index.get(address) {
                 vouch(&mut inner.functions[index]);
-                report.names_applied += 1;
-            } else if let Some(function) =
-                inner.functions.iter_mut().find(|f| f.address == *address)
+                index
+            } else if let Some((index, function)) = inner
+                .functions
+                .iter_mut()
+                .enumerate()
+                .find(|(_, f)| f.address == *address)
             {
                 vouch(function);
-                report.names_applied += 1;
+                inner.function_addr_index.insert(*address, index);
+                index
             } else {
                 // Address is not currently indexed as a function.
-                // Insert a synthesized FunctionInfo placeholder and register it in global_symbols
-                // so the user's chosen label is never dropped.
+                // Insert a synthesized FunctionInfo placeholder and register it in
+                // both function_addr_index and global_symbols so the user's chosen
+                // label is never dropped.
+                let index = inner.functions.len();
                 inner
                     .functions
                     .push(fission_loader::loader::types::FunctionInfo {
@@ -440,9 +446,12 @@ impl Project {
                         is_thunk_like: false,
                         thunk_target: None,
                     });
-                inner.global_symbols.insert(*address, name.clone());
-                report.names_applied += 1;
-            }
+                inner.function_addr_index.insert(*address, index);
+                index
+            };
+            inner.global_symbols.insert(*address, name.clone());
+            let _ = index;
+            report.names_applied += 1;
         }
 
         // Signatures ride along the same way, and are read by the decompiler
@@ -862,7 +871,7 @@ pub mod signature_syntax {
     /// What precedes it is the return type, minus a function name if one was
     /// written: `int parse_header(char *buf)` returns `int`, not
     /// `int parse_header`.
-    fn split_at_params(text: &str) -> Result<(&str, &str), String> {
+    fn split_at_params(text: &str) -> Result<(String, &str), String> {
         let trimmed = text.trim_end();
         if !text.contains('(') {
             return Err(format!(
@@ -902,13 +911,12 @@ pub mod signature_syntax {
     /// `int parse_header` -> `int`: a trailing identifier after a complete
     /// return type is the function's name. A lone word (`int`) or a type made
     /// only of keywords/tags (`struct stat`, `unsigned int`) is the type itself.
-    fn strip_function_name(returns: &str) -> &str {
+    fn strip_function_name(returns: &str) -> String {
         let (type_name, name) = split_declaration(returns);
         if name.is_empty() {
-            returns
+            returns.to_string()
         } else {
-            let len = type_name.len();
-            returns[..len].trim_end()
+            type_name
         }
     }
 
@@ -968,9 +976,10 @@ pub mod signature_syntax {
                 }
             }
         }
-        // `char buf[64]`, `int items[]`: a trailing array suffix belongs to the
-        // declarator; the identifier before it is the name.
-        if let Some(bracket) = text.find('[') {
+        // `char buf[64]`, `int items[]`: a trailing array suffix at top level
+        // (outside parentheses) belongs to the declarator; ignore `[` nested
+        // inside parameter lists such as `void (*)(int a[4])`.
+        if let Some(bracket) = find_top_level_bracket(text) {
             let (decl, suffix) = text.split_at(bracket);
             let (type_name, name) = split_declaration(decl);
             if !name.is_empty() {
@@ -978,10 +987,14 @@ pub mod signature_syntax {
                 return (type_name.replace("* [", "*[").trim().to_string(), name);
             }
         }
-        let Some(last_space) = text.rfind(|c: char| c.is_whitespace() || c == '*') else {
+        let Some((last_space, sep_char)) = text
+            .char_indices()
+            .rev()
+            .find(|&(_, c)| c.is_whitespace() || c == '*')
+        else {
             return (text.to_string(), String::new());
         };
-        let (head, tail) = text.split_at(last_space + 1);
+        let (head, tail) = text.split_at(last_space + sep_char.len_utf8());
         let tail = tail.trim();
         let is_identifier = is_plain_identifier(tail) && !KEYWORDS.contains(&tail);
         if is_identifier && !head.trim().is_empty() && !completes_the_type(head, tail) {
@@ -989,6 +1002,19 @@ pub mod signature_syntax {
         } else {
             (text.to_string(), String::new())
         }
+    }
+
+    fn find_top_level_bracket(text: &str) -> Option<usize> {
+        let mut paren_depth = 0i32;
+        for (idx, ch) in text.char_indices() {
+            match ch {
+                '(' => paren_depth += 1,
+                ')' => paren_depth = (paren_depth - 1).max(0),
+                '[' if paren_depth == 0 => return Some(idx),
+                _ => {}
+            }
+        }
+        None
     }
 
     fn is_plain_identifier(word: &str) -> bool {
@@ -1040,7 +1066,7 @@ pub mod signature_syntax {
         }
         let (returns, params_text) = split_at_params(text)?;
 
-        let returns = (!returns.is_empty()).then(|| returns.to_string());
+        let returns = (!returns.is_empty()).then_some(returns);
 
         let mut params = Vec::new();
         if !params_text.is_empty() && params_text != "void" {
@@ -1262,5 +1288,81 @@ mod signature_tests {
         for bad in ["int )(int)", "int ((int)", "int (int))"] {
             assert!(parse(bad).is_err(), "{bad:?} was accepted");
         }
+    }
+
+    #[test]
+    fn array_return_declarators_and_multibyte_whitespace_do_not_corrupt_or_panic() {
+        let ptr_arr = parse("char *buf[64](int)").expect("parse ptr array return");
+        assert_eq!(ptr_arr.returns.as_deref(), Some("char *[64]"));
+
+        let val_arr = parse("char buf[64](int)").expect("parse array return");
+        assert_eq!(val_arr.returns.as_deref(), Some("char [64]"));
+
+        let wide_gap = parse("char    é[64](int)").expect("parse utf8 name after spaces");
+        assert_eq!(wide_gap.returns.as_deref(), Some("char [64]"));
+
+        let nbsp = parse("int\u{00A0}foo(int\u{3000}bar)").expect("parse multibyte whitespace");
+        assert_eq!(nbsp.returns.as_deref(), Some("int"));
+        assert_eq!(nbsp.params.len(), 1);
+        assert_eq!(nbsp.params[0].type_name, "int");
+        assert_eq!(nbsp.params[0].name, "bar");
+
+        let fn_ptr_arr_param =
+            parse("int (void (*)(int a[4]), int)").expect("parse unnamed fn ptr with array param");
+        assert_eq!(fn_ptr_arr_param.params[0].type_name, "void (*)(int a[4])");
+        assert_eq!(fn_ptr_arr_param.params[0].name, "");
+    }
+}
+
+#[cfg(test)]
+mod project_apply_tests {
+    use super::*;
+
+    #[test]
+    fn apply_updates_global_symbols_and_function_addr_index() {
+        let existing = fission_loader::loader::types::FunctionInfo {
+            name: "sub_1000".to_string(),
+            address: 0x1000,
+            size: 16,
+            is_export: false,
+            is_import: false,
+            origin: Some("scan".to_string()),
+            kind: Some("code".to_string()),
+            source_section: None,
+            external_library: None,
+            is_thunk_like: false,
+            thunk_target: None,
+        };
+        let mut loaded = fission_loader::loader::types::LoadedBinaryBuilder::new(
+            "test.bin".to_string(),
+            fission_loader::loader::types::DataBuffer::Heap(vec![0xc3; 32]),
+        )
+        .add_function(existing)
+        .add_global_symbol(0x1000, "sub_1000".to_string())
+        .build()
+        .expect("build binary");
+
+        let mut project = Project::for_binary(&loaded);
+        project.names.insert(0x1000, "renamed_existing".to_string());
+        project.names.insert(0x2000, "synthesized_fn".to_string());
+
+        let report = project.apply(&mut loaded).expect("apply project");
+        assert_eq!(report.names_applied, 2);
+
+        let inner = loaded.inner();
+        assert_eq!(
+            inner.global_symbols.get(&0x1000).map(String::as_str),
+            Some("renamed_existing")
+        );
+        assert_eq!(
+            inner.global_symbols.get(&0x2000).map(String::as_str),
+            Some("synthesized_fn")
+        );
+        let synth_idx = inner
+            .function_addr_index
+            .get(&0x2000)
+            .copied()
+            .expect("synthesized function indexed");
+        assert_eq!(inner.functions[synth_idx].name, "synthesized_fn");
     }
 }
