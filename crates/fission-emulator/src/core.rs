@@ -476,12 +476,10 @@ impl Emulator {
             deadline: None,
         };
 
-        // Default SP if no ELF image_info applied yet (Windows / bare-metal).
-        let sp_init = if emu.arch.pointer_size == 8 {
-            0x0000_7FFF_FFFF_F000u64
-        } else {
-            0x7FFF_E000u64
-        };
+        // Default SP if no OS image applies one (bare metal): the top of the
+        // stack `loader::map_binary_to_state` maps, which is also where the OS
+        // images put theirs.
+        let sp_init = crate::loader::default_stack_top(emu.arch.pointer_size == 8);
         let _ = emu.write_register_u64(emu.arch.sp_reg, sp_init);
 
         if emu.arch.name.starts_with("AARCH64") {

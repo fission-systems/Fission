@@ -329,6 +329,12 @@ impl SimProcedure for SysMmap {
         let map_fixed = flags & 0x10 != 0; // MAP_FIXED
         let map_anon = flags & 0x20 != 0; // MAP_ANONYMOUS
 
+        if length == 0 {
+            // Linux: "EINVAL (since Linux 2.6.12) length was 0." This took it
+            // as one byte and mapped a page.
+            emu.set_syscall_return((-22i64) as u64)?;
+            return Ok(HleResult::Continue);
+        }
         let base = emu
             .state
             .page_map

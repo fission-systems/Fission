@@ -154,10 +154,14 @@ impl SimProcedure for Mmap {
         let map_fixed = flags & 0x10 != 0;
         let map_anon = flags & 0x20 != 0;
 
-        let base = emu
-            .state
-            .page_map
-            .mmap_with_hint(addr, length, page_prot, map_fixed);
+        // An empty length is EINVAL, which libc reports as MAP_FAILED.
+        let base = if length == 0 {
+            0
+        } else {
+            emu.state
+                .page_map
+                .mmap_with_hint(addr, length, page_prot, map_fixed)
+        };
         if base == 0 {
             // No free hole: libc's mmap returns MAP_FAILED.
             tracing::warn!("SimProcedure: mmap(len={length}) -> MAP_FAILED");

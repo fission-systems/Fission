@@ -794,6 +794,39 @@ mod tests {
 
     const THREAD_FLAGS: u64 = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
 
+    /// `mmap` of zero bytes is `EINVAL`, and of more than the address space
+    /// holds `ENOMEM`. The first was taken as one byte and mapped.
+    #[test]
+    fn mmap_rejects_an_empty_or_impossible_length() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, 0, 3, MAP_PRIVATE_ANONYMOUS, u64::MAX, 0],
+        );
+        assert_eq!(read_syscall_result(&mut emu), -EINVAL);
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, u64::MAX - 0x100, 3, MAP_PRIVATE_ANONYMOUS, u64::MAX, 0],
+        );
+        assert_eq!(read_syscall_result(&mut emu), -12, "ENOMEM");
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, 0x2000, 3, MAP_PRIVATE_ANONYMOUS, u64::MAX, 0],
+        );
+        assert!(
+            read_syscall_result(&mut emu) > 0,
+            "an ordinary mapping still works"
+        );
+    }
+
     #[test]
     fn futex_wait_mismatch_and_unsupported_commands_return_errors() {
         let env = LinuxEnv::new();
