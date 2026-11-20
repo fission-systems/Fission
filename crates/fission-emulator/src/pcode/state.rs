@@ -468,7 +468,7 @@ impl MachineState {
 
             // When writing concrete bytes, clear their shadow memory taint.
             for i in 0..data.len() {
-                let curr_addr = addr + i as u64;
+                let curr_addr = addr.wrapping_add(i as u64);
                 let old_node = space.clear_shadow(curr_addr);
                 if self.tracing_memory && old_node.is_some() {
                     self.trace_shadow_writes

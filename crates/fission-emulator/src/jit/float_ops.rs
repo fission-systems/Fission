@@ -136,8 +136,8 @@ fn mask_int(val: u64, size: u32) -> u64 {
     }
 }
 
-fn sign_extend_u64(val: u64, size: u32) -> i64 {
-    if size >= 8 {
+pub(crate) fn sign_extend_u64(val: u64, size: u32) -> i64 {
+    if size >= 8 || size == 0 {
         return val as i64;
     }
     let bits = (size * 8) as i32;
