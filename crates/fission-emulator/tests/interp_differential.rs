@@ -95,7 +95,7 @@ fn build_from(fixture: &str, max_inst: u64, interpret: bool) -> Emulator {
 /// 32-bit fixture in the crate, and this shape needs a real CRT to exercise.
 fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/control_flow_gcc-m32_O0.exe");
+        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-m32_O0.exe");
     if !path.is_file() {
         return None;
     }

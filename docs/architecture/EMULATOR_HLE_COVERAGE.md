@@ -68,3 +68,39 @@ across the 148 runs.
 The sorted candidate paths and their file SHA-256 digests produce inventory
 SHA-256 `ad66b140a457b7e2e788e45fc5be931fdf78891d3a5ff87f3c17584a6ad53acc`
 when each record is encoded as `relative-path NUL file-digest LF`.
+
+## Measured snapshot (2026-11-20)
+
+The dev corpus binaries are not in any repository -- only their sources and
+manifests are -- and the benchmark checkout no longer carries the builder.
+They were rebuilt from benchmark commit
+`70e4c6348db412bcde31d17ae5f1854829d1db09` with its own `corpus-builder` image:
+
+```sh
+git -C ~/fission-benchmark archive 70e4c6348db412bcde31d17ae5f1854829d1db09 | tar -x -C <dir>
+cd <dir>
+CORPUS_TARGET=windows-x86_64 docker compose --profile tools run --rm \
+  corpus-builder python3 scripts/build_matrix.py --split dev --languages c,cpp,rust,go
+```
+
+Run only the `windows-x86_64` target: a `host` pass rebuilds the gcc C
+variants as ELF under their `.exe` names before it stops on the missing
+`gcc-m32` tool, and the sweep picks the guest OS by extension.
+
+That produced 96 binaries, not 148, so the two snapshots are not the same
+denominator. On `main` (`6b36af408`) 91 of 96 exited, but exiting is not
+running correctly. Each C program's exit code was compared with the same
+source compiled and run natively: 68 of the 76 C builds agreed. The JIT
+reused stale four-byte views of a sixteen-byte temporary (the second
+`movaps` in a block stored the first one's value), which gave
+`crypto` (clang `-O2`) and `memory_layouts` (gcc `-m32`, twice) a wrong
+result. The two Go binaries were counted as exits but were the Go runtime
+aborting before `main`.
+
+After the fixes in this change: 96 of 96 exit, all 76 C builds agree with
+the native run, and 76 binaries have no syscall or API miss. The Go
+binaries get past five start-up stops (system directory, `KUSER_SHARED_DATA`,
+the environment block, `DuplicateHandle`, a zero `nanotime`) and now stop
+at `CreateEventA`; past that the runtime waits on threads it started, which
+the Windows layer does not run. The only unhandled Linux calls are still
+AArch64 `set_robust_list` and `rseq`.
