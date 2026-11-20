@@ -1018,17 +1018,55 @@ impl JitCompiler {
         // pending exit-flush of one that the write fully covers; left alone the
         // flush would put the old value back over the new one. Drop them so the
         // next read re-seeds from the backing store.
+        //
+        // That includes unique space. A temporary is not written through on an
+        // ordinary store, but a bulk write *does* reach `MachineState`, so
+        // re-seeding a view of the bytes it covered reads the new value. A view
+        // that also covers bytes outside the write was flushed first (see
+        // `flush_unique_views!`), so dropping it loses nothing. Keeping them
+        // was wrong: `movaps xmm0, [m]` lifts to a sixteen-byte `Copy` into a
+        // temporary read back four bytes at a time, and the second `movaps` in
+        // a block got the first one's lanes.
         macro_rules! drop_stale_views {
             ($out:expr) => {{
                 let out: &Varnode = $out;
-                if out.space_id != unique_space {
-                    let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
-                    var_map.retain(|key, _| {
-                        key.0 != out.space_id || key.1 >= whi || key.1 + key.2 <= wlo
-                    });
-                    dirty.retain(|(sp, off, sz, _)| {
-                        !(*sp == out.space_id && *off >= wlo && *off + u64::from(*sz) <= whi)
-                    });
+                let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
+                var_map
+                    .retain(|key, _| key.0 != out.space_id || key.1 >= whi || key.1 + key.2 <= wlo);
+                dirty.retain(|(sp, off, sz, _)| {
+                    !(*sp == out.space_id && *off >= wlo && *off + u64::from(*sz) <= whi)
+                });
+            }};
+        }
+
+        // A unique temporary written earlier in this block exists only in a
+        // Cranelift variable -- unique space is never written through (see
+        // `store_vn!`). Anything that reaches it through `MachineState` instead
+        // -- a bulk read, the evaluator behind a wide op -- has to have it
+        // written there first, or it reads bytes nothing wrote. Flushes every
+        // cached view overlapping `vn`; registers need none, because their
+        // stores already reach the mirror.
+        macro_rules! flush_unique_views {
+            ($vn:expr) => {{
+                let vn: &Varnode = $vn;
+                if unique_space != 0 && !vn.is_constant && vn.space_id == unique_space {
+                    let (lo, hi) = (vn.offset, vn.offset + u64::from(vn.size));
+                    let mut flush: Vec<((u64, u64, u64), Variable)> = var_map
+                        .iter()
+                        .filter(|(k, _)| k.0 == unique_space && k.1 < hi && k.1 + k.2 > lo)
+                        .map(|(k, v)| (*k, *v))
+                        .collect();
+                    // `HashMap` order must not decide which view lands last.
+                    flush.sort_by_key(|(k, _)| *k);
+                    for ((space, offset, size), var) in flush {
+                        let val = builder.use_var(var);
+                        let sp = builder.ins().iconst(types::I64, space as i64);
+                        let off = builder.ins().iconst(types::I64, offset as i64);
+                        let sz = builder.ins().iconst(types::I64, size.min(8) as i64);
+                        builder
+                            .ins()
+                            .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                    }
                 }
             }};
         }
@@ -1113,41 +1151,12 @@ impl JitCompiler {
             {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());
-                // The evaluator reads its inputs from `MachineState`, and a
-                // unique temporary written earlier in this block exists only
-                // in a Cranelift variable -- unique space is never written
-                // through (see `store_vn!`). `x86-64 div qword ptr [m]` loads
-                // the operand into a temporary and widens it; without this
-                // the 128-bit op read zero. Flush every cached view that
-                // overlaps a unique input. (Registers need no flush: their
-                // stores already reach the mirror.)
-                if unique_space != 0 {
-                    let mut flush: Vec<((u64, u64, u64), Variable)> = Vec::new();
-                    for input in op
-                        .inputs
-                        .iter()
-                        .filter(|v| !v.is_constant && v.space_id == unique_space)
-                    {
-                        let (lo, hi) = (input.offset, input.offset + u64::from(input.size));
-                        flush.extend(
-                            var_map
-                                .iter()
-                                .filter(|(k, _)| k.0 == unique_space && k.1 < hi && k.1 + k.2 > lo)
-                                .map(|(k, v)| (*k, *v)),
-                        );
-                    }
-                    // `HashMap` order must not decide which view lands last.
-                    flush.sort_by_key(|(k, _)| *k);
-                    flush.dedup_by_key(|(k, _)| *k);
-                    for ((space, offset, size), var) in flush {
-                        let val = builder.use_var(var);
-                        let sp = builder.ins().iconst(types::I64, space as i64);
-                        let off = builder.ins().iconst(types::I64, offset as i64);
-                        let sz = builder.ins().iconst(types::I64, size.min(8) as i64);
-                        builder
-                            .ins()
-                            .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
-                    }
+                // The evaluator reads its inputs from `MachineState`.
+                // `x86-64 div qword ptr [m]` loads the operand into a
+                // temporary and widens it; without the flush the 128-bit op
+                // read zero.
+                for input in &op.inputs {
+                    flush_unique_views!(input);
                 }
                 let idx_val = builder.ins().iconst(types::I64, index);
                 let call = builder.ins().call(wide_op_ref, &[emu_ptr, idx_val]);
@@ -1250,6 +1259,10 @@ impl JitCompiler {
                                 }
                                 let sp = builder.ins().iconst(types::I64, src.space_id as i64);
                                 let off = builder.ins().iconst(types::I64, src.offset as i64);
+                                // The read below and the write after it both
+                                // go through `MachineState`.
+                                flush_unique_views!(src);
+                                flush_unique_views!(out);
                                 // For constants, write bytes manually; for vars, read_bytes.
                                 if src.is_constant {
                                     // The constant's low eight bytes; the rest
@@ -1310,6 +1323,7 @@ impl JitCompiler {
                             let space_id = space_const(&op.inputs[0]);
                             let addr = load_vn!(&op.inputs[1]);
                             if out.size > 8 {
+                                flush_unique_views!(out);
                                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                     StackSlotKind::ExplicitSlot,
                                     out.size,
@@ -1388,6 +1402,7 @@ impl JitCompiler {
                             ));
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                             if !val_vn.is_constant {
+                                flush_unique_views!(val_vn);
                                 let sp = builder.ins().iconst(types::I64, val_vn.space_id as i64);
                                 let off = builder.ins().iconst(types::I64, val_vn.offset as i64);
                                 let sz = builder.ins().iconst(types::I64, val_vn.size as i64);
@@ -3296,6 +3311,63 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 0x100) & 0xffff_ffff, 0x7777);
     }
+    /// x86 `movaps xmm0, [m]` twice in one block. Each lifts to a sixteen-byte
+    /// `Copy` into a temporary, read back four bytes at a time. The first
+    /// read caches the four-byte views; the second bulk write has to replace
+    /// them, or the second `movaps` hands back the first one's value.
+    #[test]
+    fn a_bulk_write_to_a_temporary_replaces_its_narrower_cached_views() {
+        let wide = |out: Varnode, input: Varnode, seq: u32| PcodeOp {
+            seq_num: seq,
+            opcode: PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(out),
+            inputs: vec![input],
+            asm_mnemonic: None,
+        };
+        let ops = vec![
+            copy_const(0x80, 0x1111, 8),
+            copy_const(0x88, 0x2222, 8),
+            copy_const(0xa0, 0x3333, 8),
+            copy_const(0xa8, 0x4444, 8),
+            wide(unique(0x100, 16), reg(0x80, 16), 4),
+            copy(reg(0x40, 4), unique(0x100, 4), 5),
+            copy(reg(0x44, 4), unique(0x108, 4), 6),
+            wide(unique(0x100, 16), reg(0xa0, 16), 7),
+            copy(reg(0x50, 4), unique(0x100, 4), 8),
+            copy(reg(0x54, 4), unique(0x108, 4), 9),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x40), 0x2222_0000_1111, "first write");
+        assert_eq!(
+            read_reg(&mut emu, 0x50),
+            0x4444_0000_3333,
+            "the second bulk write, not the cached first one"
+        );
+    }
+
+    /// The other direction: a temporary written in pieces lives only in the
+    /// block's variables, and a sixteen-byte `Copy` or `Store` of it reads
+    /// `MachineState`. It has to see the pieces.
+    #[test]
+    fn a_bulk_read_of_a_temporary_sees_its_pieces_written_earlier_in_the_block() {
+        let ops = vec![
+            copy(unique(0x200, 8), imm(0x5555, 8), 0),
+            copy(unique(0x208, 8), imm(0x6666, 8), 1),
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(reg(0x40, 16)),
+                inputs: vec![unique(0x200, 16)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x40), 0x5555);
+        assert_eq!(read_reg(&mut emu, 0x48), 0x6666);
+    }
+
     /// `COPY` of a 16-byte constant (the zeroing of a vector register's upper
     /// half lifts to one) filled the stack buffer with its low eight bytes and
     /// copied the other eight out uninitialised. The interpreter widens a
