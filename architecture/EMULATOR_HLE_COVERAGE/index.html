@@ -1272,6 +1272,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#measured-snapshot-2026-11-20" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measured snapshot (2026-11-20)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1348,6 +1359,35 @@ across the 148 runs.</p>
 <p>The sorted candidate paths and their file SHA-256 digests produce inventory
 SHA-256 <code>ad66b140a457b7e2e788e45fc5be931fdf78891d3a5ff87f3c17584a6ad53acc</code>
 when each record is encoded as <code>relative-path NUL file-digest LF</code>.</p>
+<h2 id="measured-snapshot-2026-11-20">Measured snapshot (2026-11-20)<a class="headerlink" href="#measured-snapshot-2026-11-20" title="Permanent link">&para;</a></h2>
+<p>The dev corpus binaries are not in any repository -- only their sources and
+manifests are -- and the benchmark checkout no longer carries the builder.
+They were rebuilt from benchmark commit
+<code>70e4c6348db412bcde31d17ae5f1854829d1db09</code> with its own <code>corpus-builder</code> image:</p>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>-C<span class="w"> </span>~/fission-benchmark<span class="w"> </span>archive<span class="w"> </span>70e4c6348db412bcde31d17ae5f1854829d1db09<span class="w"> </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>-x<span class="w"> </span>-C<span class="w"> </span>&lt;dir&gt;
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nb">cd</span><span class="w"> </span>&lt;dir&gt;
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">CORPUS_TARGET</span><span class="o">=</span>windows-x86_64<span class="w"> </span>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>tools<span class="w"> </span>run<span class="w"> </span>--rm<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span>corpus-builder<span class="w"> </span>python3<span class="w"> </span>scripts/build_matrix.py<span class="w"> </span>--split<span class="w"> </span>dev<span class="w"> </span>--languages<span class="w"> </span>c,cpp,rust,go
+</span></code></pre></div>
+<p>Run only the <code>windows-x86_64</code> target: a <code>host</code> pass rebuilds the gcc C
+variants as ELF under their <code>.exe</code> names before it stops on the missing
+<code>gcc-m32</code> tool, and the sweep picks the guest OS by extension.</p>
+<p>That produced 96 binaries, not 148, so the two snapshots are not the same
+denominator. On <code>main</code> (<code>6b36af408</code>) 91 of 96 exited, but exiting is not
+running correctly. Each C program's exit code was compared with the same
+source compiled and run natively: 68 of the 76 C builds agreed. The JIT
+reused stale four-byte views of a sixteen-byte temporary (the second
+<code>movaps</code> in a block stored the first one's value), which gave
+<code>crypto</code> (clang <code>-O2</code>) and <code>memory_layouts</code> (gcc <code>-m32</code>, twice) a wrong
+result. The two Go binaries were counted as exits but were the Go runtime
+aborting before <code>main</code>.</p>
+<p>After the fixes in this change: 96 of 96 exit, all 76 C builds agree with
+the native run, and 76 binaries have no syscall or API miss. The Go
+binaries get past five start-up stops (system directory, <code>KUSER_SHARED_DATA</code>,
+the environment block, <code>DuplicateHandle</code>, a zero <code>nanotime</code>) and now stop
+at <code>CreateEventA</code>; past that the runtime waits on threads it started, which
+the Windows layer does not run. The only unhandled Linux calls are still
+AArch64 <code>set_robust_list</code> and <code>rseq</code>.</p>
 
 
 
