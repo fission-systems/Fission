@@ -1008,6 +1008,77 @@ impl JitCompiler {
                                 || offset + size <= wlo
                         });
                     }
+
+                    // A temporary has no backing store to re-seed from, so its
+                    // other cached views are brought up to date rather than
+                    // dropped wholesale. SLEIGH reuses a temporary's offset
+                    // across the instructions of a block at different widths;
+                    // left alone, a narrower view written earlier answered a
+                    // later read with the old bytes.
+                    //
+                    // - A view inside the write: dropped. A later read derives
+                    //   it from this one (`ensure_var!`).
+                    // - A view the write lands inside: the written bytes are
+                    //   spliced into it.
+                    // - A view that straddles the edge: written through to
+                    //   `MachineState`, this value over it, and dropped, so a
+                    //   later read of it re-seeds the merged bytes. Not seen in
+                    //   practice; it is here so that shape is right too.
+                    if unique_space != 0 && vn.space_id == unique_space {
+                        let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
+                        let written = (vn.space_id, vn.offset, rsz as u64);
+                        let mut views: Vec<((u64, u64, u64), Variable)> = var_map
+                            .iter()
+                            .filter(|(k, _)| {
+                                **k != written && k.0 == vn.space_id && k.1 < whi && k.1 + k.2 > wlo
+                            })
+                            .map(|(k, v)| (*k, *v))
+                            .collect();
+                        // `HashMap` order must not decide anything here.
+                        views.sort_by_key(|(k, _)| *k);
+                        let mut straddled = false;
+                        for (key, var) in views {
+                            let (_, offset, size) = key;
+                            if offset >= wlo && offset + size <= whi {
+                                var_map.remove(&key);
+                            } else if offset <= wlo && offset + size >= whi {
+                                let shift = (wlo - offset) * 8;
+                                let bits = u64::from(rsz) * 8;
+                                let field = if bits >= 64 {
+                                    u64::MAX
+                                } else {
+                                    ((1u64 << bits) - 1) << shift
+                                };
+                                let old = builder.use_var(var);
+                                let kept = builder.ins().band_imm(old, !field as i64);
+                                let placed = if shift > 0 {
+                                    builder.ins().ishl_imm(val, shift as i64)
+                                } else {
+                                    val
+                                };
+                                let merged = builder.ins().bor(kept, placed);
+                                builder.def_var(var, merged);
+                            } else {
+                                let old = builder.use_var(var);
+                                let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                                let off = builder.ins().iconst(types::I64, offset as i64);
+                                let sz = builder.ins().iconst(types::I64, size as i64);
+                                builder
+                                    .ins()
+                                    .call(write_space_ref, &[emu_ptr, sp, off, sz, old]);
+                                var_map.remove(&key);
+                                straddled = true;
+                            }
+                        }
+                        if straddled {
+                            let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                            let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                            let sz = builder.ins().iconst(types::I64, rsz as i64);
+                            builder
+                                .ins()
+                                .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                        }
+                    }
                 }
             }};
         }
@@ -1395,13 +1466,25 @@ impl JitCompiler {
                         let addr = load_vn!(&op.inputs[1]);
                         let val_vn = &op.inputs[2];
                         if val_vn.size > 8 {
+                            // Whole words, so a constant can be zero-extended
+                            // into it: the buffer is host stack, and copying
+                            // it unfilled put host memory into the guest.
+                            let words = (val_vn.size as usize).div_ceil(8);
                             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                 StackSlotKind::ExplicitSlot,
-                                val_vn.size,
+                                (words * 8) as u32,
                                 0,
                             ));
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
-                            if !val_vn.is_constant {
+                            if val_vn.is_constant {
+                                let zero = builder.ins().iconst(types::I64, 0);
+                                for word in 1..words {
+                                    builder.ins().stack_store(zero, slot, (word * 8) as i32);
+                                }
+                                let c =
+                                    builder.ins().iconst(types::I64, val_vn.constant_val as i64);
+                                builder.ins().stack_store(c, slot, 0);
+                            } else {
                                 flush_unique_views!(val_vn);
                                 let sp = builder.ins().iconst(types::I64, val_vn.space_id as i64);
                                 let off = builder.ins().iconst(types::I64, val_vn.offset as i64);
@@ -1741,7 +1824,10 @@ impl JitCompiler {
                 PcodeOpcode::BoolNegate => {
                     if let Some(out) = op.output.as_ref() {
                         let a = load_vn!(&op.inputs[0]);
-                        store_vn!(out, builder.ins().bxor_imm(a, 1));
+                        // `a == 0`, as the interpreter has it: `a ^ 1` agrees
+                        // only on 0 and 1, and left 2 true.
+                        let zero = builder.ins().icmp_imm(IntCC::Equal, a, 0);
+                        store_vn!(out, builder.ins().uextend(types::I64, zero));
                         emit_shadow_unop!(out, &op.inputs[0], a, SymUnOpKind::BoolNot as u32);
                     }
                 }
@@ -1829,7 +1915,11 @@ impl JitCompiler {
                         } else {
                             0
                         };
-                        let shifted = if shift_bytes > 0 {
+                        // Cranelift takes a shift amount modulo 64; a shift
+                        // past the whole value is zero, as the interpreter has it.
+                        let shifted = if shift_bytes >= 8 {
+                            builder.ins().iconst(types::I64, 0)
+                        } else if shift_bytes > 0 {
                             builder.ins().ushr_imm(val, shift_bytes * 8)
                         } else {
                             val
@@ -1878,9 +1968,18 @@ impl JitCompiler {
                         } else {
                             0
                         };
+                        // A shift of 64 or more is zero, not modulo 64.
                         let shifted = if op.inputs.len() > 1 && !op.inputs[1].is_constant {
                             let off = load_vn!(&op.inputs[1]);
-                            builder.ins().ushr(val, off)
+                            let shifted = builder.ins().ushr(val, off);
+                            let past =
+                                builder
+                                    .ins()
+                                    .icmp_imm(IntCC::UnsignedGreaterThanOrEqual, off, 64);
+                            let zero = builder.ins().iconst(types::I64, 0);
+                            builder.ins().select(past, zero, shifted)
+                        } else if offset_bits >= 64 {
+                            builder.ins().iconst(types::I64, 0)
                         } else if offset_bits > 0 {
                             builder.ins().ushr_imm(val, offset_bits)
                         } else {
@@ -3311,6 +3410,157 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 0x100) & 0xffff_ffff, 0x7777);
     }
+    /// SLEIGH reuses a temporary's offset across the instructions of a block
+    /// at different widths. A wider write has to replace a narrower view of
+    /// the same bytes cached earlier, and a narrower write has to update the
+    /// wider view it lands inside -- or a later read gets the old bytes.
+    #[test]
+    fn a_write_to_a_temporary_updates_its_other_cached_views() {
+        let ops = vec![
+            // Narrow, then wider over it.
+            copy(uniq(0x100, 4), imm(0x1111_1111, 4), 0),
+            copy(reg(0x40, 4), uniq(0x100, 4), 1),
+            copy(uniq(0x100, 8), imm(0x2222_2222_3333_3333, 8), 2),
+            copy(reg(0x48, 4), uniq(0x100, 4), 3),
+            copy(reg(0x50, 4), uniq(0x104, 4), 4),
+            // Wide, then narrower inside it.
+            copy(uniq(0x200, 8), imm(0xAAAA_AAAA_BBBB_BBBBu64 as i64, 8), 5),
+            copy(reg(0x58, 8), uniq(0x200, 8), 6),
+            copy(uniq(0x204, 2), imm(0xCCCC, 2), 7),
+            copy(reg(0x60, 8), uniq(0x200, 8), 8),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x48) & 0xFFFF_FFFF, 0x3333_3333);
+        assert_eq!(read_reg(&mut emu, 0x50) & 0xFFFF_FFFF, 0x2222_2222);
+        assert_eq!(read_reg(&mut emu, 0x60), 0xAAAA_CCCC_BBBB_BBBB);
+    }
+
+    /// The rare shape: a write that straddles the edge of a cached view. The
+    /// view's bytes outside the write keep their value, the ones inside take
+    /// the new one.
+    #[test]
+    fn a_write_straddling_a_cached_view_of_a_temporary_merges_into_it() {
+        let ops = vec![
+            copy(uniq(0x300, 4), imm(0x4444_3333, 4), 0),
+            copy(reg(0x40, 4), uniq(0x300, 4), 1),
+            copy(uniq(0x302, 4), imm(0x6666_5555, 4), 2),
+            copy(reg(0x48, 4), uniq(0x300, 4), 3),
+            copy(reg(0x50, 4), uniq(0x302, 4), 4),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x48) & 0xFFFF_FFFF, 0x5555_3333);
+        assert_eq!(read_reg(&mut emu, 0x50) & 0xFFFF_FFFF, 0x6666_5555);
+    }
+
+    /// `BOOL_NEGATE` of a non-zero value is zero. The JIT computed `a ^ 1`,
+    /// which agrees with the interpreter's `a == 0` only for 0 and 1.
+    #[test]
+    fn bool_negate_of_any_nonzero_value_is_zero() {
+        let ops = vec![
+            copy_const(0x00, 2, 1),
+            unop_sized(PcodeOpcode::BoolNegate, 0x08, 1, 0x00, 1),
+            copy_const(0x10, 0, 1),
+            unop_sized(PcodeOpcode::BoolNegate, 0x18, 1, 0x10, 1),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x08) & 0xFF, 0);
+        assert_eq!(read_reg(&mut emu, 0x18) & 0xFF, 1);
+    }
+
+    /// A shift by the whole width or more is zero, as the interpreter has it.
+    /// Cranelift takes a shift amount modulo 64, so `SUBPIECE x, 8` and
+    /// `EXTRACT` at bit 64 handed back `x` itself.
+    #[test]
+    fn subpiece_and_extract_past_the_input_are_zero() {
+        let ops = vec![
+            copy_const(0x00, 0x1122_3344_5566_7788, 8),
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::SubPiece,
+                address: 0x1000,
+                output: Some(reg(0x08, 1)),
+                inputs: vec![reg(0x00, 8), imm(8, 4)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Extract,
+                address: 0x1000,
+                output: Some(reg(0x10, 8)),
+                inputs: vec![reg(0x00, 8), imm(64, 4)],
+                asm_mnemonic: None,
+            },
+            copy_const(0x20, 64, 8),
+            PcodeOp {
+                seq_num: 4,
+                opcode: PcodeOpcode::Extract,
+                address: 0x1000,
+                output: Some(reg(0x18, 8)),
+                inputs: vec![reg(0x00, 8), reg(0x20, 8)],
+                asm_mnemonic: None,
+            },
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x08) & 0xFF, 0, "SUBPIECE by 8 bytes");
+        assert_eq!(read_reg(&mut emu, 0x10), 0, "EXTRACT at bit 64");
+        assert_eq!(read_reg(&mut emu, 0x18), 0, "EXTRACT at a run-time 64");
+    }
+
+    /// `STORE` of a constant wider than eight bytes. The stack buffer was
+    /// filled only for a non-constant value, so the store copied whatever the
+    /// host stack held into guest memory.
+    #[test]
+    fn a_wide_constant_store_writes_the_constant_zero_extended() {
+        for round in 0..8i64 {
+            let mut emu = make_emu();
+            let ram = emu.state.ram_space();
+            let target = emu.read_register_u64("RSP").expect("rsp") - 0x200;
+            emu.state
+                .write_space(ram, target, &[0x5A; 16])
+                .expect("seed");
+            let ops = vec![
+                // Leave something non-zero on the host stack first.
+                copy_const(0x48, -1, 8),
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(reg(0x80, 16)),
+                    inputs: vec![reg(0x40, 16)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Store,
+                    address: 0x1000,
+                    output: None,
+                    inputs: vec![
+                        imm(ram as i64, 8),
+                        imm(target as i64, 8),
+                        imm(0x1234 + round, 16),
+                    ],
+                    asm_mnemonic: None,
+                },
+            ];
+            let insns = [GuestInsn {
+                pc: 0x1000,
+                len: 4,
+                ops,
+            }];
+            let mut compiler = JitCompiler::new().expect("cranelift backend available");
+            let func_ptr = compiler
+                .compile_translation_block(&insns, 4, 2, false, &mut Vec::new())
+                .expect("compile");
+            let f: extern "C" fn(*mut crate::core::Emulator) -> u64 =
+                unsafe { std::mem::transmute(func_ptr) };
+            assert_eq!(f(&mut emu as *mut _), 0x1004);
+            let stored = emu.state.read_space(ram, target, 16).expect("read");
+            let mut want = [0u8; 16];
+            want[..8].copy_from_slice(&(0x1234 + round).to_le_bytes());
+            assert_eq!(stored, want, "round {round}");
+        }
+    }
+
     /// x86 `movaps xmm0, [m]` twice in one block. Each lifts to a sixteen-byte
     /// `Copy` into a temporary, read back four bytes at a time. The first
     /// read caches the four-byte views; the second bulk write has to replace
