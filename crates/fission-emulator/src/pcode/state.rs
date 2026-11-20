@@ -205,6 +205,16 @@ pub struct MemoryAccess {
 
 pub type MemoryAccessHook = std::sync::Arc<dyn Fn(&MemoryAccess) + Send + Sync>;
 
+/// The contents of RAM nobody mapped, byte by byte.
+///
+/// A harness that runs code against an initial state it defines everywhere
+/// -- every byte a pure function of the address -- installs one. An access to
+/// an unmapped page then maps it readable and writable, filled from this,
+/// rather than faulting. Two evaluators given the same function read the
+/// same bytes at every address without either knowing which values are
+/// pointers.
+pub type LazyMemory = std::sync::Arc<dyn Fn(u64) -> u8 + Send + Sync>;
+
 /// Holds the complete state of the emulated machine.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct MachineState {
@@ -223,6 +233,11 @@ pub struct MachineState {
 
     #[serde(skip)]
     pub hooks: Vec<MemoryAccessHook>,
+
+    /// What unmapped RAM holds. `None` (the default) leaves an access to an
+    /// unmapped page a fault. See [`LazyMemory`].
+    #[serde(skip)]
+    pub lazy_memory: Option<LazyMemory>,
 
     #[serde(skip)]
     pub tracing_memory: bool,
@@ -298,6 +313,7 @@ impl MachineState {
             spaces_layout: layout,
             enforce_page_faults: false,
             hooks: Vec::new(),
+            lazy_memory: None,
             tracing_memory: false,
             trace_mem_reads: Vec::new(),
             trace_mem_writes: Vec::new(),
@@ -397,9 +413,16 @@ impl MachineState {
         }
         if self.enforce_page_faults && space_id == self.spaces_layout.ram {
             use crate::pcode::page_map::AccessKind;
-            self.page_map
+            if self
+                .page_map
                 .check_range(addr, size, AccessKind::Read)
-                .map_err(|e| anyhow::anyhow!(e))?;
+                .is_err()
+            {
+                self.map_lazy_pages(addr, size);
+                self.page_map
+                    .check_range(addr, size, AccessKind::Read)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+            }
         }
         // One lookup, not `contains_key` then `get_mut`: `spaces` is a HAMT
         // too, so the pair hashed the space id twice on every access.
@@ -413,6 +436,37 @@ impl MachineState {
             self.trace_mem_reads.push((addr, buf.to_vec()));
         }
         Ok(())
+    }
+
+    /// Map every unmapped page `[addr, addr + size)` touches, filled from
+    /// [`Self::lazy_memory`]. A page already mapped is left as it is --
+    /// including its protection, so a write to read-only memory still
+    /// faults. The fill is the page's initial content, not an access: it is
+    /// neither traced nor observed.
+    fn map_lazy_pages(&mut self, addr: u64, size: usize) {
+        use crate::pcode::page_map::{PAGE_SIZE, page_align_down, prot};
+        let Some(fill) = self.lazy_memory.clone() else {
+            return;
+        };
+        let last = addr.wrapping_add(size.max(1) as u64 - 1);
+        let mut page = page_align_down(addr);
+        loop {
+            if !self.page_map.is_mapped(page) {
+                self.page_map
+                    .map_region(page, PAGE_SIZE, prot::READ | prot::WRITE, true);
+                let bytes: Vec<u8> = (0..PAGE_SIZE).map(|i| fill(page.wrapping_add(i))).collect();
+                let ram = self.spaces_layout.ram;
+                let space = self
+                    .spaces
+                    .entry(ram)
+                    .or_insert_with(|| AddressSpace::new(format!("space_{ram}")));
+                let _ = space.write(page, &bytes);
+            }
+            if page >= page_align_down(last) {
+                break;
+            }
+            page = page.wrapping_add(PAGE_SIZE);
+        }
     }
 
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -439,9 +493,16 @@ impl MachineState {
 
         if self.enforce_page_faults && space_id == self.spaces_layout.ram {
             use crate::pcode::page_map::AccessKind;
-            self.page_map
+            if self
+                .page_map
                 .check_range(addr, data.len(), AccessKind::Write)
-                .map_err(|e| anyhow::anyhow!(e))?;
+                .is_err()
+            {
+                self.map_lazy_pages(addr, data.len());
+                self.page_map
+                    .check_range(addr, data.len(), AccessKind::Write)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+            }
         }
 
         if self.tracing_memory && space_id == self.spaces_layout.ram {
@@ -519,6 +580,41 @@ impl MachineState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// With lazy memory installed, an unmapped page reads what the function
+    /// says, takes writes, and records neither its fill nor anything else as
+    /// an access; a mapped page keeps its contents and its protection.
+    #[test]
+    fn lazy_memory_fills_unmapped_pages_and_leaves_mapped_ones_alone() {
+        use crate::pcode::page_map::prot;
+        let mut state = MachineState::new();
+        state.enforce_page_faults = true;
+        state.tracing_memory = true;
+        let ram = state.ram_space();
+        state.page_map.map_region(0x1000, 0x1000, prot::READ, true);
+
+        // No provider: still a fault.
+        assert!(state.read_space(ram, 0x9000, 4).is_err());
+
+        state.lazy_memory = Some(std::sync::Arc::new(|addr| (addr as u8) ^ 0x5a));
+        let want: Vec<u8> = (0x9ffeu64..0xa002).map(|a| (a as u8) ^ 0x5a).collect();
+        assert_eq!(
+            state.read_space(ram, 0x9ffe, 4).unwrap(),
+            want,
+            "a read across two unmapped pages reads both fills"
+        );
+        assert!(state.trace_mem_writes.is_empty(), "the fill is not a write");
+
+        state.write_space(ram, 0x2_0004, &[1, 2]).unwrap();
+        assert_eq!(
+            state.read_space(ram, 0x2_0003, 4).unwrap(),
+            [0x03 ^ 0x5a, 1, 2, 0x06 ^ 0x5a]
+        );
+
+        // The read-only page mapped before keeps its zeros and refuses writes.
+        assert_eq!(state.read_space(ram, 0x1000, 2).unwrap(), [0, 0]);
+        assert!(state.write_space(ram, 0x1000, &[9]).is_err());
+    }
 
     #[test]
     fn test_hybrid_memory_model() {

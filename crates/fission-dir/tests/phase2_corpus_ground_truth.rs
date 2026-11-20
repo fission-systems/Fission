@@ -48,7 +48,7 @@
 //! is not a matter of a few more expression forms.
 
 use fission_dir::report::VerifyOutcome;
-use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};
+use fission_dir::{EmulatorHarness, RunPlan, check_ground_truth, decompile_one};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::path::PathBuf;
@@ -179,7 +179,7 @@ fn check_binary(
         if pair.hir.body.is_empty() || pair.hir.params.len() > MAX_ARITY {
             continue;
         }
-        let samples = default_samples(pair.hir.params.len());
+        let samples = RunPlan::default();
         match check_ground_truth(
             &mut harness,
             func.address,
