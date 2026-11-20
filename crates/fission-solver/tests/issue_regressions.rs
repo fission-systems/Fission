@@ -417,3 +417,31 @@ fn array_theory_enforces_read_over_write_and_congruence_in_solver() {
     ));
     assert_eq!(nested.check_sat().unwrap(), SatResult::Sat);
 }
+
+/// `eval` and `min` over a select that only the query mentions. With array
+/// axioms on, the select is no longer flagged unsupported, so it needs its
+/// own functional-consistency lemma: `select(a, i) == 5` and `i == j` leave
+/// `select(a, j)` exactly one value. The first model value was an arbitrary
+/// 0, which `eval` reported as a possible value and `min` could start from.
+#[test]
+fn eval_and_min_of_a_select_only_the_query_mentions_are_sound() {
+    let a = SymExpr::new_array_var("a", 8, 8);
+    let i = SymExpr::new_var("i", 8);
+    let j = SymExpr::new_var("j", 8);
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::new_eq(
+        array_select(a.clone(), i.clone()),
+        SymExpr::new_const(5, 8),
+    ));
+    solver.assert(SymExpr::new_eq(i, j.clone()));
+
+    let values = solver.eval(&array_select(a.clone(), j.clone()), 4);
+    assert!(
+        values.is_empty() || values == [5],
+        "select(a, j) can only be 5, got {values:?}"
+    );
+    let low = solver.min(&array_select(a.clone(), j.clone()));
+    assert!(low.is_none() || low == Some(5), "min: {low:?}");
+    let high = solver.max(&array_select(a, j));
+    assert!(high.is_none() || high == Some(5), "max: {high:?}");
+}

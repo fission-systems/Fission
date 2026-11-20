@@ -341,6 +341,13 @@ impl Solver {
         // after the path constraints would have no CNF-backed AIG nodes and
         // model evaluation would read the new gates as zero.
         self.bv_theory.aig.lower_expr(expr);
+        // And give its array reads their axioms. With array axioms on, the
+        // AIG no longer flags a select as unsupported, so a select that only
+        // the query mentions -- `select(a, j)` when the constraints talk
+        // about `select(a, i)` and `i == j` -- would otherwise be free bits,
+        // and the first model value an arbitrary one. The lemmas are axioms
+        // of the array, true in every query, so they stay asserted.
+        self.assert_array_lemmas_for(expr);
         let mut results = Vec::new();
         if !matches!(
             self.check_sat().unwrap_or(SatResult::Unknown),

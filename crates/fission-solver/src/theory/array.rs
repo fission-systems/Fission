@@ -7,6 +7,10 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub struct ArrayTheory {
     /// Maps an Array base expression to its Selects.
     parent_selects: HashMap<SymExpr, Vec<SymExpr>>,
+    /// Every select in `parent_selects`, in the order first seen. The map's
+    /// own iteration order is the hasher's, and the memory CEGAR loop walks
+    /// the selects to emit lemmas -- so models varied from run to run.
+    select_order: Vec<SymExpr>,
     /// Maps an Array base expression to its Stores.
     stores: HashMap<SymExpr, Vec<SymExpr>>,
     /// Select/Store terms already processed so repeated calls do not re-emit axioms.
@@ -38,6 +42,7 @@ impl ArrayTheory {
     pub fn new() -> Self {
         Self {
             parent_selects: HashMap::new(),
+            select_order: Vec::new(),
             stores: HashMap::new(),
             processed_terms: HashSet::new(),
             emitted_lemmas: HashSet::new(),
@@ -60,7 +65,7 @@ impl ArrayTheory {
     /// All unique `ArraySelect` terms observed (including intermediate selects
     /// synthesized while unwinding store chains).
     pub fn select_terms(&self) -> impl Iterator<Item = &SymExpr> {
-        self.parent_selects.values().flat_map(|v| v.iter())
+        self.select_order.iter()
     }
 
     /// Recursively register every `ArraySelect` and `ArrayStore` within `expr`
@@ -102,6 +107,7 @@ impl ArrayTheory {
                     let selects = self.parent_selects.entry(base.clone()).or_default();
                     if !selects.contains(&term) {
                         selects.push(term.clone());
+                        self.select_order.push(term.clone());
                     }
 
                     // Direct Read-over-Write unwinding when reading from an ArrayStore or Ite.
