@@ -94,6 +94,8 @@ pub struct NirDecompileOutput {
     /// builder gave it. A slot whose relation to the frame is not proven is
     /// absent.
     pub stack_slot_cfa_offsets: std::collections::BTreeMap<String, i64>,
+    /// The callees `code` calls with a declared, not recovered, prototype.
+    pub declared_callees: std::collections::BTreeSet<String>,
     pub recovered_variables: Option<Vec<crate::render::RecoveredVariable>>,
     pub build_stats: Option<PreviewBuildStats>,
     pub hint_stats: Option<PreviewHintStats>,
@@ -583,6 +585,7 @@ fn render_mlil_preview_with_binary_and_context_output(
             globals
         },
         stack_slot_cfa_offsets: builder.stack_slot_cfa_offsets(),
+        declared_callees: crate::render::printed_declared_callees(&printed_hir, options),
         printed_hir: Some(printed_hir),
         recovered_variables: Some(recovered_variables),
         build_stats: Some(build_stats),

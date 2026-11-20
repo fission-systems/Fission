@@ -60,6 +60,10 @@ enum Stream {
     Argument = 2,
     Register = 3,
     CallResult = 4,
+    /// What a stubbed call leaves in a register it may overwrite.
+    CallClobber = 5,
+    /// What a stubbed call writes to memory it may write.
+    CallMemory = 6,
 }
 
 const EDGES: [u64; 24] = [
@@ -142,7 +146,7 @@ impl InitialState {
         if let Some(&(values, calls, memory)) = UNIFORM.get(self.run as usize) {
             let pick = match stream {
                 Stream::Memory => memory,
-                Stream::CallResult => calls,
+                Stream::CallResult | Stream::CallClobber | Stream::CallMemory => calls,
                 Stream::Argument | Stream::Register => values,
             };
             if let Word(w) = pick {
@@ -182,6 +186,20 @@ impl InitialState {
     /// What the `n`th call (counting from zero) returns.
     pub fn call_result(&self, n: usize) -> u64 {
         self.word(Stream::CallResult, n as u64)
+    }
+
+    /// What the `n`th call leaves in the `index`th register it may overwrite.
+    pub fn call_clobber(&self, n: usize, index: usize) -> u64 {
+        self.word(Stream::CallClobber, ((n as u64) << 8) | index as u64)
+    }
+
+    /// The byte the `n`th call writes at `addr`, where it writes at all.
+    pub fn call_memory_byte(&self, n: usize, addr: u64) -> u8 {
+        let word = self.word(
+            Stream::CallMemory,
+            (addr / 8).wrapping_mul(0x9e37_79b9) ^ ((n as u64) << 48),
+        );
+        (word >> ((addr % 8) * 8)) as u8
     }
 
     /// The register- or stack-slot word that carries argument `index` of

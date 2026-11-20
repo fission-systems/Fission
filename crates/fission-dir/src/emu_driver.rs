@@ -136,7 +136,34 @@ impl fission_emulator::observe::Observer for CoverageLog {
 /// waits on a callee to make progress (`while (n) n -= read(..)`) never ends.
 /// Each call is a round trip out of compiled code; the instruction budget
 /// alone let such a loop run for minutes.
-pub const MAX_STUBBED_CALLS: usize = 4096;
+pub const MAX_STUBBED_CALLS: usize = 256;
+
+/// What a stand-in for each callee does: the same on both sides of a check,
+/// so a call has one effect whichever side makes it.
+pub struct CallStub<'a> {
+    /// The value the `n`th call returns.
+    pub result: &'a dyn Fn(usize) -> u64,
+    /// What the `n`th call leaves in the `index`th register the convention
+    /// lets a callee overwrite (`killed_by_call`). `None` leaves them alone.
+    pub clobber: Option<&'a dyn Fn(usize, usize) -> u64>,
+    /// The bytes the `n`th call, given these argument registers, writes.
+    pub writes: &'a dyn Fn(usize, &[u64]) -> Vec<(u64, u8)>,
+}
+
+impl<'a> CallStub<'a> {
+    /// A stub that returns `result(n)` and does nothing else.
+    pub fn returning(result: &'a dyn Fn(usize) -> u64) -> Self {
+        Self {
+            result,
+            clobber: None,
+            writes: &no_writes,
+        }
+    }
+}
+
+fn no_writes(_: usize, _: &[u64]) -> Vec<(u64, u8)> {
+    Vec::new()
+}
 
 /// How far below the entry stack pointer a function's own frame may reach.
 /// Writes there are its locals, which the decompiled body keeps in variables.
@@ -360,6 +387,11 @@ impl EmulatorHarness {
 
     /// Read one byte of the restored baseline: the program image as every
     /// call starts from it. `None` where nothing is mapped.
+    /// Whether the loaded image maps `addr`.
+    pub fn in_image(&self, addr: u64) -> bool {
+        self.baseline_byte(addr).is_some()
+    }
+
     pub fn baseline_byte(&self, addr: u64) -> Option<u8> {
         // The raw space read zero-fills a page nothing mapped, which would
         // let a tree's stray load agree with machine code that never made it.
@@ -388,8 +420,8 @@ impl EmulatorHarness {
     ///
     /// Stubbing is what lets the decompiled body be compared at all: both
     /// sides see the same return values without either having to model the
-    /// callee. What it costs is the callee's own effects -- an out-parameter
-    /// it would have written stays as it was, on both sides alike.
+    /// callee. This entry point stubs only the return value; see
+    /// [`CallStub`] for one that also overwrites what a callee may.
     pub fn call_stubbed(
         &mut self,
         address: u64,
@@ -398,7 +430,7 @@ impl EmulatorHarness {
         call_return: &dyn Fn(usize) -> u64,
     ) -> Result<StubbedRun> {
         self.prepare_call(address, args)?;
-        self.run_prepared(flow, call_return)
+        self.run_prepared(flow, &CallStub::returning(call_return))
     }
 
     /// Set up one run of `address` from `state`: the baseline image, with
@@ -488,7 +520,7 @@ impl EmulatorHarness {
     pub fn run_prepared(
         &mut self,
         flow: &crate::call_sites::MachineFlow,
-        call_return: &dyn Fn(usize) -> u64,
+        stub: &CallStub<'_>,
     ) -> Result<StubbedRun> {
         let sp_reg = self.emu.arch.sp_reg;
         let entry_sp = self.emu.read_register_u64(sp_reg)?;
@@ -504,6 +536,7 @@ impl EmulatorHarness {
         }
         let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
         let return_reg = self.emu.arch.cc.return_reg();
+        let killed: Vec<&'static str> = self.emu.arch.cc.killed_by_call().to_vec();
         let mut calls = Vec::new();
         let end = loop {
             // The emulator does not stop at a breakpoint on the PC it starts
@@ -521,15 +554,28 @@ impl EmulatorHarness {
                     .map(|reg| self.emu.read_register_u64(reg))
                     .collect::<Result<Vec<_>>>()?;
                 let n = calls.len();
+                let writes = (stub.writes)(n, &args);
                 calls.push(ObservedCall { site: pc, args });
+                if is_call && flow.calls[&pc].is_none() {
+                    break StubbedEnd::NoReturnCall(pc);
+                }
+                // What the callee may do: write the memory the stub says,
+                // leave anything in the registers a call kills, and return.
+                // Written straight into the state, these are not stores the
+                // function made.
+                let ram = self.emu.state.ram_space();
+                for (addr, byte) in writes {
+                    let _ = self.emu.state.write_space(ram, addr, &[byte]);
+                }
+                if let Some(clobber) = stub.clobber {
+                    for (index, reg) in killed.iter().enumerate() {
+                        let _ = self.emu.write_register_u64(reg, clobber(n, index));
+                    }
+                }
+                self.emu.write_register_u64(return_reg, (stub.result)(n))?;
                 if is_call {
-                    let Some(next) = flow.calls[&pc] else {
-                        break StubbedEnd::NoReturnCall(pc);
-                    };
-                    self.emu.write_register_u64(return_reg, call_return(n))?;
-                    self.emu.pc = next;
+                    self.emu.pc = flow.calls[&pc].expect("checked above");
                 } else {
-                    self.emu.write_register_u64(return_reg, call_return(n))?;
                     // Return to this function's caller, as the callee would.
                     self.emu.simulate_return_for("")?;
                 }

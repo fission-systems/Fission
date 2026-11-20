@@ -17,7 +17,7 @@ use fission_midend_prehir::PreHirFunction;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::call_sites::MachineFlow;
-use crate::emu_driver::{EmulatorHarness, ObservedCall, StubbedEnd};
+use crate::emu_driver::{CallStub, EmulatorHarness, ObservedCall, StubbedEnd};
 use crate::eval::{
     CallEvent, World, hir_addressed_locals, hir_free_names, hir_mentioned_names, normalize,
     prehir_addressed_locals, run_hir, run_prehir, width_of,
@@ -48,6 +48,14 @@ pub struct Grounding {
     /// as the decompiler placed it. A body that takes the address of a local
     /// missing here is refused.
     pub frame_offsets: BTreeMap<String, i64>,
+    /// The address ranges the loaded image covers.
+    pub image: Vec<std::ops::Range<u64>>,
+    /// Those of them a callee may write.
+    pub writable: Vec<std::ops::Range<u64>>,
+    /// Callees whose prototype the printed code declares rather than
+    /// recovered: an argument that differs at a call to one is a difference,
+    /// at any other a suspect.
+    pub declared_callees: BTreeSet<String>,
 }
 
 impl Grounding {
@@ -62,17 +70,30 @@ impl Grounding {
     pub fn for_function(
         binary: &LoadedBinary,
         address: u64,
-        printed: &[PrintedGlobal],
-        frame_offsets: BTreeMap<String, i64>,
+        pair: &crate::decompile::PreHirHirPair,
     ) -> Self {
+        let printed: &[PrintedGlobal] = &pair.globals;
+        let frame_offsets = pair.frame_offsets.clone();
         let (flow, flow_error) = match crate::call_sites::call_sites(binary, address) {
             Ok(flow) => (Some(flow), None),
             Err(err) => (None, Some(format!("{err:#}"))),
         };
+        let sections = &binary.inner().sections;
         let mut grounding = Self {
             flow,
             flow_error,
             frame_offsets,
+            declared_callees: pair.declared_callees.clone(),
+            image: sections
+                .iter()
+                .filter(|s| s.virtual_size > 0)
+                .map(|s| s.virtual_address..s.virtual_address.saturating_add(s.virtual_size))
+                .collect(),
+            writable: sections
+                .iter()
+                .filter(|s| s.virtual_size > 0 && s.is_writable)
+                .map(|s| s.virtual_address..s.virtual_address.saturating_add(s.virtual_size))
+                .collect(),
             ..Self::default()
         };
         for global in printed {
@@ -222,6 +243,9 @@ pub fn check_ground_truth_with(
         || !matches!(prehir.return_type, NirType::Unknown);
     let no_placed: HashMap<u64, u8> = HashMap::new();
     let mut divergences = Vec::new();
+    // Runs whose only difference is an argument at a call with a recovered
+    // prototype: reported only when no run differs outright.
+    let mut suspects = Vec::new();
     let mut checked = 0usize;
     let mut emulator_errors = 0usize;
     let mut first_interpreter_error: Option<String> = None;
@@ -275,6 +299,31 @@ pub fn check_ground_truth_with(
         let hir_locals = place(&hir_local_offsets);
         let prehir_locals = prehir_local_offsets.as_deref().map(place);
         let call_return = |n: usize| state.call_result(n);
+        let call_clobber = |n: usize, index: usize| state.call_clobber(n, index);
+        let tls = harness
+            .registers(&["fs_offset".to_string()])
+            .first()
+            .map(|(_, base)| *base as u64)
+            .filter(|base| *base != 0)
+            .map(|base| base..base.saturating_add(0x1000));
+        let objects: BTreeMap<u64, u64> = hir_locals
+            .iter()
+            .filter_map(|(name, addr)| {
+                let ty = &hir.locals.iter().find(|l| &l.name == name)?.ty;
+                Some((*addr, type_bytes(ty)?))
+            })
+            .chain(grounding.globals.iter().filter_map(|(name, addr)| {
+                Some((*addr, type_bytes(grounding.global_types.get(name)?)?))
+            }))
+            .collect();
+        let effects = CallEffects {
+            state: &state,
+            objects: &objects,
+            frame: &frame,
+            tls: tls.as_ref(),
+            grounding,
+        };
+        let call_writes = |n: usize, args: &[u64]| effects.writes(n, args);
         let (prehir_r, hir_r) = {
             let backing = |addr: u64| Some(harness.initial_byte(&state, addr));
             let world = World {
@@ -289,6 +338,7 @@ pub fn check_ground_truth_with(
                     .map(|_| &call_return as &dyn Fn(usize) -> u64),
                 no_return_sites: Some(&no_return_sites),
                 local_addresses: Some(&hir_locals),
+                call_writes: Some(&call_writes),
             };
             let prehir_r = match &prehir_locals {
                 Ok(locals) => run_prehir(
@@ -328,7 +378,12 @@ pub fn check_ground_truth_with(
         };
         let prehir_run = prehir_r.as_ref().ok();
 
-        let machine = match harness.run_prepared(flow, &call_return) {
+        let stub = CallStub {
+            result: &call_return,
+            clobber: Some(&call_clobber),
+            writes: &call_writes,
+        };
+        let machine = match harness.run_prepared(flow, &stub) {
             Ok(run) => run,
             Err(err) => {
                 tracing::debug!("emulator run {run} failed: {err}");
@@ -361,6 +416,7 @@ pub fn check_ground_truth_with(
         let prehir_val = prehir_run.and_then(|run| run.ret).map(norm);
         let hir_val = hir_run.ret.map(norm);
         let mut detail = None;
+        let mut suspect: Option<String> = None;
         let sides = std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
         for (side, run) in sides {
             if detail.is_some() {
@@ -369,7 +425,13 @@ pub fn check_ground_truth_with(
             // A run that ends at a call which does not return still made
             // every store before it: those are compared, only the return
             // value is not.
-            detail = compare_calls(side, &run.calls, &machine.calls)
+            detail = compare_calls(
+                side,
+                &run.calls,
+                &machine.calls,
+                &grounding.declared_callees,
+                &mut suspect,
+            )
                 .or_else(|| {
                     (run.ended_in_no_return != ended_in_noreturn).then(|| {
                         if ended_in_noreturn {
@@ -401,11 +463,25 @@ pub fn check_ground_truth_with(
                 emulator_result: emulator_val,
                 detail,
             });
+        } else if let Some(suspect) = suspect
+            && suspects.len() < MAX_REPORTED_DIVERGENCES
+        {
+            suspects.push(Divergence {
+                run: Some(state.run()),
+                args: args.to_vec(),
+                prehir_result: prehir_val,
+                hir_result: hir_val,
+                emulator_result: emulator_val,
+                detail: Some(suspect),
+            });
         }
     }
 
     if !divergences.is_empty() {
         return VerifyOutcome::Diverged(divergences);
+    }
+    if !suspects.is_empty() {
+        return VerifyOutcome::Suspect(suspects);
     }
     if checked == 0 {
         if emulator_errors > 0 {
@@ -423,7 +499,18 @@ pub fn check_ground_truth_with(
 /// The first way `calls` (what one tree did) differs from `machine`'s, or
 /// `None`. Both sides stop at a call that does not return, so the sequences
 /// are compared whole.
-fn compare_calls(side: &str, calls: &[CallEvent], machine: &[ObservedCall]) -> Option<String> {
+///
+/// An argument that differs at a call whose callee is not in `declared` is
+/// not a difference by itself: the decompiler recovered that prototype, and
+/// it may be the prototype that is wrong. The first such one goes to
+/// `suspect`, and the comparison goes on.
+fn compare_calls(
+    side: &str,
+    calls: &[CallEvent],
+    machine: &[ObservedCall],
+    declared: &BTreeSet<String>,
+    suspect: &mut Option<String>,
+) -> Option<String> {
     for (n, observed) in machine.iter().enumerate() {
         let Some(call) = calls.get(n) else {
             return Some(format!(
@@ -445,12 +532,16 @@ fn compare_calls(side: &str, calls: &[CallEvent], machine: &[ObservedCall]) -> O
             };
             let bits = (*bits).clamp(1, 64);
             if !argument_matches(*value, bits, *raw) {
-                return Some(format!(
+                let difference = format!(
                     "{side}: call #{n} ({}) argument {i} is {:#x}, machine passed {:#x}",
                     call.target,
                     mask_to_width(*value as u64, bits),
                     mask_to_width(*raw, bits)
-                ));
+                );
+                if declared.contains(&call.target) {
+                    return Some(difference);
+                }
+                suspect.get_or_insert(difference);
             }
         }
     }
@@ -517,6 +608,82 @@ fn compare_writes(
         }
     }
     None
+}
+
+/// The longest run of bytes a stub writes from one argument.
+const MAX_STUB_OBJECT: u64 = 256;
+
+/// How far past an argument that points at no known object a stub writes.
+const STUB_WINDOW: u64 = 16;
+
+/// Bytes a value of `ty` occupies, when its declaration says.
+fn type_bytes(ty: &NirType) -> Option<u64> {
+    match ty {
+        NirType::Aggregate { size, .. } => Some(u64::from(*size)),
+        NirType::Unknown => None,
+        other => Some(u64::from(width_of(other).div_ceil(8))),
+    }
+}
+
+/// What a stand-in for a callee writes, the same on both sides of a check.
+///
+/// A callee may write the image's writable data and the memory it was given
+/// pointers to. So each call rewrites every printed global in writable data,
+/// the object an argument points at when the tree knows it (a local whose
+/// address is passed, a global), and a small window behind an argument that
+/// points elsewhere outside the image, the frame and thread-local storage.
+/// Never the frame beyond a known object: the function's other locals live
+/// there, and a callee writing them would be a broken program, not a model
+/// of one. Never the thread block: the stack canary is there.
+///
+/// A value the decompiled code keeps from before a call that the machine
+/// reloads after it then differs.
+struct CallEffects<'a> {
+    state: &'a InitialState,
+    objects: &'a BTreeMap<u64, u64>,
+    frame: &'a std::ops::Range<u64>,
+    tls: Option<&'a std::ops::Range<u64>>,
+    grounding: &'a Grounding,
+}
+
+impl CallEffects<'_> {
+    fn off_limits(&self, addr: u64) -> bool {
+        self.frame.contains(&addr)
+            || self.tls.is_some_and(|tls| tls.contains(&addr))
+            || self.grounding.image.iter().any(|r| r.contains(&addr))
+    }
+
+    fn writes(&self, n: usize, args: &[u64]) -> Vec<(u64, u8)> {
+        let mut out = Vec::new();
+        let mut write = |addr: u64| out.push((addr, self.state.call_memory_byte(n, addr)));
+        for (name, addr) in &self.grounding.globals {
+            let writable = self.grounding.writable.iter().any(|r| r.contains(addr));
+            if let (true, Some(size)) = (
+                writable,
+                self.grounding.global_types.get(name).and_then(type_bytes),
+            ) {
+                (0..size.min(MAX_STUB_OBJECT)).for_each(|i| write(addr.wrapping_add(i)));
+            }
+        }
+        for &arg in args {
+            if let Some(&size) = self.objects.get(&arg) {
+                let in_image = self.grounding.image.iter().any(|r| r.contains(&arg));
+                let writable = self.grounding.writable.iter().any(|r| r.contains(&arg));
+                if !in_image || writable {
+                    (0..size.min(MAX_STUB_OBJECT)).for_each(|i| write(arg.wrapping_add(i)));
+                }
+                continue;
+            }
+            for i in 0..STUB_WINDOW {
+                let addr = arg.wrapping_add(i);
+                if self.off_limits(addr) {
+                    break;
+                }
+                write(addr);
+            }
+        }
+        out
+    }
 }
 
 /// The offset from the canonical frame address of each local in
@@ -609,6 +776,45 @@ mod tests {
         assert_eq!(slots_of(&[("param_40", None)]), [0]);
     }
 
+    /// `compare_calls` with every callee's prototype declared: an argument
+    /// difference is a difference.
+    fn declared_compare(calls: &[CallEvent], machine: &[ObservedCall]) -> Option<String> {
+        let declared = calls.iter().map(|c| c.target.clone()).collect();
+        compare_calls("hir", calls, machine, &declared, &mut None)
+    }
+
+    /// At a call whose prototype was recovered, a differing argument is a
+    /// suspect and the rest of the sequence is still compared: a call that is
+    /// missing afterwards is a difference outright.
+    #[test]
+    fn an_argument_at_a_recovered_prototype_is_a_suspect() {
+        let tree = [event(0x10, &[1]), event(0x20, &[2])];
+        let mut suspect = None;
+        let none = BTreeSet::new();
+        assert_eq!(
+            compare_calls(
+                "hir",
+                &tree,
+                &[observed(0x10, &[9]), observed(0x20, &[2])],
+                &none,
+                &mut suspect
+            ),
+            None
+        );
+        assert!(suspect.is_some_and(|s| s.contains("argument 0")));
+        let mut suspect = None;
+        assert!(
+            compare_calls(
+                "hir",
+                &tree[..1],
+                &[observed(0x10, &[9]), observed(0x20, &[2])],
+                &none,
+                &mut suspect
+            )
+            .is_some_and(|d| d.contains("missing from the tree"))
+        );
+    }
+
     fn event(site: u64, args: &[i64]) -> CallEvent {
         CallEvent {
             site: Some(site),
@@ -629,7 +835,7 @@ mod tests {
     fn matching_calls_agree_and_register_garbage_above_the_width_is_ignored() {
         let tree = [event(0x10, &[5, -1])];
         let machine = [observed(0x10, &[0xdead_0000_0005, 0xffff_ffff, 0x77])];
-        assert_eq!(compare_calls("hir", &tree, &machine), None);
+        assert_eq!(declared_compare(&tree, &machine), None);
     }
 
     #[test]
@@ -641,17 +847,17 @@ mod tests {
             ..event(0x10, &[-1])
         }];
         assert_eq!(
-            compare_calls("hir", &tree, &[observed(0x10, &[0xffff_ffff])]),
+            declared_compare(&tree, &[observed(0x10, &[0xffff_ffff])]),
             None
         );
         // A different low half is still a different argument, and a 64-bit
         // value the machine really passed in full is compared in full.
-        assert!(compare_calls("hir", &tree, &[observed(0x10, &[0xffff_fffe])]).is_some());
+        assert!(declared_compare(&tree, &[observed(0x10, &[0xffff_fffe])]).is_some());
         let wide = [CallEvent {
             arg_bits: vec![64],
             ..event(0x10, &[0x1_0000_0001])
         }];
-        assert!(compare_calls("hir", &wide, &[observed(0x10, &[0x1])]).is_some());
+        assert!(declared_compare(&wide, &[observed(0x10, &[0x1])]).is_some());
     }
 
     #[test]
@@ -659,18 +865,18 @@ mod tests {
         let machine = [observed(0x10, &[5]), observed(0x20, &[6])];
         let dropped = [event(0x10, &[5])];
         assert!(
-            compare_calls("hir", &dropped, &machine)
+            declared_compare(&dropped, &machine)
                 .unwrap()
                 .contains("missing")
         );
         let changed = [event(0x10, &[5]), event(0x20, &[7])];
         assert!(
-            compare_calls("hir", &changed, &machine)
+            declared_compare(&changed, &machine)
                 .unwrap()
                 .contains("argument 0")
         );
         let extra = [event(0x10, &[5]), event(0x20, &[6]), event(0x30, &[1])];
-        assert!(compare_calls("hir", &extra, &machine).is_some());
+        assert!(declared_compare(&extra, &machine).is_some());
     }
 
     #[test]

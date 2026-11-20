@@ -77,7 +77,7 @@ pub use layered::PrintedGlobal;
 pub(crate) use layered::file_scope_storage_names;
 #[cfg(test)]
 pub(crate) use layered::render_layered_pseudocode_with_provenance;
-pub(crate) use layered::{printed_globals, printed_string_literals};
+pub(crate) use layered::{printed_declared_callees, printed_globals, printed_string_literals};
 pub(crate) use layered::{
     printed_hir_tree, render_hir_function_with_provenance, render_pseudocode_with_provenance,
 };

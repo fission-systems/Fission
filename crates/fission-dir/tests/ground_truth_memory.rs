@@ -38,8 +38,7 @@ fn check_in(fixture: &str, name: &str) -> VerifyOutcome {
         ..Default::default()
     };
     let pair = decompile_one(&binary, &facts, &func).expect("decompile");
-    let grounding =
-        Grounding::for_function(&binary, address, &pair.globals, pair.frame_offsets.clone());
+    let grounding = Grounding::for_function(&binary, address, &pair);
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("harness");
     check_ground_truth_with(
         &mut harness,
@@ -78,7 +77,8 @@ fn a_string_literal_reads_the_bytes_it_was_read_from() {
 /// A local array indexed by the run's value, and a literal passed to a
 /// call: both used to be refused (`AddressOfLocal`, "no address for
 /// global"). Whatever the decompiled text gets right or wrong about them,
-/// they are now checked.
+/// they are now checked. (`pass_literal` passes the wrong literal, but to a
+/// callee whose prototype was recovered, so it is a suspect.)
 #[test]
 fn a_local_array_and_a_literal_argument_are_checked() {
     for name in ["pick_local", "pass_literal"] {
@@ -86,7 +86,9 @@ fn a_local_array_and_a_literal_argument_are_checked() {
         assert!(
             matches!(
                 outcome,
-                VerifyOutcome::Equivalent { .. } | VerifyOutcome::Diverged(_)
+                VerifyOutcome::Equivalent { .. }
+                    | VerifyOutcome::Diverged(_)
+                    | VerifyOutcome::Suspect(_)
             ),
             "{name}: expected a verdict, got {outcome:?}"
         );
