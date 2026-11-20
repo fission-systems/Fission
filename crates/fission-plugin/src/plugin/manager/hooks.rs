@@ -1,7 +1,7 @@
 use super::core::PluginManager;
 use crate::events::{FissionEvent, FissionEventType};
 use crate::plugin::api::create_binary_info;
-use crate::plugin::{HookPriority, PluginContext, PluginHook};
+use crate::plugin::{HookPriority, PluginHook};
 
 impl PluginManager {
     pub fn register_hook<F>(
@@ -50,18 +50,13 @@ impl PluginManager {
 
     pub fn emit_event(&self, event: &FissionEvent) {
         if let Some(api) = &self.api {
-            let extension = self
-                .event_bus
-                .clone()
-                .map(|arc| arc as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-            let ctx = PluginContext::new(api.clone(), extension);
-
             for plugin in self.plugins.values() {
                 if !plugin.info.enabled {
                     continue;
                 }
 
                 if let Some(instance) = &plugin.instance {
+                    let ctx = self.context_for_plugin(api, &plugin.info.id);
                     match event {
                         FissionEvent::BinaryLoaded(binary) => {
                             let info = create_binary_info(binary.as_ref());

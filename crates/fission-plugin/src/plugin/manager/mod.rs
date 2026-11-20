@@ -65,6 +65,7 @@ mod tests {
             plugin_id.clone(),
             LoadedPlugin {
                 on_load_called: false,
+                on_load_failed: false,
                 info,
                 hooks: Vec::new(),
                 instance: None,
@@ -130,6 +131,7 @@ mod tests {
                 "drop_order".into(),
                 LoadedPlugin {
                     on_load_called: false,
+                    on_load_failed: false,
                     destroy: None,
                     info: PluginInfo {
                         id: "drop_order".into(),
@@ -170,6 +172,7 @@ mod tests {
                 "drop_order".into(),
                 LoadedPlugin {
                     on_load_called: false,
+                    on_load_failed: false,
                     destroy: None,
                     info: PluginInfo {
                         id: "drop_order".into(),
@@ -199,6 +202,7 @@ mod tests {
             "gone".into(),
             LoadedPlugin {
                 on_load_called: false,
+                on_load_failed: false,
                 destroy: None,
                 info: PluginInfo {
                     id: "gone".into(),
@@ -408,6 +412,158 @@ mod tests {
         assert!(error.contains("Failed to open plugin"), "{error}");
         assert_eq!(pm.plugin_count(), 0);
     }
+
+    #[test]
+    fn register_native_plugin_rejects_empty_id() {
+        let mut pm = PluginManager::new();
+        let err = pm
+            .register_native_plugin(Box::new(MockPlugin {
+                id: String::new(),
+                load_count: Arc::new(AtomicU32::new(0)),
+            }))
+            .expect_err("empty plugin id must be rejected");
+        assert!(err.contains("empty plugin id"), "{err}");
+    }
+
+    #[test]
+    fn unload_plugin_revokes_event_bus_and_drops_callbacks_before_plugin_instance() {
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let event_hits = Arc::new(AtomicU32::new(0));
+        let event_bus = Arc::new(EventBus::new());
+        let mut pm = PluginManager::new();
+        pm.set_event_bus(event_bus.clone());
+        pm.set_api(Arc::new(NoopApi));
+
+        struct SubscribingDropPlugin {
+            log: Arc<std::sync::Mutex<Vec<&'static str>>>,
+            event_hits: Arc<AtomicU32>,
+        }
+        impl Drop for SubscribingDropPlugin {
+            fn drop(&mut self) {
+                self.log.lock().unwrap().push("plugin");
+            }
+        }
+        impl FissionPlugin for SubscribingDropPlugin {
+            fn id(&self) -> &str {
+                "sub_drop"
+            }
+            fn name(&self) -> &str {
+                "Sub Drop"
+            }
+            fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
+                let bus = ctx.get_extension::<EventBus>().expect("event bus");
+                let guard = DropLog("event_sub", self.log.clone());
+                let hits = self.event_hits.clone();
+                bus.subscribe(move |_| {
+                    let _keep = &guard;
+                    hits.fetch_add(1, Ordering::SeqCst);
+                });
+                Ok(())
+            }
+        }
+
+        pm.register_native_plugin(Box::new(SubscribingDropPlugin {
+            log: log.clone(),
+            event_hits: event_hits.clone(),
+        }))
+        .expect("registers");
+        let hook_guard = DropLog("hook", log.clone());
+        pm.register_hook(
+            "sub_drop",
+            FissionEventType::AppStarted,
+            HookPriority::Normal,
+            move |_| {
+                let _keep = &hook_guard;
+            },
+        )
+        .expect("hook registers");
+
+        event_bus.publish(FissionEvent::AppStarted);
+        assert_eq!(event_hits.load(Ordering::SeqCst), 1);
+
+        pm.unload_plugin("sub_drop").expect("unload");
+        // Both hook and EventBus callbacks must drop BEFORE the plugin instance.
+        assert_eq!(*log.lock().unwrap(), ["hook", "event_sub", "plugin"]);
+
+        // Subsequent events must not reach the unloaded plugin callback.
+        event_bus.publish(FissionEvent::AppStarted);
+        assert_eq!(event_hits.load(Ordering::SeqCst), 1);
+
+        // Same invariant when dropping PluginManager directly with an external Arc<EventBus>.
+        log.lock().unwrap().clear();
+        {
+            let mut pm2 = PluginManager::new();
+            pm2.set_event_bus(event_bus.clone());
+            pm2.set_api(Arc::new(NoopApi));
+            pm2.register_native_plugin(Box::new(SubscribingDropPlugin {
+                log: log.clone(),
+                event_hits: event_hits.clone(),
+            }))
+            .expect("registers");
+            let hook_guard2 = DropLog("hook", log.clone());
+            pm2.register_hook(
+                "sub_drop",
+                FissionEventType::AppStarted,
+                HookPriority::Normal,
+                move |_| {
+                    let _keep = &hook_guard2;
+                },
+            )
+            .expect("hook registers");
+        }
+        assert_eq!(*log.lock().unwrap(), ["hook", "event_sub", "plugin"]);
+        event_bus.publish(FissionEvent::AppStarted);
+        assert_eq!(event_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn failed_on_load_cannot_be_re_enabled_revokes_subscriptions_and_skips_on_unload() {
+        struct FailWithCleanupTracking {
+            unload_calls: Arc<AtomicU32>,
+            event_hits: Arc<AtomicU32>,
+        }
+        impl FissionPlugin for FailWithCleanupTracking {
+            fn id(&self) -> &str {
+                "fail_track"
+            }
+            fn name(&self) -> &str {
+                "Fail Track"
+            }
+            fn on_load(&mut self, ctx: &PluginContext) -> Result<()> {
+                if let Some(bus) = ctx.get_extension::<EventBus>() {
+                    let hits = self.event_hits.clone();
+                    bus.subscribe(move |_| {
+                        hits.fetch_add(1, Ordering::SeqCst);
+                    });
+                }
+                anyhow::bail!("intentional on_load failure")
+            }
+            fn on_unload(&mut self, _ctx: &PluginContext) -> Result<()> {
+                self.unload_calls.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let event_bus = Arc::new(EventBus::new());
+        let unload_calls = Arc::new(AtomicU32::new(0));
+        let event_hits = Arc::new(AtomicU32::new(0));
+        let mut pm = PluginManager::new();
+        pm.set_event_bus(event_bus.clone());
+        pm.register_native_plugin(Box::new(FailWithCleanupTracking {
+            unload_calls: unload_calls.clone(),
+            event_hits: event_hits.clone(),
+        }))
+        .expect("registers before set_api");
+
+        pm.set_api(Arc::new(NoopApi));
+        assert!(!pm.get_plugin("fail_track").expect("listed").enabled);
+        assert!(pm.enable_plugin("fail_track").is_err());
+        event_bus.publish(FissionEvent::AppStarted);
+        assert_eq!(event_hits.load(Ordering::SeqCst), 0);
+
+        pm.unload_plugin("fail_track").expect("unload");
+        assert_eq!(unload_calls.load(Ordering::SeqCst), 0);
+    }
 }
 
 /// An instance a dynamic plugin made was allocated by that library's own
@@ -482,6 +638,7 @@ mod foreign_allocation_tests {
                 })),
                 library: Some(library),
                 on_load_called: true,
+                on_load_failed: false,
                 destroy: None,
                 state: None,
             },
@@ -528,6 +685,7 @@ mod foreign_allocation_tests {
                 })),
                 library: Some(library),
                 on_load_called: true,
+                on_load_failed: false,
                 destroy: Some(test_destroy),
                 state: None,
             },

@@ -170,7 +170,7 @@ fn run_script_inner(
     };
 
     let host_bin = BinaryHost(bin);
-    let deadline = Duration::from_millis(limits.max_runtime_ms.max(1));
+    let timeout_duration = Duration::from_millis(limits.max_runtime_ms.max(1));
 
     // A live machine, if the caller asked for one. Launching costs a real
     // program load, so it happens only when requested -- a script that reads
@@ -195,11 +195,11 @@ fn run_script_inner(
     crate::api::machine::register(&mut engine);
 
     let timed_out = Arc::new(AtomicBool::new(false));
-    let deadline = Instant::now() + deadline;
+    let deadline: Option<Instant> = Instant::now().checked_add(timeout_duration);
     let timed_out_for_progress = timed_out.clone();
     let halted_for_progress = halted.clone();
     engine.on_progress(move |_| {
-        if Instant::now() >= deadline {
+        if deadline.is_some_and(|d| Instant::now() >= d) {
             timed_out_for_progress.store(true, std::sync::atomic::Ordering::Relaxed);
             Some("script exceeded max_runtime_ms".into())
         } else if halted_for_progress
@@ -217,11 +217,23 @@ fn run_script_inner(
     });
 
     #[cfg(feature = "emulator")]
+    struct DeadlineResetGuard(Option<crate::api::machine::MachineHost>);
+    #[cfg(feature = "emulator")]
+    impl Drop for DeadlineResetGuard {
+        fn drop(&mut self) {
+            if let Some(mut machine) = self.0.take() {
+                machine.set_deadline(None);
+            }
+        }
+    }
+
+    #[cfg(feature = "emulator")]
     let mut machine = machine;
     #[cfg(feature = "emulator")]
-    if let Some(m) = machine.as_mut() {
-        m.set_deadline(Some(deadline));
-    }
+    let _deadline_guard = machine.as_mut().map(|m| {
+        m.set_deadline(deadline);
+        DeadlineResetGuard(Some(m.clone()))
+    });
 
     let mut scope = rhai::Scope::new();
     scope.push("binary", host_bin);
@@ -232,7 +244,7 @@ fn run_script_inner(
     let eval_result = { engine.eval_ast_with_scope::<Dynamic>(&mut scope, &ast) };
 
     if timed_out.load(std::sync::atomic::Ordering::Relaxed)
-        || Instant::now() >= deadline
+        || deadline.is_some_and(|d| Instant::now() >= d)
         || eval_result
             .as_ref()
             .err()

@@ -89,16 +89,33 @@ impl FissionEvent {
 
 type EventHandler = Arc<dyn Fn(&FissionEvent) + Send + Sync>;
 
-pub struct EventBus {
-    subscribers: RwLock<HashMap<u64, EventHandler>>,
+struct EventBusInner {
+    subscribers: RwLock<HashMap<u64, (Option<String>, EventHandler)>>,
     next_id: RwLock<u64>,
+}
+
+pub struct EventBus {
+    inner: Arc<EventBusInner>,
+    owner: Option<String>,
 }
 
 impl EventBus {
     pub fn new() -> Self {
         Self {
-            subscribers: RwLock::new(HashMap::new()),
-            next_id: RwLock::new(0),
+            inner: Arc::new(EventBusInner {
+                subscribers: RwLock::new(HashMap::new()),
+                next_id: RwLock::new(0),
+            }),
+            owner: None,
+        }
+    }
+
+    /// Return a handle sharing the same underlying bus that tags any new
+    /// subscriptions with `owner`, allowing bulk revocation on plugin unload.
+    pub fn scoped(&self, owner: impl Into<String>) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            owner: Some(owner.into()),
         }
     }
 
@@ -106,20 +123,44 @@ impl EventBus {
     where
         F: Fn(&FissionEvent) + Send + Sync + 'static,
     {
-        let mut id_guard = self.next_id.write().unwrap_or_else(|e| e.into_inner());
+        let mut id_guard = self
+            .inner
+            .next_id
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         let id = *id_guard;
         *id_guard += 1;
         drop(id_guard);
 
-        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
-        subs.insert(id, Arc::new(handler));
+        let mut subs = self
+            .inner
+            .subscribers
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        subs.insert(id, (self.owner.clone(), Arc::new(handler)));
 
         id
     }
 
     pub fn unsubscribe(&self, id: u64) {
-        let mut subs = self.subscribers.write().unwrap_or_else(|e| e.into_inner());
+        let mut subs = self
+            .inner
+            .subscribers
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         subs.remove(&id);
+    }
+
+    /// Remove every subscription registered through a scoped handle for `owner`.
+    pub fn unsubscribe_owner(&self, owner: &str) -> usize {
+        let mut subs = self
+            .inner
+            .subscribers
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        let before = subs.len();
+        subs.retain(|_, (sub_owner, _)| sub_owner.as_deref() != Some(owner));
+        before - subs.len()
     }
 
     pub fn publish(&self, event: FissionEvent) {
@@ -127,8 +168,12 @@ impl EventBus {
         // or unsubscribes takes the write lock, and waiting for it while this
         // thread still held the read lock deadlocked.
         let handlers: Vec<EventHandler> = {
-            let subs = self.subscribers.read().unwrap_or_else(|e| e.into_inner());
-            subs.values().cloned().collect()
+            let subs = self
+                .inner
+                .subscribers
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
+            subs.values().map(|(_, handler)| handler.clone()).collect()
         };
         for handler in handlers {
             handler(&event);
@@ -216,5 +261,34 @@ mod tests {
         }
         bus.publish(FissionEvent::AppStarted);
         assert_eq!(hits.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn scoped_unsubscribe_owner_removes_only_that_owners_subscriptions() {
+        let bus = EventBus::new();
+        let host_hits = Arc::new(AtomicUsize::new(0));
+        let alpha_hits = Arc::new(AtomicUsize::new(0));
+        let beta_hits = Arc::new(AtomicUsize::new(0));
+
+        let host_c = host_hits.clone();
+        bus.subscribe(move |_| {
+            host_c.fetch_add(1, Ordering::SeqCst);
+        });
+        let alpha_c = alpha_hits.clone();
+        bus.scoped("alpha").subscribe(move |_| {
+            alpha_c.fetch_add(1, Ordering::SeqCst);
+        });
+        let beta_c = beta_hits.clone();
+        bus.scoped("beta").subscribe(move |_| {
+            beta_c.fetch_add(1, Ordering::SeqCst);
+        });
+
+        assert_eq!(bus.unsubscribe_owner("alpha"), 1);
+        assert_eq!(bus.unsubscribe_owner("alpha"), 0);
+        bus.publish(FissionEvent::AppStarted);
+
+        assert_eq!(host_hits.load(Ordering::SeqCst), 1);
+        assert_eq!(alpha_hits.load(Ordering::SeqCst), 0);
+        assert_eq!(beta_hits.load(Ordering::SeqCst), 1);
     }
 }

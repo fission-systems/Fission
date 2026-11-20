@@ -283,13 +283,7 @@ impl MachineHost {
     pub fn set_reg(&mut self, name: String, value: i64) -> ScriptResult<()> {
         self.with("write a register", |b| {
             let mut regs = b.fetch_registers(THREAD).map_err(fail)?;
-            if name.eq_ignore_ascii_case("pc") || name.eq_ignore_ascii_case("rip") {
-                regs.pc = value as u64;
-            }
-            if regs.get(&name).is_none() && !name.eq_ignore_ascii_case("pc") {
-                return Err(fail(format!("this machine has no register {name}")));
-            }
-            regs.set(&name, value as u64);
+            apply_register_write(&mut regs, &name, value as u64).map_err(fail)?;
             b.set_registers(THREAD, &regs).map_err(fail)
         })
     }
@@ -337,13 +331,22 @@ impl MachineHost {
                             return Ok(String::from_utf8_lossy(&accumulated).into_owned());
                         }
                         accumulated.extend_from_slice(&bytes);
-                        current_addr += chunk_len as u64;
+                        let Some(next_addr) = current_addr.checked_add(chunk_len as u64) else {
+                            break;
+                        };
+                        current_addr = next_addr;
                         remaining -= chunk_len;
                     }
                     Err(_) => {
                         let mut probed_any = false;
                         for offset in 0..chunk_len {
-                            match b.read_memory(current_addr + offset as u64, 1) {
+                            let Some(byte_addr) = current_addr.checked_add(offset as u64) else {
+                                if accumulated.is_empty() && !probed_any {
+                                    return Err(fail("address overflow while reading string"));
+                                }
+                                return Ok(String::from_utf8_lossy(&accumulated).into_owned());
+                            };
+                            match b.read_memory(byte_addr, 1) {
                                 Ok(single) => {
                                     let byte = single[0];
                                     if byte == 0 {
@@ -362,7 +365,10 @@ impl MachineHost {
                                 }
                             }
                         }
-                        current_addr += chunk_len as u64;
+                        let Some(next_addr) = current_addr.checked_add(chunk_len as u64) else {
+                            break;
+                        };
+                        current_addr = next_addr;
                         remaining -= chunk_len;
                     }
                 }
@@ -399,8 +405,9 @@ impl MachineHost {
         if let Ok(guard) = self.0.lock() {
             if let Some(binary) = &guard.binary {
                 if let Some(sec) = binary.section_containing_for_execution(address_u64) {
-                    let avail = (sec.virtual_address + sec.virtual_size).saturating_sub(address_u64)
-                        as usize;
+                    let end = sec.virtual_address.saturating_add(sec.virtual_size);
+                    let avail =
+                        usize::try_from(end.saturating_sub(address_u64)).unwrap_or(usize::MAX);
                     if avail == 0 {
                         return Err(fail(format!(
                             "address 0x{address:x} is beyond section bounds"
@@ -485,6 +492,39 @@ impl MachineHost {
             text
         })
     }
+}
+
+fn apply_register_write(
+    regs: &mut fission_dynamic::debug::types::RegisterState,
+    name: &str,
+    raw: u64,
+) -> Result<(), String> {
+    let is_arm32_r15 = name.eq_ignore_ascii_case("r15")
+        && regs.get("rip").is_none()
+        && regs.get("eip").is_none()
+        && regs.get("pc").is_none()
+        && regs.get("r15").is_some();
+    if name.eq_ignore_ascii_case("pc") {
+        regs.pc = raw;
+        if regs.get("pc").is_some() {
+            regs.set("pc", raw);
+        } else if regs.get("rip").is_some() {
+            regs.set("rip", raw);
+        } else if regs.get("eip").is_some() {
+            regs.set("eip", raw);
+        } else if regs.get("r15").is_some() {
+            regs.set("r15", raw);
+        }
+        return Ok(());
+    }
+    if regs.get(name).is_none() {
+        return Err(format!("this machine has no register {name}"));
+    }
+    if name.eq_ignore_ascii_case("rip") || name.eq_ignore_ascii_case("eip") || is_arm32_r15 {
+        regs.pc = raw;
+    }
+    regs.set(name, raw);
+    Ok(())
 }
 
 /// A register's value by name. `pc` is the program counter whatever the
@@ -621,5 +661,33 @@ mod reg_and_event_tests {
         // Positive control: an ordinary register is unaffected, a missing one is missing.
         assert_eq!(register_value(&regs, "rax"), Some(5));
         assert_eq!(register_value(&regs, "nope"), None);
+    }
+
+    #[test]
+    fn apply_register_write_handles_pc_rip_eip_and_preserves_x64_r15() {
+        let mut x64 = fission_dynamic::debug::types::RegisterState::at(0x401000)
+            .with("RIP", 0x401000)
+            .with("R15", 0x1111);
+        apply_register_write(&mut x64, "pc", 0x402000).expect("set pc on x64");
+        assert_eq!(x64.pc, 0x402000);
+        assert_eq!(x64.get("RIP"), Some(0x402000));
+        assert!(x64.get("pc").is_none());
+
+        // R15 on x86-64 is a GPR and must NOT overwrite regs.pc.
+        apply_register_write(&mut x64, "R15", 0x2222).expect("set R15 GPR on x64");
+        assert_eq!(x64.pc, 0x402000);
+        assert_eq!(x64.get("R15"), Some(0x2222));
+
+        let mut x86 = fission_dynamic::debug::types::RegisterState::at(0x1000).with("EIP", 0x1000);
+        apply_register_write(&mut x86, "eip", 0x1234).expect("set eip on x86");
+        assert_eq!(x86.pc, 0x1234);
+        assert_eq!(x86.get("EIP"), Some(0x1234));
+
+        let mut arm = fission_dynamic::debug::types::RegisterState::at(0x2000).with("r15", 0x2000);
+        apply_register_write(&mut arm, "r15", 0x2400).expect("set r15 PC on ARM32");
+        assert_eq!(arm.pc, 0x2400);
+        assert_eq!(arm.get("r15"), Some(0x2400));
+
+        assert!(apply_register_write(&mut x64, "no_such_reg", 1).is_err());
     }
 }

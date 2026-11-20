@@ -40,7 +40,10 @@ impl BinaryHost {
                     .and_then(|sec| self.0.view_section_bytes(sec, addr, size))
             })
             .or_else(|| {
-                let offset = addr as usize;
+                if !self.0.sections.is_empty() {
+                    return None;
+                }
+                let offset = usize::try_from(addr).ok()?;
                 let data = self.0.data.as_slice();
                 if offset < data.len() {
                     let take = size.min(data.len() - offset);
