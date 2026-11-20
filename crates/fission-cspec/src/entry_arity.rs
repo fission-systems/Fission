@@ -361,12 +361,18 @@ pub fn infer_entry_register_param_arity(
     let mut sp_keys: HashSet<(u64, u64)> = HashSet::default();
     let mut fp_keys: HashSet<(u64, u64)> = HashSet::default();
     let mut arch_reg_keys: HashSet<(u64, u64)> = HashSet::default();
+    // The integer argument registers among them: a stack address reaches a
+    // callee through one of these, or through memory (the `Store` arm).
+    let mut arg_reg_keys: HashSet<(u64, u64)> = HashSet::default();
     for block in &pcode.blocks {
         for op in &block.ops {
             for vn in op.inputs.iter().chain(op.output.iter()) {
                 let Some(key) = varnode_key(vn) else {
                     continue;
                 };
+                if namer.integer_param_slot_for_varnode(vn).is_some() {
+                    arg_reg_keys.insert(key);
+                }
                 if namer.is_stack_pointer_varnode(vn) {
                     sp_keys.insert(key);
                 } else if namer.is_frame_pointer_varnode(vn) {
@@ -593,8 +599,16 @@ pub fn infer_entry_register_param_arity(
                         }
                     }
                     PcodeOpcode::Call | PcodeOpcode::CallInd => {
+                        // Only a stack address the callee is handed escapes:
+                        // one in an argument register. Any other register
+                        // holding one is the caller's business -- ARM's
+                        // `push` keeps its cursor in the SLEIGH helper
+                        // `mult_addr`, which still points into the pushed
+                        // block at the next `bl`, and counting it confirmed
+                        // the `r3` that `push {r3, lr}` saves only for
+                        // alignment.
                         for (k, v) in &env {
-                            if !arch_reg_keys.contains(k) {
+                            if !arch_reg_keys.contains(k) || !arg_reg_keys.contains(k) {
                                 continue;
                             }
                             if let Some(orig) = v.origin() {
@@ -751,6 +765,106 @@ mod tests {
             ],
         };
         assert_eq!(infer_entry_register_param_arity(&func, &namer), Some(2));
+    }
+
+    #[test]
+    fn arm32_push_through_the_mult_addr_cursor_does_not_make_r3_a_parameter() {
+        // `push {r3, lr}` as the Thumb SLEIGH lifts it: the pushed block is
+        // written through the register-space helper `mult_addr`, which still
+        // holds a stack address at the `bl` that follows.
+        let namer = namer_for(CallingConvention::Arm32, "ELF", false);
+        let sp = reg(0x54, 4);
+        let r0 = reg(0x20, 4);
+        let r3 = reg(0x2c, 4);
+        let lr = reg(0x58, 4);
+        let mult_addr = reg(0x80, 4);
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(mult_addr.clone()),
+                        vec![sp.clone()],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::IntSub,
+                        Some(mult_addr.clone()),
+                        vec![mult_addr.clone(), cst(4, 4)],
+                    ),
+                    op(
+                        2,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![cst(0, 4), mult_addr.clone(), lr],
+                    ),
+                    op(
+                        3,
+                        PcodeOpcode::IntSub,
+                        Some(mult_addr.clone()),
+                        vec![mult_addr.clone(), cst(4, 4)],
+                    ),
+                    op(
+                        4,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![cst(0, 4), mult_addr.clone(), r3],
+                    ),
+                    op(5, PcodeOpcode::Copy, Some(sp.clone()), vec![mult_addr]),
+                    op(6, PcodeOpcode::Call, None, vec![cst(0x2000, 4)]),
+                    op(7, PcodeOpcode::Return, None, vec![r0]),
+                ],
+            }],
+        };
+        assert_eq!(infer_entry_register_param_arity(&func, &namer), None);
+    }
+
+    #[test]
+    fn a_stack_address_passed_in_an_argument_register_confirms_the_spill() {
+        // `sub sp, #8; str r1, [sp]; mov r0, sp; bl f`: the callee is handed
+        // the slot `r1` was saved to, so `r1` is a parameter. The same
+        // address in `r12`, which carries no argument, hands it nothing.
+        let namer = namer_for(CallingConvention::Arm32, "ELF", false);
+        let sp = reg(0x54, 4);
+        let r1 = reg(0x24, 4);
+        let build = |carrier: Varnode| PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntSub,
+                        Some(sp.clone()),
+                        vec![sp.clone(), cst(8, 4)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Store,
+                        None,
+                        vec![cst(0, 4), sp.clone(), r1.clone()],
+                    ),
+                    op(2, PcodeOpcode::Copy, Some(carrier), vec![sp.clone()]),
+                    op(3, PcodeOpcode::Call, None, vec![cst(0x2000, 4)]),
+                    op(4, PcodeOpcode::Return, None, vec![]),
+                ],
+            }],
+        };
+        assert_eq!(
+            infer_entry_register_param_arity(&build(reg(0x20, 4)), &namer),
+            Some(2),
+            "handed to the callee in r0"
+        );
+        assert_eq!(
+            infer_entry_register_param_arity(&build(reg(0x50, 4)), &namer),
+            None,
+            "held in r12"
+        );
     }
 
     #[test]
