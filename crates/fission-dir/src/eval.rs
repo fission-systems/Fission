@@ -675,6 +675,16 @@ macro_rules! define_interp {
                 // for unsigned comparisons); arithmetic/logical ops are
                 // normalized to the *result* type `ty` after computing.
                 let operand_bits = width_of(infer_ty(lhs, env)?).clamp(1, 64);
+                // Where the two operands meet: C converts both to the wider
+                // type before comparing or dividing. Narrowing to the left
+                // operand's width instead made `(int)x == 0xFFFFFFFFLL` true
+                // at x == -1, a comparison C evaluates as false. Each value is
+                // already held extended by its own type's signedness, so
+                // masking at the wider width compares what C compares.
+                let common_bits = infer_ty(rhs, env)
+                    .ok()
+                    .map(|ty| width_of(ty).clamp(1, 64))
+                    .map_or(operand_bits, |rhs_bits| rhs_bits.max(operand_bits));
 
                 let raw = match op {
                     $BinaryOp::Add => l.wrapping_add(r),
@@ -683,28 +693,28 @@ macro_rules! define_interp {
                     $BinaryOp::Div => {
                         // Zero at the operand width, not only as a whole
                         // value: `x % (uint)0x100000000` divides by zero.
-                        if r == 0 || unsigned_masked(r, operand_bits) == 0 {
+                        if r == 0 || unsigned_masked(r, common_bits) == 0 {
                             bail!("interp: division by zero");
                         }
                         if is_signed(ty) {
-                            (sign_extend_i128(l, operand_bits)
-                                / sign_extend_i128(r, operand_bits)) as i64
+                            (sign_extend_i128(l, common_bits)
+                                / sign_extend_i128(r, common_bits)) as i64
                         } else {
-                            (unsigned_masked(l, operand_bits) / unsigned_masked(r, operand_bits))
+                            (unsigned_masked(l, common_bits) / unsigned_masked(r, common_bits))
                                 as i64
                         }
                     }
                     $BinaryOp::Mod => {
                         // Zero at the operand width, not only as a whole
                         // value: `x % (uint)0x100000000` divides by zero.
-                        if r == 0 || unsigned_masked(r, operand_bits) == 0 {
+                        if r == 0 || unsigned_masked(r, common_bits) == 0 {
                             bail!("interp: modulo by zero");
                         }
                         if is_signed(ty) {
-                            (sign_extend_i128(l, operand_bits)
-                                % sign_extend_i128(r, operand_bits)) as i64
+                            (sign_extend_i128(l, common_bits)
+                                % sign_extend_i128(r, common_bits)) as i64
                         } else {
-                            (unsigned_masked(l, operand_bits) % unsigned_masked(r, operand_bits))
+                            (unsigned_masked(l, common_bits) % unsigned_masked(r, common_bits))
                                 as i64
                         }
                     }
@@ -725,34 +735,34 @@ macro_rules! define_interp {
                         (sign_extend_i128(l, operand_bits) >> ((r as u32) & 63)) as i64
                     }
                     $BinaryOp::Eq => bool_to_raw(
-                        unsigned_masked(l, operand_bits) == unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) == unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::Ne => bool_to_raw(
-                        unsigned_masked(l, operand_bits) != unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) != unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::Lt => bool_to_raw(
-                        unsigned_masked(l, operand_bits) < unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) < unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::Le => bool_to_raw(
-                        unsigned_masked(l, operand_bits) <= unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) <= unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::Gt => bool_to_raw(
-                        unsigned_masked(l, operand_bits) > unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) > unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::Ge => bool_to_raw(
-                        unsigned_masked(l, operand_bits) >= unsigned_masked(r, operand_bits),
+                        unsigned_masked(l, common_bits) >= unsigned_masked(r, common_bits),
                     ),
                     $BinaryOp::SLt => bool_to_raw(
-                        sign_extend_i128(l, operand_bits) < sign_extend_i128(r, operand_bits),
+                        sign_extend_i128(l, common_bits) < sign_extend_i128(r, common_bits),
                     ),
                     $BinaryOp::SLe => bool_to_raw(
-                        sign_extend_i128(l, operand_bits) <= sign_extend_i128(r, operand_bits),
+                        sign_extend_i128(l, common_bits) <= sign_extend_i128(r, common_bits),
                     ),
                     $BinaryOp::SGt => bool_to_raw(
-                        sign_extend_i128(l, operand_bits) > sign_extend_i128(r, operand_bits),
+                        sign_extend_i128(l, common_bits) > sign_extend_i128(r, common_bits),
                     ),
                     $BinaryOp::SGe => bool_to_raw(
-                        sign_extend_i128(l, operand_bits) >= sign_extend_i128(r, operand_bits),
+                        sign_extend_i128(l, common_bits) >= sign_extend_i128(r, common_bits),
                     ),
                 };
                 Ok(normalize(raw, ty))
@@ -1731,14 +1741,11 @@ mod world_tests {
         );
     }
 
-    /// `x % d` where `d` is not zero but is at the operand's width (a 64-bit
-    /// `0x1_0000_0000` against a 32-bit `x`): refused, where it panicked.
+    /// `x % d` where `d` is not zero but is zero at the width the two
+    /// operands meet (`0x1_0000_0000` held in a 32-bit `unsigned`): refused,
+    /// where it panicked.
     #[test]
     fn a_divisor_that_is_zero_at_the_operand_width_is_refused() {
-        let wide = NirType::Int {
-            bits: 64,
-            signed: false,
-        };
         for op in [
             fission_midend_core::ir::HirBinaryOp::Mod,
             fission_midend_core::ir::HirBinaryOp::Div,
@@ -1746,12 +1753,38 @@ mod world_tests {
             let body = vec![HirStmt::Return(Some(binary(
                 op,
                 HirExpr::Const(5, u32_ty()),
-                HirExpr::Const(0x1_0000_0000, wide.clone()),
+                HirExpr::Const(0x1_0000_0000, u32_ty()),
             )))];
             let outcome = std::panic::catch_unwind(|| {
                 run_hir(&body, &[], &[], &[], &World::default()).is_err()
             });
             assert_eq!(outcome.ok(), Some(true), "{op:?}");
+        }
+    }
+
+    /// A wider divisor is not narrowed to the dividend: C converts both to
+    /// the wider type, so `5u % 0x100000000ull` is 5 and `5u / ...` is 0.
+    /// Narrowing made it a division by zero; a wider divisor that is not a
+    /// multiple of 2^32 would have divided by the wrong number.
+    #[test]
+    fn a_wider_divisor_divides_at_its_own_width() {
+        let wide = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        for (op, want) in [
+            (fission_midend_core::ir::HirBinaryOp::Mod, 5),
+            (fission_midend_core::ir::HirBinaryOp::Div, 0),
+        ] {
+            let body = vec![HirStmt::Return(Some(binary(
+                op,
+                HirExpr::Const(5, u32_ty()),
+                HirExpr::Const(0x1_0000_0003, wide.clone()),
+            )))];
+            let got = run_hir(&body, &[], &[], &[], &World::default())
+                .expect("run")
+                .ret;
+            assert_eq!(got, Some(want), "{op:?}");
         }
     }
 
@@ -1917,6 +1950,45 @@ mod world_tests {
                 i64_ty(),
             ),
             Some(i64::MIN)
+        );
+
+        // A wider right operand: C converts both to it, so `(int)-1` is
+        // `-1LL`, not `0xFFFFFFFFLL`, and the comparison is false. Masking
+        // to the left operand's width called it true.
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Eq,
+                HirExpr::Const(-1, i32_ty()),
+                HirExpr::Const(0xFFFF_FFFF, i64_ty()),
+                NirType::Bool,
+            ),
+            Some(0)
+        );
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Lt,
+                HirExpr::Const(0xFFFF_FFFFu32 as i64, u32_ty()),
+                HirExpr::Const(
+                    0x1_0000_0000,
+                    NirType::Int {
+                        bits: 64,
+                        signed: false
+                    }
+                ),
+                NirType::Bool,
+            ),
+            Some(1),
+            "0xFFFFFFFFu < 0x100000000ull"
+        );
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::SLt,
+                HirExpr::Const(5, i32_ty()),
+                HirExpr::Const(0x1_0000_0000, i64_ty()),
+                NirType::Bool,
+            ),
+            Some(1),
+            "5 < 0x100000000LL"
         );
 
         // Mixed signed/unsigned 32-bit equality compares masked 32-bit values (`-1_i32 == 0xFFFF_FFFF_u32`).
