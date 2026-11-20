@@ -24,12 +24,29 @@
 /// too. [`Self::get`] answers only for the ones that fit in a `u64`, which is
 /// what almost every caller wants; [`Self::get_bytes`] answers for all of
 /// them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default)]
 pub struct RegisterState {
     entries: Vec<(Box<str>, RegisterValue)>,
     /// Program counter, whatever this architecture calls it.
     pub pc: u64,
 }
+
+impl PartialEq for RegisterState {
+    fn eq(&self, other: &Self) -> bool {
+        self.pc == other.pc
+            && self.entries.len() == other.entries.len()
+            && self
+                .entries
+                .iter()
+                .all(|(name, value)| other.value(name) == Some(value))
+            && other
+                .entries
+                .iter()
+                .all(|(name, value)| self.value(name) == Some(value))
+    }
+}
+
+impl Eq for RegisterState {}
 
 /// One register's value.
 ///
@@ -291,5 +308,25 @@ mod tests {
         assert_eq!(aarch64_register_name(31), Some("SP"));
         assert_eq!(aarch64_register_name(32), Some("PC"));
         assert_eq!(aarch64_register_name(34), None);
+    }
+
+    #[test]
+    fn equality_ignores_register_name_casing_and_insertion_order() {
+        let a = RegisterState::at(0x401000).with("RAX", 7).with("RBX", 9);
+        let b = RegisterState::at(0x401000).with("rbx", 9).with("rax", 7);
+        assert_eq!(a, b);
+
+        let mut c = a.clone();
+        c.set("rAx", 8);
+        assert_ne!(a, c);
+
+        let diff_pc = RegisterState::at(0x401004).with("RAX", 7).with("RBX", 9);
+        assert_ne!(a, diff_pc);
+
+        let mut w1 = RegisterState::at(0);
+        w1.set_bytes("XMM0", &[1, 2, 3, 4]);
+        let mut w2 = RegisterState::at(0);
+        w2.set_bytes("xmm0", &[1, 2, 3, 4]);
+        assert_eq!(w1, w2);
     }
 }
