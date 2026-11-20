@@ -62,6 +62,9 @@ pub struct AigManager {
     /// Maps ArraySelect nodes to their vector of AIG literals
     array_select_map: HashMap<SymExpr, Vec<AigLit>>,
     pub last_cnf_node: usize,
+    /// When true, [`Solver`](crate::solver::Solver) supplies `ArrayTheory` axioms for
+    /// `ArraySelect` over `Var` / `ArrayStore` / `Ite` chains.
+    array_axioms_enabled: bool,
     /// Operations met during lowering that have no circuit here. Any entry
     /// makes an answer about this problem untrustworthy, and the solver
     /// reports `Unknown` rather than a verdict.
@@ -82,7 +85,21 @@ impl AigManager {
             var_map: HashMap::new(),
             array_select_map: HashMap::new(),
             last_cnf_node: 0,
+            array_axioms_enabled: false,
             unsupported: Vec::new(),
+        }
+    }
+
+    pub fn set_array_axioms_enabled(&mut self, enabled: bool) {
+        self.array_axioms_enabled = enabled;
+    }
+
+    fn has_array_axioms(array: &SymExpr) -> bool {
+        match array {
+            SymExpr::Var { .. } => true,
+            SymExpr::ArrayStore { array, .. } => Self::has_array_axioms(array),
+            SymExpr::Ite { t, f, .. } => Self::has_array_axioms(t) && Self::has_array_axioms(f),
+            _ => false,
         }
     }
 
@@ -537,19 +554,19 @@ impl AigManager {
                     self.add_var(*id, bits)
                 }
             }
-            SymExpr::ArraySelect { array, .. } => {
-                // A read gets fresh bits. Only the emulator's own memory
-                // arrays (`space_<id>`) are constrained afterwards, by the
-                // oracle CEGAR in `Solver::check_sat_with_oracle`. Any other
-                // array term -- a store chain, an arbitrary array variable --
-                // has neither read-over-write nor functional-consistency
-                // axioms here, so a model of the fresh bits is not a model of
-                // the formula. Say so, so the answer degrades to `Unknown`.
+            SymExpr::ArraySelect { array, index } => {
+                // Ensure index subexpressions are lowered so any unsupported ops inside
+                // the index are recorded consistently.
+                let _ = self.lower_expr(index);
+                // A read gets fresh bits. Either oracle CEGAR (`space_<id>`) or
+                // `ArrayTheory` (when attached to `Solver`) supplies read-over-write
+                // and functional-consistency axioms.
                 let oracle_backed = matches!(
                     array.as_ref(),
                     SymExpr::Var { name, .. } if name.starts_with("space_")
                 );
-                if !oracle_backed {
+                let theory_backed = self.array_axioms_enabled && Self::has_array_axioms(array);
+                if !oracle_backed && !theory_backed {
                     self.note_unsupported(
                         "ArraySelect over a term without array axioms".to_string(),
                     );

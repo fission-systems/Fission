@@ -160,7 +160,7 @@ impl BvTheorySolver {
                     let aig_node_idx = aig_lit.index();
                     let cnf_var = self.cnf.get_cnf_var_for_aig(aig_node_idx);
                     if cnf_var == 0 {
-                        let bit_val = if *aig_lit == AigLit::TRUE { 1u64 } else { 0u64 };
+                        let bit_val = u64::from(aig_lit.is_inverted());
                         value |= bit_val << bit_idx;
                         continue;
                     }
@@ -211,7 +211,7 @@ impl BvTheorySolver {
             let aig_node_idx = aig_lit.index();
             let cnf_var = self.cnf.get_cnf_var_for_aig(aig_node_idx);
             if cnf_var == 0 {
-                let bit_val = if *aig_lit == AigLit::TRUE { 1u64 } else { 0u64 };
+                let bit_val = u64::from(aig_lit.is_inverted());
                 value |= bit_val << bit_idx;
                 continue;
             }

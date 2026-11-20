@@ -1,7 +1,7 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
 use crate::theory::bitvector::LoweredAssumption;
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Result of a SAT query.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +25,7 @@ pub struct Solver {
     pub nodes: HashMap<SymNodeId, SymExpr>,
 
     pub bv_theory: crate::theory::bitvector::BvTheorySolver,
+    pub array_theory: crate::theory::array::ArrayTheory,
     pub sat: crate::sat::SatSolver,
     pub lowered_assertions: usize,
 }
@@ -35,13 +36,48 @@ impl Default for Solver {
     }
 }
 
+fn collect_array_selects(expr: &SymExpr, seen: &mut HashSet<SymExpr>, out: &mut Vec<SymExpr>) {
+    expr.visit_preorder(&mut |node| {
+        if matches!(node, SymExpr::ArraySelect { .. }) && seen.insert(node.clone()) {
+            out.push(node.clone());
+        }
+    });
+}
+
+fn read_oracle_value(
+    oracle: &dyn MemoryOracle,
+    space_id: u64,
+    addr: u64,
+    bit_width: u32,
+) -> Option<u64> {
+    if bit_width == 0 || bit_width > 64 {
+        return None;
+    }
+    let byte_count = u64::from(bit_width.div_ceil(8));
+    let mut val = 0u64;
+    for byte_idx in 0..byte_count {
+        let byte_addr = addr.checked_add(byte_idx)?;
+        let byte = oracle.read_concrete(space_id, byte_addr)?;
+        val |= u64::from(byte) << (byte_idx * 8);
+    }
+    let mask = if bit_width >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bit_width) - 1
+    };
+    Some(val & mask)
+}
+
 impl Solver {
     pub fn new() -> Self {
+        let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
+        bv_theory.aig.set_array_axioms_enabled(true);
         Self {
             assertions: Vec::new(),
             model: HashMap::new(),
             nodes: HashMap::new(),
-            bv_theory: crate::theory::bitvector::BvTheorySolver::new(),
+            bv_theory,
+            array_theory: crate::theory::array::ArrayTheory::new(),
             sat: crate::sat::SatSolver::new(),
             lowered_assertions: 0,
         }
@@ -76,11 +112,19 @@ impl Solver {
         self.lower_pending_assertions();
     }
 
+    fn assert_array_lemmas_for(&mut self, expr: &SymExpr) {
+        self.array_theory.add_expr(expr);
+        for lemma in self.array_theory.take_lemmas() {
+            self.bv_theory.assert_expr(&lemma);
+        }
+    }
+
     fn lower_pending_assertions(&mut self) -> bool {
         while self.lowered_assertions < self.assertions.len() {
-            self.bv_theory
-                .assert_expr(&self.assertions[self.lowered_assertions]);
+            let expr = self.assertions[self.lowered_assertions].clone();
             self.lowered_assertions += 1;
+            self.bv_theory.assert_expr(&expr);
+            self.assert_array_lemmas_for(&expr);
         }
         self.bv_theory.load_into_sat(&mut self.sat)
     }
@@ -109,6 +153,13 @@ impl Solver {
             return Ok(self.refuted());
         }
 
+        for e in extra {
+            self.assert_array_lemmas_for(e);
+        }
+        if !self.bv_theory.load_into_sat(&mut self.sat) {
+            return Ok(self.refuted());
+        }
+
         loop {
             loop_count += 1;
             if loop_count > 10 {
@@ -134,7 +185,10 @@ impl Solver {
             }
 
             // 3. Solve pure boolean SAT problem with assumptions
-            if !self.sat.solve_with_assumptions(None, &assumptions) {
+            if !self
+                .sat
+                .solve_with_assumptions(Some(&mut self.array_theory), &assumptions)
+            {
                 return Ok(self.refuted());
             }
 
@@ -145,40 +199,63 @@ impl Solver {
 
             // 5. Memory CEGAR
             if let Some(oracle) = oracle {
-                let mut new_lemmas = Vec::new();
-                for (_, expr) in &self.nodes {
-                    if let SymExpr::ArraySelect { array, index } = expr {
-                        if let SymExpr::Var { name, .. } = array.as_ref() {
-                            if name.starts_with("space_") {
-                                let space_id: u64 = name["space_".len()..].parse().unwrap_or(0);
-                                let c_idx = self.bv_theory.evaluate_expr_in_model(&self.sat, index);
-                                let c_val = self.bv_theory.evaluate_expr_in_model(&self.sat, expr);
+                let mut seen_selects = HashSet::new();
+                let mut selects = Vec::new();
+                let mut node_ids: Vec<SymNodeId> = self.nodes.keys().copied().collect();
+                node_ids.sort_unstable();
+                for id in node_ids {
+                    if let Some(expr) = self.nodes.get(&id) {
+                        collect_array_selects(expr, &mut seen_selects, &mut selects);
+                    }
+                }
+                for expr in &self.assertions {
+                    collect_array_selects(expr, &mut seen_selects, &mut selects);
+                }
+                for expr in extra {
+                    collect_array_selects(expr, &mut seen_selects, &mut selects);
+                }
+                for expr in self.array_theory.select_terms() {
+                    collect_array_selects(expr, &mut seen_selects, &mut selects);
+                }
 
-                                if let Some(oracle_val) = oracle.read_concrete(space_id, c_idx) {
-                                    if c_val != oracle_val as u64 {
-                                        // Lemma: index == c_idx => ArraySelect == oracle_val
-                                        let eq_idx = SymExpr::Eq(
-                                            index.clone(),
-                                            Box::new(SymExpr::new_const(
-                                                c_idx,
-                                                index.get_bit_width(),
-                                            )),
-                                        );
-                                        let eq_val = SymExpr::Eq(
-                                            Box::new(expr.clone()),
-                                            Box::new(SymExpr::new_const(
-                                                oracle_val as u64,
-                                                expr.get_bit_width(),
-                                            )),
-                                        );
-                                        let implies = SymExpr::Or(
-                                            Box::new(SymExpr::new_not(eq_idx)),
-                                            Box::new(eq_val),
-                                        );
-                                        new_lemmas.push(implies);
-                                    }
-                                }
-                            }
+                let mut new_lemmas = Vec::new();
+                for expr in selects {
+                    let SymExpr::ArraySelect { array, index } = &expr else {
+                        continue;
+                    };
+                    let SymExpr::Var { name, .. } = array.as_ref() else {
+                        continue;
+                    };
+                    let Some(suffix) = name.strip_prefix("space_") else {
+                        continue;
+                    };
+                    let Ok(space_id) = suffix.parse::<u64>() else {
+                        continue;
+                    };
+                    let bit_width = match expr.get_sort() {
+                        Sort::BitVector(bits) | Sort::Float(bits) if (1..=64).contains(&bits) => {
+                            bits
+                        }
+                        _ => continue,
+                    };
+                    let c_idx = self.bv_theory.evaluate_expr_in_model(&self.sat, index);
+                    let c_val = self.bv_theory.evaluate_expr_in_model(&self.sat, &expr);
+
+                    if let Some(oracle_val) = read_oracle_value(oracle, space_id, c_idx, bit_width)
+                    {
+                        if c_val != oracle_val {
+                            // Lemma: index == c_idx => ArraySelect == oracle_val
+                            let eq_idx = SymExpr::Eq(
+                                index.clone(),
+                                Box::new(SymExpr::new_const(c_idx, index.get_bit_width())),
+                            );
+                            let eq_val = SymExpr::Eq(
+                                Box::new(expr.clone()),
+                                Box::new(SymExpr::new_const(oracle_val, bit_width)),
+                            );
+                            let implies =
+                                SymExpr::Or(Box::new(SymExpr::new_not(eq_idx)), Box::new(eq_val));
+                            new_lemmas.push(implies);
                         }
                     }
                 }
@@ -264,6 +341,13 @@ impl Solver {
         // after the path constraints would have no CNF-backed AIG nodes and
         // model evaluation would read the new gates as zero.
         self.bv_theory.aig.lower_expr(expr);
+        // And give its array reads their axioms. With array axioms on, the
+        // AIG no longer flags a select as unsupported, so a select that only
+        // the query mentions -- `select(a, j)` when the constraints talk
+        // about `select(a, i)` and `i == j` -- would otherwise be free bits,
+        // and the first model value an arbitrary one. The lemmas are axioms
+        // of the array, true in every query, so they stay asserted.
+        self.assert_array_lemmas_for(expr);
         let mut results = Vec::new();
         if !matches!(
             self.check_sat().unwrap_or(SatResult::Unknown),
