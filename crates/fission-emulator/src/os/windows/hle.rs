@@ -685,12 +685,27 @@ impl OsEnvironment for WindowsEnv {
             "calloc" => {
                 let count = emu.read_arg(0)? as usize;
                 let size = emu.read_arg(1)? as usize;
-                let bytes = count.saturating_mul(size);
-                let addr = heap_alloc_mapped(emu, self, bytes);
-                if addr != 0 && bytes > 0 {
-                    let zeros = vec![0u8; bytes];
-                    emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
-                }
+                let addr = match count.checked_mul(size) {
+                    Some(bytes) => {
+                        let addr = heap_alloc_mapped(emu, self, bytes);
+                        // Zeroed a page at a time, not with one host buffer
+                        // the size of the request.
+                        let zeros = [0u8; 0x1000];
+                        let mut done = 0usize;
+                        while addr != 0 && done < bytes {
+                            let n = (bytes - done).min(zeros.len());
+                            emu.state.write_space(
+                                emu.state.ram_space(),
+                                addr + done as u64,
+                                &zeros[..n],
+                            )?;
+                            done += n;
+                        }
+                        addr
+                    }
+                    // `count * size` overflows: NULL, as the CRT returns.
+                    None => 0,
+                };
                 emu.write_return_val(addr)?;
             }
             "free" => {

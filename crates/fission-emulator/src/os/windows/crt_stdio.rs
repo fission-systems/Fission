@@ -165,9 +165,11 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
             i += 1;
         }
         let width = (width == 0).then_some(usize::MAX).unwrap_or(width);
+        let modifier_start = i;
         while i < spec.len() && matches!(spec[i], b'l' | b'h' | b'z' | b'j' | b't' | b'L') {
             i += 1;
         }
+        let modifier = &spec[modifier_start..i];
         let Some(&conversion) = spec.get(i) else {
             break;
         };
@@ -188,13 +190,17 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
                 if matches!(input[at], b'-' | b'+') {
                     at += 1;
                 }
+                let digits = at;
                 while at < input.len() && input[at].is_ascii_digit() && at - start < width {
                     at += 1;
                 }
-                if at == start {
+                // A sign and no digits is a matching failure, not a zero.
+                if at == digits {
                     break;
                 }
-                let parsed: i64 = text[start..at].parse().unwrap_or(0);
+                let Ok(parsed) = ascii(&input[start..at]).parse::<i64>() else {
+                    break;
+                };
                 (Some(parsed as u64), None)
             }
             b'x' | b'X' => {
@@ -204,7 +210,7 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
                 if at == start {
                     break;
                 }
-                (u64::from_str_radix(&text[start..at], 16).ok(), None)
+                (u64::from_str_radix(ascii(&input[start..at]), 16).ok(), None)
             }
             b'f' | b'e' | b'g' => {
                 while at < input.len()
@@ -214,16 +220,23 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
                 {
                     at += 1;
                 }
-                if at == start {
+                // A number needs a digit: a lone sign or point converts
+                // nothing.
+                if !input[start..at].iter().any(u8::is_ascii_digit) {
                     break;
                 }
-                let parsed: f64 = text[start..at].parse().unwrap_or(0.0);
+                let Ok(parsed) = ascii(&input[start..at]).parse::<f64>() else {
+                    break;
+                };
                 (Some(parsed.to_bits()), None)
             }
             b'c' => {
+                // Bytes, not characters: the input need not split on a
+                // character boundary, and slicing the decoded text there
+                // panicked.
                 let take = if width == usize::MAX { 1 } else { width };
                 at = (at + take).min(input.len());
-                (None, Some(text[start..at].to_string()))
+                (None, Some(input[start..at].to_vec()))
             }
             b's' => {
                 while at < input.len() && !input[at].is_ascii_whitespace() && at - start < width {
@@ -232,7 +245,7 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
                 if at == start {
                     break;
                 }
-                (None, Some(text[start..at].to_string()))
+                (None, Some(input[start..at].to_vec()))
             }
             b'%' => {
                 if input[at] != b'%' {
@@ -254,27 +267,52 @@ fn scan(emu: &mut Emulator, text: &str, fmt: &str, arglist: u64, is_64bit: bool)
         let space = emu.state.ram_space();
         match (value, text_value) {
             (Some(word), _) if matches!(conversion, b'f' | b'e' | b'g') => {
-                emu.state
-                    .write_space(space, destination, &word.to_le_bytes())?;
+                // `%f` stores a `float`; `%lf` and `%Lf` a `double` (MSVC's
+                // `long double` is a `double`). Eight bytes into a `float`
+                // overwrote the variable after it.
+                let value = f64::from_bits(word);
+                if modifier.is_empty() {
+                    emu.state
+                        .write_space(space, destination, &(value as f32).to_le_bytes())?;
+                } else {
+                    emu.state
+                        .write_space(space, destination, &word.to_le_bytes())?;
+                }
             }
             (Some(word), _) => {
-                // The declared width is unknown here, so four bytes: `%d`
-                // into an `int` is what every caller wrote.
+                let size = integer_width(modifier, step as usize);
                 emu.state
-                    .write_space(space, destination, &(word as u32).to_le_bytes())?;
+                    .write_space(space, destination, &word.to_le_bytes()[..size])?;
             }
-            (_, Some(mut string)) => {
+            (_, Some(mut bytes)) => {
                 if conversion == b's' {
-                    string.push('\0');
+                    bytes.push(0);
                 }
-                emu.state
-                    .write_space(space, destination, string.as_bytes())?;
+                emu.state.write_space(space, destination, &bytes)?;
             }
             _ => {}
         }
         assigned += 1;
     }
     Ok(assigned)
+}
+
+/// Bytes this scan accepted as numeric, which are ASCII by construction.
+fn ascii(bytes: &[u8]) -> &str {
+    std::str::from_utf8(bytes).unwrap_or("")
+}
+
+/// How many bytes an integer conversion stores, by its length modifier, on
+/// Windows' LLP64: `long` is four bytes, `long long` eight, and `size_t`,
+/// `ptrdiff_t` the pointer.
+fn integer_width(modifier: &[u8], pointer: usize) -> usize {
+    match modifier {
+        b"hh" => 1,
+        b"h" => 2,
+        b"ll" | b"L" | b"j" => 8,
+        b"z" | b"t" => pointer,
+        _ => 4,
+    }
 }
 
 /// `_fileno(FILE*)`.

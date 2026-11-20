@@ -1398,3 +1398,93 @@ fn duplicating_the_current_thread_gives_a_real_handle() {
     assert_ne!(handle, 0, "a handle was written");
     assert_ne!(handle, thread, "not the pseudo-handle itself");
 }
+
+/// `sscanf` into the given destinations; returns the assignment count.
+fn sscanf(emu: &mut Emulator, input: &[u8], format: &str, destinations: &[u64]) -> u64 {
+    let space = emu.state.ram_space();
+    let text = SCRATCH + 0x1000;
+    let mut bytes = input.to_vec();
+    bytes.push(0);
+    emu.state.write_space(space, text, &bytes).expect("input");
+    let fmt = plant(emu, SCRATCH + 0x1400, format);
+    let arglist = SCRATCH + 0x1800;
+    for (index, destination) in destinations.iter().enumerate() {
+        emu.state
+            .write_space(
+                space,
+                arglist + index as u64 * 8,
+                &destination.to_le_bytes(),
+            )
+            .expect("va_list");
+    }
+    call(
+        emu,
+        "__stdio_common_vsscanf",
+        &[0, text, input.len() as u64, fmt, 0, arglist],
+    )
+}
+
+/// A length modifier decides how many bytes a conversion stores. `%f` is a
+/// `float`: storing the `double` it parsed wrote eight bytes over a
+/// four-byte variable and the one after it.
+#[test]
+fn sscanf_stores_each_conversion_at_its_declared_width() {
+    let mut emu = windows_emulator();
+    let out = SCRATCH + 0x2000;
+    let space = emu.state.ram_space();
+    emu.state
+        .write_space(space, out, &[0xEE; 0x60])
+        .expect("sentinel");
+    let (f, lf, hd, lld, hhd) = (out, out + 0x10, out + 0x20, out + 0x30, out + 0x40);
+    let assigned = sscanf(
+        &mut emu,
+        b"1.5 2.25 -3 5000000000 7",
+        "%f %lf %hd %lld %hhd",
+        &[f, lf, hd, lld, hhd],
+    );
+    assert_eq!(assigned, 5);
+    let at = |emu: &mut Emulator, a: u64, n: usize| read_back(emu, a, n);
+    assert_eq!(at(&mut emu, f, 4), 1.5f32.to_le_bytes(), "%f is a float");
+    assert_eq!(at(&mut emu, f + 4, 4), [0xEE; 4], "and nothing past it");
+    assert_eq!(
+        at(&mut emu, lf, 8),
+        2.25f64.to_le_bytes(),
+        "%lf is a double"
+    );
+    assert_eq!(at(&mut emu, hd, 2), (-3i16).to_le_bytes(), "%hd is a short");
+    assert_eq!(at(&mut emu, hd + 2, 2), [0xEE; 2]);
+    assert_eq!(at(&mut emu, lld, 8), 5_000_000_000i64.to_le_bytes(), "%lld");
+    assert_eq!(at(&mut emu, hhd, 2), [7, 0xEE], "%hhd is one byte");
+}
+
+/// A sign with no digits after it is a matching failure, not a zero.
+#[test]
+fn sscanf_does_not_convert_a_bare_sign() {
+    let mut emu = windows_emulator();
+    let out = SCRATCH + 0x2000;
+    assert_eq!(sscanf(&mut emu, b"-x", "%d", &[out]), 0);
+    assert_eq!(sscanf(&mut emu, b". 1", "%f", &[out]), 0);
+}
+
+/// `%c` takes bytes, and the input need not be split on a character
+/// boundary: slicing the decoded text at a byte offset inside `é` panicked.
+#[test]
+fn sscanf_c_takes_bytes_even_inside_a_multibyte_character() {
+    let mut emu = windows_emulator();
+    let out = SCRATCH + 0x2000;
+    let assigned = sscanf(&mut emu, "é!".as_bytes(), "%c", &[out]);
+    assert_eq!(assigned, 1);
+    assert_eq!(read_back(&mut emu, out, 1), [0xC3]);
+}
+
+/// An allocation no heap can satisfy is NULL, as it is on Windows -- not an
+/// overflow, and not a host allocation of the requested size.
+#[test]
+fn an_impossible_allocation_is_null() {
+    let mut emu = windows_emulator();
+    assert_eq!(call(&mut emu, "malloc", &[u64::MAX]), 0);
+    assert_eq!(call(&mut emu, "calloc", &[1 << 40, 1 << 30]), 0);
+    let ok = call(&mut emu, "calloc", &[0x10, 0x10]);
+    assert_ne!(ok, 0);
+    assert_eq!(read_back(&mut emu, ok, 0x100), vec![0u8; 0x100]);
+}
