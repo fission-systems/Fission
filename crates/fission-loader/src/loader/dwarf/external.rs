@@ -13,58 +13,60 @@
 use super::super::types::LoadedBinary;
 use std::path::{Path, PathBuf};
 
-/// Parses `.gnu_debuglink`: a NUL-terminated companion filename, padded
-/// with zero bytes to the next 4-byte boundary, followed by a
-/// little-endian `u32` CRC32 (the IEEE 802.3 polynomial `crc32fast`
-/// implements) of the companion file's *entire* contents -- used below to
-/// reject a same-named file that doesn't actually match (e.g. a stale
-/// leftover from a previous build).
-fn parse_gnu_debuglink(binary: &LoadedBinary) -> Option<(String, u32)> {
-    let section = binary
-        .sections
-        .iter()
-        .find(|s| s.name == ".gnu_debuglink")?;
-    let start = section.file_offset as usize;
-    let end = start.checked_add(section.file_size as usize)?;
-    let data = binary.data.as_slice().get(start..end)?;
+/// The bytes of the section named `name`, as they sit in the file.
+fn section_file_bytes<'a>(binary: &'a LoadedBinary, name: &str) -> Option<&'a [u8]> {
+    let section = binary.sections.iter().find(|s| s.name == name)?;
+    let start = usize::try_from(section.file_offset).ok()?;
+    let end = start.checked_add(usize::try_from(section.file_size).ok()?)?;
+    binary.data.as_slice().get(start..end)
+}
 
+/// A `u32` at `at`, in the byte order of the file that carries it.
+fn read_u32(data: &[u8], at: usize, little_endian: bool) -> Option<u32> {
+    let bytes: [u8; 4] = data.get(at..at.checked_add(4)?)?.try_into().ok()?;
+    Some(if little_endian {
+        u32::from_le_bytes(bytes)
+    } else {
+        u32::from_be_bytes(bytes)
+    })
+}
+
+/// Parses `.gnu_debuglink`: a NUL-terminated companion filename, padded
+/// with zero bytes to the next 4-byte boundary, followed by a `u32` CRC32
+/// (the IEEE 802.3 polynomial `crc32fast` implements) of the companion
+/// file's *entire* contents -- used below to reject a same-named file that
+/// doesn't actually match (e.g. a stale leftover from a previous build). The
+/// CRC is stored in the byte order of the file itself.
+fn parse_gnu_debuglink(data: &[u8], little_endian: bool) -> Option<(String, u32)> {
     let nul = data.iter().position(|&b| b == 0)?;
     let filename = String::from_utf8_lossy(&data[..nul]).to_string();
     let crc_offset = (nul + 1).div_ceil(4) * 4;
-    let crc_bytes = data.get(crc_offset..crc_offset + 4)?;
-    Some((filename, u32::from_le_bytes(crc_bytes.try_into().ok()?)))
+    Some((filename, read_u32(data, crc_offset, little_endian)?))
 }
 
 /// Parses `.note.gnu.build-id`: a standard ELF note (`namesz: u32`,
 /// `descsz: u32`, `type: u32`, then `name` and `desc` each padded to a
 /// 4-byte boundary) with `name == "GNU\0"` and `type == NT_GNU_BUILD_ID
 /// (3)`; `desc` is the raw build-id bytes (a SHA-1 hash in practice, but
-/// callers shouldn't assume a fixed length).
-fn parse_gnu_build_id(binary: &LoadedBinary) -> Option<Vec<u8>> {
+/// callers shouldn't assume a fixed length). The three header words are in
+/// the byte order of the file: read as little-endian on a big-endian target,
+/// `type` comes out as `0x0300_0000` and the note was never recognised.
+fn parse_gnu_build_id(data: &[u8], little_endian: bool) -> Option<Vec<u8>> {
     const NT_GNU_BUILD_ID: u32 = 3;
 
-    let section = binary
-        .sections
-        .iter()
-        .find(|s| s.name == ".note.gnu.build-id")?;
-    let start = section.file_offset as usize;
-    let end = start.checked_add(section.file_size as usize)?;
-    let data = binary.data.as_slice().get(start..end)?;
-
-    let namesz = u32::from_le_bytes(data.get(0..4)?.try_into().ok()?) as usize;
-    let descsz = u32::from_le_bytes(data.get(4..8)?.try_into().ok()?) as usize;
-    let note_type = u32::from_le_bytes(data.get(8..12)?.try_into().ok()?);
+    let namesz = usize::try_from(read_u32(data, 0, little_endian)?).ok()?;
+    let descsz = usize::try_from(read_u32(data, 4, little_endian)?).ok()?;
+    let note_type = read_u32(data, 8, little_endian)?;
     if note_type != NT_GNU_BUILD_ID {
         return None;
     }
-    let name_start = 12;
-    let name_padded = namesz.div_ceil(4) * 4;
-    let name = data.get(name_start..name_start + namesz)?;
+    let name_start: usize = 12;
+    let name = data.get(name_start..name_start.checked_add(namesz)?)?;
     if name != b"GNU\0" {
         return None;
     }
-    let desc_start = name_start + name_padded;
-    let desc = data.get(desc_start..desc_start + descsz)?;
+    let desc_start = name_start.checked_add(namesz.checked_next_multiple_of(4)?)?;
+    let desc = data.get(desc_start..desc_start.checked_add(descsz)?)?;
     Some(desc.to_vec())
 }
 
@@ -121,7 +123,10 @@ pub(in crate::loader) fn resolve_external_debug_binary(
         .parent()
         .unwrap_or_else(|| Path::new("."));
 
-    if let Some((filename, expected_crc)) = parse_gnu_debuglink(binary) {
+    let little_endian = binary.is_little_endian();
+    if let Some((filename, expected_crc)) = section_file_bytes(binary, ".gnu_debuglink")
+        .and_then(|data| parse_gnu_debuglink(data, little_endian))
+    {
         for candidate in [
             own_dir.join(&filename),
             own_dir.join(".debug").join(&filename),
@@ -136,7 +141,9 @@ pub(in crate::loader) fn resolve_external_debug_binary(
         }
     }
 
-    if let Some(build_id) = parse_gnu_build_id(binary) {
+    if let Some(build_id) = section_file_bytes(binary, ".note.gnu.build-id")
+        .and_then(|data| parse_gnu_build_id(data, little_endian))
+    {
         if build_id.len() >= 2 {
             let hex: String = build_id.iter().map(|b| format!("{b:02x}")).collect();
             let (dir_part, file_part) = hex.split_at(2);
@@ -159,7 +166,70 @@ pub(in crate::loader) fn resolve_external_debug_binary(
 #[cfg(test)]
 mod tests {
     use super::super::analyzer::DwarfAnalyzer;
+    use super::{parse_gnu_build_id, parse_gnu_debuglink};
     use crate::loader::LoadedBinary;
+
+    /// A `.note.gnu.build-id` section with the given build-id, its three
+    /// header words in the requested byte order.
+    fn build_id_note(id: &[u8], little_endian: bool) -> Vec<u8> {
+        let word = |v: u32| {
+            if little_endian {
+                v.to_le_bytes()
+            } else {
+                v.to_be_bytes()
+            }
+        };
+        let mut note = Vec::new();
+        note.extend(word(4));
+        note.extend(word(id.len() as u32));
+        note.extend(word(3));
+        note.extend(b"GNU\0");
+        note.extend(id);
+        note
+    }
+
+    #[test]
+    fn build_id_note_is_read_in_the_byte_order_of_the_file() {
+        let id = [0xde, 0xad, 0xbe, 0xef, 0x01, 0x02, 0x03, 0x04];
+        assert_eq!(
+            parse_gnu_build_id(&build_id_note(&id, true), true).as_deref(),
+            Some(&id[..])
+        );
+        // Big-endian targets (PowerPC, MIPS BE, s390x, SPARC) were read as
+        // little-endian and the note type never matched.
+        assert_eq!(
+            parse_gnu_build_id(&build_id_note(&id, false), false).as_deref(),
+            Some(&id[..])
+        );
+        // And the wrong order is still a mismatch, not a lucky parse.
+        assert_eq!(parse_gnu_build_id(&build_id_note(&id, false), true), None);
+    }
+
+    #[test]
+    fn build_id_note_with_sizes_past_the_section_is_ignored() {
+        let mut note = build_id_note(&[1, 2, 3, 4], true);
+        note[4..8].copy_from_slice(&u32::MAX.to_le_bytes()); // descsz
+        assert_eq!(parse_gnu_build_id(&note, true), None);
+        let mut note = build_id_note(&[1, 2, 3, 4], true);
+        note[0..4].copy_from_slice(&u32::MAX.to_le_bytes()); // namesz
+        assert_eq!(parse_gnu_build_id(&note, true), None);
+        assert_eq!(parse_gnu_build_id(&[], true), None);
+    }
+
+    #[test]
+    fn debuglink_crc_is_read_in_the_byte_order_of_the_file() {
+        let mut link = b"a.debug\0".to_vec();
+        link.extend([0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(
+            parse_gnu_debuglink(&link, false),
+            Some(("a.debug".to_string(), 0x1234_5678))
+        );
+        assert_eq!(
+            parse_gnu_debuglink(&link, true),
+            Some(("a.debug".to_string(), 0x7856_3412))
+        );
+        assert_eq!(parse_gnu_debuglink(b"a.debug\0", true), None);
+    }
 
     /// Real split-debug fixture, produced the standard way: `objcopy
     /// --only-keep-debug sample.elf sample.elf.debug`, `strip

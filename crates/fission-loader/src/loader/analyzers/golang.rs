@@ -550,7 +550,7 @@ impl<'a> GoAnalyzer<'a> {
                 if let Some(offset) = Self::find_buildinfo_magic(data) {
                     if let Some(ver) = Self::parse_buildinfo_version(
                         &data[offset..],
-                        section.virtual_address + offset as u64,
+                        section.virtual_address.saturating_add(offset as u64),
                         self.binary,
                     ) {
                         return Some(ver);
@@ -592,12 +592,15 @@ impl<'a> GoAnalyzer<'a> {
             // Pointer-based: scan forward for "go1." in a 256-byte window
             let window = &data[content_start..content_start.saturating_add(256).min(data.len())];
             if let Some(pos) = window.windows(4).position(|w| w == b"go1.") {
-                let end = window[pos..]
+                // The version ends at a NUL or newline, at 32 bytes, or where
+                // the window does -- whichever comes first.
+                let tail = &window[pos..];
+                let end = tail
                     .iter()
                     .position(|&b| b == 0 || b == b'\n')
-                    .unwrap_or(32)
+                    .unwrap_or(tail.len())
                     .min(32);
-                if let Ok(s) = std::str::from_utf8(&window[pos..pos + end]) {
+                if let Ok(s) = std::str::from_utf8(&tail[..end]) {
                     return Some(s.to_string());
                 }
             }
@@ -609,11 +612,10 @@ impl<'a> GoAnalyzer<'a> {
     fn read_varint_string(data: &[u8]) -> Option<(String, usize)> {
         let (len, varint_bytes) = Self::read_uvarint(data)?;
         let start = varint_bytes;
-        let end = start + len as usize;
-        if end > data.len() {
-            return None;
-        }
-        let s = std::str::from_utf8(&data[start..end]).ok()?;
+        // `len` is an untrusted 64-bit value: `start + len` wrapped in release
+        // builds and slipped past the length check with `end < start`.
+        let end = start.checked_add(usize::try_from(len).ok()?)?;
+        let s = std::str::from_utf8(data.get(start..end)?).ok()?;
         Some((s.to_string(), end))
     }
 
@@ -1095,5 +1097,65 @@ mod tests {
     #[test]
     fn go_1_16_pclntab_32_bit() {
         assert_main_f(&pclntab_function(GO_1_16_MAGIC, 4));
+    }
+
+    /// A `\xff Go buildinf:` header for 64-bit pointers followed by `tail`.
+    fn buildinfo(flags: u8, tail: &[u8]) -> Vec<u8> {
+        let mut data = GO_BUILDINFO_MAGIC.to_vec();
+        data.push(8); // pointer size
+        data.push(flags);
+        if flags & 2 != 0 {
+            data.extend([0u8; 16]); // the two unused pointer slots
+        }
+        data.extend_from_slice(tail);
+        data
+    }
+
+    fn version_of(data: &[u8]) -> Option<String> {
+        let binary = LoadedBinaryBuilder::new("go".to_string(), DataBuffer::Heap(Vec::new()))
+            .build()
+            .expect("empty binary");
+        GoAnalyzer::parse_buildinfo_version(data, 0, &binary)
+    }
+
+    #[test]
+    fn inline_buildinfo_version_is_read() {
+        let mut tail = vec![8u8];
+        tail.extend_from_slice(b"go1.22.3");
+        assert_eq!(
+            version_of(&buildinfo(2, &tail)).as_deref(),
+            Some("go1.22.3")
+        );
+    }
+
+    /// A ten-byte uvarint encoding `u64::MAX` as the string length: `start +
+    /// len` overflowed (debug) or wrapped to `end < start` and indexed
+    /// `data[10..9]` (release).
+    #[test]
+    fn inline_buildinfo_with_an_overflowing_length_is_ignored() {
+        let mut tail = vec![0xffu8; 9];
+        tail.push(0x01);
+        tail.extend_from_slice(b"go1.22.3 and some padding");
+        assert_eq!(version_of(&buildinfo(2, &tail)), None);
+    }
+
+    #[test]
+    fn inline_buildinfo_with_a_length_past_the_data_is_ignored() {
+        assert_eq!(version_of(&buildinfo(2, &[200, b'g', b'o'])), None);
+    }
+
+    /// Pointer-style header: the version is found by scanning, and may run to
+    /// the end of the data with no terminator. The reader used to take 32
+    /// bytes regardless and index past the end.
+    #[test]
+    fn scanned_buildinfo_version_may_end_where_the_data_does() {
+        assert_eq!(
+            version_of(&buildinfo(0, b"\0\0go1.21")).as_deref(),
+            Some("go1.21")
+        );
+        assert_eq!(
+            version_of(&buildinfo(0, b"go1.20.5\0tail")).as_deref(),
+            Some("go1.20.5")
+        );
     }
 }

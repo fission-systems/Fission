@@ -11,14 +11,9 @@ impl LoadedBinary {
     /// If the LoadedBinary is cloned (via Arc), this modification
     /// will trigger a clone of the entire inner structure.
     pub fn patch_bytes(&mut self, offset: u64, new_bytes: &[u8]) -> Option<Vec<u8>> {
-        let offset = offset as usize;
-        let end = offset + new_bytes.len();
-
-        if end > self.data.as_slice().len() {
-            return None;
-        }
-
-        let original = self.data.as_slice()[offset..end].to_vec();
+        let offset = usize::try_from(offset).ok()?;
+        let end = offset.checked_add(new_bytes.len())?;
+        let original = self.data.as_slice().get(offset..end)?.to_vec();
 
         let data_mut = Arc::make_mut(&mut self.data);
         let vec = data_mut.to_mut_vec();
@@ -36,14 +31,9 @@ impl LoadedBinary {
 
     /// Get bytes at a file offset (for displaying original)
     pub fn get_bytes_at_offset(&self, offset: u64, size: usize) -> Option<Vec<u8>> {
-        let offset = offset as usize;
-        let end = offset + size;
-
-        if end > self.data.as_slice().len() {
-            return None;
-        }
-
-        Some(self.data.as_slice()[offset..end].to_vec())
+        let offset = usize::try_from(offset).ok()?;
+        let end = offset.checked_add(size)?;
+        Some(self.data.as_slice().get(offset..end)?.to_vec())
     }
 
     /// Save the (potentially patched) binary to a file
@@ -62,5 +52,29 @@ impl LoadedBinary {
     pub fn apply_quick_patch_va(&mut self, va: u64, patch_type: QuickPatch) -> Option<Vec<u8>> {
         let bytes = patch_type.bytes();
         self.patch_bytes_va(va, &bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder};
+
+    /// `offset + len` near `u64::MAX` wrapped in release builds, passed the
+    /// `end > len` test with `end < offset`, and panicked on the slice.
+    #[test]
+    fn patching_at_an_offset_whose_end_overflows_is_refused() {
+        let mut binary =
+            LoadedBinaryBuilder::new("patch".to_string(), DataBuffer::Heap(vec![1, 2, 3, 4]))
+                .build()
+                .expect("binary");
+        assert_eq!(binary.patch_bytes(u64::MAX, &[9, 9]), None);
+        assert_eq!(binary.patch_bytes(u64::MAX - 1, &[9, 9]), None);
+        assert_eq!(binary.patch_bytes(3, &[9, 9]), None);
+        assert_eq!(binary.get_bytes_at_offset(u64::MAX, 2), None);
+        assert_eq!(binary.get_bytes_at_offset(3, usize::MAX), None);
+        // Nothing above touched the data; an in-range patch still works.
+        assert_eq!(binary.get_bytes_at_offset(0, 4), Some(vec![1, 2, 3, 4]));
+        assert_eq!(binary.patch_bytes(2, &[9, 9]), Some(vec![3, 4]));
+        assert_eq!(binary.get_bytes_at_offset(0, 4), Some(vec![1, 2, 9, 9]));
     }
 }

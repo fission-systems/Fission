@@ -2,6 +2,9 @@ use super::{FunctionInfo, LoadedBinary, SectionInfo};
 use crate::loader::reader::Endian;
 use crate::prelude::*;
 
+/// Largest image [`LoadedBinary::get_memory_mapped_data`] will materialise.
+pub const MAX_MAPPED_IMAGE_BYTES: u64 = 1 << 30;
+
 impl LoadedBinary {
     /// Sort sections by virtual address for binary search
     pub fn sort_sections(&mut self) {
@@ -279,7 +282,7 @@ impl LoadedBinary {
 
         self.functions
             .iter()
-            .find(|f| f.size > 0 && address >= f.address && address < f.address + f.size)
+            .find(|f| address >= f.address && address - f.address < f.size)
     }
 
     /// Find function at exact address only (no range check) - O(1) lookup
@@ -327,7 +330,7 @@ impl LoadedBinary {
 
             if va < section.virtual_address {
                 std::cmp::Ordering::Greater
-            } else if va >= section.virtual_address + section_size {
+            } else if va - section.virtual_address >= section_size {
                 std::cmp::Ordering::Less
             } else {
                 std::cmp::Ordering::Equal
@@ -347,10 +350,15 @@ impl LoadedBinary {
     }
 
     /// Create a memory-mapped representation of the binary for the decompiler.
-    pub fn get_memory_mapped_data(&self) -> Vec<u8> {
+    ///
+    /// Returns `None` when the sections span more than
+    /// [`MAX_MAPPED_IMAGE_BYTES`]: the span is `max(end) - min(start)` over
+    /// section headers, so two sparse sections in a small file can ask for
+    /// terabytes of zeroes.
+    pub fn get_memory_mapped_data(&self) -> Option<Vec<u8>> {
         let binary_data = self.inner().data.as_slice();
         if self.sections.is_empty() {
-            return binary_data.to_vec();
+            return Some(binary_data.to_vec());
         }
 
         let min_va = self
@@ -370,7 +378,11 @@ impl LoadedBinary {
             .max()
             .unwrap_or(min_va);
 
-        let total_size = usize::try_from(max_va_end.saturating_sub(min_va)).unwrap_or(0);
+        let span = max_va_end.saturating_sub(min_va);
+        if span > MAX_MAPPED_IMAGE_BYTES {
+            return None;
+        }
+        let total_size = usize::try_from(span).ok()?;
         let mut mapped = vec![0u8; total_size];
 
         for section in &self.sections {
@@ -398,7 +410,7 @@ impl LoadedBinary {
                 mapped[dest_start..dest_end].copy_from_slice(&binary_data[start..end]);
             }
         }
-        mapped
+        Some(mapped)
     }
 }
 
@@ -517,7 +529,10 @@ mod tests {
         .image_base(0x400000)
         .build()
         .expect("raw binary");
-        assert_eq!(raw_binary.get_memory_mapped_data(), vec![0xaa, 0xbb, 0xcc]);
+        assert_eq!(
+            raw_binary.get_memory_mapped_data(),
+            Some(vec![0xaa, 0xbb, 0xcc])
+        );
 
         let coff_like = LoadedBinaryBuilder::new(
             "coff.obj".to_string(),
@@ -538,8 +553,80 @@ mod tests {
         .expect("coff binary");
         assert_eq!(
             coff_like.get_memory_mapped_data(),
-            vec![0x11, 0x22, 0x33, 0x44]
+            Some(vec![0x11, 0x22, 0x33, 0x44])
         );
+    }
+
+    fn sparse_section(name: &str, virtual_address: u64, virtual_size: u64) -> SectionInfo {
+        SectionInfo {
+            name: name.to_string(),
+            virtual_address,
+            virtual_size,
+            file_offset: 0,
+            file_size: 4,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        }
+    }
+
+    /// Two four-byte sections a terabyte apart: the mapped image is the span
+    /// between them, which used to be allocated whatever its size.
+    #[test]
+    fn get_memory_mapped_data_refuses_a_span_far_larger_than_the_file() {
+        let sparse = LoadedBinaryBuilder::new(
+            "sparse.bin".to_string(),
+            DataBuffer::Heap(vec![0x11, 0x22, 0x33, 0x44]),
+        )
+        .image_base(0x1000)
+        .add_section(sparse_section(".low", 0x1000, 4))
+        .add_section(sparse_section(".high", 0x1000 + (1 << 40), 4))
+        .build()
+        .expect("sparse binary");
+        // `is_none`, not `assert_eq!`: a failure must not format a terabyte.
+        assert!(sparse.get_memory_mapped_data().is_none());
+
+        // The same two sections a megabyte apart are mapped as before.
+        let near = LoadedBinaryBuilder::new(
+            "near.bin".to_string(),
+            DataBuffer::Heap(vec![0x11, 0x22, 0x33, 0x44]),
+        )
+        .image_base(0x1000)
+        .add_section(sparse_section(".low", 0x1000, 4))
+        .add_section(sparse_section(".high", 0x1000 + (1 << 20), 4))
+        .build()
+        .expect("near binary");
+        let mapped = near.get_memory_mapped_data().expect("mapped");
+        assert_eq!(mapped.len(), (1 << 20) + 4);
+        assert_eq!(&mapped[..4], &[0x11, 0x22, 0x33, 0x44]);
+        assert_eq!(&mapped[1 << 20..], &[0x11, 0x22, 0x33, 0x44]);
+    }
+
+    /// A section or function that ends at the top of the address space:
+    /// `start + size` overflowed in the range tests.
+    #[test]
+    fn range_lookups_survive_extents_that_end_at_the_top_of_the_address_space() {
+        let top = u64::MAX - 0xf;
+        let binary = LoadedBinaryBuilder::new(
+            "top.bin".to_string(),
+            DataBuffer::Heap(vec![0x11, 0x22, 0x33, 0x44]),
+        )
+        .add_section(sparse_section(".top", top, u64::MAX))
+        .add_function(FunctionInfo {
+            name: "at_the_top".to_string(),
+            address: top,
+            size: u64::MAX,
+            ..FunctionInfo::default()
+        })
+        .build()
+        .expect("binary");
+        assert_eq!(binary.va_to_file_offset(top + 2), Some(2));
+        assert_eq!(binary.va_to_file_offset(top - 1), None);
+        assert_eq!(
+            binary.function_at(top + 8).map(|f| f.name.as_str()),
+            Some("at_the_top")
+        );
+        assert!(binary.function_at(top - 1).is_none());
     }
 }
 

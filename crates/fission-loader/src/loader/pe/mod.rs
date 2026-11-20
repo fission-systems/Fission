@@ -120,6 +120,27 @@ mod symbol_type {
     pub const DT_FCN: u16 = 2;
 }
 
+/// Address space a PE or TE image needs above its base.
+///
+/// Every RVA, section extent and table index in these formats is a 32-bit
+/// quantity, and the loader forms `image_base + rva (+ size)` in dozens of
+/// places. Refusing an image whose base leaves less than this much room makes
+/// all of those sums exact, rather than checking each one. Real images sit far
+/// below the limit: user-mode bases are under 2^47, and Windows kernel images
+/// load around `0xFFFFF800_00000000`, eight terabytes short of the top.
+const IMAGE_BASE_HEADROOM: u64 = 1 << 34;
+
+/// Refuse an image base so high that `image_base + rva` can wrap.
+pub(in crate::loader) fn ensure_image_base_is_mappable(image_base: u64) -> Result<()> {
+    if image_base > u64::MAX - IMAGE_BASE_HEADROOM {
+        return Err(err!(
+            loader,
+            "MalformedHeader: image base {image_base:#x} leaves no address space for the image"
+        ));
+    }
+    Ok(())
+}
+
 impl PeLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let main_started = std::time::Instant::now();
@@ -138,13 +159,15 @@ impl PeLoader {
             PeOptionalHeader::Pe32Plus(_) => true,
         };
 
-        let (image_base, entry_point, _section_alignment) = match &pe_file.optional_header {
+        let (image_base, entry_rva, _section_alignment) = match &pe_file.optional_header {
             PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => (
                 opt.image_base,
-                opt.image_base + opt.address_of_entry_point as u64,
+                opt.address_of_entry_point,
                 opt.section_alignment,
             ),
         };
+        ensure_image_base_is_mappable(image_base)?;
+        let entry_point = image_base + u64::from(entry_rva);
 
         let spec_started = std::time::Instant::now();
         let (architecture, load_spec) =
@@ -844,8 +867,11 @@ impl<'a> PeLoaderImpl<'a> {
             let section_rva = (section_va - image_base) as u32;
             let section_size = section.virtual_size as u32;
 
-            // Check if RVA is within this section
-            if rva >= section_rva && rva < section_rva + section_size {
+            // Check if RVA is within this section. The end is formed in 64
+            // bits: `VirtualAddress + VirtualSize` is free to exceed 2^32.
+            if rva >= section_rva
+                && u64::from(rva) < u64::from(section_rva) + u64::from(section_size)
+            {
                 let delta = rva - section_rva;
                 if u64::from(delta) >= section.file_size {
                     return None;
