@@ -283,6 +283,21 @@ impl<'a> PreviewBuilder<'a> {
                 block_idx: block.index as usize,
                 op_idx: prev_idx,
             };
+            // `push rbp` in the prologue saves the caller's value, which lands
+            // where a first stack argument would when nothing else moves the
+            // stack pointer before the call: `fcntl(fd, 3, 0)` printed with
+            // the saved register appended. A save stores a preserved
+            // register's entry value; an argument pushed from one stores a
+            // value the function computed into it first.
+            if self.with_lowering_site(site, |this| {
+                this.is_callee_saved_push_store(prev)
+                    && prev
+                        .inputs
+                        .last()
+                        .is_some_and(|saved| this.stores_an_entry_register_value(saved))
+            }) {
+                continue;
+            }
             let stack_address = self.with_lowering_site(site, |this| {
                 this.resolve_call_store_stack_address(block, prev_idx)
             });
@@ -829,6 +844,28 @@ impl<'a> PreviewBuilder<'a> {
             && vn.size == 4
     }
 
+    /// Whether `value`, through copies, is a register nothing in this
+    /// function has written yet: the value it held on entry.
+    fn stores_an_entry_register_value(&self, value: &Varnode) -> bool {
+        let mut cursor = value.clone();
+        for _ in 0..6 {
+            let Some((_, def)) = self.lookup_def_site(&cursor) else {
+                return is_register_varnode(&cursor);
+            };
+            if !matches!(
+                def.opcode,
+                PcodeOpcode::Copy | PcodeOpcode::Cast | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt
+            ) {
+                return false;
+            }
+            let Some(input) = def.inputs.first() else {
+                return false;
+            };
+            cursor = input.clone();
+        }
+        false
+    }
+
     pub(in crate::midend::builder) fn recover_call_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -904,19 +941,34 @@ impl<'a> PreviewBuilder<'a> {
             PcodeOpcode::CallInd => {
                 self.resolve_iat_load_call_target_without_telemetry(op.inputs.first()?)?
             }
+            // `jmp f` out of the function is a tail call, named by the same
+            // lookup `recover_known_external_tail_call_expr` uses.
+            PcodeOpcode::Branch => {
+                let address = branch_target_address(op.inputs.first()?)?;
+                if self.address_to_index.contains_key(&address) {
+                    return None;
+                }
+                sanitize_c_identifier(&super::super::dynamic_guards::resolve_call_target_address(
+                    address,
+                    self.type_context,
+                )?)
+            }
             _ => return None,
         };
-        self.type_context?
-            .call_prototype_summaries
-            .get(&target)?
+        // The named parameters of a variadic declaration are as certain as an
+        // exact arity: `open(const char *, int, ...)` reads `rdi` and `esi` at
+        // every call, whatever follows in the variadic tail.
+        let summary = self.type_context?.call_prototype_summaries.get(&target)?;
+        summary
             .locked_exact_arity
+            .or(summary.variadic_fixed_arity)
             .map(|arity| arity.min(param_count))
     }
 
     /// An exact callee declaration can prove that an ABI register is read by
     /// the call even when the lifted function body contains no p-code use of
-    /// that register.  Treat it as an entry-owned parameter only when no
-    /// dominating call can have clobbered the caller-saved slot first.
+    /// that register.  Treat it as an entry-owned parameter only when it still
+    /// holds its entry value there.
     fn entry_register_arg_at_exact_call(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
@@ -927,8 +979,7 @@ impl<'a> PreviewBuilder<'a> {
         if self
             .declared_variadic_fixed_arity
             .is_some_and(|fixed| param_index >= fixed)
-            || self.lookup_def_site(vn).is_some()
-            || !self.entry_register_slot_is_live_at_call(block, call_idx)
+            || !self.register_holds_entry_value_at_call(block, call_idx, vn)
         {
             return None;
         }
@@ -936,27 +987,57 @@ impl<'a> PreviewBuilder<'a> {
         Some(PreHirExpr::Var(name))
     }
 
-    fn entry_register_slot_is_live_at_call(
+    /// Whether no path from the entry to the call writes `vn` -- through any
+    /// view of it -- or makes a call, which clobbers every argument register.
+    ///
+    /// Having no single reaching definition is not the same thing: at a join
+    /// where each arm loads a different format string into `rdx`, there is
+    /// none, and reading the entry `rdx` instead printed the caller's third
+    /// argument where the machine passes the string.
+    fn register_holds_entry_value_at_call(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
+        vn: &Varnode,
     ) -> bool {
         let Some(call_block_idx) = self.address_to_index.get(&block.start_address).copied() else {
             return false;
         };
-        for (block_idx, candidate) in self.pcode.blocks.iter().enumerate() {
-            let dominates_call =
-                block_idx == call_block_idx || self.dom_tree.dominates(block_idx, call_block_idx);
-            if !dominates_call {
+        let clobbers = |op: &PcodeOp| {
+            op.opcode.is_call()
+                || op.output.as_ref().is_some_and(|output| {
+                    is_register_varnode(output)
+                        && output.offset < vn.offset + u64::from(vn.size)
+                        && vn.offset < output.offset + u64::from(output.size)
+                })
+        };
+        let Some(call_block) = self.pcode.blocks.get(call_block_idx) else {
+            return false;
+        };
+        if call_block.ops[..call_idx.min(call_block.ops.len())]
+            .iter()
+            .any(clobbers)
+        {
+            return false;
+        }
+        let mut seen = HashSet::default();
+        let mut work = self
+            .predecessors
+            .get(call_block_idx)
+            .cloned()
+            .unwrap_or_default();
+        while let Some(idx) = work.pop() {
+            if !seen.insert(idx) {
                 continue;
             }
-            let end = if block_idx == call_block_idx {
-                call_idx.min(candidate.ops.len())
-            } else {
-                candidate.ops.len()
-            };
-            if candidate.ops[..end].iter().any(|op| op.opcode.is_call()) {
+            let Some(candidate) = self.pcode.blocks.get(idx) else {
                 return false;
+            };
+            if candidate.ops.iter().any(clobbers) {
+                return false;
+            }
+            if let Some(preds) = self.predecessors.get(idx) {
+                work.extend(preds.iter().copied());
             }
         }
         true
@@ -976,7 +1057,7 @@ impl<'a> PreviewBuilder<'a> {
         scan_block: &crate::pcode::PcodeBasicBlock,
         before_op_idx: usize,
         seed: &Varnode,
-    ) -> Varnode {
+    ) -> (Varnode, usize) {
         let mut cursor = seed.clone();
         let mut limit = before_op_idx.min(scan_block.ops.len());
         for _ in 0..6 {
@@ -1013,7 +1094,7 @@ impl<'a> PreviewBuilder<'a> {
                 break;
             }
         }
-        cursor
+        (cursor, limit)
     }
 
     /// True when `def` writes the same register family that `vn` reads
@@ -1155,22 +1236,45 @@ impl<'a> PreviewBuilder<'a> {
                 } else {
                     self.try_lower_materialized_output_rhs(scan_block.start_address, prev)?
                 };
-                let source = if prefer_source_values {
-                    let seed = prev.inputs.first().unwrap_or(output);
-                    // Clone so we can peel without borrowing `prev` across the
-                    // subsequent lower/surface calls.
-                    self.peel_prefer_source_arg_varnode(scan_block, prev_idx, seed)
+                // A tail call prefers the register a copy reads (`mov ecx,
+                // edx; jmp rax` passes `edx`, not the slot's own entry
+                // value), read where the copy reads it: the register may be
+                // written again before the jump (`mov rdi, rbx; pop rbx; jmp
+                // f`). Only a copy has a source to prefer -- `xor edi, edi`
+                // is `edi = edi ^ edi`, whose first input is not its value --
+                // so any other definition is read just after itself.
+                let (source, source_site) = if prefer_source_values {
+                    let copies = matches!(
+                        prev.opcode,
+                        PcodeOpcode::Copy
+                            | PcodeOpcode::Cast
+                            | PcodeOpcode::IntZExt
+                            | PcodeOpcode::IntSExt
+                    );
+                    let (source, read_at) = match prev.inputs.first() {
+                        Some(seed) if copies => {
+                            self.peel_prefer_source_arg_varnode(scan_block, prev_idx, seed)
+                        }
+                        _ => (output.clone(), prev_idx + 1),
+                    };
+                    let site = LoweringSite {
+                        block_idx: scan_block.index as usize,
+                        op_idx: read_at,
+                    };
+                    (source, Some(site))
                 } else {
-                    output.clone()
+                    (output.clone(), None)
                 };
                 let expr = if let Some(expr) = direct_rhs {
                     expr
-                } else if prefer_source_values
-                    && let Some(name) = self.surface_call_carrier_name(&source)
-                {
-                    PreHirExpr::Var(name)
                 } else {
-                    match self.lower_varnode(&source, &mut HashSet::default()) {
+                    let lowered = match source_site {
+                        Some(site) => self.with_lowering_site(site, |this| {
+                            this.lower_varnode(&source, &mut HashSet::default())
+                        }),
+                        None => self.lower_varnode(&source, &mut HashSet::default()),
+                    };
+                    match lowered {
                         Ok(expr) => expr,
                         Err(MlilPreviewError::UnsupportedPattern("opcode"))
                             if self.surface_call_carrier_name(output).is_some() =>
@@ -1314,12 +1418,23 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
         abi: &AbiState,
     ) -> Vec<CarrierAssignment> {
-        let same_block_carriers = block.ops[..call_idx]
+        // An earlier call in this block clobbered every argument register, so
+        // only what is written after it is staged for this call: `xor esi,
+        // esi; call dup2; mov edi, ebp; jmp f` printed `f(fd, 0)` from
+        // `dup2`'s second argument.
+        let last_call = block.ops[..call_idx]
+            .iter()
+            .enumerate()
+            .rposition(|(idx, op)| {
+                matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                    && !self.call_is_terminal_branchind_artifact(block, idx)
+            });
+        let same_block_carriers = block.ops[last_call.map_or(0, |idx| idx + 1)..call_idx]
             .iter()
             .filter_map(|op| op.output.as_ref())
             .collect::<Vec<_>>();
         let same_block = abi.assign_carriers(same_block_carriers.iter().copied());
-        if !same_block.is_empty() {
+        if !same_block.is_empty() || last_call.is_some() {
             return same_block;
         }
 

@@ -2389,6 +2389,387 @@ fn a_call_returned_from_its_own_block_is_printed_once() {
     );
 }
 
+/// `ret` as SLEIGH lifts it: the return address comes off the stack.
+fn x64_ret_ops(seq: u32) -> Vec<PcodeOp> {
+    let ret_addr = register(0x288, 8);
+    let rsp = register(0x20, 8);
+    vec![
+        op(
+            seq,
+            PcodeOpcode::Load,
+            Some(ret_addr.clone()),
+            vec![constant(3), rsp.clone()],
+        ),
+        op(
+            seq + 1,
+            PcodeOpcode::IntAdd,
+            Some(rsp.clone()),
+            vec![rsp, constant(8)],
+        ),
+        op(seq + 2, PcodeOpcode::Return, None, vec![ret_addr]),
+    ]
+}
+
+/// `f(5); if (x) f(6); return;` with the `ret` in a block of its own that
+/// both paths reach. Nothing gives the function a return value, so the calls
+/// are emitted without one -- and return recovery then lowered the call that
+/// last wrote the result register a second time, as `return sub_2000();`: a
+/// call the machine never makes, without its arguments.
+#[test]
+fn a_return_after_a_call_in_another_block_does_not_call_again() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let rbx = register(0x18, 8);
+    let rax = register(0, 8);
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rdi.clone()), vec![constant(5)]),
+                // `xor eax, eax`: no vector registers to a variadic callee.
+                op(20, PcodeOpcode::Copy, Some(rax.clone()), vec![constant(0)]),
+                op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rbx.clone(), constant(0)],
+                ),
+                op(
+                    3,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1030), zf.clone()],
+                ),
+            ],
+        ),
+        // do { f(6); rbx = *rbx; } while (rbx);
+        block_at(
+            0x1020,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rdi), vec![constant(6)]),
+                op(21, PcodeOpcode::Copy, Some(rax), vec![constant(0)]),
+                op(5, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(
+                    6,
+                    PcodeOpcode::Load,
+                    Some(rbx.clone()),
+                    vec![constant(3), rbx.clone()],
+                ),
+                op(
+                    7,
+                    PcodeOpcode::IntNotEqual,
+                    Some(zf.clone()),
+                    vec![rbx, constant(0)],
+                ),
+                op(8, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        block_at(0x1030, 2, x64_ret_ops(9)),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![2, 1];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "two_calls", 0x1000, &options).expect("render");
+    let calls = printed_calls_of_sub_2000(&code);
+    assert_eq!(calls.len(), 2, "two call instructions, two calls:\n{code}");
+    assert!(
+        calls.iter().all(|call| !call.contains("sub_2000()")),
+        "every call carries its argument:\n{code}"
+    );
+}
+
+/// `if (x) return 7; return f(5);` with the call made by `jmp f` after the
+/// epilogue. The arguments are staged in the jumping block, which is a fact
+/// about that block; they were recovered only when the whole function had
+/// two blocks or fewer, so any branch elsewhere printed `return sub_3000();`.
+#[test]
+fn a_jump_to_a_function_keeps_its_arguments_in_a_branching_function() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let rdi = register(0x38, 8);
+    let edi = register(0x38, 4);
+    let eax = register(0, 4);
+    let rax = register(0, 8);
+    let zf = register(0x206, 1);
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rdi.clone(), constant(0)],
+                ),
+                op(1, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        // x == 0: tail call f(5)
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(
+                    2,
+                    PcodeOpcode::Copy,
+                    Some(edi.clone()),
+                    vec![constant_sized(5, 4)],
+                ),
+                op(3, PcodeOpcode::IntZExt, Some(rdi), vec![edi]),
+                // A lifted `jmp f` names its target as a code address.
+                op(
+                    4,
+                    PcodeOpcode::Branch,
+                    None,
+                    vec![Varnode {
+                        space_id: 3,
+                        offset: 0x3000,
+                        size: 8,
+                        is_constant: false,
+                        constant_val: 0,
+                    }],
+                ),
+            ],
+        ),
+        // x != 0: return 7
+        block_at(
+            0x1020,
+            2,
+            vec![
+                op(
+                    5,
+                    PcodeOpcode::Copy,
+                    Some(eax.clone()),
+                    vec![constant_sized(7, 4)],
+                ),
+                op(6, PcodeOpcode::IntZExt, Some(rax), vec![eax]),
+            ]
+            .into_iter()
+            .chain(x64_ret_ops(7))
+            .collect(),
+        ),
+    ];
+    blocks[0].successors = vec![2, 1];
+    let pcode = pcode_function(blocks);
+    let code = render_mlil_preview(&pcode, "tail_jump", 0x1000, &options).expect("render");
+    assert!(code.contains("sub_3000(5)"), "{code}");
+}
+
+/// A lifted `jmp f`: its target is a code address.
+fn code_address(address: u64) -> Varnode {
+    Varnode {
+        space_id: 3,
+        offset: address,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+/// Options for an x86-64 System V function.
+fn sysv_options() -> MlilPreviewOptions {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let mut options = test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+    options
+}
+
+/// `xor edi, edi; jmp f` passes 0. The tail-call scan prefers the source a
+/// copy reads (`mov edi, ebx` passes what `ebx` held), and took the first
+/// input of any definition for one: `edi ^ edi` gave `edi`, named `param_1`.
+#[test]
+fn a_jump_after_zeroing_an_argument_register_passes_zero() {
+    let rdi = register(0x38, 8);
+    let edi = register(0x38, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntXor,
+                Some(edi.clone()),
+                vec![edi.clone(), edi.clone()],
+            ),
+            op(1, PcodeOpcode::IntZExt, Some(rdi), vec![edi]),
+            op(2, PcodeOpcode::Branch, None, vec![code_address(0x3000)]),
+        ],
+    )]);
+    let code = render_mlil_preview(&pcode, "tail_zero", 0x1000, &sysv_options()).expect("render");
+    assert!(code.contains("sub_3000(0)"), "{code}");
+
+    // `lea rdi, [rsi + 1]; jmp f` passes `rsi + 1`, not `rsi`.
+    let rsi = register(0x30, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::IntAdd,
+                Some(register(0x38, 8)),
+                vec![rsi, constant(1)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![code_address(0x3000)]),
+        ],
+    )]);
+    let code = render_mlil_preview(&pcode, "tail_add", 0x1000, &sysv_options()).expect("render");
+    assert!(!code.contains("sub_3000(param_2)"), "{code}");
+    assert!(code.contains("sub_3000(param_2 + 1)"), "{code}");
+}
+
+/// `mov rbx, rdx; sub rbx, 8; ...; mov rdi, rbx; pop rbx; jmp f` passes
+/// `rdx - 8`. The tail-call scan prefers the register a copy reads, and named
+/// it by its entry alias (`param_3`) although it had been written since, or
+/// read it at the jump, after the `pop` restored the caller's value.
+#[test]
+fn a_jump_passes_a_register_copied_before_it_is_restored() {
+    let rbx = register(0x18, 8);
+    let rdi = register(0x38, 8);
+    let rdx = register(0x10, 8);
+    let rsp = register(0x20, 8);
+    let zf = register(0x206, 1);
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Copy, Some(rbx.clone()), vec![rdx.clone()]),
+                op(
+                    1,
+                    PcodeOpcode::IntSub,
+                    Some(rbx.clone()),
+                    vec![rbx.clone(), constant(8)],
+                ),
+                op(
+                    2,
+                    PcodeOpcode::IntEqual,
+                    Some(zf.clone()),
+                    vec![rdx, constant(0)],
+                ),
+                op(3, PcodeOpcode::CBranch, None, vec![constant(0x1020), zf]),
+            ],
+        ),
+        block_at(
+            0x1010,
+            1,
+            vec![
+                op(4, PcodeOpcode::Copy, Some(rdi), vec![rbx.clone()]),
+                // pop rbx
+                op(
+                    5,
+                    PcodeOpcode::Load,
+                    Some(rbx),
+                    vec![constant(3), rsp.clone()],
+                ),
+                op(
+                    6,
+                    PcodeOpcode::IntAdd,
+                    Some(rsp.clone()),
+                    vec![rsp, constant(8)],
+                ),
+                op(7, PcodeOpcode::Branch, None, vec![code_address(0x3000)]),
+            ],
+        ),
+        block_at(0x1020, 2, x64_ret_ops(8)),
+    ];
+    blocks[0].successors = vec![2, 1];
+    let pcode = pcode_function(blocks);
+    let code =
+        render_mlil_preview(&pcode, "tail_restore", 0x1000, &sysv_options()).expect("render");
+    assert!(code.contains("sub_3000(param_3 - 8)"), "{code}");
+}
+
+/// `xor esi, esi; call g; mov edi, 7; jmp f`: the call clobbers `esi`, so
+/// it is not an argument of `f`. Carriers written anywhere in the block were
+/// counted, and `f(7, 0)` passed `g`'s second argument along.
+#[test]
+fn an_argument_written_before_an_earlier_call_is_not_passed_to_a_later_one() {
+    let rdi = register(0x38, 8);
+    let rsi = register(0x30, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(rsi), vec![constant(0)]),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(2, PcodeOpcode::Copy, Some(rdi), vec![constant(7)]),
+            op(3, PcodeOpcode::Branch, None, vec![code_address(0x3000)]),
+        ],
+    )]);
+    let code =
+        render_mlil_preview(&pcode, "tail_after_call", 0x1000, &sysv_options()).expect("render");
+    assert!(code.contains("sub_3000(7)"), "{code}");
+}
+
+/// `push rbp` before a call stores where a first stack argument would go
+/// when nothing else moves the stack pointer, but it saves the caller's
+/// register: `fcntl(fd, 3, 0)` printed with `rbp`'s value appended.
+#[test]
+fn a_callee_saved_push_is_not_a_stack_argument() {
+    let rbp = register(0x28, 8);
+    let rsp = register(0x20, 8);
+    let rdi = register(0x38, 8);
+    let saved = varnode(0x4f900);
+    let at = |address: u64, mut op: PcodeOp| {
+        op.address = address;
+        op
+    };
+    let mut options = sysv_options();
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            // push rbp: one instruction
+            at(
+                0x1000,
+                op(0, PcodeOpcode::Copy, Some(saved.clone()), vec![rbp]),
+            ),
+            at(
+                0x1000,
+                op(
+                    1,
+                    PcodeOpcode::IntSub,
+                    Some(rsp.clone()),
+                    vec![rsp.clone(), constant(8)],
+                ),
+            ),
+            at(
+                0x1000,
+                op(2, PcodeOpcode::Store, None, vec![constant(3), rsp, saved]),
+            ),
+            op(3, PcodeOpcode::Copy, Some(rdi), vec![constant(5)]),
+            op(4, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+        ]
+        .into_iter()
+        .chain(x64_ret_ops(5))
+        .collect(),
+    )]);
+    let code = render_mlil_preview(&pcode, "push_save", 0x1000, &options).expect("render");
+    assert!(code.contains("sub_2000(5)"), "{code}");
+    // Control: a push of a register the convention does not preserve is
+    // still read as an argument.
+    options.cspec_unaffected_offsets.clear();
+    let code = render_mlil_preview(&pcode, "push_save", 0x1000, &options).expect("render");
+    assert!(!code.contains("sub_2000(5)"), "{code}");
+}
+
 /// `if (n == 0) n = 1; return f(p, n);` -- one arm writes the result register
 /// (`mov rax, [n]` to copy `n`), and both arms reach a join holding the call
 /// and the `ret`. A call gives the join no p-code output, so the join was
@@ -2779,9 +3160,11 @@ fn x64_branchind_register_fp_tail_call() {
         "must not null-check staged arg param_2:\n{code}"
     );
     // Args must be the staged sources (param_2, param_3), not the ABI slot
-    // names of the destinations (param_1 / overwritten rcx).
+    // names of the destinations (param_1 / overwritten rcx). `edx` is
+    // written again after the copy, so the first argument is read through
+    // `rcx`, the zero-extension of the copied `edx`.
     assert!(
-        code.contains("(param_2") || code.contains(", param_2") || code.contains("(param_2,"),
+        code.contains("param_2, param_3)"),
         "expected first staged arg param_2:\n{code}"
     );
     assert!(

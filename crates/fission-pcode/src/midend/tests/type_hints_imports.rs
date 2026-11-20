@@ -109,6 +109,287 @@ fn exact_call_arity_recovers_dominating_predecessor_register_slot() {
     assert!(rendered.contains("two_args(11, 22)"), "{rendered}");
 }
 
+/// `open(path, flags, ...)`: the named parameters of a variadic declaration
+/// are read at every call just as an exact arity's are. A path that sets
+/// `rdi` in one block and `esi` next to the call printed `open()`, because
+/// only `locked_exact_arity` was taken as proof and a variadic callee has none.
+#[test]
+fn variadic_named_parameters_recover_a_dominating_predecessor_register_slot() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x401000,
+                    output: Some(rdi),
+                    inputs: vec![cst(11, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401010,
+                        output: Some(rsi),
+                        inputs: vec![cst(22, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x401014,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x401019,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let render = |summary: NirCallPrototypeSummary| {
+        let mut context = exact_import_context(target, "two_named", 2);
+        context
+            .call_prototype_summaries
+            .insert("two_named".to_string(), summary);
+        render_mlil_preview_with_context(
+            &func,
+            "caller",
+            0x401000,
+            &preview_options_for(CallingConvention::SystemVAmd64),
+            Some(&context),
+        )
+        .expect("preview render should succeed")
+    };
+    let declaration = |variadic_fixed_arity| NirCallPrototypeSummary {
+        variadic_fixed_arity,
+        min_arity: 2,
+        max_arity: 2,
+        locked_exact_arity: None,
+        returns_void: false,
+        param_pointer_pointees: vec![None; 2],
+        param_surface_type_names: vec![None; 2],
+    };
+
+    let rendered = render(declaration(Some(2)));
+    assert!(rendered.contains("two_named(11, 22"), "{rendered}");
+    // Control: without the variadic prefix nothing proves `rdi` is read here.
+    let rendered = render(declaration(None));
+    assert!(!rendered.contains("two_named(11"), "{rendered}");
+}
+
+/// `jmp two_args` after the epilogue, with `rdi` set in the block before the
+/// one that stages `rsi`. A declaration proved the leading slots of a `call`
+/// but was not looked up for a tail call, so the jump printed `two_args()`
+/// (no contiguous prefix in its own block).
+#[test]
+fn exact_call_arity_recovers_a_tail_call_slot_from_the_preceding_block() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let cond = uniq(0x100, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401000,
+                        output: Some(rdi),
+                        inputs: vec![cst(11, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x401004,
+                        output: None,
+                        inputs: vec![cst(0x401020, 8), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x401010,
+                        output: Some(rsi),
+                        inputs: vec![cst(22, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 3,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x401014,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x401020,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 4,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401020,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+    let context = exact_import_context(target, "two_args", 2);
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "caller",
+        0x401000,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+    assert!(rendered.contains("two_args(11, 22)"), "{rendered}");
+}
+
+/// At a join where each arm loads a different value into `rdx`, no single
+/// definition reaches the call -- but `rdx` was written. Taking "no reaching
+/// definition" for "the entry value" printed the caller's third parameter
+/// where the machine passes one arm's string.
+#[test]
+fn exact_call_arity_does_not_read_the_entry_value_of_a_register_written_on_every_path() {
+    let target = 0x401100;
+    let rdi = reg(0x38, 8);
+    let rsi = reg(0x30, 8);
+    let rdx = reg(0x10, 8);
+    let cond = uniq(0x100, 1);
+    let copy = |seq: u32, address: u64, output: &Varnode, value: i64| PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(output.clone()),
+        inputs: vec![cst(value, 8)],
+        asm_mnemonic: None,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x401000,
+                successors: vec![1, 2],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x401000,
+                    output: None,
+                    inputs: vec![cst(0x401020, 8), cond],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x401010,
+                successors: vec![3],
+                ops: vec![
+                    copy(1, 0x401010, &rdx, 33),
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x401018,
+                        output: None,
+                        inputs: vec![cst(0x401030, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x401020,
+                successors: vec![3],
+                ops: vec![copy(3, 0x401020, &rdx, 44)],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x401030,
+                successors: vec![],
+                ops: vec![
+                    copy(4, 0x401030, &rdi, 11),
+                    copy(5, 0x401034, &rsi, 22),
+                    PcodeOp {
+                        seq_num: 6,
+                        opcode: PcodeOpcode::Call,
+                        address: 0x401038,
+                        output: None,
+                        inputs: vec![cst(target as i64, 8)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 7,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x40103d,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+    let render = |func: &PcodeFunction| {
+        let context = exact_import_context(target, "three_args", 3);
+        render_mlil_preview_with_context(
+            func,
+            "caller",
+            0x401000,
+            &preview_options_for(CallingConvention::SystemVAmd64),
+            Some(&context),
+        )
+        .expect("preview render should succeed")
+    };
+    let rendered = render(&func);
+    assert!(!rendered.contains("param_3"), "{rendered}");
+
+    // Control: with neither arm writing `rdx`, the call reads the entry value.
+    let mut untouched = func.clone();
+    untouched.blocks[1].ops.remove(0);
+    untouched.blocks[2].ops.clear();
+    let rendered = render(&untouched);
+    assert!(
+        rendered.contains("three_args(11, 22, param_3)"),
+        "{rendered}"
+    );
+}
+
 #[test]
 fn exact_call_arity_does_not_invent_non_dominating_register_slot() {
     let target = 0x401100;
