@@ -29,6 +29,7 @@ This crate is a **dynamic analysis pillar**, not a decompiler semantic repair la
 | `TraceLog` | `src/trace.rs` | Per-instruction audit trail |
 | Linux HLE | `src/os/linux/mod.rs` | Linux syscall HLE + `image_info` + `signal` delivery |
 | Windows HLE | `src/os/windows/hle.rs` | Win32 HLE; PE `image_info` (stack/PEB/TEB/heap) |
+| Windows threads | `src/os/windows/threads.rs` | Cooperative guest threads, events, waits, per-thread TEB/TLS |
 | Bare Metal HLE | `src/os/bare_metal/mod.rs` | Minimal semihosting-style HLE |
 | Arch descriptors | `src/arch/` | Architecture metadata, calling convention traits, register maps |
 

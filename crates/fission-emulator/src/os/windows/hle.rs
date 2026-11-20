@@ -3,6 +3,7 @@ use crate::os::env::{HleResult, OsEnvironment};
 use crate::os::windows::crt_data::CrtGlobals;
 use crate::os::windows::heap::DummyHeap;
 use crate::os::windows::imports::{ImportTable, SharedImportTable};
+use crate::os::windows::threads::{StartConvention, WindowsThreads};
 use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_loader::loader::LoadedBinary;
@@ -31,7 +32,7 @@ fn uptime_ms(emu: &Emulator) -> u64 {
 
 /// Move the process clock forward. `KUSER_SHARED_DATA` carries the same clock
 /// and is read without a call, so it moves with it.
-fn advance_clock(emu: &mut Emulator, ms: u64) {
+pub(crate) fn advance_clock(emu: &mut Emulator, ms: u64) {
     emu.tick_count = emu.tick_count.wrapping_add(ms);
     if let Err(error) =
         crate::os::windows::peb_teb::write_shared_user_time(&mut emu.state, emu.tick_count)
@@ -82,6 +83,8 @@ pub struct WindowsEnv {
     initterm: Mutex<Vec<InitTermCall>>,
     /// Built when imports are patched, because the IAT points into it.
     crt_globals: Mutex<Option<CrtGlobals>>,
+    /// Guest threads, events and TLS. See `os::windows::threads`.
+    threads: Mutex<WindowsThreads>,
 }
 
 impl WindowsEnv {
@@ -91,6 +94,59 @@ impl WindowsEnv {
             imports: Mutex::new(ImportTable::default()),
             initterm: Mutex::new(Vec::new()),
             crt_globals: Mutex::new(None),
+            threads: Mutex::new(WindowsThreads::default()),
+        }
+    }
+}
+
+/// The name of the stub a thread's start routine returns to.
+const THREAD_RETURN_STUB: &str = "FissionThreadReturn";
+const CREATE_SUSPENDED: u64 = 0x4;
+const CREATE_EVENT_MANUAL_RESET: u64 = 0x1;
+const CREATE_EVENT_INITIAL_SET: u64 = 0x2;
+
+impl WindowsEnv {
+    fn lock_threads(&self) -> std::sync::MutexGuard<'_, WindowsThreads> {
+        self.threads.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Create a guest thread, or `None` if there is no room for its stack or
+    /// TEB (the API then reports failure).
+    fn spawn_thread(
+        &self,
+        emu: &mut Emulator,
+        start: u64,
+        parameter: u64,
+        stack_size: u64,
+        suspended: bool,
+        convention: StartConvention,
+    ) -> Result<Option<(u64, u64)>> {
+        let return_stub = self
+            .imports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stub_for(THREAD_RETURN_STUB);
+        match self.lock_threads().create_thread(
+            emu,
+            start,
+            parameter,
+            stack_size,
+            suspended,
+            convention,
+            return_stub,
+        ) {
+            Ok(created) => {
+                tracing::info!(
+                    "thread {} created at 0x{start:X} (handle 0x{:X})",
+                    created.1,
+                    created.0
+                );
+                Ok(Some(created))
+            }
+            Err(error) => {
+                tracing::warn!("thread creation failed: {error:#}");
+                Ok(None)
+            }
         }
     }
 }
@@ -242,7 +298,132 @@ impl OsEnvironment for WindowsEnv {
                 emu.write_return_val(1)?;
             }
             // Thread / Sync / process identity
-            "CreateThread" | "_beginthreadex" | "_beginthread" => handle_create_thread(emu)?,
+            "CreateThread" | "_beginthreadex" => {
+                // (attributes, stack size, start, parameter, flags, &id)
+                let stack_size = emu.read_arg(1)?;
+                let start = emu.read_arg(2)?;
+                let parameter = emu.read_arg(3)?;
+                let flags = emu.read_arg(4)?;
+                let id_out = emu.read_arg(5)?;
+                let handle = self.spawn_thread(
+                    emu,
+                    start,
+                    parameter,
+                    stack_size,
+                    flags & CREATE_SUSPENDED != 0,
+                    StartConvention::Stdcall,
+                )?;
+                if let Some((handle, tid)) = handle {
+                    if id_out != 0 {
+                        let space = emu.state.ram_space();
+                        emu.state
+                            .write_space(space, id_out, &(tid as u32).to_le_bytes())?;
+                    }
+                    emu.write_return_val(handle)?;
+                } else {
+                    emu.write_return_val(0)?;
+                }
+            }
+            "_beginthread" => {
+                // (start, stack size, argument) -> handle, or -1
+                let start = emu.read_arg(0)?;
+                let stack_size = emu.read_arg(1)?;
+                let parameter = emu.read_arg(2)?;
+                let handle = self.spawn_thread(
+                    emu,
+                    start,
+                    parameter,
+                    stack_size,
+                    false,
+                    StartConvention::Cdecl,
+                )?;
+                emu.write_return_val(handle.map_or(u64::MAX, |(h, _)| h))?;
+            }
+            "ExitThread" | "_endthreadex" => {
+                let code = emu.read_arg(0).unwrap_or(0) as u32;
+                return self.lock_threads().exit_current(emu, code);
+            }
+            "_endthread" => return self.lock_threads().exit_current(emu, 0),
+            THREAD_RETURN_STUB => {
+                // A start routine returned: its value is the exit code.
+                let code = emu.read_register_u64(emu.arch.cc.return_reg())? as u32;
+                return self.lock_threads().exit_current(emu, code);
+            }
+            "ResumeThread" => {
+                let handle = emu.read_arg(0)?;
+                let previous = self.lock_threads().resume_thread(handle);
+                emu.write_return_val(previous)?;
+            }
+            "SuspendThread" => {
+                // A thread here runs only when the running one gives way, so
+                // another thread is never mid-instruction to be suspended,
+                // and its context is not exposed to `GetThreadContext`.
+                // -1 is the documented failure; the Go runtime treats it as
+                // "the thread has gone" and drops the preemption request.
+                emu.write_return_val(crate::os::windows::threads::WAIT_FAILED)?;
+            }
+            "GetExitCodeThread" => {
+                let handle = emu.read_arg(0)?;
+                let out = emu.read_arg(1)?;
+                match self.lock_threads().exit_code(handle) {
+                    Some(code) => {
+                        if out != 0 {
+                            let space = emu.state.ram_space();
+                            emu.state
+                                .write_space(space, out, &(code as u32).to_le_bytes())?;
+                        }
+                        emu.write_return_val(1)?;
+                    }
+                    None => emu.write_return_val(0)?,
+                }
+            }
+            // Events: (attributes, manual reset, initial state, name) and the
+            // Ex form (attributes, name, flags, access).
+            "CreateEventA" | "CreateEventW" => {
+                let manual = emu.read_arg(1)? & 0xFFFF_FFFF != 0;
+                let initial = emu.read_arg(2)? & 0xFFFF_FFFF != 0;
+                let handle = self.lock_threads().create_event(emu, manual, initial);
+                emu.write_return_val(handle)?;
+            }
+            "CreateEventExA" | "CreateEventExW" => {
+                let flags = emu.read_arg(2)?;
+                let handle = self.lock_threads().create_event(
+                    emu,
+                    flags & CREATE_EVENT_MANUAL_RESET != 0,
+                    flags & CREATE_EVENT_INITIAL_SET != 0,
+                );
+                emu.write_return_val(handle)?;
+            }
+            "SetEvent" => {
+                let handle = emu.read_arg(0)?;
+                let ok = self.lock_threads().set_event(emu, handle);
+                emu.write_return_val(u64::from(ok))?;
+            }
+            "ResetEvent" => {
+                let handle = emu.read_arg(0)?;
+                let ok = self.lock_threads().reset_event(handle);
+                emu.write_return_val(u64::from(ok))?;
+            }
+            "WaitForMultipleObjects" | "WaitForMultipleObjectsEx" => {
+                // (count, handles, wait all, milliseconds)
+                let count = emu.read_arg(0)? & 0xFFFF_FFFF;
+                let array = emu.read_arg(1)?;
+                let all = emu.read_arg(2)? & 0xFFFF_FFFF != 0;
+                let timeout = emu.read_arg(3)? & 0xFFFF_FFFF;
+                if count == 0 || count > 64 || array == 0 {
+                    emu.write_return_val(crate::os::windows::threads::WAIT_FAILED)?;
+                } else {
+                    let mut handles = Vec::with_capacity(count as usize);
+                    for index in 0..count {
+                        let at = array + index * u64::from(emu.arch.pointer_size);
+                        handles.push(crate::os::windows::threads::read_pointer(emu, at)?);
+                    }
+                    return self
+                        .lock_threads()
+                        .wait(emu, func_name, handles, all, timeout);
+                }
+            }
+            "SwitchToThread" => return self.lock_threads().yield_now(emu, func_name),
             // A condition variable is a pointer-sized word the caller owns.
             // Nothing here schedules, so initialising it to zero and waking
             // nobody is the whole of it -- and a program that waits on one
@@ -303,7 +484,11 @@ impl OsEnvironment for WindowsEnv {
             }
             "longjmp" | "_longjmp" => return handle_longjmp(emu),
             "WaitForSingleObject" | "WaitForSingleObjectEx" => {
-                emu.write_return_val(0)?;
+                let handle = emu.read_arg(0)?;
+                let timeout = emu.read_arg(1)? & 0xFFFF_FFFF;
+                return self
+                    .lock_threads()
+                    .wait(emu, func_name, vec![handle], false, timeout);
             }
             "CloseHandle" => {
                 emu.write_return_val(1)?;
@@ -311,27 +496,52 @@ impl OsEnvironment for WindowsEnv {
             "GetCurrentProcess" => {
                 emu.write_return_val(!0u64)?;
             } // pseudo -1
-            "DuplicateHandle" => handle_duplicate_handle(emu)?,
+            "DuplicateHandle" => {
+                let current_thread = self.lock_threads().current_handle(emu);
+                handle_duplicate_handle(emu, current_thread)?
+            }
             "GetCurrentProcessId" => {
                 emu.write_return_val(1000)?;
             }
             "GetCurrentThread" => {
-                emu.write_return_val(!1u64 + 1)?;
+                // The pseudo-handle is -2; -1 is the process's.
+                emu.write_return_val(!1u64)?;
             }
             "GetCurrentThreadId" => {
-                emu.write_return_val(1000)?;
+                let tid = self.lock_threads().current_tid();
+                emu.write_return_val(tid)?;
             }
+            // TLS lives in each thread's TEB, where programs also read it
+            // directly through the segment register.
             "TlsAlloc" => {
-                emu.write_return_val(1)?;
-            }
-            "TlsGetValue" => {
-                emu.write_return_val(0)?;
-            }
-            "TlsSetValue" => {
-                emu.write_return_val(1)?;
+                let index = self.lock_threads().tls_alloc();
+                emu.write_return_val(index)?;
             }
             "TlsFree" => {
-                emu.write_return_val(1)?;
+                let index = emu.read_arg(0)? & 0xFFFF_FFFF;
+                let ok = self.lock_threads().tls_free(index);
+                emu.write_return_val(u64::from(ok))?;
+            }
+            "TlsGetValue" => {
+                let index = emu.read_arg(0)? & 0xFFFF_FFFF;
+                let slot = self.lock_threads().tls_slot(emu, index);
+                let value = match slot {
+                    Some(slot) => crate::os::windows::threads::read_pointer(emu, slot)?,
+                    None => 0,
+                };
+                emu.write_return_val(value)?;
+            }
+            "TlsSetValue" => {
+                let index = emu.read_arg(0)? & 0xFFFF_FFFF;
+                let value = emu.read_arg(1)?;
+                let slot = self.lock_threads().tls_slot(emu, index);
+                match slot {
+                    Some(slot) => {
+                        crate::os::windows::threads::write_pointer(emu, slot, value)?;
+                        emu.write_return_val(1)?;
+                    }
+                    None => emu.write_return_val(0)?,
+                }
             }
             "InitializeCriticalSection"
             | "InitializeCriticalSectionEx"
@@ -593,14 +803,16 @@ impl OsEnvironment for WindowsEnv {
             | "__setusermatherr_ucrt" => {
                 emu.write_return_val(0)?;
             }
-            "ExitThread" => {
-                let code = emu.read_arg(0).unwrap_or(0) as u32;
-                return Ok(HleResult::Halt(code));
-            }
             // Time / Process identity (deterministic, tick-based)
-            "Sleep" => {
-                let ms = emu.read_arg(0).unwrap_or(0);
-                // Advance simulated tick by requested ms (no real sleep).
+            "Sleep" | "SleepEx" => {
+                let ms = emu.read_arg(0).unwrap_or(0) & 0xFFFF_FFFF;
+                let mut threads = self.lock_threads();
+                if threads.has_other_threads() {
+                    return threads.sleep(emu, func_name, ms);
+                }
+                // One thread: nothing else could run, so the clock simply
+                // moves on (no real sleep).
+                drop(threads);
                 advance_clock(emu, ms);
                 tracing::debug!("Sleep({}ms) — tick_count now {}", ms, emu.tick_count);
                 emu.write_return_val(0)?;
@@ -1514,7 +1726,7 @@ fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
 /// duplicate exists to turn into real ones; those get the identifiers the
 /// rest of the HLE already answers with. Zero is failure, and the Go runtime
 /// stops on it ("runtime.minit: duplicatehandle failed") before `main`.
-fn handle_duplicate_handle(emu: &mut Emulator) -> Result<()> {
+fn handle_duplicate_handle(emu: &mut Emulator, current_thread: u64) -> Result<()> {
     let ptr = u64::from(emu.arch.pointer_size);
     let source = emu.read_arg(1)?;
     let target = emu.read_arg(3)?;
@@ -1524,8 +1736,10 @@ fn handle_duplicate_handle(emu: &mut Emulator) -> Result<()> {
         (1u64 << (ptr * 8)) - 1
     };
     let duplicate = match source & mask {
-        // GetCurrentProcess() / GetCurrentThread() pseudo-handles.
-        h if h == mask || h == mask - 1 => DUPLICATED_SELF_HANDLE,
+        // GetCurrentThread() is -2: the duplicate names the running thread.
+        h if h == mask - 1 => current_thread,
+        // GetCurrentProcess() is -1.
+        h if h == mask => DUPLICATED_SELF_HANDLE,
         h => h,
     };
     if target != 0 {
@@ -1536,14 +1750,7 @@ fn handle_duplicate_handle(emu: &mut Emulator) -> Result<()> {
 }
 
 /// A real handle for the current process or thread, once duplicated.
-const DUPLICATED_SELF_HANDLE: u64 = 0x3E8;
-
-fn handle_create_thread(emu: &mut Emulator) -> Result<()> {
-    let start_address = emu.read_arg(2)?;
-    tracing::info!("CreateThread(start: 0x{:X})", start_address);
-    emu.write_return_val(0x40000000)?; // dummy handle
-    Ok(())
-}
+pub(crate) const DUPLICATED_SELF_HANDLE: u64 = 0x3E8;
 
 fn handle_lstrcpy_a(emu: &mut Emulator) -> Result<()> {
     let dst = emu.read_arg(0)?;

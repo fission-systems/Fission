@@ -7,6 +7,7 @@ pub mod image_info;
 pub mod imports;
 pub mod loader;
 pub mod peb_teb;
+pub mod threads;
 
 pub use hle::WindowsEnv;
 pub use image_info::{PeImageInfo, PeProcessArgs};

@@ -198,7 +198,11 @@ pub fn win32_stdcall_pop_bytes(func_name: &str) -> u64 {
         | "DeleteFileA"
         | "DeleteFileW"
         | "IsValidCodePage"
-        | "RegCloseKey" => 4,
+        | "RegCloseKey"
+        | "SetEvent"
+        | "ResetEvent"
+        | "ResumeThread"
+        | "SuspendThread" => 4,
 
         // 2 args (8 bytes)
         "GetProcAddress"
@@ -276,6 +280,15 @@ pub fn win32_stdcall_pop_bytes(func_name: &str) -> u64 {
 
         // 7 args (28 bytes)
         "CreateFileA" | "CreateFileW" | "DuplicateHandle" => 28,
+
+        // Thread and event objects.
+        "SleepEx" | "GetExitCodeThread" => 8,
+        "CreateEventA"
+        | "CreateEventW"
+        | "CreateEventExA"
+        | "CreateEventExW"
+        | "WaitForMultipleObjects" => 16,
+        "WaitForMultipleObjectsEx" => 20,
 
         // 8 args (32 bytes)
         "WideCharToMultiByte" => 32,

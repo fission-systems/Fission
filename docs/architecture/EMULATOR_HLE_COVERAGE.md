@@ -104,3 +104,21 @@ the environment block, `DuplicateHandle`, a zero `nanotime`) and now stop
 at `CreateEventA`; past that the runtime waits on threads it started, which
 the Windows layer does not run. The only unhandled Linux calls are still
 AArch64 `set_robust_list` and `rseq`.
+
+### Windows threads (same day)
+
+`os::windows::threads` runs Windows guest threads cooperatively, the model
+`os::linux::task` uses for Linux: `CreateThread`, `_beginthread[ex]`,
+events, `WaitForSingleObject`/`WaitForMultipleObjects`, `Sleep`,
+`SwitchToThread`, thread exit, and TLS in each thread's own TEB. A thread
+gives way only inside an API that blocks or yields; when every thread is
+blocked, the process clock jumps to the earliest wait deadline.
+
+Both cgo Go binaries now start their runtime threads, run `main.main`, and
+exit 0 (their `main` computes and discards). The process handle is no longer
+treated as already signalled -- the Go runtime sleeps by waiting on it --
+which also moves `win32_status`'s exit code by one, to the value real
+Windows gives: its `WaitForSingleObject(GetCurrentProcess(), 0)` times out.
+96 of 96 exit; 76 have no syscall or API miss; the Go binaries' remaining
+misses are optional queries (`GetErrorMode`, `WerGetFlags`, ...) they get
+past.

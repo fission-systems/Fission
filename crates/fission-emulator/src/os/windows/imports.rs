@@ -89,6 +89,17 @@ impl ImportTable {
         magic
     }
 
+    /// The stub for `name`, allocating it the first time. For addresses the
+    /// emulator itself hands to the guest -- where a thread's start routine
+    /// returns -- which have no IAT slot.
+    pub fn stub_for(&mut self, name: &str) -> u64 {
+        let bare = bare_api_name(name);
+        if let Some((&magic, _)) = self.by_magic.iter().find(|(_, n)| **n == bare) {
+            return magic;
+        }
+        self.alloc_stub(name)
+    }
+
     /// Patch IAT slots from loader facts; build magic → name map.
     ///
     /// `globals` is where imported *data* lives: an IAT slot naming a msvcrt
