@@ -366,3 +366,80 @@ fn machine_read_string_resilient_to_boundary() {
         serde_json::json!("hello")
     );
 }
+
+#[test]
+fn machine_set_reg_pc_and_read_string_high_address_do_not_break_or_wrap() {
+    let result = run(r#"
+        let entry = machine.pc();
+        let target = entry + 2;
+        machine.set_reg("pc", target);
+        let after = machine.pc();
+        let rip = machine.reg("RIP");
+
+        let err = "";
+        try {
+            let _s = machine.read_string(-1, 16);
+        } catch (e) {
+            err = e.to_string();
+        }
+        emit(#{ kind: "pc_and_wrap", target: target, after: after, rip: rip, has_err: err.len() > 0 });
+    "#);
+    assert_eq!(
+        result.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        result.diagnostics
+    );
+    let data = result.findings[0].data.as_ref().expect("data");
+    assert_eq!(data["after"], data["target"]);
+    assert_eq!(data["rip"], data["target"]);
+    assert_eq!(data["has_err"], serde_json::json!(true));
+}
+
+#[test]
+fn run_script_on_machine_clears_deadline_after_completion() {
+    let fix = fixture();
+    let machine = fission_script::MachineHost::launch(&fix.path, &fix).expect("launch machine");
+
+    // Run a short-deadline script that times out, which arms the shared MachineHost's deadline.
+    let short_limits = ScriptLimits {
+        max_runtime_ms: 15,
+        max_operations: 0,
+        ..ScriptLimits::default()
+    };
+    let timed_out = fission_script::run_script_on_machine(
+        &fix,
+        r#"
+        let entry = machine.pc();
+        while true {
+            machine.step();
+            machine.set_reg("pc", entry);
+        }
+        "#,
+        "timeout_shared.rhai",
+        short_limits,
+        machine.clone(),
+    );
+    assert_eq!(timed_out.status, ScriptRunStatus::Timeout);
+
+    // Wait briefly so the old deadline would definitely be expired if leaked.
+    std::thread::sleep(std::time::Duration::from_millis(30));
+
+    let next_run = fission_script::run_script_on_machine(
+        &fix,
+        r#"
+        machine.step();
+        emit(#{ kind: "after_timeout", pc: machine.pc() });
+        "#,
+        "after_timeout.rhai",
+        ScriptLimits::default(),
+        machine,
+    );
+    assert_eq!(
+        next_run.status,
+        ScriptRunStatus::Ok,
+        "{:?}",
+        next_run.diagnostics
+    );
+    assert_eq!(next_run.findings.len(), 1);
+}

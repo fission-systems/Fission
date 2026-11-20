@@ -275,4 +275,55 @@ mod tests {
         assert_eq!(d["b0"], serde_json::json!(0x7f));
         assert_eq!(d["b1"], serde_json::json!(b'E'));
     }
+
+    #[test]
+    fn huge_max_runtime_ms_does_not_overflow_instant_deadline() {
+        let bin = prepare_binary_for_script(test_binary());
+        let limits = ScriptLimits {
+            max_runtime_ms: u64::MAX,
+            ..ScriptLimits::default()
+        };
+        let out = run_script(
+            &bin,
+            r#"emit(#{ kind: "ok" });"#,
+            "huge_timeout.rhai",
+            limits,
+        );
+        assert_eq!(out.status, ScriptRunStatus::Ok, "{:?}", out.diagnostics);
+        assert_eq!(out.findings.len(), 1);
+    }
+
+    #[test]
+    fn binary_read_bytes_does_not_fall_back_to_file_offsets_for_sectioned_binaries() {
+        let bin = LoadedBinaryBuilder::new(
+            "sectioned.elf".into(),
+            DataBuffer::Heap(vec![0x7f, b'E', b'L', b'F', 1, 2, 3, 4]),
+        )
+        .format("ELF")
+        .image_base(0x400000)
+        .entry_point(0x401000)
+        .add_section(fission_loader::SectionInfo {
+            name: ".bss".into(),
+            virtual_address: 0x402000,
+            virtual_size: 0x100,
+            file_offset: 0,
+            file_size: 0,
+            is_executable: false,
+            is_readable: true,
+            is_writable: true,
+        })
+        .build()
+        .expect("sectioned fixture");
+
+        let src = r#"
+            let at_zero = binary.read_bytes(0, 4);
+            let at_bss = binary.read_bytes(addr("0x402000"), 4);
+            emit(#{ kind: "reads", zero_len: at_zero.len(), bss_len: at_bss.len() });
+        "#;
+        let out = run_script(&bin, src, "sectioned_read.rhai", ScriptLimits::default());
+        assert_eq!(out.status, ScriptRunStatus::Ok, "{:?}", out.diagnostics);
+        let d = out.findings[0].data.as_ref().expect("data");
+        assert_eq!(d["zero_len"], serde_json::json!(0));
+        assert_eq!(d["bss_len"], serde_json::json!(0));
+    }
 }

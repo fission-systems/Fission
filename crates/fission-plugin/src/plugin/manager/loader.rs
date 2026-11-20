@@ -1,7 +1,7 @@
 use super::core::PluginManager;
 use super::types::{LoadedPlugin, PluginDestroy, release_library_instance};
+use crate::plugin::FissionPlugin;
 use crate::plugin::api::{PluginInfo, PluginType};
-use crate::plugin::{FissionPlugin, PluginContext};
 use std::path::Path;
 
 /// Symbol exported by a Rust dynamic plugin.
@@ -31,18 +31,20 @@ impl PluginManager {
         mut plugin: Box<dyn FissionPlugin>,
     ) -> Result<String, String> {
         let id = plugin.id().to_string();
+        if id.is_empty() {
+            return Err("Plugin returned an empty plugin id".to_string());
+        }
 
         if self.plugins.contains_key(&id) {
             return Err(format!("Plugin '{}' already loaded", id));
         }
 
         if let Some(api) = &self.api {
-            let extension = self
-                .event_bus
-                .clone()
-                .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-            let ctx = PluginContext::new(api.clone(), extension);
+            let ctx = self.context_for_plugin(api, &id);
             if let Err(e) = plugin.on_load(&ctx) {
+                if let Some(bus) = &self.event_bus {
+                    bus.unsubscribe_owner(&id);
+                }
                 return Err(format!("Failed to load plugin '{}': {:?}", id, e));
             }
         }
@@ -60,6 +62,7 @@ impl PluginManager {
         let on_load_called = self.api.is_some();
         let loaded = LoadedPlugin {
             on_load_called,
+            on_load_failed: false,
             info,
             hooks: Vec::new(),
             instance: Some(plugin),
@@ -127,12 +130,11 @@ impl PluginManager {
         }
 
         if let Some(api) = &self.api {
-            let extension = self
-                .event_bus
-                .clone()
-                .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-            let ctx = PluginContext::new(api.clone(), extension);
+            let ctx = self.context_for_plugin(api, &plugin_id);
             if let Err(error) = plugin.on_load(&ctx) {
+                if let Some(bus) = &self.event_bus {
+                    bus.unsubscribe_owner(&plugin_id);
+                }
                 release_library_instance(plugin, destroy);
                 return Err(format!("Failed to load plugin '{}': {error:?}", plugin_id));
             }
@@ -151,6 +153,7 @@ impl PluginManager {
         let on_load_called = self.api.is_some();
         let loaded = LoadedPlugin {
             on_load_called,
+            on_load_failed: false,
             info,
             hooks: Vec::new(),
             instance: Some(plugin),
@@ -165,21 +168,25 @@ impl PluginManager {
 
     pub fn unload_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(mut plugin) = self.plugins.remove(plugin_id) {
-            if let (Some(instance_ref), Some(api)) = (plugin.instance.as_mut(), &self.api) {
-                let extension = self
-                    .event_bus
-                    .clone()
-                    .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-                let ctx = PluginContext::new(api.clone(), extension);
+            if plugin.on_load_called
+                && let (Some(instance_ref), Some(api)) = (plugin.instance.as_mut(), &self.api)
+            {
+                let ctx = self.context_for_plugin(api, plugin_id);
                 let _ = instance_ref.on_unload(&ctx);
             }
-            // Release the instance while the originating library is still
-            // mapped; its vtable and drop glue live in that library.
-            plugin.release_instance();
 
+            // Drop all hook and EventBus callbacks originating from this plugin
+            // BEFORE releasing the plugin instance or unmapping its library.
             for hook_id in std::mem::take(&mut plugin.hooks) {
                 self.hooks.remove(&hook_id);
             }
+            if let Some(bus) = &self.event_bus {
+                bus.unsubscribe_owner(plugin_id);
+            }
+
+            // Release the instance while the originating library is still
+            // mapped; its vtable and drop glue live in that library.
+            plugin.release_instance();
 
             drop(plugin.library.take());
 

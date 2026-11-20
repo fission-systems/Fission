@@ -43,28 +43,58 @@ impl PluginManager {
         }
     }
 
+    pub(super) fn context_for_plugin(
+        &self,
+        api: &Arc<dyn PluginAPI>,
+        plugin_id: &str,
+    ) -> crate::contracts::traits::PluginContext {
+        let extension = self
+            .event_bus
+            .as_ref()
+            .map(|bus| Arc::new(bus.scoped(plugin_id)) as Arc<dyn std::any::Any + Send + Sync>);
+        crate::contracts::traits::PluginContext::new(api.clone(), extension)
+    }
+
     pub fn set_api(&mut self, api: Arc<dyn PluginAPI>) {
         self.api = Some(api.clone());
 
         // Registration only calls `on_load` once there is an API to hand the
         // plugin, so a plugin registered earlier has not been loaded yet. Do it
-        // now, once. One whose `on_load` fails ends as registration would have
-        // ended it -- not running -- so it is disabled rather than left active.
-        let extension = self
-            .event_bus
-            .clone()
-            .map(|e| e as std::sync::Arc<dyn std::any::Any + Send + Sync>);
-        let ctx = crate::contracts::traits::PluginContext::new(api, extension);
-        for plugin in self.plugins.values_mut() {
-            if plugin.on_load_called {
+        // now, once. One whose `on_load` fails ends disabled and marked failed
+        // without marking `on_load_called = true`.
+        let plugin_ids: Vec<String> = self.plugins.keys().cloned().collect();
+        for plugin_id in plugin_ids {
+            let should_load = self
+                .plugins
+                .get(&plugin_id)
+                .is_some_and(|p| !p.on_load_called && !p.on_load_failed && p.instance.is_some());
+            if !should_load {
                 continue;
             }
-            let Some(instance) = plugin.instance.as_mut() else {
-                continue;
-            };
-            plugin.on_load_called = true;
-            if instance.on_load(&ctx).is_err() {
-                plugin.info.enabled = false;
+            let ctx = self.context_for_plugin(&api, &plugin_id);
+            let load_result = self
+                .plugins
+                .get_mut(&plugin_id)
+                .and_then(|p| p.instance.as_mut())
+                .map(|instance| instance.on_load(&ctx));
+            match load_result {
+                Some(Ok(())) => {
+                    if let Some(plugin) = self.plugins.get_mut(&plugin_id) {
+                        plugin.on_load_called = true;
+                        plugin.on_load_failed = false;
+                    }
+                }
+                Some(Err(_)) => {
+                    if let Some(bus) = &self.event_bus {
+                        bus.unsubscribe_owner(&plugin_id);
+                    }
+                    if let Some(plugin) = self.plugins.get_mut(&plugin_id) {
+                        plugin.on_load_called = false;
+                        plugin.on_load_failed = true;
+                        plugin.info.enabled = false;
+                    }
+                }
+                None => {}
             }
         }
     }
@@ -75,6 +105,19 @@ impl PluginManager {
 
     pub fn add_search_path<P: AsRef<Path>>(&mut self, path: P) {
         self.search_paths.push(path.as_ref().to_path_buf());
+    }
+}
+
+impl Drop for PluginManager {
+    fn drop(&mut self) {
+        // Drop callbacks (both hooks and EventBus closures) before `self.plugins`
+        // releases plugin instances and unmaps dynamic libraries.
+        self.hooks.clear();
+        if let Some(bus) = &self.event_bus {
+            for plugin_id in self.plugins.keys() {
+                bus.unsubscribe_owner(plugin_id);
+            }
+        }
     }
 }
 

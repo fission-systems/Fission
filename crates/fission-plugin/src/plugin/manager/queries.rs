@@ -15,6 +15,12 @@ impl PluginManager {
             .plugins
             .get_mut(plugin_id)
             .ok_or_else(|| format!("Plugin '{}' not found", plugin_id))?;
+        if plugin.on_load_failed {
+            return Err(format!(
+                "Plugin '{}' failed to load and cannot be enabled",
+                plugin_id
+            ));
+        }
         plugin.info.enabled = true;
         Ok(())
     }

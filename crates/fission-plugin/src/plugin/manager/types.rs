@@ -45,9 +45,12 @@ pub(super) struct LoadedPlugin {
     /// The dynamic library must outlive its trait object.  This field is
     /// declared after `instance` so the plugin value is dropped first.
     pub library: Option<libloading::Library>,
-    /// Has `on_load` run? Registration without an API skips it, and `set_api`
-    /// runs it later for exactly the plugins this says it has not run for.
+    /// Has `on_load` run successfully? Registration without an API skips it,
+    /// and `set_api` runs it later for plugins that have neither loaded nor
+    /// already failed `on_load`.
     pub on_load_called: bool,
+    /// Did `on_load` fail during deferred `set_api` initialization?
+    pub on_load_failed: bool,
     /// The library's `fission_plugin_destroy`, valid while `library` is.
     pub destroy: Option<PluginDestroy>,
     #[allow(dead_code)]
