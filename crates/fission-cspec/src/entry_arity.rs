@@ -224,6 +224,24 @@ fn step_stack_env(
             }
             _ => StackVal::NonStack,
         },
+        // A product of constants is a constant. ARM's `vpush`/`vpop` move
+        // `sp` by `count * 4`, computed into a temporary first; left unfolded,
+        // the temporary was unknown, `sp` lost its offset, and a later reload
+        // of the pushed registers matched every spill below the entry stack
+        // pointer -- `vpop {d8}` read as a use of the `r3` that the `push`
+        // before it saved for alignment.
+        PcodeOpcode::IntMult => match (op.inputs.first(), op.inputs.get(1)) {
+            (Some(lhs), Some(rhs)) => match (
+                eval_varnode(env, lhs, sp_keys, fp_keys),
+                eval_varnode(env, rhs, sp_keys, fp_keys),
+            ) {
+                (StackVal::Const(a), StackVal::Const(b)) => {
+                    a.checked_mul(b).map_or(StackVal::NonStack, StackVal::Const)
+                }
+                _ => StackVal::NonStack,
+            },
+            _ => StackVal::NonStack,
+        },
         PcodeOpcode::IntAnd => match (op.inputs.first(), op.inputs.get(1)) {
             (Some(lhs), Some(rhs)) => {
                 match (
@@ -818,6 +836,98 @@ mod tests {
                     op(6, PcodeOpcode::Call, None, vec![cst(0x2000, 4)]),
                     op(7, PcodeOpcode::Return, None, vec![r0]),
                 ],
+            }],
+        };
+        assert_eq!(infer_entry_register_param_arity(&func, &namer), None);
+    }
+
+    #[test]
+    fn arm32_vpush_after_an_alignment_push_does_not_make_r3_a_parameter() {
+        // `push {r3, lr}; vpush {d8}; bl f; vpop {d8}; pop {r3, pc}` as the
+        // Thumb SLEIGH lifts it: `vpush`/`vpop` move `sp` by `2 * 4`,
+        // computed into a temporary. The `d8` reload is not a read of `r3`.
+        let namer = namer_for(CallingConvention::Arm32, "ELF", false);
+        let sp = reg(0x54, 4);
+        let r3 = reg(0x2c, 4);
+        let lr = reg(0x58, 4);
+        let pc = reg(0x5c, 4);
+        let d8 = reg(0x340, 8);
+        let ma = reg(0x80, 4);
+        let (n1, n2) = (uniq(0x100, 4), uniq(0x104, 4));
+        let mut ops = vec![
+            // push {r3, lr}
+            (PcodeOpcode::Copy, Some(ma.clone()), vec![sp.clone()]),
+            (
+                PcodeOpcode::IntSub,
+                Some(ma.clone()),
+                vec![ma.clone(), cst(4, 4)],
+            ),
+            (PcodeOpcode::Store, None, vec![cst(3, 8), ma.clone(), lr]),
+            (
+                PcodeOpcode::IntSub,
+                Some(ma.clone()),
+                vec![ma.clone(), cst(4, 4)],
+            ),
+            (
+                PcodeOpcode::Store,
+                None,
+                vec![cst(3, 8), ma.clone(), r3.clone()],
+            ),
+            (PcodeOpcode::Copy, Some(sp.clone()), vec![ma.clone()]),
+            // vpush {d8}
+            (
+                PcodeOpcode::IntMult,
+                Some(n1.clone()),
+                vec![cst(2, 4), cst(4, 4)],
+            ),
+            (PcodeOpcode::IntSub, Some(sp.clone()), vec![sp.clone(), n1]),
+            (PcodeOpcode::Copy, Some(ma.clone()), vec![sp.clone()]),
+            (
+                PcodeOpcode::Store,
+                None,
+                vec![cst(3, 8), ma.clone(), d8.clone()],
+            ),
+            (PcodeOpcode::Call, None, vec![cst(0x2000, 4)]),
+            // vpop {d8}
+            (PcodeOpcode::Copy, Some(ma.clone()), vec![sp.clone()]),
+            (
+                PcodeOpcode::IntMult,
+                Some(n2.clone()),
+                vec![cst(2, 4), cst(4, 4)],
+            ),
+            (PcodeOpcode::IntAdd, Some(sp.clone()), vec![sp.clone(), n2]),
+            (PcodeOpcode::Load, Some(d8), vec![cst(3, 8), ma.clone()]),
+            // pop {r3, pc}
+            (PcodeOpcode::Copy, Some(ma.clone()), vec![sp.clone()]),
+            (PcodeOpcode::Load, Some(r3), vec![cst(3, 8), ma.clone()]),
+            (
+                PcodeOpcode::IntAdd,
+                Some(ma.clone()),
+                vec![ma.clone(), cst(4, 4)],
+            ),
+            (
+                PcodeOpcode::Load,
+                Some(pc.clone()),
+                vec![cst(3, 8), ma.clone()],
+            ),
+            (
+                PcodeOpcode::IntAdd,
+                Some(ma.clone()),
+                vec![ma.clone(), cst(4, 4)],
+            ),
+            (PcodeOpcode::Copy, Some(sp), vec![ma]),
+            (PcodeOpcode::Return, None, vec![pc]),
+        ];
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: ops
+                    .drain(..)
+                    .enumerate()
+                    .map(|(i, (opcode, out, inputs))| op(i as u32, opcode, out, inputs))
+                    .collect(),
             }],
         };
         assert_eq!(infer_entry_register_param_arity(&func, &namer), None);
