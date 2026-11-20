@@ -90,12 +90,58 @@ impl<'a> PreviewBuilder<'a> {
         }
         let uses = self.output_use_sites_in_block(block, op_idx, output);
         uses.len() == 1
+            && !self.def_input_written_before(block, op_idx, uses[0].0)
             && Self::expr_is_low_cost_builder_inline_candidate(rhs)
             && if Self::expr_requires_passthrough_single_use_inline(rhs) {
                 Self::use_opcode_allows_passthrough_single_use_builder_inline(uses[0].1.opcode)
             } else {
                 Self::use_opcode_allows_single_use_builder_inline(uses[0].1.opcode)
             }
+    }
+
+    /// Whether an op strictly between the definition at `op_idx` and its use
+    /// at `use_idx` writes storage the definition reads.
+    ///
+    /// Inlined at the use, the definition's expression is evaluated there,
+    /// so it would read the later value. A post-indexed load is the plain
+    /// case: AArch64 `ldrb w9, [x8], #1` is `tmp = x8; x8 = x8 + 1;
+    /// w9 = *tmp`, and inlining `tmp` printed `x8 = x8 + 1; w9 = *x8`, a load
+    /// one byte past the one the machine makes. The definition keeps a
+    /// statement instead, a snapshot taken where the machine read the value.
+    /// (`def_reads_global_written_before_use` is the same rule for a global
+    /// read, whose writes are not ops on the same storage key.)
+    ///
+    /// The stack pointer is the exception: a read of it lowers to a frame
+    /// offset fixed by its value where the definition is, not to a variable
+    /// read again at the use, so `pop` (`tmp = *rsp; rsp += 8; reg = tmp`)
+    /// still names the slot it popped.
+    pub(super) fn def_input_written_before(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        use_idx: usize,
+    ) -> bool {
+        let Some(def) = block.ops.get(op_idx) else {
+            return false;
+        };
+        let reads: Vec<&Varnode> = def
+            .inputs
+            .iter()
+            .filter(|read| !read.is_constant && !self.output_is_stack_pointer_register(read))
+            .collect();
+        let overlaps = |read: &Varnode, written: &Varnode| {
+            !written.is_constant
+                && read.space_id == written.space_id
+                && read.offset < written.offset + u64::from(written.size)
+                && written.offset < read.offset + u64::from(read.size)
+        };
+        block
+            .ops
+            .get(op_idx + 1..use_idx)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|op| op.output.as_ref())
+            .any(|written| reads.iter().any(|read| overlaps(read, written)))
     }
 
     /// True when `op_idx` is strictly inside a same-block-forward CBranch skip
