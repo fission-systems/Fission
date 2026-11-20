@@ -40,7 +40,10 @@ use crate::collapse_shapes::{
 };
 use crate::host::StructuringHost;
 use crate::linear_types::LoweredTerminator;
-use crate::reaching_conditions::{compute_reaching_conditions, topological_order};
+use crate::reaching_conditions::{
+    compute_reaching_conditions, compute_reaching_conditions_after_returns, topological_order,
+    topological_order_returning_first,
+};
 use crate::reaching_emit::{
     Branch, emit_acyclic_region, inline_single_use_guards, materialize_branch_conditions,
 };
@@ -495,6 +498,11 @@ fn describe_region(
         }
         bodies.insert(n, stmts);
     }
+    let Ok((order, reaching)) =
+        reaching_after_returns(&dense, head, &order, &bound, &bodies, reaching)
+    else {
+        return Ok(Err(DeclineReason::ReachingFailed));
+    };
 
     let body = emit_acyclic_region(&order, &reaching, |n| {
         bodies.get(&n).cloned().unwrap_or_default()
@@ -515,6 +523,122 @@ fn describe_region(
         body,
         used_hierarchical_regions: hierarchical_regions > 0,
     }))
+}
+
+/// Recompute the emission order and `reaching` knowing which nodes return,
+/// once their statements are lowered; see
+/// [`compute_reaching_conditions_after_returns`] and
+/// [`topological_order_returning_first`].
+///
+/// The first computation happens before any statement is lowered, for the
+/// declines that do not need statements, and stays the answer when no node
+/// returns.
+fn reaching_after_returns(
+    dense: &[Vec<NodeId>],
+    head: NodeId,
+    order: &[NodeId],
+    bound: &crate::reaching_emit::BoundConditions,
+    bodies: &crate::HashMap<NodeId, Vec<PreHirStmt>>,
+    reaching: crate::HashMap<NodeId, fission_midend_prehir::PreHirExpr>,
+) -> Result<
+    (
+        Vec<NodeId>,
+        crate::HashMap<NodeId, fission_midend_prehir::PreHirExpr>,
+    ),
+    crate::reaching_conditions::ReachingError,
+> {
+    let leaves = returning_nodes(order, bodies);
+    if leaves.is_empty() {
+        return Ok((order.to_vec(), reaching));
+    }
+    let order = topological_order_returning_first(dense, &leaves)
+        .ok_or(crate::reaching_conditions::ReachingError::Cyclic)?;
+    let reaching = compute_reaching_conditions_after_returns(
+        dense,
+        head,
+        &order,
+        bound.edge_condition(),
+        &leaves,
+    )?;
+    Ok((order, reaching))
+}
+
+/// The nodes whose statements return from the function on every path
+/// through them.
+///
+/// A node qualifies when its last statement is a `return` and nothing before
+/// it can leave the node another way -- no `break` or `continue` that escapes
+/// it. The whole set is empty when any body in the region holds a label or a
+/// jump: control could then enter a node, or leave one, without passing its
+/// guard, and "a returning node ran, so nothing emitted after it runs" would
+/// no longer follow from the emission order.
+fn returning_nodes(
+    order: &[NodeId],
+    bodies: &crate::HashMap<NodeId, Vec<PreHirStmt>>,
+) -> crate::HashSet<NodeId> {
+    if order
+        .iter()
+        .filter_map(|n| bodies.get(n))
+        .any(|stmts| has_jump_or_label(stmts))
+    {
+        return crate::HashSet::default();
+    }
+    order
+        .iter()
+        .copied()
+        .filter(|n| {
+            bodies.get(n).is_some_and(|stmts| {
+                matches!(stmts.last(), Some(PreHirStmt::Return(_)))
+                    && !escapes_by_break_or_continue(stmts, false, false)
+            })
+        })
+        .collect()
+}
+
+fn has_jump_or_label(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Goto(_) | PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => has_jump_or_label(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => has_jump_or_label(then_body) || has_jump_or_label(else_body),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|c| has_jump_or_label(&c.body)) || has_jump_or_label(default)
+        }
+        _ => false,
+    })
+}
+
+/// Whether a `break` or `continue` in `stmts` targets something outside them.
+fn escapes_by_break_or_continue(stmts: &[PreHirStmt], in_loop: bool, in_switch: bool) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Break => !in_loop && !in_switch,
+        PreHirStmt::Continue => !in_loop,
+        PreHirStmt::Block(body) => escapes_by_break_or_continue(body, in_loop, in_switch),
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => escapes_by_break_or_continue(body, true, false),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            escapes_by_break_or_continue(then_body, in_loop, in_switch)
+                || escapes_by_break_or_continue(else_body, in_loop, in_switch)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|c| escapes_by_break_or_continue(&c.body, in_loop, true))
+                || escapes_by_break_or_continue(default, in_loop, true)
+        }
+        _ => false,
+    })
 }
 
 /// A reaching-condition body plus the admission fact introduced by recursive
@@ -1159,6 +1283,11 @@ fn lower_acyclic_members(
         }
         bodies.insert(n, stmts);
     }
+    let Ok((order, reaching)) =
+        reaching_after_returns(&dense, head, &order, &bound, &bodies, reaching)
+    else {
+        return Ok(Err(DeclineReason::ReachingFailed));
+    };
     let body = emit_acyclic_region(&order, &reaching, |n| {
         bodies.get(&n).cloned().unwrap_or_default()
     });
@@ -1442,5 +1571,49 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    fn bodies_of(nodes: Vec<(NodeId, Vec<PreHirStmt>)>) -> crate::HashMap<NodeId, Vec<PreHirStmt>> {
+        nodes.into_iter().collect()
+    }
+
+    #[test]
+    fn a_node_ending_in_return_returns() {
+        let bodies = bodies_of(vec![
+            (0, vec![expr("a")]),
+            (1, vec![expr("b"), PreHirStmt::Return(None)]),
+        ]);
+        let leaves = returning_nodes(&[0, 1], &bodies);
+        assert_eq!(leaves.into_iter().collect::<Vec<_>>(), vec![1]);
+    }
+
+    #[test]
+    fn a_return_behind_an_escaping_break_does_not_count() {
+        let escape = PreHirStmt::If {
+            cond: PreHirExpr::Var("c".to_string()),
+            then_body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+            else_body: std::rc::Rc::new(vec![]),
+        };
+        let bodies = bodies_of(vec![(0, vec![escape, PreHirStmt::Return(None)])]);
+        assert!(returning_nodes(&[0], &bodies).is_empty());
+
+        // A `break` that belongs to a loop inside the node stays inside it.
+        let inner = PreHirStmt::While {
+            cond: PreHirExpr::Var("c".to_string()),
+            body: std::rc::Rc::new(vec![PreHirStmt::Break]),
+        };
+        let bodies = bodies_of(vec![(0, vec![inner, PreHirStmt::Return(None)])]);
+        assert_eq!(returning_nodes(&[0], &bodies).len(), 1);
+    }
+
+    #[test]
+    fn a_label_anywhere_in_the_region_disables_the_assumption() {
+        // Control can reach a label without passing the guards before it, so
+        // no guard may assume that an earlier return was not taken.
+        let bodies = bodies_of(vec![
+            (0, vec![PreHirStmt::Return(None)]),
+            (1, vec![PreHirStmt::Label("L".to_string()), expr("x")]),
+        ]);
+        assert!(returning_nodes(&[0, 1], &bodies).is_empty());
     }
 }

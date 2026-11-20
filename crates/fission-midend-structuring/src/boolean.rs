@@ -259,6 +259,29 @@ pub fn implies(a: &PreHirExpr, b: &PreHirExpr) -> bool {
     ta.implies(&tb)
 }
 
+/// Whether `a` and `b` agree wherever `care` holds; what they do elsewhere
+/// does not matter.
+///
+/// `care` is the set of states a guard can actually be evaluated in. Two
+/// guards that differ only outside it select the same executions. Same
+/// "could not decide" caveat as the rest of this module: `false` is not a
+/// proof that they disagree.
+pub fn agree_where(a: &PreHirExpr, b: &PreHirExpr, care: &PreHirExpr) -> bool {
+    let Some(atoms) = atoms_of(&[a, b, care]) else {
+        return false;
+    };
+    let (ta, tb, tc) = (
+        tabulate_over(a, &atoms),
+        tabulate_over(b, &atoms),
+        tabulate_over(care, &atoms),
+    );
+    ta.words
+        .iter()
+        .zip(&tb.words)
+        .zip(&tc.words)
+        .all(|((x, y), c)| (x ^ y) & c == 0)
+}
+
 /// Whether `a` and `b` mean the same thing, however they are written.
 pub fn are_equivalent(a: &PreHirExpr, b: &PreHirExpr) -> bool {
     let Some((ta, tb)) = tabulate_pair(a, b) else {

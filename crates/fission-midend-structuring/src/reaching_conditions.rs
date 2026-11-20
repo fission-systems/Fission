@@ -227,6 +227,66 @@ pub fn compute_reaching_conditions(
         return Err(ReachingError::UnknownHead(head));
     }
     let order = topological_order(successors).ok_or(ReachingError::Cyclic)?;
+    reaching_over(successors, head, &order, edge_condition, None)
+}
+
+/// [`compute_reaching_conditions`] for a region emitted in `order`, where the
+/// nodes in `leaves` end by returning from the function.
+///
+/// Emission evaluates guards in `order`, one after another. Once a node in
+/// `leaves` has run, nothing after it runs at all -- so by the time a later
+/// node's guard is evaluated, every path into a returning node that precedes
+/// it is known not to have been taken. The condition does not have to say so
+/// again. Without this, the code after `if (c) { ...; return; }` is guarded by
+/// `!c` spelled out as every other path through the region, and every later
+/// guard repeats that formula as a conjunct: the source's straight-line code
+/// after an early return comes back as a chain of re-tested decisions.
+///
+/// So each node's condition is simplified *where it can be evaluated* -- under
+/// the negation of the returning paths before it -- by [`prune_guard`], which
+/// only ever removes operands. A guard that is true in every such state
+/// becomes `true`, i.e. the node is unconditional, which is what it is.
+///
+/// `order` must be the order the region is emitted in; a different order
+/// would let a guard assume a return that has not been evaluated yet.
+/// `leaves` must hold only nodes that return on every path through their own
+/// statements -- the caller decides that from the statements, not the graph.
+pub fn compute_reaching_conditions_after_returns(
+    successors: &[Vec<NodeId>],
+    head: NodeId,
+    order: &[NodeId],
+    edge_condition: impl Fn(NodeId, NodeId) -> Option<PreHirExpr>,
+    leaves: &HashSet<NodeId>,
+) -> Result<HashMap<NodeId, PreHirExpr>, ReachingError> {
+    if head >= successors.len() {
+        return Err(ReachingError::UnknownHead(head));
+    }
+    reaching_over(successors, head, order, edge_condition, Some(leaves))
+}
+
+fn reaching_over(
+    successors: &[Vec<NodeId>],
+    head: NodeId,
+    order: &[NodeId],
+    edge_condition: impl Fn(NodeId, NodeId) -> Option<PreHirExpr>,
+    leaves: Option<&HashSet<NodeId>>,
+) -> Result<HashMap<NodeId, PreHirExpr>, ReachingError> {
+    // Disjunction of the reaching conditions of the returning nodes visited
+    // so far; `None` while there are none.
+    let mut returned: Option<PreHirExpr> = None;
+    let note_return = |n: NodeId, cond: &PreHirExpr, returned: &mut Option<PreHirExpr>| {
+        if leaves.is_some_and(|l| l.contains(&n)) {
+            *returned = Some(match returned.take() {
+                None => cond.clone(),
+                Some(prev) => PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalOr,
+                    lhs: Box::new(prev),
+                    rhs: Box::new(cond.clone()),
+                    ty: NirType::Bool,
+                },
+            });
+        }
+    };
 
     let mut predecessors: Vec<Vec<NodeId>> = vec![Vec::new(); successors.len()];
     for (u, outs) in successors.iter().enumerate() {
@@ -241,8 +301,9 @@ pub fn compute_reaching_conditions(
     let mut sizes: HashMap<NodeId, usize> = HashMap::default();
     reaching.insert(head, always());
     sizes.insert(head, 1);
+    note_return(head, &always(), &mut returned);
 
-    for n in order {
+    for &n in order {
         if n == head {
             continue;
         }
@@ -277,7 +338,20 @@ pub fn compute_reaching_conditions(
             });
         }
         if let Some(cond) = acc {
-            let simplified = simplify_logical_expr(cond);
+            let mut simplified = simplify_logical_expr(cond);
+            if leaves.is_some() {
+                // The states this guard can be evaluated in: none of the
+                // returning paths before it was taken. When those paths cover
+                // everything, the node is dead and no state is left to
+                // simplify against; leave its condition as computed.
+                let care = returned
+                    .as_ref()
+                    .map_or_else(always, |r| negate_expr(r.clone()));
+                if !crate::boolean::is_contradiction(&care) {
+                    simplified = prune_guard(simplified, &care);
+                }
+            }
+            note_return(n, &simplified, &mut returned);
             sizes.insert(n, condition_terms(&simplified));
             reaching.insert(n, simplified);
         }
@@ -285,8 +359,113 @@ pub fn compute_reaching_conditions(
     Ok(reaching)
 }
 
+/// Guards larger than this are left as they are: each removal is checked
+/// with a truth table over the whole guard, so the cost is quadratic in it.
+const MAX_PRUNED_GUARD_TERMS: usize = 256;
+
+/// Remove the operands of `cond` that do not change its value anywhere `care`
+/// holds.
+///
+/// Only two removals are ever made, and both are chosen so that the guard
+/// still reads a decision variable only after the decisions that lead to it:
+///
+/// - a disjunct, from any position -- each remaining disjunct stays the
+///   ordered path formula it was;
+/// - the *last* conjunct of a conjunction -- a prefix of a path formula is
+///   still a path formula.
+///
+/// A leading conjunct is never removed, even when that would be equivalent:
+/// it is what keeps a later operand from reading a variable its branch never
+/// assigned. Nothing is ever added or reordered. Returns `true` when `cond`
+/// holds everywhere `care` does.
+pub fn prune_guard(cond: PreHirExpr, care: &PreHirExpr) -> PreHirExpr {
+    if is_always(&cond) || condition_terms(&cond) > MAX_PRUNED_GUARD_TERMS {
+        return cond;
+    }
+    if crate::boolean::agree_where(&always(), &cond, care) {
+        return always();
+    }
+    let mut current = cond;
+    'shrink: loop {
+        let mut site = 0usize;
+        loop {
+            let mut k = site;
+            let Some(candidate) = without_operand(&current, &mut k, false) else {
+                break 'shrink;
+            };
+            if crate::boolean::agree_where(&candidate, &current, care) {
+                current = candidate;
+                continue 'shrink;
+            }
+            site += 1;
+        }
+    }
+    current
+}
+
+/// `e` with its `k`-th removable operand (pre-order) taken out, or `None`
+/// when it has fewer than `k + 1`.
+///
+/// `followed` marks a subformula that some enclosing conjunction evaluates
+/// another operand after. Removing a disjunct makes a formula true in fewer
+/// states, so what follows is read no more often than before; removing a
+/// trailing conjunct makes it true in more, so it is allowed only where
+/// nothing follows.
+fn without_operand(e: &PreHirExpr, k: &mut usize, followed: bool) -> Option<PreHirExpr> {
+    let PreHirExpr::Binary { op, lhs, rhs, ty } = e else {
+        return None;
+    };
+    let rebuild = |l: PreHirExpr, r: PreHirExpr| PreHirExpr::Binary {
+        op: *op,
+        lhs: Box::new(l),
+        rhs: Box::new(r),
+        ty: ty.clone(),
+    };
+    match op {
+        PreHirBinaryOp::LogicalOr => {
+            for keep in [rhs, lhs] {
+                if *k == 0 {
+                    return Some((**keep).clone());
+                }
+                *k -= 1;
+            }
+            if let Some(l) = without_operand(lhs, k, followed) {
+                return Some(rebuild(l, (**rhs).clone()));
+            }
+            without_operand(rhs, k, followed).map(|r| rebuild((**lhs).clone(), r))
+        }
+        PreHirBinaryOp::LogicalAnd => {
+            if !followed {
+                if *k == 0 {
+                    return Some((**lhs).clone());
+                }
+                *k -= 1;
+            }
+            if let Some(l) = without_operand(lhs, k, true) {
+                return Some(rebuild(l, (**rhs).clone()));
+            }
+            without_operand(rhs, k, followed).map(|r| rebuild((**lhs).clone(), r))
+        }
+        _ => None,
+    }
+}
+
 /// Kahn's algorithm; `None` when the graph has a cycle.
 pub fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
+    topological_order_returning_first(successors, &HashSet::default())
+}
+
+/// [`topological_order`], taking a node of `returning` whenever one is ready.
+///
+/// Any topological order is a correct emission order; this one puts an early
+/// return ahead of the code that runs when it is not taken, as `if (c)
+/// return; rest;` is written. That is also the order in which
+/// [`compute_reaching_conditions_after_returns`] can use the return: a guard
+/// may only assume returns emitted before it.
+pub fn topological_order_returning_first(
+    successors: &[Vec<NodeId>],
+    returning: &HashSet<NodeId>,
+) -> Option<Vec<NodeId>> {
     let n = successors.len();
     let mut indegree = vec![0usize; n];
     for outs in successors {
@@ -298,7 +477,14 @@ pub fn topological_order(successors: &[Vec<NodeId>]) -> Option<Vec<NodeId>> {
     }
     let mut ready: Vec<NodeId> = (0..n).filter(|i| indegree[*i] == 0).collect();
     let mut order = Vec::with_capacity(n);
-    while let Some(u) = ready.pop() {
+    loop {
+        let next = match ready.iter().rposition(|u| returning.contains(u)) {
+            Some(i) => Some(ready.remove(i)),
+            None => ready.pop(),
+        };
+        let Some(u) = next else {
+            break;
+        };
         order.push(u);
         for &v in &successors[u] {
             if v >= n {
@@ -528,5 +714,89 @@ mod tests {
             compute_reaching_conditions(&succ, 7, |_, _| None),
             Err(ReachingError::UnknownHead(7))
         );
+    }
+
+    /// `if (a) { if (b) return; }  rest;` -- node 3 returns, node 2 is the
+    /// code after the early return.
+    fn early_return() -> (
+        Vec<Vec<NodeId>>,
+        impl Fn(NodeId, NodeId) -> Option<PreHirExpr>,
+    ) {
+        let succ = vec![vec![1, 2], vec![3, 2], vec![], vec![]];
+        let edge = |p: NodeId, n: NodeId| match (p, n) {
+            (0, 1) => Some(var("a")),
+            (0, 2) => Some(negate_expr(var("a"))),
+            (1, 3) => Some(var("b")),
+            (1, 2) => Some(negate_expr(var("b"))),
+            _ => None,
+        };
+        (succ, edge)
+    }
+
+    #[test]
+    fn code_after_an_early_return_is_unconditional() {
+        let (succ, edge) = early_return();
+        let leaves: HashSet<NodeId> = [3].into_iter().collect();
+        let order = topological_order_returning_first(&succ, &leaves).unwrap();
+        // The order matters: the returning node has to be emitted first.
+        assert!(
+            order.iter().position(|&n| n == 3) < order.iter().position(|&n| n == 2),
+            "{order:?}"
+        );
+        let r =
+            compute_reaching_conditions_after_returns(&succ, 0, &order, &edge, &leaves).unwrap();
+        assert!(is_always(&r[&2]), "got {:?}", r[&2]);
+        // The returning node keeps the condition it returns under.
+        assert_eq!(r[&3], and(var("a"), var("b")));
+    }
+
+    #[test]
+    fn without_the_return_the_rest_stays_guarded() {
+        let (succ, edge) = early_return();
+        let order = topological_order(&succ).unwrap();
+        let plain = compute_reaching_conditions(&succ, 0, &edge).unwrap();
+        assert!(!is_always(&plain[&2]), "got {:?}", plain[&2]);
+        // Node 3 here does not return, so nothing may be assumed about it.
+        let none = HashSet::default();
+        let r = compute_reaching_conditions_after_returns(&succ, 0, &order, &edge, &none).unwrap();
+        assert!(!is_always(&r[&2]), "got {:?}", r[&2]);
+    }
+
+    #[test]
+    fn a_return_emitted_after_a_node_simplifies_nothing_before_it() {
+        // Same graph, but node 2 is emitted before node 3: a guard may not
+        // assume a return that has not been evaluated yet.
+        let (succ, edge) = early_return();
+        let order = topological_order(&succ).unwrap();
+        assert_eq!(order, vec![0, 1, 2, 3]);
+        let leaves: HashSet<NodeId> = [3].into_iter().collect();
+        let r =
+            compute_reaching_conditions_after_returns(&succ, 0, &order, &edge, &leaves).unwrap();
+        assert!(!is_always(&r[&2]), "got {:?}", r[&2]);
+    }
+
+    #[test]
+    fn pruning_drops_a_trailing_conjunct_but_never_a_leading_one() {
+        let a_and_b = and(var("a"), var("b"));
+        // Where `b` always holds, `a && b` is `a`: the last operand goes.
+        assert_eq!(prune_guard(a_and_b.clone(), &var("b")), var("a"));
+        // Where `a` always holds it is just as much `b` -- but `a` is the
+        // decision that makes `b` meaningful, so it stays.
+        assert_eq!(prune_guard(a_and_b.clone(), &var("a")), a_and_b);
+    }
+
+    #[test]
+    fn pruning_drops_a_disjunct_that_cannot_hold() {
+        let a_or_b = or(var("a"), var("b"));
+        let not_a = negate_expr(var("a"));
+        assert_eq!(prune_guard(a_or_b, &not_a), var("b"));
+    }
+
+    #[test]
+    fn pruning_keeps_a_conjunct_something_is_read_after() {
+        // `(a && b) && c` where `b` always holds: `b` is not last, so
+        // removing it would read `c` in states it was not read in before.
+        let chain = and(and(var("a"), var("b")), var("c"));
+        assert_eq!(prune_guard(chain.clone(), &var("b")), chain);
     }
 }

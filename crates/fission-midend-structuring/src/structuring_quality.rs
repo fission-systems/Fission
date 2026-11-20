@@ -190,12 +190,22 @@ impl StructuringQuality {
     /// it would cost more CFG nodes than it saves, and
     /// [`SelectionAxis::Jumps`] never does.
     pub fn improves_on_axis(&self, baseline: &Self, axis: SelectionAxis) -> bool {
+        let removed = baseline.gotos.saturating_sub(self.gotos);
         if axis == SelectionAxis::NodeEstimate {
+            // The node estimate counts `if`, `?:` and loops as branches and
+            // `&&`/`||` as nothing, so on its own it prefers a candidate that
+            // writes control flow as short-circuit chains -- a reaching
+            // condition re-testing every decision on the path -- over one that
+            // writes it as statements. They are branches all the same; the
+            // invariant `branch_term_budget` states for the jump axis holds
+            // here too: no more short-circuit branches added than jumps
+            // removed.
             return self.estimated_cfg_nodes_x100() < baseline.estimated_cfg_nodes_x100()
                 && self.switches >= baseline.switches
-                && self.empty_if_shells <= baseline.empty_if_shells;
+                && self.empty_if_shells <= baseline.empty_if_shells
+                && self.guard_branch_terms
+                    <= branch_term_budget(baseline.guard_branch_terms, removed);
         }
-        let removed = baseline.gotos.saturating_sub(self.gotos);
         let guard_budget = guard_budget(baseline.guard_formula_size, removed);
         self.gotos < baseline.gotos
             && self.switches >= baseline.switches
@@ -590,6 +600,47 @@ mod tests {
             }],
             default: Rc::new(Vec::new()),
         }
+    }
+
+    fn or_chain(names: &[&str]) -> PreHirExpr {
+        let mut it = names.iter().map(|n| PreHirExpr::Var(n.to_string()));
+        let first = it.next().unwrap();
+        it.fold(first, |acc, v| PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalOr,
+            lhs: Box::new(acc),
+            rhs: Box::new(v),
+            ty: fission_midend_core::ir::NirType::Bool,
+        })
+    }
+
+    fn guarded(cond: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::If {
+            cond,
+            then_body: Rc::new(vec![goto_free_stmt()]),
+            else_body: Rc::new(Vec::new()),
+        }
+    }
+
+    fn goto_free_stmt() -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Var("x".to_string()))
+    }
+
+    #[test]
+    fn short_circuits_are_branches_on_the_node_axis_too() {
+        // Two `if`s and a jump, against one `if` whose guard spells the
+        // paths out: fewer statements of control flow, so the node estimate
+        // alone prefers it -- but it removed one jump and added three `||`.
+        let baseline = measure(&[guarded(cond()), guarded(cond()), goto("a")]);
+        let rewritten = measure(&[guarded(or_chain(&["a", "b", "c", "d"]))]);
+        assert!(
+            rewritten.estimated_cfg_nodes_x100() < baseline.estimated_cfg_nodes_x100(),
+            "the estimate on its own would take it"
+        );
+        assert!(!rewritten.improves_on_axis(&baseline, SelectionAxis::NodeEstimate));
+
+        // One `||` for the one jump removed keeps the branch count level.
+        let folded = measure(&[guarded(or_chain(&["a", "b"]))]);
+        assert!(folded.improves_on_axis(&baseline, SelectionAxis::NodeEstimate));
     }
 
     #[test]
