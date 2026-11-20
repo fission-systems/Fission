@@ -4,7 +4,7 @@ use crate::loader::types::{
     extract_fixed_string,
 };
 use crate::prelude::*;
-use fission_core::architecture::select_macho_load_spec;
+use fission_core::architecture::select_macho_load_spec_with_endian;
 use fission_core::constants::binary_format::*;
 use std::collections::{HashMap, HashSet};
 
@@ -172,9 +172,14 @@ impl MachoLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
-        let (architecture, load_spec) =
-            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, image_base)
-                .map_err(|e| err!(loader, "{}", e))?;
+        let (architecture, load_spec) = select_macho_load_spec_with_endian(
+            cputype,
+            header.cpusubtype,
+            is_64bit,
+            endian == Endian::Big,
+            image_base,
+        )
+        .map_err(|e| err!(loader, "{}", e))?;
 
         // Parse symbols after all sections are collected so n_sect can be filtered
         // against executable sections. This avoids treating data symbols as functions.
@@ -355,9 +360,14 @@ impl MachoLoader {
         if image_base == u64::MAX {
             image_base = 0;
         }
-        let (architecture, load_spec) =
-            select_macho_load_spec(cputype, header.cpusubtype, is_64bit, image_base)
-                .map_err(|e| err!(loader, "{}", e))?;
+        let (architecture, load_spec) = select_macho_load_spec_with_endian(
+            cputype,
+            header.cpusubtype,
+            is_64bit,
+            endian == Endian::Big,
+            image_base,
+        )
+        .map_err(|e| err!(loader, "{}", e))?;
 
         let mut global_symbols = HashMap::new();
         let mut relocation_symbols = HashMap::new();

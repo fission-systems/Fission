@@ -104,6 +104,24 @@ pub const MACHO_CPU_TYPE_ARM: i32 = 12;
 /// Mach-O CPU type: ARM64
 pub const MACHO_CPU_TYPE_ARM64: i32 = 0x0100000C;
 
+/// Mach-O CPU type: Motorola 680x0
+pub const MACHO_CPU_TYPE_MC680X0: i32 = 6;
+
+/// Mach-O CPU type: PA-RISC (HPPA)
+pub const MACHO_CPU_TYPE_HPPA: i32 = 11;
+
+/// Mach-O CPU type: Motorola 88000
+pub const MACHO_CPU_TYPE_MC88000: i32 = 13;
+
+/// Mach-O CPU type: SPARC
+pub const MACHO_CPU_TYPE_SPARC: i32 = 14;
+
+/// Mach-O CPU type: PowerPC (32-bit)
+pub const MACHO_CPU_TYPE_POWERPC: i32 = 18;
+
+/// Mach-O CPU type: PowerPC (64-bit)
+pub const MACHO_CPU_TYPE_POWERPC64: i32 = 0x01000012;
+
 // =============================================================================
 // Archive Formats
 // =============================================================================

@@ -16,7 +16,8 @@ use super::constants::{
 };
 
 use crate::core::config::{
-    AnalysisConfig, Config, DebugConfig, DecompilerConfig, LogConfig, LogLevel, UiConfig,
+    AnalysisConfig, Config, DebugConfig, DecompilerConfig, LogConfig, LogLevel, PathsConfig,
+    UiConfig,
 };
 
 /// TOML-compatible configuration structure
@@ -238,13 +239,10 @@ impl TomlConfig {
 /// Convert TomlConfig to runtime Config
 impl From<TomlConfig> for Config {
     fn from(toml: TomlConfig) -> Self {
+        let file_enabled = !toml.logging.file.trim().is_empty();
         Config {
             decompiler: DecompilerConfig {
-                num_workers: if toml.decompiler.num_workers == 0 {
-                    1
-                } else {
-                    toml.decompiler.num_workers
-                },
+                num_workers: toml.decompiler.num_workers,
                 max_workers: toml.decompiler.max_workers,
                 default_function_size: toml.decompiler.default_function_size,
                 max_function_size: toml.decompiler.max_function_size,
@@ -277,11 +275,18 @@ impl From<TomlConfig> for Config {
                 level: LogLevel::parse(&toml.logging.level).unwrap_or_default(),
                 file_path: toml.logging.file,
                 console_enabled: toml.logging.console_enabled,
-                file_enabled: false, // Will be set based on file_path
+                file_enabled,
                 include_timestamp: toml.logging.include_timestamp,
                 include_target: toml.logging.include_target,
                 max_file_size: 10 * MB,
                 max_rotated_files: 3,
+            },
+            paths: PathsConfig {
+                workspace_root: toml.paths.workspace_root,
+                fid_dir: toml.paths.fid_dir,
+                gdt_dir: toml.paths.gdt_dir,
+                die_dir: toml.paths.die_dir,
+                patterns_dir: toml.paths.patterns_dir,
             },
         }
     }
@@ -312,5 +317,42 @@ timeout_ms = 60000
         };
         assert_eq!(config.logging.level, "debug");
         assert_eq!(config.decompiler.timeout_ms, 60000);
+    }
+
+    #[test]
+    fn from_toml_preserves_auto_workers_file_logging_and_paths() {
+        let toml_str = r#"
+[logging]
+file = "fission.log"
+
+[decompiler]
+num_workers = 0
+
+[paths]
+workspace_root = "/tmp/ws"
+fid_dir = "/tmp/fid"
+gdt_dir = "/tmp/gdt"
+die_dir = "/tmp/die"
+patterns_dir = "/tmp/patterns"
+"#;
+        let toml_cfg: TomlConfig = toml::from_str(toml_str).expect("parse toml");
+        let cfg: Config = toml_cfg.into();
+        assert_eq!(cfg.decompiler.num_workers, 0);
+        assert!(cfg.decompiler.effective_num_workers() >= 1);
+        assert!(cfg.logging.file_enabled);
+        assert_eq!(cfg.logging.file_path, "fission.log");
+        assert_eq!(
+            cfg.paths,
+            PathsConfig {
+                workspace_root: "/tmp/ws".to_string(),
+                fid_dir: "/tmp/fid".to_string(),
+                gdt_dir: "/tmp/gdt".to_string(),
+                die_dir: "/tmp/die".to_string(),
+                patterns_dir: "/tmp/patterns".to_string(),
+            }
+        );
+
+        let empty_log_cfg: Config = TomlConfig::default().into();
+        assert!(!empty_log_cfg.logging.file_enabled);
     }
 }
