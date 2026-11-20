@@ -532,9 +532,13 @@ fn read_reloc_target_at_use_site(
     None
 }
 
-static READONLY_WINDOWS_CACHE: OnceLock<
-    Mutex<LruCache<String, std::sync::Arc<Vec<(u64, std::sync::Arc<[u8]>)>>>>,
-> = OnceLock::new();
+struct CachedReadOnlyWindows {
+    storage: fission_loader::loader::LoadedBinaryStorageToken,
+    windows: std::sync::Arc<Vec<(u64, std::sync::Arc<[u8]>)>>,
+}
+
+static READONLY_WINDOWS_CACHE: OnceLock<Mutex<LruCache<String, CachedReadOnlyWindows>>> =
+    OnceLock::new();
 
 /// Non-executable readable sections, for the jump-table reader.
 ///
@@ -557,7 +561,8 @@ fn readonly_windows_for(binary: &LoadedBinary) -> Vec<(u64, std::sync::Arc<[u8]>
         .lock()
         .expect("readonly-window cache poisoned")
         .get(&binary.hash)
-        .cloned()
+        .filter(|entry| entry.storage.matches(binary))
+        .map(|entry| entry.windows.clone())
     {
         return (*hit).clone();
     }
@@ -585,10 +590,13 @@ fn readonly_windows_for(binary: &LoadedBinary) -> Vec<(u64, std::sync::Arc<[u8]>
         }
     }
     let shared = std::sync::Arc::new(windows);
-    cache
-        .lock()
-        .expect("readonly-window cache poisoned")
-        .put(binary.hash.clone(), shared.clone());
+    cache.lock().expect("readonly-window cache poisoned").put(
+        binary.hash.clone(),
+        CachedReadOnlyWindows {
+            storage: binary.storage_token(),
+            windows: shared.clone(),
+        },
+    );
     (*shared).clone()
 }
 
@@ -716,10 +724,17 @@ pub(crate) fn resolve_call_target_name(
     resolve_call_target_name_direct(binary, target_addr).or_else(|| {
         let ptr_size = if binary.is_64bit { 8 } else { 4 };
         let raw = binary.view_bytes(target_addr, ptr_size)?;
+        let little_endian = binary.is_little_endian();
         let pointed = if binary.is_64bit {
-            u64::from_le_bytes(raw.try_into().ok()?)
-        } else {
+            if little_endian {
+                u64::from_le_bytes(raw.try_into().ok()?)
+            } else {
+                u64::from_be_bytes(raw.try_into().ok()?)
+            }
+        } else if little_endian {
             u32::from_le_bytes(raw.try_into().ok()?) as u64
+        } else {
+            u32::from_be_bytes(raw.try_into().ok()?) as u64
         };
         if pointed == 0 {
             return None;
@@ -1418,5 +1433,81 @@ mod tests {
 
         let facts = ControlFlowFacts::assemble(&binary, None);
         assert!(facts.indirect_targets.contains(&0x1400_1500));
+    }
+
+    #[test]
+    fn resolve_call_target_name_decodes_big_endian_pointer() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+        use std::collections::HashMap;
+
+        let slot = 0x1000_2000u64;
+        let target = 0x1000_3000u64;
+        let mut data = vec![0u8; 0x3000];
+        data[0x1000..0x1008].copy_from_slice(&target.to_be_bytes());
+
+        let binary = LoadedBinaryBuilder::new("be_plt.elf".to_string(), DataBuffer::Heap(data))
+            .format("ELF")
+            .architecture(fission_core::architecture::ArchitectureDescriptor {
+                processor: "PowerPC".into(),
+                endian: "big".into(),
+                bitness: 64,
+                variant: "default".into(),
+                abi: None,
+                raw_machine: "ppc64".into(),
+            })
+            .add_section(SectionInfo {
+                name: ".got".to_string(),
+                virtual_address: slot,
+                virtual_size: 0x100,
+                file_offset: 0x1000,
+                file_size: 0x100,
+                is_executable: false,
+                is_readable: true,
+                is_writable: true,
+            })
+            .add_global_symbols(HashMap::from([(target, "abort".to_string())]))
+            .build()
+            .expect("build");
+
+        assert_eq!(
+            resolve_call_target_name(&binary, slot),
+            Some(("abort".to_string(), None))
+        );
+    }
+
+    #[test]
+    fn readonly_windows_cache_invalidates_after_storage_mutation() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+        let make_binary = |byte: u8| {
+            let mut data = vec![0u8; 0x200];
+            data[0] = byte;
+            let mut binary =
+                LoadedBinaryBuilder::new("ro_cache.elf".to_string(), DataBuffer::Heap(data))
+                    .format("ELF")
+                    .is_64bit(true)
+                    .add_section(SectionInfo {
+                        name: ".rodata".to_string(),
+                        virtual_address: 0x2000,
+                        virtual_size: 0x100,
+                        file_offset: 0,
+                        file_size: 0x100,
+                        is_executable: false,
+                        is_readable: true,
+                        is_writable: false,
+                    })
+                    .build()
+                    .expect("build");
+            binary.hash = "shared-ro-cache-test-hash".to_string();
+            binary
+        };
+
+        let bin1 = make_binary(0x11);
+        let w1 = readonly_windows_for(&bin1);
+        assert_eq!(w1[0].1[0], 0x11);
+
+        let bin2 = make_binary(0x22);
+        let w2 = readonly_windows_for(&bin2);
+        assert_eq!(w2[0].1[0], 0x22);
     }
 }

@@ -8,7 +8,8 @@
 //! flow placeholders are out of scope for this module; track as a follow-up if CFG consumers need them.
 
 use fission_sleigh::runtime::{
-    DecodeStopReason, DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend,
+    DecodeContract, DecodeMemoryContext, DecodeStopReason, DecodedFlowKind, DecodedReferenceKind,
+    PackedContextOverride, RuntimeSleighFrontend,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -173,14 +174,28 @@ impl XrefDatabase {
             if section.file_size == 0 {
                 continue;
             }
-            let start = section.file_offset as usize;
-            let end = start.saturating_add(section.file_size as usize);
-            let Some(code) = binary.data.as_slice().get(start..end) else {
+            let Some(code) = usize::try_from(section.file_offset)
+                .ok()
+                .and_then(|start| {
+                    usize::try_from(section.file_size)
+                        .ok()
+                        .and_then(|sz| start.checked_add(sz))
+                        .map(|end| (start, end))
+                })
+                .and_then(|(start, end)| binary.data.as_slice().get(start..end))
+            else {
                 coverage.omit(XrefOmissionReason::SectionBytesUnavailable, 1);
                 continue;
             };
-            let base_addr = section.virtual_address;
-            match db.analyze_code(frontend, code, base_addr, &mapped) {
+            let address_state = frontend.normalize_low_bit_code_address(section.virtual_address);
+            let base_addr = address_state.address;
+            let context_override = crate::analysis::decode_context_for_address(
+                binary,
+                frontend,
+                section.virtual_address,
+                address_state.context_override,
+            );
+            match db.analyze_code(frontend, code, base_addr, context_override, &mapped) {
                 Some(reason) => coverage.omit(reason, 1),
                 None => coverage.completed_units += 1,
             }
@@ -220,17 +235,32 @@ impl XrefDatabase {
             let Ok(size) = usize::try_from(function.size) else {
                 continue;
             };
+            let address_state = frontend.normalize_low_bit_code_address(addr);
+            let entry_addr = address_state.address;
+            let context_override = crate::analysis::decode_context_for_address(
+                binary,
+                frontend,
+                addr,
+                address_state.context_override,
+            );
             if binary
-                .available_execution_bytes(addr)
+                .available_execution_bytes(entry_addr)
                 .map_or(true, |available| available < size)
             {
                 continue;
             }
-            let Some(code) = binary.view_executable_bytes(addr, size) else {
+            let Some(code) = binary.view_executable_bytes(entry_addr, size) else {
                 continue;
             };
-            let Ok(decoded) = frontend.lift_raw_pcode_function_with_contract(code, addr, 4096)
-            else {
+            let contract = DecodeContract::strict_function(4096);
+            let memory_context = DecodeMemoryContext::default();
+            let Ok(decoded) = frontend.lift_raw_pcode_function_with_context_and_memory_context(
+                code,
+                entry_addr,
+                contract,
+                &memory_context,
+                context_override,
+            ) else {
                 continue;
             };
             if !matches!(
@@ -253,9 +283,20 @@ impl XrefDatabase {
         frontend: &RuntimeSleighFrontend,
         code: &[u8],
         base_addr: u64,
+        context_override: Option<PackedContextOverride>,
         mapped: &[(u64, u64)],
     ) -> Option<XrefOmissionReason> {
-        let Ok(instructions) = frontend.decode_window_parallel(code, base_addr) else {
+        let decode_result = if context_override.is_some() {
+            frontend.decode_window_with_context_override(
+                code,
+                base_addr,
+                usize::MAX,
+                context_override,
+            )
+        } else {
+            frontend.decode_window_parallel(code, base_addr)
+        };
+        let Ok(instructions) = decode_result else {
             return Some(XrefOmissionReason::InstructionDecodeFailed);
         };
         let decoded_bytes = instructions
@@ -541,5 +582,60 @@ mod tests {
 
         let db = XrefDatabase::build_from_binary(&binary);
         assert_eq!(db.total_refs(), 0);
+    }
+
+    #[test]
+    fn thumb_image_decodes_code_and_refines_with_vsa_in_thumb_context() {
+        use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+
+        // Thumb-2 `bl 0x1010` at 0x1000 (`00 f0 06 f8`), then `bx lr` (`70 47`) at 0x1004;
+        // `bx lr` (`70 47`) at 0x1010. Entry point carries Thumb bit 0 (0x1001).
+        let mut raw = vec![0u8; 0x100];
+        raw[0x00..0x06].copy_from_slice(&[0x00, 0xf0, 0x06, 0xf8, 0x70, 0x47]);
+        raw[0x10..0x12].copy_from_slice(&[0x70, 0x47]);
+
+        let binary = LoadedBinaryBuilder::new("thumb_xrefs.elf".to_string(), DataBuffer::Heap(raw))
+            .format("ELF")
+            .entry_point(0x1001)
+            .arch_spec("ARM:LE:32:v8")
+            .architecture(fission_core::architecture::ArchitectureDescriptor {
+                processor: "ARM".into(),
+                endian: "little".into(),
+                bitness: 32,
+                variant: "v8".into(),
+                abi: None,
+                raw_machine: "EM_ARM".into(),
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_functions(vec![FunctionInfo {
+                name: "thumb_caller".to_string(),
+                address: 0x1001,
+                size: 6,
+                is_import: false,
+                ..Default::default()
+            }])
+            .build()
+            .expect("thumb elf");
+
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("ARM8_le").expect("ARM8 runtime frontend");
+        let mut db = XrefDatabase::build_with_frontend(&binary, &frontend);
+        assert!(
+            db.get_refs_from(0x1000)
+                .iter()
+                .any(|x| x.xref_type == XrefType::Call && x.to_addr == 0x1010),
+            "expected Thumb BL call xref from 0x1000 to 0x1010: {:?}",
+            db.get_refs_from(0x1000)
+        );
+        db.refine_with_vsa(&binary, &frontend, &[0x1001]);
     }
 }

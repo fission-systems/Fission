@@ -114,10 +114,14 @@ fn vector_table_words(binary: &LoadedBinary) -> Option<Vec<u64>> {
     let section = binary
         .sections
         .iter()
-        .filter(|section| section.virtual_address != 0 && section.file_size >= 4)
+        .filter(|section| section.is_addressable() && section.file_size >= 4)
         .min_by_key(|section| section.virtual_address)?;
-    let start = section.file_offset as usize;
+    let start = usize::try_from(section.file_offset).ok()?;
+    let file_size = usize::try_from(section.file_size).ok()?;
     let needed = (EXAMINED_VECTORS + 1) * 4;
+    if file_size < needed {
+        return None;
+    }
     let data = binary.data.as_slice();
     let end = start.checked_add(needed)?;
     if end > data.len() {
@@ -203,5 +207,59 @@ mod tests {
         // Its neighbours are still ARM.
         assert!(decode_context_for_address(&image, &frontend, 0x4804, None).is_none());
         assert!(decode_context_for_address(&image, &frontend, 0x4428, None).is_none());
+    }
+
+    #[test]
+    fn cortex_m_isr_vector_at_vma_zero_is_detected_while_unallocated_metadata_is_ignored() {
+        use fission_loader::loader::SectionInfo;
+
+        let mut raw = vec![0u8; 0x200];
+        // Non-allocated metadata at file offset 0..0x80 (contains garbage non-Thumb words)
+        for word in raw[..0x80].chunks_exact_mut(4) {
+            word.copy_from_slice(&0xea00_00b8u32.to_le_bytes());
+        }
+        // Allocated .isr_vector at VMA 0x0, file_offset 0x80: SRAM SP + Thumb handlers
+        raw[0x80..0x84].copy_from_slice(&0x2001_0000u32.to_le_bytes());
+        for slot in 1..=7usize {
+            let off = 0x80 + slot * 4;
+            raw[off..off + 4].copy_from_slice(&((0x100 + slot as u32 * 4) | 1).to_le_bytes());
+        }
+
+        let image = LoadedBinaryBuilder::new("cortexm.elf".to_string(), DataBuffer::Heap(raw))
+            .format("ELF")
+            .entry_point(0x8000) // even entry point
+            .arch_spec("ARM:LE:32:v8")
+            .architecture(ArchitectureDescriptor {
+                processor: "ARM".to_string(),
+                endian: "little".to_string(),
+                bitness: 32,
+                variant: "v8".to_string(),
+                abi: None,
+                raw_machine: "EM_ARM".to_string(),
+            })
+            .add_section(SectionInfo {
+                name: ".comment".to_string(),
+                virtual_address: 0,
+                virtual_size: 0x80,
+                file_offset: 0,
+                file_size: 0x80,
+                is_executable: false,
+                is_readable: false,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".isr_vector".to_string(),
+                virtual_address: 0,
+                virtual_size: 0x80,
+                file_offset: 0x80,
+                file_size: 0x80,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("cortex-m ELF");
+
+        assert!(image_executes_thumb(&image));
     }
 }

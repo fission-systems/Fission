@@ -4,7 +4,7 @@
 //! is [`super::xrefs::XrefType::Call`]. This includes conditional calls (`call` on conditional
 //! flow) when Sleigh classifies them as call targets; jump-only tail edges are excluded.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_signatures::CallGraphView;
@@ -251,6 +251,7 @@ impl CallGraph {
         let fallback_range = fallback_range.max(1);
         let mut callers_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
         let mut callees_map: FxHashMap<u64, FxHashMap<u64, usize>> = FxHashMap::default();
+        let mut seen_call_sites: FxHashSet<(u64, u64)> = FxHashSet::default();
         let mut total_call_sites = 0usize;
 
         for record in &index.refs {
@@ -260,6 +261,9 @@ impl CallGraph {
             let Some(to_addr) = record.target.address else {
                 continue;
             };
+            if !seen_call_sites.insert((record.source.address, to_addr)) {
+                continue;
+            }
 
             let caller =
                 match resolve_enclosing_function(&functions, record.source.address, fallback_range)
@@ -457,5 +461,49 @@ mod tests {
         ];
 
         assert_eq!(find_function_addr(&functions, 0x1100, 0x40), Some(0x1000));
+    }
+
+    #[test]
+    fn build_from_xref_index_deduplicates_call_sites_across_layers() {
+        use crate::analysis::xref_index::{
+            XrefEvidence, XrefIndexBuilder, XrefSource, XrefSourceCategory, XrefSourceLayer,
+            XrefTarget,
+        };
+
+        let functions = sample_functions();
+        let mut builder = XrefIndexBuilder::new();
+        for layer in [XrefSourceLayer::Disassembly, XrefSourceLayer::Pcode] {
+            builder.push_record(
+                XrefSource {
+                    address: 0x1004,
+                    category: XrefSourceCategory::Instruction {
+                        enclosing_function: Some(0x1000),
+                    },
+                },
+                XrefTarget {
+                    address: Some(0x2000),
+                    symbol: Some("callee".to_string()),
+                },
+                XrefKind::Call,
+                fission_loader::Confidence::High,
+                XrefEvidence {
+                    layer,
+                    instruction_mnemonic: Some("call".to_string()),
+                    pcode_op: None,
+                    relocation_kind: None,
+                    relocation_type: None,
+                    relocation_size: None,
+                    relocation_addend: None,
+                    symbol_name: Some("callee".to_string()),
+                    note: None,
+                },
+            );
+        }
+
+        let index = builder.finish();
+        let g = CallGraph::build_from_xref_index(&functions, &index, 0x40);
+        assert_eq!(g.total_call_sites(), 1);
+        assert_eq!(g.callees_of(0x1000)[0].count, 1);
+        assert_eq!(g.callers_of(0x2000)[0].count, 1);
     }
 }

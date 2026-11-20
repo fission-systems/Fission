@@ -97,8 +97,12 @@ impl PatchManager {
     /// Apply all patches to a data buffer
     pub fn apply_all(&mut self, data: &mut [u8]) {
         for patch in self.patches.values_mut() {
-            let offset = patch.offset as usize;
-            let end = offset + patch.patched.len();
+            let Ok(offset) = usize::try_from(patch.offset) else {
+                continue;
+            };
+            let Some(end) = offset.checked_add(patch.patched.len()) else {
+                continue;
+            };
 
             if end <= data.len() {
                 data[offset..end].copy_from_slice(&patch.patched);
@@ -110,8 +114,15 @@ impl PatchManager {
     /// Revert all patches in a data buffer
     pub fn revert_all(&mut self, data: &mut [u8]) {
         for patch in self.patches.values_mut() {
-            let offset = patch.offset as usize;
-            let end = offset + patch.original.len();
+            if !patch.applied {
+                continue;
+            }
+            let Ok(offset) = usize::try_from(patch.offset) else {
+                continue;
+            };
+            let Some(end) = offset.checked_add(patch.original.len()) else {
+                continue;
+            };
 
             if end <= data.len() {
                 data[offset..end].copy_from_slice(&patch.original);
@@ -153,5 +164,27 @@ mod tests {
         // Revert
         pm.revert_all(&mut data);
         assert_eq!(data[0], 0x74); // Back to JE
+    }
+
+    #[test]
+    fn overflow_offset_and_unapplied_revert_are_safe() {
+        let mut data = vec![0x90, 0x91, 0x92, 0x93];
+        let mut pm = PatchManager::new();
+        pm.add_patch(
+            u64::MAX - 1,
+            vec![0xaa, 0xbb, 0xcc],
+            vec![0x11, 0x22, 0x33],
+            "oob",
+        );
+        pm.add_patch(0, vec![0xff, 0xfe], vec![0x01, 0x02], "unapplied");
+
+        // Unapplied patch must not clobber buffer on revert.
+        pm.revert_all(&mut data);
+        assert_eq!(data, vec![0x90, 0x91, 0x92, 0x93]);
+
+        // Overflowing u64::MAX - 1 + 3 must not wrap into range or panic.
+        pm.apply_all(&mut data);
+        assert!(!pm.get_patch(u64::MAX - 1).unwrap().applied);
+        assert_eq!(data[0..2], [0x01, 0x02]);
     }
 }

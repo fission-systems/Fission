@@ -773,3 +773,72 @@ fn strict_boundary_probe_survives_a_window_cut_by_the_section_start() {
 
     assert!(!is_strict_boundary(&binary, None, 0x401011));
 }
+
+#[test]
+fn scan_data_references_decodes_big_endian_pointers() {
+    let mut bytes = vec![0u8; 0x200];
+    // .text at 0x1000..0x1020:
+    //   0x1000: blr (0x4e80_0020) -- known callee & strict terminator before 0x1004
+    //   0x1004: bl 0x1000 (0x4bff_fffd) -- call to known function so `has_call_to_valid` holds
+    //   0x1008: blr (0x4e80_0020)
+    bytes[0x00..0x04].copy_from_slice(&0x4e80_0020u32.to_be_bytes());
+    bytes[0x04..0x08].copy_from_slice(&0x4bff_fffdu32.to_be_bytes());
+    bytes[0x08..0x0c].copy_from_slice(&0x4e80_0020u32.to_be_bytes());
+    // .rodata at 0x2000: big-endian pointer to 0x1004
+    bytes[0x100..0x104].copy_from_slice(&0x1004u32.to_be_bytes());
+
+    let binary = LoadedBinaryBuilder::new("be_data_ref.elf".to_string(), DataBuffer::Heap(bytes))
+        .format("ELF")
+        .entry_point(0x1000)
+        .arch_spec("PowerPC:BE:32:default")
+        .architecture(fission_core::architecture::ArchitectureDescriptor {
+            processor: "PowerPC".into(),
+            endian: "big".into(),
+            bitness: 32,
+            variant: "default".into(),
+            abi: None,
+            raw_machine: "EM_PPC".into(),
+        })
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x20,
+            file_offset: 0,
+            file_size: 0x20,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(SectionInfo {
+            name: ".rodata".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 0x20,
+            file_offset: 0x100,
+            file_size: 0x20,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("be ELF");
+
+    let frontend = fission_sleigh::runtime::RuntimeSleighFrontend::new_for_load_spec(
+        binary.load_spec().expect("load spec"),
+    )
+    .expect("PowerPC runtime");
+    let executable_ranges = super::ranges::executable_ranges(&binary);
+    let known: std::collections::HashSet<u64> = [0x1000].into();
+    let mut cache = std::collections::HashMap::new();
+    let found = super::discover::scan_data_references(
+        &binary,
+        &frontend,
+        &executable_ranges,
+        &known,
+        &mut cache,
+        None,
+    );
+    assert!(
+        found.iter().any(|s| s.address == 0x1004),
+        "expected big-endian .rodata pointer 0x1004 in {found:?}"
+    );
+}

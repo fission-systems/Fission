@@ -105,20 +105,23 @@ pub(crate) fn scan_msvc_eh_funcinfo(binary: &LoadedBinary) -> Vec<u64> {
 
     let mut candidates = Vec::new();
     for section in sections {
-        let Some(bytes) = binary.view_bytes(section.virtual_address, section.virtual_size as usize)
-        else {
+        let Ok(scan_size) = usize::try_from(section.virtual_size) else {
+            continue;
+        };
+        let Some(bytes) = binary.view_bytes(section.virtual_address, scan_size) else {
             continue;
         };
         let section_start = section.virtual_address;
-        let section_end = section.virtual_address + section.virtual_size;
+        let section_end = section.virtual_address.saturating_add(section.virtual_size);
 
         // 4-byte aligned scan, matching Ghidra's own `alignment = 4`.
         let mut offset = 0usize;
         while offset + 4 <= bytes.len() {
             let field0 = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
             let magic = field0 & 0x1FFF_FFFF;
-            if matches!(magic, EH_MAGIC_V1 | EH_MAGIC_V2 | EH_MAGIC_V3) {
-                let addr = section_start + offset as u64;
+            if matches!(magic, EH_MAGIC_V1 | EH_MAGIC_V2 | EH_MAGIC_V3)
+                && let Some(addr) = section_start.checked_add(offset as u64)
+            {
                 collect_func_info_candidates(
                     binary,
                     addr,

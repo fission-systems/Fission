@@ -121,7 +121,7 @@ impl ValueState {
 
     pub fn get_value(&self, v: &Varnode) -> AbstractValue {
         if v.is_constant {
-            return AbstractValue::Constant(v.constant_val as u64);
+            return AbstractValue::Constant(mask_for_size(v.constant_val as u64, v.size));
         }
         self.varnodes
             .get(&VarnodeKey::from(v))
@@ -130,11 +130,47 @@ impl ValueState {
     }
 
     pub fn set_value(&mut self, v: &Varnode, val: AbstractValue) {
-        if val == AbstractValue::Top {
+        let masked = mask_abstract_value(val, v.size);
+        if masked == AbstractValue::Top {
             self.varnodes.remove(&VarnodeKey::from(v));
         } else {
-            self.varnodes.insert(VarnodeKey::from(v), val);
+            self.varnodes.insert(VarnodeKey::from(v), masked);
         }
+    }
+}
+
+fn mask_for_size(value: u64, size: u32) -> u64 {
+    match size {
+        0 => 0,
+        1..=7 => value & ((1u64 << (size * 8)) - 1),
+        _ => value,
+    }
+}
+
+fn sign_extend_for_size(value: u64, size: u32) -> i64 {
+    let bits = size.saturating_mul(8);
+    if bits == 0 {
+        return 0;
+    }
+    if bits >= 64 {
+        return value as i64;
+    }
+    let shift = 64 - bits;
+    ((value << shift) as i64) >> shift
+}
+
+fn mask_abstract_value(val: AbstractValue, size: u32) -> AbstractValue {
+    match val {
+        AbstractValue::Constant(c) => AbstractValue::Constant(mask_for_size(c, size)),
+        AbstractValue::Set(mut vals) => {
+            for v in &mut vals {
+                *v = mask_for_size(*v, size);
+            }
+            vals.sort_unstable();
+            vals.dedup();
+            AbstractValue::Set(vals)
+        }
+        other => other,
     }
 }
 
@@ -301,18 +337,44 @@ impl ValueSetAnalyzer {
     fn evaluate_op(&mut self, state: &mut ValueState, op: &fission_pcode_ir::PcodeOp) {
         match op.opcode {
             PcodeOpcode::Copy => {
-                if let Some(out) = &op.output {
-                    let val = state.get_value(&op.inputs[0]);
+                if let (Some(out), Some(in0)) = (&op.output, op.inputs.first()) {
+                    let val = mask_abstract_value(state.get_value(in0), out.size);
                     state.set_value(out, val);
+                }
+            }
+            PcodeOpcode::IntZExt => {
+                if let (Some(out), Some(in0)) = (&op.output, op.inputs.first()) {
+                    match state.get_value(in0) {
+                        AbstractValue::Constant(a) => {
+                            let extended = mask_for_size(mask_for_size(a, in0.size), out.size);
+                            state.set_value(out, AbstractValue::Constant(extended));
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntSExt => {
+                if let (Some(out), Some(in0)) = (&op.output, op.inputs.first()) {
+                    match state.get_value(in0) {
+                        AbstractValue::Constant(a) => {
+                            let extended =
+                                mask_for_size(sign_extend_for_size(a, in0.size) as u64, out.size);
+                            state.set_value(out, AbstractValue::Constant(extended));
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
                 }
             }
             PcodeOpcode::IntAdd => {
                 if let (Some(out), Some(in0), Some(in1)) =
-                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
                 {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
-                            state.set_value(out, AbstractValue::Constant(a.wrapping_add(b)));
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a.wrapping_add(b), out.size)),
+                            );
                         }
                         _ => state.set_value(out, AbstractValue::Top),
                     }
@@ -320,11 +382,29 @@ impl ValueSetAnalyzer {
             }
             PcodeOpcode::IntSub => {
                 if let (Some(out), Some(in0), Some(in1)) =
-                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
                 {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
-                            state.set_value(out, AbstractValue::Constant(a.wrapping_sub(b)));
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a.wrapping_sub(b), out.size)),
+                            );
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntMult => {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
+                {
+                    match (state.get_value(in0), state.get_value(in1)) {
+                        (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a.wrapping_mul(b), out.size)),
+                            );
                         }
                         _ => state.set_value(out, AbstractValue::Top),
                     }
@@ -332,11 +412,60 @@ impl ValueSetAnalyzer {
             }
             PcodeOpcode::IntLeft => {
                 if let (Some(out), Some(in0), Some(in1)) =
-                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
                 {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
-                            state.set_value(out, AbstractValue::Constant(a.wrapping_shl(b as u32)));
+                            let width = u64::from(out.size.saturating_mul(8));
+                            let shifted = if width == 0 || b >= width {
+                                0
+                            } else {
+                                mask_for_size(a.wrapping_shl(b as u32), out.size)
+                            };
+                            state.set_value(out, AbstractValue::Constant(shifted));
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntRight => {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
+                {
+                    match (state.get_value(in0), state.get_value(in1)) {
+                        (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
+                            let width = u64::from(in0.size.saturating_mul(8));
+                            let val = mask_for_size(a, in0.size);
+                            let shifted = if width == 0 || b >= width {
+                                0
+                            } else {
+                                mask_for_size(val >> (b as u32), out.size)
+                            };
+                            state.set_value(out, AbstractValue::Constant(shifted));
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntSRight => {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
+                {
+                    match (state.get_value(in0), state.get_value(in1)) {
+                        (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
+                            let width = u64::from(in0.size.saturating_mul(8));
+                            let signed = sign_extend_for_size(a, in0.size);
+                            let raw = if width == 0 {
+                                0
+                            } else if b >= width {
+                                if signed < 0 { u64::MAX } else { 0 }
+                            } else {
+                                (signed >> (b as u32)) as u64
+                            };
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(raw, out.size)),
+                            );
                         }
                         _ => state.set_value(out, AbstractValue::Top),
                     }
@@ -344,11 +473,44 @@ impl ValueSetAnalyzer {
             }
             PcodeOpcode::IntAnd => {
                 if let (Some(out), Some(in0), Some(in1)) =
-                    (&op.output, op.inputs.get(0), op.inputs.get(1))
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
                 {
                     match (state.get_value(in0), state.get_value(in1)) {
                         (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
-                            state.set_value(out, AbstractValue::Constant(a & b));
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a & b, out.size)),
+                            );
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntOr => {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
+                {
+                    match (state.get_value(in0), state.get_value(in1)) {
+                        (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a | b, out.size)),
+                            );
+                        }
+                        _ => state.set_value(out, AbstractValue::Top),
+                    }
+                }
+            }
+            PcodeOpcode::IntXor => {
+                if let (Some(out), Some(in0), Some(in1)) =
+                    (&op.output, op.inputs.first(), op.inputs.get(1))
+                {
+                    match (state.get_value(in0), state.get_value(in1)) {
+                        (AbstractValue::Constant(a), AbstractValue::Constant(b)) => {
+                            state.set_value(
+                                out,
+                                AbstractValue::Constant(mask_for_size(a ^ b, out.size)),
+                            );
                         }
                         _ => state.set_value(out, AbstractValue::Top),
                     }
@@ -632,5 +794,78 @@ mod tests {
             );
         }
         assert!(!xrefs.is_empty(), "the loop's read should be reported");
+    }
+
+    #[test]
+    fn copy_without_inputs_does_not_panic_and_sub64_ops_mask_width() {
+        let mut analyzer = ValueSetAnalyzer::new();
+        let mut state = ValueState::default();
+
+        let out32 = Varnode {
+            space_id: 1,
+            offset: 0x00,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+
+        // Malformed Copy with empty inputs must not panic.
+        analyzer.evaluate_op(
+            &mut state,
+            &PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::Copy,
+                address: 0x1000,
+                output: Some(out32.clone()),
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        );
+        assert_eq!(state.get_value(&out32), AbstractValue::Top);
+
+        // 32-bit IntAdd wraps modulo 2^32, not 2^64.
+        analyzer.evaluate_op(
+            &mut state,
+            &PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::IntAdd,
+                address: 0x1004,
+                output: Some(out32.clone()),
+                inputs: vec![Varnode::constant(0xFFFF_FFFF, 4), Varnode::constant(1, 4)],
+                asm_mnemonic: None,
+            },
+        );
+        assert_eq!(state.get_value(&out32), AbstractValue::Constant(0));
+
+        // 32-bit IntLeft by >= 32 yields 0, not wrapping_shl(32) on 64 bits.
+        analyzer.evaluate_op(
+            &mut state,
+            &PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::IntLeft,
+                address: 0x1008,
+                output: Some(out32.clone()),
+                inputs: vec![Varnode::constant(1, 4), Varnode::constant(32, 4)],
+                asm_mnemonic: None,
+            },
+        );
+        assert_eq!(state.get_value(&out32), AbstractValue::Constant(0));
+
+        // 32-bit IntLeft within width masks high bits.
+        analyzer.evaluate_op(
+            &mut state,
+            &PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::IntLeft,
+                address: 0x100c,
+                output: Some(out32.clone()),
+                inputs: vec![Varnode::constant(0x1_0001, 4), Varnode::constant(16, 4)],
+                asm_mnemonic: None,
+            },
+        );
+        assert_eq!(
+            state.get_value(&out32),
+            AbstractValue::Constant(0x0001_0000)
+        );
     }
 }
