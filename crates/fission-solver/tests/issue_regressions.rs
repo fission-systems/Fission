@@ -278,3 +278,142 @@ fn select_from_an_oracle_backed_space_array_stays_supported() {
         aig.unsupported()
     );
 }
+
+#[test]
+fn unconstrained_inverted_aig_bits_evaluate_as_one() {
+    use fission_solver::aig::AigLit;
+    use fission_solver::sat::SatSolver;
+    use fission_solver::theory::bitvector::BvTheorySolver;
+    use std::collections::HashMap;
+
+    let mut bv = BvTheorySolver::new();
+    let sat = SatSolver::new();
+
+    let x = SymExpr::new_var("x", 8);
+    let inv_x = SymExpr::Xor(Box::new(x.clone()), Box::new(SymExpr::new_const(0xff, 8)));
+
+    let SymExpr::Var { id: x_id, .. } = &x else {
+        unreachable!()
+    };
+    let nodes = HashMap::from([(1, x.clone())]);
+
+    // Register unconstrained AIG variables without loading clauses into SAT (`cnf_var == 0`).
+    let _ = bv.aig.lower_expr(&inv_x);
+    let mut model = HashMap::new();
+    bv.extract_model(&sat, &nodes, &mut model);
+    assert_eq!(model[&1], 0);
+    assert_eq!(bv.evaluate_expr_in_model(&sat, &x), 0);
+    assert_eq!(bv.evaluate_expr_in_model(&sat, &inv_x), 0xff);
+    assert_eq!(bv.aig.get_var_bits(*x_id).expect("var bits").len(), 8);
+    assert_ne!(AigLit::new(1, true), AigLit::TRUE);
+}
+
+struct SliceOracle {
+    space_id: u64,
+    base: u64,
+    bytes: Vec<u8>,
+}
+
+impl fission_solver::solver::MemoryOracle for SliceOracle {
+    fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8> {
+        if space_id != self.space_id || addr < self.base {
+            return None;
+        }
+        let offset = usize::try_from(addr - self.base).ok()?;
+        self.bytes.get(offset).copied()
+    }
+}
+
+#[test]
+fn memory_cegar_refines_unregistered_and_multibyte_selects() {
+    let space = SymExpr::new_array_var("space_0", 64, 32);
+    let ptr = SymExpr::new_var("ptr", 64);
+    let oracle = SliceOracle {
+        space_id: 0,
+        base: 0x1000,
+        // Little-endian 0x1122_3344 followed by 0x5566_7788.
+        bytes: vec![0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55],
+    };
+
+    // Unregistered `ArraySelect` appears only inside an assertion (not in `solver.nodes`).
+    let mut solver = Solver::new();
+    solver.assert(SymExpr::Eq(
+        Box::new(ptr.clone()),
+        Box::new(SymExpr::new_const(0x1000, 64)),
+    ));
+    solver.assert(SymExpr::Eq(
+        Box::new(array_select(space.clone(), ptr.clone())),
+        Box::new(SymExpr::new_const(0x1122_3344, 32)),
+    ));
+    assert_eq!(
+        solver.check_sat_with_oracle(Some(&oracle), &[]).unwrap(),
+        SatResult::Sat
+    );
+
+    // Asking for the upper byte to be 0 (or mismatching value) must be refuted.
+    let mut mismatch = Solver::new();
+    mismatch.assert(SymExpr::Eq(
+        Box::new(ptr.clone()),
+        Box::new(SymExpr::new_const(0x1004, 64)),
+    ));
+    assert_eq!(
+        mismatch
+            .check_sat_with_oracle(
+                Some(&oracle),
+                &[SymExpr::Neq(
+                    Box::new(array_select(space, ptr)),
+                    Box::new(SymExpr::new_const(0x5566_7788, 32)),
+                )],
+            )
+            .unwrap(),
+        SatResult::Unsat
+    );
+}
+
+#[test]
+fn array_theory_enforces_read_over_write_and_congruence_in_solver() {
+    let a = SymExpr::new_array_var("mem", 8, 8);
+    let i = SymExpr::new_var("i", 8);
+    let j = SymExpr::new_var("j", 8);
+    let v = SymExpr::new_var("v", 8);
+
+    // Read-over-write same index: select(store(a, i, v), i) == v.
+    let mut row_same = Solver::new();
+    row_same.assert(not_equal(
+        array_select(array_store(a.clone(), i.clone(), v.clone()), i.clone()),
+        v.clone(),
+    ));
+    assert_eq!(row_same.check_sat().unwrap(), SatResult::Unsat);
+
+    // Read-over-write distinct index: i != j => select(store(a, i, v), j) == select(a, j).
+    let mut row_diff = Solver::new();
+    row_diff.assert(SymExpr::Neq(Box::new(i.clone()), Box::new(j.clone())));
+    row_diff.assert(not_equal(
+        array_select(array_store(a.clone(), i.clone(), v), j.clone()),
+        array_select(a.clone(), j.clone()),
+    ));
+    assert_eq!(row_diff.check_sat().unwrap(), SatResult::Unsat);
+
+    // Functional consistency across distinct select sites.
+    let mut cong = Solver::new();
+    cong.assert(SymExpr::Eq(Box::new(i.clone()), Box::new(j.clone())));
+    cong.assert(not_equal(
+        array_select(a.clone(), i.clone()),
+        array_select(a.clone(), j.clone()),
+    ));
+    assert_eq!(cong.check_sat().unwrap(), SatResult::Unsat);
+
+    // Nested store satisfiability: store(store(a, i, 1), j, 2)[i] == 1 when i != j.
+    let mut nested = Solver::new();
+    let chain = array_store(
+        array_store(a, i.clone(), SymExpr::new_const(1, 8)),
+        j.clone(),
+        SymExpr::new_const(2, 8),
+    );
+    nested.assert(SymExpr::Neq(Box::new(i.clone()), Box::new(j)));
+    nested.assert(SymExpr::Eq(
+        Box::new(array_select(chain, i)),
+        Box::new(SymExpr::new_const(1, 8)),
+    ));
+    assert_eq!(nested.check_sat().unwrap(), SatResult::Sat);
+}

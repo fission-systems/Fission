@@ -773,36 +773,32 @@ impl SatSolver {
 
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
 
-                // A clause whose derivation has to backtrack below the
-                // assumption levels is conditional on those assumptions.  It
-                // must not be installed as a root fact: doing so turns a
-                // failed probe such as `x > 228` into a permanent constraint
-                // and can make a later, satisfiable probe report the wrong
-                // answer.  This is especially important for the binary
-                // searches used by Solver::min/max.
-                if !assumptions.is_empty()
-                    && (learned_clause.len() == 1 || backtrack_level < assumptions.len() as u32)
-                {
-                    self.cancel_until(0);
-                    return false;
-                }
-
-                // Do not backtrack past assumptions
-                if backtrack_level < assumptions.len() as u32 {
-                    backtrack_level = assumptions.len() as u32;
-                }
-
-                // Capture the conflict's decision levels before unassigning its trail.
-                let learned_lbd = self.compute_lbd(&learned_clause);
-                self.cancel_until(backtrack_level);
-
+                // Every assumption sits at decision level `1..=assumptions.len() < decision_level()`.
+                // A conflict at `decision_level() > assumptions.len()` therefore retains at
+                // least one literal `< decision_level()` whenever any assumption contributed to it:
+                // - A unit learned clause (`len == 1`) depends only on level-0 facts and can
+                //   safely be installed at root before replaying `assumptions`.
+                // - A multi-literal clause preserves any contributing assumption negated in
+                //   `learned_clause[1..]`, so clamping `backtrack_level` to `assumptions.len()`
+                //   keeps the clause conditional on those assumptions instead of aborting early.
                 if learned_clause.len() == 1 {
-                    self.enqueue(learned_clause[0], None);
+                    self.cancel_until(0);
+                    if !self.enqueue(learned_clause[0], None) || self.propagate().is_some() {
+                        self.ok = false;
+                        return false;
+                    }
+                    if !assumptions.is_empty() && !self.restore_assumptions(assumptions) {
+                        return false;
+                    }
                 } else {
-                    let c_idx = self.clauses.len();
+                    // Do not backtrack past assumptions.
+                    if backtrack_level < assumptions.len() as u32 {
+                        backtrack_level = assumptions.len() as u32;
+                    }
 
-                    // We must watch the first two literals. The first is the asserting literal.
-                    // The second must be one with the highest decision level (which is backtrack_level).
+                    // Capture the conflict's decision levels and highest-level watched literal
+                    // before unassigning its trail.
+                    let learned_lbd = self.compute_lbd(&learned_clause);
                     let mut max_i = 1;
                     let mut max_lvl = self.vardata[learned_clause[1].var() as usize].level;
                     for i in 2..learned_clause.len() {
@@ -813,6 +809,9 @@ impl SatSolver {
                         }
                     }
 
+                    self.cancel_until(backtrack_level);
+
+                    let c_idx = self.clauses.len();
                     let mut final_clause = learned_clause.clone();
                     final_clause.swap(1, max_i);
 
@@ -834,8 +833,10 @@ impl SatSolver {
                         blocker: lit0,
                     });
 
-                    // BCP will flip the asserting literal
-                    self.enqueue(lit0, Some(c_idx));
+                    // BCP will flip the asserting literal.
+                    if !self.enqueue(lit0, Some(c_idx)) {
+                        return false;
+                    }
                 }
 
                 // GC: evict poor-quality learned clauses to bound memory usage
@@ -908,5 +909,55 @@ mod retention_regressions {
             sat.clause_meta.iter().flatten().any(|m| m.lbd == 3),
             "the first learned clause spans three decision levels"
         );
+    }
+
+    #[test]
+    fn assumption_solve_backtracking_below_assumptions_does_not_abort_sat() {
+        // Assumptions are [lit(1, false), lit(2, false)] at decision levels 1 and 2.
+        // Default branch phase picks lit(3, true) at level 3, triggering conflict:
+        // [3, ¬4] propagates ¬4 at level 3, and [¬1, 3, 4] conflicts with ¬1 (level 1).
+        // 1-UIP learns [3, ¬1] with backtrack_level = 1 < 2, even though 1=T, 2=T, 3=T is SAT.
+        let mut sat = SatSolver::new();
+        sat.add_clause(vec![Lit::new(2, false), Lit::new(2, true)]);
+        sat.add_clause(vec![Lit::new(3, false), Lit::new(4, true)]);
+        sat.add_clause(vec![
+            Lit::new(1, true),
+            Lit::new(3, false),
+            Lit::new(4, false),
+        ]);
+        for (var, bumps) in [(3, 20), (4, 5)] {
+            for _ in 0..bumps {
+                sat.var_bump_activity(var);
+            }
+        }
+
+        let assumptions = [Lit::new(1, false), Lit::new(2, false)];
+        assert!(
+            sat.solve_with_assumptions(None, &assumptions),
+            "SAT query aborted prematurely on learned clause backtracking below assumptions"
+        );
+        assert_eq!(sat.get_var_value(1), LBool::True);
+        assert_eq!(sat.get_var_value(2), LBool::True);
+        assert_eq!(sat.get_var_value(3), LBool::True);
+
+        // Learned clause [3, ¬1] remains valid when 1 is assumed false and 3 is forced false.
+        assert!(sat.solve_with_assumptions(None, &[Lit::new(1, true), Lit::new(3, true)]));
+        assert_eq!(sat.get_var_value(3), LBool::False);
+        assert_eq!(sat.get_var_value(4), LBool::False);
+    }
+
+    #[test]
+    fn unit_learned_clause_at_depth_above_assumptions_is_installed_globally() {
+        let mut sat = SatSolver::new();
+        sat.add_clause(vec![Lit::new(1, false), Lit::new(1, true)]);
+        sat.add_clause(vec![Lit::new(2, false), Lit::new(2, true)]);
+        // Together these entail global unit `3 = True`, discovered when 3=False is decided at level 3.
+        sat.add_clause(vec![Lit::new(3, false), Lit::new(4, false)]);
+        sat.add_clause(vec![Lit::new(3, false), Lit::new(4, true)]);
+        sat.var_bump_activity(3);
+
+        assert!(sat.solve_with_assumptions(None, &[Lit::new(1, false), Lit::new(2, false)]));
+        assert_eq!(sat.get_var_value(3), LBool::True);
+        assert!(sat.solve());
     }
 }

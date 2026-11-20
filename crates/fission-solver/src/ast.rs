@@ -598,6 +598,67 @@ impl SymExpr {
     pub fn get_size(&self) -> u32 {
         self.get_bit_width()
     }
+
+    /// Invoke `visit` once per node in preorder across `self` and all subexpressions.
+    pub fn visit_preorder(&self, visit: &mut impl FnMut(&SymExpr)) {
+        visit(self);
+        match self {
+            Self::Const { .. } | Self::Var { .. } => {}
+            Self::FNeg(a)
+            | Self::FAbs(a)
+            | Self::FSqrt(a)
+            | Self::FIsNan(a)
+            | Self::Extract { expr: a, .. } => a.visit_preorder(visit),
+            Self::Add(a, b)
+            | Self::Sub(a, b)
+            | Self::Mul(a, b)
+            | Self::Udiv(a, b)
+            | Self::Urem(a, b)
+            | Self::Sdiv(a, b)
+            | Self::Srem(a, b)
+            | Self::Smod(a, b)
+            | Self::And(a, b)
+            | Self::Or(a, b)
+            | Self::Xor(a, b)
+            | Self::Shl(a, b)
+            | Self::Lshr(a, b)
+            | Self::Ashr(a, b)
+            | Self::Eq(a, b)
+            | Self::Neq(a, b)
+            | Self::Ult(a, b)
+            | Self::Ule(a, b)
+            | Self::Slt(a, b)
+            | Self::Sle(a, b)
+            | Self::Sgt(a, b)
+            | Self::FAdd(a, b)
+            | Self::FSub(a, b)
+            | Self::FMul(a, b)
+            | Self::FDiv(a, b)
+            | Self::FEq(a, b)
+            | Self::FNeq(a, b)
+            | Self::FLt(a, b)
+            | Self::FLe(a, b)
+            | Self::Concat(a, b)
+            | Self::ArraySelect { array: a, index: b } => {
+                a.visit_preorder(visit);
+                b.visit_preorder(visit);
+            }
+            Self::Ite {
+                cond: a,
+                t: b,
+                f: c,
+            }
+            | Self::ArrayStore {
+                array: a,
+                index: b,
+                value: c,
+            } => {
+                a.visit_preorder(visit);
+                b.visit_preorder(visit);
+                c.visit_preorder(visit);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
