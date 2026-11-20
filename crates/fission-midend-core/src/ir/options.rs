@@ -718,9 +718,16 @@ impl NirRenderOptions {
     }
 
     pub fn effective_structuring_engine(&self) -> StructuringEngineKind {
-        match std::env::var("FISSION_STRUCTURING_ENGINE")
-            .ok()
-            .as_deref()
+        self.effective_structuring_engine_with_override(
+            std::env::var("FISSION_STRUCTURING_ENGINE").ok().as_deref(),
+        )
+    }
+
+    fn effective_structuring_engine_with_override(
+        &self,
+        override_value: Option<&str>,
+    ) -> StructuringEngineKind {
+        match override_value
             .map(str::trim)
             .map(str::to_ascii_lowercase)
             .as_deref()
@@ -732,7 +739,7 @@ impl NirRenderOptions {
             Some("legacy")
             | Some("legacyscored")
             | Some("legacy_scored")
-            | Some("legacy-scored") => StructuringEngineKind::GraphCollapseV1,
+            | Some("legacy-scored") => StructuringEngineKind::LegacyScored,
             _ => self.structuring_engine,
         }
     }
@@ -1237,5 +1244,26 @@ mod loader_symbol_option_tests {
         assert!(options.is_mapped_global(0x2010));
         assert!(options.is_mapped_global(0x2140));
         assert_eq!(options.first_rodata_section_base(), Some(0x2100));
+    }
+
+    #[test]
+    fn effective_structuring_engine_respects_legacy_and_graph_overrides() {
+        use super::StructuringEngineKind;
+        let defaults = NirRenderOptions::default();
+        for legacy in ["legacy", "legacyscored", "legacy_scored", "legacy-scored"] {
+            assert_eq!(
+                defaults.effective_structuring_engine_with_override(Some(legacy)),
+                StructuringEngineKind::LegacyScored,
+                "{legacy}"
+            );
+        }
+        assert_eq!(
+            defaults.effective_structuring_engine_with_override(Some("graph-collapse-v1")),
+            StructuringEngineKind::GraphCollapseV1
+        );
+        assert_eq!(
+            defaults.effective_structuring_engine_with_override(None),
+            defaults.structuring_engine
+        );
     }
 }

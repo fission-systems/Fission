@@ -511,7 +511,7 @@ impl NirScalarSsa {
             }
         }
         for (site, pieces) in &self.memory_operation_outputs {
-            if pieces.is_empty() {
+            if !self.memory_write_pieces_are_well_formed(pieces) {
                 return Err(ScalarSsaShapeError::MalformedMemorySsa);
             }
             for piece in pieces {
@@ -526,6 +526,43 @@ impl NirScalarSsa {
             if !guard.effect.writes() {
                 return Err(ScalarSsaShapeError::MalformedMemorySsa);
             }
+        }
+        if self.value_memory_high_variables.len() != self.memory_values.len()
+            || self.memory_value_covers.len() != self.memory_values.len()
+        {
+            return Err(ScalarSsaShapeError::MalformedMemorySsa);
+        }
+        for cover in &self.memory_value_covers {
+            if !cover.windows(2).all(|pair| pair[0] < pair[1])
+                || cover.iter().any(|c| c.start >= c.end_exclusive)
+            {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+        }
+        let mut seen_memory_values = vec![false; self.memory_values.len()];
+        for (index, high) in self.memory_high_variables.iter().enumerate() {
+            let expected_id = SsaMemoryHighVariableId(index as u32);
+            if high.id != expected_id
+                || high.members.is_empty()
+                || !high.members.windows(2).all(|pair| pair[0] < pair[1])
+                || !high.cover.windows(2).all(|pair| pair[0] < pair[1])
+                || high.cover.iter().any(|c| c.start >= c.end_exclusive)
+            {
+                return Err(ScalarSsaShapeError::MalformedMemorySsa);
+            }
+            for member in &high.members {
+                require_memory_value(*member)?;
+                let member_index = member.0 as usize;
+                if seen_memory_values[member_index]
+                    || self.value_memory_high_variables[member_index] != high.id
+                {
+                    return Err(ScalarSsaShapeError::MalformedMemorySsa);
+                }
+                seen_memory_values[member_index] = true;
+            }
+        }
+        if seen_memory_values.iter().any(|seen| !*seen) {
+            return Err(ScalarSsaShapeError::MalformedMemorySsa);
         }
         for (block, phis) in &self.memory_phis {
             if !phis
@@ -691,14 +728,14 @@ impl NirScalarSsa {
         let Some(first) = pieces.first() else {
             return false;
         };
-        if first.byte_offset != 0 {
+        if first.byte_offset != 0 || self.memory_value(first.value).is_none() {
             return false;
         }
         pieces.windows(2).all(|pair| {
-            let Some(left) = self.memory_values.get(pair[0].value.0 as usize) else {
+            let Some(left) = self.memory_value(pair[0].value) else {
                 return false;
             };
-            let Some(right) = self.memory_values.get(pair[1].value.0 as usize) else {
+            let Some(right) = self.memory_value(pair[1].value) else {
                 return false;
             };
             pair[0]
@@ -712,6 +749,24 @@ impl NirScalarSsa {
                     .offset
                     .checked_add(i128::from(left.storage.size))
                     .is_some_and(|offset| offset == right.storage.offset)
+        })
+    }
+
+    fn memory_write_pieces_are_well_formed(&self, pieces: &[SsaMemoryAccessPiece]) -> bool {
+        if self.memory_access_pieces_are_well_formed(pieces) {
+            return true;
+        }
+        if pieces.is_empty()
+            || !pieces
+                .iter()
+                .all(|piece| piece.byte_offset == 0 && self.memory_value(piece.value).is_some())
+        {
+            return false;
+        }
+        pieces.windows(2).all(|pair| {
+            let left = &self.memory_values[pair[0].value.0 as usize];
+            let right = &self.memory_values[pair[1].value.0 as usize];
+            left.storage < right.storage
         })
     }
 }
@@ -754,9 +809,130 @@ impl SsaDynamicGuard {
                     && self.space_id.is_some()
                     && self.region.is_some()
                     && self.maximum_offset_exclusive.is_some_and(|maximum| {
-                        self.step == 0 || i128::from(self.step) <= maximum - self.minimum_offset
+                        self.step == 0
+                            || u128::from(self.step) <= maximum.abs_diff(self.minimum_offset)
                     })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem_storage(offset: i128) -> SsaMemoryStorageKey {
+        SsaMemoryStorageKey {
+            region: SsaMemoryRegion::Stack,
+            space_id: 2,
+            offset,
+            size: 4,
+        }
+    }
+
+    #[test]
+    fn dynamic_guard_bounded_wide_signed_span_does_not_overflow() {
+        let guard = SsaDynamicGuard {
+            site: SsaOpSite { block: 0, op: 0 },
+            kind: SsaDynamicGuardKind::Load,
+            effect: SsaMemoryEffect::Read,
+            region: Some(SsaMemoryRegion::Stack),
+            space_id: Some(2),
+            minimum_offset: i128::MIN,
+            maximum_offset_exclusive: Some(10),
+            step: 8,
+            precision: SsaGuardRangePrecision::Bounded,
+            call_target: None,
+            call_effect_source: None,
+        };
+        assert!(guard.is_well_formed());
+    }
+
+    #[test]
+    fn validate_shape_checks_memory_outputs_and_high_variable_invariants() {
+        let storage = mem_storage(-8);
+        let store_site = SsaOpSite { block: 0, op: 0 };
+        let val = SsaMemoryValue {
+            id: SsaMemoryValueId(0),
+            storage,
+            definition: SsaValueDefinition::Operation(store_site),
+        };
+        let guard = SsaDynamicGuard {
+            site: store_site,
+            kind: SsaDynamicGuardKind::Store,
+            effect: SsaMemoryEffect::Write,
+            region: Some(SsaMemoryRegion::Stack),
+            space_id: Some(2),
+            minimum_offset: -8,
+            maximum_offset_exclusive: Some(-4),
+            step: 0,
+            precision: SsaGuardRangePrecision::Exact,
+            call_target: None,
+            call_effect_source: None,
+        };
+        let mut valid = NirScalarSsa::default();
+        valid.dynamic_guards.insert(store_site, guard);
+        valid.memory_values.push(val);
+        valid.memory_operation_outputs.insert(
+            store_site,
+            vec![SsaMemoryAccessPiece {
+                byte_offset: 0,
+                value: SsaMemoryValueId(0),
+            }],
+        );
+        valid.memory_high_variables.push(SsaMemoryHighVariable {
+            id: SsaMemoryHighVariableId(0),
+            members: vec![SsaMemoryValueId(0)],
+            cover: vec![SsaCoverBlock {
+                block: 0,
+                start: 0,
+                end_exclusive: 2,
+            }],
+        });
+        valid
+            .value_memory_high_variables
+            .push(SsaMemoryHighVariableId(0));
+        valid.memory_value_covers.push(vec![SsaCoverBlock {
+            block: 0,
+            start: 0,
+            end_exclusive: 2,
+        }]);
+        assert_eq!(valid.validate_shape(), Ok(()));
+
+        // 1. Non-zero starting byte_offset on memory_operation_outputs is rejected.
+        let mut bad_output = valid.clone();
+        bad_output
+            .memory_operation_outputs
+            .get_mut(&store_site)
+            .unwrap()[0]
+            .byte_offset = 4;
+        assert_eq!(
+            bad_output.validate_shape(),
+            Err(ScalarSsaShapeError::MalformedMemorySsa)
+        );
+
+        // 2. Length mismatch on value_memory_high_variables is rejected.
+        let mut bad_hv_len = valid.clone();
+        bad_hv_len.value_memory_high_variables.clear();
+        assert_eq!(
+            bad_hv_len.validate_shape(),
+            Err(ScalarSsaShapeError::MalformedMemorySsa)
+        );
+
+        // 3. Inverted cover interval in memory_value_covers is rejected.
+        let mut bad_cover = valid.clone();
+        bad_cover.memory_value_covers[0][0].start = 2;
+        assert_eq!(
+            bad_cover.validate_shape(),
+            Err(ScalarSsaShapeError::MalformedMemorySsa)
+        );
+
+        // 4. Uncovered memory value is rejected.
+        let mut missing_member = valid;
+        missing_member.memory_high_variables.clear();
+        assert_eq!(
+            missing_member.validate_shape(),
+            Err(ScalarSsaShapeError::MalformedMemorySsa)
+        );
     }
 }
