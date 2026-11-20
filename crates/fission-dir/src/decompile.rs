@@ -13,8 +13,12 @@ use fission_static::analysis::decomp::facts::FactStore;
 pub struct PreHirHirPair {
     pub prehir: PreHirFunction,
     pub hir: HirFunction,
-    /// The globals the printed code declares.
+    /// The globals the printed code declares, and the string literals it
+    /// spells.
     pub globals: Vec<fission_decompiler::PrintedGlobal>,
+    /// Each stack slot's offset from the canonical frame address, by name;
+    /// a slot whose place in the frame is not proven is absent.
+    pub frame_offsets: std::collections::BTreeMap<String, i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,5 +68,6 @@ pub fn decompile_one(
         prehir,
         hir,
         globals: output.printed_globals,
+        frame_offsets: output.stack_slot_cfa_offsets,
     })
 }

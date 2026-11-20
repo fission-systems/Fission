@@ -658,6 +658,20 @@ impl<'a> PreviewBuilder<'a> {
         PreHirExpr::Var(self.ensure_live_register_binding(&name, vn.size))
     }
 
+    /// Remember that the printed string literal `literal` stands for the
+    /// bytes at `address`. The same text read from a second address makes
+    /// it ambiguous: the printed code no longer says which copy it means.
+    fn record_string_literal_address(&mut self, literal: &str, address: u64) {
+        self.string_literal_addresses
+            .entry(literal.to_string())
+            .and_modify(|known| {
+                if *known != Some(address) {
+                    *known = None;
+                }
+            })
+            .or_insert(Some(address));
+    }
+
     fn lower_varnode_inner(
         &mut self,
         vn: &Varnode,
@@ -666,20 +680,19 @@ impl<'a> PreviewBuilder<'a> {
         if vn.is_constant {
             let address = vn.constant_val as u64;
             if let Some(name) = self.options.global_names.get(&address) {
+                // The loader names a scanned string by its text. Printed, the
+                // literal no longer says where it is, so the address it was
+                // read from is kept beside it, as for one read below.
+                if name.starts_with('"') {
+                    self.record_string_literal_address(name, address);
+                }
                 return Ok(PreHirExpr::AddressOfGlobal(name.clone()));
             }
             // Short strings the load-time scan is right to skip -- see
             // `read_c_string_from_binary`.
             if let Some(text) = self.read_c_string_from_binary(address) {
                 let literal = format!("\"{}\"", text.escape_default());
-                self.string_literal_addresses
-                    .entry(literal.clone())
-                    .and_modify(|known| {
-                        if *known != Some(address) {
-                            *known = None;
-                        }
-                    })
-                    .or_insert(Some(address));
+                self.record_string_literal_address(&literal, address);
                 return Ok(PreHirExpr::AddressOfGlobal(literal));
             }
             return Ok(PreHirExpr::Const(

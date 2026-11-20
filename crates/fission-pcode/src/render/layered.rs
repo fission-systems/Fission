@@ -1860,6 +1860,34 @@ pub(crate) fn printed_globals(
         .collect()
 }
 
+/// The string literals the printed code spells, as objects of their own: a
+/// literal's text (`"\"hello\""`, as printed) names the bytes the builder
+/// read it from. `None` when this function read the same text from more
+/// than one address, so the text does not say which copy it means.
+///
+/// A literal is not declared, but it is an address the code passes and
+/// compares like any global's, and a consumer checking the code against the
+/// machine needs that address -- a search of the image for the same bytes
+/// cannot stand in, since a short literal is often the tail of a longer
+/// string as well (`"%s\n"`).
+pub(crate) fn printed_string_literals<'s>(
+    literals: impl IntoIterator<Item = (&'s String, &'s Option<u64>)>,
+) -> Vec<PrintedGlobal> {
+    let mut out: Vec<PrintedGlobal> = literals
+        .into_iter()
+        .map(|(name, address)| PrintedGlobal {
+            name: name.clone(),
+            ty: NirType::Int {
+                bits: 8,
+                signed: false,
+            },
+            address: *address,
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 fn collect_referenced_global_decls(
     hir: &HirFunction,
     options: &MlilPreviewOptions,

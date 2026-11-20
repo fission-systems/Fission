@@ -15,19 +15,24 @@
 //!
 //! # Scope (concrete tier)
 //!
-//! Supported: `Var`/`Const`/`Cast`/`Unary`/`Binary`/`Select` expressions;
-//! `Assign` (to a plain `Var` only), `Block`, `Switch`, `If`, `While`,
-//! `DoWhile`, `For`, `Label`, `Goto`, `Return`, `Break`, `Continue`
-//! statements.
+//! Supported: `Var`/`Const`/`Cast`/`Unary`/`Binary`/`Select` expressions,
+//! memory (`Load`/`PtrOffset`/`Index`/`FieldAccess` through a pointer,
+//! `AddressOfGlobal`, `AddressOfLocal`), calls through the world's stubs;
+//! `Assign` (to a variable or through `Deref`/`Index`/`FieldAccess`),
+//! `Block`, `Switch`, `If`, `While`, `DoWhile`, `For`, `Label`, `Goto`,
+//! `Return`, `Break`, `Continue` statements.
+//!
+//! Memory is the world's: bytes the body stores, over the backing the caller
+//! supplies (the program image and the run's initial state). A local whose
+//! address the body takes lives there, at the address the world gives it,
+//! and reading or assigning it by name reads or writes those bytes.
 //!
 //! Not supported -- `eval_expr`/`exec_stmt` return `Err` rather than
-//! silently producing a wrong or default value: `Load`/`PtrOffset`/`Index`/
-//! `FieldAccess`/`AggregateCopy`/`AddressOfGlobal`/general `Call`, and
-//! `Deref`/`Index`/`FieldAccess` on the assignment side. There is no memory
-//! model at this tier -- verification is scoped to pure/arithmetic
-//! functions. A function that touches any of these bails out of
-//! verification with a clear reason rather than being silently skipped or
-//! falsely reported equivalent.
+//! silently producing a wrong or default value: `AggregateCopy`, a member
+//! access on a struct value, a call the world has no stub for, and the
+//! address of a local the world did not place. A function that touches any
+//! of these bails out of verification with a clear reason rather than being
+//! silently skipped or falsely reported equivalent.
 //!
 //! `LogicalAnd`/`LogicalOr` short-circuit as in C: the right operand of
 //! `flag && f()` must not run, or count as a call, when `flag` is zero.
@@ -115,6 +120,11 @@ pub struct World<'a> {
     /// Call sites that do not return. A call made from one ends the run, as
     /// it ends the machine's.
     pub no_return_sites: Option<&'a std::collections::BTreeSet<u64>>,
+    /// Where each local whose address the body takes lives. Such a local is
+    /// memory, not a variable: `&x` passed to a call, or `*(&x + 4)`, reads
+    /// the bytes `x` is stored in. A body that takes the address of a local
+    /// missing here is refused.
+    pub local_addresses: Option<&'a HashMap<String, u64>>,
 }
 
 /// The result of one interpreted run.
@@ -304,6 +314,7 @@ macro_rules! define_interp {
                 global_types: Option<&'w std::collections::HashMap<String, NirType>>,
                 call_return: Option<&'w dyn Fn(usize) -> u64>,
                 no_return_sites: Option<&'w std::collections::BTreeSet<u64>>,
+                local_addresses: Option<&'w std::collections::HashMap<String, u64>>,
                 /// Calls made so far, in order. Behind a cell because
                 /// evaluating an expression is otherwise read-only.
                 calls: RefCell<Vec<CallEvent>>,
@@ -336,7 +347,17 @@ macro_rules! define_interp {
                     self.globals.and_then(|globals| globals.get(name).copied())
                 }
 
+                /// The address of `name` when it is a local living in memory.
+                fn local_address(&self, name: &str) -> Option<u64> {
+                    self.local_addresses
+                        .and_then(|addresses| addresses.get(name).copied())
+                }
+
                 fn get(&self, name: &str) -> Result<Value> {
+                    if let Some(addr) = self.local_address(name) {
+                        let ty = self.ty(name)?;
+                        return Ok(normalize(self.mem.read(addr, width_of(ty))?, ty));
+                    }
                     if let Some(v) = self.values.get(name) {
                         return Ok(*v);
                     }
@@ -359,6 +380,11 @@ macro_rules! define_interp {
                 }
 
                 fn set(&mut self, name: &str, v: Value) {
+                    if let Some(addr) = self.local_address(name) {
+                        let bits = self.types.get(name).map_or(64, width_of);
+                        self.mem.write(addr, bits, v);
+                        return;
+                    }
                     self.values.insert(name.to_string(), v);
                 }
             }
@@ -397,7 +423,7 @@ macro_rules! define_interp {
                     // `p[i]` is the element, as the printer writes it.
                     $Expr::Index { elem_ty, .. } => Ok(elem_ty),
                     $Expr::Call { ty, .. } => Ok(ty),
-                    $Expr::AddressOfGlobal(_) => Ok(&PTR_TY),
+                    $Expr::AddressOfGlobal(_) | $Expr::AddressOfLocal(_) => Ok(&PTR_TY),
                     other => bail!("interp: cannot infer type of unsupported expr {other:?}"),
                 }
             }
@@ -497,6 +523,11 @@ macro_rules! define_interp {
                     $Expr::AddressOfGlobal(name) => env.global(name).map(|a| a as i64).ok_or_else(|| {
                         anyhow::anyhow!("interp: no address for global '{name}'")
                     }),
+                    $Expr::AddressOfLocal(name) => {
+                        env.local_address(name).map(|a| a as i64).ok_or_else(|| {
+                            anyhow::anyhow!("interp: no frame address for local '{name}'")
+                        })
+                    }
                     $Expr::Call {
                         origin,
                         target,
@@ -987,19 +1018,28 @@ macro_rules! define_interp {
                 interpret_inner(body, params, locals, args, image, bound)
             }
 
-            fn collect_expr_reads(expr: &$Expr, reads: &mut Vec<String>) {
+            fn collect_expr_reads(
+                expr: &$Expr,
+                reads: &mut Vec<String>,
+                addressed: &mut Vec<String>,
+            ) {
                 match expr {
+                    $Expr::AddressOfLocal(name) => {
+                        if !addressed.contains(name) {
+                            addressed.push(name.clone());
+                        }
+                    }
                     $Expr::Var(name) => {
                         if !name.is_empty() && !reads.contains(name) {
                             reads.push(name.clone());
                         }
                     }
                     $Expr::Unary { expr, .. } | $Expr::Cast { expr, .. } => {
-                        collect_expr_reads(expr, reads);
+                        collect_expr_reads(expr, reads, addressed);
                     }
                     $Expr::Binary { lhs, rhs, .. } => {
-                        collect_expr_reads(lhs, reads);
-                        collect_expr_reads(rhs, reads);
+                        collect_expr_reads(lhs, reads, addressed);
+                        collect_expr_reads(rhs, reads, addressed);
                     }
                     $Expr::Select {
                         cond,
@@ -1007,30 +1047,30 @@ macro_rules! define_interp {
                         else_expr,
                         ..
                     } => {
-                        collect_expr_reads(cond, reads);
-                        collect_expr_reads(then_expr, reads);
-                        collect_expr_reads(else_expr, reads);
+                        collect_expr_reads(cond, reads, addressed);
+                        collect_expr_reads(then_expr, reads, addressed);
+                        collect_expr_reads(else_expr, reads, addressed);
                     }
                     $Expr::Call { args, .. } => {
                         for arg in args {
-                            collect_expr_reads(arg, reads);
+                            collect_expr_reads(arg, reads, addressed);
                         }
                     }
                     $Expr::Load { ptr, .. } => {
-                        collect_expr_reads(ptr, reads);
+                        collect_expr_reads(ptr, reads, addressed);
                     }
                     $Expr::PtrOffset { base, .. } => {
-                        collect_expr_reads(base, reads);
+                        collect_expr_reads(base, reads, addressed);
                     }
                     $Expr::Index { base, index, .. } => {
-                        collect_expr_reads(base, reads);
-                        collect_expr_reads(index, reads);
+                        collect_expr_reads(base, reads, addressed);
+                        collect_expr_reads(index, reads, addressed);
                     }
                     $Expr::FieldAccess { base, .. } => {
-                        collect_expr_reads(base, reads);
+                        collect_expr_reads(base, reads, addressed);
                     }
                     $Expr::AggregateCopy { src, .. } => {
-                        collect_expr_reads(src, reads);
+                        collect_expr_reads(src, reads, addressed);
                     }
                     _ => {}
                 }
@@ -1040,6 +1080,7 @@ macro_rules! define_interp {
                 stmt: &$Stmt,
                 reads: &mut Vec<String>,
                 assigned: &mut Vec<String>,
+                addressed: &mut Vec<String>,
             ) {
                 match stmt {
                     $Stmt::Assign { lhs, rhs } => {
@@ -1050,74 +1091,74 @@ macro_rules! define_interp {
                                 }
                             }
                             $LValue::Deref { ptr, .. } => {
-                                collect_expr_reads(ptr, reads);
+                                collect_expr_reads(ptr, reads, addressed);
                             }
                             $LValue::Index { base, index, .. } => {
-                                collect_expr_reads(base, reads);
-                                collect_expr_reads(index, reads);
+                                collect_expr_reads(base, reads, addressed);
+                                collect_expr_reads(index, reads, addressed);
                             }
                             $LValue::FieldAccess { base, .. } => {
-                                collect_expr_reads(base, reads);
+                                collect_expr_reads(base, reads, addressed);
                             }
                         }
-                        collect_expr_reads(rhs, reads);
+                        collect_expr_reads(rhs, reads, addressed);
                     }
                     $Stmt::Expr(e) => {
-                        collect_expr_reads(e, reads);
+                        collect_expr_reads(e, reads, addressed);
                     }
                     $Stmt::Block(stmts) => {
                         for s in stmts.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                     }
                     $Stmt::Switch { expr, cases, default } => {
-                        collect_expr_reads(expr, reads);
+                        collect_expr_reads(expr, reads, addressed);
                         for c in cases {
                             for s in c.body.iter() {
-                                collect_stmt_names(s, reads, assigned);
+                                collect_stmt_names(s, reads, assigned, addressed);
                             }
                         }
                         for s in default.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                     }
                     $Stmt::If { cond, then_body, else_body } => {
-                        collect_expr_reads(cond, reads);
+                        collect_expr_reads(cond, reads, addressed);
                         for s in then_body.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                         for s in else_body.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                     }
                     $Stmt::While { cond, body } => {
-                        collect_expr_reads(cond, reads);
+                        collect_expr_reads(cond, reads, addressed);
                         for s in body.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                     }
                     $Stmt::DoWhile { body, cond } => {
                         for s in body.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
-                        collect_expr_reads(cond, reads);
+                        collect_expr_reads(cond, reads, addressed);
                     }
                     $Stmt::For { init, cond, update, body } => {
                         if let Some(init) = init {
-                            collect_stmt_names(init, reads, assigned);
+                            collect_stmt_names(init, reads, assigned, addressed);
                         }
                         if let Some(cond) = cond {
-                            collect_expr_reads(cond, reads);
+                            collect_expr_reads(cond, reads, addressed);
                         }
                         if let Some(update) = update {
-                            collect_stmt_names(update, reads, assigned);
+                            collect_stmt_names(update, reads, assigned, addressed);
                         }
                         for s in body.iter() {
-                            collect_stmt_names(s, reads, assigned);
+                            collect_stmt_names(s, reads, assigned, addressed);
                         }
                     }
                     $Stmt::Return(Some(e)) => {
-                        collect_expr_reads(e, reads);
+                        collect_expr_reads(e, reads, addressed);
                     }
                     _ => {}
                 }
@@ -1132,8 +1173,9 @@ macro_rules! define_interp {
             pub fn free_names(func: &$Function) -> Vec<String> {
                 let mut reads: Vec<String> = Vec::new();
                 let mut assigned: Vec<String> = Vec::new();
+                let mut addressed: Vec<String> = Vec::new();
                 for stmt in &func.body {
-                    collect_stmt_names(stmt, &mut reads, &mut assigned);
+                    collect_stmt_names(stmt, &mut reads, &mut assigned, &mut addressed);
                 }
                 reads.retain(|n| {
                     !assigned.contains(n)
@@ -1143,12 +1185,29 @@ macro_rules! define_interp {
                 reads
             }
 
+            /// Every local whose address the body or a local's initializer
+            /// takes (`&x`): such a local lives in memory, where a pointer to
+            /// it reads and writes the same bytes the name does.
+            pub fn addressed_locals(body: &[$Stmt], locals: &[$Binding]) -> Vec<String> {
+                let mut reads: Vec<String> = Vec::new();
+                let mut assigned: Vec<String> = Vec::new();
+                let mut addressed: Vec<String> = Vec::new();
+                for stmt in body {
+                    collect_stmt_names(stmt, &mut reads, &mut assigned, &mut addressed);
+                }
+                for init in locals.iter().filter_map(|l| l.initializer.as_ref()) {
+                    collect_expr_reads(init, &mut reads, &mut addressed);
+                }
+                addressed
+            }
+
             /// Every name the body reads or assigns.
             pub fn mentioned_names(func: &$Function) -> Vec<String> {
                 let mut reads: Vec<String> = Vec::new();
                 let mut assigned: Vec<String> = Vec::new();
+                let mut addressed: Vec<String> = Vec::new();
                 for stmt in &func.body {
-                    collect_stmt_names(stmt, &mut reads, &mut assigned);
+                    collect_stmt_names(stmt, &mut reads, &mut assigned, &mut addressed);
                 }
                 reads.extend(assigned);
                 reads
@@ -1218,6 +1277,7 @@ macro_rules! define_interp {
                     global_types: world.global_types,
                     call_return: world.call_return,
                     no_return_sites: world.no_return_sites,
+                    local_addresses: world.local_addresses,
                     calls: RefCell::new(Vec::new()),
                     fuel: STEP_FUEL,
                 };
@@ -1246,7 +1306,7 @@ macro_rules! define_interp {
                     // same default could equally have made a wrong body agree.
                     if let Some(init) = &l.initializer {
                         let v = normalize(eval_expr(init, &env)?, &l.ty);
-                        env.values.insert(l.name.clone(), v);
+                        env.set(&l.name, v);
                     }
                 }
                 // A global the body names keeps its declared type for the
@@ -1314,12 +1374,14 @@ define_interp!(
     HirFunction
 );
 
+pub use hir::addressed_locals as hir_addressed_locals;
 pub use hir::free_names as hir_free_names;
 pub use hir::interpret as interpret_hir;
 pub use hir::interpret_with_memory as interpret_hir_with_memory;
 pub use hir::interpret_with_state as interpret_hir_with_state;
 pub use hir::mentioned_names as hir_mentioned_names;
 pub use hir::run as run_hir;
+pub use prehir::addressed_locals as prehir_addressed_locals;
 pub use prehir::free_names as prehir_free_names;
 pub use prehir::interpret as interpret_prehir;
 pub use prehir::interpret_with_memory as interpret_prehir_with_memory;

@@ -31,6 +31,9 @@ pub(crate) struct StackSlot {
     pub(crate) name: String,
     pub(crate) ty: NirType,
     pub(crate) origin: NirBindingOrigin,
+    /// The register the slot's offset is measured from: the steady-state
+    /// stack pointer after the prologue, or the frame pointer.
+    pub(crate) base: StackBase,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
