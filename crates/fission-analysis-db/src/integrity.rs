@@ -164,19 +164,7 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
                 });
             continue;
         };
-        let block_end = block.start.checked_add(block.size);
-        let contains_function = block.start <= function.entry
-            && block_end.is_some_and(|end| {
-                if function.size == 0 {
-                    function.entry < end
-                } else {
-                    function
-                        .entry
-                        .checked_add(function.size)
-                        .is_some_and(|func_end| func_end <= end)
-                }
-            });
-        if !contains_function {
+        if !crate::block_contains_function(block, function.entry, function.size) {
             report
                 .issues
                 .push(SnapshotIntegrityIssue::FunctionOutsideMemoryBlock {

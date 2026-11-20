@@ -71,6 +71,31 @@ mod tests {
         let cleaned = cleanup_redundant_labels(body, None);
         assert_eq!(cleaned, vec![HirStmt::Return(None)]);
     }
+
+    #[test]
+    fn collect_and_cleanup_preserve_labels_referenced_in_for_init_and_update() {
+        let body = vec![
+            HirStmt::For {
+                init: Some(Box::new(HirStmt::Goto("init_target".to_string()))),
+                cond: None,
+                update: Some(Box::new(HirStmt::Goto("update_target".to_string()))),
+                body: vec![HirStmt::Break],
+            },
+            HirStmt::Label("init_target".to_string()),
+            HirStmt::Label("update_target".to_string()),
+            HirStmt::Return(None),
+        ];
+        let refs = collect_referenced_labels(&body);
+        assert!(refs.contains("init_target"));
+        assert!(refs.contains("update_target"));
+
+        let counts = collect_referenced_label_counts(&body);
+        assert_eq!(counts.get("init_target"), Some(&1));
+        assert_eq!(counts.get("update_target"), Some(&1));
+
+        let cleaned = cleanup_redundant_labels(body, None);
+        assert!(cleaned.contains(&HirStmt::Label("update_target".to_string())));
+    }
 }
 
 fn adjacent_label_aliases(body: &[HirStmt]) -> HashMap<String, String> {
@@ -195,10 +220,20 @@ pub fn collect_referenced_labels(body: &[HirStmt]) -> HashSet<String> {
 
 fn collect_stmt_referenced_labels(stmt: &HirStmt, referenced: &mut HashSet<String>) {
     match stmt {
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            for stmt in body {
+                collect_stmt_referenced_labels(stmt, referenced);
+            }
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(init) = init {
+                collect_stmt_referenced_labels(init, referenced);
+            }
+            if let Some(update) = update {
+                collect_stmt_referenced_labels(update, referenced);
+            }
             for stmt in body {
                 collect_stmt_referenced_labels(stmt, referenced);
             }
@@ -248,10 +283,20 @@ pub fn collect_referenced_label_counts(body: &[HirStmt]) -> HashMap<String, usiz
 
 fn collect_stmt_referenced_label_counts(stmt: &HirStmt, counts: &mut HashMap<String, usize>) {
     match stmt {
-        HirStmt::Block(body)
-        | HirStmt::While { body, .. }
-        | HirStmt::DoWhile { body, .. }
-        | HirStmt::For { body, .. } => {
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            for stmt in body {
+                collect_stmt_referenced_label_counts(stmt, counts);
+            }
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(init) = init {
+                collect_stmt_referenced_label_counts(init, counts);
+            }
+            if let Some(update) = update {
+                collect_stmt_referenced_label_counts(update, counts);
+            }
             for stmt in body {
                 collect_stmt_referenced_label_counts(stmt, counts);
             }

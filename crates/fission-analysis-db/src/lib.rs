@@ -520,6 +520,22 @@ fn is_pe_format(format: &str) -> bool {
     normalized == "pe" || normalized == "portable executable"
 }
 
+pub(crate) fn block_contains_function(block: &MemoryBlock, entry: u64, size: u64) -> bool {
+    let Some(end) = block.start.checked_add(block.size) else {
+        return false;
+    };
+    if entry < block.start {
+        return false;
+    }
+    if size == 0 {
+        entry < end
+    } else {
+        entry
+            .checked_add(size)
+            .is_some_and(|func_end| func_end <= end)
+    }
+}
+
 fn build_functions(
     functions: &[FunctionInfo],
     blocks: &[MemoryBlock],
@@ -547,10 +563,11 @@ fn build_functions(
             let kind = function_kind(&function);
             let block = block_intervals
                 .find_best(function.address, |candidate, current| {
-                    current.is_none_or(|current| {
-                        (blocks[candidate].start, blocks[candidate].id)
-                            < (blocks[current].start, blocks[current].id)
-                    })
+                    block_contains_function(&blocks[candidate], function.address, function.size)
+                        && current.is_none_or(|current| {
+                            (blocks[candidate].start, blocks[candidate].id)
+                                < (blocks[current].start, blocks[current].id)
+                        })
                 })
                 .and_then(|index| blocks.get(index));
             FunctionRecord {
@@ -614,10 +631,13 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
         );
     }
     for (address, name) in &binary.iat_symbols {
-        rows.insert(
-            (*address, SymbolKind::Import, name.clone()),
-            (None, lookup_version(name, address), FactSource::ImportTable),
-        );
+        rows.entry((*address, SymbolKind::Import, name.clone()))
+            .and_modify(|facts| {
+                if facts.1.is_none() {
+                    facts.1 = lookup_version(name, address);
+                }
+            })
+            .or_insert_with(|| (None, lookup_version(name, address), FactSource::ImportTable));
     }
     for (address, name) in &binary.global_symbols {
         rows.insert(
@@ -628,16 +648,6 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
                 FactSource::SymbolTable,
             ),
         );
-    }
-    for (&address, name) in &binary.relocation_symbols {
-        rows.entry((address, SymbolKind::RelocationTarget, name.clone()))
-            .or_insert_with(|| {
-                (
-                    binary.global_symbol_sizes.get(&address).copied(),
-                    binary.symbol_versions.get(&address).cloned(),
-                    FactSource::RelocationTable,
-                )
-            });
     }
     for symbol in &binary.loader_symbols {
         let (kind, size) = match symbol.kind {
@@ -655,6 +665,23 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
                 FactSource::SymbolTable,
             ),
         );
+    }
+    let existing_addr_names: std::collections::HashSet<(u64, String)> = rows
+        .keys()
+        .map(|(addr, _, name)| (*addr, name.clone()))
+        .collect();
+    for (&address, name) in &binary.relocation_symbols {
+        if existing_addr_names.contains(&(address, name.clone())) {
+            continue;
+        }
+        rows.entry((address, SymbolKind::RelocationTarget, name.clone()))
+            .or_insert_with(|| {
+                (
+                    binary.global_symbol_sizes.get(&address).copied(),
+                    lookup_version(name, &address),
+                    FactSource::RelocationTable,
+                )
+            });
     }
     rows.into_iter()
         .enumerate()
@@ -677,10 +704,13 @@ fn build_symbols(binary: &LoadedBinary, functions: &[FunctionRecord]) -> Vec<Sym
 }
 
 fn build_relocations(binary: &LoadedBinary, symbols: &[SymbolRecord]) -> Vec<RelocationRecord> {
-    let symbol_ids_at_address: HashMap<(u64, &str), SymbolId> = symbols
-        .iter()
-        .map(|symbol| ((symbol.address, symbol.name.as_str()), symbol.id))
-        .collect();
+    let mut symbol_ids_at_address: HashMap<(u64, &str), SymbolId> =
+        HashMap::with_capacity(symbols.len());
+    for symbol in symbols {
+        symbol_ids_at_address
+            .entry((symbol.address, symbol.name.as_str()))
+            .or_insert(symbol.id);
+    }
     let mut first_symbol_id_by_name = HashMap::with_capacity(symbols.len());
     for symbol in symbols {
         first_symbol_id_by_name
@@ -1310,5 +1340,84 @@ mod tests {
             issue,
             SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
         )));
+    }
+
+    #[test]
+    fn build_functions_and_symbols_preserve_block_containment_import_size_and_primary_symbol_id() {
+        let binary = LoadedBinaryBuilder::new("pe_check.exe".into(), DataBuffer::Heap(vec![0; 64]))
+            .format("PE")
+            .image_base(0x140000000)
+            .is_64bit(true)
+            .add_sections([
+                SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x140001000,
+                    virtual_size: 0x100,
+                    file_offset: 0x200,
+                    file_size: 0x100,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                },
+                SectionInfo {
+                    name: ".idata".into(),
+                    virtual_address: 0x140002000,
+                    virtual_size: 0x100,
+                    file_offset: 0x300,
+                    file_size: 0x100,
+                    is_executable: false,
+                    is_readable: true,
+                    is_writable: true,
+                },
+            ])
+            .add_functions([
+                FunctionInfo {
+                    name: "overflow_fn".into(),
+                    address: 0x1400010f0,
+                    size: 0x40,
+                    origin: Some("static_discovery".into()),
+                    ..FunctionInfo::default()
+                },
+                FunctionInfo {
+                    name: "kernel32.dll!CreateFileW".into(),
+                    address: 0x140002010,
+                    size: 8,
+                    is_import: true,
+                    origin: Some("pe-import-table".into()),
+                    ..FunctionInfo::default()
+                },
+            ])
+            .add_iat_symbol(0x140002010, "kernel32.dll!CreateFileW".into())
+            .add_relocation_symbols([(0x140002010, "kernel32.dll!CreateFileW".into())].into())
+            .add_relocations([RelocationEntry {
+                address: 0x140001020,
+                r_type: 1,
+                size: 8,
+                addend: 0,
+                symbol_name: Some("kernel32.dll!CreateFileW".into()),
+                symbol_address: Some(0x140002010),
+            }])
+            .build()
+            .expect("fixture should build");
+
+        let snapshot =
+            ProgramSnapshot::try_from_loaded_binary(&binary).expect("snapshot integrity passes");
+        let overflow_fn = snapshot.function_at(0x1400010f0).expect("overflow fn");
+        assert_eq!(overflow_fn.memory_block, None);
+
+        let import_sym = snapshot
+            .symbols
+            .iter()
+            .find(|s| s.address == 0x140002010 && s.kind == SymbolKind::Import)
+            .expect("import symbol");
+        assert_eq!(import_sym.size, Some(8));
+        assert!(
+            !snapshot
+                .symbols
+                .iter()
+                .any(|s| s.address == 0x140002010 && s.kind == SymbolKind::RelocationTarget),
+            "existing import symbol should not gain duplicate RelocationTarget"
+        );
+        assert_eq!(snapshot.relocations[0].symbol, Some(import_sym.id));
     }
 }
