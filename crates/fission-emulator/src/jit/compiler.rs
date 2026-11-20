@@ -2746,9 +2746,14 @@ pub(crate) fn remap_relative_branches(
                 };
                 let delta = i32::from_le_bytes(raw.to_le_bytes());
                 let candidate = local_index as i64 + delta as i64;
+                // One past the last op is a target too: SLEIGH's `goto <end>`
+                // with the label after the final statement. `cmpxchg`'s
+                // failing path is one; left unresolved, its delta read as a
+                // flat op index and the block jumped back into an earlier
+                // op, so a failed compare-exchange went on to store.
                 let is_relative = delta != 0
                     && candidate >= 0
-                    && (candidate as usize) < insn_op_count
+                    && (candidate as usize) <= insn_op_count
                     && candidate as usize != local_index;
                 if is_relative {
                     // Downstream (this file's Branch/CBranch codegen) reads

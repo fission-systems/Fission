@@ -38,9 +38,15 @@ pub fn page_align_down(addr: u64) -> u64 {
     addr & PAGE_MASK
 }
 
+/// `addr` rounded up to a page boundary. An address in the top page has no
+/// boundary above it in 64 bits, so it rounds to the top page's own start --
+/// the highest boundary there is -- rather than overflowing: unchecked, that
+/// panicked in a debug build and wrapped to 0 in a release one, which made a
+/// `map_region` reaching the top a silent no-op.
 #[inline]
 pub fn page_align_up(addr: u64) -> u64 {
-    (addr + PAGE_SIZE - 1) & PAGE_MASK
+    addr.checked_add(PAGE_SIZE - 1)
+        .map_or(PAGE_MASK, |end| end & PAGE_MASK)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -423,6 +429,11 @@ impl PageMap {
     /// hint that happens to name a live mapping never silently overwrites it.
     /// Returns the base, or 0 when no hole is large enough.
     pub fn mmap_with_hint(&mut self, addr: u64, len: u64, page_prot: u8, fixed: bool) -> u64 {
+        // More than the address space holds: fail, as Linux does with
+        // ENOMEM, rather than walk the page table across it.
+        if len > self.max_address() {
+            return 0;
+        }
         if fixed {
             self.map_region(addr, len.max(1), page_prot, true);
             return page_align_down(addr);
@@ -437,6 +448,9 @@ impl PageMap {
     /// Allocate an anonymous region of `len` bytes (page-rounded) near `mmap_hint`.
     /// Returns the base address on success, or `0` on allocation failure.
     pub fn mmap_anon(&mut self, len: u64, page_prot: u8) -> u64 {
+        if len > self.max_address() {
+            return 0;
+        }
         let len = page_align_up(len.max(1));
         let max_addr = self.max_address();
         let wrap_start = if self.is_64bit {
@@ -603,6 +617,34 @@ impl PageMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A range that reaches the top of the address space. `page_align_up`
+    /// added `PAGE_SIZE - 1` unchecked: a panic in a debug build, and a wrap
+    /// to 0 in a release one -- which made `map_region` a silent no-op.
+    #[test]
+    fn a_range_at_the_top_of_the_address_space_does_not_overflow() {
+        assert_eq!(page_align_up(u64::MAX - 5), PAGE_MASK);
+        assert_eq!(page_align_up(0x1001), 0x2000);
+        assert_eq!(page_align_up(0x1000), 0x1000);
+
+        let mut pm = PageMap::new();
+        let near_top = PAGE_MASK - PAGE_SIZE; // second-highest page
+        pm.map_region(near_top, 0x1800, prot::RW, true);
+        assert!(pm.check_access(near_top, AccessKind::Write).is_ok());
+    }
+
+    /// A length no address space can hold is refused rather than mapped page
+    /// by page or rounded to nothing.
+    #[test]
+    fn an_mmap_larger_than_the_address_space_fails() {
+        let mut pm = PageMap::new();
+        assert_eq!(pm.mmap_with_hint(0, u64::MAX - 0x100, prot::RW, false), 0);
+        assert_eq!(
+            pm.mmap_with_hint(0x1000, u64::MAX - 0x100, prot::RW, true),
+            0
+        );
+        assert_eq!(pm.mmap_anon(u64::MAX, prot::RW), 0);
+    }
 
     #[test]
     fn map_and_check_access() {

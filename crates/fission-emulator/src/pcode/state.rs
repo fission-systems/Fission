@@ -249,7 +249,11 @@ pub struct MachineState {
 
     /// Contiguous host-side register file for zero-callout JIT loads/stores.
     /// Mirrors the low `HOST_REG_FILE_SIZE` bytes of register space.
-    #[serde(skip)]
+    ///
+    /// Serialised with the rest: the JIT writes registers here and nowhere
+    /// else, so a snapshot saved without it lost every register a compiled
+    /// block had set -- and loaded back as an empty slice, which the first
+    /// register access then indexed past.
     pub host_reg_file: Box<[u8]>,
 }
 
@@ -317,8 +321,23 @@ impl MachineState {
 
     #[inline]
     pub fn host_reg_in_range(&self, offset: u64, size: usize) -> bool {
-        let end = offset as usize + size;
-        end <= HOST_REG_FILE_SIZE && offset as usize + size >= size
+        usize::try_from(offset)
+            .ok()
+            .and_then(|start| start.checked_add(size))
+            .is_some_and(|end| end <= self.host_reg_file.len())
+    }
+
+    /// Give the register mirror the size the JIT compiles against. Compiled
+    /// code addresses it as a flat `HOST_REG_FILE_SIZE` array, so one of any
+    /// other length -- a state from somewhere that did not carry it -- is
+    /// replaced, keeping what it held.
+    pub fn normalize_host_reg_file(&mut self) {
+        if self.host_reg_file.len() != HOST_REG_FILE_SIZE {
+            let mut mirror = vec![0u8; HOST_REG_FILE_SIZE];
+            let keep = self.host_reg_file.len().min(HOST_REG_FILE_SIZE);
+            mirror[..keep].copy_from_slice(&self.host_reg_file[..keep]);
+            self.host_reg_file = mirror.into_boxed_slice();
+        }
     }
 
     /// Enable PageFault checks on the RAM space (user-mode).

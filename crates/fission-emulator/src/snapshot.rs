@@ -31,6 +31,11 @@ impl EmulatorSnapshot {
         let hooks = std::mem::take(&mut emu.state.hooks);
         emu.state = self.state;
         emu.state.hooks = hooks;
+        emu.state.normalize_host_reg_file();
+        // The restored memory may hold different code at an address a cached
+        // block was compiled from -- unpacked, patched, or simply another
+        // moment of a self-modifying program.
+        emu.jit_cache.flush_all();
         emu.pc = self.pc;
         tracing::info!("Restored snapshot taken at PC=0x{:X}", self.trigger_addr);
     }

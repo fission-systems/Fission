@@ -9,6 +9,25 @@ use fission_loader::loader::LoadedBinary;
 /// Import patching (IAT/PLT/MMIO) is *not* done here; it is delegated to the
 /// `OsEnvironment` implementation so that different OS layers can handle PE,
 /// ELF, and bare-metal formats independently.
+/// The stack top every image in this crate uses -- the Linux and Windows
+/// loaders both put their stacks under it -- and the stack
+/// `map_binary_to_state` maps when no OS image supplies one. `Emulator::new`
+/// starts the stack pointer here, so all of them agree. The 32-bit default
+/// used to be `0x7FFF_E000`, inside the HLE trampoline region
+/// (`0x7FFF_0000..0x8000_0000`), and `map_binary_to_state`'s stack sat below
+/// either default.
+pub const DEFAULT_STACK_TOP_64: u64 = 0x0000_7FFF_FFFF_F000;
+pub const DEFAULT_STACK_TOP_32: u64 = 0xFFFF_E000;
+pub const DEFAULT_STACK_SIZE: u64 = 0x10_0000;
+
+pub fn default_stack_top(is_64bit: bool) -> u64 {
+    if is_64bit {
+        DEFAULT_STACK_TOP_64
+    } else {
+        DEFAULT_STACK_TOP_32
+    }
+}
+
 pub fn map_binary_to_state(state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
     let mut max_end = 0u64;
 
@@ -86,12 +105,8 @@ pub fn map_binary_to_state(state: &mut MachineState, binary: &LoadedBinary) -> R
     }
 
     // Stack region (high canonical user VA) — RW, large enough for simple programs.
-    let sp_base = if binary.inner().is_64bit {
-        0x0000_7FFF_FF00_0000u64
-    } else {
-        0x7F00_0000u64
-    };
-    let stack_size = 0x10_0000u64; // 1 MiB
+    let sp_base = default_stack_top(binary.inner().is_64bit);
+    let stack_size = DEFAULT_STACK_SIZE;
     state
         .page_map
         .map_region(sp_base - stack_size, stack_size, prot::RW, true);
