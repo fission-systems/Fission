@@ -70,6 +70,11 @@ pub enum VerifyOutcome {
     /// At least one concrete divergence (or a solver-found counterexample,
     /// reported as a single-element `Vec` after ground-truth replay).
     Diverged(Vec<Divergence>),
+    /// Ground-truth tier: the only differences are arguments at calls whose
+    /// prototype the decompiler recovered rather than was given. The text
+    /// and the machine disagree, but the recovered prototype -- not the body
+    /// -- may be what is wrong, so this is reported apart from `Diverged`.
+    Suspect(Vec<Divergence>),
     /// Not checked at this tier, with the specific reason -- distinct from
     /// both `Equivalent` and `Diverged` so callers can't mistake "we didn't
     /// look" for "we looked and it passed."
@@ -82,11 +87,12 @@ pub enum VerifyOutcome {
 
 impl VerifyOutcome {
     /// One word for the outcome, for counting a batch: `equivalent`,
-    /// `diverged`, `unsupported`, `harness` or `inconclusive`.
+    /// `diverged`, `suspect`, `unsupported`, `harness` or `inconclusive`.
     pub fn category(&self) -> &'static str {
         match self {
             VerifyOutcome::Equivalent { .. } => "equivalent",
             VerifyOutcome::Diverged(_) => "diverged",
+            VerifyOutcome::Suspect(_) => "suspect",
             VerifyOutcome::Unsupported(UnsupportedReason::Harness(_))
             | VerifyOutcome::Unsupported(UnsupportedReason::EmulatorSetup(_)) => "harness",
             VerifyOutcome::Unsupported(_) => "unsupported",

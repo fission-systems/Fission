@@ -50,7 +50,9 @@ pub mod symbolic;
 pub use call_sites::{MachineFlow, call_sites};
 pub use decompile::{DecompileError, PreHirHirPair, decompile_one};
 pub use diff::{default_samples, diff_prehir_hir};
-pub use emu_driver::{CallOutcome, EmulatorHarness, ObservedCall, StubbedEnd, StubbedRun};
+pub use emu_driver::{
+    CallOutcome, CallStub, EmulatorHarness, ObservedCall, StubbedEnd, StubbedRun,
+};
 pub use eval::{
     hir_free_names, interpret_hir, interpret_hir_with_memory, interpret_hir_with_state,
     interpret_prehir, interpret_prehir_with_memory, interpret_prehir_with_state, prehir_free_names,

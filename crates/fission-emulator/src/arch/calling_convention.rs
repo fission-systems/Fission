@@ -21,6 +21,14 @@ pub trait CallingConvention: Send + Sync {
     /// x86-64 SysV:  offset = 0x00 + n * 8  (no shadow space)
     fn stack_arg_offset(&self, n: usize) -> u64;
 
+    /// The integer registers a callee may leave holding anything: the ABI's
+    /// caller-saved set, the return register included. A caller that needs
+    /// one of them after a call saves it first, so a stand-in for the callee
+    /// may overwrite every one.
+    fn killed_by_call(&self) -> &[&'static str] {
+        &[]
+    }
+
     /// Extra stack bytes popped by the callee on return (e.g. x86-32 `stdcall` `ret N`).
     /// Defaults to 0 for caller-cleanup conventions (`cdecl`, `SysV64`, `Win64`, RISC ABIs).
     fn callee_pop_bytes(&self, _func_name: &str) -> u64 {
@@ -34,6 +42,9 @@ pub trait CallingConvention: Send + Sync {
 /// Integer args: RCX, RDX, R8, R9; shadow space = 0x20 bytes
 pub struct Win64Cc;
 impl CallingConvention for Win64Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &["rax", "rcx", "rdx", "r8", "r9", "r10", "r11"]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["rcx", "rdx", "r8", "r9"]
     }
@@ -52,6 +63,9 @@ impl CallingConvention for Win64Cc {
 /// Integer args: RDI, RSI, RDX, RCX, R8, R9; no shadow space
 pub struct SysV64Cc;
 impl CallingConvention for SysV64Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &["rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11"]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
     }
@@ -69,6 +83,9 @@ impl CallingConvention for SysV64Cc {
 /// x86-32 cdecl (all args on stack, caller cleans up)
 pub struct Cdecl32Cc;
 impl CallingConvention for Cdecl32Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &["eax", "ecx", "edx"]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &[]
     }
@@ -86,6 +103,9 @@ impl CallingConvention for Cdecl32Cc {
 /// x86-32 stdcall (args on stack, callee cleans up — Win32 API default)
 pub struct Stdcall32Cc;
 impl CallingConvention for Stdcall32Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &["eax", "ecx", "edx"]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &[]
     }
@@ -304,6 +324,12 @@ pub fn win32_stdcall_pop_bytes(func_name: &str) -> u64 {
 /// Integer args: X0–X7; return address in LR (X30)
 pub struct Aarch64Cc;
 impl CallingConvention for Aarch64Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &[
+            "x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11", "x12", "x13",
+            "x14", "x15", "x16", "x17",
+        ]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["x0", "x1", "x2", "x3", "x4", "x5", "x6", "x7"]
     }
@@ -322,6 +348,9 @@ impl CallingConvention for Aarch64Cc {
 /// Integer args: R0–R3; return address in LR (R14)
 pub struct Arm32Cc;
 impl CallingConvention for Arm32Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &["r0", "r1", "r2", "r3", "r12"]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["r0", "r1", "r2", "r3"]
     }
@@ -340,6 +369,12 @@ impl CallingConvention for Arm32Cc {
 /// Integer args: $a0–$a3; return address in $ra
 pub struct MipsO32Cc;
 impl CallingConvention for MipsO32Cc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &[
+            "at", "v0", "v1", "a0", "a1", "a2", "a3", "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+            "t7", "t8", "t9",
+        ]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["a0", "a1", "a2", "a3"]
     }
@@ -358,6 +393,11 @@ impl CallingConvention for MipsO32Cc {
 /// Integer args: R3–R10; return address in LR
 pub struct PpcElfCc;
 impl CallingConvention for PpcElfCc {
+    fn killed_by_call(&self) -> &[&'static str] {
+        &[
+            "r0", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12",
+        ]
+    }
     fn arg_regs(&self) -> &[&'static str] {
         &["r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10"]
     }
@@ -423,5 +463,33 @@ mod tests {
 
         assert_eq!(win_arch.cc.callee_pop_bytes("VirtualAlloc"), 16);
         assert_eq!(elf_arch.cc.callee_pop_bytes("VirtualAlloc"), 0);
+    }
+}
+
+#[cfg(test)]
+mod killed_by_call_tests {
+    use super::*;
+
+    /// Every register an argument or the result travels in is the callee's
+    /// to overwrite, under every convention that names its killed set.
+    #[test]
+    fn a_call_kills_its_argument_and_return_registers() {
+        let conventions: [&dyn CallingConvention; 8] = [
+            &Win64Cc,
+            &SysV64Cc,
+            &Cdecl32Cc,
+            &Stdcall32Cc,
+            &Aarch64Cc,
+            &Arm32Cc,
+            &MipsO32Cc,
+            &PpcElfCc,
+        ];
+        for cc in conventions {
+            let killed = cc.killed_by_call();
+            assert!(killed.contains(&cc.return_reg()), "{killed:?}");
+            for arg in cc.arg_regs() {
+                assert!(killed.contains(arg), "{arg} missing from {killed:?}");
+            }
+        }
     }
 }

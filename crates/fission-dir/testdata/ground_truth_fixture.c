@@ -114,6 +114,33 @@ PLAIN int literal_char(int i)
     return s[i & 7];
 }
 
+/* Calls (slice 3): a global read on both sides of a call, which a stub that
+ * rewrites writable data catches if the decompiled code keeps the first
+ * read; and a call whose caller-saved registers the stub overwrites. */
+long g_value = 5;
+
+PLAIN __attribute__((noinline, weak)) void touch(void)
+{
+}
+
+PLAIN __attribute__((noinline, weak)) void note(long x)
+{
+    (void)x;
+}
+
+PLAIN long reload_after_call(void)
+{
+    long before = g_value;
+    note(before);
+    return before * 3 + g_value;
+}
+
+PLAIN long call_then_return(long a)
+{
+    touch();
+    return a;
+}
+
 /* The canary check's failure path; nothing here links a libc. */
 PLAIN void __stack_chk_fail(void)
 {

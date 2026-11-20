@@ -117,6 +117,9 @@ pub struct World<'a> {
     /// The value the `n`th call (counting from zero) returns. `None`
     /// refuses every call that is not a modeled intrinsic.
     pub call_return: Option<&'a dyn Fn(usize) -> u64>,
+    /// The bytes the `n`th call writes, given its arguments: the same stub
+    /// the machine side runs, so a value cached across a call is caught.
+    pub call_writes: Option<&'a dyn Fn(usize, &[u64]) -> Vec<(u64, u8)>>,
     /// Call sites that do not return. A call made from one ends the run, as
     /// it ends the machine's.
     pub no_return_sites: Option<&'a std::collections::BTreeSet<u64>>,
@@ -309,7 +312,10 @@ macro_rules! define_interp {
             struct Env<'w> {
                 values: HashMap<String, Value>,
                 types: HashMap<String, NirType>,
-                mem: Memory<'w>,
+                /// Behind a cell because a call, evaluated inside an
+                /// expression, writes what its stub says it writes.
+                mem: RefCell<Memory<'w>>,
+                call_writes: Option<&'w dyn Fn(usize, &[u64]) -> Vec<(u64, u8)>>,
                 globals: Option<&'w std::collections::HashMap<String, u64>>,
                 global_types: Option<&'w std::collections::HashMap<String, NirType>>,
                 call_return: Option<&'w dyn Fn(usize) -> u64>,
@@ -356,7 +362,7 @@ macro_rules! define_interp {
                 fn get(&self, name: &str) -> Result<Value> {
                     if let Some(addr) = self.local_address(name) {
                         let ty = self.ty(name)?;
-                        return Ok(normalize(self.mem.read(addr, width_of(ty))?, ty));
+                        return Ok(normalize(self.mem.borrow().read(addr, width_of(ty))?, ty));
                     }
                     if let Some(v) = self.values.get(name) {
                         return Ok(*v);
@@ -365,7 +371,7 @@ macro_rules! define_interp {
                         // Its declaration's width: guessing eight bytes for a
                         // 32-bit global read its neighbour into the value.
                         let ty = self.ty(name)?;
-                        return Ok(normalize(self.mem.read(addr, width_of(ty))?, ty));
+                        return Ok(normalize(self.mem.borrow().read(addr, width_of(ty))?, ty));
                     }
                     bail!("interp: read of undeclared variable '{name}'")
                 }
@@ -382,7 +388,7 @@ macro_rules! define_interp {
                 fn set(&mut self, name: &str, v: Value) {
                     if let Some(addr) = self.local_address(name) {
                         let bits = self.types.get(name).map_or(64, width_of);
-                        self.mem.write(addr, bits, v);
+                        self.mem.borrow_mut().write(addr, bits, v);
                         return;
                     }
                     self.values.insert(name.to_string(), v);
@@ -492,7 +498,7 @@ macro_rules! define_interp {
                     }
                     $Expr::Load { ptr, ty } => {
                         let addr = eval_expr(ptr, env)? as u64;
-                        Ok(normalize(env.mem.read(addr, width_of(ty))?, ty))
+                        Ok(normalize(env.mem.borrow().read(addr, width_of(ty))?, ty))
                     }
                     $Expr::PtrOffset { base, offset } => {
                         Ok((eval_expr(base, env)?).wrapping_add(*offset))
@@ -509,7 +515,7 @@ macro_rules! define_interp {
                         let stride = bytes_for(width_of(elem_ty)) as i64;
                         let i = eval_expr(index, env)?;
                         let addr = (eval_expr(base, env)?).wrapping_add(i.wrapping_mul(stride));
-                        Ok(normalize(env.mem.read(addr as u64, width_of(elem_ty))?, elem_ty))
+                        Ok(normalize(env.mem.borrow().read(addr as u64, width_of(elem_ty))?, elem_ty))
                     }
                     $Expr::FieldAccess {
                         base, offset, ty, ..
@@ -518,7 +524,7 @@ macro_rules! define_interp {
                             bail!("interp: member access on a non-pointer base (a struct value)");
                         }
                         let addr = (eval_expr(base, env)?).wrapping_add(*offset as i64);
-                        Ok(normalize(env.mem.read(addr as u64, width_of(ty))?, ty))
+                        Ok(normalize(env.mem.borrow().read(addr as u64, width_of(ty))?, ty))
                     }
                     $Expr::AddressOfGlobal(name) => env.global(name).map(|a| a as i64).ok_or_else(|| {
                         anyhow::anyhow!("interp: no address for global '{name}'")
@@ -574,6 +580,14 @@ macro_rules! define_interp {
                         });
                         if env.no_return_sites.is_some_and(|sites| sites.contains(&site)) {
                             return Err(anyhow::Error::new(super::NoReturnStop));
+                        }
+                        if let Some(call_writes) = env.call_writes {
+                            let raw: Vec<u64> = calls[n].args.iter().map(|a| *a as u64).collect();
+                            let mut mem = env.mem.borrow_mut();
+                            // The callee's bytes, not the function's stores.
+                            for (addr, byte) in call_writes(n, &raw) {
+                                mem.put(addr, byte, false);
+                            }
                         }
                         Ok(normalize(call_return(n) as i64, ty))
                     }
@@ -824,7 +838,7 @@ macro_rules! define_interp {
                         // through to the environment below.
                         if let Some((addr, bits)) = eval_store_target(lhs, env)? {
                             let v = eval_expr(rhs, env)?;
-                            env.mem.write(addr, bits, v);
+                            env.mem.borrow_mut().write(addr, bits, v);
                             return Ok(Flow::Normal);
                         }
                         let name = match lhs {
@@ -846,7 +860,7 @@ macro_rules! define_interp {
                         };
                         let v = normalize(eval_expr(rhs, env)?, &ty);
                         if let Some(addr) = env.global(name) {
-                            env.mem.write(addr, width_of(&ty), v);
+                            env.mem.borrow_mut().write(addr, width_of(&ty), v);
                             env.types.insert(name.clone(), ty);
                             return Ok(Flow::Normal);
                         }
@@ -1272,7 +1286,8 @@ macro_rules! define_interp {
                 let mut env = Env {
                     values: HashMap::default(),
                     types: HashMap::default(),
-                    mem,
+                    mem: RefCell::new(mem),
+                    call_writes: world.call_writes,
                     globals: world.globals,
                     global_types: world.global_types,
                     call_return: world.call_return,
@@ -1325,7 +1340,7 @@ macro_rules! define_interp {
                     Err(err) if err.is::<super::NoReturnStop>() => (None, true),
                     Err(err) => return Err(err),
                 };
-                let writes = env.mem.stores();
+                let writes = env.mem.borrow().stores();
                 Ok(Run {
                     ret,
                     ended_in_no_return,

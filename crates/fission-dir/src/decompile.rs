@@ -19,6 +19,8 @@ pub struct PreHirHirPair {
     /// Each stack slot's offset from the canonical frame address, by name;
     /// a slot whose place in the frame is not proven is absent.
     pub frame_offsets: std::collections::BTreeMap<String, i64>,
+    /// The callees the printed code calls with a declared prototype.
+    pub declared_callees: std::collections::BTreeSet<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,5 +71,6 @@ pub fn decompile_one(
         hir,
         globals: output.printed_globals,
         frame_offsets: output.stack_slot_cfa_offsets,
+        declared_callees: output.declared_callees,
     })
 }

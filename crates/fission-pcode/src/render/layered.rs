@@ -1888,6 +1888,23 @@ pub(crate) fn printed_string_literals<'s>(
     out
 }
 
+/// The functions the printed code calls whose prototype is declared rather
+/// than recovered: a signature someone chose or a type library supplies, or
+/// one `<stdio.h>` declares. An argument that differs from the machine's at a
+/// call to one of these is a difference; at any other call it may be the
+/// recovered prototype that is wrong.
+pub(crate) fn printed_declared_callees(
+    hir: &HirFunction,
+    options: &MlilPreviewOptions,
+) -> std::collections::BTreeSet<String> {
+    collect_called_externs(hir, &hir.name)
+        .into_keys()
+        .filter(|name| {
+            options.declared_signatures.contains_key(name) || is_stdio_declared_symbol(name)
+        })
+        .collect()
+}
+
 fn collect_referenced_global_decls(
     hir: &HirFunction,
     options: &MlilPreviewOptions,

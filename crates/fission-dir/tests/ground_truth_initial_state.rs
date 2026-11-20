@@ -39,8 +39,7 @@ fn check(name: &str) -> VerifyOutcome {
         ..Default::default()
     };
     let pair = decompile_one(&binary, &facts, &func).expect("decompile");
-    let grounding =
-        Grounding::for_function(&binary, address, &pair.globals, pair.frame_offsets.clone());
+    let grounding = Grounding::for_function(&binary, address, &pair);
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("harness");
     check_ground_truth_with(
         &mut harness,

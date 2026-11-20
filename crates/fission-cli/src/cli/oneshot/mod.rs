@@ -430,12 +430,8 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 runs: args.runs,
                                 ..fission_dir::RunPlan::default()
                             };
-                            let grounding = fission_dir::Grounding::for_function(
-                                &binary,
-                                func.address,
-                                &pair.globals,
-                                pair.frame_offsets.clone(),
-                            );
+                            let grounding =
+                                fission_dir::Grounding::for_function(&binary, func.address, &pair);
                             let outcome = fission_dir::check_ground_truth_with(
                                 harness,
                                 func.address,
@@ -525,6 +521,9 @@ fn verify_outcome_reason(outcome: &fission_dir::VerifyOutcome) -> String {
     match outcome {
         fission_dir::VerifyOutcome::Equivalent { .. } => String::new(),
         fission_dir::VerifyOutcome::Diverged(_) => "diverged".to_string(),
+        fission_dir::VerifyOutcome::Suspect(_) => {
+            "an argument differs at a call with a recovered prototype".to_string()
+        }
         fission_dir::VerifyOutcome::Unsupported(reason) => reason.to_string(),
         fission_dir::VerifyOutcome::Inconclusive { reason } => reason.clone(),
     }
