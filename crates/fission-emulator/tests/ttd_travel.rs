@@ -506,3 +506,93 @@ fn jit_blocks_do_not_skip_snapshot_intervals() {
         "{recorded} snapshots recorded over {executed} instructions at interval {interval} (about {due} due)"
     );
 }
+
+/// Seeking forward past several snapshots has to apply each one's writes, not
+/// only the target's. From a seek back to an early step, a jump to a much
+/// later snapshot restored that snapshot's own deltas -- the writes since the
+/// snapshot before it -- and nothing between.
+#[test]
+fn seeking_forward_applies_every_snapshot_on_the_way() {
+    let mut traveler = build(2400, 4);
+    let _ = traveler.run();
+    let steps: Vec<u64> = traveler
+        .ttd
+        .snapshots()
+        .iter()
+        .map(|s| s.step_index)
+        .collect();
+    let early = *steps
+        .iter()
+        .find(|s| **s >= 200)
+        .expect("an early snapshot");
+    let late = *steps
+        .iter()
+        .rev()
+        .find(|s| **s >= 1600)
+        .expect("a late snapshot");
+
+    let mut reference = build(late, 0);
+    let _ = reference.run();
+    let want = writable_memory(&mut reference);
+
+    traveler.ttd_seek(early).expect("seek back");
+    let at_early = writable_memory(&mut traveler);
+    let early_map: std::collections::HashMap<u64, Vec<u8>> = at_early.into_iter().collect();
+    assert!(
+        want.iter()
+            .any(|(start, a)| early_map.get(start).is_some_and(|b| a != b)),
+        "the early and late steps are indistinguishable in memory, so this cannot \
+         tell a forward seek that applies the steps between from one that skips them"
+    );
+
+    traveler.ttd_seek(late).expect("seek forward");
+    assert_eq!(traveler.inst_count, late);
+    let got: std::collections::HashMap<u64, Vec<u8>> =
+        writable_memory(&mut traveler).into_iter().collect();
+    let mut compared = 0usize;
+    for (start, a) in &want {
+        let Some(b) = got.get(start) else { continue };
+        compared += 1;
+        let first = a.iter().zip(b.iter()).position(|(x, y)| x != y);
+        assert_eq!(
+            first, None,
+            "memory at 0x{start:X} differs from the reference at offset {first:?}"
+        );
+    }
+    assert!(compared > 0, "no writable mapping compared");
+}
+
+/// Seeking back undoes shadow (taint) writes made after the target, as it
+/// undoes memory writes. The shadow trace was cleared without being undone,
+/// so a byte tainted after the target was still tainted at it.
+#[test]
+fn seeking_back_undoes_shadow_writes_too() {
+    let mut traveler = build(1200, 4);
+    let _ = traveler.run();
+    let target = traveler
+        .ttd
+        .snapshots()
+        .iter()
+        .map(|s| s.step_index)
+        .find(|step| *step >= 400)
+        .expect("a snapshot to seek to");
+    let ram = traveler.state.ram_space();
+    // Somewhere no instruction writes: a concrete write clears the shadow of
+    // the bytes it covers, so an address the run also wrote after the target
+    // would be cleared by the memory undo and could not tell the shadow undo
+    // from none.
+    let address = 0x6000_0000u64;
+    assert_eq!(traveler.state.get_shadow_memory(ram, address), None);
+
+    // A write the recorder has seen and not yet put in a snapshot.
+    traveler.state.tracing_memory = true;
+    traveler.state.set_shadow_memory(ram, address, 7);
+    assert_eq!(traveler.state.get_shadow_memory(ram, address), Some(7));
+
+    traveler.ttd_seek(target).expect("seek");
+    assert_eq!(
+        traveler.state.get_shadow_memory(ram, address),
+        None,
+        "the taint written after the target survived the rewind"
+    );
+}

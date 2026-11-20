@@ -1758,6 +1758,125 @@ impl Emulator {
         Ok(())
     }
 
+    /// Bring memory and its shadow from where the machine is (`came_from`) to
+    /// the snapshot `snap`.
+    ///
+    /// - Back: undo the writes made after it -- those still pending in the
+    ///   trace, then those in later snapshots, newest first -- shadow included.
+    ///   The shadow was only cleared, so taint written after the target
+    ///   survived the rewind.
+    /// - Forward: replay the snapshots between the one the machine last passed
+    ///   and `snap`, in order. Only `snap`'s own deltas were applied, which
+    ///   are the writes since the snapshot before it -- a jump across several
+    ///   left every write in between out.
+    ///
+    /// Then `snap`'s own deltas, either way.
+    fn ttd_restore_memory(
+        &mut self,
+        snap: &fission_ttd::ExecutionSnapshot,
+        came_from: u64,
+    ) -> Result<()> {
+        let ram = self.state.ram_space();
+        let set_shadow =
+            |state: &mut MachineState, space: u64, address: u64, node: Option<u32>| match node {
+                Some(node) => state.set_shadow_memory(space, address, node),
+                None => state.clear_shadow_memory(space, address),
+            };
+
+        if came_from > snap.step_index {
+            let pending: Vec<(u64, Vec<u8>)> = self
+                .state
+                .trace_mem_writes
+                .iter()
+                .map(|(addr, old, _new)| (*addr, old.clone()))
+                .collect();
+            let pending_shadow: Vec<(u64, u64, Option<u32>)> = self
+                .state
+                .trace_shadow_writes
+                .iter()
+                .map(|(space, addr, old, _new)| (*space, *addr, *old))
+                .collect();
+            let later: Vec<&fission_ttd::ExecutionSnapshot> = self
+                .ttd
+                .snapshots()
+                .into_iter()
+                .filter(|s| s.step_index > snap.step_index)
+                .collect();
+            let later_memory: Vec<(u64, Vec<u8>)> = later
+                .iter()
+                .flat_map(|s| {
+                    s.memory_deltas
+                        .iter()
+                        .map(|d| (d.address, d.old_value.clone()))
+                })
+                .collect();
+            let later_shadow: Vec<(u64, u64, Option<u32>)> = later
+                .iter()
+                .flat_map(|s| {
+                    s.shadow_deltas
+                        .iter()
+                        .map(|d| (d.space_id, d.address, d.old_node))
+                })
+                .collect();
+            for (address, old) in pending.iter().rev().chain(later_memory.iter().rev()) {
+                self.state.write_space(ram, *address, old)?;
+            }
+            for (space, address, old) in
+                pending_shadow.iter().rev().chain(later_shadow.iter().rev())
+            {
+                set_shadow(&mut self.state, *space, *address, *old);
+            }
+        } else if came_from < snap.step_index {
+            let passed = self
+                .ttd
+                .snapshots()
+                .iter()
+                .map(|s| s.step_index)
+                .filter(|step| *step <= came_from)
+                .max();
+            let between: Vec<fission_ttd::ExecutionSnapshot> = self
+                .ttd
+                .snapshots()
+                .into_iter()
+                .filter(|s| {
+                    s.step_index < snap.step_index && passed.is_none_or(|p| s.step_index > p)
+                })
+                .cloned()
+                .collect();
+            for s in &between {
+                for delta in &s.memory_deltas {
+                    self.state
+                        .write_space(ram, delta.address, &delta.new_value)?;
+                }
+                for delta in &s.shadow_deltas {
+                    set_shadow(
+                        &mut self.state,
+                        delta.space_id,
+                        delta.address,
+                        delta.new_node,
+                    );
+                }
+            }
+        }
+        // The restore itself is not execution; do not let it be recorded as such.
+        self.state.trace_mem_writes.clear();
+        self.state.trace_shadow_writes.clear();
+
+        for delta in &snap.memory_deltas {
+            self.state
+                .write_space(ram, delta.address, &delta.new_value)?;
+        }
+        for delta in &snap.shadow_deltas {
+            set_shadow(
+                &mut self.state,
+                delta.space_id,
+                delta.address,
+                delta.new_node,
+            );
+        }
+        Ok(())
+    }
+
     /// Seek the TTD timeline to a given instruction step index.
     ///
     /// 1. Restore the nearest snapshot at or before `target_step` (registers +
@@ -1807,55 +1926,13 @@ impl Emulator {
         self.inst_count = snap.step_index;
         self.ttd_last_snapshot_inst = snap.step_index;
 
-        // Undo what ran after the target before restoring anything else: the
-        // writes recorded in later snapshots, newest first, and the ones made
-        // since the last snapshot that are still waiting in the trace. Without
-        // this a byte written after the target kept its later value --
-        // `old_value` was recorded for exactly this and never read.
-        if came_from > snap.step_index {
-            let ram = self.state.ram_space();
-            let pending: Vec<(u64, Vec<u8>)> = self
-                .state
-                .trace_mem_writes
-                .iter()
-                .map(|(addr, old, _new)| (*addr, old.clone()))
-                .collect();
-            let later: Vec<(u64, Vec<u8>)> = self
-                .ttd
-                .snapshots()
-                .iter()
-                .filter(|s| s.step_index > snap.step_index)
-                .flat_map(|s| {
-                    s.memory_deltas
-                        .iter()
-                        .map(|d| (d.address, d.old_value.clone()))
-                })
-                .collect();
-            for (address, old) in pending.iter().rev().chain(later.iter().rev()) {
-                let _ = self.state.write_space(ram, *address, old);
-            }
-            // The undo itself is not execution; do not let it be recorded as such.
-            self.state.trace_mem_writes.clear();
-            self.state.trace_shadow_writes.clear();
-        }
-
-        // Restore memory via stored deltas (forward apply new_value at keyframe).
-        for delta in &snap.memory_deltas {
-            let _ = self
-                .state
-                .write_space(self.state.ram_space(), delta.address, &delta.new_value);
-        }
-
-        // Restore shadow state via stored deltas
-        for delta in &snap.shadow_deltas {
-            if let Some(new_node) = delta.new_node {
-                self.state
-                    .set_shadow_memory(delta.space_id, delta.address, new_node);
-            } else {
-                self.state
-                    .clear_shadow_memory(delta.space_id, delta.address);
-            }
-        }
+        // Restoring memory is the recorder putting back what it saw, not a
+        // guest access: a page unmapped or made read-only after the target
+        // still takes its old bytes. Any other failure is an error.
+        let enforce = std::mem::replace(&mut self.state.enforce_page_faults, false);
+        let restored = self.ttd_restore_memory(&snap, came_from);
+        self.state.enforce_page_faults = enforce;
+        restored?;
 
         tracing::info!(
             "TTD: Restored to step {} (PC=0x{:X})",
