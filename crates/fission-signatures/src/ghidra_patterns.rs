@@ -170,7 +170,12 @@ impl GhidraFuncPattern {
         if addr < data_base {
             return false;
         }
-        let offset = (addr - data_base) as usize;
+        let Ok(offset) = usize::try_from(addr - data_base) else {
+            return false;
+        };
+        if offset > data.len() {
+            return false;
+        }
 
         let pre_len = self.pre_bytes.len();
         if pre_len > 0 {
@@ -187,7 +192,10 @@ impl GhidraFuncPattern {
 
         let post_len = self.post_bytes.len();
         if post_len > 0 {
-            if offset + post_len > data.len() {
+            if offset
+                .checked_add(post_len)
+                .is_none_or(|end| end > data.len())
+            {
                 return false;
             }
             let post_slice = &data[offset..offset + post_len];
@@ -1384,5 +1392,20 @@ mod tests {
         </patternlist>"#;
         let pats = parse_ghidra_pattern_xml(xml).unwrap();
         assert_eq!(pats.len(), 2, "expected 2 patterns, got {}", pats.len());
+    }
+
+    #[test]
+    fn matches_rejects_out_of_range_addresses_without_panicking() {
+        let xml = r#"<patternlist>
+          <pattern>
+            <data>0xcc * 0x4883ec</data>
+            <funcstart/>
+          </pattern>
+        </patternlist>"#;
+        let pats = parse_ghidra_pattern_xml(xml).unwrap();
+        let data = [0xcc, 0x48, 0x83, 0xec];
+        assert!(pats[0].matches(&data, 0x1000, 0x1001));
+        assert!(!pats[0].matches(&data, 0x1000, 0x1005));
+        assert!(!pats[0].matches(&data, 0x1000, u64::MAX));
     }
 }

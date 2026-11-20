@@ -224,31 +224,47 @@ impl FpkReader {
         self.blocks.len()
     }
 
-    fn decompress(&self, block: &BlockRef) -> Result<String, FpkError> {
-        let raw = &self.map[block.offset..block.offset + block.comp_len];
-        // `raw_len` comes from the block index; bound the up-front reservation.
-        let mut out = String::with_capacity(block.raw_len.min(MAX_RESERVED_BLOCK_BYTES));
-        match self.codec & 0xff {
-            COMPRESS_ZSTD => {
-                let bytes = zstd::decode_all(raw)
-                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
-                out = String::from_utf8(bytes)
-                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
-            }
-            _ => {
-                flate2::read::ZlibDecoder::new(raw)
-                    .read_to_string(&mut out)
-                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
-            }
-        }
-        if out.len() != block.raw_len {
+    fn decode_bounded<R: Read>(
+        reader: R,
+        expected_len: usize,
+        label: &str,
+        source: &str,
+        offset: usize,
+    ) -> Result<Vec<u8>, FpkError> {
+        if expected_len > MAX_RESERVED_BLOCK_BYTES {
             return Err(FpkError::Corrupt(format!(
-                "block at {} decompressed to {} bytes, index says {}",
-                block.offset,
-                out.len(),
-                block.raw_len
+                "{label} at {offset} declares {expected_len} bytes exceeding cap {MAX_RESERVED_BLOCK_BYTES}"
             )));
         }
+        let mut out = Vec::with_capacity(expected_len.min(64 * 1024));
+        reader
+            .take((expected_len as u64).saturating_add(1))
+            .read_to_end(&mut out)
+            .map_err(|e| FpkError::Corrupt(format!("{label} at {offset}: {e}")))?;
+        if out.len() != expected_len {
+            return Err(FpkError::Corrupt(format!(
+                "{label} at {offset} decoded to {} bytes, {source} {expected_len}",
+                out.len()
+            )));
+        }
+        Ok(out)
+    }
+
+    fn decompress(&self, block: &BlockRef) -> Result<String, FpkError> {
+        let raw = &self.map[block.offset..block.offset + block.comp_len];
+        let bytes = match self.codec & 0xff {
+            COMPRESS_ZSTD => {
+                let decoder = zstd::stream::read::Decoder::new(raw)
+                    .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
+                Self::decode_bounded(decoder, block.raw_len, "block", "index says", block.offset)?
+            }
+            _ => {
+                let decoder = flate2::read::ZlibDecoder::new(raw);
+                Self::decode_bounded(decoder, block.raw_len, "block", "index says", block.offset)?
+            }
+        };
+        let out = String::from_utf8(bytes)
+            .map_err(|e| FpkError::Corrupt(format!("block at {}: {e}", block.offset)))?;
         if self.codec & 0xff00 == LAYOUT_COLUMNAR {
             return rows_from_columns(&out, block.offset);
         }
@@ -375,15 +391,19 @@ impl FpkReader {
             }
             let cached = &cached_chunks[chunk];
             if cached.get().is_none() {
-                let raw = zstd::decode_all(&self.map[offset..offset + comp_len])
-                    .map_err(|e| FpkError::Corrupt(format!("index chunk at {offset}: {e}")))?;
-                if raw.len() != count * HASH_ENTRY_LEN {
-                    return Err(FpkError::Corrupt(format!(
-                        "index chunk at {offset} decoded to {} bytes, directory says {}",
-                        raw.len(),
-                        count * HASH_ENTRY_LEN
-                    )));
-                }
+                let expected_len = count.checked_mul(HASH_ENTRY_LEN).ok_or_else(|| {
+                    FpkError::Corrupt(format!("index chunk at {offset} entry count overflow"))
+                })?;
+                let decoder =
+                    zstd::stream::read::Decoder::new(&self.map[offset..offset + comp_len])
+                        .map_err(|e| FpkError::Corrupt(format!("index chunk at {offset}: {e}")))?;
+                let raw = Self::decode_bounded(
+                    decoder,
+                    expected_len,
+                    "index chunk",
+                    "directory says",
+                    offset,
+                )?;
                 // A racing successful decoder may have published first. Failed
                 // decoding is never retained; subsequent callers still retry.
                 let _ = cached.set(raw.into_boxed_slice());
@@ -1370,6 +1390,24 @@ mod tests {
             FpkReader::open(&path),
             Err(FpkError::Malformed(_))
         ));
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn oversized_decompressed_block_is_rejected_without_reading_unbounded() {
+        // Pack a valid 64 KiB block, then patch index `raw_len` down to 4 bytes
+        // so streaming decode stops at 5 bytes and reports corruption.
+        let payload = "a".repeat(64 * 1024);
+        let mut image = pack(&[payload.as_str()]);
+        let index_offset = u64_at(&image, 24) as usize;
+        // index entry: u32 key_len | key | u64 offset | u32 comp_len | u32 raw_len
+        let key_len = u32_at(&image, index_offset) as usize;
+        let raw_len_off = index_offset + 4 + key_len + 12;
+        image[raw_len_off..raw_len_off + 4].copy_from_slice(&4u32.to_le_bytes());
+        let path = write_temp(&image);
+        let reader = FpkReader::open(&path).unwrap();
+        let err = reader.read_all().unwrap_err();
+        assert!(matches!(err, FpkError::Corrupt(_)));
         std::fs::remove_file(&path).ok();
     }
 }

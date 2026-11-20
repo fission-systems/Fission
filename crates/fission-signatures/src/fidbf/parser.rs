@@ -101,6 +101,14 @@ fn unpack_java_fid_database(path: &Path, data: &[u8]) -> Result<Vec<u8>, FidbfPa
         return Err(err("truncated ZIP data descriptor".into()));
     }
     let csz = u32::from_le_bytes(data[dd_off + 8..dd_off + 12].try_into().expect("slice")) as usize;
+    let usz =
+        u32::from_le_bytes(data[dd_off + 12..dd_off + 16].try_into().expect("slice")) as usize;
+    const MAX_UNPACKED_FIDBF_BYTES: usize = 512 * 1024 * 1024;
+    if usz > MAX_UNPACKED_FIDBF_BYTES {
+        return Err(err(format!(
+            "uncompressed size {usz} exceeds cap ({MAX_UNPACKED_FIDBF_BYTES})"
+        )));
+    }
 
     if data_start + csz > dd_off {
         return Err(err(format!(
@@ -108,13 +116,30 @@ fn unpack_java_fid_database(path: &Path, data: &[u8]) -> Result<Vec<u8>, FidbfPa
         )));
     }
 
-    // Inflate the raw DEFLATE stream.
+    // Inflate the raw DEFLATE stream under a strict decoded-size bound.
     let compressed = &data[data_start..data_start + csz];
-    let mut decoder = DeflateDecoder::new(compressed);
-    let mut unpacked = Vec::new();
+    let limit = if usz > 0 {
+        usz
+    } else {
+        MAX_UNPACKED_FIDBF_BYTES
+    };
+    let decoder = DeflateDecoder::new(compressed);
+    let mut unpacked = Vec::with_capacity(limit.min(64 * 1024));
     decoder
+        .take((limit as u64).saturating_add(1))
         .read_to_end(&mut unpacked)
         .map_err(|e| err(format!("DEFLATE decompression failed: {e}")))?;
+    if unpacked.len() > limit {
+        return Err(err(format!(
+            "decompressed payload exceeds size limit ({limit} bytes)"
+        )));
+    }
+    if usz > 0 && unpacked.len() != usz {
+        return Err(err(format!(
+            "decompressed payload size {} does not match descriptor {usz}",
+            unpacked.len()
+        )));
+    }
 
     Ok(unpacked)
 }
@@ -235,5 +260,38 @@ mod tests {
                 .any(|l| l.language_id.contains("x86")),
             "expected x86 library entry"
         );
+    }
+
+    #[test]
+    fn packed_fidb_rejects_deflate_payload_exceeding_descriptor_size() {
+        use flate2::{Compression, write::DeflateEncoder};
+        use std::io::Write;
+
+        let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&[b'A'; 4096]).unwrap();
+        let compressed = encoder.finish().unwrap();
+
+        let mut blob = Vec::new();
+        blob.extend_from_slice(JAVA_SERIAL_MAGIC);
+        // PK\x03\x04 local file header (4 + 26 bytes, comp=8, namelen=0, extralen=0)
+        blob.extend_from_slice(ZIP_LOCAL_SIG);
+        let mut lh = [0u8; 26];
+        lh[4..6].copy_from_slice(&8u16.to_le_bytes());
+        blob.extend_from_slice(&lh);
+        blob.extend_from_slice(&compressed);
+        // PK\x07\x08 data descriptor with csz = compressed.len(), usz = 16 (<< 4096 actual).
+        blob.extend_from_slice(ZIP_DATA_DESC_SIG);
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        blob.extend_from_slice(&16u32.to_le_bytes());
+
+        let path = temp_db_path("oversized_packed");
+        std::fs::write(&path, &blob).unwrap();
+        let err = parse_fidbf(&path).expect_err("inflated stream > descriptor usz must fail");
+        assert!(matches!(
+            err,
+            FidbfParseError::PackedFidDatabaseUnpackError(..)
+        ));
+        let _ = std::fs::remove_file(path);
     }
 }

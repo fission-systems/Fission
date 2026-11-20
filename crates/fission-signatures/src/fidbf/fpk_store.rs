@@ -239,16 +239,15 @@ pub fn decode(
     relations_fpk: &Path,
     domain_paths_fpk: &Path,
 ) -> Result<FidbfDatabase, FpkError> {
-    let mut domains: Vec<String> = Vec::new();
+    let mut domains: HashMap<usize, String> = HashMap::new();
     for line in FpkReader::open(domain_paths_fpk)?.read_all()? {
         let Some((id, path)) = line.split_once('|') else {
             continue;
         };
-        let id = usize::from_str_radix(id, 16).unwrap_or(0);
-        if domains.len() <= id {
-            domains.resize(id + 1, String::new());
-        }
-        domains[id] = unesc(path);
+        let Ok(id) = usize::from_str_radix(id, 16) else {
+            continue;
+        };
+        domains.insert(id, unesc(path));
     }
 
     let mut libraries = Vec::new();
@@ -290,7 +289,7 @@ pub fn decode(
             domain_path: f[9]
                 .parse::<usize>()
                 .ok()
-                .and_then(|id| domains.get(id).cloned())
+                .and_then(|id| domains.get(&id).cloned())
                 .unwrap_or_default(),
             flags: f[10].parse().unwrap_or(0),
             auto_pass: f[11] == "1",
@@ -489,6 +488,34 @@ mod tests {
             1
         );
         std::fs::remove_dir_all(&dir).expect("remove test directory");
+    }
+
+    #[test]
+    fn huge_domain_id_does_not_resize_oom_or_panic() {
+        let empty = pack_with(
+            &[],
+            KIND_FID_LIBRARY,
+            CODEC_ZSTD_COLUMNAR,
+            1,
+            BLOCK_TARGET_BULK,
+        );
+        let dom = pack_with(
+            &["ffffffffffffffff|/src/main.c".to_string()],
+            KIND_FID_DOMAIN_PATH,
+            CODEC_ZSTD_COLUMNAR,
+            1,
+            BLOCK_TARGET_BULK,
+        );
+        let dir = std::env::temp_dir().join(format!("fidfpk_hugedom_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let l = write(&dir, "lib.fpk", &empty);
+        let f = write(&dir, "fn.fpk", &empty);
+        let r = write(&dir, "rel.fpk", &empty);
+        let d = write(&dir, "dom.fpk", &dom);
+        let db =
+            decode("test".to_string(), &l, &f, &r, &d).expect("sparse domain id decodes cleanly");
+        assert!(db.functions.is_empty());
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
 
