@@ -275,7 +275,7 @@ pub fn win32_stdcall_pop_bytes(func_name: &str) -> u64 {
         | "RegQueryValueExW" => 24,
 
         // 7 args (28 bytes)
-        "CreateFileA" | "CreateFileW" => 28,
+        "CreateFileA" | "CreateFileW" | "DuplicateHandle" => 28,
 
         // 8 args (32 bytes)
         "WideCharToMultiByte" => 32,

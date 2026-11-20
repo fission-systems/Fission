@@ -14,7 +14,31 @@ const FIXED_EPOCH_SECONDS: u64 = 1_767_225_600;
 /// Seconds between the FILETIME epoch (1601) and the Unix one.
 const FILETIME_UNIX_OFFSET_SECONDS: u64 = 11_644_473_600;
 /// The same instant in FILETIME units, 100 ns since 1601.
-const FIXED_FILETIME_BASE: u64 = (FIXED_EPOCH_SECONDS + FILETIME_UNIX_OFFSET_SECONDS) * 10_000_000;
+pub(crate) const FIXED_FILETIME_BASE: u64 =
+    (FIXED_EPOCH_SECONDS + FILETIME_UNIX_OFFSET_SECONDS) * 10_000_000;
+
+/// How long the machine had been up when this process started. The clocks
+/// that count from boot -- `GetTickCount`, `QueryPerformanceCounter`,
+/// `InterruptTime` -- start here rather than at zero: zero is not a value
+/// they take on a running machine, and the Go runtime stops on it
+/// ("nanotime returning zero"). Fixed, for the same reason the epoch is.
+pub(crate) const UPTIME_AT_START_MS: u64 = 60_000;
+
+/// Milliseconds since boot.
+fn uptime_ms(emu: &Emulator) -> u64 {
+    UPTIME_AT_START_MS.wrapping_add(emu.tick_count)
+}
+
+/// Move the process clock forward. `KUSER_SHARED_DATA` carries the same clock
+/// and is read without a call, so it moves with it.
+fn advance_clock(emu: &mut Emulator, ms: u64) {
+    emu.tick_count = emu.tick_count.wrapping_add(ms);
+    if let Err(error) =
+        crate::os::windows::peb_teb::write_shared_user_time(&mut emu.state, emu.tick_count)
+    {
+        tracing::warn!("KUSER_SHARED_DATA clock not updated: {error:#}");
+    }
+}
 
 /// Standard handle cookies returned by GetStdHandle (and accepted by WriteFile).
 const STD_INPUT_HANDLE: u64 = 0x50;
@@ -201,10 +225,13 @@ impl OsEnvironment for WindowsEnv {
             "IsProcessorFeaturePresent" => {
                 emu.write_return_val(0)?;
             }
-            "GetSystemDirectoryA" | "GetWindowsDirectoryA" => {
-                // Return empty / failure — CRT often tolerates 0.
-                emu.write_return_val(0)?;
-            }
+            // Zero means the call failed, and a caller is entitled to stop
+            // there: the Go runtime does, with "Unable to determine system
+            // directory", before it reaches `main`.
+            "GetSystemDirectoryA" => handle_directory_a(emu, SYSTEM_DIRECTORY)?,
+            "GetSystemDirectoryW" => handle_directory_w(emu, SYSTEM_DIRECTORY)?,
+            "GetWindowsDirectoryA" => handle_directory_a(emu, WINDOWS_DIRECTORY)?,
+            "GetWindowsDirectoryW" => handle_directory_w(emu, WINDOWS_DIRECTORY)?,
             "FlsAlloc" => {
                 emu.write_return_val(1)?;
             }
@@ -284,6 +311,7 @@ impl OsEnvironment for WindowsEnv {
             "GetCurrentProcess" => {
                 emu.write_return_val(!0u64)?;
             } // pseudo -1
+            "DuplicateHandle" => handle_duplicate_handle(emu)?,
             "GetCurrentProcessId" => {
                 emu.write_return_val(1000)?;
             }
@@ -400,17 +428,18 @@ impl OsEnvironment for WindowsEnv {
             }
             "GetModuleFileNameA" => handle_get_module_file_name_a(emu)?,
             "GetModuleFileNameW" => handle_get_module_file_name_w(emu)?,
-            "GetCommandLineA" => handle_get_command_line_a(emu)?,
-            "GetCommandLineW" => handle_get_command_line_w(emu)?,
+            "GetCommandLineA" => handle_get_command_line_a(emu, self)?,
+            "GetCommandLineW" => handle_get_command_line_w(emu, self)?,
             "GetEnvironmentStringsW" => {
-                // Return a dummy env block pointer in guest heap region.
-                let base = 0x0000_0000_2100_0000u64;
+                // A block of `NAME=value\0` strings ending in an empty one.
+                // Each call gets its own copy, as on Windows, which is what
+                // `FreeEnvironmentStrings` is for.
                 let data = "PATH=C:\\Windows\\System32\0\0"
                     .encode_utf16()
                     .flat_map(|c| c.to_le_bytes())
                     .collect::<Vec<_>>();
-                let _ = emu.state.write_space(emu.state.ram_space(), base, &data);
-                emu.write_return_val(base)?;
+                let block = guest_block(emu, self, &data)?;
+                emu.write_return_val(block)?;
             }
             "FreeEnvironmentStringsW" | "FreeEnvironmentStringsA" => {
                 emu.write_return_val(1)?;
@@ -572,17 +601,17 @@ impl OsEnvironment for WindowsEnv {
             "Sleep" => {
                 let ms = emu.read_arg(0).unwrap_or(0);
                 // Advance simulated tick by requested ms (no real sleep).
-                emu.tick_count = emu.tick_count.wrapping_add(ms);
+                advance_clock(emu, ms);
                 tracing::debug!("Sleep({}ms) — tick_count now {}", ms, emu.tick_count);
                 emu.write_return_val(0)?;
             }
             "GetTickCount" => {
-                emu.tick_count = emu.tick_count.wrapping_add(15); // ~15ms per call
-                emu.write_return_val(emu.tick_count & 0xFFFF_FFFF)?;
+                advance_clock(emu, 15); // ~15ms per call
+                emu.write_return_val(uptime_ms(emu) & 0xFFFF_FFFF)?;
             }
             "GetTickCount64" => {
-                emu.tick_count = emu.tick_count.wrapping_add(15);
-                emu.write_return_val(emu.tick_count)?;
+                advance_clock(emu, 15);
+                emu.write_return_val(uptime_ms(emu))?;
             }
             "GetSystemTimeAsFileTime" | "GetSystemTimePreciseAsFileTime" => {
                 // lpSystemTimeAsFileTime: pointer in RCX (arg 0)
@@ -598,19 +627,19 @@ impl OsEnvironment for WindowsEnv {
                         emu.state
                             .write_space(emu.state.ram_space(), ptr, &fake_time.to_le_bytes());
                 }
-                emu.tick_count = emu.tick_count.wrapping_add(1);
+                advance_clock(emu, 1);
                 // void return
             }
             "QueryPerformanceCounter" => {
                 // lpPerformanceCount: pointer in RCX
                 let ptr = emu.read_arg(0).unwrap_or(0);
                 if ptr != 0 {
-                    let counter = emu.tick_count.wrapping_mul(10_000);
+                    let counter = uptime_ms(emu).wrapping_mul(10_000);
                     let _ =
                         emu.state
                             .write_space(emu.state.ram_space(), ptr, &counter.to_le_bytes());
                 }
-                emu.tick_count = emu.tick_count.wrapping_add(1);
+                advance_clock(emu, 1);
                 emu.write_return_val(1)?; // TRUE = success
             }
             "QueryPerformanceFrequency" => {
@@ -1157,27 +1186,35 @@ fn handle_get_module_file_name_w(emu: &mut Emulator) -> Result<()> {
     Ok(())
 }
 
-fn handle_get_command_line_a(emu: &mut Emulator) -> Result<()> {
-    let base = 0x0000_0000_2110_0000u64;
-    let data = b"test.exe\0";
-    emu.state.write_space(emu.state.ram_space(), base, data)?;
-    emu.write_return_val(base)?;
+fn handle_get_command_line_a(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
+    let block = guest_block(emu, env, b"test.exe\0")?;
+    emu.write_return_val(block)?;
     Ok(())
 }
 
-fn handle_get_command_line_w(emu: &mut Emulator) -> Result<()> {
-    let base = 0x0000_0000_2110_1000u64;
-    let wide: Vec<u16> = "test.exe"
+fn handle_get_command_line_w(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
+    let bytes: Vec<u8> = "test.exe\0"
         .encode_utf16()
-        .chain(std::iter::once(0))
+        .flat_map(|c| c.to_le_bytes())
         .collect();
-    let mut bytes = Vec::new();
-    for c in wide {
-        bytes.extend_from_slice(&c.to_le_bytes());
-    }
-    emu.state.write_space(emu.state.ram_space(), base, &bytes)?;
-    emu.write_return_val(base)?;
+    let block = guest_block(emu, env, &bytes)?;
+    emu.write_return_val(block)?;
     Ok(())
+}
+
+/// Put `bytes` somewhere the guest can read them and answer with the address.
+///
+/// These answers used to go to fixed addresses (`0x2100_0000` and up) that
+/// nothing mapped, so the write failed -- silently, for the environment block
+/// -- and the guest got a pointer to an unmapped page. The Go runtime reads
+/// its environment through one before `main`.
+fn guest_block(emu: &mut Emulator, env: &WindowsEnv, bytes: &[u8]) -> Result<u64> {
+    let addr = heap_alloc_mapped(emu, env, bytes.len());
+    if addr == 0 {
+        anyhow::bail!("guest heap exhausted");
+    }
+    emu.state.write_space(emu.state.ram_space(), addr, bytes)?;
+    Ok(addr)
 }
 
 /// Allocate on the emulated heap **and make the pages exist**.
@@ -1470,6 +1507,37 @@ fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
     Ok(())
 }
 
+/// `DuplicateHandle(srcProcess, srcHandle, dstProcess, &dstHandle, ...)`.
+///
+/// Nothing here owns kernel objects, so the duplicate is the handle itself --
+/// except for the pseudo-handles of the current process and thread, which a
+/// duplicate exists to turn into real ones; those get the identifiers the
+/// rest of the HLE already answers with. Zero is failure, and the Go runtime
+/// stops on it ("runtime.minit: duplicatehandle failed") before `main`.
+fn handle_duplicate_handle(emu: &mut Emulator) -> Result<()> {
+    let ptr = u64::from(emu.arch.pointer_size);
+    let source = emu.read_arg(1)?;
+    let target = emu.read_arg(3)?;
+    let mask = if ptr >= 8 {
+        u64::MAX
+    } else {
+        (1u64 << (ptr * 8)) - 1
+    };
+    let duplicate = match source & mask {
+        // GetCurrentProcess() / GetCurrentThread() pseudo-handles.
+        h if h == mask || h == mask - 1 => DUPLICATED_SELF_HANDLE,
+        h => h,
+    };
+    if target != 0 {
+        write_ptr(emu, target, duplicate, ptr)?;
+    }
+    emu.write_return_val(1)?;
+    Ok(())
+}
+
+/// A real handle for the current process or thread, once duplicated.
+const DUPLICATED_SELF_HANDLE: u64 = 0x3E8;
+
 fn handle_create_thread(emu: &mut Emulator) -> Result<()> {
     let start_address = emu.read_arg(2)?;
     tracing::info!("CreateThread(start: 0x{:X})", start_address);
@@ -1547,6 +1615,49 @@ pub(crate) fn module_file_name_reply(path: &str, size: usize) -> (Vec<u8>, u64) 
     bytes.truncate(size - 1);
     bytes.push(0);
     (bytes, size as u64)
+}
+
+/// The directories the guest is told it has. The same `System32` the
+/// environment block's `PATH` already names.
+const SYSTEM_DIRECTORY: &str = "C:\\Windows\\System32";
+const WINDOWS_DIRECTORY: &str = "C:\\Windows";
+
+/// What `GetSystemDirectory`/`GetWindowsDirectory` write and return for a
+/// buffer of `size` characters. Unlike `GetModuleFileName`, a buffer that is
+/// too small gets nothing, and the return value is the size it needs
+/// *including* the terminator; one that fits gets the path and its NUL, and
+/// the return value excludes the terminator.
+pub(crate) fn directory_reply<T: Copy + Default>(path: &[T], size: usize) -> (Vec<T>, u64) {
+    if size > path.len() {
+        let mut units = path.to_vec();
+        units.push(T::default());
+        return (units, path.len() as u64);
+    }
+    (Vec::new(), path.len() as u64 + 1)
+}
+
+fn handle_directory_a(emu: &mut Emulator, path: &str) -> Result<()> {
+    let buf = emu.read_arg(0)?;
+    let size = emu.read_arg(1)? as u32 as usize;
+    let (bytes, ret) = directory_reply(path.as_bytes(), size);
+    if buf != 0 && !bytes.is_empty() {
+        emu.state.write_space(emu.state.ram_space(), buf, &bytes)?;
+    }
+    emu.write_return_val(ret)?;
+    Ok(())
+}
+
+fn handle_directory_w(emu: &mut Emulator, path: &str) -> Result<()> {
+    let buf = emu.read_arg(0)?;
+    let size = emu.read_arg(1)? as u32 as usize;
+    let wide: Vec<u16> = path.encode_utf16().collect();
+    let (units, ret) = directory_reply(&wide, size);
+    if buf != 0 && !units.is_empty() {
+        let bytes: Vec<u8> = units.iter().flat_map(|c| c.to_le_bytes()).collect();
+        emu.state.write_space(emu.state.ram_space(), buf, &bytes)?;
+    }
+    emu.write_return_val(ret)?;
+    Ok(())
 }
 
 fn handle_read_console_a(emu: &mut Emulator) -> Result<()> {
