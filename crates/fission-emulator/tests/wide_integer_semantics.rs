@@ -310,3 +310,66 @@ fn a_piece_with_an_eight_byte_low_half_does_not_shift_by_64() {
     // and `<< 64` is a panic (or, without overflow checks, `hi | lo`).
     assert_eq!(bench.get(&out), 0x1234);
 }
+
+fn constant(value: u64, size: u32) -> Varnode {
+    Varnode {
+        space_id: 0,
+        offset: value,
+        size,
+        is_constant: true,
+        constant_val: value as i64,
+    }
+}
+
+/// `INSERT` at a position past the destination's width inserts nothing.
+/// `wrapping_shl` took the position modulo 64 and overwrote the low bits.
+#[test]
+fn an_insert_past_the_width_leaves_the_destination() {
+    let mut bench = Bench::new();
+    let (dest, src, out) = (slot(0x00, 8), slot(0x10, 8), slot(0x20, 8));
+    bench.put(&dest, 0x1111_2222_3333_4444);
+    bench.put(&src, 0xAB);
+    bench.run(
+        PcodeOpcode::Insert,
+        &[dest.clone(), src.clone(), constant(64, 4), constant(8, 4)],
+        &out,
+    );
+    assert_eq!(bench.get(&out), 0x1111_2222_3333_4444);
+    // And in range, for contrast.
+    bench.run(
+        PcodeOpcode::Insert,
+        &[dest.clone(), src.clone(), constant(8, 4), constant(8, 4)],
+        &out,
+    );
+    assert_eq!(bench.get(&out), 0x1111_2222_3333_AB44);
+}
+
+/// A signed carry on operands wider than the 128-bit path takes reaches the
+/// 64-bit one, whose `1i128 << (bits - 1)` overflowed for 32-byte operands.
+#[test]
+fn a_signed_carry_on_32_byte_operands_does_not_overflow() {
+    let mut bench = Bench::new();
+    let (a, b, out) = (slot(0x00, 32), slot(0x40, 32), slot(0x80, 1));
+    for (vn, value) in [(&a, 1u8), (&b, 2u8)] {
+        let mut bytes = [0u8; 32];
+        bytes[0] = value;
+        bench
+            .state
+            .write_space(vn.space_id, vn.offset, &bytes)
+            .expect("write");
+    }
+    for opcode in [PcodeOpcode::IntSCarry, PcodeOpcode::IntSBorrow] {
+        let op = PcodeOp {
+            seq_num: 0,
+            opcode,
+            address: 0x1000,
+            output: Some(out.clone()),
+            inputs: vec![a.clone(), b.clone()],
+            asm_mnemonic: None,
+        };
+        let mut solver = Solver::new();
+        let mut evaluator = Evaluator::new(&mut bench.state, &mut solver);
+        evaluator.step(&op).expect("step");
+    }
+    assert_eq!(bench.get(&out), 0, "1 - 2 does not overflow");
+}

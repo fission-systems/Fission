@@ -2000,6 +2000,7 @@ impl JitCompiler {
                         // Ghidra INSERT: inputs = dest, src, position, size (const)
                         let dest = load_vn!(&op.inputs[0]);
                         let src = load_vn!(&op.inputs[1]);
+                        let dynamic_pos = op.inputs.len() > 2 && !op.inputs[2].is_constant;
                         let pos = if op.inputs.len() > 2 && op.inputs[2].is_constant {
                             op.inputs[2].constant_val as u32
                         } else {
@@ -2016,15 +2017,37 @@ impl JitCompiler {
                         } else {
                             (1u64 << nbits) - 1
                         };
-                        let clear_mask = !(mask.wrapping_shl(pos));
-                        let cleared = builder.ins().band_imm(dest, clear_mask as i64);
                         let src_m = builder.ins().band_imm(src, mask as i64);
-                        let inserted = if pos > 0 {
-                            builder.ins().ishl_imm(src_m, pos as i64)
+                        // A position at or past 64 inserts nothing, as the
+                        // interpreter has it; Cranelift would take it modulo
+                        // 64. A run-time position was read as 0.
+                        let result = if dynamic_pos {
+                            let pos_v = load_vn!(&op.inputs[2]);
+                            let mask_v = builder.ins().iconst(types::I64, mask as i64);
+                            let field = builder.ins().ishl(mask_v, pos_v);
+                            let not_field = builder.ins().bnot(field);
+                            let cleared = builder.ins().band(dest, not_field);
+                            let placed = builder.ins().ishl(src_m, pos_v);
+                            let merged = builder.ins().bor(cleared, placed);
+                            let past = builder.ins().icmp_imm(
+                                IntCC::UnsignedGreaterThanOrEqual,
+                                pos_v,
+                                64,
+                            );
+                            builder.ins().select(past, dest, merged)
+                        } else if pos >= 64 {
+                            dest
                         } else {
-                            src_m
+                            let clear_mask = !(mask << pos);
+                            let cleared = builder.ins().band_imm(dest, clear_mask as i64);
+                            let inserted = if pos > 0 {
+                                builder.ins().ishl_imm(src_m, pos as i64)
+                            } else {
+                                src_m
+                            };
+                            builder.ins().bor(cleared, inserted)
                         };
-                        store_vn!(out, builder.ins().bor(cleared, inserted));
+                        store_vn!(out, result);
                     }
                 }
                 // LZCOUNT: leading zero bits in the input (width = input size * 8)
@@ -3455,6 +3478,47 @@ mod tests {
         let mut emu = compile_and_run(ops);
         assert_eq!(read_reg(&mut emu, 0x48) & 0xFFFF_FFFF, 0x5555_3333);
         assert_eq!(read_reg(&mut emu, 0x50) & 0xFFFF_FFFF, 0x6666_5555);
+    }
+
+    /// `INSERT` at a position past the width inserts nothing, and a run-time
+    /// position is the position -- the compiler read it as 0.
+    #[test]
+    fn insert_honours_its_position_in_range_past_it_and_at_run_time() {
+        let insert = |out: u64, pos: Varnode, seq: u32| PcodeOp {
+            seq_num: seq,
+            opcode: PcodeOpcode::Insert,
+            address: 0x1000,
+            output: Some(reg(out, 8)),
+            inputs: vec![reg(0x00, 8), reg(0x08, 8), pos, imm(8, 4)],
+            asm_mnemonic: None,
+        };
+        let ops = vec![
+            copy_const(0x00, 0x1111_2222_3333_4444, 8),
+            copy_const(0x08, 0xAB, 8),
+            insert(0x10, imm(8, 4), 2),
+            insert(0x18, imm(64, 4), 3),
+            copy_const(0x30, 16, 8),
+            insert(0x20, reg(0x30, 8), 5),
+            copy_const(0x38, 64, 8),
+            insert(0x28, reg(0x38, 8), 7),
+        ];
+        let mut emu = compile_and_run(ops);
+        assert_eq!(read_reg(&mut emu, 0x10), 0x1111_2222_3333_AB44);
+        assert_eq!(
+            read_reg(&mut emu, 0x18),
+            0x1111_2222_3333_4444,
+            "past the width"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 0x20),
+            0x1111_2222_33AB_4444,
+            "run-time 16"
+        );
+        assert_eq!(
+            read_reg(&mut emu, 0x28),
+            0x1111_2222_3333_4444,
+            "run-time 64"
+        );
     }
 
     /// `BOOL_NEGATE` of a non-zero value is zero. The JIT computed `a ^ 1`,

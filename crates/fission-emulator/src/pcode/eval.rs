@@ -841,7 +841,10 @@ impl<'a> Evaluator<'a> {
                 let a = sign_extend(a_raw, sz) as i128;
                 let b = sign_extend(b_raw, sz) as i128;
                 let sum = a + b;
-                let bits = sz * 8;
+                // Values on this path are at most eight bytes wide; a wider
+                // operand (past the 128-bit path) is read truncated, and its
+                // `1 << (bits - 1)` overflowed `i128`.
+                let bits = (sz * 8).min(64);
                 // A zero-width operand has no sign bit to overflow into.
                 let overflow = bits != 0 && {
                     let min = -(1i128 << (bits - 1));
@@ -859,7 +862,7 @@ impl<'a> Evaluator<'a> {
                 let a = sign_extend(a_raw, sz) as i128;
                 let b = sign_extend(b_raw, sz) as i128;
                 let diff = a - b;
-                let bits = sz * 8;
+                let bits = (sz * 8).min(64);
                 let borrow = bits != 0 && {
                     let min = -(1i128 << (bits - 1));
                     let max = (1i128 << (bits - 1)) - 1;
@@ -940,7 +943,12 @@ impl<'a> Evaluator<'a> {
                 } else {
                     (1u64 << nbits) - 1
                 };
-                let res = (dest & !mask.wrapping_shl(pos)) | ((src & mask).wrapping_shl(pos));
+                // A position at or past 64 inserts nothing; `wrapping_shl`
+                // took it modulo 64 and overwrote the low bits.
+                let res = match (mask.checked_shl(pos), (src & mask).checked_shl(pos)) {
+                    (Some(field), Some(value)) if pos < 64 => (dest & !field) | value,
+                    _ => dest,
+                };
                 self.write_varnode_u64(out, res)?;
             }
             PcodeOpcode::PopCount => {

@@ -101,7 +101,9 @@ pub fn soft_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
             }
         }
         x if x == FloatUnOp::Int2Float as u32 => {
-            let i = a_bits as i64;
+            // Signed, at the input's own width -- as the default path and the
+            // interpreter read it. `as i64` made a four-byte -1 4294967295.
+            let i = crate::jit::float_ops::sign_extend_u64(a_bits, in_size);
             f64_to_bits(i as f64, out_size)
         }
         x if x == FloatUnOp::Float2Float as u32 => {
@@ -116,6 +118,19 @@ pub fn soft_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
 mod tests {
     use super::*;
     use crate::jit::float_ops::FloatBinOp;
+
+    /// `INT2FLOAT` reads its input as a signed integer of its own width: a
+    /// four-byte -1 is -1.0, not 4294967295.0.
+    #[test]
+    fn int2float_sign_extends_a_narrow_input() {
+        use crate::jit::float_ops::FloatUnOp;
+        let r = soft_unop(FloatUnOp::Int2Float as u32, 4, 8, 0xFFFF_FFFF);
+        assert_eq!(f64::from_bits(r), -1.0);
+        let r = soft_unop(FloatUnOp::Int2Float as u32, 2, 4, 0xFFFE);
+        assert_eq!(f32::from_bits(r as u32), -2.0);
+        let r = soft_unop(FloatUnOp::Int2Float as u32, 8, 8, 5);
+        assert_eq!(f64::from_bits(r), 5.0);
+    }
 
     #[test]
     fn soft_add_f32() {
