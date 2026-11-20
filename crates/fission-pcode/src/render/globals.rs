@@ -4,13 +4,37 @@
 //! Does not perform semantic recovery beyond address→name rewrites.
 
 use super::{HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions};
+use fission_midend_core::ir::NirType;
 use std::collections::HashMap;
 
+/// Known globals by address, and the byte size of each named object.
+struct Globals {
+    names: HashMap<u64, String>,
+    sizes: HashMap<String, u64>,
+}
+
+impl Globals {
+    /// A name is the whole object: an access of another width through its
+    /// address stays an access through its address. `*(uint *)&g` on an
+    /// 8-byte `g` reads or writes 4 bytes; `g` would be all 8.
+    fn names_whole_object(&self, name: &str, access: &NirType) -> bool {
+        match (self.sizes.get(name), super::printer::type_byte_size(access)) {
+            (Some(&size), Some(width)) => size == u64::from(width),
+            _ => true,
+        }
+    }
+}
+
 pub(crate) fn recover_global_symbol_accesses(hir: &mut HirFunction, options: &MlilPreviewOptions) {
-    let globals = global_symbol_name_map(hir, options);
-    if globals.is_empty() {
+    let names = global_symbol_name_map(hir, options);
+    if names.is_empty() {
         return;
     }
+    let sizes = names
+        .iter()
+        .filter_map(|(addr, name)| Some((name.clone(), *options.global_sizes.get(addr)?)))
+        .collect();
+    let globals = Globals { names, sizes };
     let mut aliases = HashMap::new();
     recover_global_symbol_accesses_in_stmts(&mut hir.body, &globals, &mut aliases);
 }
@@ -31,7 +55,7 @@ fn global_symbol_name_map(hir: &HirFunction, options: &MlilPreviewOptions) -> Ha
 
 fn recover_global_symbol_accesses_in_stmts(
     stmts: &mut [HirStmt],
-    globals: &HashMap<u64, String>,
+    globals: &Globals,
     aliases: &mut HashMap<String, String>,
 ) {
     for stmt in stmts {
@@ -40,7 +64,7 @@ fn recover_global_symbol_accesses_in_stmts(
                 recover_global_symbol_accesses_in_expr(rhs, globals, aliases);
                 recover_global_symbol_accesses_in_lvalue(lhs, globals, aliases);
                 if let HirLValue::Var(name) = lhs {
-                    if let Some(global_name) = global_pointer_alias(rhs, globals) {
+                    if let Some(global_name) = global_pointer_alias(rhs, &globals.names) {
                         aliases.insert(name.clone(), global_name);
                     } else {
                         aliases.remove(name);
@@ -131,14 +155,15 @@ fn recover_global_symbol_accesses_in_stmts(
 
 fn recover_global_symbol_accesses_in_lvalue(
     lvalue: &mut HirLValue,
-    globals: &HashMap<u64, String>,
+    globals: &Globals,
     aliases: &HashMap<String, String>,
 ) {
     match lvalue {
-        HirLValue::Deref { ptr, .. } => {
+        HirLValue::Deref { ptr, ty } => {
             recover_global_symbol_accesses_in_expr(ptr, globals, aliases);
-            if let Some(name) = global_pointer_alias(ptr, globals)
+            if let Some(name) = global_pointer_alias(ptr, &globals.names)
                 .or_else(|| global_pointer_alias_from_expr(ptr, aliases))
+                && globals.names_whole_object(&name, ty)
             {
                 *lvalue = HirLValue::Var(name);
             }
@@ -156,14 +181,15 @@ fn recover_global_symbol_accesses_in_lvalue(
 
 fn recover_global_symbol_accesses_in_expr(
     expr: &mut HirExpr,
-    globals: &HashMap<u64, String>,
+    globals: &Globals,
     aliases: &HashMap<String, String>,
 ) {
     match expr {
-        HirExpr::Load { ptr, .. } => {
+        HirExpr::Load { ptr, ty } => {
             recover_global_symbol_accesses_in_expr(ptr, globals, aliases);
-            if let Some(name) = global_pointer_alias(ptr, globals)
+            if let Some(name) = global_pointer_alias(ptr, &globals.names)
                 .or_else(|| global_pointer_alias_from_expr(ptr, aliases))
+                && globals.names_whole_object(&name, ty)
             {
                 *expr = HirExpr::Var(name);
             }

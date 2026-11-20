@@ -1921,6 +1921,21 @@ fn collect_referenced_global_decls(
         &binding_types,
         &mut decls,
     );
+    // A local's initializer runs too: `uint64_t *slot = &g + 4;` names `g`
+    // as surely as a statement does.
+    for initializer in hir
+        .locals
+        .iter()
+        .filter_map(|binding| binding.initializer.as_ref())
+    {
+        collect_global_decls_from_expr(
+            initializer,
+            &global_names,
+            &global_decl_types,
+            &binding_types,
+            &mut decls,
+        );
+    }
     decls
 }
 
@@ -2510,6 +2525,45 @@ mod global_decl_tests {
 
         assert!(rendered.starts_with("uint math_sink;\n\n"), "{rendered}");
         assert!(rendered.contains("math_sink = param_1;"), "{rendered}");
+    }
+
+    /// `uint *slot = (uint *)(&current_user + 8);` names `current_user` as
+    /// surely as a statement does, but only the body was scanned for
+    /// declarations: the object went undeclared, and the verifier had no
+    /// address for it.
+    #[test]
+    fn a_global_named_only_in_a_local_initializer_is_declared() {
+        let mut options = preview_options_with_global("current_user");
+        options.global_sizes.insert(0x2000, 40);
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "f".to_string(),
+            locals: vec![NirBinding {
+                name: "slot_8".to_string(),
+                ty: NirType::Ptr(Box::new(u32_ty.clone())),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: Some(HirExpr::PtrOffset {
+                    base: Box::new(HirExpr::AddressOfGlobal("current_user".to_string())),
+                    offset: 8,
+                }),
+            }],
+            body: vec![HirStmt::Return(Some(HirExpr::Load {
+                ptr: Box::new(HirExpr::Var("slot_8".to_string())),
+                ty: u32_ty,
+            }))],
+            ..HirFunction::default()
+        };
+        let globals = printed_globals(&hir, &options);
+        assert!(
+            globals
+                .iter()
+                .any(|global| global.name == "current_user" && global.address == Some(0x2000)),
+            "{globals:?}"
+        );
     }
 
     #[test]
