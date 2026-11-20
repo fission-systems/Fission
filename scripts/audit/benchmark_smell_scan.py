@@ -44,7 +44,12 @@ CORPUS_TOKENS = (
 )
 
 FAST_SCAN_ROOTS = (
-    "crates/fission-pcode/src/nir",
+    "crates/fission-pcode/src/midend",
+    "crates/fission-pcode/src/render",
+    "crates/fission-midend-core/src",
+    "crates/fission-midend-prehir/src",
+    "crates/fission-midend-normalize/src",
+    "crates/fission-midend-structuring/src",
     "crates/fission-decompiler/src",
 )
 
