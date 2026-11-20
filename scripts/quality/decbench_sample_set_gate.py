@@ -180,19 +180,44 @@ def source_cfg_name(fn: str, src) -> str | None:
     return None
 
 
-def declared_name(text: str, addr: int) -> str:
-    """The name in the emitted declarator, which is not always `sub_<addr>`."""
+def _find_declared_name_match(text: str):
+    """Return `(line_index, match, lines)` for the function declarator header line."""
     import re
 
-    pattern = re.compile(r"^[^\n;{}]*?\b([A-Za-z_]\w*)\s*\(", re.M)
-    for line in text.splitlines():
+    pattern = re.compile(r"^[^\n;{}]*?\b([A-Za-z_]\w*)\s*\(")
+    lines = text.splitlines(keepends=True)
+    for idx, line in enumerate(lines):
         stripped = line.lstrip()
         if "(" not in line or stripped.startswith(("//", "#", "typedef")):
             continue
-        match = pattern.match(line)
+        match = pattern.match(line.rstrip("\r\n"))
         if match and (line.rstrip().endswith(")") or line.rstrip().endswith("{")):
-            return match.group(1)
+            return idx, match, lines
+    return None
+
+
+def declared_name(text: str, addr: int) -> str:
+    """The name in the emitted declarator, which is not always `sub_<addr>`."""
+    found = _find_declared_name_match(text)
+    if found is not None:
+        _, match, _ = found
+        return match.group(1)
     return f"sub_{addr:x}"
+
+
+def rename_declared_function(text: str, addr: int, unique: str) -> str:
+    """Replace only the declared function identifier in `text`, leaving body/strings intact."""
+    import re
+
+    found = _find_declared_name_match(text)
+    if found is not None:
+        idx, match, lines = found
+        line = lines[idx]
+        start, end = match.span(1)
+        lines[idx] = f"{line[:start]}{unique}{line[end:]}"
+        return "".join(lines)
+    fallback = f"sub_{addr:x}"
+    return re.sub(rf"\b{re.escape(fallback)}\b", unique, text, count=1)
 
 
 def node_count(cfg) -> int | None:
@@ -265,13 +290,20 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
                  "--no-header", "--no-warnings", "--addresses-file", str(addr_file)],
                 capture_output=True, text=True, timeout=900,
             )
+            if run.returncode != 0:
+                stderr_preview = (run.stderr or "").strip().splitlines()
+                tail = stderr_preview[-1] if stderr_preview else ""
+                print(
+                    f"warning: decomp failed for {anon} (exit {run.returncode}): {tail}",
+                    file=sys.stderr,
+                )
             records = {
                 int(e["address"], 16): e
                 for e in json.loads(run.stdout[run.stdout.index("["):])
                 if e.get("code")
             }
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"warning: failed to decompile/parse output for {anon}: {exc}", file=sys.stderr)
 
         if key not in src_cfgs:
             try:
@@ -303,7 +335,7 @@ def score(cli: Path, benchmark_root: Path, quick: bool, dump: list | None = None
                 continue
             text = unit["rec"]["code"]
             unique = f"{unit['fn']}_u{index}"
-            batch[unique] = text.replace(declared_name(text, unit["addr"]), unique)
+            batch[unique] = rename_declared_function(text, unit["addr"], unique)
             unit[f"key_{layer}"] = unique
         names_l = list(batch)
         for i in range(0, len(names_l), JOERN_CHUNK):

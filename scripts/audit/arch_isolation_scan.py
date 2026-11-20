@@ -12,9 +12,9 @@ from pathlib import Path
 
 
 SCAN_ROOTS = (
-    "crates/fission-pcode/src/nir/normalize",
-    "crates/fission-pcode/src/nir/structuring",
-    "crates/fission-pcode/src/nir/types",
+    "crates/fission-midend-normalize/src",
+    "crates/fission-midend-structuring/src",
+    "crates/fission-pcode/src/midend/structuring",
 )
 
 REGISTER_PATTERN = re.compile(

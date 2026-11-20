@@ -74,13 +74,17 @@ def split_args(s):
         if in_s:
             cur += c
             if c == "\\":
-                cur += s[i + 1]; i += 1
+                if i + 1 < len(s):
+                    cur += s[i + 1]
+                    i += 1
             elif c == '"':
                 in_s = False
         elif in_c:
             cur += c
             if c == "\\":
-                cur += s[i + 1]; i += 1
+                if i + 1 < len(s):
+                    cur += s[i + 1]
+                    i += 1
             elif c == "'":
                 in_c = False
         elif c == '"':

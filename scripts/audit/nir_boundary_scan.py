@@ -11,10 +11,21 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
-NIR_ROOT = Path("crates/fission-pcode/src/nir")
+SCAN_ROOTS: tuple[tuple[Path, str | None], ...] = (
+    (Path("crates/fission-pcode/src/midend"), None),
+    (Path("crates/fission-pcode/src/render"), "render"),
+    (Path("crates/fission-midend-normalize/src"), "normalize"),
+    (Path("crates/fission-midend-structuring/src"), "structuring"),
+    (Path("crates/fission-midend-prehir/src"), None),
+    (Path("crates/fission-midend-core/src"), "types"),
+)
 TARGET_PATTERN = re.compile(
-    r"crate::nir::(abi|abstract_location|action_pipeline|builder|cfg|cspec|normalize|pass|render|stats|"
-    r"structuring|support|telemetry|types|var_rename|vsa)\b"
+    r"(?:"
+    r"crate::(?:midend|nir)::(abi|abstract_location|action_pipeline|builder|cfg|cspec|normalize|pass|render|stats|structuring|support|telemetry|types|var_rename|vsa)"
+    r"|crate::(render)"
+    r"|fission_midend_(normalize|structuring)"
+    r"|fission_midend_prehir::(action_pipeline|vsa)"
+    r")\b"
 )
 
 RULES: dict[str, dict[str, str]] = {
@@ -57,14 +68,18 @@ class Finding:
     detail: str
 
 
-def source_layer(path: Path) -> str | None:
-    try:
-        rel = path.relative_to(NIR_ROOT)
-    except ValueError:
-        return None
-    if len(rel.parts) == 1:
-        return rel.stem
-    return rel.parts[0]
+def source_layer(rel_path: Path) -> str | None:
+    for scan_root, forced_layer in SCAN_ROOTS:
+        try:
+            rel = rel_path.relative_to(scan_root)
+        except ValueError:
+            continue
+        if forced_layer is not None:
+            return forced_layer
+        if len(rel.parts) == 1:
+            return rel.stem
+        return rel.parts[0]
+    return None
 
 
 def read_text(path: Path) -> str:
@@ -72,14 +87,17 @@ def read_text(path: Path) -> str:
 
 
 def iter_files(root: Path) -> list[Path]:
-    base = root / NIR_ROOT
     files = []
-    for path in base.rglob("*.rs"):
-        rel = path.relative_to(root).as_posix()
-        if "/tests/" in rel or "test" in path.stem:
+    for scan_root, _ in SCAN_ROOTS:
+        base = root / scan_root
+        if not base.exists():
             continue
-        files.append(path)
-    return sorted(files)
+        for path in base.rglob("*.rs"):
+            rel = path.relative_to(root).as_posix()
+            if "/tests/" in rel or "test" in path.stem:
+                continue
+            files.append(path)
+    return sorted(set(files))
 
 
 def scan(root: Path) -> list[Finding]:
@@ -91,12 +109,13 @@ def scan(root: Path) -> list[Finding]:
         rel = path.relative_to(root).as_posix()
         rules = RULES.get(src, {})
         for lineno, line in enumerate(read_text(path).splitlines(), start=1):
-            if "nir_boundary_allow" in line:
+            stripped = line.lstrip()
+            if stripped.startswith("//") or "nir_boundary_allow" in line:
                 continue
             seen: set[str] = set()
             for match in TARGET_PATTERN.finditer(line):
-                target = match.group(1)
-                if target == src or target in seen:
+                target = next((g for g in match.groups() if g is not None), None)
+                if not target or target == src or target in seen:
                     continue
                 seen.add(target)
                 severity = rules.get(target)
