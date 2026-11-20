@@ -440,6 +440,27 @@ impl EmulatorHarness {
         u32::from(self.emu.arch.pointer_size) * 8
     }
 
+    /// The canonical frame address of the call [`Self::begin_run`] set up:
+    /// the stack pointer before the call. A target that pushes its return
+    /// address (x86) entered one word below it; one that keeps it in a link
+    /// register entered at it.
+    pub fn cfa(&mut self) -> Result<u64> {
+        let sp = self.emu.read_register_u64(self.emu.arch.sp_reg)?;
+        Ok(if self.emu.arch.cc.return_addr_reg().is_some() {
+            sp
+        } else {
+            sp.wrapping_add(u64::from(self.emu.arch.pointer_size))
+        })
+    }
+
+    /// The addresses the function's own frame covers in the run
+    /// [`Self::begin_run`] set up. Stores there are the function's own
+    /// business; only stores outside it are compared.
+    pub fn frame_range(&mut self) -> Result<std::ops::Range<u64>> {
+        let entry_sp = self.emu.read_register_u64(self.emu.arch.sp_reg)?;
+        Ok(entry_sp.saturating_sub(FRAME_BELOW)..entry_sp.saturating_add(FRAME_ABOVE))
+    }
+
     /// Registers as they stand now -- after [`Self::begin_run`], what the
     /// function finds at entry. Names the machine does not know are left out.
     pub fn registers(&mut self, names: &[String]) -> Vec<(String, i64)> {

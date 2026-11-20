@@ -312,6 +312,46 @@ impl<'a> PreviewBuilder<'a> {
         }
     }
 
+    /// Each stack slot's offset from the canonical frame address (the stack
+    /// pointer before the call that entered the function), by binding name.
+    ///
+    /// A slot's own offset is measured from the register it was addressed
+    /// through, and one frame can hold both kinds: `[rbp-0x110]` and the
+    /// whole-frame backing, which counts from the steady-state stack pointer.
+    /// So the relation is per slot, not per function. A slot whose base has
+    /// no proven relation to the CFA (an ARM frame pointer) is left out.
+    pub(super) fn stack_slot_cfa_offsets(&self) -> std::collections::BTreeMap<String, i64> {
+        let pointer_size = i64::from(self.options.pointer_size);
+        let (steady_to_cfa, frame_pointer_to_cfa) = match self.options.calling_convention {
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => (
+                // The steady-state stack pointer sits the frame below entry,
+                // and entry sits the pushed return address below the CFA.
+                self.stack_frame_size.checked_add(pointer_size),
+                // The frame pointer is one word (the saved one) below entry.
+                self.entry_frame_pointer_established
+                    .then(|| pointer_size.checked_mul(2))
+                    .flatten(),
+            ),
+            // The return address stays in a link register: entry is the CFA.
+            CallingConvention::Arm32 | CallingConvention::AArch64 => {
+                (Some(self.stack_frame_size), None)
+            }
+            _ => (None, None),
+        };
+        self.locals
+            .iter()
+            .filter_map(|(offset, slot)| {
+                let to_cfa = match slot.base {
+                    StackBase::Rsp => steady_to_cfa,
+                    StackBase::Rbp => frame_pointer_to_cfa,
+                }?;
+                Some((slot.name.clone(), offset.checked_sub(to_cfa)?))
+            })
+            .collect()
+    }
+
     fn binding_name_exists(&self, name: &str) -> bool {
         self.temps.contains_key(name) || self.used_param_local_names.contains(name)
     }

@@ -434,6 +434,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 &binary,
                                 func.address,
                                 &pair.globals,
+                                pair.frame_offsets.clone(),
                             );
                             let outcome = fission_dir::check_ground_truth_with(
                                 harness,

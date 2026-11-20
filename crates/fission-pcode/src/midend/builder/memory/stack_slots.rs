@@ -1920,6 +1920,7 @@ impl<'a> PreviewBuilder<'a> {
             name,
             ty: ty.clone(),
             origin,
+            base,
         });
         if entry.ty == NirType::Unknown {
             entry.ty = ty.clone();

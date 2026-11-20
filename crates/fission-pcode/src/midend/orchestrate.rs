@@ -89,6 +89,11 @@ pub struct NirDecompileOutput {
     /// The file-scope objects `code` declares, with their types and
     /// addresses.
     pub printed_globals: Vec<crate::render::PrintedGlobal>,
+    /// Each stack slot's offset from the canonical frame address (the stack
+    /// pointer before the call that entered the function), by the name the
+    /// builder gave it. A slot whose relation to the frame is not proven is
+    /// absent.
+    pub stack_slot_cfa_offsets: std::collections::BTreeMap<String, i64>,
     pub recovered_variables: Option<Vec<crate::render::RecoveredVariable>>,
     pub build_stats: Option<PreviewBuildStats>,
     pub hint_stats: Option<PreviewHintStats>,
@@ -570,7 +575,14 @@ fn render_mlil_preview_with_binary_and_context_output(
         raw_hir: Some(raw_hir),
         prehir: Some(prehir),
         hir_function: Some(hir_function),
-        printed_globals: crate::render::printed_globals(&printed_hir, options),
+        printed_globals: {
+            let mut globals = crate::render::printed_globals(&printed_hir, options);
+            globals.extend(crate::render::printed_string_literals(
+                &builder.string_literal_addresses,
+            ));
+            globals
+        },
+        stack_slot_cfa_offsets: builder.stack_slot_cfa_offsets(),
         printed_hir: Some(printed_hir),
         recovered_variables: Some(recovered_variables),
         build_stats: Some(build_stats),

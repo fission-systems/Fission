@@ -67,6 +67,53 @@ int guarded_sum(int x)
     return a[0] + a[3];
 }
 
+/* Memory (slice 2): a local array indexed by a run's value, a local whose
+ * address a call receives, and string literals. */
+PLAIN int pick_local(unsigned i, int a, int b)
+{
+    volatile int v[4];
+    v[0] = a;
+    v[1] = b;
+    v[2] = a + b;
+    v[3] = a ^ b;
+    return v[i & 3];
+}
+
+PLAIN __attribute__((noinline, weak)) void bump(int *p)
+{
+    *p += 1;
+}
+
+PLAIN int pass_local(int a)
+{
+    int x = a;
+    bump(&x);
+    return x + 1;
+}
+
+PLAIN int give_local(int a)
+{
+    int x = a * 3;
+    bump(&x);
+    return a + 1;
+}
+
+PLAIN __attribute__((noinline)) long take_text(const char *s)
+{
+    return (long)s;
+}
+
+PLAIN long pass_literal(int i)
+{
+    return take_text(i ? "hello, fixture" : "goodbye, fixture");
+}
+
+PLAIN int literal_char(int i)
+{
+    const char *s = "fixture text";
+    return s[i & 7];
+}
+
 /* The canary check's failure path; nothing here links a libc. */
 PLAIN void __stack_chk_fail(void)
 {

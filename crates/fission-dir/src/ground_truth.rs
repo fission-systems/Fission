@@ -19,7 +19,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::call_sites::MachineFlow;
 use crate::emu_driver::{EmulatorHarness, ObservedCall, StubbedEnd};
 use crate::eval::{
-    CallEvent, World, hir_free_names, hir_mentioned_names, normalize, run_hir, run_prehir, width_of,
+    CallEvent, World, hir_addressed_locals, hir_free_names, hir_mentioned_names, normalize,
+    prehir_addressed_locals, run_hir, run_prehir, width_of,
 };
 use crate::initial_state::{InitialState, RunPlan};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
@@ -43,6 +44,10 @@ pub struct Grounding {
     /// Declared globals the printed code cannot be tied to one address --
     /// several loader symbols share the name.
     pub ambiguous_globals: BTreeSet<String>,
+    /// Each stack slot's offset from the canonical frame address, by name,
+    /// as the decompiler placed it. A body that takes the address of a local
+    /// missing here is refused.
+    pub frame_offsets: BTreeMap<String, i64>,
 }
 
 impl Grounding {
@@ -54,7 +59,12 @@ impl Grounding {
     /// temporary can be spelled like an address (`tmp_1a004`), and a local
     /// can shadow a symbol, and only the printer's declarations say which
     /// names are file-scope storage in the text being checked.
-    pub fn for_function(binary: &LoadedBinary, address: u64, printed: &[PrintedGlobal]) -> Self {
+    pub fn for_function(
+        binary: &LoadedBinary,
+        address: u64,
+        printed: &[PrintedGlobal],
+        frame_offsets: BTreeMap<String, i64>,
+    ) -> Self {
         let (flow, flow_error) = match crate::call_sites::call_sites(binary, address) {
             Ok(flow) => (Some(flow), None),
             Err(err) => (None, Some(format!("{err:#}"))),
@@ -62,6 +72,7 @@ impl Grounding {
         let mut grounding = Self {
             flow,
             flow_error,
+            frame_offsets,
             ..Self::default()
         };
         for global in printed {
@@ -179,6 +190,25 @@ pub fn check_ground_truth_with(
         .max()
         .map_or(0, |&s| s + 1);
 
+    // Locals the body takes the address of live in the frame, where the
+    // machine keeps them: `&x` handed to a call is the same pointer on both
+    // sides, and `*(&x + 4)` reads the bytes next to `x`.
+    let hir_local_offsets = match frame_offsets(
+        &hir_addressed_locals(&hir.body, &hir.locals),
+        &grounding.frame_offsets,
+    ) {
+        Ok(offsets) => offsets,
+        Err(reason) => {
+            return VerifyOutcome::Unsupported(UnsupportedReason::Interpreter(format!(
+                "hir: {reason}"
+            )));
+        }
+    };
+    let prehir_local_offsets = frame_offsets(
+        &prehir_addressed_locals(&prehir.body, &prehir.locals),
+        &grounding.frame_offsets,
+    );
+
     let empty_flow = MachineFlow::default();
     let flow = grounding.flow.as_ref().unwrap_or(&empty_flow);
     let no_return_sites: BTreeSet<u64> = flow
@@ -228,6 +258,22 @@ pub fn check_ground_truth_with(
             continue;
         }
         let bound = harness.registers(&free);
+        let (cfa, frame) = match (harness.cfa(), harness.frame_range()) {
+            (Ok(cfa), Ok(frame)) => (cfa, frame),
+            (Err(err), _) | (_, Err(err)) => {
+                first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
+                emulator_errors += 1;
+                continue;
+            }
+        };
+        let place = |offsets: &[(String, i64)]| -> HashMap<String, u64> {
+            offsets
+                .iter()
+                .map(|(name, offset)| (name.clone(), cfa.wrapping_add_signed(*offset)))
+                .collect()
+        };
+        let hir_locals = place(&hir_local_offsets);
+        let prehir_locals = prehir_local_offsets.as_deref().map(place);
         let call_return = |n: usize| state.call_result(n);
         let (prehir_r, hir_r) = {
             let backing = |addr: u64| Some(harness.initial_byte(&state, addr));
@@ -242,17 +288,33 @@ pub fn check_ground_truth_with(
                     .as_ref()
                     .map(|_| &call_return as &dyn Fn(usize) -> u64),
                 no_return_sites: Some(&no_return_sites),
+                local_addresses: Some(&hir_locals),
             };
-            (
-                run_prehir(
+            let prehir_r = match &prehir_locals {
+                Ok(locals) => run_prehir(
                     &prehir.body,
                     &prehir.params,
                     &prehir.locals,
                     &prehir_args,
-                    &world,
+                    &World {
+                        local_addresses: Some(locals),
+                        ..world
+                    },
                 ),
+                Err(reason) => Err(anyhow::anyhow!("prehir: {reason}")),
+            };
+            (
+                prehir_r,
                 run_hir(&hir.body, &hir.params, &hir.locals, &args, &world),
             )
+        };
+        // Stores into the frame are the function's own business on both sides.
+        let outside = |writes: &BTreeMap<u64, u8>| -> BTreeMap<u64, u8> {
+            writes
+                .iter()
+                .filter(|(addr, _)| !frame.contains(addr))
+                .map(|(addr, value)| (*addr, *value))
+                .collect()
         };
         // The printed tree is what is being checked. PreHIR is compared when
         // it runs, but a PreHIR the interpreter cannot run (it can name storage
@@ -318,7 +380,7 @@ pub fn check_ground_truth_with(
                     })
                 })
                 .or_else(|| {
-                    compare_writes(side, &run.writes, &machine.writes, &no_placed, |a| {
+                    compare_writes(side, &outside(&run.writes), &machine.writes, &no_placed, |a| {
                         Some(harness.initial_byte(&state, a))
                     })
                 });
@@ -455,6 +517,26 @@ fn compare_writes(
         }
     }
     None
+}
+
+/// The offset from the canonical frame address of each local in
+/// `addressed`, as the decompiler placed its stack slot; or why one of them
+/// has no place in the frame.
+fn frame_offsets(
+    addressed: &[String],
+    slots: &BTreeMap<String, i64>,
+) -> Result<Vec<(String, i64)>, String> {
+    addressed
+        .iter()
+        .map(|name| {
+            slots
+                .get(name)
+                .map(|offset| (name.clone(), *offset))
+                .ok_or_else(|| {
+                    format!("the address of '{name}' is taken, and it has no placed stack slot")
+                })
+        })
+        .collect()
 }
 
 /// Slots past this are not a parameter list the decompiler means; such a

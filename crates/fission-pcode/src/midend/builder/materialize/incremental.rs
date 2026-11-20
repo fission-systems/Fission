@@ -181,6 +181,7 @@ impl<'a> PreviewBuilder<'a> {
                 name,
                 ty,
                 origin,
+                base,
             },
         );
     }
@@ -203,6 +204,9 @@ impl<'a> PreviewBuilder<'a> {
                     fields: Vec::new(),
                 },
                 origin: NirBindingOrigin::StackOffset(0),
+                // The whole frame, from the steady-state stack pointer up:
+                // `fixed_frame_byte_offset` measures every byte from there.
+                base: StackBase::Rsp,
             },
         );
         self.stack_frame_backing = Some(StackFrameBacking { name, size });
