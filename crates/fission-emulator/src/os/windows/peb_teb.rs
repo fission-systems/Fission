@@ -2,7 +2,9 @@ use crate::pcode::page_map::prot;
 use crate::pcode::state::MachineState;
 use anyhow::Result;
 
-pub const TEB_ADDR_64: u64 = 0x0000_0000_7FFD_E000;
+/// A 64-bit TEB is 0x1838 bytes, so it takes two pages: its TLS slots start at
+/// `+0x1480`. At `0x7FFDE000` they ran into the PEB's page.
+pub const TEB_ADDR_64: u64 = 0x0000_0000_7FFD_D000;
 pub const PEB_ADDR_64: u64 = 0x0000_0000_7FFD_F000;
 pub const TEB_ADDR_32: u64 = 0x7FFD_E000;
 pub const PEB_ADDR_32: u64 = 0x7FFD_F000;
@@ -25,10 +27,14 @@ pub fn setup_peb_teb(
         (TEB_ADDR_32, PEB_ADDR_32)
     };
 
-    // PEB/TEB pages
-    state
-        .page_map
-        .map_region(teb_addr & !0xFFF, 0x2000, prot::RW | prot::ANON, true);
+    // TEB pages up to and including the PEB's.
+    let teb_page = teb_addr & !0xFFF;
+    state.page_map.map_region(
+        teb_page,
+        (peb_addr & !0xFFF) + 0x1000 - teb_page,
+        prot::RW | prot::ANON,
+        true,
+    );
 
     // The Thread Information Block -- the first fields of the TEB, which the
     // CRT reads directly rather than through an API. MinGW/MSVC start-up walks
@@ -36,10 +42,10 @@ pub fn setup_peb_teb(
     // Field offsets differ by bitness: ExceptionList, StackBase, StackLimit, Self.
     {
         let ram = state.ram_space();
-        let (exception_list, stack_base, stack_limit_off, self_off) = if is_64bit {
-            (0x00u64, 0x08u64, 0x10u64, 0x30u64)
+        let (exception_list, stack_base, stack_limit_off, self_off, client_id) = if is_64bit {
+            (0x00u64, 0x08u64, 0x10u64, 0x30u64, 0x40u64)
         } else {
-            (0x00, 0x04, 0x08, 0x18)
+            (0x00, 0x04, 0x08, 0x18, 0x20)
         };
         let word = |v: u64| -> Vec<u8> {
             let b = v.to_le_bytes();
@@ -50,6 +56,15 @@ pub fn setup_peb_teb(
         state.write_space(ram, teb_addr + stack_base, &word(stack_top))?;
         state.write_space(ram, teb_addr + stack_limit_off, &word(stack_limit))?;
         state.write_space(ram, teb_addr + self_off, &word(teb_addr))?;
+        // ClientId: the process and thread ids `GetCurrentProcessId` and
+        // `GetCurrentThreadId` answer with.
+        let pointer = if is_64bit { 8 } else { 4 };
+        state.write_space(ram, teb_addr + client_id, &word(1000))?;
+        state.write_space(
+            ram,
+            teb_addr + client_id + pointer,
+            &word(crate::os::windows::threads::ROOT_TID),
+        )?;
     }
 
     setup_shared_user_data(state)?;

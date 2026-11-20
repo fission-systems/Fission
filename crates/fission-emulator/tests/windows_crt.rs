@@ -166,3 +166,60 @@ fn a_32_bit_mingw_pe_runs_its_crt_and_exits() {
         emu.metrics.hle_misses
     );
 }
+
+/// A cgo Go program: the runtime starts threads before `main` (`_beginthread`
+/// through cgo), parks the main thread on an event they signal, and sleeps
+/// its monitor thread by waiting on the process handle. With threads that
+/// never ran, the main thread waited forever; before that, five start-up
+/// queries aborted it outright.
+#[test]
+fn a_cgo_go_program_starts_its_threads_and_runs_main() {
+    let Some(path) = corpus("go/patterns_go_default.exe") else {
+        eprintln!("skipping: dev corpus not present");
+        return;
+    };
+
+    let binary = LoadedBinary::from_file(&path).expect("load");
+    let main = {
+        let inner = binary.inner();
+        let index = *inner
+            .function_name_index
+            .get("main.main")
+            .expect("main.main in the symbol table");
+        inner.functions[index].address
+    };
+    let mut state = MachineState::new();
+    let info = fission_emulator::os::windows::loader::load_pe(&mut state, &binary).expect("pe");
+    let load_spec = binary.load_spec().expect("spec").clone();
+    let sleigh = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(&load_spec)
+        .expect("frontend")
+        .into_iter()
+        .next()
+        .expect("sleigh");
+    let arch = ArchInfo::from_language_id(load_spec.pair.language_id.as_str(), Some(&binary))
+        .expect("arch");
+    let mut emu = Emulator::new(state, binary, sleigh, arch, Box::new(WindowsEnv::new()))
+        .expect("emulator")
+        .with_max_inst(Some(5_000_000));
+    emu.apply_windows_image(info).expect("image");
+    emu.add_observer(Box::new(Coverage::new()));
+
+    emu.run().expect("run");
+
+    assert!(
+        emu.halt_requested,
+        "the process did not exit: {}",
+        emu.metrics.summary_line()
+    );
+    // `main` computes and discards; a Go runtime abort exits with 2.
+    assert_eq!(emu.exit_code, Some(0), "{}", emu.metrics.summary_line());
+    let observers = emu.take_observers();
+    let coverage = observers
+        .iter()
+        .find_map(|o| o.as_any().downcast_ref::<Coverage>())
+        .expect("coverage");
+    assert!(
+        coverage.executed_instructions().contains(&main),
+        "main.main at 0x{main:X} never ran"
+    );
+}

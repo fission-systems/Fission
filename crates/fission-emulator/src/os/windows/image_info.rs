@@ -164,15 +164,15 @@ pub fn load_pe_image(
     let (stack_top, teb_addr, peb_addr, heap_base) = if is_64bit {
         (
             0x0000_7FFF_FFFF_F000u64,
-            0x0000_0000_7FFD_E000u64,
-            0x0000_0000_7FFD_F000u64,
+            crate::os::windows::peb_teb::TEB_ADDR_64,
+            crate::os::windows::peb_teb::PEB_ADDR_64,
             page_align_up(max_end.max(image_base).saturating_add(0x10_0000)).max(0x2000_0000),
         )
     } else {
         (
             0xFFFF_E000u64,
-            0x7FFD_E000u64,
-            0x7FFD_F000u64,
+            crate::os::windows::peb_teb::TEB_ADDR_32,
+            crate::os::windows::peb_teb::PEB_ADDR_32,
             page_align_up(max_end.max(image_base).saturating_add(0x10_0000)).max(0x1000_0000),
         )
     };
