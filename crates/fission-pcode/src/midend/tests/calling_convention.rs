@@ -3197,8 +3197,8 @@ fn rax_is_never_a_param() {
     ] {
         if abi == CallingConvention::AArch64 {
             let (name, idx) = reg_param(0x00, 8, abi).unwrap();
-            assert_eq!(name, "param_1");
-            assert_eq!(idx, Some(0));
+            assert_eq!(name, "pc");
+            assert_eq!(idx, None);
         } else {
             let (name, idx) = reg_param(0x00, 8, abi).unwrap();
             assert_eq!(name, "rax", "rax should stay 'rax' in {abi:?}");

@@ -19,7 +19,7 @@
 
 use crate::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// `(language_id, compiler_spec_id)` → relative `.cspec` filename stem (no extension).
 ///
@@ -69,26 +69,77 @@ impl LdefsEntry {
     }
 }
 
-// ── Global cache ─────────────────────────────────────────────────────────────
+// ── Global per-root cache ────────────────────────────────────────────────────
 
-static LDEFS_INDEX: OnceLock<LdefsIndex> = OnceLock::new();
-static LANGUAGE_SLASPEC_INDEX: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
+type LdefsIndexCache = HashMap<PathBuf, Arc<LdefsIndex>>;
+type LanguageSlaspecCache = HashMap<PathBuf, Arc<LanguageSlaspecIndex>>;
+
+static LDEFS_INDEX_CACHE: OnceLock<RwLock<LdefsIndexCache>> = OnceLock::new();
+static LANGUAGE_SLASPEC_CACHE: OnceLock<RwLock<LanguageSlaspecCache>> = OnceLock::new();
 
 /// `language_id` → absolute path to the checked-in `.slaspec` entry file.
 pub type LanguageSlaspecIndex = HashMap<String, PathBuf>;
 
-/// Return (or build and cache) the global `language_id` → `.slaspec` index.
-pub fn global_language_slaspec_index(languages_root: &Path) -> &'static LanguageSlaspecIndex {
-    LANGUAGE_SLASPEC_INDEX.get_or_init(|| build_language_slaspec_index(languages_root))
+/// Return (or build and cache) the global `language_id` → `.slaspec` index for `languages_root`.
+///
+/// Keyed by canonical `languages_root` path; non-existent directories and empty scans
+/// are not cached so transient path mistakes never poison later calls.
+pub fn global_language_slaspec_index(languages_root: &Path) -> Arc<LanguageSlaspecIndex> {
+    let Ok(canonical) = std::fs::canonicalize(languages_root) else {
+        return Arc::new(HashMap::default());
+    };
+    if !canonical.is_dir() {
+        return Arc::new(HashMap::default());
+    }
+    let cache = LANGUAGE_SLASPEC_CACHE.get_or_init(|| RwLock::new(HashMap::default()));
+    if let Ok(guard) = cache.read()
+        && let Some(hit) = guard.get(&canonical)
+    {
+        return Arc::clone(hit);
+    }
+    let built = build_language_slaspec_index(&canonical);
+    if built.is_empty() {
+        return Arc::new(built);
+    }
+    let shared = Arc::new(built);
+    if let Ok(mut guard) = cache.write() {
+        let entry = guard
+            .entry(canonical)
+            .or_insert_with(|| Arc::clone(&shared));
+        return Arc::clone(entry);
+    }
+    shared
 }
 
 /// Return (or build and cache) the global `.ldefs` index for `languages_root`.
 ///
-/// The first call scans the entire `languages_root` tree.  Subsequent calls return
-/// the cached result immediately.  If `languages_root` doesn't exist the index is
-/// empty and the caller falls back to the legacy heuristic.
-pub fn global_ldefs_index(languages_root: &Path) -> &'static LdefsIndex {
-    LDEFS_INDEX.get_or_init(|| build_ldefs_index(languages_root))
+/// Keyed by canonical `languages_root` path; non-existent directories and empty scans
+/// are not cached so subsequent calls with a valid `languages_root` succeed cleanly.
+pub fn global_ldefs_index(languages_root: &Path) -> Arc<LdefsIndex> {
+    let Ok(canonical) = std::fs::canonicalize(languages_root) else {
+        return Arc::new(HashMap::default());
+    };
+    if !canonical.is_dir() {
+        return Arc::new(HashMap::default());
+    }
+    let cache = LDEFS_INDEX_CACHE.get_or_init(|| RwLock::new(HashMap::default()));
+    if let Ok(guard) = cache.read()
+        && let Some(hit) = guard.get(&canonical)
+    {
+        return Arc::clone(hit);
+    }
+    let built = build_ldefs_index(&canonical);
+    if built.is_empty() {
+        return Arc::new(built);
+    }
+    let shared = Arc::new(built);
+    if let Ok(mut guard) = cache.write() {
+        let entry = guard
+            .entry(canonical)
+            .or_insert_with(|| Arc::clone(&shared));
+        return Arc::clone(entry);
+    }
+    shared
 }
 
 // ── Builder ───────────────────────────────────────────────────────────────────
@@ -426,90 +477,8 @@ fn find_tag_close(s: &str) -> usize {
     s.len()
 }
 
-/// Extract an attribute value by name from an XML tag segment (e.g., `key="value"` or `key='value'`).
-/// Matches attributes as distinct tokens (avoiding prefix/substring collisions) and tolerates
-/// single quotes as well as optional whitespace around `=`.
 fn extract_attr<'a>(segment: &'a str, key: &str) -> Option<&'a str> {
-    let mut chars = segment.char_indices().peekable();
-    while let Some(&(i, c)) = chars.peek() {
-        if c.is_ascii_whitespace() {
-            chars.next();
-            continue;
-        }
-        if c == '"' || c == '\'' {
-            let quote = c;
-            chars.next();
-            while let Some((_, qc)) = chars.next() {
-                if qc == quote {
-                    break;
-                }
-            }
-            continue;
-        }
-        if c == '/' || c == '>' {
-            chars.next();
-            continue;
-        }
-
-        // We are at the start of a token (tag name or attribute name)
-        let name_start = i;
-        while let Some(&(next_i, next_c)) = chars.peek() {
-            if next_c.is_ascii_whitespace()
-                || next_c == '='
-                || next_c == '/'
-                || next_c == '>'
-                || next_c == '"'
-                || next_c == '\''
-            {
-                break;
-            }
-            chars.next();
-        }
-        let name_end = chars.peek().map_or(segment.len(), |&(ni, _)| ni);
-        let name = &segment[name_start..name_end];
-
-        // Skip whitespace between name and '='
-        while let Some(&(_, next_c)) = chars.peek() {
-            if next_c.is_ascii_whitespace() {
-                chars.next();
-            } else {
-                break;
-            }
-        }
-
-        // Check if followed by '='
-        if let Some(&(_, '=')) = chars.peek() {
-            chars.next(); // consume '='
-
-            // Skip whitespace between '=' and quote
-            while let Some(&(_, next_c)) = chars.peek() {
-                if next_c.is_ascii_whitespace() {
-                    chars.next();
-                } else {
-                    break;
-                }
-            }
-
-            // Check quote
-            if let Some(&(_, quote)) = chars.peek() {
-                if quote == '"' || quote == '\'' {
-                    chars.next(); // consume opening quote
-                    let val_start = chars.peek().map_or(segment.len(), |&(vi, _)| vi);
-                    let mut val_end = val_start;
-                    while let Some((vi, vc)) = chars.next() {
-                        if vc == quote {
-                            val_end = vi;
-                            break;
-                        }
-                    }
-                    if name == key {
-                        return Some(&segment[val_start..val_end]);
-                    }
-                }
-            }
-        }
-    }
-    None
+    crate::xml_scan::extract_attr(segment, key)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -771,5 +740,60 @@ mod tests {
                 .map(|e| e.cspec_filename.as_str()),
             Some("x86-64-win.cspec")
         );
+    }
+
+    #[test]
+    fn failed_or_nonexistent_root_does_not_poison_global_ldefs_and_slaspec_caches() {
+        let missing = Path::new("/nonexistent/fission-cspec-ldefs-missing-root");
+        assert!(global_ldefs_index(missing).is_empty());
+        assert!(global_language_slaspec_index(missing).is_empty());
+
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(2)
+            .unwrap();
+        let valid = repo_root.join("utils/sleigh-specs/languages");
+        if valid.is_dir() {
+            assert!(
+                !global_ldefs_index(&valid).is_empty(),
+                "earlier missing root call must not cache an empty ldefs index forever"
+            );
+            assert!(
+                !global_language_slaspec_index(&valid).is_empty(),
+                "earlier missing root call must not cache an empty slaspec index forever"
+            );
+        }
+
+        // Distinct custom roots stay isolated.
+        let tmp = std::env::temp_dir().join(format!(
+            "fission-cspec-ldefs-cache-test-{}",
+            std::process::id()
+        ));
+        let lang_dir = tmp.join("Toy");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&lang_dir).unwrap();
+        std::fs::write(
+            lang_dir.join("toy.ldefs"),
+            r#"<language_definitions><language id="Toy:LE:32:test" processorspec="toy.pspec" slafile="toy.sla" spec="toy.cspec"/></language_definitions>"#,
+        )
+        .unwrap();
+        std::fs::write(lang_dir.join("toy.slaspec"), "define endian=little;\n").unwrap();
+
+        let custom_ldefs = global_ldefs_index(&tmp);
+        let custom_sla = global_language_slaspec_index(&tmp);
+        assert!(
+            custom_ldefs
+                .get(&("Toy:LE:32:test".to_string(), "default".to_string()))
+                .is_some()
+        );
+        assert!(custom_sla.contains_key("Toy:LE:32:test"));
+        if valid.is_dir() {
+            assert!(
+                global_ldefs_index(&valid)
+                    .get(&("Toy:LE:32:test".to_string(), "default".to_string()))
+                    .is_none()
+            );
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -101,6 +101,7 @@ impl PreprocessorState {
             .push((canonical, slaspec_cache::content_hash(source.as_bytes())));
         let mut conditionals: Vec<ConditionalFrame> = Vec::new();
         let mut with_depth: u32 = 0;
+        let mut inner_brace_depth: u32 = 0;
 
         for raw_line in source.lines() {
             let trimmed = strip_comment(raw_line).trim();
@@ -108,26 +109,52 @@ impl PreprocessorState {
                 continue;
             }
 
-            if trimmed.starts_with("with ") {
+            if trimmed.strip_prefix("with").is_some_and(|rest| {
+                rest.starts_with(|c: char| c.is_ascii_whitespace() || c == ':' || c == '{')
+            }) {
                 if let Some(open) = trimmed.find('{') {
                     with_depth = with_depth.saturating_add(1);
-                    let inner = trimmed[open + 1..].trim();
-                    if !inner.is_empty() && !inner.starts_with('}') {
-                        self.handle_content_line(inner, path, &mut conditionals)?;
+                    let mut inner = trimmed[open + 1..].trim();
+                    let (opens, closes) = count_braces(inner);
+                    let mut total_depth = inner_brace_depth.saturating_add(opens as u32);
+                    for _ in 0..closes {
+                        if total_depth > inner_brace_depth {
+                            total_depth -= 1;
+                        } else if with_depth > 0 {
+                            with_depth -= 1;
+                            if inner.ends_with('}') {
+                                inner = inner[..inner.len() - 1].trim_end();
+                            }
+                        }
                     }
-                    if inner.ends_with('}') {
-                        with_depth = with_depth.saturating_sub(1);
+                    inner_brace_depth = total_depth;
+                    if !inner.is_empty() {
+                        self.handle_content_line(inner, path, &mut conditionals)?;
                     }
                 }
                 continue;
             }
             if with_depth > 0 {
-                if trimmed == "}" || trimmed.ends_with('}') {
-                    with_depth = with_depth.saturating_sub(1);
+                let mut content = trimmed;
+                let (opens, closes) = count_braces(content);
+                for _ in 0..opens {
+                    inner_brace_depth = inner_brace_depth.saturating_add(1);
                 }
-                if trimmed == "}" {
+                for _ in 0..closes {
+                    if inner_brace_depth > 0 {
+                        inner_brace_depth -= 1;
+                    } else if with_depth > 0 {
+                        with_depth -= 1;
+                        if content.ends_with('}') {
+                            content = content[..content.len() - 1].trim_end();
+                        }
+                    }
+                }
+                if content.is_empty() {
                     continue;
                 }
+                self.handle_content_line(content, path, &mut conditionals)?;
+                continue;
             }
 
             self.handle_content_line(trimmed, path, &mut conditionals)?;
@@ -351,17 +378,38 @@ fn strip_enclosing_parens(expr: &str) -> Option<&str> {
     (depth == 0).then_some(inner.trim())
 }
 
+fn count_braces(text: &str) -> (usize, usize) {
+    let mut opens = 0usize;
+    let mut closes = 0usize;
+    for b in text.bytes() {
+        match b {
+            b'{' => opens += 1,
+            b'}' => closes += 1,
+            _ => {}
+        }
+    }
+    (opens, closes)
+}
+
 fn substitute_macros(text: &str, defines: &BTreeMap<String, String>) -> String {
     // Every replacement needle begins with this prefix. Literal lines need
     // no per-definition allocation/search, regardless of the definition map.
-    if !text.contains("$(") {
+    if !text.contains("$(") || defines.is_empty() {
         return text.to_owned();
     }
+    const MAX_PASSES: usize = 16;
     let mut out = text.to_string();
-    for (name, value) in defines {
-        let needle = format!("$({name})");
-        if out.contains(&needle) {
-            out = out.replace(&needle, value);
+    for _ in 0..MAX_PASSES {
+        let mut changed = false;
+        for (name, value) in defines {
+            let needle = format!("$({name})");
+            if out.contains(&needle) {
+                out = out.replace(&needle, value);
+                changed = true;
+            }
+        }
+        if !changed || !out.contains("$(") {
+            break;
         }
     }
     out
@@ -398,6 +446,7 @@ fn extract_define_registers(expanded: &ExpandedSpec) -> Result<Vec<ParsedRegiste
             registers.extend(parse_single_define_register(&line, &expanded.defines)?);
         } else {
             let mut block = line;
+            let mut is_bracket_block = false;
             loop {
                 idx += 1;
                 if idx >= expanded.lines.len() {
@@ -409,11 +458,20 @@ fn extract_define_registers(expanded: &ExpandedSpec) -> Result<Vec<ParsedRegiste
                 );
                 block.push(' ');
                 block.push_str(&next);
-                if next.contains(']') {
+                if block.contains('[') {
+                    is_bracket_block = true;
+                    if block.contains(']') {
+                        break;
+                    }
+                } else if next.ends_with(';') {
                     break;
                 }
             }
-            registers.extend(parse_define_register_block(&block, &expanded.defines)?);
+            if is_bracket_block {
+                registers.extend(parse_define_register_block(&block, &expanded.defines)?);
+            } else {
+                registers.extend(parse_single_define_register(&block, &expanded.defines)?);
+            }
         }
         idx += 1;
     }
@@ -446,7 +504,7 @@ fn parse_offset_and_size(
         + offset_key.len();
     let offset_rest = rest[offset_start..].trim_start();
     let offset_end = offset_rest
-        .find(|c: char| c.is_ascii_whitespace())
+        .find(|c: char| c.is_ascii_whitespace() || c == '[' || c == ';')
         .unwrap_or(offset_rest.len());
     let base_offset = parse_u64_token(&offset_rest[..offset_end], defines)?;
 
@@ -456,7 +514,7 @@ fn parse_offset_and_size(
         + size_key.len();
     let size_rest = rest[size_start..].trim_start();
     let size_end = size_rest
-        .find(|c: char| c.is_ascii_whitespace() || c == '[')
+        .find(|c: char| c.is_ascii_whitespace() || c == '[' || c == ';')
         .unwrap_or(size_rest.len());
     let size = parse_u32_token(&size_rest[..size_end], defines)?;
     Ok((base_offset, size))
@@ -472,20 +530,20 @@ fn parse_single_define_register(
         .trim()
         .trim_end_matches(';');
     let (base_offset, size) = parse_offset_and_size(rest, defines, line)?;
-    let size_key_pos = rest.find("size=").unwrap_or(0) + "size=".len();
-    let size_rest = rest[size_key_pos..].trim_start();
-    let size_token_end = size_rest
-        .find(|c: char| c.is_ascii_whitespace() || c == '[')
-        .unwrap_or(size_rest.len());
-    // Skip macro/size token characters.
-    let mut idx = 0;
-    for ch in size_rest.chars() {
-        if idx >= size_token_end {
-            break;
-        }
-        idx += ch.len_utf8();
-    }
-    let name = size_rest[idx..].trim().trim_end_matches(';');
+    let key_token_end = |key: &str| -> usize {
+        let Some(pos) = rest.find(key) else {
+            return 0;
+        };
+        let value_start = pos + key.len();
+        let trimmed = rest[value_start..].trim_start();
+        let skipped_ws = rest[value_start..].len() - trimmed.len();
+        let tok_len = trimmed
+            .find(|c: char| c.is_ascii_whitespace() || c == '[' || c == ';')
+            .unwrap_or(trimmed.len());
+        value_start + skipped_ws + tok_len
+    };
+    let header_end = key_token_end("offset=").max(key_token_end("size="));
+    let name = rest[header_end..].trim().trim_end_matches(';').trim();
     if name.is_empty() || name == "_" || name.starts_with('[') {
         return Ok(Vec::new());
     }
@@ -744,36 +802,79 @@ mod substitution_preparation_tests {
     use super::*;
 
     #[test]
-    fn literal_fast_path_preserves_ordered_macro_substitution() {
+    fn literal_fast_path_and_fixed_point_macro_substitution() {
         let defines = BTreeMap::from([
             ("A".to_owned(), "$(B)".to_owned()),
             ("B".to_owned(), "wide".to_owned()),
             ("Z".to_owned(), "$(A)".to_owned()),
+            ("CYCLE1".to_owned(), "$(CYCLE2)".to_owned()),
+            ("CYCLE2".to_owned(), "$(CYCLE1)".to_owned()),
             ("이름".to_owned(), "값".to_owned()),
         ]);
-        for text in [
-            "",
-            "literal register r0",
-            "unicode 값",
-            "$",
-            "$(",
-            "$()",
-            "$(unknown)",
-            "$(A) $(A)",
-            "$(Z)",
-            "$(이름)",
-            "prefix $(B) suffix",
-            "$(A))",
+        for (text, expected) in [
+            ("", ""),
+            ("literal register r0", "literal register r0"),
+            ("unicode 값", "unicode 값"),
+            ("$", "$"),
+            ("$(", "$("),
+            ("$()", "$()"),
+            ("$(unknown)", "$(unknown)"),
+            ("$(A) $(A)", "wide wide"),
+            // Z -> $(A) -> $(B) -> wide requires multi-pass substitution across alphabetical order.
+            ("$(Z)", "wide"),
+            ("$(이름)", "값"),
+            ("prefix $(B) suffix", "prefix wide suffix"),
+            ("$(A))", "wide)"),
         ] {
-            let mut expected = text.to_owned();
-            for (name, value) in &defines {
-                let needle = format!("$({name})");
-                if expected.contains(&needle) {
-                    expected = expected.replace(&needle, value);
-                }
-            }
             assert_eq!(substitute_macros(text, &defines), expected, "{text}");
             assert_eq!(substitute_macros(text, &BTreeMap::new()), text);
         }
+        // Cyclic macros must terminate without infinite looping.
+        let _ = substitute_macros("$(CYCLE1)", &defines);
+    }
+
+    #[test]
+    fn slaspec_edge_cases_multiline_bracketless_no_space_bracket_and_with_blocks() {
+        let tmp = std::env::temp_dir().join(format!(
+            "fission-cspec-slaspec-edge-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        let entry = tmp.join("edge.slaspec");
+        std::fs::write(
+            &entry,
+            r#"@define OUT "$(INNER)"
+@define INNER "4"
+with : mode=1 { @define IN_WITH "0x10" }
+with : mode=2 {
+    @define MULTI_WITH "0x20" }
+define register size=$(OUT) offset=$(IN_WITH)
+    pc;
+define register offset=$(MULTI_WITH) size=$(OUT)[r0 r1];
+"#,
+        )
+        .unwrap();
+
+        let parsed = parse_registers_from_slaspec(&entry).expect("parse edge slaspec");
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert!(
+            parsed
+                .iter()
+                .any(|r| r.name == "pc" && r.offset == 0x10 && r.size == 4),
+            "expected pc at 0x10 size 4 in {parsed:?}"
+        );
+        assert!(
+            parsed
+                .iter()
+                .any(|r| r.name == "r0" && r.offset == 0x20 && r.size == 4),
+            "expected r0 at 0x20 size 4 in {parsed:?}"
+        );
+        assert!(
+            parsed
+                .iter()
+                .any(|r| r.name == "r1" && r.offset == 0x24 && r.size == 4),
+            "expected r1 at 0x24 size 4 in {parsed:?}"
+        );
     }
 }

@@ -64,21 +64,26 @@ impl DwarfRegisterMappings {
 
             if tag == "register_mapping" {
                 if let (Some(dwarf_str), Some(ghidra_name)) = (
-                    extract_attr(segment, "dwarf"),
-                    extract_attr(segment, "ghidra"),
+                    crate::xml_scan::extract_attr(segment, "dwarf"),
+                    crate::xml_scan::extract_attr(segment, "ghidra"),
                 ) {
                     let Some(base_dwarf) = parse_u32(dwarf_str) else {
                         continue;
                     };
-                    let auto_count = extract_attr(segment, "auto_count").and_then(parse_u32);
+                    let auto_count =
+                        crate::xml_scan::extract_attr(segment, "auto_count").and_then(parse_u32);
                     match auto_count {
                         Some(count) if count > 0 => {
                             if let Some((prefix, base_num)) = split_trailing_digits(ghidra_name) {
                                 for i in 0..count {
-                                    doc.by_dwarf_num.insert(
-                                        base_dwarf + i,
-                                        format!("{prefix}{}", base_num + i),
-                                    );
+                                    let Some(dwarf_num) = base_dwarf.checked_add(i) else {
+                                        break;
+                                    };
+                                    let Some(reg_num) = base_num.checked_add(i) else {
+                                        break;
+                                    };
+                                    doc.by_dwarf_num
+                                        .insert(dwarf_num, format!("{prefix}{reg_num}"));
                                 }
                             } else {
                                 // Non-conforming auto_count name (Ghidra would
@@ -175,14 +180,6 @@ pub fn load_dwarf_regs_for_pair(
 }
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
-
-/// Extract `key="value"` from an XML attribute string.
-fn extract_attr<'a>(segment: &'a str, key: &str) -> Option<&'a str> {
-    let needle = format!("{key}=\"");
-    let start = segment.find(needle.as_str())? + needle.len();
-    let end = segment[start..].find('"')? + start;
-    Some(&segment[start..end])
-}
 
 /// Parse a decimal `u32` attribute value.
 fn parse_u32(s: &str) -> Option<u32> {
@@ -297,5 +294,18 @@ mod tests {
         let doc = load_dwarf_regs_for_pair(&languages_root, "x86:LE:64:default", "gcc")
             .expect("x86-64.dwarf via .ldefs index");
         assert_eq!(doc.ghidra_name_for(5), Some("RDI"));
+    }
+
+    #[test]
+    fn auto_count_overflow_and_substring_attr_collisions_are_handled_safely() {
+        let xml = r#"<dwarf><register_mappings>
+<register_mapping my_dwarf="99" dwarf="4294967294" ghidra="R1" auto_count="4"/>
+<register_mapping custom_dwarf="10" ghidra="RBX"/>
+</register_mappings></dwarf>"#;
+        let doc = DwarfRegisterMappings::parse_str(xml);
+        assert_eq!(doc.ghidra_name_for(4294967294), Some("R1"));
+        assert_eq!(doc.ghidra_name_for(4294967295), Some("R2"));
+        assert_eq!(doc.ghidra_name_for(99), None);
+        assert_eq!(doc.ghidra_name_for(10), None);
     }
 }

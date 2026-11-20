@@ -89,8 +89,8 @@ pub enum CspecPentry {
 pub struct CspecPrototype {
     /// Prototype name, e.g. `"__stdcall"`, `"__cdecl"`, `"MSABI"`.
     pub name: String,
-    /// Stack shift applied after CALL (size of return address on stack).
-    pub extrapop: i64,
+    /// Stack shift applied after CALL (`extrapop`), or `None` for `"unknown"` / omitted.
+    pub extrapop: Option<i64>,
     /// Ordered input parameter locations.
     pub input: Vec<CspecPentry>,
     /// Ordered output (return value) locations.
@@ -187,8 +187,9 @@ pub struct ResolvedPrototype {
     pub stack_pointer_offset: Option<u64>,
     /// Byte offset where stack parameters begin (from stack `<pentry>`).
     pub stack_arg_base: Option<i64>,
-    /// Return-address size on stack (`extrapop` / `stackshift` from the prototype).
-    pub extrapop: i64,
+    /// Return-address size on stack (`extrapop` / `stackshift` from the prototype),
+    /// or `None` when the prototype specifies `"unknown"`.
+    pub extrapop: Option<i64>,
     /// Callee-saved register offsets.
     pub unaffected_offsets: Vec<u64>,
     /// Caller-saved register offsets.
@@ -357,8 +358,14 @@ fn resolve_prototype(
     });
 
     let float_return_offset = proto.output.iter().find_map(|pentry| {
-        if let CspecPentry::Register { name, metatype, .. } = pentry {
-            if metatype.as_deref() != Some("float") {
+        if let CspecPentry::Register {
+            name,
+            metatype,
+            storage,
+            ..
+        } = pentry
+        {
+            if metatype.as_deref() != Some("float") && storage.as_deref() != Some("float") {
                 return None;
             }
             resolve_reg_offset(name, reg_map)
@@ -496,10 +503,7 @@ impl<'a> CspecParser<'a> {
             }
             "prototype" if matches!(self.state, ParseState::Root | ParseState::DefaultProto) => {
                 let proto_name = attrs.get("name").cloned().unwrap_or_default();
-                let extrapop = attrs
-                    .get("extrapop")
-                    .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
+                let extrapop = attrs.get("extrapop").and_then(|v| parse_signed_i64(v));
                 self.cur_proto = Some(CspecPrototype {
                     name: proto_name,
                     extrapop,
@@ -553,16 +557,12 @@ impl<'a> CspecParser<'a> {
                 }
             }
             "addr" if self.state == ParseState::Pentry => {
-                if attrs.get("space").map_or(false, |s| s == "stack") {
-                    let offset: i64 = attrs
-                        .get("offset")
-                        .and_then(|v| v.parse().ok())
-                        .unwrap_or(0);
-                    if let Some(proto) = self.cur_proto.as_mut() {
-                        if self.cur_io == Some(IoKind::Input) {
-                            proto.input.push(CspecPentry::Stack { offset });
-                        }
-                    }
+                if attrs.get("space").is_some_and(|s| s == "stack")
+                    && let Some(offset) = attrs.get("offset").and_then(|v| parse_signed_i64(v))
+                    && let Some(proto) = self.cur_proto.as_mut()
+                    && self.cur_io == Some(IoKind::Input)
+                {
+                    proto.input.push(CspecPentry::Stack { offset });
                 }
             }
             "register"
@@ -685,6 +685,26 @@ enum XmlToken {
     },
 }
 
+fn parse_signed_i64(raw: &str) -> Option<i64> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(rest) = s.strip_prefix('-') {
+        let rest = rest.trim_start();
+        if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+            return i64::from_str_radix(&format!("-{hex}"), 16).ok();
+        }
+        return s.parse::<i64>().ok();
+    }
+    let rest = s.strip_prefix('+').unwrap_or(s);
+    if let Some(hex) = rest.strip_prefix("0x").or_else(|| rest.strip_prefix("0X")) {
+        i64::from_str_radix(hex, 16).ok()
+    } else {
+        rest.parse::<i64>().ok()
+    }
+}
+
 fn tokenize_xml(xml: &str) -> Vec<XmlToken> {
     let mut tokens = Vec::new();
     let bytes = xml.as_bytes();
@@ -711,13 +731,32 @@ fn tokenize_xml(xml: &str) -> Vec<XmlToken> {
             }
             continue;
         }
-        // Skip comments and processing instructions.
-        if i < bytes.len() && (bytes[i] == b'?' || bytes[i] == b'!') {
-            // Find matching '>'
+        // XML comments run until `-->`, even when commented-out tags contain `>`.
+        if xml[i..].starts_with("!--") {
+            i += "!--".len();
+            if let Some(end) = xml[i..].find("-->") {
+                i += end + "-->".len();
+            } else {
+                i = bytes.len();
+            }
+            continue;
+        }
+        // Skip processing instructions (`<?...?>`) and other `<!...>` directives.
+        if i < bytes.len() && bytes[i] == b'?' {
+            if let Some(end) = xml[i..].find("?>") {
+                i += end + "?>".len();
+            } else {
+                i = bytes.len();
+            }
+            continue;
+        }
+        if i < bytes.len() && bytes[i] == b'!' {
             while i < bytes.len() && bytes[i] != b'>' {
                 i += 1;
             }
-            i += 1;
+            if i < bytes.len() {
+                i += 1;
+            }
             continue;
         }
         let Some(end) = xml[i..].find('>') else {
@@ -958,7 +997,7 @@ mod tests {
         );
         assert_eq!(rp.return_offset, Some(0x00), "RAX return");
         assert_eq!(rp.stack_arg_base, Some(8), "stack arg base");
-        assert_eq!(rp.extrapop, 8, "return-address stack size");
+        assert_eq!(rp.extrapop, Some(8), "return-address stack size");
         assert!(rp.unaffected_offsets.contains(&0x20), "RSP is callee-saved");
         assert!(
             rp.killedbycall_offsets.contains(&0x00),
@@ -1081,7 +1120,54 @@ mod arm_stack_pentry_tests {
             Some(0),
             "stack_arg_base is the value the abi.rs consumers would use"
         );
-        assert_eq!(rp.extrapop, 0, "ARM pushes no return address on the stack");
+        assert_eq!(
+            rp.extrapop,
+            Some(0),
+            "ARM pushes no return address on the stack"
+        );
+    }
+
+    #[test]
+    fn extrapop_unknown_hex_stack_offsets_comments_and_float_storage_parse_accurately() {
+        let xml = r#"<compiler_spec>
+  <stackpointer register="ESP" space="ram"/>
+  <!-- <prototype name="__bogus" extrapop="99"><input><pentry><addr space="stack" offset="0x40"/></pentry></input></prototype> -->
+  <default_proto>
+    <prototype name="__stdcall" extrapop="unknown" stackshift="4">
+      <input>
+        <pentry minsize="1" maxsize="4"><addr space="stack" offset="0x10"/></pentry>
+        <pentry minsize="1" maxsize="4"><addr space="stack" offset="-0x8"/></pentry>
+      </input>
+      <output>
+        <pentry minsize="4" maxsize="8" storage="float"><register name="ST0"/></pentry>
+        <pentry minsize="1" maxsize="4"><register name="EAX"/></pentry>
+      </output>
+    </prototype>
+  </default_proto>
+</compiler_spec>"#;
+
+        let doc = CspecDocument::parse_str(xml).expect("parse cspec");
+        assert!(doc.prototypes.iter().all(|p| p.name != "__bogus"));
+        let raw = doc.default_proto.as_ref().expect("default_proto");
+        assert_eq!(raw.extrapop, None);
+        assert_eq!(
+            raw.input,
+            vec![
+                CspecPentry::Stack { offset: 0x10 },
+                CspecPentry::Stack { offset: -0x8 },
+            ]
+        );
+
+        let mut reg_map = SlaRegisterMap::default();
+        reg_map.insert("ESP".into(), (0x10, 4));
+        reg_map.insert("EAX".into(), (0x00, 4));
+        reg_map.insert("ST0".into(), (0x1100, 10));
+        let resolved = doc.resolve(&reg_map);
+        let rp = resolved.default_proto.expect("resolved");
+        assert_eq!(rp.extrapop, None);
+        assert_eq!(rp.stack_arg_base, Some(0x10));
+        assert_eq!(rp.return_offset, Some(0x00));
+        assert_eq!(rp.float_return_offset, Some(0x1100));
     }
 }
 
