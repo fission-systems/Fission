@@ -124,11 +124,14 @@ pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) ->
     );
 
     let mut solver = Solver::new();
-    for v in &param_vars {
-        // Registers the Var's node so `get_value` can read a counterexample
-        // model back for it after a `Sat` result.
-        solver.register_node(v.clone());
-    }
+    let param_node_ids: Vec<_> = param_vars
+        .iter()
+        .map(|v| {
+            // Registers the Var's node so `get_value` can read a counterexample
+            // model back for it after a `Sat` result.
+            solver.register_node(v.clone())
+        })
+        .collect();
     solver.assert(SymExpr::new_neq(prehir_cmp, hir_cmp));
 
     let result = match solver.check_sat() {
@@ -143,12 +146,9 @@ pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) ->
     match classify_solver_result(result) {
         SolverVerdict::Equivalent => SymbolicOutcome::Equivalent,
         SolverVerdict::Counterexample => {
-            let args = param_vars
+            let args = param_node_ids
                 .iter()
-                .map(|v| match v {
-                    SymExpr::Var { id, .. } => solver.get_value(*id).unwrap_or(0),
-                    _ => 0,
-                })
+                .map(|&id| solver.get_value(id).unwrap_or(0))
                 .collect();
             SymbolicOutcome::Diverged(Counterexample { args })
         }
@@ -303,5 +303,126 @@ mod tests {
         let err = lower_sym::prehir::lower(&uninit_body, &params, &locals, &param_vars)
             .expect_err("uninitialized local read should be rejected");
         assert!(err.to_string().contains("undeclared variable 'uninit'"));
+    }
+
+    #[test]
+    fn signed_var_widening_cast_sign_extends_in_symbolic_equivalence() {
+        use super::{SymbolicOutcome, check_symbolic_equivalence};
+        use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBinding};
+        use fission_midend_prehir::{PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt};
+
+        let i32_ty = int(32, true);
+        let i64_ty = int(64, true);
+
+        let prehir = PreHirFunction {
+            return_type: i64_ty.clone(),
+            params: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Cast {
+                ty: i64_ty.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }))],
+            ..Default::default()
+        };
+        let hir = HirFunction {
+            return_type: i64_ty.clone(),
+            params: vec![NirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: fission_midend_core::ir::HirBinaryOp::SLt,
+                    lhs: Box::new(HirExpr::Var("x".to_string())),
+                    rhs: Box::new(HirExpr::Const(0, i32_ty)),
+                    ty: fission_midend_core::ir::NirType::Bool,
+                },
+                then_body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                    op: fission_midend_core::ir::HirBinaryOp::Or,
+                    lhs: Box::new(HirExpr::Cast {
+                        ty: i64_ty.clone(),
+                        expr: Box::new(HirExpr::Var("x".to_string())),
+                    }),
+                    rhs: Box::new(HirExpr::Const(-0x1_0000_0000_i64, i64_ty.clone())),
+                    ty: i64_ty.clone(),
+                }))],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Cast {
+                    ty: i64_ty.clone(),
+                    expr: Box::new(HirExpr::Var("x".to_string())),
+                }))],
+            }],
+            ..Default::default()
+        };
+
+        let verdict = check_symbolic_equivalence(&prehir, &hir);
+        assert!(
+            matches!(verdict, SymbolicOutcome::Equivalent),
+            "signed var widening cast should sign-extend, got {}",
+            name(&verdict)
+        );
+    }
+
+    #[test]
+    fn symbolic_counterexample_returns_registered_model_values() {
+        use super::{SymbolicOutcome, check_symbolic_equivalence};
+        use fission_midend_core::ir::{HirExpr, HirFunction, HirStmt, NirBinding};
+        use fission_midend_prehir::{
+            PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirFunction, PreHirStmt,
+        };
+
+        let i32_ty = int(32, true);
+        let prehir = PreHirFunction {
+            return_type: i32_ty.clone(),
+            params: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(7, i32_ty.clone())),
+                        ty: fission_midend_core::ir::NirType::Bool,
+                    },
+                    then_body: vec![PreHirStmt::Return(Some(PreHirExpr::Const(
+                        1,
+                        i32_ty.clone(),
+                    )))]
+                    .into(),
+                    else_body: Vec::new().into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Const(0, i32_ty.clone()))),
+            ],
+            ..Default::default()
+        };
+        let hir = HirFunction {
+            return_type: i32_ty.clone(),
+            params: vec![NirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![HirStmt::Return(Some(HirExpr::Const(0, i32_ty)))],
+            ..Default::default()
+        };
+
+        let SymbolicOutcome::Diverged(ce) = check_symbolic_equivalence(&prehir, &hir) else {
+            panic!("expected counterexample");
+        };
+        assert_eq!(ce.args, vec![7]);
     }
 }

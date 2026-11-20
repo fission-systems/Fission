@@ -687,7 +687,8 @@ macro_rules! define_interp {
                             bail!("interp: division by zero");
                         }
                         if is_signed(ty) {
-                            l.wrapping_div(r)
+                            (sign_extend_i128(l, operand_bits)
+                                / sign_extend_i128(r, operand_bits)) as i64
                         } else {
                             (unsigned_masked(l, operand_bits) / unsigned_masked(r, operand_bits))
                                 as i64
@@ -700,7 +701,8 @@ macro_rules! define_interp {
                             bail!("interp: modulo by zero");
                         }
                         if is_signed(ty) {
-                            l.wrapping_rem(r)
+                            (sign_extend_i128(l, operand_bits)
+                                % sign_extend_i128(r, operand_bits)) as i64
                         } else {
                             (unsigned_masked(l, operand_bits) % unsigned_masked(r, operand_bits))
                                 as i64
@@ -722,8 +724,12 @@ macro_rules! define_interp {
                     $BinaryOp::Sar => {
                         (sign_extend_i128(l, operand_bits) >> ((r as u32) & 63)) as i64
                     }
-                    $BinaryOp::Eq => bool_to_raw(l == r),
-                    $BinaryOp::Ne => bool_to_raw(l != r),
+                    $BinaryOp::Eq => bool_to_raw(
+                        unsigned_masked(l, operand_bits) == unsigned_masked(r, operand_bits),
+                    ),
+                    $BinaryOp::Ne => bool_to_raw(
+                        unsigned_masked(l, operand_bits) != unsigned_masked(r, operand_bits),
+                    ),
                     $BinaryOp::Lt => bool_to_raw(
                         unsigned_masked(l, operand_bits) < unsigned_masked(r, operand_bits),
                     ),
@@ -1858,6 +1864,80 @@ mod world_tests {
         let run = run_hir(&body, &[], &[], &[], &returning).expect("run");
         assert!(!run.ended_in_no_return);
         assert_eq!(run.ret, Some(5));
+    }
+
+    #[test]
+    fn signed_sub_64_div_mod_and_mixed_sign_eq_ne_use_operand_width() {
+        let i32_ty = || NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let i64_ty = || NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let eval_one =
+            |op: fission_midend_core::ir::HirBinaryOp, l: HirExpr, r: HirExpr, ty: NirType| {
+                let body = vec![HirStmt::Return(Some(HirExpr::Binary {
+                    op,
+                    lhs: Box::new(l),
+                    rhs: Box::new(r),
+                    ty,
+                }))];
+                run_hir(&body, &[], &[], &[], &World::default())
+                    .expect("run")
+                    .ret
+            };
+
+        // Signed 32-bit div/mod when operands come from unsigned-stored u32 bit patterns
+        // (`0xFFFF_FFFF` -> `-1` as i32) or trigger 32-bit `i32::MIN / -1` without panicking.
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Div,
+                HirExpr::Const(-6, u32_ty()),
+                HirExpr::Const(2, u32_ty()),
+                i32_ty(),
+            ),
+            Some(-3)
+        );
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Mod,
+                HirExpr::Const(-7, u32_ty()),
+                HirExpr::Const(4, u32_ty()),
+                i32_ty(),
+            ),
+            Some(-3)
+        );
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Div,
+                HirExpr::Const(i64::MIN, i64_ty()),
+                HirExpr::Const(-1, i64_ty()),
+                i64_ty(),
+            ),
+            Some(i64::MIN)
+        );
+
+        // Mixed signed/unsigned 32-bit equality compares masked 32-bit values (`-1_i32 == 0xFFFF_FFFF_u32`).
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Eq,
+                HirExpr::Const(-1, i32_ty()),
+                HirExpr::Const(0xFFFF_FFFFu32 as i64, u32_ty()),
+                NirType::Bool,
+            ),
+            Some(1)
+        );
+        assert_eq!(
+            eval_one(
+                fission_midend_core::ir::HirBinaryOp::Ne,
+                HirExpr::Const(-1, i32_ty()),
+                HirExpr::Const(0xFFFF_FFFFu32 as i64, u32_ty()),
+                NirType::Bool,
+            ),
+            Some(0)
+        );
     }
 }
 

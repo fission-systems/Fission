@@ -12,6 +12,7 @@
 //! mod.rs`), rather than reimplementing binary loading.
 
 use anyhow::{Context, Result, bail};
+use fission_emulator::arch::Endianness;
 use fission_emulator::pcode::page_map::prot;
 use fission_emulator::{
     ArchInfo, Emulator, LinuxEnv, MachineState, OsEnvironment, RunOutcome, WindowsEnv,
@@ -153,8 +154,8 @@ pub struct EmulatorHarness {
     emu: Emulator,
     baseline_state: MachineState,
     baseline_pc: u64,
-    /// Address of the scratch buffer, once installed.
-    scratch: Option<u64>,
+    /// Address and byte length of the scratch buffer, once installed.
+    scratch: Option<(u64, usize)>,
 }
 
 /// Stack pointer at the callee's entry for a call with `stack_args` stack
@@ -170,6 +171,24 @@ fn call_frame_sp(sp: u64, ptr_size: u64, shadow_space: u64, stack_args: u64) -> 
     // Round the argument area up to 16 so the entry alignment survives.
     let arg_area = (stack_args * ptr_size).div_ceil(16) * 16;
     sp - arg_area - ptr_size - shadow_space
+}
+
+/// Stack pointer at the callee's entry for a link-register ABI (ARM/AArch64/
+/// MIPS/PowerPC) where no return address is pushed on the stack, reserving
+/// room below baseline `sp` for outgoing stack arguments (and any ABI base
+/// offset such as MIPS o32's 16-byte home area).
+fn link_reg_call_frame_sp(sp: u64, ptr_size: u64, base_offset: u64, stack_args: u64) -> u64 {
+    let outgoing = base_offset.saturating_add(stack_args.saturating_mul(ptr_size));
+    let frame = outgoing.div_ceil(16) * 16;
+    sp.saturating_sub(frame)
+}
+
+fn encode_word(value: u64, ptr_size: u8, endian: Endianness) -> Vec<u8> {
+    let size = usize::from(ptr_size).min(8);
+    match endian {
+        Endianness::Little => value.to_le_bytes()[..size].to_vec(),
+        Endianness::Big => value.to_be_bytes()[8 - size..].to_vec(),
+    }
 }
 
 impl EmulatorHarness {
@@ -257,16 +276,34 @@ impl EmulatorHarness {
     /// same address in whatever evaluates the decompiled side -- the two
     /// memories only agree because both are told the same thing.
     pub fn install_scratch(&mut self, contents: &[u8]) -> Result<u64> {
-        if let Some(addr) = self.scratch {
+        let ram = self.emu.state.ram_space();
+        if let Some((addr, mapped_len)) = self.scratch
+            && contents.len() <= mapped_len
+        {
+            if self
+                .baseline_state
+                .read_space_readonly(ram, addr, contents.len())
+                .ok()
+                .as_deref()
+                == Some(contents)
+            {
+                return Ok(addr);
+            }
+            self.emu.state = self.baseline_state.clone();
+            self.emu
+                .state
+                .write_space(ram, addr, contents)
+                .context("failed to update the scratch buffer")?;
+            self.baseline_state = self.emu.state.clone();
             return Ok(addr);
         }
+        self.emu.state = self.baseline_state.clone();
         let len = contents.len().max(1) as u64;
         let addr = self
             .emu
             .state
             .page_map
             .mmap_anon(len, prot::READ | prot::WRITE);
-        let ram = self.emu.state.ram_space();
         self.emu
             .state
             .write_space(ram, addr, contents)
@@ -274,7 +311,7 @@ impl EmulatorHarness {
         // Re-baseline so every later call sees the buffer, and sees it
         // unmodified.
         self.baseline_state = self.emu.state.clone();
-        self.scratch = Some(addr);
+        self.scratch = Some((addr, len as usize));
         Ok(addr)
     }
 
@@ -478,13 +515,23 @@ impl EmulatorHarness {
         // return address to the link register (ARM/MIPS/PPC) or push it on
         // the stack (x86) -- exactly what `simulate_return()` already
         // expects to read back when the callee's own `ret` executes.
+        let sp_reg = self.emu.arch.sp_reg;
+        let ptr_size_u8 = self.emu.arch.pointer_size;
+        let ptr_size = u64::from(ptr_size_u8);
+        let endian = self.emu.arch.endian;
+        let sp = self.emu.read_register_u64(sp_reg)?;
+        let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
+        let stack_args = (args.len().saturating_sub(arg_regs.len())) as u64;
+
         self.emu.pc = address;
         if let Some(lr) = self.emu.arch.cc.return_addr_reg() {
             self.emu.write_register_u64(lr, SENTINEL_RET)?;
+            let base_offset = self.emu.arch.cc.stack_arg_offset(0);
+            let new_sp = link_reg_call_frame_sp(sp, ptr_size, base_offset, stack_args);
+            if new_sp != sp {
+                self.emu.write_register_u64(sp_reg, new_sp)?;
+            }
         } else {
-            let sp_reg = self.emu.arch.sp_reg;
-            let ptr_size = self.emu.arch.pointer_size as u64;
-            let sp = self.emu.read_register_u64(sp_reg)?;
             // `stack_arg_offset(0) - ptr_size` is the CC's own required gap
             // between the return address and the first stack-passed arg --
             // on Win64 that's the mandatory 32-byte "shadow space" the
@@ -501,19 +548,15 @@ impl EmulatorHarness {
                 .cc
                 .stack_arg_offset(0)
                 .saturating_sub(ptr_size);
-            let stack_args = (args.len().saturating_sub(self.emu.arch.cc.arg_regs().len())) as u64;
             let new_sp = call_frame_sp(sp, ptr_size, shadow_space, stack_args);
             let ram = self.emu.state.ram_space();
-            let bytes = SENTINEL_RET.to_le_bytes()[..ptr_size as usize].to_vec();
+            let bytes = encode_word(SENTINEL_RET, ptr_size_u8, endian);
             self.emu.state.write_space(ram, new_sp, &bytes)?;
             self.emu.write_register_u64(sp_reg, new_sp)?;
         }
 
         // Inject args via the calling convention's arg registers/stack
         // slots -- mirrors `read_arg`'s logic in reverse.
-        let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
-        let ptr_size = self.emu.arch.pointer_size as u64;
-        let sp_reg = self.emu.arch.sp_reg;
         for (i, &value) in args.iter().enumerate() {
             if i < arg_regs.len() {
                 self.emu.write_register_u64(arg_regs[i], value)?;
@@ -522,7 +565,7 @@ impl EmulatorHarness {
                 let stack_off = self.emu.arch.cc.stack_arg_offset(n);
                 let sp = self.emu.read_register_u64(sp_reg)?;
                 let ram = self.emu.state.ram_space();
-                let bytes = value.to_le_bytes()[..ptr_size as usize].to_vec();
+                let bytes = encode_word(value, ptr_size_u8, endian);
                 self.emu.state.write_space(ram, sp + stack_off, &bytes)?;
             }
         }
@@ -533,7 +576,8 @@ impl EmulatorHarness {
 
 #[cfg(test)]
 mod tests {
-    use super::call_frame_sp;
+    use super::{EmulatorHarness, call_frame_sp, encode_word, link_reg_call_frame_sp};
+    use fission_emulator::arch::Endianness;
 
     /// Where the callee finds stack argument `n`, as `call` writes it:
     /// `new_sp + stack_arg_offset(n)` with `stack_arg_offset(n) = ptr + shadow
@@ -579,5 +623,56 @@ mod tests {
     fn a_call_without_stack_arguments_is_unchanged() {
         assert_eq!(call_frame_sp(0x1000, 8, 0, 0), 0x1000 - 8);
         assert_eq!(call_frame_sp(0x1000, 8, 32, 0), 0x1000 - 8 - 32);
+    }
+
+    #[test]
+    fn link_register_stack_args_reserve_aligned_frame_below_baseline_sp() {
+        let sp = 0x7fff_ffff_e000u64;
+        for (ptr, base) in [(8u64, 0u64), (4, 0), (4, 0x10), (4, 0x08)] {
+            for stack_args in 1..=6u64 {
+                let new_sp = link_reg_call_frame_sp(sp, ptr, base, stack_args);
+                assert_eq!(new_sp % 16, 0);
+                for n in 0..stack_args {
+                    let slot = new_sp + base + n * ptr;
+                    assert!(
+                        slot + ptr <= sp,
+                        "ptr={ptr} base={base:#x} arg {n}: {slot:#x} reaches {sp:#x}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn encode_word_respects_endianness_and_pointer_width() {
+        assert_eq!(
+            encode_word(0x1234_5678, 4, Endianness::Little),
+            vec![0x78, 0x56, 0x34, 0x12]
+        );
+        assert_eq!(
+            encode_word(0x1234_5678, 4, Endianness::Big),
+            vec![0x12, 0x34, 0x56, 0x78]
+        );
+        assert_eq!(
+            encode_word(0x0102_0304_0506_0708, 8, Endianness::Big),
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
+    }
+
+    #[test]
+    fn install_scratch_expands_or_rewrites_when_buffer_grows() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../fission-emulator/testdata/win_x64_write.exe"
+        );
+        let mut harness = EmulatorHarness::build(std::path::Path::new(path), Some(1000))
+            .expect("build harness from fixture");
+        let small = vec![0xAAu8; 128];
+        let addr_small = harness.install_scratch(&small).expect("install 128B");
+        assert_eq!(harness.baseline_byte(addr_small + 127), Some(0xAA));
+
+        let large = vec![0x55u8; 512];
+        let addr_large = harness.install_scratch(&large).expect("install 512B");
+        assert_eq!(harness.baseline_byte(addr_large + 511), Some(0x55));
     }
 }
