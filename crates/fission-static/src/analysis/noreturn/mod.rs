@@ -73,9 +73,21 @@ const NORETURN_INSTRUCTION_LIMIT: usize = 4000;
 
 const CACHE_CAPACITY: usize = 8;
 
-static NORETURN_CACHE: OnceLock<Mutex<LruCache<String, BTreeSet<u64>>>> = OnceLock::new();
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct NoReturnCacheKey {
+    binary_hash: String,
+    functions_digest: u64,
+}
 
-fn noreturn_cache() -> &'static Mutex<LruCache<String, BTreeSet<u64>>> {
+struct CachedNoReturn {
+    storage: fission_loader::loader::LoadedBinaryStorageToken,
+    set: BTreeSet<u64>,
+}
+
+static NORETURN_CACHE: OnceLock<Mutex<LruCache<NoReturnCacheKey, CachedNoReturn>>> =
+    OnceLock::new();
+
+fn noreturn_cache() -> &'static Mutex<LruCache<NoReturnCacheKey, CachedNoReturn>> {
     NORETURN_CACHE.get_or_init(|| {
         Mutex::new(LruCache::new(
             NonZeroUsize::new(CACHE_CAPACITY).expect("non-zero cache capacity"),
@@ -83,10 +95,29 @@ fn noreturn_cache() -> &'static Mutex<LruCache<String, BTreeSet<u64>>> {
     })
 }
 
+fn noreturn_cache_key(binary: &LoadedBinary) -> NoReturnCacheKey {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    binary.functions.len().hash(&mut hasher);
+    for func in &binary.functions {
+        func.address.hash(&mut hasher);
+        func.size.hash(&mut hasher);
+        func.is_import.hash(&mut hasher);
+        func.name.hash(&mut hasher);
+        func.external_library.hash(&mut hasher);
+    }
+    NoReturnCacheKey {
+        binary_hash: binary.hash.clone(),
+        functions_digest: hasher.finish(),
+    }
+}
+
 /// Return the set of function entry addresses known (by name) or computed
 /// (structurally, transitively) to never return, for `binary`.
 ///
-/// Cached per `binary.hash`, mirroring `control_flow_facts_for`'s cache.
+/// Cached per `(binary.hash, functions_digest)` and validated against storage,
+/// mirroring `control_flow_facts_for`'s cache.
 pub fn no_return_functions_for(binary: &LoadedBinary) -> BTreeSet<u64> {
     no_return_functions_with_seeds(binary, None)
 }
@@ -97,17 +128,30 @@ pub(crate) fn no_return_functions_with_seeds(
     binary: &LoadedBinary,
     seeds: Option<&mut DecodeSeeds>,
 ) -> BTreeSet<u64> {
-    let hash = binary.hash.clone();
-    if let Ok(mut cache) = noreturn_cache().lock() {
-        if let Some(set) = cache.get(&hash) {
-            return set.clone();
-        }
+    let key = noreturn_cache_key(binary);
+    // Warm hits intentionally skip transient `seeds` capture (FID preparation
+    // only reuses leftover traces from a cold noreturn sweep; see
+    // `transient_decode_seeds_do_not_recompute_warm_no_return_or_ordinary_cf`).
+    // Keying on `functions_digest` and validating `LoadedBinaryStorageToken`
+    // ensures pre-discovery or pre-patch state cannot shadow post-discovery
+    // noreturn sets or cold seed capture.
+    if let Ok(mut cache) = noreturn_cache().lock()
+        && let Some(cached) = cache.get(&key)
+        && cached.storage.matches(binary)
+    {
+        return cached.set.clone();
     }
 
     let set = compute_no_return_functions(binary, seeds);
 
     if let Ok(mut cache) = noreturn_cache().lock() {
-        cache.put(hash, set.clone());
+        cache.put(
+            key,
+            CachedNoReturn {
+                storage: binary.storage_token(),
+                set: set.clone(),
+            },
+        );
     }
     set
 }
@@ -837,5 +881,69 @@ mod tests {
             &pcode,
             &BTreeSet::new()
         ));
+    }
+
+    #[test]
+    fn cache_invalidates_when_functions_or_storage_change() {
+        use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+
+        let make_binary = |opcodes: &[u8], funcs: Vec<FunctionInfo>| {
+            let mut code = vec![0u8; 0x100];
+            code[..opcodes.len()].copy_from_slice(opcodes);
+            let mut bin =
+                LoadedBinaryBuilder::new("noreturn_cache.elf".to_string(), DataBuffer::Heap(code))
+                    .format("ELF")
+                    .arch_spec("x86:LE:64:default")
+                    .is_64bit(true)
+                    .add_section(SectionInfo {
+                        name: ".text".to_string(),
+                        virtual_address: 0x1000,
+                        virtual_size: 0x100,
+                        file_offset: 0,
+                        file_size: 0x100,
+                        is_executable: true,
+                        is_readable: true,
+                        is_writable: false,
+                    })
+                    .add_functions(funcs)
+                    .build()
+                    .expect("build");
+            bin.hash = "noreturn-cache-test-hash".to_string();
+            bin
+        };
+
+        // 1. Pre-discovery warm call with empty functions must not poison post-discovery
+        //    noreturn analysis or cold seed capture.
+        let bin_empty = make_binary(&[0xc3, 0x90], Vec::new());
+        assert!(no_return_functions_for(&bin_empty).is_empty());
+
+        let post_discovery_funcs = vec![
+            FunctionInfo {
+                name: "abort".to_string(),
+                address: 0x2000,
+                size: 8,
+                is_import: true,
+                ..Default::default()
+            },
+            FunctionInfo {
+                name: "normal_ret".to_string(),
+                address: 0x1000,
+                size: 2,
+                is_import: false,
+                ..Default::default()
+            },
+        ];
+        let bin_with_funcs = make_binary(&[0xc3, 0x90], post_discovery_funcs.clone());
+        let mut seeds = DecodeSeeds::new();
+        let detected = no_return_functions_with_seeds(&bin_with_funcs, Some(&mut seeds));
+        assert!(detected.contains(&0x2000));
+        assert!(!detected.contains(&0x1000));
+        assert!(seeds.contains_key(&0x1000));
+
+        // 2. Identical hash and function table but mutated underlying storage (ret -> self-loop
+        //    `jmp 0x1000`) must invalidate the cache via `LoadedBinaryStorageToken`.
+        let bin_patched = make_binary(&[0xeb, 0xfe], post_discovery_funcs);
+        let detected_patched = no_return_functions_for(&bin_patched);
+        assert!(detected_patched.contains(&0x1000));
     }
 }

@@ -1096,7 +1096,8 @@ pub(crate) fn validate_after_condition(
                 return true;
             }
             if let Some(sec) = binary.sections.iter().find(|s| {
-                prev_addr >= s.virtual_address && prev_addr < s.virtual_address + s.virtual_size
+                prev_addr >= s.virtual_address
+                    && prev_addr < s.virtual_address.saturating_add(s.virtual_size)
             }) {
                 if !sec.is_executable {
                     return true;
@@ -1609,17 +1610,19 @@ pub(super) fn is_strict_boundary(
         // 4. JMP near (0xe9 xx xx xx xx): opcode at check_addr-4
         if check_addr >= 4 {
             if let Some(op) = binary.view_bytes_exact(check_addr - 4, 5) {
-                if op[0] == 0xe9 {
+                if op[0] == 0xe9
+                    && let Some(next_ip) = check_addr.checked_add(1)
+                {
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
-                    let next_ip = check_addr + 1;
-                    let target = (next_ip as i64 + rel32 as i64) as u64;
-                    let exec_ranges =
-                        crate::analysis::function_discovery::ranges::executable_ranges(binary);
-                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
-                        target,
-                        &exec_ranges,
-                    ) {
-                        return true;
+                    if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
+                        let exec_ranges =
+                            crate::analysis::function_discovery::ranges::executable_ranges(binary);
+                        if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                            target,
+                            &exec_ranges,
+                        ) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -1630,17 +1633,19 @@ pub(super) fn is_strict_boundary(
         //    the following byte, but the compiler may place a new subroutine there.
         if check_addr >= 4 {
             if let Some(op) = binary.view_bytes_exact(check_addr - 4, 5) {
-                if op[0] == 0xe8 {
+                if op[0] == 0xe8
+                    && let Some(next_ip) = check_addr.checked_add(1)
+                {
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
-                    let next_ip = check_addr + 1;
-                    let target = (next_ip as i64 + rel32 as i64) as u64;
-                    let exec_ranges =
-                        crate::analysis::function_discovery::ranges::executable_ranges(binary);
-                    if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
-                        target,
-                        &exec_ranges,
-                    ) {
-                        return true;
+                    if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
+                        let exec_ranges =
+                            crate::analysis::function_discovery::ranges::executable_ranges(binary);
+                        if crate::analysis::function_discovery::ranges::is_in_executable_ranges(
+                            target,
+                            &exec_ranges,
+                        ) {
+                            return true;
+                        }
                     }
                 }
             }
@@ -1664,14 +1669,16 @@ pub(super) fn is_strict_boundary(
         }
         // FF /2 or FF /4 with ModRM+SIB (3-6 bytes): check a few offsets
         for back in [2usize, 5, 6] {
-            if check_addr as usize >= back {
-                if let Some(op) = binary.view_bytes(check_addr - back as u64, 1) {
-                    if op[0] == 0xff {
-                        if let Some(mrm) = binary.view_bytes(check_addr - back as u64 + 1, 1) {
-                            let reg = (mrm[0] >> 3) & 0x7;
-                            if reg == 2 || reg == 4 {
-                                return true;
-                            }
+            if check_addr >= back as u64 {
+                let op_addr = check_addr - back as u64;
+                if let Some(op) = binary.view_bytes(op_addr, 1) {
+                    if op[0] == 0xff
+                        && let Some(mrm_addr) = op_addr.checked_add(1)
+                        && let Some(mrm) = binary.view_bytes(mrm_addr, 1)
+                    {
+                        let reg = (mrm[0] >> 3) & 0x7;
+                        if reg == 2 || reg == 4 {
+                            return true;
                         }
                     }
                 }
@@ -1873,6 +1880,7 @@ pub(crate) fn scan_data_references(
     use rayon::prelude::*;
 
     let ptr_size = if binary.is_64bit { 8 } else { 4 };
+    let little_endian = binary.is_little_endian();
 
     let mut candidates: Vec<(u64, bool)> = binary
         .sections
@@ -1880,15 +1888,26 @@ pub(crate) fn scan_data_references(
         .filter(|sec| !sec.is_executable && sec.is_readable)
         .flat_map(|section| {
             let mut sec_candidates = Vec::new();
-            if let Some(bytes) =
-                binary.view_bytes(section.virtual_address, section.virtual_size as usize)
-            {
+            let Ok(sec_size) = usize::try_from(section.virtual_size) else {
+                return sec_candidates;
+            };
+            if let Some(bytes) = binary.view_bytes(section.virtual_address, sec_size) {
                 let mut offset = 0;
                 while offset + ptr_size <= bytes.len() {
                     let val = if ptr_size == 8 {
-                        u64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap())
+                        let raw: [u8; 8] = bytes[offset..offset + 8].try_into().unwrap();
+                        if little_endian {
+                            u64::from_le_bytes(raw)
+                        } else {
+                            u64::from_be_bytes(raw)
+                        }
                     } else {
-                        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as u64
+                        let raw: [u8; 4] = bytes[offset..offset + 4].try_into().unwrap();
+                        if little_endian {
+                            u32::from_le_bytes(raw) as u64
+                        } else {
+                            u32::from_be_bytes(raw) as u64
+                        }
                     };
                     // A code pointer on an architecture with a low-bit code mode
                     // (ARM/Thumb) carries the mode in bit 0: strip it to get the

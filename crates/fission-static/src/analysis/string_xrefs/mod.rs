@@ -129,11 +129,21 @@ pub struct StringXrefStats {
 pub fn analyze_string_xrefs(binary: &LoadedBinary, min_length: usize) -> StringXrefAnalysis {
     let mut analysis = StringXrefAnalysis::new();
 
-    // Extract strings from all sections
+    // Extract strings from all addressable file-backed sections
     let mut all_strings = Vec::new();
     for section in &binary.sections {
-        let start = section.file_offset as usize;
-        let end = start + section.file_size as usize;
+        if !section.is_addressable() || section.file_size == 0 {
+            continue;
+        }
+        let Ok(start) = usize::try_from(section.file_offset) else {
+            continue;
+        };
+        let Ok(size) = usize::try_from(section.file_size) else {
+            continue;
+        };
+        let Some(end) = start.checked_add(size) else {
+            continue;
+        };
         if let Some(data) = binary.data.as_slice().get(start..end) {
             let base_addr = section.virtual_address;
             let strings = super::strings::extract_strings(data, base_addr, min_length);
@@ -199,5 +209,52 @@ mod tests {
 
         let results = analysis.find_by_partial("Hello");
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn analyze_string_xrefs_ignores_non_addressable_and_overflow_sections() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+        let mut bytes = b"secret_debug_comment\0visible_string\0".to_vec();
+        bytes.resize(0x100, 0);
+        let binary = LoadedBinaryBuilder::new("str.elf".to_string(), DataBuffer::Heap(bytes))
+            .format("ELF")
+            .is_64bit(true)
+            .add_section(SectionInfo {
+                name: ".comment".to_string(),
+                virtual_address: 0,
+                virtual_size: 21,
+                file_offset: 0,
+                file_size: 21,
+                is_executable: false,
+                is_readable: false,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".overflow".to_string(),
+                virtual_address: 0x2000,
+                virtual_size: u64::MAX,
+                file_offset: u64::MAX - 4,
+                file_size: 16,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_section(SectionInfo {
+                name: ".rodata".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 15,
+                file_offset: 21,
+                file_size: 15,
+                is_executable: false,
+                is_readable: true,
+                is_writable: false,
+            })
+            .build()
+            .expect("build");
+
+        let analysis = analyze_string_xrefs(&binary, 4);
+        assert!(analysis.find_by_content("secret_debug_comment").is_empty());
+        assert_eq!(analysis.find_by_content("visible_string").len(), 1);
     }
 }

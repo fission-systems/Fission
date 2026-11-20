@@ -2,7 +2,9 @@
 
 use fission_loader::loader::LoadedBinary;
 use fission_pcode_ir::PcodeOpcode;
-use fission_sleigh::runtime::{DecodeStopReason, DecodedFlowKind, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{
+    DecodeContract, DecodeMemoryContext, DecodeStopReason, DecodedFlowKind, RuntimeSleighFrontend,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::analysis::xref_coverage::{
@@ -94,7 +96,15 @@ pub(crate) fn push_pcode_layer_with_coverage(
             coverage.omit(XrefOmissionReason::FunctionSizeUnrepresentable, 1);
             continue;
         };
-        let Some(available) = binary.available_execution_bytes(function.address) else {
+        let address_state = frontend.normalize_low_bit_code_address(function.address);
+        let entry_addr = address_state.address;
+        let context_override = crate::analysis::decode_context_for_address(
+            binary,
+            &frontend,
+            function.address,
+            address_state.context_override,
+        );
+        let Some(available) = binary.available_execution_bytes(entry_addr) else {
             coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         };
@@ -102,14 +112,18 @@ pub(crate) fn push_pcode_layer_with_coverage(
             coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         }
-        let Some(bytes) = binary.view_executable_bytes(function.address, size) else {
+        let Some(bytes) = binary.view_executable_bytes(entry_addr, size) else {
             coverage.omit(XrefOmissionReason::FunctionBytesUnavailable, 1);
             continue;
         };
-        let Ok(decoded) = frontend.lift_raw_pcode_function_with_contract(
+        let contract = DecodeContract::strict_function(PCODE_FUNCTION_INSTRUCTION_LIMIT);
+        let memory_context = DecodeMemoryContext::default();
+        let Ok(decoded) = frontend.lift_raw_pcode_function_with_context_and_memory_context(
             bytes,
-            function.address,
-            PCODE_FUNCTION_INSTRUCTION_LIMIT,
+            entry_addr,
+            contract,
+            &memory_context,
+            context_override,
         ) else {
             coverage.omit(XrefOmissionReason::FunctionLiftFailed, 1);
             continue;
@@ -273,11 +287,7 @@ pub(crate) fn push_pcode_layer_with_coverage(
         for op in decoded.function.blocks.iter().flat_map(|block| &block.ops) {
             if matches!(
                 op.opcode,
-                PcodeOpcode::Call
-                    | PcodeOpcode::CallInd
-                    | PcodeOpcode::Branch
-                    | PcodeOpcode::BranchInd
-                    | PcodeOpcode::CBranch
+                PcodeOpcode::Call | PcodeOpcode::Branch | PcodeOpcode::CBranch
             ) {
                 let Some((decoded_flow_kind, instruction_length)) =
                     decoded_instructions.get(&op.address)
@@ -499,5 +509,120 @@ mod tests {
 
         assert!(!is_mapped_target(&binary, 8));
         assert!(is_mapped_target(&binary, 0x1008));
+    }
+
+    #[test]
+    fn callind_direct_ram_pointer_slot_emits_data_read_not_call_and_thumb_lifts() {
+        use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo};
+
+        // x86-64: `call qword ptr [rip + 0x1000]` (ff 15 00 10 00 00) at 0x1000 followed by `ret` (c3)
+        // Pointer slot is mapped in .got at 0x2006 (RIP=0x1006 + 0x1000).
+        let mut x64_img = vec![0u8; 0x2000];
+        x64_img[0x00..0x07].copy_from_slice(&[0xff, 0x15, 0x00, 0x10, 0x00, 0x00, 0xc3]);
+
+        let x64_bin =
+            LoadedBinaryBuilder::new("got_call.elf".to_string(), DataBuffer::Heap(x64_img))
+                .format("ELF")
+                .entry_point(0x1000)
+                .arch_spec("x86:LE:64:default")
+                .architecture(fission_core::architecture::ArchitectureDescriptor {
+                    processor: "x86".into(),
+                    endian: "little".into(),
+                    bitness: 64,
+                    variant: "default".into(),
+                    abi: None,
+                    raw_machine: "x86_64".into(),
+                })
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 0x100,
+                    file_offset: 0,
+                    file_size: 0x100,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_section(SectionInfo {
+                    name: ".got".to_string(),
+                    virtual_address: 0x2000,
+                    virtual_size: 0x100,
+                    file_offset: 0x1000,
+                    file_size: 0x100,
+                    is_executable: false,
+                    is_readable: true,
+                    is_writable: true,
+                })
+                .add_functions(vec![FunctionInfo {
+                    name: "caller".to_string(),
+                    address: 0x1000,
+                    size: 7,
+                    is_import: false,
+                    ..Default::default()
+                }])
+                .build()
+                .expect("x64 elf");
+
+        let mut builder = XrefIndexBuilder::new();
+        let coverage = push_pcode_layer_with_coverage(&mut builder, &x64_bin);
+        assert_eq!(coverage.completed_units, 1);
+        let index = builder.finish();
+        let slot_refs: Vec<_> = index
+            .refs
+            .iter()
+            .filter(|r| r.target.address == Some(0x2006))
+            .collect();
+        assert!(
+            slot_refs.iter().any(|r| r.kind == XrefKind::DataRead),
+            "expected DataRead for indirect call pointer slot: {slot_refs:?}"
+        );
+        assert!(
+            !slot_refs
+                .iter()
+                .any(|r| r.kind == XrefKind::Call || r.kind == XrefKind::Jump),
+            "indirect call pointer slot must not be marked direct Call/Jump: {slot_refs:?}"
+        );
+
+        // Thumb function marked by bit 0 (0x1001): `movs r0, #1; bx lr` (01 20 70 47)
+        let mut arm_img = vec![0u8; 0x100];
+        arm_img[0x00..0x04].copy_from_slice(&[0x01, 0x20, 0x70, 0x47]);
+        let arm_bin = LoadedBinaryBuilder::new("thumb.elf".to_string(), DataBuffer::Heap(arm_img))
+            .format("ELF")
+            .entry_point(0x1001)
+            .arch_spec("ARM:LE:32:v8")
+            .architecture(fission_core::architecture::ArchitectureDescriptor {
+                processor: "ARM".into(),
+                endian: "little".into(),
+                bitness: 32,
+                variant: "v8".into(),
+                abi: None,
+                raw_machine: "EM_ARM".into(),
+            })
+            .add_section(SectionInfo {
+                name: ".text".to_string(),
+                virtual_address: 0x1000,
+                virtual_size: 0x100,
+                file_offset: 0,
+                file_size: 0x100,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_functions(vec![FunctionInfo {
+                name: "thumb_fn".to_string(),
+                address: 0x1001,
+                size: 4,
+                is_import: false,
+                ..Default::default()
+            }])
+            .build()
+            .expect("thumb elf");
+
+        let mut thumb_builder = XrefIndexBuilder::new();
+        let thumb_cov = push_pcode_layer_with_coverage(&mut thumb_builder, &arm_bin);
+        assert_eq!(
+            thumb_cov.completed_units, 1,
+            "Thumb function at odd address should lift via normalized address + TMode context"
+        );
     }
 }
