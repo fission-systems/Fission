@@ -71,7 +71,11 @@ struct Leaf {
     kind: LeafKind,
 }
 
-type SymEnv = HashMap<String, SymExpr>;
+#[derive(Clone, Default)]
+struct SymEnv {
+    values: HashMap<String, SymExpr>,
+    types: HashMap<String, NirType>,
+}
 
 fn and(a: SymExpr, b: SymExpr) -> SymExpr {
     // No `new_and_bool`/short-circuit-aware helper on `SymExpr` for boolean
@@ -172,7 +176,6 @@ macro_rules! define_lower_sym {
             use $ir_crate::{$BinaryOp, $Binding, $Expr, $LValue, $Stmt, $UnaryOp};
             use fission_midend_core::ir::NirType;
             use fission_solver::ast::SymExpr;
-            use std::collections::HashMap;
 
             use super::{Leaf, LeafKind, SymEnv, and, resize, sym_const, PATH_EXPLORE_BUDGET};
             use super::super::eval::{is_signed, width_of};
@@ -198,12 +201,20 @@ macro_rules! define_lower_sym {
                 }
             }
 
-            fn infer_ty<'a>(expr: &'a $Expr, env: &'a SymEnv) -> Result<NirType> {
+            fn infer_ty(expr: &$Expr, env: &SymEnv) -> Result<NirType> {
                 match expr {
                     $Expr::Var(name) => env
+                        .values
                         .get(name)
-                        .map(|e| int_ty_of_size(bit_width(e)))
-                        .ok_or_else(|| anyhow::anyhow!("lower_sym: read of undeclared variable '{name}'")),
+                        .map(|e| {
+                            env.types
+                                .get(name)
+                                .cloned()
+                                .unwrap_or_else(|| int_ty_of_size(bit_width(e)))
+                        })
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("lower_sym: read of undeclared variable '{name}'")
+                        }),
                     $Expr::Const(_, ty)
                     | $Expr::Cast { ty, .. }
                     | $Expr::Unary { ty, .. }
@@ -221,12 +232,8 @@ macro_rules! define_lower_sym {
                 }
             }
 
-            /// A throwaway `NirType::Int` used only to recover a bit width
-            /// through [`super::super::eval::width_of`] for a `Var` whose
-            /// declared type isn't separately tracked here (the `SymExpr`
-            /// itself already carries the width; sign handling for `Var`
-            /// reads is unsigned-by-construction since every write already
-            /// normalizes via [`resize`] at its own declared type).
+            /// Fallback unsigned integer type used only when a variable has a
+            /// value in `SymEnv` without a separate declared `NirType`.
             fn int_ty_of_size(bits: u32) -> NirType {
                 NirType::Int { bits, signed: false }
             }
@@ -234,6 +241,7 @@ macro_rules! define_lower_sym {
             fn eval_expr(expr: &$Expr, env: &SymEnv) -> Result<SymExpr> {
                 match expr {
                     $Expr::Var(name) => env
+                        .values
                         .get(name)
                         .cloned()
                         .ok_or_else(|| anyhow::anyhow!("lower_sym: read of undeclared variable '{name}'")),
@@ -355,8 +363,18 @@ macro_rules! define_lower_sym {
                                      memory model at the symbolic tier"
                                 ),
                             };
+                            let rhs_ty = infer_ty(rhs, &env)?;
                             let v = eval_expr(rhs, &env)?;
-                            env.insert(name.clone(), v);
+                            let target_ty = env
+                                .types
+                                .get(name)
+                                .cloned()
+                                .unwrap_or_else(|| rhs_ty.clone());
+                            let target_bits = width_of(&target_ty).clamp(1, 64);
+                            let from_bits = bit_width(&v);
+                            let resized = resize(v, from_bits, target_bits, is_signed(&rhs_ty));
+                            env.types.insert(name.clone(), target_ty);
+                            env.values.insert(name.clone(), resized);
                             idx += 1;
                         }
                         $Stmt::Return(expr) => {
@@ -458,14 +476,26 @@ macro_rules! define_lower_sym {
                     param_vars.len(),
                     params.len()
                 );
-                let mut env: SymEnv = HashMap::new();
+                let mut env = SymEnv::default();
                 for (p, v) in params.iter().zip(param_vars) {
-                    env.insert(p.name.clone(), v.clone());
+                    let bound = resize(
+                        v.clone(),
+                        bit_width(v),
+                        width_of(&p.ty).clamp(1, 64),
+                        is_signed(&p.ty),
+                    );
+                    env.types.insert(p.name.clone(), p.ty.clone());
+                    env.values.insert(p.name.clone(), bound);
                 }
                 for l in locals {
+                    env.types.insert(l.name.clone(), l.ty.clone());
                     if let Some(init) = &l.initializer {
+                        let init_ty = infer_ty(init, &env)?;
                         let v = eval_expr(init, &env)?;
-                        env.insert(l.name.clone(), v);
+                        let target_bits = width_of(&l.ty).clamp(1, 64);
+                        let from_bits = bit_width(&v);
+                        let resized = resize(v, from_bits, target_bits, is_signed(&init_ty));
+                        env.values.insert(l.name.clone(), resized);
                     }
                 }
                 let mut budget = 0usize;

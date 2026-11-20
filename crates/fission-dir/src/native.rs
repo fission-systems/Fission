@@ -390,9 +390,20 @@ fn reconstruct_op(
                     ),
                     bits,
                 ),
-                // On p-code booleans (0 or 1) the bitwise forms coincide.
-                PcodeOpcode::BoolAnd => bin(PcodeNativeBinaryOp::BitAnd, a, b, bits),
-                PcodeOpcode::BoolOr => bin(PcodeNativeBinaryOp::BitOr, a, b, bits),
+                // On p-code booleans (non-zero is true, result is 0 or 1), normalize
+                // operands via `!= 0` before combining rather than raw bitwise ops.
+                PcodeOpcode::BoolAnd => bin(
+                    PcodeNativeBinaryOp::BitAnd,
+                    bin(PcodeNativeBinaryOp::NotEqual, a, zero.clone(), bits),
+                    bin(PcodeNativeBinaryOp::NotEqual, b, zero, bits),
+                    bits,
+                ),
+                PcodeOpcode::BoolOr => bin(
+                    PcodeNativeBinaryOp::BitOr,
+                    bin(PcodeNativeBinaryOp::NotEqual, a, zero.clone(), bits),
+                    bin(PcodeNativeBinaryOp::NotEqual, b, zero, bits),
+                    bits,
+                ),
                 _ => unreachable!(),
             })
         }
@@ -455,21 +466,18 @@ fn reconstruct_op(
             }
             let value = value_for(&op.inputs[0], op_index, value_space_ids, values, inputs)?;
             let amount = value_for(&op.inputs[1], op_index, value_space_ids, values, inputs)?;
-            // A shift amount may be narrower or wider than the value it shifts;
-            // the binary contract requires matching operand widths, so adapt it.
+            // A shift amount narrower than the shifted value is zero-extended;
+            // wider shift amounts must keep their full width because p-code
+            // shifts yield 0 whenever `amount >= bit_width` (never masked mod width).
             let amount_bits = bits_for_size(amount_size);
-            let amount = match amount_bits.cmp(&bits) {
-                std::cmp::Ordering::Equal => amount,
-                std::cmp::Ordering::Less => PcodeNativeExpr::Convert {
+            let amount = if amount_bits < bits {
+                PcodeNativeExpr::Convert {
                     op: PcodeNativeConvertOp::ZeroExtend,
                     value: Box::new(amount),
                     bits,
-                },
-                std::cmp::Ordering::Greater => PcodeNativeExpr::Convert {
-                    op: PcodeNativeConvertOp::Truncate { lsb_bits: 0 },
-                    value: Box::new(amount),
-                    bits,
-                },
+                }
+            } else {
+                amount
             };
             Ok(PcodeNativeExpr::Binary {
                 op: if op.opcode == PcodeOpcode::IntLeft {
@@ -579,6 +587,21 @@ fn widest_containing_prefix(
         .map(|(_, expression)| expression.clone())
 }
 
+fn narrowest_contained_prefix_size(
+    values: &HashMap<ObservedLocation, PcodeNativeExpr>,
+    location: ObservedLocation,
+) -> Option<u32> {
+    values
+        .keys()
+        .filter(|candidate| {
+            candidate.space_id == location.space_id
+                && candidate.offset == location.offset
+                && candidate.size < location.size
+        })
+        .map(|candidate| candidate.size)
+        .min()
+}
+
 fn require_widths(
     op: &PcodeOp,
     op_index: usize,
@@ -642,6 +665,15 @@ fn value_for(
                 bits,
             });
         }
+    }
+    if let Some(narrow_size) = narrowest_contained_prefix_size(values, location) {
+        return Err(PcodeNativeReconstructError::PartialOverwrite {
+            op_index,
+            space_id: location.space_id,
+            offset: location.offset,
+            size: narrow_size,
+            existing_size: location.size,
+        });
     }
     if let Some(index) = inputs
         .iter()
@@ -803,7 +835,8 @@ impl DirVerifier for PcodeObservationVerifier {
         for sample in &samples {
             let foundation_value = match execute_foundation_region(foundation, region, sample) {
                 Ok(value) => value,
-                Err(detail) => {
+                Err(RegionExecError::AliasedMemorySample(_)) => continue,
+                Err(RegionExecError::Backend(detail)) => {
                     return inconclusive_backend(
                         budget,
                         executed_traces,
@@ -824,6 +857,13 @@ impl DirVerifier for PcodeObservationVerifier {
                     "concrete emulator observation differs",
                 );
             }
+        }
+        if executed_traces == 0 {
+            return inconclusive_backend(
+                budget,
+                0,
+                "no concrete sample satisfied the non-aliasing memory assumption",
+            );
         }
 
         match prove_symbolically(foundation, region) {
@@ -865,7 +905,12 @@ impl DirVerifier for PcodeObservationVerifier {
                             )
                         }
                     }
-                    Err(detail) => inconclusive_backend(
+                    Err(RegionExecError::AliasedMemorySample(detail)) => inconclusive_backend(
+                        budget,
+                        executed_traces,
+                        format!("solver model violated non-aliasing memory assumption: {detail}"),
+                    ),
+                    Err(RegionExecError::Backend(detail)) => inconclusive_backend(
                         budget,
                         executed_traces,
                         format!("solver model could not be replayed in emulator: {detail}"),
@@ -974,20 +1019,26 @@ fn validate_expression_contract(
             validate_expression_bits(*bits)?;
             let left_bits = validate_expression_contract(left, inputs)?;
             let right_bits = validate_expression_contract(right, inputs)?;
-            if left_bits != right_bits {
+            let is_shift = matches!(
+                op,
+                PcodeNativeBinaryOp::ShiftLeft | PcodeNativeBinaryOp::ShiftRightLogical
+            );
+            if !is_shift && left_bits != right_bits {
                 return Err(format!(
                     "{op:?} operands have different widths: {left_bits} and {right_bits}"
                 ));
             }
-            if matches!(
-                op,
-                PcodeNativeBinaryOp::Add
-                    | PcodeNativeBinaryOp::Subtract
-                    | PcodeNativeBinaryOp::BitAnd
-                    | PcodeNativeBinaryOp::BitOr
-                    | PcodeNativeBinaryOp::BitXor
-                    | PcodeNativeBinaryOp::Multiply
-            ) && left_bits != *bits
+            if (is_shift
+                || matches!(
+                    op,
+                    PcodeNativeBinaryOp::Add
+                        | PcodeNativeBinaryOp::Subtract
+                        | PcodeNativeBinaryOp::BitAnd
+                        | PcodeNativeBinaryOp::BitOr
+                        | PcodeNativeBinaryOp::BitXor
+                        | PcodeNativeBinaryOp::Multiply
+                ))
+                && left_bits != *bits
             {
                 return Err(format!(
                     "{op:?} result is {bits} bits but operands are {left_bits} bits"
@@ -1089,33 +1140,45 @@ fn value_space_assumptions(region: &PcodeNativeRegion) -> Vec<ValidationAssumpti
     }]
 }
 
+enum RegionExecError {
+    AliasedMemorySample(String),
+    Backend(String),
+}
+
 fn execute_foundation_region(
     foundation: &PcodeFoundation,
     region: &PcodeNativeRegion,
     sample: &[u64],
-) -> Result<u64, String> {
+) -> Result<u64, RegionExecError> {
     if sample.len() != region.inputs.len() {
-        return Err(format!(
+        return Err(RegionExecError::Backend(format!(
             "sample has {} values for {} live-ins",
             sample.len(),
             region.inputs.len()
-        ));
+        )));
     }
     let raw = foundation.pcode().as_raw();
     let block = raw
         .blocks
         .iter()
         .find(|block| block.index == region.selection.block_index)
-        .ok_or_else(|| format!("block {} disappeared", region.selection.block_index))?;
+        .ok_or_else(|| {
+            RegionExecError::Backend(format!(
+                "block {} disappeared",
+                region.selection.block_index
+            ))
+        })?;
     let end = region
         .selection
         .first_op
         .checked_add(region.selection.op_count)
-        .ok_or_else(|| "region end overflowed".to_string())?;
+        .ok_or_else(|| RegionExecError::Backend("region end overflowed".to_string()))?;
     let ops = block
         .ops
         .get(region.selection.first_op..end)
-        .ok_or_else(|| "region no longer fits its foundation block".to_string())?;
+        .ok_or_else(|| {
+            RegionExecError::Backend("region no longer fits its foundation block".to_string())
+        })?;
 
     let mut state = MachineState::new();
     // Static locations first: a load's address expression is built from
@@ -1123,9 +1186,10 @@ fn execute_foundation_region(
     // seeded here or earlier in this same pass.
     for (input, value) in region.inputs.iter().zip(sample) {
         if let PcodeNativeInputOrigin::Location(location) = &input.origin {
-            write_location(&mut state, *location, *value)?;
+            write_location(&mut state, *location, *value).map_err(RegionExecError::Backend)?;
         }
     }
+    let mut seeded_bytes = HashMap::<(u64, u64), u8>::new();
     for (input, value) in region.inputs.iter().zip(sample) {
         if let PcodeNativeInputOrigin::Memory {
             space_id,
@@ -1134,6 +1198,27 @@ fn execute_foundation_region(
         } = &input.origin
         {
             let resolved = evaluate_expression(address, sample);
+            if resolved
+                .checked_add(u64::from(*size).saturating_sub(1))
+                .is_none()
+            {
+                return Err(RegionExecError::AliasedMemorySample(format!(
+                    "load of {size} bytes at space {space_id} offset 0x{resolved:x} wraps 64-bit address space"
+                )));
+            }
+            for offset in 0..*size {
+                let byte_addr = resolved.wrapping_add(u64::from(offset));
+                let byte = ((value >> (offset * 8)) & 0xff) as u8;
+                if let Some(&prev) = seeded_bytes.get(&(*space_id, byte_addr))
+                    && prev != byte
+                {
+                    return Err(RegionExecError::AliasedMemorySample(format!(
+                        "distinct loads collided at space {space_id} offset 0x{byte_addr:x} \
+                         with conflicting bytes 0x{prev:02x} vs 0x{byte:02x}"
+                    )));
+                }
+                seeded_bytes.insert((*space_id, byte_addr), byte);
+            }
             write_location(
                 &mut state,
                 ObservedLocation {
@@ -1142,18 +1227,27 @@ fn execute_foundation_region(
                     size: *size,
                 },
                 *value,
-            )?;
+            )
+            .map_err(RegionExecError::Backend)?;
         }
     }
     let mut solver = Solver::new();
     let mut evaluator = Evaluator::new(&mut state, &mut solver);
     for op in ops {
-        match evaluator.step(op).map_err(|error| error.to_string())? {
+        match evaluator
+            .step(op)
+            .map_err(|error| RegionExecError::Backend(error.to_string()))?
+        {
             StepResult::Next => {}
-            _ => return Err(format!("opcode {:?} changed control flow", op.opcode)),
+            _ => {
+                return Err(RegionExecError::Backend(format!(
+                    "opcode {:?} changed control flow",
+                    op.opcode
+                )));
+            }
         }
     }
-    read_location(&mut state, region.selection.output)
+    read_location(&mut state, region.selection.output).map_err(RegionExecError::Backend)
 }
 
 fn write_location(
@@ -1263,6 +1357,7 @@ fn lower_foundation_symbolically(
             .output
             .as_ref()
             .ok_or_else(|| format!("opcode {:?} lost its output", op.opcode))?;
+        let output_location = location_of(output);
         let get = |varnode: &Varnode| -> Result<SymExpr, String> {
             if varnode.is_constant {
                 return Ok(SymExpr::new_const(
@@ -1271,9 +1366,36 @@ fn lower_foundation_symbolically(
                 ));
             }
             let location = location_of(varnode);
-            values
+            if let Some(expr) = values.get(&location) {
+                return Ok(expr.clone());
+            }
+            let wide_prefix = values
+                .iter()
+                .filter(|(candidate, _)| {
+                    candidate.space_id == location.space_id
+                        && candidate.offset == location.offset
+                        && candidate.size > location.size
+                })
+                .max_by_key(|(candidate, _)| candidate.size)
+                .map(|(_, expr)| expr.clone());
+            if let Some(wide) = wide_prefix {
+                return Ok(SymExpr::Extract {
+                    expr: Box::new(wide),
+                    lsb: 0,
+                    size: bits_for_size(location.size),
+                });
+            }
+            if values.keys().any(|candidate| {
+                candidate.space_id == location.space_id
+                    && candidate.offset == location.offset
+                    && candidate.size < location.size
+            }) {
+                return Err(format!(
+                    "partial overwrite of narrower value before reading {location:?}"
+                ));
+            }
+            input_map
                 .get(&location)
-                .or_else(|| input_map.get(&location))
                 .cloned()
                 .ok_or_else(|| format!("missing symbolic live-in {location:?}"))
         };
@@ -1294,6 +1416,43 @@ fn lower_foundation_symbolically(
             PcodeOpcode::IntXor => {
                 SymExpr::Xor(Box::new(get(&op.inputs[0])?), Box::new(get(&op.inputs[1])?))
             }
+            PcodeOpcode::BoolNegate => widen_boolean(
+                SymExpr::Eq(
+                    Box::new(get(&op.inputs[0])?),
+                    Box::new(SymExpr::new_const(0, bits_for_size(op.inputs[0].size))),
+                ),
+                bits_for_size(output.size),
+            ),
+            PcodeOpcode::BoolAnd => {
+                let input_bits = bits_for_size(op.inputs[0].size);
+                let a = SymExpr::Neq(
+                    Box::new(get(&op.inputs[0])?),
+                    Box::new(SymExpr::new_const(0, input_bits)),
+                );
+                let b = SymExpr::Neq(
+                    Box::new(get(&op.inputs[1])?),
+                    Box::new(SymExpr::new_const(0, input_bits)),
+                );
+                widen_boolean(
+                    SymExpr::And(Box::new(a), Box::new(b)),
+                    bits_for_size(output.size),
+                )
+            }
+            PcodeOpcode::BoolOr => {
+                let input_bits = bits_for_size(op.inputs[0].size);
+                let a = SymExpr::Neq(
+                    Box::new(get(&op.inputs[0])?),
+                    Box::new(SymExpr::new_const(0, input_bits)),
+                );
+                let b = SymExpr::Neq(
+                    Box::new(get(&op.inputs[1])?),
+                    Box::new(SymExpr::new_const(0, input_bits)),
+                );
+                widen_boolean(
+                    SymExpr::Or(Box::new(a), Box::new(b)),
+                    bits_for_size(output.size),
+                )
+            }
             PcodeOpcode::IntEqual => widen_boolean(
                 SymExpr::Eq(Box::new(get(&op.inputs[0])?), Box::new(get(&op.inputs[1])?)),
                 bits_for_size(output.size),
@@ -1313,27 +1472,62 @@ fn lower_foundation_symbolically(
             PcodeOpcode::IntLeft => {
                 let left = get(&op.inputs[0])?;
                 let right = get(&op.inputs[1])?;
-                let target_bits = bits_for_size(output.size);
-                let right =
-                    adapt_shift_amount(right, bits_for_size(op.inputs[1].size), target_bits);
-                SymExpr::Shl(Box::new(left), Box::new(right))
+                lower_shift_symbolically(
+                    left,
+                    bits_for_size(op.inputs[0].size),
+                    right,
+                    bits_for_size(op.inputs[1].size),
+                    true,
+                )
             }
             PcodeOpcode::IntRight => {
                 let left = get(&op.inputs[0])?;
                 let right = get(&op.inputs[1])?;
-                let target_bits = bits_for_size(output.size);
-                let right =
-                    adapt_shift_amount(right, bits_for_size(op.inputs[1].size), target_bits);
-                SymExpr::Lshr(Box::new(left), Box::new(right))
+                lower_shift_symbolically(
+                    left,
+                    bits_for_size(op.inputs[0].size),
+                    right,
+                    bits_for_size(op.inputs[1].size),
+                    false,
+                )
             }
             opcode => return Err(format!("unsupported symbolic P-code opcode {opcode:?}")),
         };
-        values.insert(location_of(output), expression);
+        if values.keys().any(|known| {
+            known.space_id == output_location.space_id
+                && known.offset == output_location.offset
+                && known.size > output_location.size
+        }) {
+            return Err("symbolic partial overwrite of wider value is not modeled".to_string());
+        }
+        values.retain(|known, _| {
+            !(known.space_id == output_location.space_id
+                && known.offset == output_location.offset
+                && known.size < output_location.size)
+        });
+        values.insert(output_location, expression);
     }
 
-    values
-        .remove(&region.selection.output)
-        .ok_or_else(|| "symbolic region did not define its selected output".to_string())
+    if let Some(expr) = values.get(&region.selection.output) {
+        return Ok(expr.clone());
+    }
+    if let Some(wide) = values
+        .iter()
+        .filter(|(candidate, _)| {
+            candidate.space_id == region.selection.output.space_id
+                && candidate.offset == region.selection.output.offset
+                && candidate.size > region.selection.output.size
+        })
+        .max_by_key(|(candidate, _)| candidate.size)
+        .map(|(_, expr)| expr.clone())
+    {
+        return Ok(SymExpr::Extract {
+            expr: Box::new(wide),
+            lsb: 0,
+            size: bits_for_size(region.selection.output.size),
+        });
+    }
+    Err("symbolic region did not define its selected output".to_string())
 }
 
 fn lower_candidate_symbolically(
@@ -1354,6 +1548,8 @@ fn lower_candidate_symbolically(
             right,
             bits,
         } => {
+            let left_bits = expression_bits(left);
+            let right_bits = expression_bits(right);
             let left = lower_candidate_symbolically(left, inputs)?;
             let right = lower_candidate_symbolically(right, inputs)?;
             Ok(match op {
@@ -1381,9 +1577,11 @@ fn lower_candidate_symbolically(
                     widen_boolean(SymExpr::Sle(Box::new(left), Box::new(right)), *bits)
                 }
                 PcodeNativeBinaryOp::Multiply => SymExpr::Mul(Box::new(left), Box::new(right)),
-                PcodeNativeBinaryOp::ShiftLeft => SymExpr::Shl(Box::new(left), Box::new(right)),
+                PcodeNativeBinaryOp::ShiftLeft => {
+                    lower_shift_symbolically(left, left_bits, right, right_bits, true)
+                }
                 PcodeNativeBinaryOp::ShiftRightLogical => {
-                    SymExpr::Lshr(Box::new(left), Box::new(right))
+                    lower_shift_symbolically(left, left_bits, right, right_bits, false)
                 }
             })
         }
@@ -1481,18 +1679,45 @@ fn widen_boolean(boolean: SymExpr, bits: u32) -> SymExpr {
     }
 }
 
-fn adapt_shift_amount(amount: SymExpr, from_bits: u32, to_bits: u32) -> SymExpr {
-    match from_bits.cmp(&to_bits) {
-        std::cmp::Ordering::Equal => amount,
-        std::cmp::Ordering::Less => SymExpr::Concat(
-            Box::new(SymExpr::new_const(0, to_bits - from_bits)),
-            Box::new(amount),
+fn lower_shift_symbolically(
+    left: SymExpr,
+    value_bits: u32,
+    right: SymExpr,
+    amount_bits: u32,
+    is_left: bool,
+) -> SymExpr {
+    let build_shift = |lhs: SymExpr, rhs: SymExpr| {
+        if is_left {
+            SymExpr::Shl(Box::new(lhs), Box::new(rhs))
+        } else {
+            SymExpr::Lshr(Box::new(lhs), Box::new(rhs))
+        }
+    };
+    match amount_bits.cmp(&value_bits) {
+        std::cmp::Ordering::Equal => build_shift(left, right),
+        std::cmp::Ordering::Less => build_shift(
+            left,
+            SymExpr::Concat(
+                Box::new(SymExpr::new_const(0, value_bits - amount_bits)),
+                Box::new(right),
+            ),
         ),
-        std::cmp::Ordering::Greater => SymExpr::Extract {
-            expr: Box::new(amount),
-            lsb: 0,
-            size: to_bits,
-        },
+        std::cmp::Ordering::Greater => {
+            let in_range = SymExpr::Ult(
+                Box::new(right.clone()),
+                Box::new(SymExpr::new_const(u64::from(value_bits), amount_bits)),
+            );
+            let narrowed = SymExpr::Extract {
+                expr: Box::new(right),
+                lsb: 0,
+                size: value_bits,
+            };
+            SymExpr::Ite {
+                cond: Box::new(in_range),
+                t: Box::new(build_shift(left, narrowed)),
+                f: Box::new(SymExpr::new_const(0, value_bits)),
+            }
+        }
     }
 }
 
@@ -1589,6 +1814,37 @@ fn deterministic_samples(inputs: &[PcodeNativeInput], limit: u64) -> Vec<Vec<u64
     }
 
     let mut samples = Vec::new();
+    let mem_input_count = inputs
+        .iter()
+        .filter(|input| matches!(input.origin, PcodeNativeInputOrigin::Memory { .. }))
+        .count();
+    if mem_input_count > 1 {
+        let base_for = |idx: usize, bits: u32| -> u64 {
+            mask_value(((idx as u64) + 1).wrapping_mul(0x1000), bits)
+        };
+        for (mem_idx, input) in inputs.iter().enumerate() {
+            if !matches!(input.origin, PcodeNativeInputOrigin::Memory { .. }) {
+                continue;
+            }
+            let bits = bits_for_size(input.size());
+            let max = mask_value(u64::MAX, bits);
+            for value in [1, max, 0xaaaa_aaaa_aaaa_aaaa & max] {
+                let mut sample: Vec<u64> = inputs
+                    .iter()
+                    .enumerate()
+                    .map(|(i, inp)| {
+                        let w = bits_for_size(inp.size());
+                        match inp.origin {
+                            PcodeNativeInputOrigin::Location(_) => base_for(i, w),
+                            PcodeNativeInputOrigin::Memory { .. } => mask_value(0x1111_2222, w),
+                        }
+                    })
+                    .collect();
+                sample[mem_idx] = value;
+                push_unique_sample(&mut samples, sample, limit);
+            }
+        }
+    }
     let patterns = [0_u64, 1, u64::MAX, 0xaaaaaaaaaaaaaaaa, 0x5555555555555555];
     for pattern in patterns {
         push_unique_sample(
@@ -2625,6 +2881,215 @@ mod tests {
         assert_eq!(
             artifacts[0].assurance.band(),
             AssuranceBand::ConditionallyProven
+        );
+        let CandidateSemantics::PcodeNativeRegion(region) = &artifacts[0].candidate.semantics
+        else {
+            panic!("expected native region");
+        };
+        // `1_u8 << 256_u32` must evaluate to 0 rather than truncating 256 to 0.
+        assert_eq!(evaluate_expression(&region.expression, &[1, 256]), 0);
+        assert_eq!(evaluate_expression(&region.expression, &[1, 2]), 4);
+
+        // Negative control: truncating the wider shift count must be caught as a Counterexample
+        // by `prove_symbolically` (not self-cancelled).
+        let mut buggy_region = region.clone();
+        buggy_region.expression = PcodeNativeExpr::Binary {
+            op: PcodeNativeBinaryOp::ShiftLeft,
+            left: Box::new(PcodeNativeExpr::Input { index: 0, bits: 8 }),
+            right: Box::new(PcodeNativeExpr::Convert {
+                op: PcodeNativeConvertOp::Truncate { lsb_bits: 0 },
+                value: Box::new(PcodeNativeExpr::Input { index: 1, bits: 32 }),
+                bits: 8,
+            }),
+            bits: 8,
+        };
+        assert!(matches!(
+            prove_symbolically(&foundation, &buggy_region).expect("solver runs"),
+            SymbolicOutcome::Counterexample(_)
+        ));
+    }
+
+    #[test]
+    fn bool_and_or_normalize_nonzero_inputs_even_across_widths() {
+        for (opcode, a_val, b_val, want) in [
+            (PcodeOpcode::BoolAnd, 2_u64, 4_u64, 1_u64),
+            (PcodeOpcode::BoolAnd, 0_u64, 4_u64, 0_u64),
+            (PcodeOpcode::BoolOr, 0xaa_u64, 0xaa_u64, 1_u64),
+            (PcodeOpcode::BoolOr, 0_u64, 0_u64, 0_u64),
+        ] {
+            let input_a = varnode(2, 0, 4);
+            let input_b = varnode(2, 8, 4);
+            let output = varnode(1, 0x100, 1);
+            let function = PcodeFunction {
+                blocks: vec![PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: Vec::new(),
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode,
+                        address: 0x1000,
+                        output: Some(output.clone()),
+                        inputs: vec![input_a, input_b],
+                        asm_mnemonic: None,
+                    }],
+                }],
+            };
+            let foundation = PcodeFoundation::new(0x1000, function).unwrap();
+            let selection = PcodeRegionSelection {
+                block_index: 0,
+                first_op: 0,
+                op_count: 1,
+                output: location_of(&output),
+            };
+            let artifacts = DirPipeline::new(
+                PcodeNativeReconstructor::new(selection, [1, 2]),
+                PcodeObservationVerifier::default(),
+            )
+            .run(
+                &foundation,
+                &ObservationScope::location_only(selection.output),
+                ValidationBudget::default(),
+            )
+            .expect("bool region reconstructs and verifies");
+            assert_eq!(
+                artifacts[0].assurance.band(),
+                AssuranceBand::ConditionallyProven,
+                "{opcode:?}: {:?}",
+                artifacts[0].assurance
+            );
+            let CandidateSemantics::PcodeNativeRegion(region) = &artifacts[0].candidate.semantics
+            else {
+                panic!("expected native region");
+            };
+            assert_eq!(
+                evaluate_expression(&region.expression, &[a_val, b_val]),
+                want
+            );
+        }
+    }
+
+    #[test]
+    fn distinct_loads_do_not_trigger_aliasing_overwrite_counterexample() {
+        let p0 = varnode(2, 0, 8);
+        let p1 = varnode(2, 8, 8);
+        let t0 = varnode(1, 0x10, 4);
+        let t1 = varnode(1, 0x20, 4);
+        let output = varnode(1, 0x30, 4);
+        let function = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x1000,
+                        output: Some(t0.clone()),
+                        inputs: vec![Varnode::constant(3, 8), p0],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Load,
+                        address: 0x1004,
+                        output: Some(t1.clone()),
+                        inputs: vec![Varnode::constant(3, 8), p1],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1008,
+                        output: Some(output.clone()),
+                        inputs: vec![t0, t1],
+                        asm_mnemonic: None,
+                    },
+                ],
+            }],
+        };
+        let foundation = PcodeFoundation::new(0x1000, function).unwrap();
+        let selection = PcodeRegionSelection {
+            block_index: 0,
+            first_op: 0,
+            op_count: 3,
+            output: location_of(&output),
+        };
+        let artifacts = DirPipeline::new(
+            PcodeNativeReconstructor::new(selection, [1, 2]),
+            PcodeObservationVerifier::default(),
+        )
+        .run(
+            &foundation,
+            &ObservationScope::location_only(selection.output),
+            ValidationBudget::default(),
+        )
+        .expect("multi-load region verifies");
+
+        assert_eq!(
+            artifacts[0].assurance.verdict(),
+            ValidationVerdict::Equivalent,
+            "{:?}",
+            artifacts[0].assurance
+        );
+        assert!(artifacts[0].assurance.evidence().executed_traces > 0);
+
+        let CandidateSemantics::PcodeNativeRegion(region) = &artifacts[0].candidate.semantics
+        else {
+            panic!("expected native region");
+        };
+        assert!(matches!(
+            execute_foundation_region(&foundation, region, &[0x2000, 1, 0x2000, 2]),
+            Err(RegionExecError::AliasedMemorySample(_))
+        ));
+    }
+
+    #[test]
+    fn narrow_write_before_live_in_wide_read_is_refused_and_wide_overwrite_evicts_narrow_symbolically()
+     {
+        // 1. Writing AL (1 byte) then reading live-in RAX (8 bytes) must be refused as PartialOverwrite.
+        let (al, rax, out8) = (varnode(2, 0, 1), varnode(2, 0, 8), varnode(2, 0x40, 8));
+        let (foundation, selection) =
+            copy_chain(&[(al, Varnode::constant(5, 1)), (out8.clone(), rax)], out8);
+        let result = PcodeNativeReconstructor::new(selection, [2]).reconstruct(&foundation);
+        assert!(
+            matches!(
+                result,
+                Err(PcodeNativeReconstructError::PartialOverwrite { .. })
+            ),
+            "expected PartialOverwrite when reading RAX after writing AL, got {result:?}"
+        );
+
+        // 2. EAX = a; RAX = b; out = EAX; must evict stale EAX symbolically and prove universally.
+        let (eax, rax2, a, b, out4) = (
+            varnode(2, 0, 4),
+            varnode(2, 0, 8),
+            varnode(2, 0x20, 4),
+            varnode(2, 0x28, 8),
+            varnode(2, 0x40, 4),
+        );
+        let (foundation2, selection2) =
+            copy_chain(&[(eax.clone(), a), (rax2, b), (out4.clone(), eax)], out4);
+        let artifacts = DirPipeline::new(
+            PcodeNativeReconstructor::new(selection2, [2]),
+            PcodeObservationVerifier::default(),
+        )
+        .run(
+            &foundation2,
+            &ObservationScope::location_only(selection2.output),
+            ValidationBudget::default(),
+        )
+        .expect("reconstructs and verifies");
+        assert_eq!(
+            artifacts[0].assurance.band(),
+            AssuranceBand::ConditionallyProven,
+            "{:?}",
+            artifacts[0].assurance
+        );
+        assert_eq!(
+            artifacts[0].assurance.evidence().strength,
+            EvidenceStrength::Universal
         );
     }
 }
