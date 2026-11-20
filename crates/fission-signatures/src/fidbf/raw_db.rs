@@ -11,6 +11,8 @@ const NODE_LONGKEY_VAR_REC: u8 = 1;
 const NODE_LONGKEY_FIXED_REC: u8 = 2;
 const NODE_CHAINED_BUFFER_INDEX: u8 = 8;
 const NODE_CHAINED_BUFFER_DATA: u8 = 9;
+const MAX_CHAINED_BUFFER_BYTES: usize = 64 * 1024 * 1024;
+const INITIAL_CHAINED_RESERVE: usize = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub(crate) struct RawSchema {
@@ -242,6 +244,12 @@ impl<'a> RawDbHandle<'a> {
         let key_count = usize::try_from(read_i32(data, 1)?).map_err(|_| {
             FidbfParseError::MalformedRawFidDatabase("negative var leaf key count".to_string())
         })?;
+        let max_keys = data.len().saturating_sub(13) / 13;
+        if key_count > max_keys {
+            return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                "var leaf key count {key_count} exceeds remaining payload entries ({max_keys})"
+            )));
+        }
         let mut entries = Vec::with_capacity(key_count);
         let mut offset = 13usize;
         for _ in 0..key_count {
@@ -332,6 +340,11 @@ impl<'a> RawDbHandle<'a> {
                         "negative indexed chained buffer length".to_string(),
                     )
                 })?;
+                if total_len > MAX_CHAINED_BUFFER_BYTES {
+                    return Err(FidbfParseError::MalformedRawFidDatabase(format!(
+                        "indexed chained buffer length {total_len} exceeds cap ({MAX_CHAINED_BUFFER_BYTES})"
+                    )));
+                }
                 let max_data_per_buffer = self.buffer_size.saturating_sub(DATA_BASE_OFFSET_INDEXED);
                 let indexes_per_buffer = self.buffer_size.saturating_sub(INDEX_BASE_OFFSET) / 4;
                 if max_data_per_buffer == 0 || indexes_per_buffer == 0 {
@@ -340,7 +353,7 @@ impl<'a> RawDbHandle<'a> {
                     ));
                 }
 
-                let mut out = Vec::with_capacity(total_len);
+                let mut out = Vec::with_capacity(total_len.min(INITIAL_CHAINED_RESERVE));
                 let mut current_index_id = buffer_id;
                 let mut visited_index = HashSet::new();
 
@@ -676,5 +689,41 @@ mod tests {
             .collect_var_leaf(&leaf, &schema, &mut out)
             .expect_err("entry 1 overflowing into entry 0 must be rejected");
         assert!(matches!(err, FidbfParseError::MalformedRawFidDatabase(_)));
+    }
+
+    #[test]
+    fn oversized_var_leaf_key_count_and_chained_len_are_rejected_without_oom() {
+        let block_size = 32usize;
+        let mut file_bytes = vec![0u8; block_size * 2];
+        file_bytes[0..8].copy_from_slice(&LOCAL_BUFFER_FILE_MAGIC.to_be_bytes());
+        file_bytes[16..20].copy_from_slice(&LOCAL_BUFFER_FILE_VERSION.to_be_bytes());
+        file_bytes[20..24].copy_from_slice(&(block_size as i32).to_be_bytes());
+
+        // Chained index buffer claiming i32::MAX total length.
+        let mut idx_payload = vec![0u8; block_size - BLOCK_PREFIX_SIZE];
+        idx_payload[0] = NODE_CHAINED_BUFFER_INDEX;
+        idx_payload[1..5].copy_from_slice(&i32::MAX.to_be_bytes());
+        write_block(&mut file_bytes, block_size, 0, &idx_payload);
+
+        let handle = RawDbHandle::open(&file_bytes).expect("open synthetic raw db");
+        assert!(matches!(
+            handle.read_chained_buffer(0),
+            Err(FidbfParseError::MalformedRawFidDatabase(_))
+        ));
+
+        let schema = RawSchema {
+            version: 1,
+            key_type: RawFieldType::Long,
+            field_types: vec![RawFieldType::Binary],
+            field_names: vec!["Blob".to_string()],
+        };
+        let mut huge_leaf = vec![0u8; 32];
+        huge_leaf[0] = NODE_LONGKEY_VAR_REC;
+        huge_leaf[1..5].copy_from_slice(&i32::MAX.to_be_bytes());
+        let mut out = Vec::new();
+        assert!(matches!(
+            handle.collect_var_leaf(&huge_leaf, &schema, &mut out),
+            Err(FidbfParseError::MalformedRawFidDatabase(_))
+        ));
     }
 }

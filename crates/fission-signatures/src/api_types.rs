@@ -530,11 +530,12 @@ impl ApiTypeDatabase {
             return hit.map(|ptr| unsafe { &*ptr });
         }
         let ptr = if let Some(winner) = merge_candidates(candidates) {
+            let Ok(mut arena) = self.arena.lock() else {
+                return None;
+            };
             let boxed = Box::new(winner);
             let ptr: *const ApiSignature = &*boxed;
-            if let Ok(mut arena) = self.arena.lock() {
-                arena.push(boxed);
-            }
+            arena.push(boxed);
             Some(ptr)
         } else {
             None
@@ -860,5 +861,29 @@ mod tests {
         assert_eq!(sig.params[0].type_name, "BOOL (*)(HWND, LPARAM)");
         assert_eq!(sig.params[1].name, "lParam");
         assert_eq!(sig.params[1].type_name, "LPARAM");
+    }
+
+    #[test]
+    fn get_returns_none_without_caching_dangling_ptr_when_arena_is_poisoned() {
+        let mut db = ApiTypeDatabase::default();
+        let bytes = crate::fpk::pack(&["foo_poison|int|x:int".to_string()], 1);
+        let path =
+            std::env::temp_dir().join(format!("api_types_poison_{}.fpk", std::process::id()));
+        std::fs::write(&path, bytes).expect("write test fpk");
+        let reader = crate::fpk::FpkReader::open(&path).expect("open test fpk");
+        db.packed.push(reader);
+
+        let db = std::sync::Arc::new(db);
+        let db_poison = std::sync::Arc::clone(&db);
+        let _ = std::thread::spawn(move || {
+            let _guard = db_poison.arena.lock().unwrap();
+            panic!("poison arena mutex intentionally");
+        })
+        .join();
+
+        assert!(db.arena.is_poisoned());
+        assert!(db.get("foo_poison").is_none());
+        assert!(!db.resolved.lock().unwrap().contains_key("foo_poison"));
+        let _ = std::fs::remove_file(path);
     }
 }
