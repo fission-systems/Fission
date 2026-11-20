@@ -90,14 +90,20 @@ mod native {
         }
 
         pub fn from_config(config: &LogConfig) -> Self {
+            Self::from_config_with_override(config, FILE_LOGGING_OVERRIDE.get().cloned())
+        }
+
+        fn from_config_with_override(config: &LogConfig, override_path: Option<PathBuf>) -> Self {
             let env_file_path = std::env::var("FISSION_LOG_FILE")
                 .ok()
                 .filter(|value| !value.trim().is_empty())
                 .map(PathBuf::from);
-            let file_path = env_file_path.or_else(|| {
-                (config.file_enabled && !config.file_path.is_empty())
-                    .then(|| PathBuf::from(config.file_path.clone()))
-            });
+            let file_path = env_file_path
+                .or_else(|| {
+                    (config.file_enabled && !config.file_path.is_empty())
+                        .then(|| PathBuf::from(config.file_path.clone()))
+                })
+                .or(override_path);
             let mode = match (config.console_enabled, file_path.is_some()) {
                 (true, true) => LoggingMode::ConsoleAndFile,
                 (true, false) => LoggingMode::ConsoleOnly,
@@ -165,8 +171,15 @@ mod native {
         }
     }
 
+    fn log_file_dir(path: &Path) -> &Path {
+        match path.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        }
+    }
+
     fn build_file_writer(path: &Path) -> io::Result<(NonBlocking, WorkerGuard)> {
-        let dir = path.parent().unwrap_or_else(|| Path::new("."));
+        let dir = log_file_dir(path);
         fs::create_dir_all(dir)?;
         let file_name = path.file_name().ok_or_else(|| {
             io::Error::new(io::ErrorKind::InvalidInput, "log file path has no name")
@@ -177,8 +190,9 @@ mod native {
     }
 
     fn build_make_writer(options: &LoggingOptions, guards: &mut Vec<WorkerGuard>) -> BoxMakeWriter {
-        let file_writer = if options.mode.file_enabled() {
-            resolve_file_path(options).and_then(|path| match build_file_writer(&path) {
+        let resolved_path = resolve_file_path(options);
+        let file_writer = if options.mode.file_enabled() || resolved_path.is_some() {
+            resolved_path.and_then(|path| match build_file_writer(&path) {
                 Ok((writer, guard)) => {
                     guards.push(guard);
                     Some(writer)
@@ -388,6 +402,26 @@ mod native {
             let _entered = span.enter();
             let trace = capture_span_trace();
             assert!(!format!("{trace:?}").is_empty());
+        }
+
+        #[test]
+        fn from_config_honors_file_override_and_bare_filename_parent() {
+            let mut cfg = LogConfig::default();
+            cfg.file_enabled = false;
+            cfg.console_enabled = true;
+
+            let opts = LoggingOptions::from_config_with_override(
+                &cfg,
+                Some(PathBuf::from("override.log")),
+            );
+            assert_eq!(opts.mode, LoggingMode::ConsoleAndFile);
+            assert_eq!(opts.file_path.as_deref(), Some(Path::new("override.log")));
+
+            assert_eq!(log_file_dir(Path::new("fission.log")), Path::new("."));
+            assert_eq!(
+                log_file_dir(Path::new("/tmp/logs/fission.log")),
+                Path::new("/tmp/logs")
+            );
         }
     }
 } // end mod native

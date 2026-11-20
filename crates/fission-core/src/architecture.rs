@@ -6,7 +6,9 @@
 //! LanguageService/*.ldefs -> LoadSpec`.
 
 use crate::constants::binary_format::{
-    MACHO_CPU_TYPE_ARM, MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_X86, MACHO_CPU_TYPE_X86_64,
+    MACHO_CPU_TYPE_ARM, MACHO_CPU_TYPE_ARM64, MACHO_CPU_TYPE_HPPA, MACHO_CPU_TYPE_MC680X0,
+    MACHO_CPU_TYPE_MC88000, MACHO_CPU_TYPE_POWERPC, MACHO_CPU_TYPE_POWERPC64, MACHO_CPU_TYPE_SPARC,
+    MACHO_CPU_TYPE_X86, MACHO_CPU_TYPE_X86_64,
 };
 use crate::core_constants::{ELFCLASS32, ELFCLASS64, ELFDATA2LSB, ELFDATA2MSB};
 use rkyv::{Archive, Deserialize, Serialize};
@@ -286,7 +288,10 @@ impl OpinionDatabase {
 
         if let Some(ref cache_p) = cache_path {
             if let Ok(serialized) = serde_json::to_string(&db) {
-                let _ = fs::write(cache_p, serialized);
+                let _ = crate::core::config_store::write_file_atomically(
+                    cache_p,
+                    serialized.as_bytes(),
+                );
             }
         }
 
@@ -685,22 +690,53 @@ pub fn select_elf_load_spec(
     )
 }
 
+fn macho_default_is_big_endian(cputype: i32) -> bool {
+    matches!(
+        cputype,
+        MACHO_CPU_TYPE_MC680X0
+            | MACHO_CPU_TYPE_HPPA
+            | MACHO_CPU_TYPE_MC88000
+            | MACHO_CPU_TYPE_SPARC
+            | MACHO_CPU_TYPE_POWERPC
+            | MACHO_CPU_TYPE_POWERPC64
+    )
+}
+
 pub fn select_macho_load_spec(
     cputype: i32,
     cpusubtype: i32,
     is_64bit: bool,
     image_base: u64,
 ) -> ArchitectureSelectionResult {
+    select_macho_load_spec_with_endian(
+        cputype,
+        cpusubtype,
+        is_64bit,
+        macho_default_is_big_endian(cputype),
+        image_base,
+    )
+}
+
+pub fn select_macho_load_spec_with_endian(
+    cputype: i32,
+    cpusubtype: i32,
+    is_64bit: bool,
+    is_big_endian: bool,
+    image_base: u64,
+) -> ArchitectureSelectionResult {
     let bitness = if is_64bit { 64 } else { 32 };
+    let endian = if is_big_endian { "big" } else { "little" };
     let primary = macho_primary_key(cputype, cpusubtype);
     select_from_opinion(
         MACHO_LOADER_NAME,
         &primary,
         None,
-        ExpectedLanguageFacts::new(bitness, "little"),
+        ExpectedLanguageFacts::new(bitness, endian),
         "Mach-O",
         image_base,
-        format!("Mach-O cputype=0x{cputype:x}, cpusubtype=0x{cpusubtype:x}, is_64bit={is_64bit}"),
+        format!(
+            "Mach-O cputype=0x{cputype:x}, cpusubtype=0x{cpusubtype:x}, is_64bit={is_64bit}, is_big_endian={is_big_endian}"
+        ),
     )
 }
 
@@ -1280,6 +1316,27 @@ mod tests {
         let (_, spec) =
             select_macho_load_spec(MACHO_CPU_TYPE_ARM64, 0, true, 0).expect("select Mach-O");
         assert_eq!(spec.pair.language_id.as_str(), "AARCH64:LE:64:AppleSilicon");
+    }
+
+    #[test]
+    fn selects_big_endian_macho_specs_and_rejects_endian_mismatch() {
+        let (_, ppc32) =
+            select_macho_load_spec(MACHO_CPU_TYPE_POWERPC, 0, false, 0).expect("PowerPC BE 32");
+        assert_eq!(ppc32.pair.language_id.as_str(), "PowerPC:BE:32:default");
+
+        let (_, ppc64) =
+            select_macho_load_spec_with_endian(MACHO_CPU_TYPE_POWERPC64, 0, true, true, 0)
+                .expect("PowerPC BE 64");
+        assert_eq!(ppc64.pair.language_id.as_str(), "PowerPC:BE:64:default");
+
+        let (_, sparc) =
+            select_macho_load_spec(MACHO_CPU_TYPE_SPARC, 0, false, 0).expect("SPARC BE 32");
+        assert_eq!(sparc.pair.language_id.as_str(), "sparc:BE:32:default");
+
+        assert!(matches!(
+            select_macho_load_spec_with_endian(MACHO_CPU_TYPE_POWERPC, 0, false, false, 0),
+            Err(ArchitectureSelectionError::UnsupportedMachine { .. })
+        ));
     }
 
     #[test]

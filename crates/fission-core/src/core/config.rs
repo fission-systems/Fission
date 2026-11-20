@@ -26,6 +26,18 @@ pub struct Config {
     pub ui: UiConfig,
     /// Logging settings
     pub logging: LogConfig,
+    /// Resource path overrides from `[paths]`
+    pub paths: PathsConfig,
+}
+
+/// Resource path overrides loaded from TOML `[paths]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PathsConfig {
+    pub workspace_root: String,
+    pub fid_dir: String,
+    pub gdt_dir: String,
+    pub die_dir: String,
+    pub patterns_dir: String,
 }
 
 impl Default for Config {
