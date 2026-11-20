@@ -303,12 +303,8 @@ pub fn load_pspec_for_pair(
 
 // ── XML helpers ───────────────────────────────────────────────────────────────
 
-/// Extract `key="value"` from an XML attribute string.
 fn extract_attr<'a>(segment: &'a str, key: &str) -> Option<&'a str> {
-    let needle = format!("{key}=\"");
-    let start = segment.find(needle.as_str())? + needle.len();
-    let end = segment[start..].find('"')? + start;
-    Some(&segment[start..end])
+    crate::xml_scan::extract_attr(segment, key)
 }
 
 /// Parse a `u64` value from decimal or `0x`-prefixed hex.
@@ -560,5 +556,15 @@ mod tests {
             "pspec file must exist: {}",
             pspec_path.display()
         );
+    }
+
+    #[test]
+    fn extract_attr_rejects_prefix_and_unclosed_quote_collisions() {
+        let doc = PspecDocument::parse_str(
+            r#"<processor_spec><register_data><register subname="BAD" not_hidden="true"/><register my_group="FLAGS" name="R0" group="GPR"/></register_data></processor_spec>"#,
+        );
+        assert!(!doc.hidden_registers.contains("BAD"));
+        assert!(!doc.is_flag_register("R0"));
+        assert_eq!(extract_attr(r#"name="unclosed"#, "name"), None);
     }
 }

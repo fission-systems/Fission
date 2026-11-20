@@ -58,19 +58,18 @@ pub fn default_cspec_pair(options: &NirRenderOptions) -> Option<(String, String)
 }
 
 pub fn apply_resolved_proto_to_options(options: &mut NirRenderOptions, proto: &ResolvedPrototype) {
-    if !proto.int_param_offsets.is_empty() {
-        options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
-    }
-    if !proto.float_param_offsets.is_empty() {
+    options.cspec_param_offsets = Some(proto.int_param_offsets.clone());
+    if proto.float_param_offsets.is_empty() {
+        options.cspec_float_param_offsets = None;
+        options.cspec_float_shares_int_slots = false;
+    } else {
         options.cspec_float_param_offsets = Some(proto.float_param_offsets.clone());
         options.cspec_float_shares_int_slots = proto.float_shares_int_slots;
     }
-    if let Some(base) = proto.stack_arg_base {
-        options.cspec_stack_arg_base = Some(base);
-    }
+    options.cspec_stack_arg_base = proto.stack_arg_base;
     options.cspec_stack_pointer_offset = proto.stack_pointer_offset;
     options.cspec_unaffected_offsets = proto.unaffected_offsets.clone();
-    options.cspec_extrapop = Some(proto.extrapop);
+    options.cspec_extrapop = proto.extrapop;
     options.cspec_return_offset = proto.return_offset;
     options.cspec_float_return_offset = proto.float_return_offset;
 }
@@ -153,7 +152,55 @@ pub(crate) fn register_model(
 pub(crate) fn sla_register_map_from_offset_map(
     map: &std::collections::HashMap<(u64, u32), String>,
 ) -> SlaRegisterMap {
-    map.iter()
-        .map(|((off, sz), name)| (name.to_ascii_uppercase(), (*off, *sz)))
-        .collect()
+    let mut name_index: SlaRegisterMap = SlaRegisterMap::default();
+    super::register_model::add_register_aliases(&mut name_index, map);
+    name_index
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::HashMap;
+
+    #[test]
+    fn empty_int_param_offsets_still_populates_cspec_param_offsets_for_x86_32() {
+        let mut options = NirRenderOptions {
+            calling_convention: CallingConvention::X86_32,
+            format: "PE".to_string(),
+            is_64bit: false,
+            pointer_size: 4,
+            ..Default::default()
+        };
+        let proto = ResolvedPrototype {
+            name: "__stdcall".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            return_offset: Some(0x00),
+            float_return_offset: None,
+            stack_pointer_offset: Some(0x10),
+            stack_arg_base: Some(4),
+            extrapop: None,
+            unaffected_offsets: vec![0x10, 0x14],
+            killedbycall_offsets: vec![0x00],
+        };
+        apply_resolved_proto_to_options(&mut options, &proto);
+        assert_eq!(options.cspec_param_offsets, Some(Vec::new()));
+        assert_eq!(options.cspec_extrapop, None);
+        // Now `ensure_cspec` must preserve the already-applied explicit prototype.
+        options.cspec_stack_arg_base = Some(42);
+        ensure_cspec(&mut options, &SlaRegisterMap::default());
+        assert_eq!(options.cspec_stack_arg_base, Some(42));
+    }
+
+    #[test]
+    fn sla_register_map_from_offset_map_populates_aliases() {
+        let mut offset_map = std::collections::HashMap::new();
+        offset_map.insert((0x00, 4), "r0".to_string());
+        offset_map.insert((0x78, 4), "s8".to_string());
+        let sla = sla_register_map_from_offset_map(&offset_map);
+        assert_eq!(sla.get("ZERO"), Some(&(0x00, 4)));
+        assert_eq!(sla.get("FP"), Some(&(0x78, 4)));
+        assert_eq!(sla.get("S8"), Some(&(0x78, 4)));
+    }
 }

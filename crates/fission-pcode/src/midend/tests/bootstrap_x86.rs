@@ -1439,7 +1439,7 @@ fn preview_keeps_params_for_zero_entry_relocatable_function() {
                     opcode: PcodeOpcode::Copy,
                     address: 0,
                     output: Some(tmp.clone()),
-                    inputs: vec![runtime_reg(0, 4)],
+                    inputs: vec![runtime_reg(0x4000, 8)],
                     asm_mnemonic: Some("MOV X8,X0".to_string()),
                 },
                 PcodeOp {
@@ -1483,7 +1483,10 @@ fn preview_keeps_params_for_zero_entry_relocatable_function() {
     )
     .expect("preview render");
 
-    assert!(code.contains("llvm_smoke(long long param_1)"), "{code}");
+    assert!(
+        code.contains("llvm_smoke(unsigned long long param_1)"),
+        "{code}"
+    );
     assert!(code.contains("return param_1;"), "{code}");
     assert!(!code.contains("w0"), "{code}");
 }

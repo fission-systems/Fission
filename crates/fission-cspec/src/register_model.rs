@@ -193,21 +193,41 @@ fn register_family_key(reg: &ParsedRegister) -> u64 {
 }
 
 fn detect_return_target(by_offset: &HashMap<(u64, u32), String>) -> Option<(u64, u32)> {
-    by_offset
-        .iter()
-        .find(|(_, name)| matches!(name.as_str(), "lr" | "x30" | "ra" | "r31" | "blink"))
-        .map(|((off, sz), _)| (*off, *sz))
+    const PRIORITY: &[&str] = &["lr", "x30", "ra", "blink", "r31"];
+    for target in PRIORITY {
+        if let Some(((off, sz), _)) = by_offset
+            .iter()
+            .filter(|(_, name)| name.eq_ignore_ascii_case(target))
+            .max_by(|((off_a, sz_a), _), ((off_b, sz_b), _)| {
+                sz_a.cmp(sz_b).then_with(|| off_b.cmp(off_a))
+            })
+        {
+            return Some((*off, *sz));
+        }
+    }
+    None
 }
 
 /// Ghidra/cspec register synonyms that share the same `(offset, size)`.
-fn add_register_aliases(name_index: &mut SlaRegisterMap, by_offset: &HashMap<(u64, u32), String>) {
+pub(crate) fn add_register_aliases<S: std::hash::BuildHasher>(
+    name_index: &mut SlaRegisterMap,
+    by_offset: &std::collections::HashMap<(u64, u32), String, S>,
+) {
     const SYNONYMS: &[(&str, &str)] = &[("fp", "s8"), ("s8", "fp"), ("zero", "r0"), ("r0", "zero")];
-    for ((off, sz), canonical) in by_offset {
+    let mut entries: Vec<((u64, u32), &str)> = by_offset
+        .iter()
+        .map(|(&(off, sz), name)| ((off, sz), name.as_str()))
+        .collect();
+    entries.sort_by_key(|((off, sz), _)| (*off, *sz));
+
+    for ((off, sz), canonical) in entries {
         let upper = canonical.to_ascii_uppercase();
-        name_index.entry(upper).or_insert((*off, *sz));
+        name_index.entry(upper).or_insert((off, sz));
         for (left, right) in SYNONYMS {
             if canonical.eq_ignore_ascii_case(left) {
-                name_index.insert(right.to_ascii_uppercase(), (*off, *sz));
+                name_index
+                    .entry(right.to_ascii_uppercase())
+                    .or_insert((off, sz));
             }
         }
     }
@@ -404,6 +424,7 @@ pub fn register_namer_for_abi(abi: CallingConvention) -> RegisterNamer {
         return_offset: model.as_ref().and_then(|m| m.return_offset()),
         float_return_offset: None,
         return_target: model.as_ref().and_then(|m| m.return_target_offset()),
+        stack_pointer_offset: None,
         model,
         pointer_size: minimal_options_for_abi(abi).pointer_size,
     }
@@ -458,6 +479,7 @@ pub struct RegisterNamer {
     /// from `return_offset`.
     pub float_return_offset: Option<u64>,
     pub return_target: Option<(u64, u32)>,
+    pub stack_pointer_offset: Option<u64>,
     pub model: Option<Arc<RegisterModel>>,
     pub pointer_size: u32,
 }
@@ -489,8 +511,54 @@ impl RegisterNamer {
                 .as_ref()
                 .and_then(|m| m.return_target_offset())
                 .or(options.cspec_return_target),
+            stack_pointer_offset: options.cspec_stack_pointer_offset,
             model,
             pointer_size: options.pointer_size,
+        }
+    }
+
+    pub fn is_stack_pointer_varnode(&self, vn: &Varnode) -> bool {
+        if is_register_space_id(vn.space_id) && self.stack_pointer_offset == Some(vn.offset) {
+            return true;
+        }
+        let Some(name) = self.hw_name(vn) else {
+            return false;
+        };
+        match self.abi {
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => {
+                matches!(name.as_str(), "rsp" | "esp" | "sp")
+            }
+            CallingConvention::AArch64 => name == "sp",
+            CallingConvention::Arm32 => matches!(name.as_str(), "sp" | "r13"),
+            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => name == "r1",
+            CallingConvention::Mips32
+            | CallingConvention::Mips64
+            | CallingConvention::LoongArch32
+            | CallingConvention::LoongArch64 => name == "sp",
+        }
+    }
+
+    pub fn is_frame_pointer_varnode(&self, vn: &Varnode) -> bool {
+        let Some(name) = self.hw_name(vn) else {
+            return false;
+        };
+        match self.abi {
+            CallingConvention::WindowsX64
+            | CallingConvention::SystemVAmd64
+            | CallingConvention::X86_32 => {
+                matches!(name.as_str(), "rbp" | "ebp" | "bp")
+            }
+            CallingConvention::AArch64 => matches!(name.as_str(), "x29" | "w29" | "fp"),
+            CallingConvention::Arm32 => matches!(name.as_str(), "r11" | "fp"),
+            CallingConvention::PowerPc32 | CallingConvention::PowerPc64 => name == "r31",
+            CallingConvention::Mips32 | CallingConvention::Mips64 => {
+                matches!(name.as_str(), "s8" | "fp")
+            }
+            CallingConvention::LoongArch32 | CallingConvention::LoongArch64 => {
+                matches!(name.as_str(), "fp" | "s9" | "r22")
+            }
         }
     }
 
@@ -523,13 +591,6 @@ impl RegisterNamer {
     }
 
     pub fn hw_name_at(&self, offset: u64, size: u32) -> Option<String> {
-        if self.abi == CallingConvention::AArch64 && offset == 0x00 {
-            return Some(if size == 4 {
-                "w0".to_string()
-            } else {
-                "x0".to_string()
-            });
-        }
         if matches!(
             self.abi,
             CallingConvention::WindowsX64 | CallingConvention::SystemVAmd64
@@ -553,15 +614,6 @@ impl RegisterNamer {
             }
             // Reserved flag slots (F1/F3/…) stay unnamed rather than sharing `"reg"`.
             return None;
-        }
-        if self.abi == CallingConvention::PowerPc64 && size == 4 {
-            let slot_base = offset & !0x7;
-            if offset
-                .checked_add(u64::from(size))
-                .is_some_and(|end| end <= slot_base.saturating_add(8))
-            {
-                return self.hw_name_at(slot_base, 8);
-            }
         }
         if matches!(
             self.abi,
@@ -629,6 +681,19 @@ impl RegisterNamer {
             })
             .or_else(|| x86_ia32_low_gpr_name(self.abi, offset, size))
             .or_else(|| x86_64_low_gpr_name(self.abi, offset, size))
+            .or_else(|| {
+                if self.abi == CallingConvention::PowerPc64 && size == 4 {
+                    let slot_base = offset & !0x7;
+                    if slot_base != offset
+                        && offset
+                            .checked_add(u64::from(size))
+                            .is_some_and(|end| end <= slot_base.saturating_add(8))
+                    {
+                        return self.hw_name_at(slot_base, 8);
+                    }
+                }
+                None
+            })
     }
 
     fn x64_canonical_hw_name(&self, offset: u64, size: u32) -> Option<String> {
@@ -672,24 +737,38 @@ impl RegisterNamer {
         size: u32,
     ) -> Option<(String, Option<usize>)> {
         let hw_name = self.hw_name_at(offset, size)?;
-        let param_idx = match self.abi {
+        let (param_idx, preserve_hw_name) = match self.abi {
             CallingConvention::WindowsX64
             | CallingConvention::SystemVAmd64
-            | CallingConvention::X86_32 => self
-                .int_param_offsets
-                .iter()
-                .position(|&param_offset| param_offset == offset),
+            | CallingConvention::X86_32 => {
+                let slot_size = u64::from(self.param_slot_size());
+                let access_end = (size > 0)
+                    .then(|| offset.checked_add(u64::from(size)))
+                    .flatten()?;
+                let idx = self.int_param_offsets.iter().position(|&param_offset| {
+                    param_offset
+                        .checked_add(slot_size)
+                        .is_some_and(|slot_end| offset >= param_offset && access_end <= slot_end)
+                });
+                // High-byte slices (e.g. CH/DH) occupy a non-zero offset within the
+                // slot: report their ABI slot index while keeping their distinct
+                // hardware name so lowering does not alias them to the full slot.
+                let is_high_slice = idx.is_some_and(|slot| offset != self.int_param_offsets[slot]);
+                (idx, is_high_slice)
+            }
             _ => {
                 let name_family = self.model.as_ref().and_then(|m| m.family_index(&hw_name))?;
-                self.int_param_offsets.iter().position(|&param_offset| {
+                let idx = self.int_param_offsets.iter().position(|&param_offset| {
                     self.model.as_ref().and_then(|m| {
                         m.name_for(param_offset, self.param_slot_size())
                             .and_then(|n| m.family_index(n))
                     }) == Some(name_family)
-                })
+                });
+                (idx, false)
             }
         };
         match param_idx {
+            Some(idx) if preserve_hw_name => Some((hw_name, Some(idx))),
             Some(idx) => Some((format!("param_{}", idx + 1), Some(idx))),
             None => Some((hw_name, None)),
         }
@@ -711,6 +790,9 @@ impl RegisterNamer {
         }
 
         let model = self.model.as_ref()?;
+        if let Some((reg_offset, reg_size)) = model.lookup_name(&hw_name) {
+            return self.register_name_with_param_owned(reg_offset, reg_size)?.1;
+        }
         let family = model.family_index(&hw_name)?;
         self.int_param_offsets.iter().position(|&offset| {
             model
@@ -1569,5 +1651,90 @@ mod preparation_cache_tests {
         assert_eq!(x86_ia32_low_gpr_name(abi, 0x04, 4).as_deref(), Some("ecx"));
         assert_eq!(x86_ia32_low_gpr_name(abi, 0x08, 4).as_deref(), Some("edx"));
         assert_eq!(x86_64_low_gpr_name(abi, 0x08, 4), None);
+    }
+
+    #[test]
+    fn detect_return_target_deterministically_prefers_lr_over_r31() {
+        let mut by_offset = HashMap::default();
+        by_offset.insert((0x7c, 4), "r31".to_string());
+        by_offset.insert((0x1008, 4), "lr".to_string());
+        assert_eq!(detect_return_target(&by_offset), Some((0x1008, 4)));
+    }
+
+    #[test]
+    fn aarch64_pc_at_offset_zero_is_not_misnamed_as_x0_param() {
+        let mut options = crate::NirRenderOptions {
+            calling_convention: CallingConvention::AArch64,
+            format: "ELF64".to_string(),
+            is_64bit: true,
+            pointer_size: 8,
+            ..Default::default()
+        };
+        crate::test_maps::sync_preview_cspec(&mut options);
+        let namer = RegisterNamer::from_options(&options);
+        assert_eq!(namer.hw_name_at(0x00, 8).as_deref(), Some("pc"));
+        assert_eq!(
+            namer.register_name_with_param_owned(0x00, 8),
+            Some(("pc".to_string(), None))
+        );
+        assert_eq!(namer.hw_name_at(0x4000, 8).as_deref(), Some("x0"));
+        assert_eq!(
+            namer.register_name_with_param_owned(0x4000, 8),
+            Some(("param_1".to_string(), Some(0)))
+        );
+    }
+
+    #[test]
+    fn powerpc64_resolves_4byte_segment_registers_and_low_gpr_halves() {
+        let mut options = crate::NirRenderOptions {
+            calling_convention: CallingConvention::PowerPc64,
+            format: "ELF64".to_string(),
+            is_64bit: true,
+            is_big_endian: true,
+            pointer_size: 8,
+            ..Default::default()
+        };
+        crate::test_maps::sync_preview_cspec(&mut options);
+        let namer = RegisterNamer::from_options(&options);
+        assert_eq!(namer.hw_name_at(0x800, 4).as_deref(), Some("sr0"));
+        assert_eq!(namer.hw_name_at(0x804, 4).as_deref(), Some("sr1"));
+        assert_eq!(namer.hw_name_at(0x1c, 4).as_deref(), Some("r3"));
+    }
+
+    #[test]
+    fn x86_64_ch_and_dh_map_to_rcx_and_rdx_param_slots() {
+        for (abi, expected_ch, expected_dh) in [
+            (CallingConvention::WindowsX64, Some(0), Some(1)),
+            (CallingConvention::SystemVAmd64, Some(3), Some(2)),
+        ] {
+            let mut options = crate::NirRenderOptions {
+                calling_convention: abi,
+                format: if abi == CallingConvention::WindowsX64 {
+                    "PE".to_string()
+                } else {
+                    "ELF64".to_string()
+                },
+                is_64bit: true,
+                pointer_size: 8,
+                ..Default::default()
+            };
+            crate::test_maps::sync_preview_cspec(&mut options);
+            let namer = RegisterNamer::from_options(&options);
+            assert_eq!(namer.hw_name_at(0x09, 1).as_deref(), Some("ch"));
+            assert_eq!(namer.hw_name_at(0x11, 1).as_deref(), Some("dh"));
+            assert_eq!(
+                namer.register_name_with_param_owned(0x09, 1),
+                Some(("ch".to_string(), expected_ch))
+            );
+            assert_eq!(
+                namer.register_name_with_param_owned(0x11, 1),
+                Some(("dh".to_string(), expected_dh))
+            );
+            // AH belongs to RAX (not a parameter on either Win64 or SysV)
+            assert_eq!(
+                namer.register_name_with_param_owned(0x01, 1),
+                Some(("ah".to_string(), None))
+            );
+        }
     }
 }
