@@ -6654,3 +6654,112 @@ fn a_block_of_copies_the_plan_names_is_not_stepped_over() {
     );
     assert!(!builder.is_trivial_forwarding_block(1, 2));
 }
+
+/// A post-indexed load (`ldrb w9, [x8], #1`; on x86 the same shape as
+/// `lodsb`) is `tmp = ptr; ptr = ptr + 1; v = *tmp`. The load reads the
+/// pointer from before the increment, so `tmp` cannot be inlined at the load
+/// once `ptr` has been reassigned: that printed `ptr = ptr + 1; v = *ptr`, a
+/// read one element past the machine's.
+#[test]
+fn a_definition_whose_input_is_rewritten_before_its_use_is_not_inlined() {
+    use crate::midend::render_mlil_preview;
+
+    // n = 0; do { v = *p++; n += v; } while (v); return n;
+    // with `p` carried around the loop in rdi.
+    let rax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x00, 8);
+    let rdx = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x10, 8);
+    let rdi = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0x38, 8);
+    let old = crate::midend::builder::materialize::test_support::varnode(0x100);
+    let more = Varnode {
+        size: 1,
+        ..crate::midend::builder::materialize::test_support::varnode(0x200)
+    };
+    let mut entry = block_at(
+        0x1000,
+        0,
+        vec![op(
+            0,
+            PcodeOpcode::Copy,
+            Some(rax.clone()),
+            vec![constant(0)],
+        )],
+    );
+    entry.successors = vec![1];
+    let mut body = block_at(
+        0x1010,
+        1,
+        vec![
+            op(
+                0x10,
+                PcodeOpcode::Copy,
+                Some(old.clone()),
+                vec![rdi.clone()],
+            ),
+            op(
+                0x11,
+                PcodeOpcode::IntAdd,
+                Some(rdi.clone()),
+                vec![rdi.clone(), constant(1)],
+            ),
+            op(
+                0x12,
+                PcodeOpcode::Load,
+                Some(rdx.clone()),
+                vec![constant(0), old],
+            ),
+            op(
+                0x13,
+                PcodeOpcode::IntAdd,
+                Some(rax.clone()),
+                vec![rax.clone(), rdx.clone()],
+            ),
+            op(
+                0x14,
+                PcodeOpcode::IntNotEqual,
+                Some(more.clone()),
+                vec![rdx, constant(0)],
+            ),
+            op(
+                0x15,
+                PcodeOpcode::CBranch,
+                None,
+                vec![constant(0x1010), more],
+            ),
+        ],
+    );
+    body.successors = vec![1, 2];
+    let exit = block_at(
+        0x1030,
+        2,
+        vec![op(0x30, PcodeOpcode::Return, None, vec![constant(0), rax])],
+    );
+    let pcode = pcode_function(vec![entry, body, exit]);
+    let mut options = crate::midend::builder::materialize::test_support::test_options();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    options.format = "ELF64".to_string();
+    options.pe_x64_only = false;
+    crate::midend::cspec::test_maps::sync_preview_cspec(&mut options);
+
+    let code = render_mlil_preview(&pcode, "post_index", 0x1000, &options).expect("render");
+    let lines: Vec<&str> = code.lines().map(str::trim).collect();
+    let increment = lines
+        .iter()
+        .position(|line| line.contains("= ") && line.contains(" + 1;"))
+        .unwrap_or_else(|| panic!("the pointer update is printed:\n{code}"));
+    let incremented = lines[increment]
+        .split(" = ")
+        .next()
+        .expect("an assignment")
+        .trim();
+    // Whatever the load dereferences, it is not the variable that already
+    // holds the advanced pointer.
+    assert!(
+        !lines[increment + 1..]
+            .iter()
+            .any(|line| line.contains(&format!("*{incremented}"))
+                || line.contains(&format!("*({incremented})"))
+                || line.contains(&format!("*(unsigned long long *)({incremented})"))
+                || line.contains(&format!("*(unsigned long long *){incremented}"))),
+        "the load reads the pointer after its increment:\n{code}"
+    );
+}
