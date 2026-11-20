@@ -47,6 +47,7 @@ pub fn diff_prehir_hir(
                 checked += 1;
                 if prehir_result != hir_result {
                     divergences.push(Divergence {
+                        run: None,
                         args: args.clone(),
                         prehir_result,
                         hir_result,
@@ -62,6 +63,7 @@ pub fn diff_prehir_hir(
             (Ok(prehir_result), Err(hir_err)) => {
                 tracing::debug!("HIR-only eval error for {args:?}: {hir_err}");
                 divergences.push(Divergence {
+                    run: None,
                     args: args.clone(),
                     prehir_result,
                     hir_result: None,
@@ -72,6 +74,7 @@ pub fn diff_prehir_hir(
             (Err(prehir_err), Ok(hir_result)) => {
                 tracing::debug!("PreHIR-only eval error for {args:?}: {prehir_err}");
                 divergences.push(Divergence {
+                    run: None,
                     args: args.clone(),
                     prehir_result: None,
                     hir_result,
@@ -133,26 +136,6 @@ pub fn default_samples(arity: usize) -> Vec<Vec<i64>> {
     // pairwise and boundary coverage capped at MAX_DEFAULT_SAMPLES.
     pairwise_samples(arity, MAX_DEFAULT_SAMPLES)
 }
-
-/// Samples for the ground-truth tier: the same boundary values, at most
-/// `GROUND_SAMPLES` of them whatever the arity.
-///
-/// Every ground-truth sample runs two interpreters and an emulated call, and
-/// a body that loops on a stubbed call runs each to its budget; the full
-/// cross product for three parameters (343 samples) made one such function
-/// take minutes. The diagonal, single-parameter and pairwise variations
-/// below keep every boundary value of every parameter.
-pub fn ground_samples(arity: usize) -> Vec<Vec<i64>> {
-    if arity == 0 {
-        // Still two: the stub policy alternates by sample index, and one
-        // sample would only ever see every call fail.
-        return vec![Vec::new(), Vec::new()];
-    }
-    pairwise_samples(arity, GROUND_SAMPLES)
-}
-
-/// Ground-truth samples per function.
-pub const GROUND_SAMPLES: usize = 24;
 
 /// Boundary values in diagonal, single-parameter and pairwise variations,
 /// at most `cap` of them.
@@ -482,12 +465,5 @@ mod tests {
         for s in &samples_6 {
             assert_eq!(s.len(), 6);
         }
-    }
-
-    /// A function without parameters still runs under both stub policies,
-    /// which alternate by sample index.
-    #[test]
-    fn a_parameterless_function_gets_one_sample_per_stub_policy() {
-        assert_eq!(ground_samples(0), vec![Vec::<i64>::new(), Vec::new()]);
     }
 }

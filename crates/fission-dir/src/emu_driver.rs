@@ -398,6 +398,77 @@ impl EmulatorHarness {
         call_return: &dyn Fn(usize) -> u64,
     ) -> Result<StubbedRun> {
         self.prepare_call(address, args)?;
+        self.run_prepared(flow, call_return)
+    }
+
+    /// Set up one run of `address` from `state`: the baseline image, with
+    /// every unmapped byte, every general-purpose register and every argument
+    /// slot taken from `state`. `args` are the raw slot words
+    /// ([`crate::initial_state::InitialState::argument_word`]).
+    ///
+    /// The machine is left stopped at the function's first instruction, so
+    /// the caller can read registers ([`Self::registers`]) before
+    /// [`Self::run_prepared`] runs it.
+    pub fn begin_run(
+        &mut self,
+        address: u64,
+        args: &[u64],
+        state: &crate::initial_state::InitialState,
+    ) -> Result<()> {
+        self.restore_baseline();
+        let lazy = *state;
+        self.emu.state.lazy_memory = Some(Arc::new(move |addr| lazy.memory_byte(addr)));
+        let sp = self.emu.arch.sp_reg;
+        let pc = self.emu.arch.pc_reg;
+        let link = self.emu.arch.cc.return_addr_reg();
+        let gp: Vec<&'static str> = self.emu.arch.gp_regs.to_vec();
+        for (index, name) in gp.iter().enumerate() {
+            let fixed = [Some(sp), Some(pc), link]
+                .iter()
+                .flatten()
+                .any(|reg| reg.eq_ignore_ascii_case(name));
+            if !fixed {
+                self.emu
+                    .write_register_u64(name, state.register_word(index as u64))?;
+            }
+        }
+        self.setup_call(address, args)
+    }
+
+    /// Width of an argument slot: the target's pointer size, in bits.
+    pub fn pointer_bits(&self) -> u32 {
+        u32::from(self.emu.arch.pointer_size) * 8
+    }
+
+    /// Registers as they stand now -- after [`Self::begin_run`], what the
+    /// function finds at entry. Names the machine does not know are left out.
+    pub fn registers(&mut self, names: &[String]) -> Vec<(String, i64)> {
+        names
+            .iter()
+            .filter_map(|n| {
+                self.emu
+                    .read_register_u64(n)
+                    .ok()
+                    .map(|v| (n.clone(), v as i64))
+            })
+            .collect()
+    }
+
+    /// What a run from `state` finds at `addr` before anything writes it: the
+    /// image where the image maps it, the state's own byte elsewhere -- what
+    /// the machine's lazy memory fills an unmapped page with.
+    pub fn initial_byte(&self, state: &crate::initial_state::InitialState, addr: u64) -> u8 {
+        self.baseline_byte(addr)
+            .unwrap_or_else(|| state.memory_byte(addr))
+    }
+
+    /// Run the call [`Self::prepare_call`] or [`Self::begin_run`] set up, as
+    /// [`Self::call_stubbed`] describes.
+    pub fn run_prepared(
+        &mut self,
+        flow: &crate::call_sites::MachineFlow,
+        call_return: &dyn Fn(usize) -> u64,
+    ) -> Result<StubbedRun> {
         let sp_reg = self.emu.arch.sp_reg;
         let entry_sp = self.emu.read_register_u64(sp_reg)?;
         let log = Arc::new(Mutex::new(Vec::new()));
@@ -503,14 +574,23 @@ impl EmulatorHarness {
     /// Restore the baseline and set up a call of `address` with `args`,
     /// stopped at its first instruction.
     fn prepare_call(&mut self, address: u64, args: &[u64]) -> Result<()> {
-        // Restore baseline -- a called function can mutate globals/heap.
+        self.restore_baseline();
+        self.setup_call(address, args)
+    }
+
+    /// Restore the baseline -- a called function can mutate globals/heap.
+    fn restore_baseline(&mut self) {
         self.emu.state = self.baseline_state.clone();
         self.emu.pc = self.baseline_pc;
         // The instruction budget is per call. The count lives on the
         // emulator, not in the restored state, so without this every call
         // spent what the earlier ones left and a batch ran out partway.
         self.emu.inst_count = 0;
+    }
 
+    /// Set up a call of `address` with `args` on the current state, stopped
+    /// at its first instruction.
+    fn setup_call(&mut self, address: u64, args: &[u64]) -> Result<()> {
         // Set up the call like a real `call`/`bl`: write the sentinel
         // return address to the link register (ARM/MIPS/PPC) or push it on
         // the stack (x86) -- exactly what `simulate_return()` already

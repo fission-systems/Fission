@@ -12,7 +12,7 @@
 //! catches that class of bug.
 
 use fission_loader::loader::LoadedBinary;
-use fission_midend_core::ir::{HirFunction, NirType};
+use fission_midend_core::ir::{HirFunction, NirBindingOrigin, NirType};
 use fission_midend_prehir::PreHirFunction;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -21,47 +21,12 @@ use crate::emu_driver::{EmulatorHarness, ObservedCall, StubbedEnd};
 use crate::eval::{
     CallEvent, World, hir_free_names, hir_mentioned_names, normalize, run_hir, run_prehir, width_of,
 };
+use crate::initial_state::{InitialState, RunPlan};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 use fission_decompiler::PrintedGlobal;
 
-/// Size of the scratch region allocated for each pointer parameter.
-const SCRATCH_REGION_SIZE: usize = 128;
-
-/// Pointer parameters one call can be given a region for.
-const SCRATCH_REGIONS: usize = 8;
-
-/// Regions after the parameter ones that stubbed calls return pointers to.
-const RESULT_REGIONS: usize = 8;
-
-/// Divergent samples a function is checked until.
+/// Divergent runs a function is checked until.
 const MAX_REPORTED_DIVERGENCES: usize = 3;
-
-/// Bytes the scratch buffer is filled with.
-///
-/// Zero, except the first four bytes of every sixteen. Zeros make any
-/// pointer-sized field a null terminator, so a linked structure walked from
-/// here ends rather than chasing garbage into unmapped memory and faulting the
-/// call; the non-zero words give the arithmetic something to do so a body that
-/// reads a field is not just returning zero either.
-///
-/// Allocates disjoint 128-byte regions for each pointer parameter so multiple
-/// pointer arguments (e.g. memcpy, strcmp) do not artificially alias.
-///
-/// Only the parameter regions are seeded. The regions after them are what a
-/// stubbed call returns a pointer to, and those are all zero: a fresh result
-/// buffer whose first word read 65 sent bodies down paths, and chased
-/// pointers, that a zeroed one does not.
-fn scratch_contents(param_regions: usize, result_regions: usize) -> Vec<u8> {
-    let param_regions = param_regions.max(1);
-    let mut bytes = vec![0u8; (param_regions + result_regions) * SCRATCH_REGION_SIZE];
-    for (chunk, slot) in bytes[..param_regions * SCRATCH_REGION_SIZE]
-        .chunks_mut(16)
-        .enumerate()
-    {
-        slot[..4].copy_from_slice(&((chunk as u32) + 1).to_le_bytes());
-    }
-    bytes
-}
 
 /// What the comparison needs from outside the two trees and the emulator.
 #[derive(Debug, Clone, Default)]
@@ -116,56 +81,38 @@ impl Grounding {
     }
 }
 
-/// For each `args` tuple, evaluate `prehir`/`hir` concretely and call the real
-/// emulator at `address` with the same arguments, then compare all three.
-/// Calls are refused; see [`check_ground_truth_with`] for the tier that
-/// stubs them.
+/// Run `prehir`, `hir` and the real machine code from the same initial
+/// states (`plan`) and compare what each returns. Calls are refused; see
+/// [`check_ground_truth_with`] for the tier that stubs them.
 pub fn check_ground_truth(
     harness: &mut EmulatorHarness,
     address: u64,
     prehir: &PreHirFunction,
     hir: &HirFunction,
-    samples: &[Vec<i64>],
+    plan: &RunPlan,
 ) -> VerifyOutcome {
-    check_ground_truth_with(
-        harness,
-        address,
-        prehir,
-        hir,
-        samples,
-        &Grounding::default(),
-    )
+    check_ground_truth_with(harness, address, prehir, hir, plan, &Grounding::default())
 }
 
-/// The value the `n`th stubbed call returns under `policy`.
+/// For each run of `plan`, run `prehir` and `hir` and the real machine code
+/// from the same initial state ([`crate::initial_state`]) with the same
+/// stubbed calls, and compare what each returns, every call each makes and
+/// every byte each stores outside the function's own frame.
 ///
-/// Two policies, alternated across samples: every call returns zero (the
-/// failure path of most library calls), or a pointer to a zeroed region of
-/// its own (the success path, and a non-zero integer). Both sides use the
-/// same function, so they always agree on it.
-fn stub_return(scratch: u64, policy: usize, n: usize) -> u64 {
-    if policy % 2 == 0 {
-        0
-    } else {
-        let region = SCRATCH_REGIONS + n % RESULT_REGIONS;
-        scratch.wrapping_add((region * SCRATCH_REGION_SIZE) as u64)
-    }
-}
-
-/// For each `args` tuple, run `prehir` and `hir` and the real machine code
-/// on the same arguments, the same memory and the same stubbed calls, and
-/// compare what each returns, every call each makes and every byte each
-/// stores outside the function's own frame.
+/// Every byte the function can read is defined by the run -- arguments,
+/// registers, and memory anywhere a pointer leads -- and both sides read the
+/// same one, so a pointer argument needs no buffer of its own and neither
+/// side needs to know which arguments are pointers.
 ///
-/// A sample counts toward `checked` only when all three ran to a comparable
+/// A run counts toward `checked` only when all three ran to a comparable
 /// end; one the interpreter refuses is skipped and its reason kept, so a
-/// function no sample could check reports why rather than passing.
+/// function no run could check reports why rather than passing.
 pub fn check_ground_truth_with(
     harness: &mut EmulatorHarness,
     address: u64,
     prehir: &PreHirFunction,
     hir: &HirFunction,
-    samples: &[Vec<i64>],
+    plan: &RunPlan,
     grounding: &Grounding,
 ) -> VerifyOutcome {
     // The calling convention model only covers integer registers. A floating-point
@@ -187,39 +134,6 @@ pub fn check_ground_truth_with(
         ));
     }
 
-    let num_ptrs = hir
-        .params
-        .iter()
-        .filter(|p| matches!(p.ty, NirType::Ptr(_)))
-        .count();
-    if num_ptrs > SCRATCH_REGIONS {
-        return VerifyOutcome::Unsupported(UnsupportedReason::Construct(
-            "more pointer parameters than scratch regions",
-        ));
-    }
-    // Always the same buffer: a harness serves every function of a batch and
-    // installs its scratch once, so a size chosen per function would leave a
-    // later function's regions outside the bytes the emulator holds. It also
-    // holds the regions stubbed calls return pointers to.
-    let contents = scratch_contents(SCRATCH_REGIONS, RESULT_REGIONS);
-    let scratch = match harness.install_scratch(&contents) {
-        Ok(addr) => addr,
-        Err(err) => {
-            return VerifyOutcome::Unsupported(UnsupportedReason::Harness(format!(
-                "scratch buffer: {err}"
-            )));
-        }
-    };
-    let image: Vec<(u64, u8)> = contents
-        .iter()
-        .enumerate()
-        .map(|(i, b)| (scratch.wrapping_add(i as u64), *b))
-        .collect();
-    let placed: HashMap<u64, u8> = image.iter().copied().collect();
-
-    // Registers the body reads without ever writing -- caller state the
-    // interpreter has no other way to know. Taken from the machine that is
-    // about to run the same call, so both sides see the same thing.
     if let Some(name) = hir_mentioned_names(hir)
         .into_iter()
         .find(|name| grounding.ambiguous_globals.contains(name))
@@ -228,9 +142,42 @@ pub fn check_ground_truth_with(
             "global '{name}' names several objects; the text does not say which"
         )));
     }
+    // Registers the body reads without ever writing -- caller state the
+    // interpreter has no other way to know. Read from the machine once each
+    // run is set up, so both sides see the same values however the names
+    // overlap (`eax` inside `rax`).
     let mut free = hir_free_names(hir);
+    // And locals named after a register. The decompiler declares a variable
+    // for a register it reads -- `long long fs_offset;` for the stack
+    // canary's segment base, `rdx` for a register a path uses before it
+    // assigns it -- and a read before any assignment is that register's
+    // value at entry. The machine says what that is. A local the machine has
+    // no register for (`local_8`, `tmp_1a004`) is not bound here, and a read
+    // of it before an assignment is still refused.
+    free.extend(
+        hir.locals
+            .iter()
+            .filter(|local| local.initializer.is_none())
+            .map(|local| local.name.clone()),
+    );
+    free.extend(
+        prehir
+            .locals
+            .iter()
+            .filter(|local| local.initializer.is_none())
+            .map(|local| local.name.clone()),
+    );
+    free.sort();
+    free.dedup();
     free.retain(|name| !grounding.globals.contains_key(name));
-    let bound = harness.entry_registers(&free);
+    let slot_bits = harness.pointer_bits();
+    let slots = param_slots(hir.params.iter().map(|p| (p.name.as_str(), p.origin)));
+    let prehir_slots = param_slots(prehir.params.iter().map(|p| (p.name.as_str(), p.origin)));
+    let slot_count = slots
+        .iter()
+        .chain(&prehir_slots)
+        .max()
+        .map_or(0, |&s| s + 1);
 
     let empty_flow = MachineFlow::default();
     let flow = grounding.flow.as_ref().unwrap_or(&empty_flow);
@@ -243,39 +190,49 @@ pub fn check_ground_truth_with(
     let return_bits = width_of(&hir.return_type).clamp(1, 64);
     let declares_value = !matches!(hir.return_type, NirType::Unknown)
         || !matches!(prehir.return_type, NirType::Unknown);
+    let no_placed: HashMap<u64, u8> = HashMap::new();
     let mut divergences = Vec::new();
     let mut checked = 0usize;
     let mut emulator_errors = 0usize;
     let mut first_interpreter_error: Option<String> = None;
     let mut first_emulator_error: Option<String> = None;
 
-    for (sample, args) in samples.iter().enumerate() {
+    for run in 0..plan.runs {
         // Three differences are evidence enough; running the rest only
         // costs time on exactly the bodies that loop to their budget.
         if divergences.len() >= MAX_REPORTED_DIVERGENCES {
             break;
         }
-        // A pointer parameter takes its disjoint buffer region address rather
-        // than the sweep's integer, preventing false buffer aliasing across
-        // multi-pointer arguments.
-        let mut ptr_idx = 0usize;
-        let args: Vec<i64> = args
-            .iter()
-            .zip(&hir.params)
-            .map(|(v, p)| match &p.ty {
-                NirType::Ptr(_) => {
-                    let offset = (ptr_idx * SCRATCH_REGION_SIZE) as u64;
-                    ptr_idx += 1;
-                    scratch.wrapping_add(offset) as i64
-                }
-                _ => *v,
+        let state = InitialState::new(plan.seed, run as u32);
+        // One word per slot up to the last one a parameter uses; a slot no
+        // parameter names still holds whatever the caller left there.
+        let raw_slots: Vec<u64> = (0..slot_count)
+            .map(|slot| match slots.iter().position(|&s| s == slot) {
+                Some(i) => state.argument_word(slot, &hir.params[i].ty, slot_bits),
+                None => state.argument_word(slot, &NirType::Unknown, slot_bits),
             })
             .collect();
-        let call_return = |n: usize| stub_return(scratch, sample, n);
+        let args: Vec<i64> = slots
+            .iter()
+            .zip(&hir.params)
+            .map(|(&slot, p)| normalize(raw_slots[slot] as i64, &p.ty))
+            .collect();
+        let prehir_args: Vec<i64> = prehir_slots
+            .iter()
+            .zip(&prehir.params)
+            .map(|(&slot, p)| normalize(raw_slots[slot] as i64, &p.ty))
+            .collect();
+        if let Err(err) = harness.begin_run(address, &raw_slots, &state) {
+            first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
+            emulator_errors += 1;
+            continue;
+        }
+        let bound = harness.registers(&free);
+        let call_return = |n: usize| state.call_result(n);
         let (prehir_r, hir_r) = {
-            let backing = |addr: u64| harness.baseline_byte(addr);
+            let backing = |addr: u64| Some(harness.initial_byte(&state, addr));
             let world = World {
-                image: &image,
+                image: &[],
                 bound: &bound,
                 backing: Some(&backing),
                 globals: Some(&grounding.globals),
@@ -287,7 +244,13 @@ pub fn check_ground_truth_with(
                 no_return_sites: Some(&no_return_sites),
             };
             (
-                run_prehir(&prehir.body, &prehir.params, &prehir.locals, &args, &world),
+                run_prehir(
+                    &prehir.body,
+                    &prehir.params,
+                    &prehir.locals,
+                    &prehir_args,
+                    &world,
+                ),
                 run_hir(&hir.body, &hir.params, &hir.locals, &args, &world),
             )
         };
@@ -303,11 +266,10 @@ pub fn check_ground_truth_with(
         };
         let prehir_run = prehir_r.as_ref().ok();
 
-        let u_args: Vec<u64> = args.iter().map(|&a| a as u64).collect();
-        let machine = match harness.call_stubbed(address, &u_args, flow, &call_return) {
+        let machine = match harness.run_prepared(flow, &call_return) {
             Ok(run) => run,
             Err(err) => {
-                tracing::debug!("emulator call failed for {args:?}: {err}");
+                tracing::debug!("emulator run {run} failed: {err}");
                 first_emulator_error.get_or_insert_with(|| format!("call failed: {err}"));
                 emulator_errors += 1;
                 continue;
@@ -324,7 +286,7 @@ pub fn check_ground_truth_with(
                 continue;
             }
             StubbedEnd::Other(other) => {
-                tracing::debug!("emulator call for {args:?} did not return normally: {other:?}");
+                tracing::debug!("emulator run {run} did not return normally: {other:?}");
                 first_emulator_error.get_or_insert_with(|| format!("{other:?}"));
                 emulator_errors += 1;
                 continue;
@@ -356,8 +318,8 @@ pub fn check_ground_truth_with(
                     })
                 })
                 .or_else(|| {
-                    compare_writes(side, &run.writes, &machine.writes, &placed, |a| {
-                        harness.baseline_byte(a)
+                    compare_writes(side, &run.writes, &machine.writes, &no_placed, |a| {
+                        Some(harness.initial_byte(&state, a))
                     })
                 });
         }
@@ -370,6 +332,7 @@ pub fn check_ground_truth_with(
             && (hir_val != emulator_val || prehir_run.is_some() && prehir_val != emulator_val);
         if return_differs || detail.is_some() {
             divergences.push(Divergence {
+                run: Some(state.run()),
                 args: args.to_vec(),
                 prehir_result: prehir_val,
                 hir_result: hir_val,
@@ -389,7 +352,7 @@ pub fn check_ground_truth_with(
             ));
         }
         return VerifyOutcome::Unsupported(UnsupportedReason::Interpreter(
-            first_interpreter_error.unwrap_or_else(|| "no samples".to_string()),
+            first_interpreter_error.unwrap_or_else(|| "no runs".to_string()),
         ));
     }
     VerifyOutcome::Equivalent { checked }
@@ -494,6 +457,40 @@ fn compare_writes(
     None
 }
 
+/// Slots past this are not a parameter list the decompiler means; such a
+/// tree is checked with its parameters in order.
+const MAX_PARAM_SLOT: usize = 16;
+
+/// The argument slot (0-based: registers, then stack words) each parameter
+/// of `params` arrives in. A tree that drops a parameter its body never
+/// reads keeps the rest where the ABI put them: `f(param_1, param_3)` reads
+/// its second parameter from the third slot, not the second. The slot is
+/// the binding's `ParamIndex` origin, else the 1-based slot the decompiler
+/// names it after (`param_3`); a list where either is missing or repeats,
+/// or reaches past [`MAX_PARAM_SLOT`], is taken in order.
+fn param_slots<'a>(
+    params: impl ExactSizeIterator<Item = (&'a str, Option<NirBindingOrigin>)>,
+) -> Vec<usize> {
+    let count = params.len();
+    let slot_of = |(name, origin): (&str, Option<NirBindingOrigin>)| match origin {
+        Some(NirBindingOrigin::ParamIndex(i)) => Some(i),
+        _ => name
+            .strip_prefix("param_")
+            .and_then(|n| n.parse::<usize>().ok())
+            .and_then(|n| n.checked_sub(1)),
+    };
+    let slots: Option<Vec<usize>> = params.map(slot_of).collect();
+    match slots {
+        Some(slots)
+            if slots.windows(2).all(|w| w[0] < w[1])
+                && slots.last().is_none_or(|&s| s < MAX_PARAM_SLOT) =>
+        {
+            slots
+        }
+        _ => (0..count).collect(),
+    }
+}
+
 /// Truncate `raw` to its low `bits` bits (unsigned) before handing off to
 /// [`normalize`] for sign-extension per the function's declared return
 /// type -- the emulator's return register can carry garbage in the high
@@ -509,6 +506,26 @@ fn mask_to_width(raw: u64, bits: u32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn slots_of(params: &[(&str, Option<NirBindingOrigin>)]) -> Vec<usize> {
+        param_slots(params.iter().copied())
+    }
+
+    #[test]
+    fn a_dropped_parameter_leaves_the_rest_in_their_slots() {
+        assert_eq!(slots_of(&[("param_1", None), ("param_3", None)]), [0, 2]);
+        assert_eq!(
+            slots_of(&[
+                ("fd", Some(NirBindingOrigin::ParamIndex(1))),
+                ("param_4", None)
+            ]),
+            [1, 3]
+        );
+        // Names that say nothing, or slots out of order, keep the order.
+        assert_eq!(slots_of(&[("argc", None), ("argv", None)]), [0, 1]);
+        assert_eq!(slots_of(&[("param_3", None), ("param_1", None)]), [0, 1]);
+        assert_eq!(slots_of(&[("param_40", None)]), [0]);
+    }
 
     fn event(site: u64, args: &[i64]) -> CallEvent {
         CallEvent {
@@ -593,16 +610,5 @@ mod tests {
             compare_writes("hir", &redundant, &machine, &HashMap::new(), baseline),
             None
         );
-    }
-
-    /// The regions a stubbed call returns a pointer to start zeroed, as the
-    /// stub policy says; only the parameter regions carry seeded words.
-    #[test]
-    fn result_regions_are_zero_and_parameter_regions_are_seeded() {
-        let bytes = scratch_contents(2, 3);
-        assert_eq!(bytes.len(), 5 * SCRATCH_REGION_SIZE);
-        let (params, results) = bytes.split_at(2 * SCRATCH_REGION_SIZE);
-        assert!(results.iter().all(|b| *b == 0));
-        assert_eq!(&params[..4], &1u32.to_le_bytes());
     }
 }

@@ -6,7 +6,7 @@
 //! own -- a real, non-decompiler-derived ground truth.
 
 use fission_dir::report::VerifyOutcome;
-use fission_dir::{EmulatorHarness, check_ground_truth, decompile_one, default_samples};
+use fission_dir::{EmulatorHarness, RunPlan, check_ground_truth, decompile_one};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_midend_core::ir::HirStmt;
 use fission_static::analysis::decomp::facts::FactStore;
@@ -34,7 +34,7 @@ fn count_bits_matches_real_machine_code() {
     };
 
     let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
-    let samples = default_samples(pair.hir.params.len());
+    let samples = RunPlan::default();
 
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
     let outcome = check_ground_truth(
@@ -68,7 +68,13 @@ fn float_return_signature_reports_unsupported() {
     let mut hir = fission_midend_core::ir::HirFunction::default();
     hir.return_type = fission_midend_core::ir::NirType::Float { bits: 32 };
     let prehir = fission_midend_prehir::PreHirFunction::default();
-    let outcome = check_ground_truth(&mut harness, 0x140001530, &prehir, &hir, &[]);
+    let outcome = check_ground_truth(
+        &mut harness,
+        0x140001530,
+        &prehir,
+        &hir,
+        &RunPlan::default(),
+    );
     match outcome {
         VerifyOutcome::Unsupported(fission_dir::report::UnsupportedReason::Construct(msg)) => {
             assert_eq!(msg, "floating-point ABI in ground-truth");
@@ -104,7 +110,7 @@ fn corrupted_hir_is_caught_against_real_machine_code() {
         fission_midend_core::ir::HirExpr::Const(0, corrupted_hir.return_type.clone()),
     ))];
 
-    let samples = default_samples(pair.hir.params.len());
+    let samples = RunPlan::default();
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
     let outcome = check_ground_truth(
         &mut harness,
@@ -158,11 +164,8 @@ fn clamp_matches_real_machine_code_including_negative_args() {
     };
 
     let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
-    let samples = default_samples(pair.hir.params.len());
-    assert!(
-        samples.iter().any(|s| s.iter().any(|&v| v < 0)),
-        "default_samples should include negative args -- otherwise this test can't catch the bug it's for"
-    );
+    // Edge runs include -1 and the 32-bit sign bit for every argument.
+    let samples = RunPlan::default();
 
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
     let outcome = check_ground_truth(

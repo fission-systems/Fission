@@ -47,6 +47,9 @@ impl fmt::Display for UnsupportedReason {
 /// itself reported, never silently dropped).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Divergence {
+    /// Ground-truth tier: the run ([`crate::initial_state::InitialState`])
+    /// whose state reproduces this. `None` for tiers that take samples.
+    pub run: Option<u32>,
     pub args: Vec<i64>,
     pub prehir_result: Option<i64>,
     pub hir_result: Option<i64>,

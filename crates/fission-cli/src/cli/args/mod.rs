@@ -385,6 +385,12 @@ pub struct VerifyArgs {
     #[arg(long, default_value_t = 1_000_000)]
     pub max_inst: u64,
 
+    /// Runs per function for the ground-truth tier, each from its own
+    /// initial state (arguments, registers and memory drawn from a fixed
+    /// seed and the run number)
+    #[arg(long, default_value_t = fission_dir::DEFAULT_RUNS)]
+    pub runs: usize,
+
     /// Emit the result as JSON instead of human-readable text
     #[arg(long)]
     pub json: bool,

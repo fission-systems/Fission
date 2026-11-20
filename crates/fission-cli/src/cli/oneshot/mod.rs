@@ -426,7 +426,10 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                 if let Some(harness) = harness.as_mut() {
                     match harness {
                         Ok(harness) => {
-                            let samples = fission_dir::ground_samples(pair.hir.params.len());
+                            let plan = fission_dir::RunPlan {
+                                runs: args.runs,
+                                ..fission_dir::RunPlan::default()
+                            };
                             let grounding = fission_dir::Grounding::for_function(
                                 &binary,
                                 func.address,
@@ -437,7 +440,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 func.address,
                                 &pair.prehir,
                                 &pair.hir,
-                                &samples,
+                                &plan,
                                 &grounding,
                             );
                             tiers.push((

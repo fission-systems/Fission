@@ -1,0 +1,81 @@
+/*
+ * Functions for fission-dir's ground-truth tests. Built into
+ * `ground_truth_fixture.elf`, which is checked in next to this file:
+ *
+ *   clang --target=x86_64-linux-gnu -O1 -fno-inline -fstack-protector-all -fno-pic \
+ *     -nostdlib -static -fuse-ld=lld -Wl,--build-id=none -Wl,-e,_start \
+ *     -o ground_truth_fixture.elf ground_truth_fixture.c
+ *
+ * Each function exercises one part of the shared initial state: memory read
+ * through a pointer argument, a pointer chain, a bool parameter, a narrow
+ * parameter the ABI extends, a writable global, and the stack canary read
+ * through the FS segment base.
+ */
+#include <stdbool.h>
+
+/* Only `guarded_sum` keeps the canary `-fstack-protector-all` adds. */
+#define PLAIN __attribute__((no_stack_protector))
+
+struct node {
+    struct node *next;
+    int value;
+};
+
+long counter = 7;
+
+PLAIN unsigned sum_bytes(const unsigned char *p, unsigned n)
+{
+    unsigned total = 0;
+    for (unsigned i = 0; i < (n & 15); i++)
+        total += p[i];
+    return total;
+}
+
+PLAIN int first_plus_fourth(const int *p)
+{
+    return p[0] + p[3];
+}
+
+PLAIN int list_len(const struct node *p)
+{
+    int n = 0;
+    while (p && n < 64) {
+        n++;
+        p = p->next;
+    }
+    return n;
+}
+
+PLAIN int pick(bool b, int x)
+{
+    return b ? x : -x;
+}
+
+PLAIN int widen(signed char c)
+{
+    return c * 3;
+}
+
+PLAIN long read_counter(void)
+{
+    return counter + 1;
+}
+
+int guarded_sum(int x)
+{
+    volatile int a[4] = {x, x + 1, x + 2, x + 3};
+    return a[0] + a[3];
+}
+
+/* The canary check's failure path; nothing here links a libc. */
+PLAIN void __stack_chk_fail(void)
+{
+    for (;;)
+        ;
+}
+
+PLAIN void _start(void)
+{
+    for (;;)
+        ;
+}
