@@ -1305,6 +1305,10 @@
          <lastmod>2026-11-20</lastmod>
     </url>
     <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-19-call-arguments-at-jumps-and-joins/</loc>
+         <lastmod>2026-11-20</lastmod>
+    </url>
+    <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-19-call-result-returned-from-a-join/</loc>
          <lastmod>2026-11-20</lastmod>
     </url>
@@ -1322,6 +1326,10 @@
     </url>
     <url>
          <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-19-read-before-store-snapshot/</loc>
+         <lastmod>2026-11-20</lastmod>
+    </url>
+    <url>
+         <loc>https://sjkim1127.github.io/Fission/proposals/2026-11-20-test-of-a-global-copy/</loc>
          <lastmod>2026-11-20</lastmod>
     </url>
     <url>
