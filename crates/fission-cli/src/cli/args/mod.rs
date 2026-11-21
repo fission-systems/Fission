@@ -49,6 +49,21 @@ pub enum ParsedInvocation {
     Schema(SchemaArgs),
     /// The agent usage guide for this CLI
     Skill,
+    /// The SLEIGH language IDs this build can lift
+    Languages(LanguagesArgs),
+}
+
+/// `fission_cli languages`: the lift-ready SLEIGH language IDs, i.e. the
+/// values `--language` accepts.
+#[derive(Args, Clone, Debug, Default, PartialEq, Eq)]
+pub struct LanguagesArgs {
+    /// Only languages whose processor name contains this (case-insensitive),
+    /// e.g. `arm` or `x86`
+    #[arg(long, value_name = "NAME")]
+    pub processor: Option<String>,
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
 }
 
 /// `fission_cli schema`: describe the `--contract v1` envelope and error codes.
@@ -139,6 +154,19 @@ struct CliArgs {
     /// them: `x86_64`, `arm64`, `arm64e`, `i386`, `armv7`.
     #[arg(long = "arch", global = true, value_name = "ARCH")]
     arch: Option<String>,
+
+    /// Load the file as a raw image (firmware, shellcode, a memory dump)
+    /// mapped at this address, instead of parsing a container format.
+    ///
+    /// A raw image says nothing about what it holds, so `--language` is
+    /// required with it. The whole file becomes one executable section
+    /// starting at the base, and one function is seeded at `--entry`.
+    #[arg(long = "base", global = true, value_name = "ADDR", value_parser = parse_hex_address)]
+    raw_base: Option<u64>,
+
+    /// Entry point of a raw image (`--base`); defaults to the base address
+    #[arg(long = "entry", global = true, value_name = "ADDR", value_parser = parse_hex_address)]
+    raw_entry: Option<u64>,
 
     /// Read decisions from this analysis database instead of the default one.
     ///
@@ -235,6 +263,8 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
 "
     )]
     Schema(SchemaArgs),
+    /// List the SLEIGH language IDs this build can lift (values for `--language`)
+    Languages(LanguagesArgs),
     /// Print the agent usage guide (SKILL.md) built into this binary
     #[command(
         long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
@@ -1062,6 +1092,7 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "ai",
     "schema",
     "skill",
+    "languages",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1099,6 +1130,8 @@ where
         fission_core::resource_roots::set_cli_signature_paths(cli.signature_path.clone());
         let language_override = cli.language.clone();
         let arch = cli.arch.clone();
+        let raw_base = cli.raw_base;
+        let raw_entry = cli.raw_entry;
         let analysis_db = cli.analysis_db.clone();
         let no_analysis_db = cli.no_analysis_db;
         let invocation = normalize_canonical(cli);
@@ -1106,6 +1139,8 @@ where
             ParsedInvocation::OneShot(mut parsed) => {
                 parsed.args.language_override = language_override.clone();
                 parsed.args.arch = arch.clone();
+                parsed.args.raw_base = raw_base;
+                parsed.args.raw_entry = raw_entry;
                 parsed.args.analysis_db = analysis_db.clone();
                 parsed.args.no_analysis_db = no_analysis_db;
                 ParsedInvocation::OneShot(parsed)
@@ -1122,7 +1157,10 @@ where
             arch.as_deref(),
             analysis_db.as_deref(),
             no_analysis_db,
-        ) {
+        )
+        .into_iter()
+        .chain(raw_load_warnings(&invocation, raw_base, raw_entry))
+        {
             eprintln!("{warning}");
         }
         invocation
@@ -1207,6 +1245,35 @@ fn ignored_option_warnings(
         _ => {}
     }
     warnings
+}
+
+/// `--base`/`--entry` load a raw image, which only the one-shot analysis
+/// commands do; everything else loads the file its own way.
+fn raw_load_warnings(
+    invocation: &ParsedInvocation,
+    raw_base: Option<u64>,
+    raw_entry: Option<u64>,
+) -> Vec<String> {
+    let command = match invocation {
+        ParsedInvocation::OneShot(_) => return Vec::new(),
+        ParsedInvocation::Script(_) => "script",
+        ParsedInvocation::Sandbox(_) => "sandbox",
+        ParsedInvocation::Verify(_) => "verify",
+        ParsedInvocation::Db(_) => "db",
+        ParsedInvocation::Debug(_) => "debug",
+        ParsedInvocation::ResourcesStatus { .. } => "resources",
+        ParsedInvocation::Schema(_) => "schema",
+        ParsedInvocation::Skill => "skill",
+        ParsedInvocation::Languages(_) => "languages",
+    };
+    [
+        ("--base", raw_base.is_some()),
+        ("--entry", raw_entry.is_some()),
+    ]
+    .into_iter()
+    .filter(|(_, given)| *given)
+    .map(|(flag, _)| format!("warning: `{flag}` is accepted but ignored by `{command}`"))
+    .collect()
 }
 
 fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
@@ -1479,6 +1546,9 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Verify(verify) => return ParsedInvocation::Verify(verify),
                 CliCommand::Schema(schema) => return ParsedInvocation::Schema(schema),
                 CliCommand::Skill => return ParsedInvocation::Skill,
+                CliCommand::Languages(languages) => {
+                    return ParsedInvocation::Languages(languages);
+                }
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1521,6 +1591,7 @@ mod tests {
             ParsedInvocation::Verify(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Schema(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Skill => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Languages(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1537,6 +1608,7 @@ mod tests {
             ParsedInvocation::Verify(_) => panic!("legacy parser cannot emit verify"),
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
+            ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
         }
     }
 
