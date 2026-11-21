@@ -1,26 +1,18 @@
-# Create a Git tag only after conservative release gates pass for the target commit:
-#   L0 — CI Fast Gate (ci.yml) successful push run on that SHA
-#   L1 — CI Heavy Validation (ci-heavy.yml) successful run on that SHA
-#   L2 — Release E2E Gate (runs in this workflow on that SHA)
-# Then create/push the annotated tag and **trigger CD Release via GitHub CLI**
-# (`gh workflow run`). GITHUB_TOKEN tag pushes do not re-fire `on: push` workflows.
-#
-# Policy: docs/CI_RELEASE_GATES.md
-# Use: Actions → "Release Tag (CI green)" → tag (e.g. v0.1.1) → optional ref (default main).
-# CLI: gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main
 name: Release Tag (CI green)
 
 on:
+  push:
+    tags: ["v*.*.*", "[0-9]*.[0-9]*.[0-9]*"]
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag to create (e.g. v0.1.1 or 0.1.1). Triggers CD builds via gh workflow run."
+        description: "SemVer to promote (e.g. v0.1.4 or v0.1.4-rc.1)"
         required: true
         type: string
       ref:
-        description: "Branch or full SHA to tag. Default: main (latest on that branch)."
+        description: "Candidate ref on main history (default main; use the same SHA when retrying)"
         required: false
-        default: "main"
+        default: main
         type: string
 
 permissions:
@@ -33,157 +25,144 @@ concurrency:
 
 jobs:
   verify-gates:
-    name: Verify L0 Fast Gate + L1 Heavy (target SHA)
+    name: Verify eligible source, L0 and L1
     runs-on: ubuntu-latest
     outputs:
-      target_sha: ${{ steps.gate.outputs.sha }}
+      sha: ${{ steps.gate.outputs.sha }}
+      tag: ${{ steps.gate.outputs.tag }}
     steps:
-      - name: Resolve ref and check ci.yml + ci-heavy.yml
+      - name: Resolve candidate and check CI on its exact SHA
         id: gate
         uses: actions/github-script@v9
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_TAG: ${{ inputs.tag }}
         with:
           script: |
-            const ref = `${{ inputs.ref }}`.trim() || "main";
-            const { data: commitData } = await github.rest.repos.getCommit({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref,
+            const repo = context.repo;
+            const manual = context.eventName === "workflow_dispatch";
+            if (manual && context.ref !== "refs/heads/main") {
+              throw Error("Dispatch the release workflow on main.");
+            }
+            const tag = manual ? process.env.INPUT_TAG.trim() : context.ref.replace(/^refs\/tags\//, "");
+            if (!/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\da-zA-Z-]+(\.[\da-zA-Z-]+)*)?$/.test(tag)) {
+              throw Error("A SemVer release tag is required.");
+            }
+            const target = manual ? (process.env.INPUT_REF.trim() || "main") : context.ref;
+            const { data: commit } = await github.rest.repos.getCommit({ ...repo, ref: target });
+            const sha = commit.sha;
+            const { data: ancestry } = await github.rest.repos.compareCommitsWithBasehead({
+              ...repo, basehead: `main...${sha}`,
             });
-            const sha = commitData.sha;
+            if (!["behind", "identical"].includes(ancestry.status)) {
+              throw Error(`Candidate ${sha} has not landed on main.`);
+            }
+            const gates = [
+              ["ci.yml", ["push"]],
+              ["ci-heavy.yml", ["schedule", "workflow_dispatch"]],
+            ];
+            for (const [workflow_id, events] of gates) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...repo, workflow_id, head_sha: sha, per_page: 100,
+                ...(workflow_id === "ci.yml" ? { branch: "main" } : {}),
+              });
+              const run = data.workflow_runs.find(r =>
+                r.status === "completed" && r.conclusion === "success" && events.includes(r.event)
+              );
+              if (!run) throw Error(`${workflow_id} must pass on main at ${sha}.`);
+              core.info(`${workflow_id}: ${run.html_url}`);
+            }
+
+            try {
+              const { data: old } = await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
+              const { data: tagged } = await github.rest.repos.getCommit({ ...repo, ref: old.ref });
+              if (tagged.sha !== sha) throw Error(`${tag} already points at a different SHA.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+            try {
+              const { data: release } = await github.rest.repos.getReleaseByTag({ ...repo, tag });
+              if (!release.draft) throw Error(`${tag} is already published.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            core.setOutput("tag", tag);
             core.setOutput("sha", sha);
-            core.info(`Resolved ${ref} → ${sha}`);
-
-            async function hasSuccessfulRun(workflowId, eventFilter) {
-              const { data: runsData } = await github.rest.actions.listWorkflowRunsForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: workflowId,
-                head_sha: sha,
-                per_page: 100,
-              });
-              const runs = runsData.workflow_runs || [];
-              const ok = runs.some((r) => {
-                if (r.status !== "completed" || r.conclusion !== "success") return false;
-                if (
-                  eventFilter &&
-                  !(Array.isArray(eventFilter) ? eventFilter : [eventFilter]).includes(r.event)
-                ) return false;
-                return true;
-              });
-              core.info(
-                `${workflowId}: examined ${runs.length} run(s)` +
-                  (eventFilter ? ` (event=${eventFilter})` : "") +
-                  ` → ${ok ? "OK" : "MISSING"}`,
-              );
-              return ok;
-            }
-
-            // L0: Fast Gate must be a successful *push* run (main integration).
-            const fastOk = await hasSuccessfulRun("ci.yml", "push");
-            if (!fastOk) {
-              core.setFailed(
-                `No successful completed push run of workflow ci.yml for commit ${sha}. ` +
-                  'Wait until "CI Fast Gate" finishes green for this commit, then retry.',
-              );
-              return;
-            }
-            core.info("L0 CI Fast Gate (ci.yml, push) succeeded for this commit.");
-
-            // L1: Heavy must have a successful nightly or manual run on this exact SHA.
-            const heavyOk = await hasSuccessfulRun("ci-heavy.yml", ["schedule", "workflow_dispatch"]);
-            if (!heavyOk) {
-              core.setFailed(
-                `No successful completed run of workflow ci-heavy.yml for commit ${sha}. ` +
-                  'Dispatch "CI Heavy Validation" on the candidate ref (or wait for a nightly run on this exact SHA), then retry. ' +
-                  "See docs/CI_RELEASE_GATES.md.",
-              );
-              return;
-            }
-            core.info("L1 CI Heavy Validation (ci-heavy.yml) succeeded for this commit.");
 
   release-e2e:
     name: L2 Release E2E
     needs: verify-gates
     uses: ./.github/workflows/release-e2e.yml
     with:
-      ref: ${{ needs.verify-gates.outputs.target_sha }}
+      ref: ${{ needs.verify-gates.outputs.sha }}
 
-  push-tag:
-    name: Create and push tag
-    needs: [verify-gates, release-e2e]
+  package:
+    needs: verify-gates
+    uses: ./.github/workflows/cd.yml
+    with:
+      source_sha: ${{ needs.verify-gates.outputs.sha }}
+      version: ${{ needs.verify-gates.outputs.tag }}
+
+  publish:
+    name: Attest and publish verified artifacts
+    needs: [verify-gates, release-e2e, package]
     runs-on: ubuntu-latest
+    environment: release
     permissions:
+      actions: read
       contents: write
-      actions: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ needs.verify-gates.outputs.tag }}
+      SHA: ${{ needs.verify-gates.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
         with:
-          # Tag the verified SHA only — never an arbitrary checkout tip.
-          ref: ${{ needs.verify-gates.outputs.target_sha }}
-          lfs: false
-          fetch-depth: 0
-
-      - name: Setup Utils
-        uses: ./.github/actions/setup-utils
-
-      - name: Validate tag name
-        id: tag
-        env:
-          TAG: ${{ inputs.tag }}
-        shell: bash
+          ref: ${{ needs.verify-gates.outputs.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-candidate-dist
+          path: dist
+      - name: Verify candidate identity and bytes
         run: |
           set -euo pipefail
-          t="$(echo -n "$TAG" | xargs)"
-          if [[ -z "$t" ]]; then echo "error: empty tag"; exit 1; fi
-          if [[ "$t" == *"/"* ]] || [[ "$t" == *" "* ]]; then
-            echo "error: tag must not contain '/' or spaces"
-            exit 1
-          fi
-          if [[ ! "$t" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]] && \
-             [[ ! "$t" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
-            echo "error: use SemVer such as v0.1.1, 0.1.1, or optional -rc.1 suffix"
-            exit 1
-          fi
-          echo "tag=${t}" >> "$GITHUB_OUTPUT"
-
-      - name: Create annotated tag and push
-        shell: bash
+          test "$(git rev-parse HEAD)" = "$SHA"
+          cd dist
+          jq -e --arg tag "$TAG" --arg sha "$SHA" '.tag == $tag and .sha == $sha' release.json
+          sha256sum -c SHA256SUMS
+      - name: Attest the verified archives, CLI and manifests
+        uses: actions/attest@v4
+        with:
+          subject-path: "dist/*"
+      - name: Create or verify tag and populate draft release
         env:
-          TARGET_SHA: ${{ needs.verify-gates.outputs.target_sha }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          t="${TAG}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin --tags --quiet || true
-          HEAD_SHA="$(git rev-parse HEAD)"
-          if [[ "${HEAD_SHA}" != "${TARGET_SHA}" ]]; then
-            echo "error: checkout HEAD ${HEAD_SHA} != verified SHA ${TARGET_SHA}"
-            exit 1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          tag_ref="refs/tags/$TAG"
+          existing="$(git ls-remote origin "$tag_ref" "$tag_ref^{}")"
+          if [[ -z "$existing" ]]; then
+            git tag -a "$TAG" "$SHA" -m "Release $TAG"
+            git push origin "$tag_ref"
+          else
+            git fetch --no-tags origin "$tag_ref"
+            test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SHA"
           fi
-          if git rev-parse "refs/tags/${t}" >/dev/null 2>&1; then
-            echo "error: tag ${t} already exists locally"
-            exit 1
+          if gh release view "$TAG" --json isDraft > release-state.json; then
+            jq -e '.isDraft == true' release-state.json
+          else
+            flags=()
+            if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+            gh release create "$TAG" --verify-tag --draft --generate-notes "${flags[@]}"
           fi
-          if git ls-remote --exit-code --tags origin "refs/tags/${t}" >/dev/null 2>&1; then
-            echo "error: tag ${t} already exists on origin"
-            exit 1
-          fi
-          git tag -a "${t}" "${TARGET_SHA}" -m "Release ${t}"
-          git push origin "refs/tags/${t}"
-          echo "Tagged ${TARGET_SHA} as ${t} (L0+L1 verified, L2 E2E green)."
-
-      # GITHUB_TOKEN tag pushes do not re-fire on.push workflows. Kick CD via CLI.
-      - name: Trigger CD Release (GitHub CLI)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.tag.outputs.tag }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Dispatching CD Release for tag=${TAG}"
-          gh workflow run "CD Release" \
-            --repo "${{ github.repository }}" \
-            -f "tag=${TAG}"
-          echo "Queued. Track: gh run list --workflow 'CD Release' --limit 3"
+          gh release upload "$TAG" --clobber dist/*
+          mkdir attached
+          gh release download "$TAG" --pattern '*' --dir attached
+          (cd attached && sha256sum -c SHA256SUMS)
+          cmp dist/SHA256SUMS attached/SHA256SUMS
+          cmp dist/release.json attached/release.json
+          gh release edit "$TAG" --draft=false
