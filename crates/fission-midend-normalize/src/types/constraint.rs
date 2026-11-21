@@ -1166,13 +1166,6 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
     }
 }
 
-fn pointee_may_retype_access(pointee: &NirType, access_ty: &NirType) -> bool {
-    !matches!(pointee, NirType::Unknown)
-        && (matches!(pointee, NirType::Ptr(_))
-            || matches!(access_ty, NirType::Ptr(_) | NirType::Unknown)
-            || type_byte_size(pointee) == type_byte_size(access_ty))
-}
-
 fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType>) {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
