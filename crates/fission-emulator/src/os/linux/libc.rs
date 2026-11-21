@@ -7,7 +7,8 @@ pub struct Malloc;
 impl SimProcedure for Malloc {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let size = emu.read_arg(0).unwrap_or(0);
-        let ptr = emu.heap_alloc(size)?;
+        // A request the heap cannot hold is NULL, not the end of the run.
+        let ptr = emu.heap_alloc(size).unwrap_or(0);
         tracing::info!("SimProcedure: malloc(0x{:X}) -> 0x{:X}", size, ptr);
         emu.write_return_val(ptr)?;
         Ok(HleResult::Continue)
@@ -19,8 +20,12 @@ impl SimProcedure for Calloc {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let nmemb = emu.read_arg(0).unwrap_or(0);
         let size = emu.read_arg(1).unwrap_or(0);
-        let total = nmemb.saturating_mul(size);
-        let ptr = emu.heap_alloc(total)?;
+        // `nmemb * size` overflowing is NULL, as is a total the heap cannot
+        // hold.
+        let ptr = nmemb
+            .checked_mul(size)
+            .and_then(|total| emu.heap_alloc(total).ok())
+            .unwrap_or(0);
         // heap_alloc already zeros the region.
         tracing::info!("SimProcedure: calloc({}, {}) -> 0x{:X}", nmemb, size, ptr);
         emu.write_return_val(ptr)?;
@@ -142,7 +147,7 @@ impl SimProcedure for Memset {
 pub struct Mmap;
 impl SimProcedure for Mmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        use crate::pcode::page_map::{page_align_up, prot};
+        use crate::pcode::page_map::prot;
         // SysV: mmap(addr, length, prot, flags, fd, offset)
         let addr = emu.read_arg(0).unwrap_or(0);
         let length = emu.read_arg(1).unwrap_or(0);
@@ -168,19 +173,12 @@ impl SimProcedure for Mmap {
             emu.write_return_val(u64::MAX)?;
             return Ok(HleResult::Continue);
         }
-        let len = page_align_up(length.max(1));
-        if !map_anon && fd >= 0 {
-            let want = length.max(1) as usize;
-            if let Ok(data) = emu.vfs.peek(fd as u64, offset, want) {
-                let _ = emu.state.write_space(emu.state.ram_space(), base, &data);
-            }
-        } else {
-            let fill = len.min(0x10_0000) as usize;
-            if fill > 0 {
-                let zeros = vec![0u8; fill];
-                let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
-            }
-        }
+        crate::os::linux::syscall::fill_new_mapping(
+            emu,
+            base,
+            length,
+            (!map_anon && fd >= 0).then_some((fd as u64, offset)),
+        );
         tracing::info!(
             "SimProcedure: mmap(0x{:X}, {}, prot=0x{:X}, flags=0x{:X}) -> 0x{:X}",
             addr,
@@ -298,29 +296,23 @@ impl SimProcedure for Read {
         let count = emu.read_arg(2).unwrap_or(0) as usize;
 
         if fd == 0 {
-            let mut data = vec![0u8; count];
-            let bytes_read;
+            // What standard input holds decides how much host memory this
+            // takes, not `count`, which is the guest's: a buffer of `count`
+            // bytes was built here first, and `read(0, buf, (size_t)-1)`
+            // took the host down with it.
             // Prefer VFS stdin (seeded by with_stdin_mock / seed_stdin).
-            if let Ok(v) = emu.vfs.read(0, count) {
-                bytes_read = v.len();
-                data[..bytes_read].copy_from_slice(&v);
+            let data = if let Ok(v) = emu.vfs.read(0, count) {
                 if let Some(ref mut mock_buf) = emu.stdin_buffer {
-                    let drop = bytes_read.min(mock_buf.len());
+                    let drop = v.len().min(mock_buf.len());
                     mock_buf.drain(..drop);
                 }
-            } else if let Some(ref mut mock_buf) = emu.stdin_buffer {
-                let to_read = std::cmp::min(count, mock_buf.len());
-                data[..to_read].copy_from_slice(&mock_buf[..to_read]);
-                mock_buf.drain(..to_read);
-                bytes_read = to_read;
+                v
             } else {
-                let host = emu.guest_stdin(count);
-                bytes_read = host.len();
-                data[..bytes_read].copy_from_slice(&host);
-            }
+                emu.guest_stdin(count)
+            };
+            let bytes_read = data.len();
             if bytes_read > 0 {
-                emu.state
-                    .write_space(emu.state.ram_space(), buf, &data[..bytes_read])?;
+                emu.state.write_space(emu.state.ram_space(), buf, &data)?;
                 // Taint stdin bytes for concolic exploration.
                 for i in 0..bytes_read {
                     let node = emu.solver.register_var(
@@ -358,16 +350,14 @@ impl SimProcedure for Write {
         let buf = emu.read_arg(1).unwrap_or(0);
         let count = emu.read_arg(2).unwrap_or(0);
 
-        if fd == 1 || fd == 2 {
-            let data = emu
-                .state
-                .read_space(emu.state.ram_space(), buf, count as usize)
-                .unwrap_or_default();
-            let _ = emu.guest_write(fd, &data);
-        } else {
-            tracing::info!("SimProcedure: write({}, 0x{:X}, {})", fd, buf, count);
-        }
-        emu.write_return_val(count)?;
+        // The same transfer the `write` syscall makes, for every descriptor:
+        // this wrote only to the standard streams, claimed `count` for any
+        // other without storing a byte, and read `count` bytes of guest
+        // memory into one host buffer whatever `count` was.
+        let result = crate::os::linux::syscall::write_from_guest(emu, fd, buf, count);
+        tracing::info!("SimProcedure: write({fd}, 0x{buf:X}, {count}) -> {result}");
+        // libc reports failure as -1 (and `errno`, which is not modelled).
+        emu.write_return_val(if result < 0 { u64::MAX } else { result as u64 })?;
         Ok(HleResult::Continue)
     }
 }
@@ -834,6 +824,82 @@ mod tests {
             Emulator::new(state, binary, sleigh, arch, Box::new(LinuxEnv::new())).unwrap();
         emu.apply_linux_image(info).unwrap();
         emu
+    }
+
+    /// `read(0, buf, (size_t)-1)` returns what standard input holds. It
+    /// built a host buffer of the requested count first.
+    #[test]
+    fn read_of_an_impossible_count_returns_what_stdin_holds() {
+        let mut emu = tiny_emu();
+        let buf = emu.heap_alloc(64).expect("guest buffer");
+        emu.seed_stdin(b"hello");
+        emu.write_register_u64("RDI", 0).unwrap();
+        emu.write_register_u64("RSI", buf).unwrap();
+        emu.write_register_u64("RDX", u64::MAX).unwrap();
+        Read.run(&mut emu).expect("read");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 5);
+        let ram = emu.state.ram_space();
+        assert_eq!(emu.state.read_space(ram, buf, 5).unwrap(), b"hello");
+    }
+
+    /// `malloc((size_t)-1)` and a `calloc` whose product overflows are NULL.
+    /// The size saturated to the top of the address space and the break was
+    /// moved there, a page at a time.
+    #[test]
+    fn an_allocation_the_heap_cannot_hold_is_null() {
+        let mut emu = tiny_emu();
+        for size in [u64::MAX, u64::MAX - 15, 1 << 62] {
+            emu.write_register_u64("RDI", size).unwrap();
+            Malloc.run(&mut emu).expect("malloc");
+            assert_eq!(
+                emu.read_register_u64("RAX").unwrap(),
+                0,
+                "malloc(0x{size:X})"
+            );
+        }
+        emu.write_register_u64("RDI", 1 << 33).unwrap();
+        emu.write_register_u64("RSI", 1 << 33).unwrap();
+        Calloc.run(&mut emu).expect("calloc");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 0);
+
+        // Positive control: an ordinary allocation still succeeds, zeroed,
+        // and so does a large one that fits.
+        emu.write_register_u64("RDI", 3).unwrap();
+        emu.write_register_u64("RSI", 16).unwrap();
+        Calloc.run(&mut emu).expect("calloc");
+        let block = emu.read_register_u64("RAX").unwrap();
+        assert_ne!(block, 0);
+        let ram = emu.state.ram_space();
+        assert_eq!(emu.state.read_space(ram, block, 48).unwrap(), [0u8; 48]);
+        emu.write_register_u64("RDI", 1 << 32).unwrap();
+        Malloc.run(&mut emu).expect("malloc");
+        let big = emu.read_register_u64("RAX").unwrap();
+        assert_ne!(big, 0);
+        emu.state
+            .write_space(ram, big + (1 << 32) - 8, b"the end.")
+            .expect("its last bytes are writable");
+    }
+
+    /// libc `write` stores what it is given, on any descriptor: it wrote
+    /// only to the standard streams and reported success for the rest.
+    #[test]
+    fn write_to_an_open_file_stores_the_bytes() {
+        let mut emu = tiny_emu();
+        let buf = emu.heap_alloc(16).expect("guest buffer");
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, buf, b"payload").unwrap();
+        let fd = emu.vfs.open("out.txt", Vec::new());
+        emu.write_register_u64("RDI", fd).unwrap();
+        emu.write_register_u64("RSI", buf).unwrap();
+        emu.write_register_u64("RDX", 7).unwrap();
+        Write.run(&mut emu).expect("write");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 7);
+        assert_eq!(emu.vfs.files[&fd].content, b"payload");
+
+        // A descriptor nobody opened is an error, not a success.
+        emu.write_register_u64("RDI", 99).unwrap();
+        Write.run(&mut emu).expect("write");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), u64::MAX);
     }
 
     #[test]

@@ -16,7 +16,7 @@ use crate::os::env::HleResult;
 use crate::os::linux::abi::TargetStat;
 use crate::os::linux::libc::read_string;
 use crate::os::procedure::SimProcedure;
-use crate::pcode::page_map::{page_align_down, page_align_up, prot};
+use crate::pcode::page_map::{page_align_up, prot};
 use anyhow::Result;
 
 fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
@@ -27,6 +27,51 @@ fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
 fn ram_read(emu: &mut Emulator, addr: u64, size: usize) -> Result<Vec<u8>> {
     let ram = emu.state.ram_space();
     emu.state.read_space(ram, addr, size)
+}
+
+/// The most one `read` or `write` transfers, as on Linux (`MAX_RW_COUNT`): a
+/// larger count is not an error, it is simply not all honoured.
+const MAX_RW_COUNT: u64 = 0x7FFF_F000;
+
+/// How much of a guest buffer is held on the host at a time while it is
+/// being transferred.
+const IO_CHUNK: usize = 1 << 20;
+
+const EFAULT: i64 = 14;
+
+/// `write(fd, buf, count)` for whatever of `buf` the guest can read.
+///
+/// The count is the guest's. Linux transfers what is readable from `buf` on
+/// and stops at the first page that is not -- `EFAULT` only when that is the
+/// very first -- so a count of `(size_t)-1` over a five-byte buffer writes
+/// five bytes. Reading `count` bytes into one host buffer first is neither
+/// that nor safe.
+pub(crate) fn write_from_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -> i64 {
+    let count = count.min(MAX_RW_COUNT) as usize;
+    let readable = emu.state.readable_len(buf, count);
+    if count > 0 && readable == 0 {
+        return -EFAULT;
+    }
+    let mut written = 0usize;
+    while written < readable {
+        let want = (readable - written).min(IO_CHUNK);
+        let Ok(data) = ram_read(emu, buf.wrapping_add(written as u64), want) else {
+            break;
+        };
+        match emu.guest_write(fd, &data) {
+            Ok(n) => {
+                written += n;
+                if n < want {
+                    break;
+                }
+            }
+            // Nothing transferred yet: the error is the answer. Otherwise the
+            // bytes that went are, and the error is the next call's.
+            Err(error) if written == 0 => return -error.errno(),
+            Err(_) => break,
+        }
+    }
+    written as i64
 }
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
@@ -75,15 +120,8 @@ impl SimProcedure for SysWrite {
 
         tracing::info!("sys_write({}, 0x{:X}, {})", fd, buf, count);
 
-        let data = ram_read(emu, buf, count as usize).unwrap_or_default();
-        match emu.guest_write(fd, &data) {
-            Ok(written) => {
-                emu.set_syscall_return(written as u64)?;
-            }
-            Err(_) => {
-                emu.set_syscall_return((-1i64) as u64)?;
-            }
-        }
+        let result = write_from_guest(emu, fd, buf, count);
+        emu.set_syscall_return(result as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -314,6 +352,36 @@ impl SimProcedure for SysAccess {
 
 // ── Memory ───────────────────────────────────────────────────────────────────
 
+/// What a new mapping at `base` holds: zeros, then -- for a file-backed one
+/// -- the file's bytes from `offset` on.
+///
+/// The whole of it, whatever was there before and whatever it may now be
+/// used for. This wrote zeros into the first megabyte only, and through the
+/// guest's own protection check: a mapping longer than that kept the bytes
+/// of whatever had been mapped there earlier (a `malloc` that trusts fresh
+/// pages to be zero then returns somebody else's data), and one made without
+/// `PROT_WRITE` was not filled at all -- not even with its file.
+pub(crate) fn fill_new_mapping(
+    emu: &mut Emulator,
+    base: u64,
+    length: u64,
+    file: Option<(u64, usize)>,
+) {
+    let len = page_align_up(length.max(1));
+    // Whatever was translated from these pages is not what they hold now.
+    emu.jit_cache.invalidate_range(base, len);
+    emu.state.zero_range(base, len);
+    let Some((fd, offset)) = file else { return };
+    let want = usize::try_from(length).unwrap_or(usize::MAX);
+    let data = match emu.vfs.file_bytes(fd, offset, want) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => return,
+    };
+    if !data.is_empty() {
+        let _ = emu.state.write_ram_unprotected(base, &data);
+    }
+}
+
 pub struct SysMmap;
 impl SimProcedure for SysMmap {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
@@ -347,29 +415,12 @@ impl SimProcedure for SysMmap {
             return Ok(HleResult::Continue);
         }
 
-        let len = page_align_up(length.max(1));
-        // File-backed mmap: copy from VFS fd when not MAP_ANONYMOUS.
-        if !map_anon && fd >= 0 {
-            let want = length.max(1) as usize;
-            match emu.vfs.peek(fd as u64, offset, want) {
-                Ok(data) => {
-                    let _ = ram_write(emu, base, &data);
-                }
-                Err(_) => {
-                    let fill = len.min(0x10_0000) as usize;
-                    if fill > 0 {
-                        let zeros = vec![0u8; fill];
-                        let _ = ram_write(emu, base, &zeros);
-                    }
-                }
-            }
-        } else {
-            let fill = len.min(0x10_0000) as usize;
-            if fill > 0 {
-                let zeros = vec![0u8; fill];
-                let _ = ram_write(emu, base, &zeros);
-            }
-        }
+        fill_new_mapping(
+            emu,
+            base,
+            length,
+            (!map_anon && fd >= 0).then_some((fd as u64, offset)),
+        );
 
         emu.set_syscall_return(base)?;
         tracing::info!(
@@ -400,12 +451,7 @@ impl SimProcedure for SysMprotect {
                 .page_map
                 .mprotect_checked(addr, len.max(1), prot_bits & 0x07 | prot::VALID);
         if ok {
-            let mut page = page_align_down(addr);
-            let end = page_align_up(addr.saturating_add(len.max(1)));
-            while page < end {
-                emu.jit_cache.invalidate_page(page);
-                page = page.saturating_add(0x1000);
-            }
+            emu.jit_cache.invalidate_range(addr, len.max(1));
             tracing::info!(
                 "sys_mprotect(0x{:X}, {}, 0x{:X}) -> 0",
                 addr,
@@ -433,12 +479,7 @@ impl SimProcedure for SysMunmap {
         let addr = emu.syscall_arg(0);
         let len = emu.syscall_arg(1);
         emu.state.page_map.unmap_region(addr, len);
-        let mut page = page_align_down(addr);
-        let end = page_align_up(addr.saturating_add(len.max(1)));
-        while page < end {
-            emu.jit_cache.invalidate_page(page);
-            page = page.saturating_add(0x1000);
-        }
+        emu.jit_cache.invalidate_range(addr, len.max(1));
         tracing::info!("sys_munmap(0x{:X}, {})", addr, len);
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)

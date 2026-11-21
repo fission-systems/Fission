@@ -997,8 +997,6 @@ fn map_interpreter(
         }
         let p_offset = usize::try_from(p_offset).context("interpreter file offset too large")?;
         let p_filesz = usize::try_from(p_filesz).context("interpreter file size too large")?;
-        let p_memsz_usize =
-            usize::try_from(p_memsz).context("interpreter memory size too large")?;
         let file_end = p_offset
             .checked_add(p_filesz)
             .context("interpreter segment file range overflow")?;
@@ -1010,7 +1008,8 @@ fn map_interpreter(
             .context("interpreter segment address overflow")?;
         guest_va
             .checked_add(p_memsz)
-            .context("interpreter segment address overflow")?;
+            .filter(|end| *end <= 1 << 47)
+            .context("interpreter segment does not fit the address space")?;
         let mut page_prot = prot::VALID | prot::READ;
         if p_flags & 2 != 0 {
             page_prot |= prot::WRITE;
@@ -1018,17 +1017,15 @@ fn map_interpreter(
         if p_flags & 1 != 0 {
             page_prot |= prot::EXEC;
         }
-        let mut buf = vec![0u8; p_memsz_usize];
-        if p_filesz > 0 {
-            buf[..p_filesz].copy_from_slice(&data[p_offset..file_end]);
-        }
-        segments.push((guest_va, p_memsz, page_prot, buf));
+        // The file's bytes only: the rest of `p_memsz` is zero without a
+        // host buffer of that size saying so.
+        segments.push((guest_va, p_memsz, page_prot, &data[p_offset..file_end]));
     }
 
     let mut staged = state.clone();
-    for (guest_va, p_memsz, page_prot, buf) in segments {
+    for (guest_va, p_memsz, page_prot, bytes) in segments {
         staged
-            .write_space(state.ram_space(), guest_va, &buf)
+            .load_image_range(guest_va, p_memsz, bytes)
             .with_context(|| format!("map interp segment at 0x{guest_va:X}"))?;
         staged
             .page_map
