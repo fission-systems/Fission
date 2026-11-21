@@ -26,7 +26,6 @@ use fission_signatures::{
 use fission_static::analysis::decomp::facts::FactProvenance;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::sync::{Arc, LazyLock, Mutex};
 
 fn get_well_known_function_hints(name: &str) -> Option<NirFunctionHints> {
@@ -132,77 +131,11 @@ fn call_param_rules_for_binary(
     rules
 }
 
-struct BinaryScopedBaseTypeContext {
-    call_targets: HashMap<u64, String>,
-    call_target_refs: HashMap<u64, CallTargetRef>,
-    iat_target_refs: HashMap<u64, CallTargetRef>,
-    ambiguous_call_targets: HashSet<u64>,
-    all_target_refs: HashMap<u64, CallTargetRef>,
-    call_effect_summaries: HashMap<String, NirCallEffectSummary>,
-    base_call_prototype_summaries: HashMap<String, NirCallPrototypeSummary>,
-    call_result_is_source_value: HashMap<String, bool>,
-    call_param_rules: Vec<NirCallParamRule>,
-    struct_types: HashMap<String, NirStructTypeHint>,
-    function_type_aliases: HashMap<String, NirFunctionType>,
-    pointer_type_aliases: HashMap<String, NirPointerTypeAlias>,
-}
-
-static BINARY_SCOPED_BASE_TYPE_CONTEXTS: LazyLock<
-    Mutex<HashMap<u64, Arc<BinaryScopedBaseTypeContext>>>,
-> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn base_type_context_cache_key(binary: &LoadedBinary, fact_store: &FactStore) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    binary.hash.hash(&mut hasher);
-    binary.format.hash(&mut hasher);
-    binary.arch_spec.hash(&mut hasher);
-    binary.is_64bit.hash(&mut hasher);
-    binary.functions.len().hash(&mut hasher);
-    for function in binary.functions.iter().take(16) {
-        function.address.hash(&mut hasher);
-        function.name.hash(&mut hasher);
-        function.is_import.hash(&mut hasher);
-    }
-    binary.inferred_types.len().hash(&mut hasher);
-    for ty in &binary.inferred_types {
-        ty.name.hash(&mut hasher);
-        ty.size.hash(&mut hasher);
-        ty.fields.len().hash(&mut hasher);
-    }
-    binary.user_signatures.len().hash(&mut hasher);
-    let mut user_sig_addrs = binary.user_signatures.keys().copied().collect::<Vec<_>>();
-    user_sig_addrs.sort_unstable();
-    for addr in user_sig_addrs {
-        addr.hash(&mut hasher);
-        if let Some(sig) = binary.user_signatures.get(&addr) {
-            sig.return_type.hash(&mut hasher);
-            sig.param_types.hash(&mut hasher);
-        }
-    }
-    binary.dwarf_functions.len().hash(&mut hasher);
-    binary.dwarf_function_types.len().hash(&mut hasher);
-    binary.dwarf_pointer_types.len().hash(&mut hasher);
-    let program = fact_store.program();
-    program.functions.len().hash(&mut hasher);
-    program.symbols.len().hash(&mut hasher);
-    let mut resolved_facts = fact_store
-        .iter_resolved_name_facts()
-        .map(|(addr, fact)| (addr, fact.name.as_str(), fact.provenance))
-        .collect::<Vec<_>>();
-    resolved_facts.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)));
-    resolved_facts.len().hash(&mut hasher);
-    for (addr, name, provenance) in resolved_facts {
-        addr.hash(&mut hasher);
-        name.hash(&mut hasher);
-        std::mem::discriminant(&provenance).hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-fn build_binary_scoped_base_type_context(
+pub(crate) fn build_nir_type_context(
     binary: &LoadedBinary,
     fact_store: &FactStore,
-) -> Arc<BinaryScopedBaseTypeContext> {
+    address: u64,
+) -> NirTypeContext {
     let mut index = CallTargetIndex::default();
     let mut iat_index = CallTargetIndex::default();
     let program = fact_store.program();
@@ -292,89 +225,9 @@ fn build_binary_scoped_base_type_context(
         .map(|(address, target_ref)| (*address, target_ref.clone()))
         .collect::<HashMap<_, _>>();
 
-    let base_call_prototype_summaries =
-        build_nir_call_prototype_summaries(&all_target_refs, binary);
-    let call_effect_summaries = build_nir_call_effect_summaries(&all_target_refs, binary);
-    let call_result_is_source_value = build_nir_call_result_facts(&all_target_refs);
-    let call_param_rules = call_param_rules_for_binary(binary, &all_target_refs)
-        .as_ref()
-        .clone();
-    let struct_types = build_nir_struct_type_hints(binary);
-    let function_type_aliases = binary
-        .dwarf_function_types
-        .iter()
-        .map(|(name, function_type)| {
-            (
-                name.clone(),
-                NirFunctionType {
-                    return_type: function_type.return_type.clone(),
-                    param_types: function_type.param_types.clone(),
-                    variadic: function_type.variadic,
-                },
-            )
-        })
-        .collect();
-    let pointer_type_aliases = binary
-        .dwarf_pointer_types
-        .iter()
-        .map(|(name, pointer_type)| {
-            (
-                name.clone(),
-                NirPointerTypeAlias {
-                    pointee_name: pointer_type.pointee_name.clone(),
-                    pointer_depth: pointer_type.pointer_depth,
-                },
-            )
-        })
-        .collect();
-
-    Arc::new(BinaryScopedBaseTypeContext {
-        call_targets,
-        call_target_refs,
-        iat_target_refs,
-        ambiguous_call_targets: resolved_index.ambiguous_call_targets,
-        all_target_refs,
-        call_effect_summaries,
-        base_call_prototype_summaries,
-        call_result_is_source_value,
-        call_param_rules,
-        struct_types,
-        function_type_aliases,
-        pointer_type_aliases,
-    })
-}
-
-fn binary_scoped_base_type_context(
-    binary: &LoadedBinary,
-    fact_store: &FactStore,
-) -> Arc<BinaryScopedBaseTypeContext> {
-    let key = base_type_context_cache_key(binary, fact_store);
-    let mut cache = match BINARY_SCOPED_BASE_TYPE_CONTEXTS.lock() {
-        Ok(cache) => cache,
-        Err(_) => return build_binary_scoped_base_type_context(binary, fact_store),
-    };
-    if let Some(hit) = cache.get(&key) {
-        return Arc::clone(hit);
-    }
-    if cache.len() >= 16 {
-        cache.clear();
-    }
-    let built = build_binary_scoped_base_type_context(binary, fact_store);
-    cache.insert(key, Arc::clone(&built));
-    built
-}
-
-pub(crate) fn build_nir_type_context(
-    binary: &LoadedBinary,
-    fact_store: &FactStore,
-    address: u64,
-) -> NirTypeContext {
-    let base = binary_scoped_base_type_context(binary, fact_store);
-
     let mut function_hints = build_nir_function_hints(binary, fact_store, address);
     if function_hints.is_none() {
-        let name = base
-            .all_target_refs
+        let name = all_target_refs
             .get(&address)
             .map(|tr| tr.symbol.as_str())
             .unwrap_or("");
@@ -385,26 +238,53 @@ pub(crate) fn build_nir_type_context(
         }
     }
 
-    let mut call_prototype_summaries = base.base_call_prototype_summaries.clone();
+    let mut call_prototype_summaries = build_nir_call_prototype_summaries(&all_target_refs, binary);
     merge_fact_store_call_prototype_hints(
         &mut call_prototype_summaries,
-        &base.all_target_refs,
+        &all_target_refs,
         binary,
         fact_store,
     );
     NirTypeContext {
-        call_targets: base.call_targets.clone(),
-        call_target_refs: base.call_target_refs.clone(),
-        iat_target_refs: base.iat_target_refs.clone(),
-        ambiguous_call_targets: base.ambiguous_call_targets.clone(),
-        call_effect_summaries: base.call_effect_summaries.clone(),
+        call_targets,
+        call_target_refs: call_target_refs.clone(),
+        iat_target_refs: iat_target_refs.clone(),
+        ambiguous_call_targets: resolved_index.ambiguous_call_targets,
+        call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
         call_prototype_summaries,
-        call_result_is_source_value: base.call_result_is_source_value.clone(),
-        call_param_rules: base.call_param_rules.clone(),
+        call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
+        call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
+            .as_ref()
+            .clone(),
         function_hints,
-        struct_types: base.struct_types.clone(),
-        function_type_aliases: base.function_type_aliases.clone(),
-        pointer_type_aliases: base.pointer_type_aliases.clone(),
+        struct_types: build_nir_struct_type_hints(binary),
+        function_type_aliases: binary
+            .dwarf_function_types
+            .iter()
+            .map(|(name, function_type)| {
+                (
+                    name.clone(),
+                    NirFunctionType {
+                        return_type: function_type.return_type.clone(),
+                        param_types: function_type.param_types.clone(),
+                        variadic: function_type.variadic,
+                    },
+                )
+            })
+            .collect(),
+        pointer_type_aliases: binary
+            .dwarf_pointer_types
+            .iter()
+            .map(|(name, pointer_type)| {
+                (
+                    name.clone(),
+                    NirPointerTypeAlias {
+                        pointee_name: pointer_type.pointee_name.clone(),
+                        pointer_depth: pointer_type.pointer_depth,
+                    },
+                )
+            })
+            .collect(),
     }
 }
 
