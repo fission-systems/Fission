@@ -51,7 +51,7 @@ Read the nearest child file before editing those areas.
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`, `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`), `~/fission-benchmark/` | The measurement surface for quality claims; published source CFGs are the answer key, Ghidra is not the oracle |
+| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`; full-dataset sweep `~/fission-benchmark/decbench-full/sweep.py`; quick gate `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`) | The measurement surface for quality claims is the **whole** dataset (96,103 functions); published source CFGs are the answer key, Ghidra is not the oracle |
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
@@ -74,7 +74,7 @@ Read the nearest child file before editing those areas.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
-10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)); run it with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence.
+10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)), measured on the **full dataset** (`~/fission-benchmark/decbench-full/sweep.py`, every config); the 250-function sample-set gate is only the quick pre-check. Caches are disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence.
 
 ## Anti-Patterns
 
@@ -101,8 +101,12 @@ cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
 
-# DecBench quick gate (see docs/BENCHMARK_DECBENCH.md)
+# DecBench quick pre-check: 250-function sample-set gate (see docs/BENCHMARK_DECBENCH.md)
 ~/fission-benchmark/.venv-decbench/bin/python scripts/quality/decbench_sample_set_gate.py check --cli target/release/fission_cli
+
+# DecBench full-dataset sweep: what quality claims cite
+~/fission-benchmark/.venv-decbench/bin/python -I ~/fission-benchmark/decbench-full/sweep.py run \
+  --cli target/release/fission_cli --repo "$PWD" --label <name>
 
 # Formatting -- CI runs exactly this
 cargo fmt --all --check
@@ -122,7 +126,7 @@ submodules and rewrites files you never touched.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and the CLI as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
-- If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and keep artifacts under `benchmark/artifacts/`.
+- If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and the full-dataset sweep; sweep results live under `~/fission-benchmark/decbench-full/runs/`, not in the repository.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
 - Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): tags a commit only after **ci.yml push** + **ci-heavy** success on that SHA and **release-e2e** green; then `cd.yml` builds assets. Do not auto-tag every `main` push.
@@ -138,9 +142,9 @@ Use this loop for source-semantic or pseudocode-quality work, especially when a 
 | Allowed as | Requires |
 |---|---|
 | Mechanical change (code + synthetic invariant tests) | nextest / crate checks; **no** “quality improved” language |
-| Semantic quality claim | Anchored DecBench row(s) + remeasured GED / type deltas, total distance next to the perfect count |
+| Semantic quality claim | Anchored DecBench row(s) for the motivation, then a **full-dataset sweep** before/after: output-hash `diff` first, GED / type deltas on the rows whose output changed, total distance next to the perfect count |
 | Readability / HIR presentation quality claim | Anchored real-binary decomp (or DecBench row) before/after; not fixture-only |
-| Official ranking / release claim | Full-dataset DecBench sweep on same rows from a tagged build (never a local run as an official ranking) |
+| Official ranking / release claim | Full-dataset DecBench sweep from a tagged build, compared with the published tools on the same rows (never a local run as an official ranking) |
 
 **Order of work (always):**
 
@@ -157,20 +161,29 @@ Applies to **NIR, HIR presentation, structuring, normalize, materialize, SLEIGH,
 
 ### Mandatory DecBench measurement
 
-Quality claims must be measured on DecBench against a **local** Fission build,
-not only `fission_cli` one-shots or unit tests. Full procedure:
+Quality claims are measured on the **whole** DecBench dataset (96,103
+functions, configs `unoptimized`, `optimized`, `inlined`, `large`,
+`sample-set`) against a **local** Fission build, not on the 250-function sample
+set and not with `fission_cli` one-shots or unit tests. Full procedure:
 [`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md).
 
 ```bash
 cargo build -p fission-cli --release
-~/fission-benchmark/.venv-decbench/bin/python scripts/quality/decbench_sample_set_gate.py check \
-  --cli target/release/fission_cli --dump /tmp/after.json
+PY=~/fission-benchmark/.venv-decbench/bin/python
+# quick pre-check (minutes): refuses a drop on the sample set
+$PY scripts/quality/decbench_sample_set_gate.py check --cli target/release/fission_cli --dump /tmp/after.json
+# the measurement a claim cites (hours): every function of every config
+$PY -I ~/fission-benchmark/decbench-full/sweep.py run --cli target/release/fission_cli --repo "$PWD" --label after
+$PY -I ~/fission-benchmark/decbench-full/sweep.py diff ~/fission-benchmark/decbench-full/runs/before ~/fission-benchmark/decbench-full/runs/after
+$PY -I ~/fission-benchmark/decbench-full/sweep.py report ~/fission-benchmark/decbench-full/runs/after
 ```
 
-- The sample-set gate is the quick signal. A ranking or release claim needs the
-  full-dataset sweep (`decbench-harness/fullrun.py`) compared on the same rows.
+- The sample-set gate is the quick pre-check, not evidence: a claim cites the
+  full-dataset sweep, per config, with the published tools on the same rows.
+- Compare **output hashes before scores** (`sweep.py diff`); a score delta on a
+  row whose text did not change is scorer noise.
 - Report **total distance next to the perfect count**; the count alone has
-  ranked a regression as a win.
+  ranked a regression as a win. Report failures, and CPU time next to wall time.
 - Build once, then measure; do not rebuild `fission_cli` while a run is in flight.
 
 Never promote local runs to an official ranking. The docker multi-decompiler
