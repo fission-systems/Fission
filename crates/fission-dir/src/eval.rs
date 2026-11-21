@@ -128,6 +128,10 @@ pub struct World<'a> {
     /// the bytes `x` is stored in. A body that takes the address of a local
     /// missing here is refused.
     pub local_addresses: Option<&'a HashMap<String, u64>>,
+    /// The function's own frame below its entry stack pointer. A read of a
+    /// byte there that the body (or a call it made) did not write is an
+    /// [`UndefinedRead`], as a read of a variable nothing assigned is.
+    pub undefined_frame: Option<&'a std::ops::Range<u64>>,
 }
 
 /// The result of one interpreted run.
@@ -152,6 +156,24 @@ impl std::fmt::Display for NoReturnStop {
 }
 
 impl std::error::Error for NoReturnStop {}
+
+/// A run that read something C leaves undefined: a variable before anything
+/// assigned it, or a byte of the function's own frame below its entry stack
+/// pointer that nothing in this run wrote. Not a refusal -- the caller weighs
+/// it against whether the machine read undefined frame bytes too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndefinedRead {
+    /// What was read, in words.
+    pub what: String,
+}
+
+impl std::fmt::Display for UndefinedRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "interp: read of {}", self.what)
+    }
+}
+
+impl std::error::Error for UndefinedRead {}
 
 /// Generates one interpreter module for a `Stmt`/`Expr`/`LValue`/`BinaryOp`/
 /// `UnaryOp`/`Binding`/`Function` family (either all `Dir*`, imported from
@@ -238,6 +260,9 @@ macro_rules! define_interp {
                 pages: HashMap<u64, Box<Page>>,
                 /// What the machine holds where nothing here has been placed.
                 backing: Option<&'w dyn Fn(u64) -> Option<u8>>,
+                /// The function's own frame below its entry stack pointer: a
+                /// byte there nothing here placed is undefined, not backed.
+                undefined: Option<std::ops::Range<u64>>,
             }
 
             impl Memory<'_> {
@@ -266,6 +291,13 @@ macro_rules! define_interp {
                     let mut raw: u64 = 0;
                     for i in 0..n {
                         let at = addr.wrapping_add(i as u64);
+                        if self.byte(at).is_none()
+                            && self.undefined.as_ref().is_some_and(|r| r.contains(&at))
+                        {
+                            return Err(anyhow::Error::new(super::UndefinedRead {
+                                what: format!("frame byte {at:#x}, which nothing in this run wrote"),
+                            }));
+                        }
                         let b = self
                             .byte(at)
                             .or_else(|| self.backing.and_then(|read| read(at)))
@@ -373,7 +405,9 @@ macro_rules! define_interp {
                         let ty = self.ty(name)?;
                         return Ok(normalize(self.mem.borrow().read(addr, width_of(ty))?, ty));
                     }
-                    bail!("interp: read of undeclared variable '{name}'")
+                    Err(anyhow::Error::new(super::UndefinedRead {
+                        what: format!("undeclared variable '{name}'"),
+                    }))
                 }
 
                 fn ty(&self, name: &str) -> Result<&NirType> {
@@ -1278,6 +1312,7 @@ macro_rules! define_interp {
                 );
                 let mut mem = Memory {
                     backing: world.backing,
+                    undefined: world.undefined_frame.cloned(),
                     ..Memory::default()
                 };
                 for (addr, byte) in image {

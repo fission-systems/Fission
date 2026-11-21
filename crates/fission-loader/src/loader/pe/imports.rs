@@ -291,9 +291,12 @@ pub(super) fn parse_delay_imports(
                 symbol_map.insert(iat_addr, full_name);
 
                 // Try to resolve the initial value in the IAT to create the delay load helper/proxy function
-                let iat_entry_rva = iat_base_rva + (idx as u64 * entry_size) as u32;
-                let iat_entry_offset = loader
-                    .rva_to_file_offset(iat_entry_rva, image_base)
+                // The entry's RVA must itself fit in 32 bits; one that does
+                // not is not in the image.
+                let iat_entry_offset = u32::try_from(idx as u64 * entry_size)
+                    .ok()
+                    .and_then(|delta| iat_base_rva.checked_add(delta))
+                    .and_then(|rva| loader.rva_to_file_offset(rva, image_base))
                     .unwrap_or(0);
                 let proxy_val = if iat_entry_offset != 0 {
                     if loader.is_64bit {
@@ -305,13 +308,15 @@ pub(super) fn parse_delay_imports(
                     0
                 };
 
-                if proxy_val != 0 {
-                    let proxy_addr = if proxy_val >= image_base {
-                        proxy_val
-                    } else {
-                        image_base + proxy_val
-                    };
-
+                // An unbound slot holds the proxy's VA (or, in some images, its
+                // RVA). The value is 64 bits of file data, so rebasing it can
+                // overflow; such a slot names no address in the image.
+                let proxy_addr = if proxy_val >= image_base {
+                    Some(proxy_val)
+                } else {
+                    image_base.checked_add(proxy_val)
+                };
+                if let Some(proxy_addr) = proxy_addr.filter(|_| proxy_val != 0) {
                     if loader.executable_section_contains(proxy_addr) {
                         delay_proxies.push(crate::loader::types::FunctionInfo {
                             name: format!("DelayLoad_{}", func_name),
@@ -467,5 +472,54 @@ mod ordinal_resolution_tests {
         let (functions, _) = parse_imports(&loader, dir_rva, image_base).expect("parse imports");
         // Must have stopped at section boundary (exactly 2 entries), not scanning into the 0xFFs
         assert_eq!(functions.len(), 2);
+    }
+
+    /// A delay-load IAT slot is 64 bits of file data. One below the image base
+    /// is rebased onto it, and that sum overflowed for a slot near 2^63 under
+    /// a high image base.
+    #[test]
+    fn delay_import_slot_that_cannot_be_rebased_is_not_a_proxy() {
+        use crate::loader::pe::PeLoaderImpl;
+        use crate::loader::types::SectionInfo;
+
+        let image_base = 0xc000_0000_0000_0000u64;
+        let mut data = vec![0u8; 0x1000];
+        // Delay-load descriptor at RVA 0x100: RVA-style attributes, DLL name
+        // at 0x300, IAT at 0x400, INT at 0x200.
+        data[0x100..0x104].copy_from_slice(&1u32.to_le_bytes());
+        data[0x104..0x108].copy_from_slice(&0x300u32.to_le_bytes());
+        data[0x10c..0x110].copy_from_slice(&0x400u32.to_le_bytes());
+        data[0x110..0x114].copy_from_slice(&0x200u32.to_le_bytes());
+        data[0x300..0x30c].copy_from_slice(b"testdll.dll\0");
+        // Two imports by ordinal.
+        data[0x200..0x208].copy_from_slice(&0x8000_0000_0000_0001u64.to_le_bytes());
+        data[0x208..0x210].copy_from_slice(&0x8000_0000_0000_0002u64.to_le_bytes());
+        // Their IAT slots: one that overflows when rebased, one that is the
+        // RVA of a proxy in `.text`.
+        data[0x400..0x408].copy_from_slice(&0x8000_0000_0000_0000u64.to_le_bytes());
+        data[0x408..0x410].copy_from_slice(&0x800u64.to_le_bytes());
+
+        let sections = vec![SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: image_base + 0x800,
+            virtual_size: 0x100,
+            file_offset: 0x800,
+            file_size: 0x100,
+            is_readable: true,
+            is_writable: false,
+            is_executable: true,
+        }];
+        let loader = PeLoaderImpl {
+            data: &data,
+            sections: &sections,
+            is_64bit: true,
+            language_id: "x86:LE:64:default".to_string(),
+        };
+
+        let (functions, _, proxies) =
+            parse_delay_imports(&loader, 0x100, image_base).expect("parse delay imports");
+        assert_eq!(functions.len(), 2, "{functions:?}");
+        assert_eq!(proxies.len(), 1, "{proxies:?}");
+        assert_eq!(proxies[0].address, image_base + 0x800);
     }
 }

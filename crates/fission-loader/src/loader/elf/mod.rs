@@ -2100,7 +2100,11 @@ fn align_up(value: u64, alignment: u64) -> u64 {
     if !alignment.is_power_of_two() {
         return value;
     }
-    (value + alignment - 1) & !(alignment - 1)
+    // `sh_addralign` is untrusted: an alignment near 2^63 has no aligned
+    // address above `value`, so leave the address where it is.
+    value
+        .checked_add(alignment - 1)
+        .map_or(value, |bumped| bumped & !(alignment - 1))
 }
 
 fn generate_elf_header_types(

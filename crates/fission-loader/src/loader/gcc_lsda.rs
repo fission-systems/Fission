@@ -351,14 +351,20 @@ pub fn parse_lsda(
     let lp_start = if lpstart_encoding == gimli::constants::DW_EH_PE_omit {
         region_start
     } else {
-        let field_vma = lsda_vma + cur.pos as u64;
+        let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
         read_encoded(&mut cur, lpstart_encoding, field_vma, is_64bit, read_at)?
     };
 
     let ttype_encoding = DwEhPe(cur.u8()?);
     let ttype_base = if ttype_encoding != gimli::constants::DW_EH_PE_omit {
         let ttype_offset = cur.uleb128()?;
-        Some(lsda_vma + cur.pos as u64 + ttype_offset)
+        // Offsets and lengths in an LSDA are untrusted: an address sum that
+        // wraps means the table is malformed, not that it lives at address 0.
+        Some(
+            lsda_vma
+                .checked_add(cur.pos as u64)?
+                .checked_add(ttype_offset)?,
+        )
     } else {
         None
     };
@@ -371,15 +377,19 @@ pub fn parse_lsda(
     let mut call_sites = Vec::new();
     let mut max_filter: i64 = 0;
     while cur.pos < call_site_table_end {
-        let field_vma = lsda_vma + cur.pos as u64;
+        let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
         let cs_start = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
-        let field_vma = lsda_vma + cur.pos as u64;
+        let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
         let cs_len = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
-        let field_vma = lsda_vma + cur.pos as u64;
+        let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
         let cs_lp = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
         let cs_action = cur.uleb128()?;
 
-        let landing_pad = (cs_lp != 0).then(|| lp_start + cs_lp);
+        let landing_pad = if cs_lp != 0 {
+            Some(lp_start.checked_add(cs_lp)?)
+        } else {
+            None
+        };
         let action_chain = if cs_action == 0 {
             Vec::new()
         } else {
@@ -391,9 +401,10 @@ pub fn parse_lsda(
             chain
         };
 
+        let start = region_start.checked_add(cs_start)?;
         call_sites.push(LsdaCallSite {
-            start: region_start + cs_start,
-            end: region_start + cs_start + cs_len,
+            start,
+            end: start.checked_add(cs_len)?,
             landing_pad,
             action_chain,
         });
