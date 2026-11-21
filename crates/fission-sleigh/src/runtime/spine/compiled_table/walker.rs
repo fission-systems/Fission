@@ -1217,7 +1217,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let selector = self.eval_pattern_expression(expr)?;
+                let (selector, _) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "varnode list",
+                )?;
                 let selector_index = checked_selector_index_i64(selector, "varnode list")?;
                 let display_index = checked_selector_display_index(selector_index, "varnode list")?;
                 let entry = entries.get(selector_index).ok_or_else(|| {
@@ -1287,7 +1291,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let selector = self.eval_pattern_expression(expr)?;
+                let (selector, encoded_size) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "value map",
+                )?;
                 let selector_index = checked_selector_index_i64(selector, "value map")?;
                 let value = values.get(selector_index).copied().ok_or_else(|| {
                     anyhow!(
@@ -1300,10 +1308,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
                         value: value_bits,
-                        encoded_size: 0,
+                        encoded_size,
                         signed: value < 0,
                     },
-                    fixed_handle_for_const_value(value_bits, 0),
+                    fixed_handle_for_const_value(value_bits, encoded_size),
                 ))
             }
             CompiledOperandSpec::SlaFixedVarnode { varnode } => Ok(OperandBinding::with_fixed(
@@ -1319,36 +1327,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let mut encoded_size = 0;
-                let value = if let CompiledPatternExpression::TokenField {
-                    big_endian,
-                    sign_bit,
-                    bit_start,
-                    bit_end,
-                    byte_start,
-                    byte_end,
-                    shift,
-                } = expr
-                {
-                    let token_base = self.token_base_for_sla_field(operand_absolute_offset);
-                    let value = u64_to_i64_bits(read_sla_token_field_at(
-                        self.ctx,
-                        token_base,
-                        *big_endian,
-                        *sign_bit,
-                        *bit_start,
-                        *bit_end,
-                        *byte_start,
-                        *byte_end,
-                        *shift,
-                    )?);
-                    encoded_size =
-                        checked_sla_field_encoded_size(*byte_start, *byte_end, "pattern token")?;
-                    self.advance_cursor_past_sla_field(token_base, encoded_size)?;
-                    value
-                } else {
-                    self.eval_pattern_expression(expr)?
-                };
+                let (value, encoded_size) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "pattern token",
+                )?;
                 let value_bits = i64_to_u64_bits(value);
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -1581,7 +1564,34 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(token_base == self.ctx.cursor && token_end <= constructor_end)
     }
 
+    fn eval_operand_pattern_expression(
+        &mut self,
+        expr: &CompiledPatternExpression,
+        operand_absolute_offset: usize,
+        _role: &str,
+    ) -> Result<(i64, u32)> {
+        let token_base = self.token_base_for_sla_field(operand_absolute_offset);
+        let value = self.eval_pattern_expression_at(expr, token_base)?;
+        let encoded_size = if let Some(span) = pattern_expression_primary_sla_token_span(0, expr)? {
+            let encoded_size = span.byte_width()?;
+            let span_end = span.relative_end()?;
+            self.advance_cursor_past_sla_field(token_base, span_end)?;
+            encoded_size
+        } else {
+            0
+        };
+        Ok((value, encoded_size))
+    }
+
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
+        self.eval_pattern_expression_at(expr, self.ctx.cursor)
+    }
+
+    fn eval_pattern_expression_at(
+        &mut self,
+        expr: &CompiledPatternExpression,
+        token_base: usize,
+    ) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
             CompiledPatternExpression::InstStart => {
@@ -1603,8 +1613,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_start,
                 byte_end,
                 shift,
-            } => Ok(u64_to_i64_bits(read_sla_token_field(
+            } => Ok(u64_to_i64_bits(read_sla_token_field_at(
                 self.ctx,
+                token_base,
                 *big_endian,
                 *sign_bit,
                 *bit_start,
@@ -1636,42 +1647,44 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.eval_operand_value_expression(*index)
             }
             CompiledPatternExpression::Add(lhs, rhs) => checked_pattern_add(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::Sub(lhs, rhs) => checked_pattern_sub(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::Mul(lhs, rhs) => Ok(wrapping_pattern_mul(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             )),
             CompiledPatternExpression::Div(lhs, rhs) => {
-                let rhs = self.eval_pattern_expression(rhs)?;
-                checked_pattern_div(self.eval_pattern_expression(lhs)?, rhs)
+                let rhs = self.eval_pattern_expression_at(rhs, token_base)?;
+                checked_pattern_div(self.eval_pattern_expression_at(lhs, token_base)?, rhs)
             }
             CompiledPatternExpression::LeftShift(lhs, rhs) => checked_pattern_left_shift(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::RightShift(lhs, rhs) => checked_pattern_right_shift(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
-            CompiledPatternExpression::And(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? & self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Or(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? | self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Xor(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? ^ self.eval_pattern_expression(rhs)?)
-            }
+            CompiledPatternExpression::And(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                & self.eval_pattern_expression_at(rhs, token_base)?),
+            CompiledPatternExpression::Or(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                | self.eval_pattern_expression_at(rhs, token_base)?),
+            CompiledPatternExpression::Xor(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                ^ self.eval_pattern_expression_at(rhs, token_base)?),
             CompiledPatternExpression::Negate(inner) => {
-                checked_pattern_negate(self.eval_pattern_expression(inner)?)
+                checked_pattern_negate(self.eval_pattern_expression_at(inner, token_base)?)
             }
-            CompiledPatternExpression::Not(inner) => Ok(!self.eval_pattern_expression(inner)?),
+            CompiledPatternExpression::Not(inner) => {
+                Ok(!self.eval_pattern_expression_at(inner, token_base)?)
+            }
         }
     }
 
@@ -1734,30 +1747,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
             | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
             | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
-                if let CompiledPatternExpression::TokenField {
-                    big_endian,
-                    sign_bit,
-                    bit_start,
-                    bit_end,
-                    byte_start,
-                    byte_end,
-                    shift,
-                } = expr
-                {
-                    Ok(u64_to_i64_bits(read_sla_token_field_at(
-                        self.ctx,
-                        operand_absolute_offset,
-                        *big_endian,
-                        *sign_bit,
-                        *bit_start,
-                        *bit_end,
-                        *byte_start,
-                        *byte_end,
-                        *shift,
-                    )?))
-                } else {
-                    self.eval_pattern_expression(expr)
-                }
+                let token_base = self.token_base_for_sla_field(operand_absolute_offset);
+                self.eval_pattern_expression_at(expr, token_base)
             }
             CompiledOperandSpec::ContextFieldExtraction {
                 bit_offset,
@@ -2467,6 +2458,169 @@ mod operand_expression_borrow_tests {
             error.to_string(),
             format!("missing operand {} for pattern expression", usize::MAX)
         );
+    }
+
+    #[test]
+    fn compound_sla_pattern_expression_reads_at_operand_offset_sets_size_and_advances_cursor() {
+        use crate::compiler::{
+            CompiledConstructTplKind, CompiledConstructorTemplate, CompiledDisplayTemplate,
+            CompiledHandleTemplate, CompiledOperandDecodeStep, CompiledSlaDecodeStatus,
+            CompiledTemplateSource,
+        };
+        use crate::runtime::spine::RuntimeMatchTrace;
+
+        let compiled = crate::compiler::compile_x86_64_frontend().expect("compile x86-64");
+        let compound_expr = CompiledPatternExpression::Add(
+            Box::new(CompiledPatternExpression::Constant(0x10)),
+            Box::new(CompiledPatternExpression::LeftShift(
+                Box::new(CompiledPatternExpression::TokenField {
+                    big_endian: false,
+                    sign_bit: false,
+                    bit_start: 0,
+                    bit_end: 7,
+                    byte_start: 0,
+                    byte_end: 0,
+                    shift: 0,
+                }),
+                Box::new(CompiledPatternExpression::Constant(2)),
+            )),
+        );
+        let value_map_expr = CompiledPatternExpression::Add(
+            Box::new(CompiledPatternExpression::TokenField {
+                big_endian: false,
+                sign_bit: false,
+                bit_start: 0,
+                bit_end: 7,
+                byte_start: 0,
+                byte_end: 0,
+                shift: 0,
+            }),
+            Box::new(CompiledPatternExpression::Constant(1)),
+        );
+        let constructor = std::sync::Arc::new(CompiledExecutableConstructor {
+            constructor_id: 9999,
+            sla_identity: None,
+            sla_decode_status: CompiledSlaDecodeStatus::Decoded,
+            mnemonic: "test_compound".to_string(),
+            source: "instruction".to_string(),
+            display: String::new(),
+            display_template: std::sync::Arc::new(CompiledDisplayTemplate {
+                constructor_hash: 0,
+                pieces: Vec::new(),
+                first_whitespace: None,
+                flowthru_operand_index: None,
+                display: String::new(),
+            }),
+            signature_hash: 0,
+            minimum_length: 1,
+            context_changes: Vec::new(),
+            context_commits: Vec::new(),
+            matcher: CompiledPatternMatcher::ExactBytes(vec![0xaa]),
+            opsize_variants: Vec::new(),
+            operand_specs: Vec::new(),
+            display_operands: std::sync::Arc::new(Vec::new()),
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
+            constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
+                handles: vec![
+                    CompiledHandleTemplate {
+                        operand_index: 0,
+                        spec: std::sync::Arc::new(CompiledOperandSpec::SlaPatternExpression {
+                            expr: compound_expr.clone(),
+                            reloffset: 2,
+                            offsetbase: -1,
+                        }),
+                        minimum_length: 0,
+                    },
+                    CompiledHandleTemplate {
+                        operand_index: 1,
+                        spec: std::sync::Arc::new(CompiledOperandSpec::SlaValueMapExpression {
+                            expr: value_map_expr,
+                            values: vec![100, 200, 300, 400],
+                            reloffset: 3,
+                            offsetbase: -1,
+                        }),
+                        minimum_length: 0,
+                    },
+                ],
+                decode_steps: vec![
+                    CompiledOperandDecodeStep::DecodeOperand { operand_index: 0 },
+                    CompiledOperandDecodeStep::DecodeOperand { operand_index: 1 },
+                ],
+                num_labels: 0,
+                result: None,
+                ops: Vec::new(),
+                template_source: CompiledTemplateSource::SpecDerived,
+            }),
+            named_templates: Vec::new(),
+            runtime_ready: true,
+            unsupported_template_kind: None,
+        });
+        let selection = RuntimeSelection {
+            constructor: &constructor,
+            constructor_index: 0,
+            subtable_id: 0,
+            constructor_id: 9999,
+            constructor_slot: 0,
+            trace: RuntimeMatchTrace {
+                root_bucket: "instruction".into(),
+                probes: crate::runtime::spine::ProbeChain::default(),
+                leaf_constructor_indexes: vec![0],
+                matched_leaf_pattern: Some(std::sync::Arc::new(
+                    crate::compiler::CompiledDisjointPattern::Instruction(
+                        crate::compiler::CompiledPatternBlock {
+                            offset: 0,
+                            nonzero_size: 1,
+                            mask_words: vec![0xff],
+                            value_words: vec![0xaa],
+                        },
+                    ),
+                )),
+            },
+        };
+        // Byte 0 is opcode 0xaa (at ctx.cursor=0); byte 2 is 0x07; byte 3 is 0x02 (selector = 2 + 1 = 3).
+        let bytes = [0xaa, 0x11, 0x07, 0x02];
+        let ctx = CompiledInstructionContext::parse(&bytes, 0x1000).unwrap();
+
+        let mut walker = CompiledParserWalker::new(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection.clone(),
+            None,
+        )
+        .unwrap();
+        // OperandValue evaluation must also read operand 0 at reloffset=2 (0x07), not ctx.cursor=0 (0xaa).
+        let via_operand_value = walker
+            .eval_pattern_expression(&CompiledPatternExpression::OperandValue { index: 0 })
+            .unwrap();
+        assert_eq!(via_operand_value, 0x10 + (0x07 << 2));
+
+        let state = bind_instruction(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+        )
+        .expect("bind compound expression operands");
+        assert_eq!(state.length, 4, "cursor must advance past reloffset 3 + 1");
+        assert!(matches!(
+            state.operands[0],
+            BoundOperand::Immediate {
+                value: 0x2c,
+                encoded_size: 1,
+                signed: false,
+            }
+        ));
+        assert_eq!(state.handles[0].fixed.size, 1);
+        assert_eq!(state.handles[0].fixed.offset_size, 1);
+        assert!(matches!(
+            state.operands[1],
+            BoundOperand::Immediate {
+                value: 400,
+                encoded_size: 1,
+                signed: false,
+            }
+        ));
     }
 
     #[test]

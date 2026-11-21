@@ -43,18 +43,10 @@ fn direct_pcode_branch_target(op: &PcodeOp) -> Option<u64> {
     match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             let target = op.inputs.first()?;
-            if target.is_constant {
-                if target.offset != 0 {
-                    Some(target.offset)
-                } else if target.constant_val >= 0 {
-                    Some(target.constant_val as u64)
-                } else {
-                    None
-                }
-            } else if target.offset != 0 {
-                Some(target.offset)
-            } else {
+            if target.is_constant || target.space_id == 0 || target.offset == 0 {
                 None
+            } else {
+                Some(target.offset)
             }
         }
         _ => None,
@@ -1713,15 +1705,16 @@ impl RuntimeSleighFrontend {
                     }
                 }
                 Some(PcodeOpcode::BranchInd) => {
+                    if cbranch_exits_to_fallthrough {
+                        enqueue_internal_target(
+                            &mut queue,
+                            entry_address,
+                            bytes.len(),
+                            fallthrough,
+                        );
+                    }
                     if contract.stop_at_indirect_branch {
-                        if cbranch_exits_to_fallthrough {
-                            enqueue_internal_target(
-                                &mut queue,
-                                entry_address,
-                                bytes.len(),
-                                fallthrough,
-                            );
-                        } else {
+                        if !cbranch_exits_to_fallthrough {
                             stop_reason = DecodeStopReason::IndirectBranchHalt;
                         }
                     } else if let Some(branch_target) =
@@ -1808,20 +1801,20 @@ impl RuntimeSleighFrontend {
                         }
                     }
                     Some(PcodeOpcode::BranchInd) => {
-                        if contract.stop_at_indirect_branch {
-                            if cbranch_exits_to_fallthrough {
-                                if internal_byte_offset(entry_address, bytes.len(), fallthrough)
-                                    .is_some()
-                                {
-                                    reach_queue.push_back(fallthrough);
-                                }
-                            }
-                        } else if let Some(targets) = inferred_indirect_edges.get(&addr) {
-                            for &target in targets {
-                                if internal_byte_offset(entry_address, bytes.len(), target)
-                                    .is_some()
-                                {
-                                    reach_queue.push_back(target);
+                        if cbranch_exits_to_fallthrough
+                            && internal_byte_offset(entry_address, bytes.len(), fallthrough)
+                                .is_some()
+                        {
+                            reach_queue.push_back(fallthrough);
+                        }
+                        if !contract.stop_at_indirect_branch {
+                            if let Some(targets) = inferred_indirect_edges.get(&addr) {
+                                for &target in targets {
+                                    if internal_byte_offset(entry_address, bytes.len(), target)
+                                        .is_some()
+                                    {
+                                        reach_queue.push_back(target);
+                                    }
                                 }
                             }
                         }
@@ -2391,6 +2384,100 @@ mod raw_seed_lift_tests {
             }
             assert!(checked > 0, "{language}: no label branch was lifted");
         }
+    }
+
+    #[test]
+    fn direct_pcode_branch_target_rejects_constant_space_op_deltas() {
+        let cond = Varnode {
+            space_id: 2,
+            offset: 0x200,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let rel_forward = PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::CBranch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode::constant(2, 4), cond.clone()],
+            asm_mnemonic: None,
+        };
+        let rel_backward = PcodeOp {
+            seq_num: 4,
+            opcode: PcodeOpcode::Branch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode::constant(-2, 4)],
+            asm_mnemonic: None,
+        };
+        let ram_branch = PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Branch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode {
+                space_id: 3,
+                offset: 0x10,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            }],
+            asm_mnemonic: None,
+        };
+
+        assert_eq!(direct_pcode_branch_target(&rel_forward), None);
+        assert_eq!(direct_pcode_branch_target(&rel_backward), None);
+        assert_eq!(direct_pcode_branch_target(&ram_branch), Some(0x10));
+
+        // At address 0x0 with 2-byte instruction (fallthrough=0x2), a constant op delta of +2
+        // that resolves within the same instruction must not count as exiting to fallthrough.
+        let ops = vec![
+            rel_forward,
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: 0x0,
+                output: Some(cond.clone()),
+                inputs: vec![Varnode::constant(1, 1)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: 0x0,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+        assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x2));
+    }
+
+    #[test]
+    fn lifting_at_entry_address_zero_does_not_enqueue_relative_op_deltas_as_addresses() {
+        fn lifted_addresses(pcode: &fission_pcode_ir::PcodeFunction) -> Vec<u64> {
+            let mut addrs: Vec<u64> = pcode
+                .blocks
+                .iter()
+                .flat_map(|b| b.ops.iter().map(|op| op.address))
+                .collect();
+            addrs.sort_unstable();
+            addrs.dedup();
+            addrs
+        }
+
+        let x86 = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        // tzcnt eax, eax (4 bytes, contains forward & backward label branches) ; ret (1 byte)
+        let x86_bytes = [0xf3u8, 0x0f, 0xbc, 0xc0, 0xc3];
+        let x86_lifted = x86.lift_raw_pcode_function(&x86_bytes, 0x0).unwrap();
+        assert_eq!(lifted_addresses(&x86_lifted), vec![0x0, 0x4]);
+
+        let aarch64 = RuntimeSleighFrontend::new_for_language("AARCH64").unwrap();
+        // csel w0, wzr, w8, mi (4 bytes, label branch) ; ret (4 bytes)
+        let a64_bytes = [0xe0u8, 0x43, 0x88, 0x1a, 0xc0, 0x03, 0x5f, 0xd6];
+        let a64_lifted = aarch64.lift_raw_pcode_function(&a64_bytes, 0x0).unwrap();
+        assert_eq!(lifted_addresses(&a64_lifted), vec![0x0, 0x4]);
     }
 
     #[test]
