@@ -6,11 +6,18 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use std::io::Write;
 
-fn packaged_sla_path(processor: &str, name: &str) -> Option<PathBuf> {
+/// A compiled `.sla` from the committed `utils/sleigh-specs/compiled/` tree.
+/// Missing is a broken checkout, so it fails rather than skipping.
+fn packaged_sla_path(processor: &str, name: &str) -> PathBuf {
     let path = crate::compiler::sleigh_compiled_root()
         .join(processor)
         .join(name);
-    path.is_file().then_some(path)
+    assert!(
+        path.is_file(),
+        "{} is committed under utils/ and must be present",
+        path.display()
+    );
+    path
 }
 
 #[test]
@@ -130,12 +137,7 @@ fn packed_attr_signed_does_not_treat_oversized_unsigned_as_signed() {
 
 #[test]
 fn decodes_real_x86_64_sla_construct_templates() {
-    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("x86", "x86-64.sla");
     let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
     assert!(!library.source_files.is_empty());
     assert!(!library.spaces.is_empty());
@@ -161,12 +163,7 @@ fn decodes_real_x86_64_sla_construct_templates() {
 
 #[test]
 fn sla_unimpl_constructors_decode_as_empty_runtime_ready_templates() {
-    let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("AARCH64", "AARCH64.sla");
     let library = load_construct_templates_from_sla(path).expect("decode AARCH64.sla");
     let instruction = library
         .native
@@ -720,12 +717,7 @@ fn sla_decode_diagnostics_are_trace_gated() {
 
 #[test]
 fn decodes_x86_varnode_list_selector_expressions() {
-    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("x86", "x86-64.sla");
     let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
     let constructors = library
         .constructors_by_source
@@ -745,12 +737,7 @@ fn decodes_x86_varnode_list_selector_expressions() {
 
 #[test]
 fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
-    let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("AARCH64", "AARCH64.sla");
     let library = load_construct_templates_from_sla(path).expect("decode AARCH64.sla");
     let subtable = library
         .subtables
@@ -792,12 +779,7 @@ fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
 
 #[test]
 fn native_decision_terminal_pairs_use_sla_constructor_identity() {
-    let Some(path) = packaged_sla_path("x86", "x86-64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("x86", "x86-64.sla");
     let library = load_construct_templates_from_sla(path).expect("decode x86-64.sla");
     let instruction = library
         .native
@@ -836,12 +818,7 @@ fn native_decision_terminal_pairs_use_sla_constructor_identity() {
 
 #[test]
 fn debug_aarch64_rm_gpr64_constructor_shape() {
-    let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("AARCH64", "AARCH64.sla");
     let artifact = load_compiled_sla(&path).expect("load AARCH64.sla");
     let mut parser = PackedParser::new(&artifact.payload);
     let root = parser.parse_root().expect("parse root");
@@ -889,12 +866,7 @@ fn debug_aarch64_rm_gpr64_constructor_shape() {
 
 #[test]
 fn debug_aarch64_rm_gpr64_operand_symbol_shape() {
-    let Some(path) = packaged_sla_path("AARCH64", "AARCH64.sla") else {
-        return;
-    };
-    if !path.exists() {
-        return;
-    }
+    let path = packaged_sla_path("AARCH64", "AARCH64.sla");
     let artifact = load_compiled_sla(&path).expect("load AARCH64.sla");
     let mut parser = PackedParser::new(&artifact.payload);
     let root = parser.parse_root().expect("parse root");
@@ -950,10 +922,7 @@ fn x86_64_sla_userops_include_syscall() {
     use std::path::PathBuf;
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../utils/sleigh-specs/compiled/x86/x86-64.sla");
-    if !path.is_file() {
-        eprintln!("skip: missing {}", path.display());
-        return;
-    }
+    assert!(path.is_file(), "missing committed {}", path.display());
     let lib = load_construct_templates_from_sla(&path).expect("load x86-64.sla");
     assert!(
         !lib.userops.is_empty(),
@@ -995,10 +964,8 @@ fn sla_carries_the_context_fields_the_runtime_resolves_by_name() {
     // resolves textually.
     const WANTED: [&str; 4] = ["TMode", "T", "ISA_MODE", "LowBitCodeMode"];
 
-    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
-        eprintln!("skipping: no entry specs");
-        return;
-    };
+    let specs = crate::compiler::discover_all_entry_specs()
+        .expect("entry specs from the committed utils/sleigh-specs");
 
     let mut checked = 0usize;
     for entry in specs.iter().filter(|e| e.entry_id.starts_with("ARM")) {
@@ -1044,9 +1011,8 @@ fn sla_carries_the_context_fields_the_runtime_resolves_by_name() {
 fn sla_context_field_names_are_never_empty() {
     use crate::compiler::packaged_sla_for_entry_spec;
 
-    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
-        return;
-    };
+    let specs = crate::compiler::discover_all_entry_specs()
+        .expect("entry specs from the committed utils/sleigh-specs");
     let mut with_fields = 0usize;
     for entry in specs.iter() {
         let Ok(Some(sla_path)) = packaged_sla_for_entry_spec(&entry.path) else {
@@ -1081,10 +1047,8 @@ fn sla_context_field_names_are_never_empty() {
 fn sla_context_bit_ranges_match_the_compiled_frontend() {
     use crate::compiler::{compile_frontend_for_entry_spec, packaged_sla_for_entry_spec};
 
-    let Ok(specs) = crate::compiler::discover_all_entry_specs() else {
-        eprintln!("skipping: no entry specs");
-        return;
-    };
+    let specs = crate::compiler::discover_all_entry_specs()
+        .expect("entry specs from the committed utils/sleigh-specs");
 
     let mut compared = 0usize;
     let mut fields_checked = 0usize;

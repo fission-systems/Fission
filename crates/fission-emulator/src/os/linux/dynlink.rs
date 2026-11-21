@@ -1975,6 +1975,17 @@ fn sym_name(
 mod tests {
     use super::*;
 
+    /// Committed under `testdata/`; a missing copy is a broken checkout.
+    fn dyn_puts_fixture() -> PathBuf {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        assert!(
+            path.is_file(),
+            "committed fixture missing: {}",
+            path.display()
+        );
+        path
+    }
+
     fn testdata(name: &str) -> Vec<u8> {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata")
@@ -2065,10 +2076,7 @@ mod tests {
 
     #[test]
     fn parse_interp_from_dyn_puts_fixture() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let data = std::fs::read(&path).unwrap();
         let interp = parse_pt_interp(&data).expect("PT_INTERP");
         assert!(
@@ -2079,10 +2087,7 @@ mod tests {
 
     #[test]
     fn prepare_dynlink_defaults_to_hle_without_env() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         // Ensure env is off for this unit test (Rust 2024: env mut is unsafe).
         unsafe {
             std::env::remove_var("FISSION_ENABLE_DYNLINK");
@@ -2096,10 +2101,7 @@ mod tests {
 
     #[test]
     fn apply_rela_writes_jump_slots_for_dyn_puts() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let binary = LoadedBinary::from_file(&path).unwrap();
         let mut state = MachineState::new();
         // Map sections like the image loader would.
@@ -2128,10 +2130,7 @@ mod tests {
 
     #[test]
     fn parse_dt_needed_from_dyn_puts() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let data = std::fs::read(&path).unwrap();
         let (needed, bind_now) = parse_dt_needed(&data);
         // musl dynamic hello typically needs libc.so
@@ -2223,10 +2222,7 @@ mod tests {
     /// After full image load, RELA JUMP_SLOT writes must stick (map → rela order).
     #[test]
     fn load_elf_then_rela_jump_slot_persists() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let binary = LoadedBinary::from_file(&path).unwrap();
         let mut state = MachineState::new();
         let info = crate::os::linux::image_info::load_elf_image(
@@ -2422,10 +2418,7 @@ mod tests {
 
     #[test]
     fn stripped_elf_applies_relocations_via_pt_dynamic() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let mut data = std::fs::read(&path).unwrap();
         // Strip section headers: e_shoff = 0, e_shentsize = 0, e_shnum = 0.
         data[40..48].fill(0);
