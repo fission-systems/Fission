@@ -161,6 +161,25 @@ pub(super) fn apply_pre_hir_debug_array_hints(
 fn seed_callee_summaries_from_type_context(
     context: &PreviewTypeContext,
 ) -> IndexMap<String, CallSummary> {
+    // The context names every call target in the program, and a prototype is
+    // looked up by symbol. Scanning the targets once per prototype made this
+    // the product of the two on every builder; index them once instead. The
+    // first reference carrying a symbol wins, in the order that scan visited
+    // them: `call_target_refs`, then `iat_target_refs`.
+    let mut target_by_symbol: crate::fast_hash::FastMap<&str, &CallTargetRef> =
+        crate::fast_hash::FastMap::default();
+    if !context.call_prototype_summaries.is_empty() {
+        target_by_symbol.reserve(context.call_target_refs.len() + context.iat_target_refs.len());
+        for target in context
+            .call_target_refs
+            .values()
+            .chain(context.iat_target_refs.values())
+        {
+            target_by_symbol
+                .entry(target.symbol.as_str())
+                .or_insert(target);
+        }
+    }
     let mut summaries = IndexMap::new();
     for (symbol, prototype) in &context.call_prototype_summaries {
         let mut param_lattices = vec![NirType::Unknown; prototype.max_arity];
@@ -187,12 +206,9 @@ fn seed_callee_summaries_from_type_context(
             .map(Option::is_some)
             .collect::<Vec<_>>();
         param_pointer_contracts.resize(prototype.max_arity, false);
-        let target = context
-            .call_target_refs
-            .values()
-            .chain(context.iat_target_refs.values())
-            .find(|target| target.symbol == *symbol)
-            .cloned()
+        let target = target_by_symbol
+            .get(symbol.as_str())
+            .map(|target| (*target).clone())
             .unwrap_or_else(|| CallTargetRef {
                 address: None,
                 symbol: symbol.clone(),
@@ -1452,6 +1468,65 @@ mod function_symbol_tests {
         assert_eq!(
             resolved_hir_function_name("helper.part.0", 0x1000, None),
             sanitize_c_identifier("helper.part.0")
+        );
+    }
+}
+
+#[cfg(test)]
+mod callee_summary_seed_tests {
+    use super::seed_callee_summaries_from_type_context;
+    use crate::midend::{CallEdgeKind, CallTargetProvenance, CallTargetRef, PreviewTypeContext};
+    use fission_midend_core::ir::NirCallPrototypeSummary;
+
+    fn target(address: u64, symbol: &str, provenance: CallTargetProvenance) -> CallTargetRef {
+        CallTargetRef {
+            address: Some(address),
+            symbol: symbol.to_string(),
+            provenance,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 255,
+        }
+    }
+
+    /// A prototype is paired with the call target that carries its symbol. A
+    /// symbol named both by the program and by its import table belongs to
+    /// the program's own reference; one named by neither is a bare reference.
+    #[test]
+    fn a_prototype_takes_the_program_target_before_the_import_table_one() {
+        let mut context = PreviewTypeContext::default();
+        context
+            .call_target_refs
+            .insert(0x1000, target(0x1000, "both", CallTargetProvenance::Direct));
+        context
+            .iat_target_refs
+            .insert(0x2000, target(0x2000, "both", CallTargetProvenance::Import));
+        context.iat_target_refs.insert(
+            0x3000,
+            target(0x3000, "imported", CallTargetProvenance::Import),
+        );
+        for symbol in ["both", "imported", "unreferenced"] {
+            context.call_prototype_summaries.insert(
+                symbol.to_string(),
+                NirCallPrototypeSummary {
+                    max_arity: 1,
+                    ..NirCallPrototypeSummary::default()
+                },
+            );
+        }
+
+        let summaries = seed_callee_summaries_from_type_context(&context);
+
+        assert_eq!(summaries.len(), 3);
+        assert_eq!(summaries["both"].target.address, Some(0x1000));
+        assert_eq!(
+            summaries["both"].target.provenance,
+            CallTargetProvenance::Direct
+        );
+        assert_eq!(summaries["imported"].target.address, Some(0x3000));
+        assert_eq!(summaries["unreferenced"].target.address, None);
+        assert_eq!(
+            summaries["unreferenced"].target.provenance,
+            CallTargetProvenance::Reference
         );
     }
 }
