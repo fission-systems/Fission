@@ -3,9 +3,9 @@
 //! Patches common anti-debug checks in the target process so that
 //! analysis can continue without manual intervention.
 
+use crate::debug::platform::windows_layout::{heap64, peb64};
 use std::ffi::c_void;
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
-use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 use windows::Win32::System::Memory::{PAGE_PROTECTION_FLAGS, PAGE_READWRITE, VirtualProtectEx};
 // `Nt*` lives under `Wdk`, not `Win32`, in windows-rs 0.54.
 use windows::Wdk::System::Threading::{NtQueryInformationProcess, PROCESSINFOCLASS};
@@ -43,161 +43,84 @@ impl AntiDebugBypassEngine {
         Ok(applied)
     }
 
-    /// Patch PEB.BeingDebugged (offset 0x2 inside PEB).
-    fn patch_peb_being_debugged(process: HANDLE) -> Result<(), String> {
-        let peb_addr = Self::get_peb_address(process)?;
-        let being_debugged_offset = peb_addr + 0x2;
-
+    /// Write `bytes` at `address`, making the page writable for the write and
+    /// putting its protection back afterwards -- whether or not the write
+    /// worked. The old code returned through `?` on a failed write and left
+    /// the page read-write.
+    fn write_protected(process: HANDLE, address: u64, bytes: &[u8]) -> Result<(), String> {
         let mut old_protect = PAGE_PROTECTION_FLAGS::default();
         unsafe {
             VirtualProtectEx(
                 process,
-                being_debugged_offset as *const c_void,
-                1,
+                address as *const c_void,
+                bytes.len(),
                 PAGE_READWRITE,
                 &mut old_protect,
             )
             .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
-
-            let patch: u8 = 0;
             let mut written = 0usize;
-            windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
+            let result = windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
                 process,
-                being_debugged_offset as *const c_void,
-                &patch as *const _ as *const c_void,
-                1,
+                address as *const c_void,
+                bytes.as_ptr() as *const c_void,
+                bytes.len(),
                 Some(&mut written),
-            )
-            .map_err(|e| format!("WriteProcessMemory failed: {:?}", e))?;
-
-            VirtualProtectEx(
+            );
+            let mut unused = PAGE_PROTECTION_FLAGS::default();
+            let _ = VirtualProtectEx(
                 process,
-                being_debugged_offset as *const c_void,
-                1,
+                address as *const c_void,
+                bytes.len(),
                 old_protect,
-                &mut old_protect,
-            )
-            .ok();
+                &mut unused,
+            );
+            result.map_err(|e| format!("WriteProcessMemory failed: {:?}", e))?;
+            if written != bytes.len() {
+                return Err(format!(
+                    "WriteProcessMemory wrote {written} of {} bytes",
+                    bytes.len()
+                ));
+            }
         }
         Ok(())
+    }
+
+    /// Patch PEB.BeingDebugged (offset 0x2 inside PEB).
+    fn patch_peb_being_debugged(process: HANDLE) -> Result<(), String> {
+        let peb_addr = Self::get_peb_address(process)?;
+        Self::write_protected(process, peb_addr + peb64::BEING_DEBUGGED, &[0])
     }
 
     /// Patch PEB.NtGlobalFlag (offset 0xBC inside PEB on x64) to clear debug flags.
     fn patch_nt_global_flag(process: HANDLE) -> Result<(), String> {
         let peb_addr = Self::get_peb_address(process)?;
-        let nt_global_flag_offset = peb_addr + 0xBC;
-
-        let mut old_protect = PAGE_PROTECTION_FLAGS::default();
-        unsafe {
-            VirtualProtectEx(
-                process,
-                nt_global_flag_offset as *const c_void,
-                4,
-                PAGE_READWRITE,
-                &mut old_protect,
-            )
-            .map_err(|e| format!("VirtualProtectEx failed: {:?}", e))?;
-
-            let patch: u32 = 0;
-            let mut written = 0usize;
-            windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
-                process,
-                nt_global_flag_offset as *const c_void,
-                &patch as *const _ as *const c_void,
-                4,
-                Some(&mut written),
-            )
-            .map_err(|e| format!("WriteProcessMemory failed: {:?}", e))?;
-
-            VirtualProtectEx(
-                process,
-                nt_global_flag_offset as *const c_void,
-                4,
-                old_protect,
-                &mut old_protect,
-            )
-            .ok();
-        }
-        Ok(())
+        Self::write_protected(
+            process,
+            peb_addr + peb64::NT_GLOBAL_FLAG,
+            &0u32.to_le_bytes(),
+        )
     }
 
-    /// Patch heap flags in the default process heap.
+    /// Give the default heap the flags it has without a debugger.
+    ///
+    /// `PEB.ProcessHeap` (x64 offset 0x30) *is* the default heap. It was read
+    /// as the `ProcessHeaps` array and dereferenced once more, so the patch
+    /// went to whatever the heap's first eight bytes pointed at -- and wrote
+    /// to offset 0x40 there, which is not a flags field on any 64-bit
+    /// Windows. A 64-bit heap (Vista and later) keeps `Flags` at 0x70 and
+    /// `ForceFlags` at 0x74.
     fn patch_heap_flags(process: HANDLE) -> Result<(), String> {
         let peb_addr = Self::get_peb_address(process)?;
-
-        // PEB.ProcessHeaps on x64 is at offset 0x30
-        let process_heaps_offset = peb_addr + 0x30;
-        let mut process_heaps: u64 = 0;
-        let mut read = 0usize;
-        unsafe {
-            ReadProcessMemory(
-                process,
-                process_heaps_offset as *const c_void,
-                &mut process_heaps as *mut _ as *mut c_void,
-                8,
-                Some(&mut read),
-            )
-            .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
+        let heap: u64 = super::read_value(process, peb_addr + peb64::PROCESS_HEAP)?;
+        if heap == 0 {
+            return Err("The process has no default heap".to_string());
         }
-
-        if process_heaps == 0 {
-            return Err("No process heaps found".to_string());
-        }
-
-        // Read the first heap pointer
-        let mut first_heap: u64 = 0;
-        unsafe {
-            ReadProcessMemory(
-                process,
-                process_heaps as *const c_void,
-                &mut first_heap as *mut _ as *mut c_void,
-                8,
-                Some(&mut read),
-            )
-            .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        }
-
-        if first_heap == 0 {
-            return Err("First heap is null".to_string());
-        }
-
-        // Heap flags are at offset 0x70/0x40 depending on version,
-        // we patch both common locations
-        let offsets = [0x70u64, 0x40u64];
-        for off in offsets {
-            let addr = first_heap + off;
-            let mut old_protect = PAGE_PROTECTION_FLAGS::default();
-            unsafe {
-                if VirtualProtectEx(
-                    process,
-                    addr as *const c_void,
-                    4,
-                    PAGE_READWRITE,
-                    &mut old_protect,
-                )
-                .is_ok()
-                {
-                    let patch: u32 = 2; // HEAP_NO_SERIALIZE only
-                    let mut written = 0usize;
-                    windows::Win32::System::Diagnostics::Debug::WriteProcessMemory(
-                        process,
-                        addr as *const c_void,
-                        &patch as *const _ as *const c_void,
-                        4,
-                        Some(&mut written),
-                    )
-                    .ok();
-                    let _ = VirtualProtectEx(
-                        process,
-                        addr as *const c_void,
-                        4,
-                        old_protect,
-                        &mut old_protect,
-                    );
-                }
-            }
-        }
-        Ok(())
+        Self::write_protected(
+            process,
+            heap + heap64::FLAGS,
+            &heap64::GROWABLE.to_le_bytes(),
+        )?;
+        Self::write_protected(process, heap + heap64::FORCE_FLAGS, &0u32.to_le_bytes())
     }
 
     /// Patch NtQueryInformationProcess to always return 0 for ProcessDebugPort.

@@ -437,6 +437,16 @@ impl ExecutionBackend for EmulatorBackend {
             emu.step_instruction()?
         };
         self.record_stop(outcome);
+        if outcome == RunOutcome::Returned {
+            // The call came back to its fall-through: the step the caller
+            // asked for is complete. `Returned` has no event of its own
+            // (`continue` can end with it too), so without this a step over a
+            // call was the one step that reported nothing.
+            self.events
+                .push_back(crate::debug::types::DebugEvent::SingleStep {
+                    thread_id: EMULATED_THREAD_ID,
+                });
+        }
         Ok(())
     }
 
@@ -761,17 +771,24 @@ fn run_past_call(emu: &mut Emulator, shape: InstructionShape) -> FissionResult<R
     }
 
     let outcome = loop {
-        let outcome = emu.resume()?;
+        let outcome = match emu.resume() {
+            Ok(outcome) => outcome,
+            // The run failed (the callee is not mapped, an instruction does
+            // not decode). The temporary breakpoint is still this function's
+            // to take back: left behind, it stops a later `continue` at an
+            // address nobody asked for.
+            Err(error) => break Err(error),
+        };
         if outcome != RunOutcome::HitBreakpoint(target) {
-            break outcome;
+            break Ok(outcome);
         }
         let sp_now = emu.read_register_u64(sp_name).unwrap_or(0);
         if sp_now >= sp_before {
-            break if user_breakpoint {
+            break Ok(if user_breakpoint {
                 outcome
             } else {
                 RunOutcome::Returned
-            };
+            });
         }
         // A deeper frame returning to the same address: keep going.
     };
@@ -779,7 +796,7 @@ fn run_past_call(emu: &mut Emulator, shape: InstructionShape) -> FissionResult<R
     if !user_breakpoint {
         emu.clear_breakpoint(target);
     }
-    Ok(outcome)
+    Ok(outcome?)
 }
 
 /// Run until the current function returns.

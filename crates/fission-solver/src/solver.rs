@@ -1,4 +1,5 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
+use crate::cnf::Lit;
 use crate::theory::bitvector::LoweredAssumption;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -9,6 +10,20 @@ pub enum SatResult {
     Sat,
     Unsat,
     Unknown,
+}
+
+/// Why a query came back [`SatResult::Unknown`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnknownReason {
+    /// The problem holds something lowering has no circuit for; these are
+    /// the entries of `bv_theory.unsupported()`.
+    Unsupported(Vec<String>),
+    /// The search spent its conflict budget (see
+    /// [`Solver::set_conflict_budget`]) without reaching a verdict.
+    ConflictBudget,
+    /// The memory oracle kept contradicting the model after the bounded
+    /// number of refinement rounds.
+    OracleRefinement,
 }
 
 pub trait MemoryOracle {
@@ -28,6 +43,8 @@ pub struct Solver {
     pub array_theory: crate::theory::array::ArrayTheory,
     pub sat: crate::sat::SatSolver,
     pub lowered_assertions: usize,
+    /// Why the most recent query was `Unknown`, if it was.
+    last_unknown: Option<UnknownReason>,
 }
 
 impl Default for Solver {
@@ -68,6 +85,15 @@ fn read_oracle_value(
     Some(val & mask)
 }
 
+/// A constant's value: its low `size` bits, which is all lowering reads.
+fn constant_value(expr: &SymExpr) -> u64 {
+    match expr {
+        SymExpr::Const { val, size } if *size < 64 => val & ((1u64 << size) - 1),
+        SymExpr::Const { val, .. } => *val,
+        _ => unreachable!("only called on a constant"),
+    }
+}
+
 impl Solver {
     pub fn new() -> Self {
         let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
@@ -80,6 +106,7 @@ impl Solver {
             array_theory: crate::theory::array::ArrayTheory::new(),
             sat: crate::sat::SatSolver::new(),
             lowered_assertions: 0,
+            last_unknown: None,
         }
     }
 
@@ -133,16 +160,99 @@ impl Solver {
         self.check_sat_with_oracle(None, &[])
     }
 
+    /// Lower temporary constraints before publishing any new array axioms.
+    /// Definitional CNF clauses can be retained even when the query is rejected.
+    fn lower_query_assumptions(
+        &mut self,
+        extra: &[SymExpr],
+    ) -> std::result::Result<Vec<Lit>, SatResult> {
+        if !self.bv_theory.unsupported().is_empty() {
+            return Err(SatResult::Unknown);
+        }
+        let mut lower = |expressions: &[SymExpr]| {
+            let mut literals = Vec::new();
+            for expression in expressions {
+                let lowered = self.bv_theory.lower_to_literal(expression, &mut self.sat);
+                let unsupported = self.bv_theory.aig.take_unsupported();
+                if !unsupported.is_empty() {
+                    tracing::debug!(?unsupported, "cannot lower query constraint");
+                    // Taken out of the AIG's record so that it does not
+                    // outlive this query -- which is also why it has to be
+                    // reported here: `last_unknown` falls back to that record.
+                    self.last_unknown = Some(UnknownReason::Unsupported(unsupported));
+                    return Err(SatResult::Unknown);
+                }
+                match lowered {
+                    LoweredAssumption::Literal(lit) => literals.push(lit),
+                    LoweredAssumption::TriviallyTrue => {}
+                    LoweredAssumption::Refuted | LoweredAssumption::TriviallyFalse => {
+                        return Err(SatResult::Unsat);
+                    }
+                }
+            }
+            Ok(literals)
+        };
+
+        let assumptions = lower(extra)?;
+        if extra
+            .iter()
+            .any(|expr| self.array_theory.has_new_terms(expr))
+        {
+            let mut array_theory = self.array_theory.clone();
+            for expr in extra {
+                array_theory.add_expr(expr);
+            }
+            for lemma in lower(&array_theory.take_lemmas())? {
+                if !self.sat.add_clause(vec![lemma]) {
+                    return Err(SatResult::Unsat);
+                }
+            }
+            self.array_theory = array_theory;
+        }
+        Ok(assumptions)
+    }
+
+    /// Bound every later query to this many SAT conflicts; one that needs
+    /// more answers `Unknown` instead of searching on. `None`, the default,
+    /// never gives up. A budget is counted in conflicts so that a verdict
+    /// does not depend on how busy the machine is.
+    pub fn set_conflict_budget(&mut self, budget: Option<u64>) {
+        self.sat.set_conflict_budget(budget);
+    }
+
+    /// Why the most recent query answered `Unknown`; `None` if it reached a
+    /// verdict. `eval`, `min`, `max`, `is_true` and `is_false` are built from
+    /// queries, so after one of them this describes the last query it made.
+    pub fn last_unknown(&self) -> Option<&UnknownReason> {
+        self.last_unknown.as_ref()
+    }
+
     pub fn check_sat_with_oracle(
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
         extra: &[SymExpr],
     ) -> Result<SatResult> {
+        let result = self.check_sat_inner(oracle, extra)?;
+        self.last_unknown = match result {
+            SatResult::Unknown => Some(self.last_unknown.take().unwrap_or_else(|| {
+                UnknownReason::Unsupported(self.bv_theory.unsupported().to_vec())
+            })),
+            _ => None,
+        };
+        Ok(result)
+    }
+
+    fn check_sat_inner(
+        &mut self,
+        oracle: Option<&dyn MemoryOracle>,
+        extra: &[SymExpr],
+    ) -> Result<SatResult> {
+        self.last_unknown = None;
         let mut loop_count = 0;
+        let mut remaining_conflicts = self.sat.conflict_budget();
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
-        let is_true = |e: &SymExpr| matches!(e, SymExpr::Const { val: 1, size: 1 });
         for e in self.assertions.iter().chain(extra.iter()) {
             if is_false(e) {
                 return Ok(SatResult::Unsat);
@@ -153,43 +263,31 @@ impl Solver {
             return Ok(self.refuted());
         }
 
-        for e in extra {
-            self.assert_array_lemmas_for(e);
-        }
-        if !self.bv_theory.load_into_sat(&mut self.sat) {
-            return Ok(self.refuted());
-        }
+        let assumptions = match self.lower_query_assumptions(extra) {
+            Ok(assumptions) => assumptions,
+            Err(result) => return Ok(result),
+        };
 
         loop {
             loop_count += 1;
             if loop_count > 10 {
                 tracing::warn!("CEGAR loop exceeded 10 iterations, bailing out");
+                self.last_unknown = Some(UnknownReason::OracleRefinement);
                 return Ok(SatResult::Unknown);
             }
 
-            // Lower extra constraints to assumptions
-            let mut assumptions = Vec::new();
-            for e in extra {
-                if is_true(e) {
-                    continue;
-                }
-                if is_false(e) {
-                    return Ok(SatResult::Unsat);
-                }
-                match self.bv_theory.lower_to_literal(e, &mut self.sat) {
-                    LoweredAssumption::Literal(lit) => assumptions.push(lit),
-                    LoweredAssumption::TriviallyTrue => {}
-                    LoweredAssumption::TriviallyFalse => return Ok(SatResult::Unsat),
-                    LoweredAssumption::Refuted => return Ok(self.refuted()),
-                }
-            }
-
             // 3. Solve pure boolean SAT problem with assumptions
-            if !self
-                .sat
-                .solve_with_assumptions(Some(&mut self.array_theory), &assumptions)
-            {
-                return Ok(self.refuted());
+            match self.sat.solve_with_remaining_budget(
+                Some(&mut self.array_theory),
+                &assumptions,
+                &mut remaining_conflicts,
+            ) {
+                Some(true) => {}
+                Some(false) => return Ok(self.refuted()),
+                None => {
+                    self.last_unknown = Some(UnknownReason::ConflictBudget);
+                    return Ok(SatResult::Unknown);
+                }
             }
 
             // 4. Model Extraction
@@ -286,9 +384,7 @@ impl Solver {
     /// unconstrained bits, so "no model" is not a statement about the problem
     /// that was asked.
     ///
-    /// The record is per solver and sticky, so a miss in one query's extra
-    /// constraints makes later queries on the same solver `Unknown` too --
-    /// conservative, and never wrong.
+    /// Lowering misses in permanent constraints remain active in every query.
     fn refuted(&self) -> SatResult {
         if self.bv_theory.unsupported().is_empty() {
             SatResult::Unsat
@@ -396,7 +492,7 @@ impl Solver {
     /// Concrete shortcut: if const, compare directly.
     pub fn is_true(&mut self, expr: &SymExpr) -> bool {
         match expr {
-            SymExpr::Const { val, .. } => *val != 0,
+            SymExpr::Const { .. } => constant_value(expr) != 0,
             _ => {
                 // NOT(expr) must be *refuted*. `!satisfiable(..)` also counted
                 // `Unknown` as proof, which made "could not tell" read as
@@ -415,7 +511,7 @@ impl Solver {
     /// Concrete shortcut: if const, compare directly.
     pub fn is_false(&mut self, expr: &SymExpr) -> bool {
         match expr {
-            SymExpr::Const { val, .. } => *val == 0,
+            SymExpr::Const { .. } => constant_value(expr) == 0,
             _ => {
                 // `expr` must be refuted, for the same reason as `is_true`.
                 let positive = SymExpr::new_neq(expr.clone(), SymExpr::new_const(0, 1));

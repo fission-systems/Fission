@@ -2100,7 +2100,11 @@ fn align_up(value: u64, alignment: u64) -> u64 {
     if !alignment.is_power_of_two() {
         return value;
     }
-    (value + alignment - 1) & !(alignment - 1)
+    // `sh_addralign` is untrusted: an alignment near 2^63 has no aligned
+    // address above `value`, so leave the address where it is.
+    value
+        .checked_add(alignment - 1)
+        .map_or(value, |bumped| bumped & !(alignment - 1))
 }
 
 fn generate_elf_header_types(
@@ -2431,15 +2435,16 @@ fn generate_elf_header_types(
                 },
             ]
         };
-        let phdr_va = image_base + phoff;
-        types.push(InferredTypeInfo {
-            name: phdr_name.to_string(),
-            mangled_name: phdr_name.to_string(),
-            kind: "struct".to_string(),
-            fields: phdr_fields,
-            size: (phdr_size as usize).saturating_mul(phnum) as u32,
-            metadata_address: phdr_va,
-        });
+        if let Some(phdr_va) = image_base.checked_add(phoff) {
+            types.push(InferredTypeInfo {
+                name: phdr_name.to_string(),
+                mangled_name: phdr_name.to_string(),
+                kind: "struct".to_string(),
+                fields: phdr_fields,
+                size: u32::try_from((phdr_size as usize).saturating_mul(phnum)).unwrap_or(u32::MAX),
+                metadata_address: phdr_va,
+            });
+        }
     }
 
     // 3. Section Headers
@@ -2573,15 +2578,16 @@ fn generate_elf_header_types(
                 },
             ]
         };
-        let shdr_va = image_base + shoff;
-        types.push(InferredTypeInfo {
-            name: shdr_name.to_string(),
-            mangled_name: shdr_name.to_string(),
-            kind: "struct".to_string(),
-            fields: shdr_fields,
-            size: (shdr_size as usize).saturating_mul(shnum) as u32,
-            metadata_address: shdr_va,
-        });
+        if let Some(shdr_va) = image_base.checked_add(shoff) {
+            types.push(InferredTypeInfo {
+                name: shdr_name.to_string(),
+                mangled_name: shdr_name.to_string(),
+                kind: "struct".to_string(),
+                fields: shdr_fields,
+                size: u32::try_from((shdr_size as usize).saturating_mul(shnum)).unwrap_or(u32::MAX),
+                metadata_address: shdr_va,
+            });
+        }
     }
 
     (types, symbols)
@@ -4421,5 +4427,19 @@ mod tests {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_enum_test.elf");
         let bin = LoadedBinary::from_file(&path).expect("load ELF");
         assert!(bin.inner().low_bit_mode_starts.is_empty());
+    }
+
+    #[test]
+    fn generate_elf_header_types_handles_high_image_base_without_overflow() {
+        let (types, _) =
+            generate_elf_header_types(true, u64::MAX - 0x10, 0x40, 1, 0x80, usize::MAX / 64);
+        // Header type at `image_base` still emits, while overflowing phdr/shdr VAs are skipped.
+        assert_eq!(types.len(), 1);
+        assert_eq!(types[0].name, "Elf64_Ehdr");
+
+        let (types, _) = generate_elf_header_types(true, 0x40_0000, 0x40, 2, 0x100, 3);
+        assert_eq!(types.len(), 3);
+        assert_eq!(types[1].metadata_address, 0x40_0040);
+        assert_eq!(types[2].metadata_address, 0x40_0100);
     }
 }

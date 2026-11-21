@@ -125,12 +125,13 @@ pub fn load_pe_image(
             page_prot |= prot::READ;
         }
 
-        let sec_data = binary.view_bytes(va, vsz as usize).unwrap_or(&[]);
-        let mut buf = vec![0u8; vsz as usize];
-        let n = sec_data.len().min(buf.len());
-        buf[..n].copy_from_slice(&sec_data[..n]);
+        // The section's virtual size is the file's claim; only the bytes the
+        // file has are copied, and the rest is zero without a host buffer of
+        // that size being built to say so.
+        let size = usize::try_from(vsz).unwrap_or(usize::MAX);
+        let sec_data = binary.view_bytes(va, size).unwrap_or(&[]);
         state
-            .write_space(state.ram_space(), va, &buf)
+            .load_image_range(va, vsz, sec_data)
             .with_context(|| format!("map PE section {} at 0x{:X}", sec.name, va))?;
         state.page_map.map_region(va, vsz, page_prot, false);
 

@@ -219,13 +219,7 @@ impl OsEnvironment for WindowsEnv {
                     size
                 };
                 if free_size > 0 {
-                    let page_start = addr & !0xFFFu64;
-                    let page_end = (addr.saturating_add(free_size) + 0xFFF) & !0xFFFu64;
-                    let mut p = page_start;
-                    while p < page_end {
-                        emu.jit_cache.invalidate_page(p);
-                        p = p.saturating_add(0x1000);
-                    }
+                    emu.jit_cache.invalidate_range(addr, free_size);
                     emu.state.page_map.unmap_region(addr, free_size);
                 }
                 emu.win_last_error = 0;
@@ -431,8 +425,13 @@ impl OsEnvironment for WindowsEnv {
             "InitializeConditionVariable" => {
                 let pointer = emu.read_arg(0).unwrap_or(0);
                 if pointer != 0 {
+                    // Pointer-sized: 8 bytes here was 4 too many on a
+                    // 32-bit guest.
+                    let width = usize::from(emu.arch.pointer_size).min(8);
                     let space = emu.state.ram_space();
-                    let _ = emu.state.write_space(space, pointer, &0u64.to_le_bytes());
+                    let _ = emu
+                        .state
+                        .write_space(space, pointer, &0u64.to_le_bytes()[..width]);
                 }
                 emu.write_return_val(0)?;
             }
@@ -454,12 +453,23 @@ impl OsEnvironment for WindowsEnv {
             // measures an interval gets zero, which is what a machine this
             // fast would report anyway.
             "time" | "_time64" | "_time32" => {
+                // `_time32` stores a 4-byte `__time32_t` and `_time64` an
+                // 8-byte one; `time` is the CRT's `time_t`, which is 32-bit
+                // in a 32-bit msvcrt and 64-bit in a 64-bit one. All three
+                // stored 8 bytes, over whatever followed a 4-byte one.
+                let width = match func_name {
+                    "_time32" => 4,
+                    "_time64" => 8,
+                    _ => usize::from(emu.arch.pointer_size).min(8),
+                };
                 let pointer = emu.read_arg(0).unwrap_or(0);
                 if pointer != 0 {
                     let space = emu.state.ram_space();
-                    let _ =
-                        emu.state
-                            .write_space(space, pointer, &FIXED_EPOCH_SECONDS.to_le_bytes());
+                    let _ = emu.state.write_space(
+                        space,
+                        pointer,
+                        &FIXED_EPOCH_SECONDS.to_le_bytes()[..width],
+                    );
                 }
                 emu.write_return_val(FIXED_EPOCH_SECONDS)?;
             }
@@ -688,18 +698,8 @@ impl OsEnvironment for WindowsEnv {
                 let addr = match count.checked_mul(size) {
                     Some(bytes) => {
                         let addr = heap_alloc_mapped(emu, self, bytes);
-                        // Zeroed a page at a time, not with one host buffer
-                        // the size of the request.
-                        let zeros = [0u8; 0x1000];
-                        let mut done = 0usize;
-                        while addr != 0 && done < bytes {
-                            let n = (bytes - done).min(zeros.len());
-                            emu.state.write_space(
-                                emu.state.ram_space(),
-                                addr + done as u64,
-                                &zeros[..n],
-                            )?;
-                            done += n;
+                        if addr != 0 {
+                            emu.state.zero_range(addr, bytes as u64);
                         }
                         addr
                     }
@@ -718,14 +718,21 @@ impl OsEnvironment for WindowsEnv {
             "realloc" => {
                 let old = emu.read_arg(0)?;
                 let bytes = emu.read_arg(1)? as usize;
+                // The old block's size, which the heap records. This copied
+                // the *new* size out of the old block, so a grown block came
+                // back holding whatever had been allocated after the old one.
+                let old_size = self.heap.lock().unwrap().allocations.get(&old).copied();
                 let addr = heap_alloc_mapped(emu, self, bytes);
                 if old != 0 && addr != 0 && bytes > 0 {
-                    // The old block's length is not tracked, so copy what was
-                    // asked for and let the guest's own bookkeeping decide
-                    // what of it is meaningful. Copying less would lose data
-                    // that was there; copying more cannot be justified.
+                    // A pointer this heap did not hand out has no recorded
+                    // size: copy what is readable of the new size, as before.
+                    let keep = match old_size {
+                        Some(size) => size.min(bytes),
+                        None => emu.state.readable_len(old, bytes),
+                    };
                     let ram = emu.state.ram_space();
-                    if let Ok(prev) = emu.state.read_space(ram, old, bytes) {
+                    if keep > 0 {
+                        let prev = emu.state.read_space(ram, old, keep)?;
                         emu.state.write_space(ram, addr, &prev)?;
                     }
                     self.heap.lock().unwrap().free(old);
@@ -1062,25 +1069,29 @@ fn handle_get_console_mode(emu: &mut Emulator) -> Result<()> {
     Ok(())
 }
 
-fn handle_get_startup_info_a(emu: &mut Emulator) -> Result<()> {
-    // STARTUPINFOA: first field cb (DWORD). Zero the rest; set cb = 68.
+/// `GetStartupInfoA/W(lpStartupInfo)`: a zeroed `STARTUPINFO` with `cb` set.
+/// The structure holds pointers and handles, so it is 68 bytes on a 32-bit
+/// guest and 104 on a 64-bit one, for both variants. The ANSI one was
+/// written at 68 bytes everywhere and the wide one at 104, so a 64-bit
+/// guest's `STARTUPINFOA` came back with its handles never written and a
+/// 32-bit guest's `STARTUPINFOW` was overrun by 36 bytes.
+fn write_startup_info(emu: &mut Emulator) -> Result<()> {
     let ptr = emu.read_arg(0)?;
     if ptr != 0 {
-        let mut buf = vec![0u8; 68];
-        buf[0..4].copy_from_slice(&68u32.to_le_bytes());
+        let size: u32 = if emu.arch.pointer_size == 4 { 68 } else { 104 };
+        let mut buf = vec![0u8; size as usize];
+        buf[0..4].copy_from_slice(&size.to_le_bytes());
         let _ = emu.state.write_space(emu.state.ram_space(), ptr, &buf);
     }
     Ok(())
 }
 
+fn handle_get_startup_info_a(emu: &mut Emulator) -> Result<()> {
+    write_startup_info(emu)
+}
+
 fn handle_get_startup_info_w(emu: &mut Emulator) -> Result<()> {
-    let ptr = emu.read_arg(0)?;
-    if ptr != 0 {
-        let mut buf = vec![0u8; 104];
-        buf[0..4].copy_from_slice(&104u32.to_le_bytes());
-        let _ = emu.state.write_space(emu.state.ram_space(), ptr, &buf);
-    }
-    Ok(())
+    write_startup_info(emu)
 }
 
 fn is_console_or_stdout_handle(h: u64) -> bool {
@@ -1155,6 +1166,14 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
         page_prot |= prot::READ;
     }
     let size = dw_size.max(0x1000);
+    // The pages this call brings into being, which are the ones that start
+    // out zero. At an address the caller names, pages already there keep
+    // what they hold: committing committed memory changes nothing.
+    let fresh = if lp_address == 0 {
+        None
+    } else {
+        Some(emu.state.page_map.unmapped_ranges(lp_address, size))
+    };
     let base = if lp_address == 0 {
         emu.state.page_map.mmap_anon(size, page_prot)
     } else {
@@ -1170,9 +1189,14 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
         emu.write_return_val(0)?;
         return Ok(());
     }
-    let fill = (size as usize).min(0x10_0000);
-    let zeros = vec![0u8; fill];
-    let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
+    // New pages are zero: all of them, whatever protection was asked for and
+    // whatever an earlier mapping left behind at these addresses. This wrote
+    // zeros over the first megabyte only, through the guest's own write
+    // check, and over pages that were already committed.
+    emu.jit_cache.invalidate_range(base, size);
+    for (start, len) in fresh.unwrap_or_else(|| vec![(base, size)]) {
+        emu.state.zero_range(start, len);
+    }
     tracing::info!(
         "VirtualAlloc(0x{:X}, 0x{:X}, type=0x{:X}, prot=0x{:X}) -> 0x{:X}",
         lp_address,
@@ -1206,12 +1230,7 @@ fn handle_virtual_protect(emu: &mut Emulator) -> Result<()> {
     }
     emu.state.page_map.mprotect(addr, size.max(1), p);
     // SMC
-    let mut page = addr & !0xFFF;
-    let end = (addr + size.max(1) + 0xFFF) & !0xFFF;
-    while page < end {
-        emu.jit_cache.invalidate_page(page);
-        page = page.saturating_add(0x1000);
-    }
+    emu.jit_cache.invalidate_range(addr, size.max(1));
     emu.write_return_val(1)?;
     Ok(())
 }
@@ -1327,70 +1346,133 @@ fn handle_create_file_w(emu: &mut Emulator) -> Result<()> {
 
 fn handle_rtl_zero_memory(emu: &mut Emulator) -> Result<()> {
     let dst = emu.read_arg(0)?;
-    let len = emu.read_arg(1)? as usize;
-    let zeros = vec![0u8; len.min(0x10_0000)];
-    emu.state.write_space(emu.state.ram_space(), dst, &zeros)?;
+    let len = emu.read_arg(1)?;
+    // The whole length, a bounded piece at a time: this stopped at the first
+    // megabyte and reported the rest as done.
+    let zeros = [0u8; 0x1000];
+    let mut done = 0u64;
+    while done < len {
+        let n = (len - done).min(zeros.len() as u64) as usize;
+        emu.state
+            .write_space(emu.state.ram_space(), dst.wrapping_add(done), &zeros[..n])?;
+        done += n as u64;
+    }
     emu.write_return_val(0)?;
     Ok(())
 }
 
-fn handle_multi_byte_to_wide_char(emu: &mut Emulator) -> Result<()> {
-    // MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr, cbMultiByte, lpWideCharStr, cchWideChar)
-    let src = emu.read_arg(2)?;
-    let cb = emu.read_arg(3)? as i64;
-    let dst = emu.read_arg(4)?;
-    let cch = emu.read_arg(5)? as i64;
-    let s = if src == 0 {
-        String::new()
-    } else if cb < 0 {
-        read_string(emu, src)?
-    } else {
-        let raw = emu
-            .state
-            .read_space(emu.state.ram_space(), src, cb as usize)?;
-        String::from_utf8_lossy(&raw).into_owned()
-    };
-    let wide: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-    if cch == 0 {
-        emu.write_return_val(wide.len() as u64)?;
-    } else if dst != 0 {
-        let n = (cch as usize).min(wide.len());
-        let mut bytes = Vec::with_capacity(n * 2);
-        for &c in &wide[..n] {
-            bytes.extend_from_slice(&c.to_le_bytes());
-        }
-        emu.state.write_space(emu.state.ram_space(), dst, &bytes)?;
-        emu.write_return_val(n as u64)?;
-    } else {
-        emu.write_return_val(0)?;
-    }
-    Ok(())
+/// An `int` argument: the low 32 bits of its slot, sign-extended. A caller
+/// that passes -1 in a 64-bit register sets only the low half (`mov r9d,
+/// -1`), and on a 32-bit guest the slot is 32 bits wide to begin with, so
+/// reading the whole slot as a 64-bit number made -1 four billion.
+fn read_int_arg(emu: &mut Emulator, index: usize) -> Result<i32> {
+    Ok(emu.read_arg(index)? as u32 as i32)
 }
 
+/// The text of a conversion's input: `len` units of `unit` bytes at `addr`,
+/// or -- for a length of -1 -- up to and including its terminating NUL.
+/// `None`, with the call already answered as failed, when the arguments are
+/// invalid or the bytes are not readable.
+fn conversion_input(
+    emu: &mut Emulator,
+    addr: u64,
+    len: i32,
+    unit: usize,
+) -> Result<Option<Vec<u8>>> {
+    if addr == 0 || len == 0 || len < -1 {
+        emu.win_last_error = 87; // ERROR_INVALID_PARAMETER
+        emu.write_return_val(0)?;
+        return Ok(None);
+    }
+    if len == -1 {
+        let mut bytes = if unit == 2 {
+            read_wide_string(emu, addr)?
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>()
+        } else {
+            read_string(emu, addr)?.into_bytes()
+        };
+        bytes.extend(std::iter::repeat_n(0, unit));
+        return Ok(Some(bytes));
+    }
+    let size = len as usize * unit;
+    if emu.state.readable_len(addr, size) < size {
+        emu.win_last_error = 998; // ERROR_NOACCESS
+        emu.write_return_val(0)?;
+        return Ok(None);
+    }
+    Ok(Some(emu.state.read_space(
+        emu.state.ram_space(),
+        addr,
+        size,
+    )?))
+}
+
+/// Store a conversion's output, or report its size. `capacity` is in units;
+/// 0 asks for the size needed. A buffer too small is an error, as it is on
+/// Windows -- not a silently truncated result.
+fn conversion_output(
+    emu: &mut Emulator,
+    dst: u64,
+    capacity: i32,
+    out: &[u8],
+    unit: usize,
+) -> Result<()> {
+    let units = out.len() / unit;
+    if capacity == 0 {
+        return emu.write_return_val(units as u64);
+    }
+    if capacity < 0 || dst == 0 {
+        emu.win_last_error = 87; // ERROR_INVALID_PARAMETER
+        return emu.write_return_val(0);
+    }
+    if (capacity as usize) < units {
+        emu.win_last_error = 122; // ERROR_INSUFFICIENT_BUFFER
+        return emu.write_return_val(0);
+    }
+    emu.state.write_space(emu.state.ram_space(), dst, out)?;
+    emu.write_return_val(units as u64)
+}
+
+/// `MultiByteToWideChar(CodePage, dwFlags, lpMultiByteStr, cbMultiByte,
+/// lpWideCharStr, cchWideChar)`. The code page is taken to be UTF-8 (which
+/// covers ASCII); the lengths are `int`s, -1 meaning "NUL-terminated, NUL
+/// included", and an explicit length converts exactly that many bytes with
+/// no NUL added.
+fn handle_multi_byte_to_wide_char(emu: &mut Emulator) -> Result<()> {
+    let src = emu.read_arg(2)?;
+    let cb = read_int_arg(emu, 3)?;
+    let dst = emu.read_arg(4)?;
+    let cch = read_int_arg(emu, 5)?;
+    let Some(raw) = conversion_input(emu, src, cb, 1)? else {
+        return Ok(());
+    };
+    let wide: Vec<u8> = String::from_utf8_lossy(&raw)
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    conversion_output(emu, dst, cch, &wide, 2)
+}
+
+/// `WideCharToMultiByte(CodePage, dwFlags, lpWideCharStr, cchWideChar,
+/// lpMultiByteStr, cbMultiByte, ...)`, the converse. `cchWideChar` used to be
+/// read and dropped: the input was taken to its first NUL whatever length
+/// the caller gave.
 fn handle_wide_char_to_multi_byte(emu: &mut Emulator) -> Result<()> {
     let src = emu.read_arg(2)?;
-    let cch = emu.read_arg(3)? as i64;
+    let cch = read_int_arg(emu, 3)?;
     let dst = emu.read_arg(4)?;
-    let cb = emu.read_arg(5)? as i64;
-    let s = if src == 0 {
-        String::new()
-    } else {
-        read_wide_string(emu, src)?
+    let cb = read_int_arg(emu, 5)?;
+    let Some(raw) = conversion_input(emu, src, cch, 2)? else {
+        return Ok(());
     };
-    let mut bytes = s.into_bytes();
-    bytes.push(0);
-    if cb == 0 {
-        emu.write_return_val(bytes.len() as u64)?;
-    } else if dst != 0 {
-        let n = (cb as usize).min(bytes.len());
-        emu.state
-            .write_space(emu.state.ram_space(), dst, &bytes[..n])?;
-        emu.write_return_val(n as u64)?;
-    } else {
-        emu.write_return_val(0)?;
-    }
-    let _ = cch;
-    Ok(())
+    let units: Vec<u16> = raw
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect();
+    let narrow = String::from_utf16_lossy(&units).into_bytes();
+    conversion_output(emu, dst, cb, &narrow, 1)
 }
 
 fn handle_get_module_file_name_w(emu: &mut Emulator) -> Result<()> {
@@ -1629,10 +1711,11 @@ fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let flags = emu.read_arg(1)?;
     let bytes = emu.read_arg(2)? as usize;
     let addr = heap_alloc_mapped(emu, env, bytes);
-    if (flags & 8) != 0 {
-        // HEAP_ZERO_MEMORY
-        let zeros = vec![0u8; bytes];
-        emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
+    if addr != 0 && (flags & 8) != 0 {
+        // HEAP_ZERO_MEMORY. Only for a block that exists -- this zeroed
+        // through a host buffer of the requested size before looking, so a
+        // request the heap refuses took the host down instead of being NULL.
+        emu.state.zero_range(addr, bytes as u64);
     }
     tracing::info!("HeapAlloc(size: {}) -> 0x{:X}", bytes, addr);
     emu.write_return_val(addr)?;
@@ -1676,9 +1759,8 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     }
     if (flags & 8) != 0 && bytes > keep {
         // HEAP_ZERO_MEMORY: the part past the old contents.
-        let zeros = vec![0u8; bytes - keep];
         emu.state
-            .write_space(emu.state.ram_space(), new_addr + keep as u64, &zeros)?;
+            .zero_range(new_addr + keep as u64, (bytes - keep) as u64);
     }
     env.heap.lock().unwrap().free(addr);
     tracing::info!("HeapReAlloc(0x{:X}, {}) -> 0x{:X}", addr, bytes, new_addr);
@@ -1686,15 +1768,33 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     Ok(())
 }
 
+/// The `len` bytes of a console write's buffer, or `None` when the guest
+/// does not have that many readable bytes there -- for which the call
+/// answers `FALSE` and `ERROR_NOACCESS`, as Windows does, rather than
+/// stopping the run or (as it used to, for a length that overflowed or that
+/// no buffer could have) the host.
+fn console_buffer(emu: &mut Emulator, addr: u64, len: Option<usize>) -> Result<Option<Vec<u8>>> {
+    let ram = emu.state.ram_space();
+    let raw = len
+        .filter(|len| emu.state.readable_len(addr, *len) == *len)
+        .and_then(|len| emu.state.read_space(ram, addr, len).ok());
+    if raw.is_none() {
+        emu.win_last_error = 998; // ERROR_NOACCESS
+        emu.write_return_val(0)?;
+    }
+    Ok(raw)
+}
+
 fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
     let buf_ptr = emu.read_arg(1)?;
-    let n_chars = emu.read_arg(2)? as usize;
+    // A DWORD: the upper half of the register is not part of the argument.
+    let n_chars = (emu.read_arg(2)? & 0xFFFF_FFFF) as usize;
     let p_written = emu.read_arg(3)?;
 
-    let raw = emu
-        .state
-        .read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
+    let Some(raw) = console_buffer(emu, buf_ptr, Some(n_chars))? else {
+        return Ok(());
+    };
     emu.guest_stdout(&raw);
 
     if p_written != 0 {
@@ -1711,12 +1811,13 @@ fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
 fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
     let buf_ptr = emu.read_arg(1)?;
-    let n_chars = emu.read_arg(2)? as usize;
+    // A DWORD: the upper half of the register is not part of the argument.
+    let n_chars = (emu.read_arg(2)? & 0xFFFF_FFFF) as usize;
     let p_written = emu.read_arg(3)?;
 
-    let raw = emu
-        .state
-        .read_space(emu.state.ram_space(), buf_ptr, n_chars * 2)?;
+    let Some(raw) = console_buffer(emu, buf_ptr, n_chars.checked_mul(2))? else {
+        return Ok(());
+    };
     let chars: Vec<u16> = raw
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -2016,16 +2117,32 @@ fn handle_get_system_info(emu: &mut Emulator) -> Result<()> {
     if pointer == 0 {
         return emu.write_return_val(0);
     }
-    // SYSTEM_INFO, 64-bit layout.
-    let mut info = [0u8; 48];
-    info[0..4].copy_from_slice(&9u32.to_le_bytes()); // PROCESSOR_ARCHITECTURE_AMD64
-    info[4..8].copy_from_slice(&0x1000u32.to_le_bytes()); // dwPageSize
-    info[8..16].copy_from_slice(&0x1_0000u64.to_le_bytes()); // lpMinimumApplicationAddress
-    info[16..24].copy_from_slice(&0x7FFF_FFFE_0000u64.to_le_bytes()); // lpMaximum...
-    info[24..32].copy_from_slice(&1u64.to_le_bytes()); // dwActiveProcessorMask
-    info[32..36].copy_from_slice(&1u32.to_le_bytes()); // dwNumberOfProcessors
-    info[36..40].copy_from_slice(&8664u32.to_le_bytes()); // dwProcessorType
-    info[40..44].copy_from_slice(&0x1000u32.to_le_bytes()); // dwAllocationGranularity
+    // SYSTEM_INFO has three pointer-sized members, so it is 48 bytes on a
+    // 64-bit guest and 36 on a 32-bit one -- which got the 48-byte layout,
+    // its fields at the wrong offsets and 12 bytes past the structure.
+    let info = if emu.arch.pointer_size == 4 {
+        let mut info = vec![0u8; 36];
+        // wProcessorArchitecture = PROCESSOR_ARCHITECTURE_INTEL (0)
+        info[4..8].copy_from_slice(&0x1000u32.to_le_bytes()); // dwPageSize
+        info[8..12].copy_from_slice(&0x1_0000u32.to_le_bytes()); // lpMinimumApplicationAddress
+        info[12..16].copy_from_slice(&0x7FFE_FFFFu32.to_le_bytes()); // lpMaximum...
+        info[16..20].copy_from_slice(&1u32.to_le_bytes()); // dwActiveProcessorMask
+        info[20..24].copy_from_slice(&1u32.to_le_bytes()); // dwNumberOfProcessors
+        info[24..28].copy_from_slice(&586u32.to_le_bytes()); // PROCESSOR_INTEL_PENTIUM
+        info[28..32].copy_from_slice(&0x1_0000u32.to_le_bytes()); // dwAllocationGranularity
+        info
+    } else {
+        let mut info = vec![0u8; 48];
+        info[0..4].copy_from_slice(&9u32.to_le_bytes()); // PROCESSOR_ARCHITECTURE_AMD64
+        info[4..8].copy_from_slice(&0x1000u32.to_le_bytes()); // dwPageSize
+        info[8..16].copy_from_slice(&0x1_0000u64.to_le_bytes()); // lpMinimumApplicationAddress
+        info[16..24].copy_from_slice(&0x7FFF_FFFE_0000u64.to_le_bytes()); // lpMaximum...
+        info[24..32].copy_from_slice(&1u64.to_le_bytes()); // dwActiveProcessorMask
+        info[32..36].copy_from_slice(&1u32.to_le_bytes()); // dwNumberOfProcessors
+        info[36..40].copy_from_slice(&8664u32.to_le_bytes()); // dwProcessorType
+        info[40..44].copy_from_slice(&0x1_0000u32.to_le_bytes()); // dwAllocationGranularity
+        info
+    };
     let space = emu.state.ram_space();
     emu.state.write_space(space, pointer, &info)?;
     emu.write_return_val(0)
@@ -2483,7 +2600,7 @@ mod heap_realloc_tests {
 
     /// A real emulator (a SysV x86-64 one; `HeapReAlloc`'s arguments are read
     /// through its calling convention: rdi, rsi, rdx, rcx).
-    fn emulator() -> Emulator {
+    pub(super) fn emulator() -> Emulator {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_static_printf_malloc.elf");
         let binary = fission_loader::loader::LoadedBinary::from_file(&path).expect("load ELF");
@@ -2550,6 +2667,111 @@ mod heap_realloc_tests {
     }
 }
 
+/// Sizes the guest chooses must not become host allocations of that size.
+#[cfg(test)]
+mod guest_size_tests {
+    use super::heap_realloc_tests::emulator;
+    use super::*;
+
+    fn set_args(emu: &mut Emulator, args: [u64; 4]) {
+        for (reg, value) in ["rdi", "rsi", "rdx", "rcx"].into_iter().zip(args) {
+            emu.write_register_u64(reg, value).unwrap();
+        }
+    }
+
+    /// `HeapAlloc(heap, HEAP_ZERO_MEMORY, (SIZE_T)-1)` is NULL. The zeroing
+    /// built a host buffer of the requested size before looking at whether
+    /// the allocation had succeeded.
+    #[test]
+    fn heap_alloc_of_an_impossible_size_with_zeroing_is_null() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        set_args(&mut emu, [0, 8, u64::MAX, 0]);
+        handle_heap_alloc(&mut emu, &env).expect("HeapAlloc");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 0);
+
+        // Positive control: an ordinary zeroed allocation is mapped and zero,
+        // even where the heap's pages held something before.
+        set_args(&mut emu, [0, 8, 0x3000, 0]);
+        handle_heap_alloc(&mut emu, &env).expect("HeapAlloc");
+        let block = emu.read_register_u64("rax").unwrap();
+        assert_ne!(block, 0);
+        let ram = emu.state.ram_space();
+        assert_eq!(
+            emu.state.read_space(ram, block, 0x3000).unwrap(),
+            vec![0u8; 0x3000]
+        );
+    }
+
+    fn virtual_alloc(emu: &mut Emulator, address: u64, size: u64) -> u64 {
+        const MEM_COMMIT_RESERVE: u64 = 0x3000;
+        const PAGE_READWRITE: u64 = 4;
+        set_args(emu, [address, size, MEM_COMMIT_RESERVE, PAGE_READWRITE]);
+        handle_virtual_alloc(emu).expect("VirtualAlloc");
+        emu.read_register_u64("rax").unwrap()
+    }
+
+    /// Pages `VirtualAlloc` brings into being are zero for the whole region,
+    /// and pages that were already committed keep their contents. It wrote
+    /// zeros over the first megabyte either way: stale bytes past it in a
+    /// region that reuses freed addresses, and a wiped megabyte when a
+    /// program committed memory it was already using.
+    #[test]
+    fn virtual_alloc_zeroes_new_pages_and_keeps_committed_ones() {
+        let mut emu = emulator();
+        const LEN: u64 = 0x30_0000;
+        let base = virtual_alloc(&mut emu, 0, LEN);
+        assert_ne!(base, 0);
+        let ram = emu.state.ram_space();
+        let far = base + 0x28_0000;
+        emu.state.write_space(ram, base, b"near").unwrap();
+        emu.state.write_space(ram, far, b"far!").unwrap();
+
+        // Committing what is committed changes nothing.
+        assert_eq!(virtual_alloc(&mut emu, base, LEN), base);
+        assert_eq!(emu.state.read_space(ram, base, 4).unwrap(), b"near");
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), b"far!");
+
+        // Released and allocated again, the same addresses are fresh.
+        emu.state.page_map.unmap_region(base, LEN);
+        assert_eq!(virtual_alloc(&mut emu, base, LEN), base);
+        assert_eq!(emu.state.read_space(ram, base, 4).unwrap(), [0u8; 4]);
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), [0u8; 4]);
+    }
+
+    /// `WriteConsoleW` doubled the character count unchecked, and both
+    /// console writes read a buffer of whatever length the guest named.
+    #[test]
+    fn a_console_write_of_an_impossible_length_fails_in_the_guest() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let text = heap_alloc_mapped(&mut emu, &env, 16);
+        let written = heap_alloc_mapped(&mut emu, &env, 8);
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, text, b"h\0i\0").unwrap();
+
+        for count in [u64::MAX, 0x8000_0000, 0x7FFF_FFFF] {
+            set_args(&mut emu, [0, text, count, written]);
+            handle_write_console_w(&mut emu).expect("WriteConsoleW");
+            assert_eq!(emu.read_register_u64("rax").unwrap(), 0, "FALSE");
+            assert_eq!(emu.win_last_error, 998, "ERROR_NOACCESS");
+            set_args(&mut emu, [0, text, count, written]);
+            handle_write_console_a(&mut emu).expect("WriteConsoleA");
+            assert_eq!(emu.read_register_u64("rax").unwrap(), 0, "FALSE");
+        }
+        assert!(emu.vfs.files[&1].content.is_empty(), "nothing was written");
+
+        // Positive control: a real write succeeds and reports its length.
+        // The count is a DWORD, so whatever the upper half of the register
+        // holds is not part of it -- doubled unchecked, `1 << 63` overflowed.
+        set_args(&mut emu, [0, text, (1 << 63) | 2, written]);
+        handle_write_console_w(&mut emu).expect("WriteConsoleW");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 1);
+        assert_eq!(emu.state.read_space(ram, written, 4).unwrap(), [2, 0, 0, 0]);
+        assert_eq!(emu.vfs.files[&1].content, b"hi");
+    }
+}
+
 #[cfg(test)]
 mod module_file_name_tests {
     use super::module_file_name_reply;
@@ -2571,5 +2793,227 @@ mod module_file_name_tests {
         let (bytes, ret) = module_file_name_reply("C:\\a.exe", 4);
         assert_eq!(bytes, b"C:\\\0");
         assert_eq!(ret, 4);
+    }
+}
+
+/// The Win32 HLE answers in the guest's own ABI: string lengths are `int`s,
+/// structures and scalars have their 32-bit sizes on a 32-bit guest.
+#[cfg(test)]
+mod win32_abi_tests {
+    use super::heap_realloc_tests::emulator;
+    use super::*;
+    use crate::arch::ArchInfo;
+
+    const RAM_BASE: u64 = 0x3000_0000;
+
+    /// A mapped page of guest memory, filled with `0xEE` so a write shows.
+    fn scratch(emu: &mut Emulator, at: u64) -> u64 {
+        use crate::pcode::page_map::prot;
+        emu.state.page_map.map_region(at, 0x1000, prot::RW, true);
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, at, &[0xEE; 0x1000]).unwrap();
+        at
+    }
+
+    fn put(emu: &mut Emulator, at: u64, bytes: &[u8]) {
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, at, bytes).unwrap();
+    }
+
+    fn get(emu: &mut Emulator, at: u64, len: usize) -> Vec<u8> {
+        let ram = emu.state.ram_space();
+        emu.state.read_space(ram, at, len).unwrap()
+    }
+
+    /// SysV-register arguments, the harness emulator's convention.
+    fn args64(emu: &mut Emulator, args: &[u64]) {
+        for (reg, value) in ["rdi", "rsi", "rdx", "rcx", "r8", "r9"]
+            .into_iter()
+            .zip(args)
+        {
+            emu.write_register_u64(reg, *value).unwrap();
+        }
+    }
+
+    /// Make the guest a 32-bit Windows one and place `args` on its stack
+    /// the way `stdcall` passes them, above a return address.
+    fn as_win32(emu: &mut Emulator, args: &[u32]) {
+        emu.arch = ArchInfo::x86_32_win();
+        let stack = scratch(emu, RAM_BASE + 0x8000);
+        let sp = stack + 0x800;
+        emu.write_register_u64("ESP", sp).unwrap();
+        let mut frame = 0xDEAD_u32.to_le_bytes().to_vec();
+        for value in args {
+            frame.extend_from_slice(&value.to_le_bytes());
+        }
+        put(emu, sp, &frame);
+    }
+
+    fn wide(text: &str) -> Vec<u8> {
+        text.encode_utf16().flat_map(u16::to_le_bytes).collect()
+    }
+
+    /// `MultiByteToWideChar(..., -1, ...)` means "NUL-terminated". The
+    /// length is an `int` in a register whose upper half the caller does not
+    /// set (`mov r9d, -1` leaves `0x00000000FFFFFFFF`), so reading it as a
+    /// 64-bit number made -1 four billion: a read of that many bytes.
+    #[test]
+    fn multi_byte_to_wide_char_reads_its_lengths_as_ints() {
+        let mut emu = emulator();
+        let buf = scratch(&mut emu, RAM_BASE);
+        put(&mut emu, buf, b"hi\0XYZ");
+        let out = buf + 0x100;
+        // (codepage, flags, src, -1, dst, 0): the size needed, NUL included.
+        args64(&mut emu, &[65001, 0, buf, 0xFFFF_FFFF, out, 0]);
+        handle_multi_byte_to_wide_char(&mut emu).expect("MultiByteToWideChar");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 3);
+        // And with room, the string and its NUL.
+        args64(
+            &mut emu,
+            &[65001, 0, buf, 0xFFFF_FFFF, out, 0xFFFF_FFFF_0000_0010],
+        );
+        handle_multi_byte_to_wide_char(&mut emu).expect("MultiByteToWideChar");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 3);
+        assert_eq!(get(&mut emu, out, 6), wide("hi\0"));
+
+        // An explicit length is exactly that many bytes, and no NUL is
+        // added that the input did not have.
+        let out2 = buf + 0x200;
+        args64(&mut emu, &[65001, 0, buf, 2, out2, 16]);
+        handle_multi_byte_to_wide_char(&mut emu).expect("MultiByteToWideChar");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 2);
+        assert_eq!(get(&mut emu, out2, 6), [b'h', 0, b'i', 0, 0xEE, 0xEE]);
+
+        // A buffer too small is an error, not a truncation.
+        args64(&mut emu, &[65001, 0, buf, 0xFFFF_FFFF, out2, 1]);
+        handle_multi_byte_to_wide_char(&mut emu).expect("MultiByteToWideChar");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 0);
+        assert_eq!(emu.win_last_error, 122, "ERROR_INSUFFICIENT_BUFFER");
+    }
+
+    /// `WideCharToMultiByte`'s `cchWideChar` was ignored: the input was read
+    /// to its first NUL whatever the caller said its length was.
+    #[test]
+    fn wide_char_to_multi_byte_converts_the_length_it_is_given() {
+        let mut emu = emulator();
+        let buf = scratch(&mut emu, RAM_BASE);
+        let mut text = wide("hiXY");
+        text.extend_from_slice(&[0, 0]);
+        put(&mut emu, buf, &text);
+        let out = buf + 0x100;
+        args64(&mut emu, &[65001, 0, buf, 2, out, 16]);
+        handle_wide_char_to_multi_byte(&mut emu).expect("WideCharToMultiByte");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 2);
+        assert_eq!(get(&mut emu, out, 3), [b'h', b'i', 0xEE]);
+
+        // Positive control: -1 (as an int) is "to the NUL, NUL included".
+        args64(&mut emu, &[65001, 0, buf, 0xFFFF_FFFF, out, 16]);
+        handle_wide_char_to_multi_byte(&mut emu).expect("WideCharToMultiByte");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 5);
+        assert_eq!(get(&mut emu, out, 5), b"hiXY\0");
+    }
+
+    /// The CRT's `realloc` copied the *new* size out of the old block, so a
+    /// grown block came back holding whatever was allocated after the old
+    /// one -- another allocation's data.
+    #[test]
+    fn crt_realloc_copies_only_the_old_block() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let malloc = |emu: &mut Emulator, size: u64| {
+            args64(emu, &[size]);
+            env.dispatch_hle(emu, "malloc").expect("malloc");
+            emu.read_register_u64("rax").unwrap()
+        };
+        let a = malloc(&mut emu, 16);
+        let b = malloc(&mut emu, 16);
+        put(&mut emu, a, &[0xAA; 16]);
+        put(&mut emu, b, &[0xBB; 16]);
+        args64(&mut emu, &[a, 64]);
+        env.dispatch_hle(&mut emu, "realloc").expect("realloc");
+        let c = emu.read_register_u64("rax").unwrap();
+        assert_ne!(c, 0);
+        assert_eq!(get(&mut emu, c, 16), [0xAA; 16], "the old contents");
+        assert!(
+            !get(&mut emu, c + 16, 48).contains(&0xBB),
+            "nothing of the next allocation"
+        );
+    }
+
+    /// A 32-bit guest's `time32_t`, `CONDITION_VARIABLE`, `STARTUPINFOW` and
+    /// `SYSTEM_INFO` are 4, 4, 68 and 36 bytes. Each was written at its
+    /// 64-bit size, over whatever the guest kept after it.
+    #[test]
+    fn a_32_bit_guest_gets_32_bit_sizes() {
+        let env = WindowsEnv::new();
+        let check = |name: &str, size: usize| {
+            let mut emu = emulator();
+            let buf = scratch(&mut emu, RAM_BASE);
+            as_win32(&mut emu, &[buf as u32]);
+            match name {
+                "GetStartupInfoW" => handle_get_startup_info_w(&mut emu).unwrap(),
+                "GetStartupInfoA" => handle_get_startup_info_a(&mut emu).unwrap(),
+                "GetSystemInfo" => handle_get_system_info(&mut emu).unwrap(),
+                _ => {
+                    env.dispatch_hle(&mut emu, name).expect(name);
+                }
+            }
+            let bytes = get(&mut emu, buf, size + 4);
+            assert_eq!(
+                &bytes[size..],
+                [0xEE; 4],
+                "{name}: nothing past {size} bytes"
+            );
+            assert_ne!(&bytes[..size], &[0xEE; 4096][..size], "{name}: written");
+            bytes
+        };
+        check("_time32", 4);
+        check("time", 4);
+        check("InitializeConditionVariable", 4);
+        let startup = check("GetStartupInfoW", 68);
+        assert_eq!(&startup[..4], 68u32.to_le_bytes(), "cb");
+        check("GetStartupInfoA", 68);
+        let info = check("GetSystemInfo", 36);
+        assert_eq!(&info[..2], [0, 0], "PROCESSOR_ARCHITECTURE_INTEL");
+        assert_eq!(&info[4..8], 0x1000u32.to_le_bytes(), "dwPageSize");
+        assert_eq!(&info[20..24], 1u32.to_le_bytes(), "dwNumberOfProcessors");
+        assert_eq!(
+            &info[28..32],
+            0x1_0000u32.to_le_bytes(),
+            "dwAllocationGranularity"
+        );
+    }
+
+    /// And a 64-bit guest keeps its 64-bit sizes -- including
+    /// `STARTUPINFOA`, which was written at its 32-bit 68 bytes there.
+    #[test]
+    fn a_64_bit_guest_keeps_64_bit_sizes() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let buf = scratch(&mut emu, RAM_BASE);
+        for (name, size) in [
+            ("_time64", 8usize),
+            ("time", 8),
+            ("_time32", 4),
+            ("InitializeConditionVariable", 8),
+            ("GetStartupInfoA", 104),
+            ("GetStartupInfoW", 104),
+            ("GetSystemInfo", 48),
+        ] {
+            put(&mut emu, buf, &[0xEE; 0x200]);
+            args64(&mut emu, &[buf]);
+            env.dispatch_hle(&mut emu, name).expect(name);
+            let bytes = get(&mut emu, buf, size + 4);
+            assert_eq!(
+                &bytes[size..],
+                [0xEE; 4],
+                "{name}: nothing past {size} bytes"
+            );
+            assert_ne!(
+                &bytes[size - 4..size],
+                [0xEE; 4],
+                "{name}: written to {size}"
+            );
+        }
     }
 }

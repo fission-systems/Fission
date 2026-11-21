@@ -22,7 +22,7 @@
 //! narrower scope than "any PE personality routine", matching only the one
 //! this session has a real fixture for.
 
-use crate::loader::gcc_lsda::{LsdaInfo, parse_lsda};
+use crate::loader::gcc_lsda::{LsdaInfo, PointerFormat, parse_lsda};
 use crate::loader::types::LoadedBinary;
 use std::collections::HashMap;
 
@@ -184,7 +184,7 @@ pub fn analyze_seh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
             &lsda_bytes,
             lsda_vma,
             region_start,
-            binary.is_64bit,
+            PointerFormat::of(binary),
             &read_at,
             &symbol_at,
         )

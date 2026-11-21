@@ -30,6 +30,59 @@ pub const PC_ADVANCE_AFTER_BREAKPOINT: u64 = 0;
 #[cfg(target_arch = "x86_64")]
 pub const PC_ADVANCE_AFTER_BREAKPOINT: u64 = 1;
 
+/// The Mach flavor that reports why a thread last trapped, and its size in
+/// 32-bit words.
+#[cfg(target_arch = "aarch64")]
+pub const EXCEPTION_STATE_FLAVOR: i32 = 7; // ARM_EXCEPTION_STATE64
+#[cfg(target_arch = "x86_64")]
+pub const EXCEPTION_STATE_FLAVOR: i32 = 6; // x86_EXCEPTION_STATE64
+pub const EXCEPTION_STATE_WORDS: usize = 4;
+
+/// Whether an exception-state buffer says the thread's last trap was a
+/// breakpoint instruction.
+///
+/// * aarch64 (`far: u64, esr: u32, exception: u32`): the exception class in
+///   `esr[31:26]` is `0x3C`, "BRK instruction execution in AArch64 state".
+/// * x86-64 (`trapno: u16, cpu: u16, err: u32, faultvaddr: u64`): trap number
+///   3, `#BP`.
+pub fn trapped_on_breakpoint(exception_words: &[u32]) -> bool {
+    #[cfg(target_arch = "aarch64")]
+    {
+        exception_words[2] >> 26 == 0x3C
+    }
+    #[cfg(target_arch = "x86_64")]
+    {
+        exception_words[0] & 0xffff == 3
+    }
+}
+
+/// The Mach flavor that carries a thread's single-step switch, and its size.
+///
+/// On aarch64 that is the debug state, whose last field is `mdscr_el1`; bit 0
+/// (`SS`) arms a software step. On x86-64 it is the trap flag in `rflags`,
+/// part of the ordinary thread state.
+#[cfg(target_arch = "aarch64")]
+pub const SINGLE_STEP_STATE_FLAVOR: i32 = 15; // ARM_DEBUG_STATE64
+#[cfg(target_arch = "aarch64")]
+pub const SINGLE_STEP_STATE_WORDS: usize = 130; // bvr, bcr, wvr, wcr: 16 x u64 each, then mdscr_el1
+#[cfg(target_arch = "x86_64")]
+pub const SINGLE_STEP_STATE_FLAVOR: i32 = THREAD_STATE_FLAVOR;
+#[cfg(target_arch = "x86_64")]
+pub const SINGLE_STEP_STATE_WORDS: usize = STATE_WORDS;
+
+/// Arm or disarm the single step in a buffer of [`SINGLE_STEP_STATE_FLAVOR`].
+pub fn set_single_step(words: &mut [u32], on: bool) {
+    #[cfg(target_arch = "aarch64")]
+    let (index, bit) = (128, 1u32); // mdscr_el1.SS
+    #[cfg(target_arch = "x86_64")]
+    let (index, bit) = (136 / 4, 0x100u32); // rflags.TF
+    if on {
+        words[index] |= bit;
+    } else {
+        words[index] &= !bit;
+    }
+}
+
 fn word_at(words: &[u32], byte_offset: usize) -> u64 {
     let index = byte_offset / 4;
     u64::from(words[index]) | (u64::from(words[index + 1]) << 32)
@@ -195,6 +248,52 @@ mod tests {
         set_program_counter(&mut words, 0xdead_beef_cafe);
         assert_eq!(program_counter(&words), 0xdead_beef_cafe);
         assert_eq!(to_registers(&words).pc, 0xdead_beef_cafe);
+    }
+
+    #[test]
+    fn the_exception_state_names_a_breakpoint_trap() {
+        let mut words = [0u32; EXCEPTION_STATE_WORDS];
+        assert!(!trapped_on_breakpoint(&words), "an empty state is no trap");
+        #[cfg(target_arch = "aarch64")]
+        {
+            words[2] = 0xf200_0000; // ESR of `BRK #0`
+            assert!(trapped_on_breakpoint(&words));
+            words[2] = 0xca00_0022; // software step, EC 0x32
+            assert!(!trapped_on_breakpoint(&words));
+            words[2] = 0x5600_0080; // SVC, EC 0x15
+            assert!(!trapped_on_breakpoint(&words));
+        }
+        #[cfg(target_arch = "x86_64")]
+        {
+            words[0] = 3 | (7 << 16); // #BP on cpu 7
+            assert!(trapped_on_breakpoint(&words));
+            words[0] = 1; // #DB, a single step
+            assert!(!trapped_on_breakpoint(&words));
+        }
+    }
+
+    #[test]
+    fn the_single_step_switch_is_one_bit_and_nothing_else_moves() {
+        // Every other bit set, the switch's own bit clear on both machines.
+        let mut words = vec![0xAAAA_AAAAu32; SINGLE_STEP_STATE_WORDS];
+        let before = words.clone();
+        set_single_step(&mut words, true);
+        let changed: Vec<usize> = (0..words.len())
+            .filter(|i| words[*i] != before[*i])
+            .collect();
+        assert_eq!(changed.len(), 1, "exactly one word changes: {changed:?}");
+        assert_eq!((words[changed[0]] ^ before[changed[0]]).count_ones(), 1);
+        #[cfg(target_arch = "aarch64")]
+        assert_eq!(changed, [128], "mdscr_el1 is the last 64-bit field");
+        #[cfg(target_arch = "x86_64")]
+        assert_eq!(changed, [34], "rflags is at byte 136");
+        set_single_step(&mut words, false);
+        assert_eq!(words[changed[0]] & !before[changed[0]], 0, "the bit is off");
+        // Disarming twice leaves it off.
+        set_single_step(&mut words, false);
+        let mut once = before.clone();
+        set_single_step(&mut once, false);
+        assert_eq!(words, once);
     }
 
     #[test]

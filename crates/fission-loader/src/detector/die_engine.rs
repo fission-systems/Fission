@@ -52,30 +52,16 @@ impl SignatureDatabase {
                         "die_pe_json_cache.v{SIGNATURE_PARSER_VERSION}.json"
                     ))
                 });
-                if let Some(ref cache_p) = cache_path {
-                    if cache_p.exists() {
-                        if let (Ok(m_cache), Ok(m_src)) =
-                            (fs::metadata(cache_p), fs::metadata(&path))
-                        {
-                            if let (Ok(t_cache), Ok(t_src)) = (m_cache.modified(), m_src.modified())
-                            {
-                                if t_cache >= t_src {
-                                    if let Ok(content) = fs::read_to_string(cache_p) {
-                                        if let Ok(db) = serde_json::from_str::<Self>(&content) {
-                                            return Some(db);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                if let Some(db) = cache_path
+                    .as_deref()
+                    .and_then(|cache| read_fresh_cache(cache, std::slice::from_ref(&path)))
+                {
+                    return Some(db);
                 }
 
                 if let Ok(db) = Self::load(&path) {
                     if let Some(ref cache_p) = cache_path {
-                        if let Ok(serialized) = serde_json::to_string(&db) {
-                            let _ = fs::write(cache_p, serialized);
-                        }
+                        write_cache(cache_p, &db);
                     }
                     Some(db)
                 } else {
@@ -104,51 +90,12 @@ impl SignatureDatabase {
                         "die_default_cache.v{SIGNATURE_PARSER_VERSION}.json"
                     ))
                 });
-                if let Some(ref cache_p) = cache_path {
-                    if cache_p.exists() {
-                        if let Ok(m_cache) = fs::metadata(cache_p) {
-                            if let Ok(t_cache) = m_cache.modified() {
-                                let mut cache_valid = true;
-
-                                if let Some(ref p) = path {
-                                    if let Ok(m_src) = fs::metadata(p) {
-                                        if let Ok(t_src) = m_src.modified() {
-                                            if t_src > t_cache {
-                                                cache_valid = false;
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if cache_valid {
-                                    if let Some(ref root) = mirror_root {
-                                        let mut sg_files = Vec::new();
-                                        for child in ["db", "db_extra", "db_custom"] {
-                                            collect_sg_files(&root.join(child), &mut sg_files);
-                                        }
-                                        for f in &sg_files {
-                                            if let Ok(m_src) = fs::metadata(f) {
-                                                if let Ok(t_src) = m_src.modified() {
-                                                    if t_src > t_cache {
-                                                        cache_valid = false;
-                                                        break;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                if cache_valid {
-                                    if let Ok(content) = fs::read_to_string(cache_p) {
-                                        if let Ok(db) = serde_json::from_str::<Self>(&content) {
-                                            return Some(db);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                let sources = default_cache_sources(path.as_deref(), mirror_root.as_deref());
+                if let Some(db) = cache_path
+                    .as_deref()
+                    .and_then(|cache| read_fresh_cache(cache, &sources))
+                {
+                    return Some(db);
                 }
 
                 let mut db = if let Some(ref p) = path {
@@ -172,9 +119,7 @@ impl SignatureDatabase {
                     None
                 } else {
                     if let Some(ref cache_p) = cache_path {
-                        if let Ok(serialized) = serde_json::to_string(&db) {
-                            let _ = fs::write(cache_p, serialized);
-                        }
+                        write_cache(cache_p, &db);
                     }
                     Some(db)
                 }
@@ -1540,6 +1485,55 @@ fn shannon_entropy(bytes: &[u8]) -> f64 {
 /// ignored.
 const SIGNATURE_PARSER_VERSION: u32 = 2;
 
+/// Every file the default database is built from, for the cache check.
+///
+/// The packed corpus beside the mirror is one of them: when it is present
+/// the database is read from it and the `.sg` files are not opened at all.
+/// It used to be left out of this list, so replacing `die_signatures.fpk`
+/// kept serving the database cached from the old one indefinitely.
+fn default_cache_sources(path: Option<&Path>, mirror_root: Option<&Path>) -> Vec<PathBuf> {
+    let mut sources: Vec<PathBuf> = path.map(Path::to_path_buf).into_iter().collect();
+    if let Some(root) = mirror_root {
+        sources.push(root.join("die_signatures.fpk"));
+        for child in ["db", "db_extra", "db_custom"] {
+            collect_sg_files(&root.join(child), &mut sources);
+        }
+    }
+    sources
+}
+
+/// Whether the cache at `cache` was written after every source that exists
+/// was last modified.
+fn cache_is_fresh(cache: &Path, sources: &[PathBuf]) -> bool {
+    let Ok(cached_at) = fs::metadata(cache).and_then(|meta| meta.modified()) else {
+        return false;
+    };
+    sources.iter().all(|source| {
+        fs::metadata(source)
+            .and_then(|meta| meta.modified())
+            .map_or(true, |modified| modified <= cached_at)
+    })
+}
+
+fn read_fresh_cache(cache: &Path, sources: &[PathBuf]) -> Option<SignatureDatabase> {
+    if !cache_is_fresh(cache, sources) {
+        return None;
+    }
+    serde_json::from_str(&fs::read_to_string(cache).ok()?).ok()
+}
+
+/// Write the cache whole or not at all.
+///
+/// `fs::write` truncates the file and then fills it, so a second process
+/// reading the cache meanwhile -- or this one, after an interrupted write --
+/// saw a truncated JSON document. A sibling temporary file renamed over the
+/// cache replaces it in one step.
+fn write_cache(cache: &Path, db: &SignatureDatabase) {
+    if let Ok(serialized) = serde_json::to_string(db) {
+        let _ = fission_core::config_store::write_file_atomically(cache, serialized.as_bytes());
+    }
+}
+
 fn loader_cache_dir() -> Option<PathBuf> {
     let cache_dir = fission_core::resource_roots::fission_cache_dir().or_else(|| {
         fission_core::utils::find_workspace_root("FISSION_ROOT")
@@ -2062,5 +2056,105 @@ mod packed_die_tests {
         a.sort();
         b.sort();
         assert_eq!(a, b, "packed corpus differs from the .sg walk");
+    }
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::io::Read;
+    use std::time::{Duration, SystemTime};
+
+    fn database(source: &str) -> SignatureDatabase {
+        SignatureDatabase {
+            format_version: "die-sg-v1".to_string(),
+            description: "test".to_string(),
+            source: source.to_string(),
+            signatures: Vec::new(),
+        }
+    }
+
+    fn touch(path: &Path, at: SystemTime) {
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("open");
+        file.set_modified(at).expect("set mtime");
+    }
+
+    /// A mirror whose database comes from the packed corpus: replacing
+    /// `die_signatures.fpk` after the cache was written makes the cache
+    /// stale. The packed corpus was not among the sources checked, so the
+    /// old database kept being served.
+    #[test]
+    fn a_newer_packed_corpus_makes_the_default_cache_stale() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().join("mirror");
+        fs::create_dir_all(root.join("db")).expect("mirror");
+        let earlier = SystemTime::now() - Duration::from_secs(3600);
+        let later = SystemTime::now();
+        touch(&root.join("db").join("packer.sg"), earlier);
+        let cache = dir.path().join("cache.json");
+        fs::write(&cache, serde_json::to_string(&database("old")).unwrap()).unwrap();
+        touch(&cache, earlier + Duration::from_secs(60));
+
+        // Before the corpus changes, the cache is current.
+        touch(&root.join("die_signatures.fpk"), earlier);
+        let sources = default_cache_sources(None, Some(&root));
+        assert!(cache_is_fresh(&cache, &sources));
+        assert!(read_fresh_cache(&cache, &sources).is_some());
+
+        // Replace the corpus: the cache is now older than one of its sources.
+        touch(&root.join("die_signatures.fpk"), later);
+        assert!(!cache_is_fresh(&cache, &sources));
+        assert!(read_fresh_cache(&cache, &sources).is_none());
+        // The `.sg` files alone -- the old source list -- did not see it.
+        let sg_only: Vec<PathBuf> = sources
+            .iter()
+            .filter(|source| source.extension().is_some_and(|ext| ext == "sg"))
+            .cloned()
+            .collect();
+        assert!(cache_is_fresh(&cache, &sg_only));
+    }
+
+    #[test]
+    fn a_missing_source_does_not_invalidate_the_cache_but_a_missing_cache_is_stale() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = dir.path().join("cache.json");
+        let absent = dir.path().join("absent.fpk");
+        assert!(!cache_is_fresh(&cache, &[]));
+        fs::write(&cache, "{}").unwrap();
+        assert!(cache_is_fresh(&cache, std::slice::from_ref(&absent)));
+        // Fresh but not a database: read as a miss, not an error.
+        assert!(read_fresh_cache(&cache, &[]).is_none());
+    }
+
+    /// The cache is replaced, not rewritten in place. A reader that opened
+    /// it before the write still reads the whole old document; `fs::write`
+    /// truncated that same file under it.
+    #[test]
+    fn a_cache_write_replaces_the_file_whole() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = dir.path().join("cache.json");
+        let old = serde_json::to_string(&database("old")).unwrap();
+        fs::write(&cache, &old).unwrap();
+        let mut reader = fs::File::open(&cache).expect("open");
+
+        write_cache(&cache, &database("new"));
+
+        let mut seen = String::new();
+        reader.read_to_string(&mut seen).expect("read");
+        assert_eq!(seen, old, "an open reader saw the file change under it");
+        let current: SignatureDatabase =
+            serde_json::from_str(&fs::read_to_string(&cache).unwrap()).unwrap();
+        assert_eq!(current.source, "new");
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .filter(|name| name != "cache.json")
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 }

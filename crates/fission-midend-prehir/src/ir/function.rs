@@ -3,6 +3,7 @@ use fission_midend_core::ir::{
     CallSummary, HirFunction, HirStmt, NirBinding, NirBindingOrigin, NirType,
 };
 use indexmap::IndexMap;
+use std::sync::Arc;
 
 use crate::ir::{PreHirExpr, PreHirStmt, prehir_expr_to_hir_expr};
 
@@ -56,7 +57,9 @@ pub struct PreHirFunction {
     pub is_big_endian: bool,
     pub suppress_entry_register_params: bool,
     pub callee_observed_max_arity: IndexMap<String, usize>,
-    pub callee_summaries: IndexMap<String, CallSummary>,
+    /// Shared with every copy of this function; see
+    /// [`HirFunction::callee_summaries`](fission_midend_core::ir::HirFunction).
+    pub callee_summaries: Arc<IndexMap<String, CallSummary>>,
 }
 
 impl Default for PreHirFunction {
@@ -77,7 +80,7 @@ impl Default for PreHirFunction {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),
-            callee_summaries: IndexMap::new(),
+            callee_summaries: Arc::default(),
         }
     }
 }

@@ -14,8 +14,12 @@
 //!   #b0)`, a condition as `(= c #b1)`, and an assertion as `(= e #b1)`.
 //! * Lowering pads the narrower operand with zeros; the printer
 //!   zero-extends to the same width.
-//! * Shift amounts of a different width than the value, floats and arrays are
-//!   refused rather than approximated.
+//! * Arrays print as `(Array (_ BitVec d) (_ BitVec r))` with `select`,
+//!   `store` and an array-sorted `ite`, and switch the logic to `QF_ABV`. An
+//!   index or stored value whose width differs from the array's sort is
+//!   refused: SMT-LIB has no such term, so there is nothing to compare with.
+//! * Shift amounts of a different width than the value and floats are refused
+//!   rather than approximated.
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -34,8 +38,8 @@ impl std::fmt::Display for Unsupported {
 
 impl std::error::Error for Unsupported {}
 
-/// A complete QF_BV script: declarations, one `assert` per assertion,
-/// `check-sat`.
+/// A complete script: declarations, one `assert` per assertion, `check-sat`.
+/// The logic is `QF_BV`, or `QF_ABV` when the assertions read an array.
 pub fn script(assertions: &[SymExpr]) -> Result<String, Unsupported> {
     let mut printer = Printer::default();
     let mut body = String::new();
@@ -47,9 +51,19 @@ pub fn script(assertions: &[SymExpr]) -> Result<String, Unsupported> {
         let _ = writeln!(body, "(assert (= {text} #b1))");
     }
 
-    let mut out = String::from("(set-logic QF_BV)\n");
+    let mut out = String::from(if printer.declared_arrays.is_empty() {
+        "(set-logic QF_BV)\n"
+    } else {
+        "(set-logic QF_ABV)\n"
+    });
     for (symbol, width) in &printer.declared {
         let _ = writeln!(out, "(declare-const {symbol} (_ BitVec {width}))");
+    }
+    for (symbol, (domain, range)) in &printer.declared_arrays {
+        let _ = writeln!(
+            out,
+            "(declare-const {symbol} (Array (_ BitVec {domain}) (_ BitVec {range})))"
+        );
     }
     out.push_str(&body);
     out.push_str("(check-sat)\n");
@@ -68,6 +82,8 @@ pub fn symbol_for(expr: &SymExpr) -> Option<String> {
 #[derive(Default)]
 struct Printer {
     declared: BTreeMap<String, u32>,
+    /// Array symbols with their index and element widths.
+    declared_arrays: BTreeMap<String, (u32, u32)>,
 }
 
 impl Printer {
@@ -154,6 +170,16 @@ impl Printer {
                 let (b, b_width) = self.bitvector(b)?;
                 (format!("(concat {a} {b})"), a_width + b_width)
             }
+            ArraySelect { array, index } => {
+                let (array, domain, range) = self.array(array)?;
+                let (index, index_width) = self.bitvector(index)?;
+                if index_width != domain {
+                    return Err(Unsupported(format!(
+                        "a {index_width}-bit index into an array indexed by {domain} bits"
+                    )));
+                }
+                (format!("(select {array} {index})"), range)
+            }
 
             other => {
                 let debug = format!("{other:?}");
@@ -162,6 +188,63 @@ impl Printer {
                     .next()
                     .unwrap_or("?");
                 return Err(Unsupported(name.to_string()));
+            }
+        })
+    }
+
+    /// An array-sorted term, with its index and element widths.
+    fn array(&mut self, expr: &SymExpr) -> Result<(String, u32, u32), Unsupported> {
+        use SymExpr::*;
+        Ok(match expr {
+            Var { sort, .. } => {
+                let Sort::Array { domain, range } = sort else {
+                    return Err(Unsupported(format!("a {sort:?} used as an array")));
+                };
+                let (Sort::BitVector(domain), Sort::BitVector(range)) =
+                    (domain.as_ref(), range.as_ref())
+                else {
+                    return Err(Unsupported(format!("an array of sort {sort:?}")));
+                };
+                let symbol = symbol_for(expr).expect("a variable has a symbol");
+                self.declared_arrays
+                    .insert(symbol.clone(), (*domain, *range));
+                (symbol, *domain, *range)
+            }
+            ArrayStore {
+                array,
+                index,
+                value,
+            } => {
+                let (array, domain, range) = self.array(array)?;
+                let (index, index_width) = self.bitvector(index)?;
+                let (value, value_width) = self.bitvector(value)?;
+                if index_width != domain || value_width != range {
+                    return Err(Unsupported(format!(
+                        "a store of {value_width} bits at a {index_width}-bit index into \
+                         an array from {domain} to {range} bits"
+                    )));
+                }
+                (format!("(store {array} {index} {value})"), domain, range)
+            }
+            Ite { cond, t, f } => {
+                let (c, c_width) = self.bitvector(cond)?;
+                if c_width != 1 {
+                    return Err(Unsupported(format!("a {c_width}-bit condition")));
+                }
+                let (t, t_domain, t_range) = self.array(t)?;
+                let (f, f_domain, f_range) = self.array(f)?;
+                if (t_domain, t_range) != (f_domain, f_range) {
+                    return Err(Unsupported("an ite of two array sorts".to_string()));
+                }
+                (format!("(ite (= {c} #b1) {t} {f})"), t_domain, t_range)
+            }
+            other => {
+                let debug = format!("{other:?}");
+                let name = debug
+                    .split(|c: char| !c.is_alphanumeric())
+                    .next()
+                    .unwrap_or("?");
+                return Err(Unsupported(format!("{name} used as an array")));
             }
         })
     }
@@ -305,6 +388,68 @@ mod tests {
                 u32::MAX
             )))
         );
+    }
+
+    /// A read through a store chain prints as `QF_ABV`, with the array
+    /// declared at its own sort.
+    #[test]
+    fn a_read_over_a_write_prints_as_an_array_term() {
+        let memory = SymExpr::new_array_var("m", 4, 8);
+        let (i, j) = (SymExpr::new_var("i", 4), SymExpr::new_var("j", 4));
+        let (m_sym, i_sym, j_sym) = (
+            symbol_for(&memory).unwrap(),
+            symbol_for(&i).unwrap(),
+            symbol_for(&j).unwrap(),
+        );
+        let written = SymExpr::ArrayStore {
+            array: Box::new(memory),
+            index: Box::new(i),
+            value: Box::new(SymExpr::new_const(7, 8)),
+        };
+        let read = SymExpr::ArraySelect {
+            array: Box::new(written),
+            index: Box::new(j),
+        };
+        let eq = SymExpr::Eq(Box::new(read), Box::new(SymExpr::new_const(7, 8)));
+        let script = script(&[eq]).expect("printable");
+        assert!(script.starts_with("(set-logic QF_ABV)\n"), "{script}");
+        assert!(
+            script.contains(&format!(
+                "(declare-const {m_sym} (Array (_ BitVec 4) (_ BitVec 8)))"
+            )),
+            "{script}"
+        );
+        assert!(
+            script.contains(&format!(
+                "(select (store {m_sym} {i_sym} (_ bv7 8)) {j_sym})"
+            )),
+            "{script}"
+        );
+    }
+
+    /// SMT-LIB has no select whose index is not the array's index sort, so
+    /// there is no script that means the same thing.
+    #[test]
+    fn an_index_of_the_wrong_width_is_refused() {
+        let memory = SymExpr::new_array_var("m", 4, 8);
+        let read = SymExpr::ArraySelect {
+            array: Box::new(memory.clone()),
+            index: Box::new(SymExpr::new_var("wide", 8)),
+        };
+        let eq = SymExpr::Eq(Box::new(read), Box::new(SymExpr::new_const(0, 8)));
+        assert!(script(&[eq]).is_err(), "8-bit index into a 4-bit domain");
+
+        let stored = SymExpr::ArrayStore {
+            array: Box::new(memory),
+            index: Box::new(SymExpr::new_var("i", 4)),
+            value: Box::new(SymExpr::new_var("wide_value", 16)),
+        };
+        let read = SymExpr::ArraySelect {
+            array: Box::new(stored),
+            index: Box::new(SymExpr::new_var("j", 4)),
+        };
+        let eq = SymExpr::Eq(Box::new(read), Box::new(SymExpr::new_const(0, 8)));
+        assert!(script(&[eq]).is_err(), "16-bit value into 8-bit elements");
     }
 
     /// Zero-extending a signed operand would change its value, so it is

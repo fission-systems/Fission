@@ -76,7 +76,11 @@ impl Timeline {
             current_position: position,
             replay_mode: false,
             current_snapshot: None,
-            events_recorded: 0,
+            // The next event goes after what the recorder already holds.
+            // Starting again at ordinal 0 records "step 0" into a recorder
+            // that treats a step at or before its last one as a rewind, and
+            // drops everything it had.
+            events_recorded: position.map_or(0, |step| step.saturating_add(1)),
         }
     }
 
@@ -502,6 +506,35 @@ mod tests {
         assert!(matches!(timeline.seek_start(), SeekResult::Empty));
         assert!(matches!(timeline.seek_end(), SeekResult::Empty));
         assert!(matches!(timeline.seek_to(0), SeekResult::Empty));
+    }
+
+    #[test]
+    fn events_recorded_after_adopting_a_recorder_extend_its_history() {
+        let mut recorder = TTDRecorder::new();
+        recorder.start_recording();
+        for step in 0..3u64 {
+            recorder.record_step(step, RegisterState::at(0x1000 + step * 4), 1);
+        }
+
+        let mut timeline = Timeline::from_recorder(recorder);
+        assert_eq!(timeline.snapshot_count(), 3);
+        timeline.record_event(RegisterState::at(0x2000), 1);
+
+        // The event is the fourth snapshot. Numbered 0, it read as a rewind
+        // to the start and replaced the three that were there.
+        assert_eq!(timeline.snapshot_count(), 4);
+        assert_eq!(timeline.step_range(), Some((0, 3)));
+        assert_eq!(timeline.latest_snapshot().map(|s| s.pc()), Some(0x2000));
+    }
+
+    #[test]
+    fn adopting_an_empty_recorder_starts_at_ordinal_zero() {
+        // Positive control: with nothing held, the first event is ordinal 0.
+        let mut recorder = TTDRecorder::new();
+        recorder.start_recording();
+        let mut timeline = Timeline::from_recorder(recorder);
+        timeline.record_event(RegisterState::at(0x2000), 1);
+        assert_eq!(timeline.step_range(), Some((0, 0)));
     }
 
     #[test]

@@ -8,7 +8,7 @@ GitHub labels are configured in repository settings; this document is the **reco
 
 | Prefix | Meaning | Examples |
 |--------|---------|----------|
-| `area:` | Subsystem / crate neighborhood | `area:pcode`, `area:loader`, `area:cli`, `area:tauri`, `area:automation`, `area:benchmark` |
+| `area:` | Subsystem / crate neighborhood | `area:pcode`, `area:loader`, `area:cli`, `area:emulator`, `area:dynamic`, `area:benchmark` |
 | `kind:` | Issue type | `kind:bug`, `kind:enhancement`, `kind:task`, `kind:docs`, `kind:process` |
 | `priority:` | Urgency | `priority:P0`, `priority:P1`, `priority:P2` |
 | `status:` | Workflow | `status:triage`, `status:blocked`, `status:needs-info`, `status:good-first-issue` |

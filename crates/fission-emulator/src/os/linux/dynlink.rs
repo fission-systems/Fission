@@ -141,6 +141,33 @@ pub fn is_resolved_got_target(val: u64) -> bool {
     val >= SHARED_LIB_BASE_START
 }
 
+/// Whether the GOT slot holding `val` was bound by the mini dynamic linker
+/// and must be left alone by the HLE import patch.
+///
+/// [`is_resolved_got_target`] answers from the value alone: at or above the
+/// address libraries linked at 0 are placed. A library linked at an address
+/// of its own -- a prelinked one -- is mapped there instead, below that
+/// line, so its bindings read as unresolved and were replaced with HLE
+/// trampolines. What a binding is, is a pointer into mapped memory that is
+/// not the main image: an unbound slot holds 0 or the address of the main
+/// image's own PLT stub.
+pub fn is_bound_got_slot(state: &MachineState, binary: &LoadedBinary, val: u64) -> bool {
+    if is_resolved_got_target(val) {
+        return true;
+    }
+    if val == 0
+        || lazy_mark_index(val).is_some()
+        || val >= 0xFFFFFFF0_0000_0000
+        || (0x7FFF_0000..0x8000_0000).contains(&val)
+    {
+        return false;
+    }
+    let in_main_image = binary.inner().sections.iter().any(|section| {
+        val >= section.virtual_address && val - section.virtual_address < section.virtual_size
+    });
+    !in_main_image && state.page_map.is_mapped(val)
+}
+
 /// Runtime table for deferred PLT/GOT binding.
 #[derive(Clone, Debug)]
 pub struct PltLazyTable {
@@ -559,6 +586,81 @@ fn find_library(soname: &str, search: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
+/// Bounds-checked little-endian reads of an ELF file's bytes.
+///
+/// Every offset, size, count and index in a dynamic image comes from the
+/// file, and the readers below used them in plain arithmetic -- `shoff + i *
+/// shentsize`, `str_off + st_name` -- so a file that names an offset near the
+/// top of the address range was an overflow panic in a checked build and a
+/// wrapped, wrong offset in an unchecked one. Here an offset that does not
+/// fit, or a range that is not in the file, is `None`.
+#[derive(Clone, Copy)]
+struct Elf<'a>(&'a [u8]);
+
+/// The fields of a program header these readers use.
+struct ProgramHeader {
+    p_type: u32,
+    p_offset: u64,
+    p_vaddr: u64,
+    p_filesz: u64,
+}
+
+impl<'a> Elf<'a> {
+    fn bytes(self, offset: usize, len: usize) -> Option<&'a [u8]> {
+        self.0.get(offset..offset.checked_add(len)?)
+    }
+
+    fn u16(self, offset: usize) -> Option<u16> {
+        Some(u16::from_le_bytes(self.bytes(offset, 2)?.try_into().ok()?))
+    }
+
+    fn u32(self, offset: usize) -> Option<u32> {
+        Some(u32::from_le_bytes(self.bytes(offset, 4)?.try_into().ok()?))
+    }
+
+    fn u64(self, offset: usize) -> Option<u64> {
+        Some(u64::from_le_bytes(self.bytes(offset, 8)?.try_into().ok()?))
+    }
+
+    /// A 64-bit field holding a file offset or size, as a `usize`.
+    fn size(self, offset: usize) -> Option<usize> {
+        usize::try_from(self.u64(offset)?).ok()
+    }
+
+    /// Where entry `index` of a table at `base` with `entry_size`-byte
+    /// entries starts.
+    fn entry(base: usize, index: usize, entry_size: usize) -> Option<usize> {
+        base.checked_add(index.checked_mul(entry_size)?)
+    }
+
+    /// The NUL-terminated string at `offset`; `None` when it is outside the
+    /// file or runs off its end.
+    fn cstr(self, offset: usize) -> Option<String> {
+        let tail = self.0.get(offset..)?;
+        let len = tail.iter().position(|&b| b == 0)?;
+        Some(String::from_utf8_lossy(&tail[..len]).into_owned())
+    }
+
+    /// The ELF64 program headers that lie wholly inside the file, in order.
+    fn program_headers(self) -> impl Iterator<Item = ProgramHeader> + 'a {
+        let table = self.size(32).zip(self.u16(54)).zip(self.u16(56));
+        let (phoff, phentsize, phnum) = match table {
+            Some(((phoff, phentsize), phnum)) => (phoff, usize::from(phentsize), phnum),
+            None => (0, 0, 0),
+        };
+        (0..usize::from(phnum)).map_while(move |index| {
+            let header = self.bytes(Self::entry(phoff, index, phentsize)?, 56)?;
+            let field = |at: usize| u64::from_le_bytes(header[at..at + 8].try_into().unwrap());
+            Some(ProgramHeader {
+                p_type: u32::from_le_bytes(header[0..4].try_into().unwrap()),
+                p_offset: field(8),
+                p_vaddr: field(16),
+                p_filesz: field(32),
+            })
+        })
+    }
+}
+
 /// Parse DT_NEEDED sonames and bind-now flag from ELF dynamic section.
 pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
     let mut needed = Vec::new();
@@ -566,35 +668,22 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
     if data.len() < 64 || data[0..4] != [0x7f, b'E', b'L', b'F'] || data[4] != 2 || data[5] != 1 {
         return (needed, bind_now);
     }
-    let phoff = u64::from_le_bytes(data[32..40].try_into().unwrap()) as usize;
-    let phentsize = u16::from_le_bytes(data[54..56].try_into().unwrap()) as usize;
-    let phnum = u16::from_le_bytes(data[56..58].try_into().unwrap()) as usize;
-
-    let mut dyn_off = None;
-    let mut dyn_filesz = 0usize;
-    for i in 0..phnum {
-        let off = phoff + i * phentsize;
-        if off + 56 > data.len() {
-            break;
-        }
-        let p_type = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
-        if p_type == PT_DYNAMIC {
-            dyn_off =
-                Some(u64::from_le_bytes(data[off + 8..off + 16].try_into().unwrap()) as usize);
-            dyn_filesz = u64::from_le_bytes(data[off + 32..off + 40].try_into().unwrap()) as usize;
-            break;
-        }
-    }
-    let Some(dyn_off) = dyn_off else {
+    let elf = Elf(data);
+    let Some(dynamic) = elf.program_headers().find(|ph| ph.p_type == PT_DYNAMIC) else {
         return (needed, bind_now);
     };
+    let dyn_off = usize::try_from(dynamic.p_offset).unwrap_or(usize::MAX);
+    let dyn_filesz = usize::try_from(dynamic.p_filesz).unwrap_or(usize::MAX);
 
     // First pass: collect tags and find STRTAB via vaddr → file offset heuristic.
     let mut tags: Vec<(i64, u64)> = Vec::new();
-    let mut i = 0;
-    while dyn_off + i + 16 <= data.len() && i < dyn_filesz {
-        let tag = i64::from_le_bytes(data[dyn_off + i..dyn_off + i + 8].try_into().unwrap());
-        let val = u64::from_le_bytes(data[dyn_off + i + 8..dyn_off + i + 16].try_into().unwrap());
+    let mut i = 0usize;
+    while i < dyn_filesz {
+        let Some(entry) = dyn_off.checked_add(i).and_then(|at| elf.bytes(at, 16)) else {
+            break;
+        };
+        let tag = i64::from_le_bytes(entry[..8].try_into().unwrap());
+        let val = u64::from_le_bytes(entry[8..].try_into().unwrap());
         if tag == DT_NULL {
             break;
         }
@@ -606,7 +695,7 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
     let strsz = tags
         .iter()
         .find(|(t, _)| *t == DT_STRSZ)
-        .map(|(_, v)| *v as usize)
+        .map(|(_, v)| *v)
         .unwrap_or(0);
 
     // Map STRTAB VA to file offset via PT_LOAD.
@@ -621,17 +710,20 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
         }
         if *tag == DT_NEEDED {
             if let (Some(soff), true) = (strtab_off, strsz > 0) {
-                let name_off = soff + *val as usize;
-                if name_off < data.len() {
-                    let end = data[name_off..]
-                        .iter()
-                        .position(|&b| b == 0)
-                        .map(|i| name_off + i)
-                        .unwrap_or(data.len().min(name_off + 256));
-                    let s = String::from_utf8_lossy(&data[name_off..end]).into_owned();
-                    if !s.is_empty() {
-                        needed.push(s);
-                    }
+                let name = usize::try_from(*val)
+                    .ok()
+                    .and_then(|name| soff.checked_add(name))
+                    .and_then(|at| {
+                        // An unterminated name is read to the end of the
+                        // file, at most 256 bytes of it.
+                        elf.cstr(at).or_else(|| {
+                            let tail = data.get(at..)?;
+                            let tail = &tail[..tail.len().min(256)];
+                            Some(String::from_utf8_lossy(tail).into_owned())
+                        })
+                    });
+                if let Some(name) = name.filter(|name| !name.is_empty()) {
+                    needed.push(name);
                 }
             }
         }
@@ -642,156 +734,131 @@ pub fn parse_dt_needed(data: &[u8]) -> (Vec<String>, bool) {
 }
 
 fn vaddr_to_offset(data: &[u8], va: u64) -> Option<usize> {
-    let phoff = u64::from_le_bytes(data[32..40].try_into().ok()?) as usize;
-    let phentsize = u16::from_le_bytes(data[54..56].try_into().ok()?) as usize;
-    let phnum = u16::from_le_bytes(data[56..58].try_into().ok()?) as usize;
-    for i in 0..phnum {
-        let off = phoff + i * phentsize;
-        if off + 56 > data.len() {
-            break;
-        }
-        let p_type = u32::from_le_bytes(data[off..off + 4].try_into().ok()?);
-        if p_type != PT_LOAD {
+    for ph in Elf(data).program_headers() {
+        if ph.p_type != PT_LOAD {
             continue;
         }
-        let p_offset = u64::from_le_bytes(data[off + 8..off + 16].try_into().ok()?);
-        let p_vaddr = u64::from_le_bytes(data[off + 16..off + 24].try_into().ok()?);
-        let p_filesz = u64::from_le_bytes(data[off + 32..off + 40].try_into().ok()?);
-        if va >= p_vaddr && va < p_vaddr + p_filesz {
-            return Some((p_offset + (va - p_vaddr)) as usize);
+        if va >= ph.p_vaddr && va - ph.p_vaddr < ph.p_filesz {
+            return usize::try_from(ph.p_offset.checked_add(va - ph.p_vaddr)?).ok();
         }
     }
     // PIE often has vaddr == offset for early segments.
-    if (va as usize) < data.len() {
-        return Some(va as usize);
-    }
-    None
+    usize::try_from(va)
+        .ok()
+        .filter(|offset| *offset < data.len())
 }
 
+/// The name and biased value of the 24-byte ELF64 symbol `sym`, if it is one
+/// a module exports: defined, global or weak, a function or an object.
+fn exported_symbol(
+    elf: Elf<'_>,
+    sym: &[u8],
+    (str_off, str_size): (usize, usize),
+    load_bias: u64,
+) -> Option<(String, u64)> {
+    let st_name = u32::from_le_bytes(sym[0..4].try_into().ok()?) as usize;
+    let st_info = sym[4];
+    let st_shndx = u16::from_le_bytes(sym[6..8].try_into().ok()?);
+    let st_value = u64::from_le_bytes(sym[8..16].try_into().ok()?);
+    if st_shndx == SHN_UNDEF || st_value == 0 {
+        return None;
+    }
+    let bind = st_info >> 4;
+    let ty = st_info & 0xf;
+    if bind != STB_GLOBAL && bind != STB_WEAK {
+        return None;
+    }
+    if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
+        return None;
+    }
+    if st_name >= str_size {
+        return None;
+    }
+    let name = elf.cstr(str_off.checked_add(st_name)?)?;
+    (!name.is_empty()).then(|| (name, st_value.saturating_add(load_bias)))
+}
+
+/// Every symbol of the table at `sym_off` (`count` entries of `entsz`
+/// bytes) that [`exported_symbol`] accepts; the first definition of a name
+/// wins.
+fn collect_exported(
+    elf: Elf<'_>,
+    (sym_off, count, entsz): (usize, usize, usize),
+    strtab: (usize, usize),
+    load_bias: u64,
+    out: &mut std::collections::HashMap<String, u64>,
+) {
+    for index in 0..count {
+        let Some(sym) = Elf::entry(sym_off, index, entsz).and_then(|at| elf.bytes(at, 24)) else {
+            break;
+        };
+        if let Some((name, value)) = exported_symbol(elf, sym, strtab, load_bias) {
+            out.entry(name).or_insert(value);
+        }
+    }
+}
+
+/// The global symbols a module defines, at the addresses they have once the
+/// module is loaded with `load_bias` added to its link addresses.
 fn collect_global_symbols(data: &[u8], load_bias: u64) -> std::collections::HashMap<String, u64> {
     let mut out = std::collections::HashMap::new();
     if data.len() < 64 {
         return out;
     }
-    let shoff = u64::from_le_bytes(data[40..48].try_into().unwrap()) as usize;
-    let shentsize = u16::from_le_bytes(data[58..60].try_into().unwrap()) as usize;
-    let shnum = u16::from_le_bytes(data[60..62].try_into().unwrap()) as usize;
+    let elf = Elf(data);
+    let shoff = elf.size(40).unwrap_or(0);
+    let shentsize = usize::from(elf.u16(58).unwrap_or(0));
+    let shnum = usize::from(elf.u16(60).unwrap_or(0));
     if shentsize >= 64 && shoff != 0 {
+        let section =
+            |index: usize| Elf::entry(shoff, index, shentsize).and_then(|at| elf.bytes(at, 64));
+        let field =
+            |header: &[u8], at: usize| u64::from_le_bytes(header[at..at + 8].try_into().unwrap());
         for si in 0..shnum {
-            let soff = shoff + si * shentsize;
-            if soff + 64 > data.len() {
-                break;
-            }
-            let sh_type = u32::from_le_bytes(data[soff + 4..soff + 8].try_into().unwrap());
+            let Some(header) = section(si) else { break };
+            let sh_type = u32::from_le_bytes(header[4..8].try_into().unwrap());
             // SHT_DYNSYM = 11
             if sh_type != 11 {
                 continue;
             }
-            let sym_off =
-                u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
-            let sym_size =
-                u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
-            let entsz = {
-                let e = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
-                if e > 0 { e } else { 24 }
+            let (Ok(sym_off), Ok(sym_size)) = (
+                usize::try_from(field(header, 24)),
+                usize::try_from(field(header, 32)),
+            ) else {
+                continue;
             };
-            let str_link =
-                u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
+            let entsz = match usize::try_from(field(header, 56)) {
+                Ok(e) if e > 0 => e,
+                _ => 24,
+            };
+            let str_link = u32::from_le_bytes(header[40..44].try_into().unwrap()) as usize;
             if str_link >= shnum {
                 continue;
             }
-            let stro = shoff + str_link * shentsize;
-            if stro + 64 > data.len() {
+            let Some(strings) = section(str_link) else {
                 continue;
-            }
-            let str_off =
-                u64::from_le_bytes(data[stro + 24..stro + 32].try_into().unwrap()) as usize;
-            let str_size =
-                u64::from_le_bytes(data[stro + 32..stro + 40].try_into().unwrap()) as usize;
-            let count = sym_size / entsz;
-            for i in 0..count {
-                let eoff = sym_off + i * entsz;
-                if eoff + 24 > data.len() {
-                    break;
-                }
-                let st_name = u32::from_le_bytes(data[eoff..eoff + 4].try_into().unwrap()) as usize;
-                let st_info = data[eoff + 4];
-                let st_shndx = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().unwrap());
-                let st_value = u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().unwrap());
-                if st_shndx == SHN_UNDEF || st_value == 0 {
-                    continue;
-                }
-                let bind = st_info >> 4;
-                let ty = st_info & 0xf;
-                if bind != STB_GLOBAL && bind != STB_WEAK {
-                    continue;
-                }
-                if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
-                    continue;
-                }
-                if st_name >= str_size || str_off + st_name >= data.len() {
-                    continue;
-                }
-                let start = str_off + st_name;
-                let end = data[start..]
-                    .iter()
-                    .position(|&b| b == 0)
-                    .map(|j| start + j)
-                    .unwrap_or(start);
-                let name = String::from_utf8_lossy(&data[start..end]).into_owned();
-                if name.is_empty() {
-                    continue;
-                }
-                out.entry(name)
-                    .or_insert(st_value.saturating_add(load_bias));
-            }
+            };
+            let (Ok(str_off), Ok(str_size)) = (
+                usize::try_from(field(strings, 24)),
+                usize::try_from(field(strings, 32)),
+            ) else {
+                continue;
+            };
+            collect_exported(
+                elf,
+                (sym_off, sym_size / entsz, entsz),
+                (str_off, str_size),
+                load_bias,
+                &mut out,
+            );
         }
     }
     if out.is_empty() {
         if let Ok(tables) = elf64_dynamic_tables(data) {
-            if let (Some(sym_off), Some((str_off, str_size))) =
-                (tables.symtab_offset, tables.strtab)
-            {
+            if let (Some(sym_off), Some(strtab)) = (tables.symtab_offset, tables.strtab) {
                 let count = tables.symbol_count.unwrap_or(0);
                 let entsz = tables.sym_entry_size.max(24);
-                for i in 0..count {
-                    let eoff = sym_off + i * entsz;
-                    if eoff + 24 > data.len() {
-                        break;
-                    }
-                    let st_name =
-                        u32::from_le_bytes(data[eoff..eoff + 4].try_into().unwrap()) as usize;
-                    let st_info = data[eoff + 4];
-                    let st_shndx = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().unwrap());
-                    let st_value =
-                        u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().unwrap());
-                    if st_shndx == SHN_UNDEF || st_value == 0 {
-                        continue;
-                    }
-                    let bind = st_info >> 4;
-                    let ty = st_info & 0xf;
-                    if bind != STB_GLOBAL && bind != STB_WEAK {
-                        continue;
-                    }
-                    if ty != STT_FUNC && ty != STT_OBJECT && ty != 0 {
-                        continue;
-                    }
-                    if st_name >= str_size || str_off + st_name >= data.len() {
-                        continue;
-                    }
-                    let start = str_off + st_name;
-                    let end = data[start..]
-                        .iter()
-                        .position(|&b| b == 0)
-                        .map(|j| start + j)
-                        .unwrap_or(start);
-                    let name = String::from_utf8_lossy(&data[start..end]).into_owned();
-                    if name.is_empty() {
-                        continue;
-                    }
-                    out.entry(name)
-                        .or_insert(st_value.saturating_add(load_bias));
-                }
+                collect_exported(elf, (sym_off, count, entsz), strtab, load_bias, &mut out);
             }
         }
     }
@@ -809,8 +876,16 @@ fn load_shared_libraries(
     let (needed, bind_now) = parse_dt_needed(main_data);
     let search = lib_search_paths();
 
+    // What is added to a module's link addresses to get where it is: the
+    // base for a position-independent image, nothing for an `ET_EXEC`, whose
+    // addresses are absolute already. The main image's symbols were biased
+    // by its base whichever it was, which offered a non-PIE executable's
+    // exports to its libraries at twice their address.
+    let main_is_dyn = Elf(main_data).u16(16) == Some(ET_DYN);
+    let main_bias = if main_is_dyn { main_base } else { 0 };
+
     let mut loaded_libs = Vec::new();
-    let mut globals = collect_global_symbols(main_data, main_base);
+    let mut globals = collect_global_symbols(main_data, main_bias);
     let mut next_base = SHARED_LIB_BASE_START;
 
     for soname in &needed {
@@ -822,13 +897,17 @@ fn load_shared_libraries(
             .with_context(|| format!("map shared lib {}", host.display()))?;
         let lib_bytes =
             std::fs::read(&host).with_context(|| format!("read shared lib {}", host.display()))?;
-        let lib_globals = collect_global_symbols(&lib_bytes, mapped.base);
+        // `mapped.bias`, not `mapped.base`: a library whose lowest segment
+        // is not at 0 -- a prelinked one -- is mapped at its link addresses,
+        // so its base is non-zero and its bias is zero. Using the base put
+        // every symbol and every relocated slot at twice the address.
+        let lib_globals = collect_global_symbols(&lib_bytes, mapped.bias);
         // Prefer first definition (main then earlier libs).
         for (k, v) in lib_globals {
             globals.entry(k).or_insert(v);
         }
         // Apply RELATIVE inside the library itself.
-        let _ = apply_rela_x86_64(&mut staged_state, &lib_bytes, mapped.base, |name| {
+        let _ = apply_rela_x86_64(&mut staged_state, &lib_bytes, mapped.bias, |name| {
             globals.get(name).copied()
         });
         loaded_libs.push((soname.clone(), mapped.base));
@@ -919,7 +998,11 @@ pub fn install_lazy_got(state: &mut MachineState, table: &PltLazyTable) -> Resul
 
 #[derive(Debug)]
 struct MappedInterp {
+    /// The lowest address the image occupies.
     base: u64,
+    /// What was added to its link addresses to put it there: `base` for an
+    /// image linked at 0, and 0 for one linked at an address of its own.
+    bias: u64,
     entry: u64,
 }
 
@@ -997,8 +1080,6 @@ fn map_interpreter(
         }
         let p_offset = usize::try_from(p_offset).context("interpreter file offset too large")?;
         let p_filesz = usize::try_from(p_filesz).context("interpreter file size too large")?;
-        let p_memsz_usize =
-            usize::try_from(p_memsz).context("interpreter memory size too large")?;
         let file_end = p_offset
             .checked_add(p_filesz)
             .context("interpreter segment file range overflow")?;
@@ -1010,7 +1091,8 @@ fn map_interpreter(
             .context("interpreter segment address overflow")?;
         guest_va
             .checked_add(p_memsz)
-            .context("interpreter segment address overflow")?;
+            .filter(|end| *end <= 1 << 47)
+            .context("interpreter segment does not fit the address space")?;
         let mut page_prot = prot::VALID | prot::READ;
         if p_flags & 2 != 0 {
             page_prot |= prot::WRITE;
@@ -1018,17 +1100,15 @@ fn map_interpreter(
         if p_flags & 1 != 0 {
             page_prot |= prot::EXEC;
         }
-        let mut buf = vec![0u8; p_memsz_usize];
-        if p_filesz > 0 {
-            buf[..p_filesz].copy_from_slice(&data[p_offset..file_end]);
-        }
-        segments.push((guest_va, p_memsz, page_prot, buf));
+        // The file's bytes only: the rest of `p_memsz` is zero without a
+        // host buffer of that size saying so.
+        segments.push((guest_va, p_memsz, page_prot, &data[p_offset..file_end]));
     }
 
     let mut staged = state.clone();
-    for (guest_va, p_memsz, page_prot, buf) in segments {
+    for (guest_va, p_memsz, page_prot, bytes) in segments {
         staged
-            .write_space(state.ram_space(), guest_va, &buf)
+            .load_image_range(guest_va, p_memsz, bytes)
             .with_context(|| format!("map interp segment at 0x{guest_va:X}"))?;
         staged
             .page_map
@@ -1038,6 +1118,7 @@ fn map_interpreter(
 
     Ok(MappedInterp {
         base: if bias != 0 { bias } else { min_vaddr },
+        bias,
         entry: e_entry.saturating_add(bias),
     })
 }
@@ -1089,12 +1170,13 @@ fn section_sym_value(
     is_et_dyn: bool,
 ) -> Option<u64> {
     let (sym_off, sym_size, entsz) = symtab?;
-    let eoff = sym_off.checked_add(r_sym.checked_mul(entsz)?)?;
-    if eoff + 24 > data.len() || eoff + entsz > sym_off + sym_size {
+    let eoff = Elf::entry(sym_off, r_sym, entsz)?;
+    let sym = Elf(data).bytes(eoff, 24)?;
+    if eoff.checked_add(entsz)? > sym_off.checked_add(sym_size)? {
         return None;
     }
-    let section_index = u16::from_le_bytes(data[eoff + 6..eoff + 8].try_into().ok()?);
-    let value = u64::from_le_bytes(data[eoff + 8..eoff + 16].try_into().ok()?);
+    let section_index = u16::from_le_bytes(sym[6..8].try_into().ok()?);
+    let value = u64::from_le_bytes(sym[8..16].try_into().ok()?);
     if section_index == SHN_UNDEF {
         None
     } else if section_index == SHN_ABS {
@@ -1234,43 +1316,42 @@ pub fn apply_rela_x86_64(
         }
     }
 
-    let shoff = u64::from_le_bytes(elf_bytes[40..48].try_into().unwrap()) as usize;
-    let shentsize = u16::from_le_bytes(elf_bytes[58..60].try_into().unwrap()) as usize;
-    let shnum = u16::from_le_bytes(elf_bytes[60..62].try_into().unwrap()) as usize;
+    let elf = Elf(elf_bytes);
+    let shoff = elf.size(40).unwrap_or(0);
+    let shentsize = usize::from(elf.u16(58).unwrap_or(0));
+    let shnum = usize::from(elf.u16(60).unwrap_or(0));
     if shentsize < 64 || shoff == 0 {
         return Ok(stats);
     }
 
     for si in 0..shnum {
-        let soff = shoff + si * shentsize;
-        if soff + 64 > elf_bytes.len() {
+        let Some(header) = Elf::entry(shoff, si, shentsize).and_then(|at| elf.bytes(at, 64)) else {
             break;
-        }
-        let sh_type = u32::from_le_bytes(elf_bytes[soff + 4..soff + 8].try_into().unwrap());
+        };
+        let sh_type = u32::from_le_bytes(header[4..8].try_into().unwrap());
         if sh_type != SHT_RELA {
             continue;
         }
-        let sh_offset =
-            u64::from_le_bytes(elf_bytes[soff + 24..soff + 32].try_into().unwrap()) as usize;
-        let sh_size =
-            u64::from_le_bytes(elf_bytes[soff + 32..soff + 40].try_into().unwrap()) as usize;
-        let sh_link =
-            u32::from_le_bytes(elf_bytes[soff + 40..soff + 44].try_into().unwrap()) as usize;
-        let sh_entsize =
-            u64::from_le_bytes(elf_bytes[soff + 56..soff + 64].try_into().unwrap()) as usize;
+        let field =
+            |at: usize| usize::try_from(u64::from_le_bytes(header[at..at + 8].try_into().unwrap()));
+        let (Ok(sh_offset), Ok(sh_size), Ok(sh_entsize)) = (field(24), field(32), field(56)) else {
+            continue;
+        };
+        let sh_link = u32::from_le_bytes(header[40..44].try_into().unwrap()) as usize;
         let entsz = if sh_entsize > 0 { sh_entsize } else { 24 };
         let count = sh_size / entsz;
 
         let (symtab, strtab) = symtab_strtab(elf_bytes, shoff, shentsize, shnum, sh_link);
 
         for ri in 0..count {
-            let roff = sh_offset + ri * entsz;
-            if roff + 24 > elf_bytes.len() {
+            let Some(relocation) =
+                Elf::entry(sh_offset, ri, entsz).and_then(|at| elf.bytes(at, 24))
+            else {
                 break;
-            }
-            let r_offset = u64::from_le_bytes(elf_bytes[roff..roff + 8].try_into().unwrap());
-            let r_info = u64::from_le_bytes(elf_bytes[roff + 8..roff + 16].try_into().unwrap());
-            let r_addend = i64::from_le_bytes(elf_bytes[roff + 16..roff + 24].try_into().unwrap());
+            };
+            let r_offset = u64::from_le_bytes(relocation[0..8].try_into().unwrap());
+            let r_info = u64::from_le_bytes(relocation[8..16].try_into().unwrap());
+            let r_addend = i64::from_le_bytes(relocation[16..24].try_into().unwrap());
             let r_type = (r_info & 0xffff_ffff) as u32;
             let r_sym = (r_info >> 32) as usize;
             let slot = if is_et_dyn {
@@ -1836,33 +1917,32 @@ fn symtab_strtab(
     if sh_link >= shnum {
         return (None, None);
     }
-    let soff = shoff + sh_link * shentsize;
-    if soff + 64 > data.len() {
+    let elf = Elf(data);
+    let section =
+        |index: usize| Elf::entry(shoff, index, shentsize).and_then(|at| elf.bytes(at, 64));
+    let field = |header: &[u8], at: usize| {
+        usize::try_from(u64::from_le_bytes(header[at..at + 8].try_into().unwrap())).ok()
+    };
+    let Some(header) = section(sh_link) else {
         return (None, None);
-    }
-    let sym_off = u64::from_le_bytes(data[soff + 24..soff + 32].try_into().unwrap()) as usize;
-    let sym_size = u64::from_le_bytes(data[soff + 32..soff + 40].try_into().unwrap()) as usize;
-    let sym_entsize = u64::from_le_bytes(data[soff + 56..soff + 64].try_into().unwrap()) as usize;
-    let str_link = u32::from_le_bytes(data[soff + 40..soff + 44].try_into().unwrap()) as usize;
+    };
+    let (Some(sym_off), Some(sym_size), Some(sym_entsize)) =
+        (field(header, 24), field(header, 32), field(header, 56))
+    else {
+        return (None, None);
+    };
+    let symtab = Some((
+        sym_off,
+        sym_size,
+        if sym_entsize > 0 { sym_entsize } else { 24 },
+    ));
+    let str_link = u32::from_le_bytes(header[40..44].try_into().unwrap()) as usize;
     if str_link >= shnum {
-        return (Some((sym_off, sym_size, sym_entsize.max(24))), None);
+        return (symtab, None);
     }
-    let stroff_hdr = shoff + str_link * shentsize;
-    if stroff_hdr + 64 > data.len() {
-        return (Some((sym_off, sym_size, sym_entsize.max(24))), None);
-    }
-    let str_off =
-        u64::from_le_bytes(data[stroff_hdr + 24..stroff_hdr + 32].try_into().unwrap()) as usize;
-    let str_size =
-        u64::from_le_bytes(data[stroff_hdr + 32..stroff_hdr + 40].try_into().unwrap()) as usize;
-    (
-        Some((
-            sym_off,
-            sym_size,
-            if sym_entsize > 0 { sym_entsize } else { 24 },
-        )),
-        Some((str_off, str_size)),
-    )
+    let strtab =
+        section(str_link).and_then(|strings| Some((field(strings, 24)?, field(strings, 32)?)));
+    (symtab, strtab)
 }
 
 fn sym_name(
@@ -1873,26 +1953,115 @@ fn sym_name(
 ) -> Option<String> {
     let (sym_off, sym_size, entsz) = symtab?;
     let (str_off, str_size) = strtab?;
-    let eoff = sym_off + index * entsz;
-    if eoff + 4 > data.len() || eoff + entsz > sym_off + sym_size {
+    let elf = Elf(data);
+    let eoff = Elf::entry(sym_off, index, entsz)?;
+    if eoff.checked_add(entsz)? > sym_off.checked_add(sym_size)? {
         return None;
     }
-    let st_name = u32::from_le_bytes(data[eoff..eoff + 4].try_into().ok()?) as usize;
-    if st_name >= str_size || str_off + st_name >= data.len() {
+    let st_name = elf.u32(eoff)? as usize;
+    if st_name >= str_size {
         return None;
     }
-    let start = str_off + st_name;
-    let end = data[start..]
-        .iter()
-        .position(|&b| b == 0)
-        .map(|i| start + i)
-        .unwrap_or(data.len().min(start + 256));
-    Some(String::from_utf8_lossy(&data[start..end]).into_owned())
+    let start = str_off.checked_add(st_name)?;
+    elf.cstr(start).or_else(|| {
+        // Unterminated: what the file has from there, at most 256 bytes.
+        let tail = data.get(start..)?;
+        (!tail.is_empty())
+            .then(|| String::from_utf8_lossy(&tail[..tail.len().min(256)]).into_owned())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn testdata(name: &str) -> Vec<u8> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join(name);
+        std::fs::read(path).expect("read fixture")
+    }
+
+    /// An `ET_EXEC`'s symbol values are addresses already. The main image's
+    /// were collected with its base added, whatever its type, so a
+    /// non-PIE executable's own symbols were offered to its libraries at
+    /// twice their address.
+    #[test]
+    fn an_executables_symbols_are_not_biased_by_its_own_base() {
+        let data = testdata("x64_needs_prelinked.elf");
+        let entry = u64::from_le_bytes(data[24..32].try_into().unwrap());
+        let binary = LoadedBinary::from_bytes(data, "fixture".into()).unwrap();
+        let mut state = MachineState::new();
+        let shared = load_shared_libraries(&mut state, &binary).unwrap();
+        assert_eq!(shared.globals.get("_start").copied(), Some(entry));
+    }
+
+    /// Whatever a dynamic image's headers and tables say, reading them is
+    /// not a panic. Each of these offsets holds a file offset, a size, a
+    /// count or an index that the readers used in unchecked arithmetic.
+    #[test]
+    fn corrupt_dynamic_headers_and_tables_are_read_without_panicking() {
+        for name in [
+            "x64_dyn_puts.elf",
+            "x64_dyn_printf_malloc.elf",
+            "x64_needs_prelinked.elf",
+            "aarch64_dyn_import.elf",
+        ] {
+            let original = testdata(name);
+            // The ELF header, the program headers, the section headers and
+            // the dynamic section: every 8-byte field of each.
+            let phoff = u64::from_le_bytes(original[32..40].try_into().unwrap()) as usize;
+            let phnum = u16::from_le_bytes(original[56..58].try_into().unwrap()) as usize;
+            let shoff = u64::from_le_bytes(original[40..48].try_into().unwrap()) as usize;
+            let shnum = u16::from_le_bytes(original[60..62].try_into().unwrap()) as usize;
+            let mut regions = vec![(16, 64), (phoff, phoff + phnum * 56)];
+            if shoff != 0 {
+                regions.push((shoff, shoff + shnum * 64));
+            }
+            for i in 0..phnum {
+                let at = phoff + i * 56;
+                if u32::from_le_bytes(original[at..at + 4].try_into().unwrap()) == PT_DYNAMIC {
+                    let off = u64::from_le_bytes(original[at + 8..at + 16].try_into().unwrap());
+                    let size = u64::from_le_bytes(original[at + 32..at + 40].try_into().unwrap());
+                    regions.push((off as usize, (off + size) as usize));
+                }
+            }
+            let mut tried = 0usize;
+            for (start, end) in regions {
+                for at in (start..end.min(original.len())).step_by(2) {
+                    for width in [2usize, 4, 8] {
+                        if at + width > original.len() {
+                            continue;
+                        }
+                        for fill in [0xFFu8, 0x7F, 0x80] {
+                            let mut data = original.clone();
+                            data[at..at + width].fill(fill);
+                            if width > 1 && fill != 0xFF {
+                                // 0x7FFF.. / 0x8000..: just under and over
+                                // the signed boundary.
+                                data[at..at + width - 1].fill(if fill == 0x7F { 0xFF } else { 0 });
+                            }
+                            tried += 1;
+                            let outcome = std::panic::catch_unwind(|| {
+                                let _ = parse_pt_interp(&data);
+                                let _ = parse_dt_needed(&data);
+                                let _ = collect_global_symbols(&data, 0x1000);
+                                let _ = elf64_has_pt_dynamic(&data);
+                                let mut state = MachineState::new();
+                                let _ = apply_rela_x86_64(&mut state, &data, 0x1000, |_| Some(1));
+                                let _ = apply_rela_aarch64(&mut state, &data, 0x1000, |_| Some(1));
+                            });
+                            assert!(
+                                outcome.is_ok(),
+                                "{name}: {width} bytes of 0x{fill:02X} at file offset 0x{at:X} panicked"
+                            );
+                        }
+                    }
+                }
+            }
+            assert!(tried > 1000, "{name}: the sweep covered {tried} mutations");
+        }
+    }
 
     #[test]
     fn parse_interp_from_dyn_puts_fixture() {

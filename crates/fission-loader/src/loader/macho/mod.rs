@@ -22,11 +22,63 @@ struct MachoSectionRelocInfo {
     nreloc: u32,
 }
 
+/// A section whose entries the indirect symbol table names one by one:
+/// symbol stubs, and lazy or non-lazy symbol pointers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MachoIndirectSection {
+    name: String,
+    address: u64,
+    size: u64,
+    /// Bytes per entry: `reserved2` for stubs, a pointer otherwise.
+    entry_size: u64,
+    /// `reserved1`: where this section's entries start in the table.
+    first_index: u32,
+}
+
+impl MachoIndirectSection {
+    fn of(
+        sectname: &[u8],
+        address: u64,
+        size: u64,
+        flags: u32,
+        reserved1: u32,
+        reserved2: u32,
+        pointer_size: u64,
+    ) -> Option<Self> {
+        const SECTION_TYPE: u32 = 0xff;
+        const S_NON_LAZY_SYMBOL_POINTERS: u32 = 0x6;
+        const S_LAZY_SYMBOL_POINTERS: u32 = 0x7;
+        const S_SYMBOL_STUBS: u32 = 0x8;
+        let entry_size = match flags & SECTION_TYPE {
+            S_NON_LAZY_SYMBOL_POINTERS | S_LAZY_SYMBOL_POINTERS => pointer_size,
+            S_SYMBOL_STUBS => u64::from(reserved2),
+            _ => return None,
+        };
+        (entry_size != 0).then(|| Self {
+            name: extract_fixed_string(sectname),
+            address,
+            size,
+            entry_size,
+            first_index: reserved1,
+        })
+    }
+}
+
 impl MachoLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         // Read Magic
         let bytes = data.as_slice();
         if let Some(slice) = select_fat_slice(bytes) {
+            // A universal file holds thin images. One whose slice is another
+            // universal file would send the loader through itself once per
+            // level, copying the remainder each time: a few thousand nested
+            // 28-byte headers are enough to run out of stack.
+            if is_universal_magic(&bytes[slice.clone()]) {
+                return Err(err!(
+                    loader,
+                    "MalformedHeader: universal Mach-O slice is itself a universal file"
+                ));
+            }
             // Back through the pipeline, not straight back into this loader:
             // a universal file's slices are not all Mach-O. Xcode ships fat
             // `.a`s whose every slice is a Unix archive, and recursing here
@@ -76,6 +128,7 @@ impl MachoLoader {
         // 1-based n_sect -> the address range of an instruction section, `None` otherwise.
         let mut section_code_ranges: Vec<Option<(u64, u64)>> = Vec::new();
         let mut section_relocs = Vec::new();
+        let mut indirect_sections = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let mut entry_point = 0u64;
@@ -92,9 +145,16 @@ impl MachoLoader {
         for _ in 0..header.ncmds {
             let cmd_start = cursor;
             let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
+            let cmd_end = load_command_end(cmd_start, cmd_header.cmdsize, bytes.len())?;
 
             if cmd_header.cmd == LC_SEGMENT_64 {
                 let seg = SegmentCommand64::parse(&reader, cmd_start)?;
+                ensure_sections_fit(
+                    SegmentCommand64::SIZE,
+                    Section64::SIZE,
+                    seg.nsects,
+                    cmd_header.cmdsize,
+                )?;
                 let seg_name = extract_fixed_string(&seg.segname);
 
                 // Use __TEXT segment's vmaddr as image base (most reliable)
@@ -116,6 +176,15 @@ impl MachoLoader {
                     // the same segment. Section instruction flags are the code
                     // ownership signal Ghidra's symbol classifiers rely on.
                     let is_executable = macho_section_has_instructions(sect.flags);
+                    indirect_sections.extend(MachoIndirectSection::of(
+                        &sect.sectname,
+                        sect.addr,
+                        sect.size,
+                        sect.flags,
+                        sect.reserved1,
+                        sect.reserved2,
+                        8,
+                    ));
                     section_code_ranges.push(is_executable.then_some((sect.addr, sect.size)));
                     section_relocs.push(MachoSectionRelocInfo {
                         virtual_address: sect.addr,
@@ -136,7 +205,7 @@ impl MachoLoader {
                     });
                 }
 
-                cursor = cmd_start + cmd_header.cmdsize as usize;
+                cursor = cmd_end;
                 continue;
             } else if cmd_header.cmd == LC_SYMTAB {
                 let symtab = SymtabCommand::parse(&reader, cmd_start)?;
@@ -148,7 +217,7 @@ impl MachoLoader {
                 // Parse LC_MAIN for entry point
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 // entryoff is offset from __TEXT segment start
-                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+                entry_point = macho_entry_point(text_segment_vmaddr, entry_cmd.entryoff)?;
             } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
                 if let Some(thread_entry) =
                     parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
@@ -166,7 +235,7 @@ impl MachoLoader {
             }
 
             // Skip command
-            cursor = cmd_start + cmd_header.cmdsize as usize;
+            cursor = cmd_end;
         }
 
         if image_base == u64::MAX {
@@ -206,20 +275,13 @@ impl MachoLoader {
         // Parse dynamic symbols to get external function imports
         let mut iat_symbols = std::collections::HashMap::new();
         if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
-            // __stubs entry size differs by architecture:
-            // - x86_64: 6 bytes
-            // - arm64: 12 bytes
-            let stub_size = match architecture.processor.as_str() {
-                "AARCH64" => 12u64,
-                _ => 6u64,
-            };
-            Self::parse_dynamic_symbols_64(
+            Self::parse_dynamic_symbols(
                 bytes,
-                &symtab,
                 &dysymtab,
-                &sections_info,
+                symtab.nsyms,
+                &indirect_sections,
                 endian,
-                stub_size,
+                |sym_idx| Self::get_symbol_name(bytes, &symtab, sym_idx, endian),
                 &mut iat_symbols,
                 &mut functions_info,
             );
@@ -296,6 +358,7 @@ impl MachoLoader {
         let mut sections_info = Vec::new();
         let mut section_code_ranges = Vec::new();
         let mut section_relocs = Vec::new();
+        let mut indirect_sections = Vec::new();
         let mut functions_info = Vec::new();
         let mut image_base = u64::MAX;
         let mut entry_point = 0u64;
@@ -307,9 +370,16 @@ impl MachoLoader {
         for _ in 0..header.ncmds {
             let cmd_start = cursor;
             let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
+            let cmd_end = load_command_end(cmd_start, cmd_header.cmdsize, bytes.len())?;
 
             if cmd_header.cmd == LC_SEGMENT {
                 let seg = SegmentCommand32::parse(&reader, cmd_start)?;
+                ensure_sections_fit(
+                    SegmentCommand32::SIZE,
+                    Section32::SIZE,
+                    seg.nsects,
+                    cmd_header.cmdsize,
+                )?;
                 let seg_name = extract_fixed_string(&seg.segname);
                 if seg_name == "__TEXT" && seg.vmaddr != 0 {
                     text_segment_vmaddr = seg.vmaddr as u64;
@@ -320,6 +390,15 @@ impl MachoLoader {
                     let sect = Section32::parse(&reader, section_offset)?;
                     section_offset += Section32::SIZE;
                     let is_executable = macho_section_has_instructions(sect.flags);
+                    indirect_sections.extend(MachoIndirectSection::of(
+                        &sect.sectname,
+                        u64::from(sect.addr),
+                        u64::from(sect.size),
+                        sect.flags,
+                        sect.reserved1,
+                        sect.reserved2,
+                        4,
+                    ));
                     section_code_ranges
                         .push(is_executable.then_some((sect.addr as u64, sect.size as u64)));
                     section_relocs.push(MachoSectionRelocInfo {
@@ -345,7 +424,7 @@ impl MachoLoader {
                 dysymtab_info = Some(DysymtabCommand::parse(&reader, cmd_start)?);
             } else if cmd_header.cmd == LC_MAIN {
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
-                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+                entry_point = macho_entry_point(text_segment_vmaddr, entry_cmd.entryoff)?;
             } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
                 if let Some(thread_entry) =
                     parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
@@ -354,7 +433,7 @@ impl MachoLoader {
                 }
             }
 
-            cursor = cmd_start + cmd_header.cmdsize as usize;
+            cursor = cmd_end;
         }
 
         if image_base == u64::MAX {
@@ -390,12 +469,13 @@ impl MachoLoader {
         }
         let mut iat_symbols = std::collections::HashMap::new();
         if let (Some(symtab), Some(dysymtab)) = (symtab_info, dysymtab_info) {
-            Self::parse_dynamic_symbols_32(
+            Self::parse_dynamic_symbols(
                 bytes,
-                &symtab,
                 &dysymtab,
-                &sections_info,
+                symtab.nsyms,
+                &indirect_sections,
                 endian,
+                |sym_idx| Self::get_symbol_name_32(bytes, &symtab, sym_idx, endian),
                 &mut iat_symbols,
                 &mut functions_info,
             );
@@ -498,28 +578,38 @@ impl MachoLoader {
         }
     }
 
-    fn parse_dynamic_symbols_64(
+    /// Name every entry the indirect symbol table describes: the stubs and
+    /// symbol pointers through which the image reaches imported symbols.
+    ///
+    /// Each such section says where its entries begin in the table
+    /// (`reserved1`) and, for stubs, how wide one is (`reserved2`). The table
+    /// used to be indexed by assumption instead -- stubs at index 0, six or
+    /// twelve bytes each by architecture, the GOT straight after them -- which
+    /// holds for the plainest layouts and misnames every slot otherwise, as in
+    /// an arm64e image, whose `__auth_stubs` and `__auth_got` come first.
+    fn parse_dynamic_symbols(
         data: &[u8],
-        symtab: &SymtabCommand,
         dysymtab: &DysymtabCommand,
-        sections: &[SectionInfo],
+        nsyms: u32,
+        indirect_sections: &[MachoIndirectSection],
         endian: Endian,
-        stub_size: u64,
+        symbol_name: impl Fn(u32) -> String,
         iat_symbols: &mut std::collections::HashMap<u64, String>,
         functions: &mut Vec<FunctionInfo>,
     ) {
-        // Find __stubs and __got sections
-        let stubs_section = sections.iter().find(|s| s.name == "__stubs");
-        let got_section = sections.iter().find(|s| s.name == "__got");
-
         if dysymtab.nindirectsyms == 0 {
             return;
         }
-
         let reader = ByteReader::new(data, endian);
-        let indirect_off = dysymtab.indirectsymoff as u64;
-
-        if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
+        let table = dysymtab.indirectsymoff as u64;
+        let entries_in_table = u64::from(dysymtab.nindirectsyms);
+        let Some(table_end) = (dysymtab.nindirectsyms as usize)
+            .checked_mul(4)
+            .and_then(|bytes| (table as usize).checked_add(bytes))
+        else {
+            return;
+        };
+        if table_end > data.len() {
             return;
         }
 
@@ -529,69 +619,35 @@ impl MachoLoader {
             .map(|f| f.address)
             .collect();
 
-        // Parse __stubs section
-        if let Some(stubs) = stubs_section {
-            let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
-
-            for i in 0..num_stubs {
-                let stub_addr = stubs.virtual_address + (i * stub_size);
-
-                // Read indirect symbol table entry
-                if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
-                    if sym_idx < symtab.nsyms {
-                        let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
-                        if !name.is_empty() {
-                            iat_symbols.insert(stub_addr, name);
-                            if let Some(name) = iat_symbols.get(&stub_addr) {
-                                push_macho_import(
-                                    functions,
-                                    &mut import_addresses,
-                                    stub_addr,
-                                    name.clone(),
-                                    "__stubs",
-                                );
-                            }
-                        }
-                    }
+        for section in indirect_sections {
+            for i in 0..section.size / section.entry_size {
+                let index = u64::from(section.first_index) + i;
+                if index >= entries_in_table {
+                    break;
                 }
-            }
-        }
-
-        // Parse __got section
-        if let Some(got) = got_section {
-            let entry_size = 8; // GOT entry is 8 bytes on 64-bit
-            let num_entries = (got.virtual_size / entry_size).min(dysymtab.nindirectsyms as u64);
-
-            // GOT entries come after stubs in indirect symbol table
-            let stubs_count = if let Some(stubs) = stubs_section {
-                (stubs.virtual_size / stub_size) as u32
-            } else {
-                0
-            };
-
-            for i in 0..num_entries {
-                let got_addr = got.virtual_address + (i * entry_size);
-
-                // Read indirect symbol table entry (offset by stubs count)
-                if let Ok(sym_idx) =
-                    reader.u32((indirect_off + (stubs_count as u64 + i) * 4) as usize)
-                {
-                    if sym_idx < symtab.nsyms {
-                        let name = Self::get_symbol_name(data, symtab, sym_idx, endian);
-                        if !name.is_empty() {
-                            iat_symbols.insert(got_addr, name);
-                            if let Some(name) = iat_symbols.get(&got_addr) {
-                                push_macho_import(
-                                    functions,
-                                    &mut import_addresses,
-                                    got_addr,
-                                    name.clone(),
-                                    "__got",
-                                );
-                            }
-                        }
-                    }
+                let Some(address) = section.address.checked_add(i * section.entry_size) else {
+                    break;
+                };
+                let Ok(sym_idx) = reader.u32((table + index * 4) as usize) else {
+                    break;
+                };
+                // `INDIRECT_SYMBOL_LOCAL` and `INDIRECT_SYMBOL_ABS` are flag
+                // values far above any symbol index: such an entry has no name.
+                if sym_idx >= nsyms {
+                    continue;
                 }
+                let name = symbol_name(sym_idx);
+                if name.is_empty() {
+                    continue;
+                }
+                iat_symbols.insert(address, name.clone());
+                push_macho_import(
+                    functions,
+                    &mut import_addresses,
+                    address,
+                    name,
+                    &section.name,
+                );
             }
         }
     }
@@ -654,87 +710,6 @@ impl MachoLoader {
                     final_name,
                     is_external,
                 );
-            }
-        }
-    }
-
-    fn parse_dynamic_symbols_32(
-        data: &[u8],
-        symtab: &SymtabCommand,
-        dysymtab: &DysymtabCommand,
-        sections: &[SectionInfo],
-        endian: Endian,
-        iat_symbols: &mut std::collections::HashMap<u64, String>,
-        functions: &mut Vec<FunctionInfo>,
-    ) {
-        if dysymtab.nindirectsyms == 0 {
-            return;
-        }
-        let stubs_section = sections.iter().find(|s| s.name == "__stubs");
-        let got_section = sections.iter().find(|s| {
-            matches!(
-                s.name.as_str(),
-                "__got" | "__la_symbol_ptr" | "__nl_symbol_ptr"
-            )
-        });
-        let indirect_off = dysymtab.indirectsymoff as u64;
-        if indirect_off as usize + (dysymtab.nindirectsyms as usize * 4) > data.len() {
-            return;
-        }
-        let reader = ByteReader::new(data, endian);
-        let mut import_addresses: HashSet<u64> = functions
-            .iter()
-            .filter(|f| f.is_import)
-            .map(|f| f.address)
-            .collect();
-
-        if let Some(stubs) = stubs_section {
-            let stub_size = 6u64;
-            let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
-            for i in 0..num_stubs {
-                let stub_addr = stubs.virtual_address + i * stub_size;
-                if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
-                    if sym_idx < symtab.nsyms {
-                        let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
-                        if !name.is_empty() {
-                            iat_symbols.insert(stub_addr, name.clone());
-                            push_macho_import(
-                                functions,
-                                &mut import_addresses,
-                                stub_addr,
-                                name,
-                                "__stubs",
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(got) = got_section {
-            let entry_size = 4u64;
-            let num_entries = (got.virtual_size / entry_size).min(dysymtab.nindirectsyms as u64);
-            let stubs_count = stubs_section
-                .map(|stubs| (stubs.virtual_size / 6) as u32)
-                .unwrap_or(0);
-            for i in 0..num_entries {
-                let got_addr = got.virtual_address + i * entry_size;
-                if let Ok(sym_idx) =
-                    reader.u32((indirect_off + (stubs_count as u64 + i) * 4) as usize)
-                {
-                    if sym_idx < symtab.nsyms {
-                        let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
-                        if !name.is_empty() {
-                            iat_symbols.insert(got_addr, name.clone());
-                            push_macho_import(
-                                functions,
-                                &mut import_addresses,
-                                got_addr,
-                                name,
-                                &got.name,
-                            );
-                        }
-                    }
-                }
             }
         }
     }
@@ -1631,28 +1606,48 @@ fn macho_arch_name(cputype: i32, cpusubtype: i32) -> String {
 /// Empty for a file that is not universal, so a caller can use a non-empty
 /// result as the test for "this file holds more than one architecture".
 pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
+    const FAT_HEADER: usize = 8;
+    const FAT_ARCH: usize = 20;
+
     let mut out = Vec::new();
-    if bytes.len() < 8 {
-        return out;
-    }
-    let Ok(head) = bytes[0..4].try_into() else {
-        return out;
-    };
-    if !matches!(u32::from_be_bytes(head), MACHO_FAT_MAGIC | MACHO_FAT_CIGAM) {
-        return out;
-    }
-    let Ok(count) = bytes[4..8].try_into() else {
+    let Some(magic) = bytes
+        .get(0..4)
+        .and_then(|head| head.try_into().ok())
+        .map(u32::from_be_bytes)
+    else {
         return out;
     };
-    let nfat_arch = u32::from_be_bytes(count) as usize;
-    let mut offset = 8usize;
-    for _ in 0..nfat_arch {
-        if offset + 20 > bytes.len() {
-            break;
-        }
-        let read = |at: usize| -> Option<u32> {
-            bytes[at..at + 4].try_into().ok().map(u32::from_be_bytes)
-        };
+    // The header is big-endian on disk whatever the slices are. `FAT_CIGAM`
+    // is the same header written little-endian: accept it, and then read it
+    // that way -- the magic used to be accepted and the fields still decoded
+    // big-endian, turning `nfat_arch = 1` into sixteen million.
+    let big_endian = match magic {
+        MACHO_FAT_MAGIC => true,
+        MACHO_FAT_CIGAM => false,
+        _ => return out,
+    };
+    let read = |at: usize| -> Option<u32> {
+        let word: [u8; 4] = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
+        Some(if big_endian {
+            u32::from_be_bytes(word)
+        } else {
+            u32::from_le_bytes(word)
+        })
+    };
+    let Some(nfat_arch) = read(4).map(|count| count as usize) else {
+        return out;
+    };
+    // Slices follow the architecture table. One that starts inside it -- at
+    // offset 0 it is the whole file again -- is not a slice, and loading it
+    // sent the loader back into the same bytes until the stack ran out.
+    let Some(table_end) = nfat_arch
+        .checked_mul(FAT_ARCH)
+        .and_then(|table| table.checked_add(FAT_HEADER))
+    else {
+        return out;
+    };
+    for index in 0..nfat_arch {
+        let offset = FAT_HEADER + index * FAT_ARCH;
         let (Some(cputype), Some(cpusubtype), Some(slice_offset), Some(slice_size)) = (
             read(offset),
             read(offset + 4),
@@ -1663,7 +1658,7 @@ pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
         };
         let (cputype, cpusubtype) = (cputype as i32, cpusubtype as i32);
         let (slice_offset, slice_size) = (slice_offset as usize, slice_size as usize);
-        if slice_offset.saturating_add(slice_size) <= bytes.len() {
+        if slice_offset >= table_end && slice_offset.saturating_add(slice_size) <= bytes.len() {
             out.push(UniversalSlice {
                 arch: macho_arch_name(cputype, cpusubtype),
                 cputype,
@@ -1672,7 +1667,6 @@ pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
                 size: slice_size,
             });
         }
-        offset += 20;
     }
     out
 }
@@ -1722,6 +1716,65 @@ fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
         .find_map(|wanted| slices.iter().find(|slice| slice.cputype == *wanted))
         .or_else(|| slices.first())
         .map(|slice| slice.offset..slice.offset + slice.size)
+}
+
+/// Whether `bytes` begin with either byte order of the universal magic.
+fn is_universal_magic(bytes: &[u8]) -> bool {
+    bytes
+        .get(0..4)
+        .and_then(|head| head.try_into().ok())
+        .map(u32::from_be_bytes)
+        .is_some_and(|magic| matches!(magic, MACHO_FAT_MAGIC | MACHO_FAT_CIGAM))
+}
+
+/// The offset just past the load command at `cmd_start`.
+///
+/// `cmdsize` is untrusted. A command shorter than its own eight-byte header
+/// cannot be stepped over -- `cmdsize == 0` leaves the cursor where it is, and
+/// the loader then re-read that command `ncmds` times, up to four billion,
+/// appending a segment's sections again on every pass. One that runs past the
+/// end of the file is not a command either. With both refused, every iteration
+/// advances by at least eight bytes inside the file, which bounds the loop by
+/// the file's length whatever `ncmds` claims.
+fn load_command_end(cmd_start: usize, cmdsize: u32, file_len: usize) -> Result<usize> {
+    const LOAD_COMMAND_HEADER: u32 = 8;
+    let end = cmd_start.checked_add(cmdsize as usize);
+    match end {
+        Some(end) if cmdsize >= LOAD_COMMAND_HEADER && end <= file_len => Ok(end),
+        _ => Err(err!(
+            loader,
+            "MalformedHeader: Mach-O load command at {cmd_start:#x} has size {cmdsize}"
+        )),
+    }
+}
+
+/// A segment command's section headers lie inside the command.
+fn ensure_sections_fit(
+    segment_size: usize,
+    section_size: usize,
+    nsects: u32,
+    cmdsize: u32,
+) -> Result<()> {
+    let needed = (nsects as usize)
+        .checked_mul(section_size)
+        .and_then(|sections| sections.checked_add(segment_size));
+    match needed {
+        Some(needed) if needed <= cmdsize as usize => Ok(()),
+        _ => Err(err!(
+            loader,
+            "MalformedHeader: Mach-O segment claims {nsects} sections in a {cmdsize}-byte command"
+        )),
+    }
+}
+
+/// `LC_MAIN`'s entry point: an offset from the start of `__TEXT`.
+fn macho_entry_point(text_vmaddr: u64, entryoff: u64) -> Result<u64> {
+    text_vmaddr.checked_add(entryoff).ok_or_else(|| {
+        err!(
+            loader,
+            "MalformedHeader: Mach-O entry offset {entryoff:#x} is outside the address space"
+        )
+    })
 }
 
 fn decode_macho_function_starts(fs_data: &[u8], base_addr: u64) -> Vec<u64> {
@@ -1863,6 +1916,34 @@ mod universal_tests {
         assert_eq!(
             decode_macho_function_starts(&truncated, 0x100000000),
             vec![0x100000010]
+        );
+    }
+
+    #[test]
+    fn indirect_sections_are_recognised_by_type_and_sized_by_their_header() {
+        use crate::loader::macho::MachoIndirectSection;
+
+        let name = b"__auth_stubs\0\0\0\0";
+        // S_SYMBOL_STUBS with attribute bits set, 16-byte stubs from index 4.
+        let stubs = MachoIndirectSection::of(name, 0x1000, 0x40, 0x8000_0408, 4, 16, 8)
+            .expect("stubs are indirect");
+        assert_eq!(stubs.name, "__auth_stubs");
+        assert_eq!((stubs.entry_size, stubs.first_index), (16, 4));
+        // Symbol pointers are one pointer wide, whatever `reserved2` holds.
+        for section_type in [0x6, 0x7] {
+            let wide = MachoIndirectSection::of(b"__got", 0, 16, section_type, 9, 0, 8).unwrap();
+            assert_eq!((wide.entry_size, wide.first_index), (8, 9));
+            let narrow = MachoIndirectSection::of(b"__got", 0, 16, section_type, 9, 0, 4).unwrap();
+            assert_eq!(narrow.entry_size, 4);
+        }
+        // Ordinary sections, and stubs that claim no width, name nothing.
+        assert_eq!(
+            MachoIndirectSection::of(b"__text", 0, 16, 0x8000_0400, 0, 0, 8),
+            None
+        );
+        assert_eq!(
+            MachoIndirectSection::of(b"__stubs", 0, 16, 0x8, 0, 0, 8),
+            None
         );
     }
 }

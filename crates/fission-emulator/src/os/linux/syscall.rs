@@ -13,10 +13,10 @@
 
 use crate::core::Emulator;
 use crate::os::env::HleResult;
-use crate::os::linux::abi::TargetStat;
+use crate::os::linux::abi::{StatLayout, TargetStat};
 use crate::os::linux::libc::read_string;
 use crate::os::procedure::SimProcedure;
-use crate::pcode::page_map::{page_align_down, page_align_up, prot};
+use crate::pcode::page_map::{page_align_up, prot};
 use anyhow::Result;
 
 fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
@@ -24,9 +24,73 @@ fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
     emu.state.write_space(ram, addr, data)
 }
 
+/// Lay `stat` out the way the `stat`-family syscall in progress reports it
+/// on this guest, and store it.
+fn write_stat(emu: &mut Emulator, statbuf: u64, stat: &TargetStat) -> Result<()> {
+    let number = emu.raw_syscall_number();
+    let layout = StatLayout::for_syscall(&emu.arch, number);
+    ram_write(emu, statbuf, &stat.to_bytes(layout))
+}
+
+/// A pointer-sized little-endian word of guest memory, or 0 where it cannot
+/// be read.
+fn read_word(emu: &mut Emulator, addr: u64) -> u64 {
+    let width = usize::from(emu.arch.pointer_size).min(8);
+    let mut raw = [0u8; 8];
+    if let Ok(bytes) = ram_read(emu, addr, width) {
+        raw[..width].copy_from_slice(&bytes);
+    }
+    u64::from_le_bytes(raw)
+}
+
 fn ram_read(emu: &mut Emulator, addr: u64, size: usize) -> Result<Vec<u8>> {
     let ram = emu.state.ram_space();
     emu.state.read_space(ram, addr, size)
+}
+
+/// The most one `read` or `write` transfers, as on Linux (`MAX_RW_COUNT`): a
+/// larger count is not an error, it is simply not all honoured.
+const MAX_RW_COUNT: u64 = 0x7FFF_F000;
+
+/// How much of a guest buffer is held on the host at a time while it is
+/// being transferred.
+const IO_CHUNK: usize = 1 << 20;
+
+const EFAULT: i64 = 14;
+
+/// `write(fd, buf, count)` for whatever of `buf` the guest can read.
+///
+/// The count is the guest's. Linux transfers what is readable from `buf` on
+/// and stops at the first page that is not -- `EFAULT` only when that is the
+/// very first -- so a count of `(size_t)-1` over a five-byte buffer writes
+/// five bytes. Reading `count` bytes into one host buffer first is neither
+/// that nor safe.
+pub(crate) fn write_from_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -> i64 {
+    let count = count.min(MAX_RW_COUNT) as usize;
+    let readable = emu.state.readable_len(buf, count);
+    if count > 0 && readable == 0 {
+        return -EFAULT;
+    }
+    let mut written = 0usize;
+    while written < readable {
+        let want = (readable - written).min(IO_CHUNK);
+        let Ok(data) = ram_read(emu, buf.wrapping_add(written as u64), want) else {
+            break;
+        };
+        match emu.guest_write(fd, &data) {
+            Ok(n) => {
+                written += n;
+                if n < want {
+                    break;
+                }
+            }
+            // Nothing transferred yet: the error is the answer. Otherwise the
+            // bytes that went are, and the error is the next call's.
+            Err(error) if written == 0 => return -error.errno(),
+            Err(_) => break,
+        }
+    }
+    written as i64
 }
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
@@ -75,15 +139,8 @@ impl SimProcedure for SysWrite {
 
         tracing::info!("sys_write({}, 0x{:X}, {})", fd, buf, count);
 
-        let data = ram_read(emu, buf, count as usize).unwrap_or_default();
-        match emu.guest_write(fd, &data) {
-            Ok(written) => {
-                emu.set_syscall_return(written as u64)?;
-            }
-            Err(_) => {
-                emu.set_syscall_return((-1i64) as u64)?;
-            }
-        }
+        let result = write_from_guest(emu, fd, buf, count);
+        emu.set_syscall_return(result as u64)?;
         Ok(HleResult::Continue)
     }
 }
@@ -189,12 +246,12 @@ impl SimProcedure for SysFstat {
             let mut target_st = TargetStat::default();
             target_st.st_size = file.content.len() as i64;
             target_st.st_mode = 0x81B4;
-            ram_write(emu, statbuf, &target_st.to_bytes())?;
+            write_stat(emu, statbuf, &target_st)?;
             emu.set_syscall_return(0)?;
         } else if fd <= 2 {
             let mut target_st = TargetStat::default();
             target_st.st_mode = 0x2180; // char device-ish for stdio
-            ram_write(emu, statbuf, &target_st.to_bytes())?;
+            write_stat(emu, statbuf, &target_st)?;
             emu.set_syscall_return(0)?;
         } else {
             emu.set_syscall_return((-1i64) as u64)?;
@@ -224,7 +281,7 @@ impl SimProcedure for SysNewfstatat {
             target_st.st_size = content.len() as i64;
             target_st.st_blocks = (content.len() as i64 + 511) / 512;
         }
-        ram_write(emu, statbuf, &target_st.to_bytes())?;
+        write_stat(emu, statbuf, &target_st)?;
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
@@ -268,31 +325,41 @@ impl SimProcedure for SysLseek {
 pub struct SysWritev;
 impl SimProcedure for SysWritev {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // writev(fd, iov, iovcnt) — iovec is {void* base; size_t len}
+        // writev(fd, iov, iovcnt). `struct iovec` is two pointer-sized words,
+        // `{ void *base; size_t len; }`: 16 bytes on a 64-bit guest and 8 on
+        // a 32-bit one. It was read as 16 everywhere, which on a 32-bit guest
+        // turns each pair of entries into one whose pointer is a pointer and
+        // a length glued together.
         let fd = emu.syscall_arg(0);
         let iov = emu.syscall_arg(1);
-        let iovcnt = emu.syscall_arg(2) as usize;
-        let mut total = 0usize;
-        for i in 0..iovcnt.min(64) {
-            let base_off = iov + (i as u64) * 16;
-            let base = u64::from_le_bytes(
-                ram_read(emu, base_off, 8)
-                    .unwrap_or_else(|_| vec![0; 8])
-                    .try_into()
-                    .unwrap_or([0; 8]),
-            );
-            let len = u64::from_le_bytes(
-                ram_read(emu, base_off + 8, 8)
-                    .unwrap_or_else(|_| vec![0; 8])
-                    .try_into()
-                    .unwrap_or([0; 8]),
-            ) as usize;
+        let iovcnt = emu.syscall_arg(2);
+        // Linux: more than IOV_MAX entries is EINVAL.
+        const IOV_MAX: u64 = 1024;
+        if iovcnt > IOV_MAX {
+            emu.set_syscall_return((-22i64) as u64)?;
+            return Ok(HleResult::Continue);
+        }
+        let word = u64::from(emu.arch.pointer_size);
+        let mut total = 0i64;
+        for i in 0..iovcnt {
+            let entry = iov.wrapping_add(i * 2 * word);
+            let base = read_word(emu, entry);
+            let len = read_word(emu, entry.wrapping_add(word));
             if len == 0 {
                 continue;
             }
-            let data = ram_read(emu, base, len).unwrap_or_default();
-            if let Ok(n) = emu.guest_write(fd, &data) {
-                total += n;
+            let written = write_from_guest(emu, fd, base, len);
+            if written < 0 {
+                // An error before anything was written is the result;
+                // after, what was written is.
+                if total == 0 {
+                    total = written;
+                }
+                break;
+            }
+            total += written;
+            if (written as u64) < len {
+                break;
             }
         }
         tracing::info!("sys_writev({}, iovcnt={}) -> {}", fd, iovcnt, total);
@@ -313,6 +380,36 @@ impl SimProcedure for SysAccess {
 }
 
 // ── Memory ───────────────────────────────────────────────────────────────────
+
+/// What a new mapping at `base` holds: zeros, then -- for a file-backed one
+/// -- the file's bytes from `offset` on.
+///
+/// The whole of it, whatever was there before and whatever it may now be
+/// used for. This wrote zeros into the first megabyte only, and through the
+/// guest's own protection check: a mapping longer than that kept the bytes
+/// of whatever had been mapped there earlier (a `malloc` that trusts fresh
+/// pages to be zero then returns somebody else's data), and one made without
+/// `PROT_WRITE` was not filled at all -- not even with its file.
+pub(crate) fn fill_new_mapping(
+    emu: &mut Emulator,
+    base: u64,
+    length: u64,
+    file: Option<(u64, usize)>,
+) {
+    let len = page_align_up(length.max(1));
+    // Whatever was translated from these pages is not what they hold now.
+    emu.jit_cache.invalidate_range(base, len);
+    emu.state.zero_range(base, len);
+    let Some((fd, offset)) = file else { return };
+    let want = usize::try_from(length).unwrap_or(usize::MAX);
+    let data = match emu.vfs.file_bytes(fd, offset, want) {
+        Ok(bytes) => bytes.to_vec(),
+        Err(_) => return,
+    };
+    if !data.is_empty() {
+        let _ = emu.state.write_ram_unprotected(base, &data);
+    }
+}
 
 pub struct SysMmap;
 impl SimProcedure for SysMmap {
@@ -347,29 +444,12 @@ impl SimProcedure for SysMmap {
             return Ok(HleResult::Continue);
         }
 
-        let len = page_align_up(length.max(1));
-        // File-backed mmap: copy from VFS fd when not MAP_ANONYMOUS.
-        if !map_anon && fd >= 0 {
-            let want = length.max(1) as usize;
-            match emu.vfs.peek(fd as u64, offset, want) {
-                Ok(data) => {
-                    let _ = ram_write(emu, base, &data);
-                }
-                Err(_) => {
-                    let fill = len.min(0x10_0000) as usize;
-                    if fill > 0 {
-                        let zeros = vec![0u8; fill];
-                        let _ = ram_write(emu, base, &zeros);
-                    }
-                }
-            }
-        } else {
-            let fill = len.min(0x10_0000) as usize;
-            if fill > 0 {
-                let zeros = vec![0u8; fill];
-                let _ = ram_write(emu, base, &zeros);
-            }
-        }
+        fill_new_mapping(
+            emu,
+            base,
+            length,
+            (!map_anon && fd >= 0).then_some((fd as u64, offset)),
+        );
 
         emu.set_syscall_return(base)?;
         tracing::info!(
@@ -400,12 +480,7 @@ impl SimProcedure for SysMprotect {
                 .page_map
                 .mprotect_checked(addr, len.max(1), prot_bits & 0x07 | prot::VALID);
         if ok {
-            let mut page = page_align_down(addr);
-            let end = page_align_up(addr.saturating_add(len.max(1)));
-            while page < end {
-                emu.jit_cache.invalidate_page(page);
-                page = page.saturating_add(0x1000);
-            }
+            emu.jit_cache.invalidate_range(addr, len.max(1));
             tracing::info!(
                 "sys_mprotect(0x{:X}, {}, 0x{:X}) -> 0",
                 addr,
@@ -433,12 +508,7 @@ impl SimProcedure for SysMunmap {
         let addr = emu.syscall_arg(0);
         let len = emu.syscall_arg(1);
         emu.state.page_map.unmap_region(addr, len);
-        let mut page = page_align_down(addr);
-        let end = page_align_up(addr.saturating_add(len.max(1)));
-        while page < end {
-            emu.jit_cache.invalidate_page(page);
-            page = page.saturating_add(0x1000);
-        }
+        emu.jit_cache.invalidate_range(addr, len.max(1));
         tracing::info!("sys_munmap(0x{:X}, {})", addr, len);
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)

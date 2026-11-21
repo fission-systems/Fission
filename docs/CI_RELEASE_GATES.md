@@ -70,7 +70,7 @@ nightly or manual dispatch on candidate ref ──► L1 Heavy
 
 **Does not cover:**
 
-- Full fission-benchmark docker corpus or Pages promotion
+- The DecBench measurement (see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)) or Pages promotion
 - Official semantic leaderboard / `release_promotion_allowed` dashboard claims
   (still manual / evaluation path in [`docs/RELEASE.md`](RELEASE.md) § quality)
 
@@ -130,8 +130,7 @@ A nightly run is sufficient when the candidate has not moved since it ran.
   Windows release tests are on L1).
 - Fast Gate no longer performs separate macOS/Windows CLI release builds on `main`;
   those release builds remain in L1 Heavy while L0 keeps the macOS test smoke signal.
-- `reusable-run-tests` runs multi-package nextest in **one** cargo process and
-  skips webkit/GTK sysdeps unless GUI packages are required.
+- `reusable-run-tests` runs multi-package nextest in **one** cargo process.
 - **sccache** (GitHub Actions backend) on lint / test / CLI build reusables via
   [`.github/actions/setup-sccache`](../.github/actions/setup-sccache).
 - Rust PRs use Cargo package metadata to select the changed crates and their

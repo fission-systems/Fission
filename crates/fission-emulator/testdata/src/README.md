@@ -70,3 +70,32 @@ Fission. Build it with LLVM:
 clang --target=x86_64-linux-gnu -c linux_hle_guard.S -o /tmp/linux_hle_guard.o
 ld.lld -shared -e _start --build-id=none -o ../linux_hle_guard.elf /tmp/linux_hle_guard.o
 ```
+
+## Linux guest ABI fixtures
+
+`linux_x86_32_abi.S` is a libc-free i386 Linux guest: `writev` with two
+8-byte `struct iovec`s, then `fstat64` into a 96-byte `struct stat64` with a
+guard word after it, both through `int 0x80`.
+
+```sh
+zig cc -target x86-linux-musl -static -nostdlib -fno-pie -no-pie \
+  -Wl,-e,_start -Wl,--build-id=none -o ../linux_x86_32_abi.elf \
+  linux_x86_32_abi.S
+```
+
+`x64_prelinked_lib.c` is a shared object linked at `0x7000000` (its lowest
+`PT_LOAD` is not at 0, as a prelinked library's is), and
+`x64_needs_prelinked.S` a guest that depends on it and exits with
+`answer() + (*answer_ptr)()`, i.e. 84 when both were bound where the library
+is mapped. Build the library first; the guest links against it.
+
+```sh
+zig cc -target x86_64-linux-musl -shared -nostdlib -Os -Wl,--build-id=none \
+  -Wl,-soname,x64_prelinked_lib.so -Wl,-T,x64_prelinked_lib.ld \
+  -o ../x64_prelinked_lib.so x64_prelinked_lib.c
+zig cc -target x86_64-linux-musl -nostdlib -Wl,-e,_start -Wl,--build-id=none \
+  -Wl,-z,now -Wl,--export-dynamic -o ../x64_needs_prelinked.elf \
+  x64_needs_prelinked.S ../x64_prelinked_lib.so
+```
+
+All three run only inside Fission's emulator.

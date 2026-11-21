@@ -99,12 +99,23 @@ fn demangle_without_swift(name: &str) -> String {
 /// Only forms Swift alone produces count. A bare `_T` / `__T` prefix does not:
 /// it begins ordinary C and C++ symbols (`_Tree_insert`, `_TIFFOpen`), and
 /// every such symbol sent the loader to run the external `swift` tool.
-/// What is accepted: `$s`/`$S` (Swift 4.1+, with Mach-O's extra underscore),
+/// What is accepted: `$s`/`$S` (Swift 4.1+, with or without Mach-O's extra
+/// underscore -- ELF and COFF symbols have none),
 /// `_T0` (Swift 4.0) and `_Tt[CPVOS]` (Swift 3 type names, as Objective-C
 /// bridging emits them), each with Mach-O's optional extra underscore.
 fn is_swift_symbol(name: &str) -> bool {
-    if name.starts_with("_$s") || name.starts_with("_$S") {
-        return true;
+    // `$s`/`$S`, with or without Mach-O's extra underscore: ELF and COFF carry
+    // the bare form, as do names already stripped of the underscore.
+    let unprefixed = name.strip_prefix('_').unwrap_or(name);
+    if let Some(mangled) = unprefixed
+        .strip_prefix("$s")
+        .or_else(|| unprefixed.strip_prefix("$S"))
+    {
+        // Something must follow: `$s` alone is not a mangled name.
+        return mangled
+            .bytes()
+            .next()
+            .is_some_and(|first| first.is_ascii_alphanumeric());
     }
     let Some(rest) = name.strip_prefix("__T").or_else(|| name.strip_prefix("_T")) else {
         return false;
@@ -182,6 +193,10 @@ mod tests {
         for swift in [
             "_$s4main3fooyyF",
             "_$S4main3fooyyF",
+            // The same names as an ELF or COFF symbol table carries them.
+            "$s4main3fooyyF",
+            "$S4main3fooyyF",
+            "$sSS5countSivg",
             "_T04main3FooC",
             "__T04main3FooC",
             "_TtC4main3Foo",
@@ -192,6 +207,11 @@ mod tests {
             assert!(is_swift_symbol(swift), "{swift}");
         }
         for not_swift in [
+            "$s",
+            "_$s",
+            "$",
+            "$d",
+            "$x.1",
             "_Tree_insert",
             "_TIFFOpen",
             "_Thread_local_x",

@@ -194,6 +194,30 @@ pub struct SatSolver {
     conflicts_since_gc: u32,
     /// GC fires when conflicts_since_gc >= gc_threshold; threshold grows after each GC.
     gc_threshold: u32,
+    /// Conflicts one search may spend before it gives up without a verdict.
+    conflict_budget: Option<u64>,
+    /// Conflicts between restarts are `RESTART_UNIT` times the Luby
+    /// sequence; `None` turns restarts off.
+    restart_unit: Option<u64>,
+}
+
+/// Conflicts per Luby unit. MiniSat's default.
+const RESTART_UNIT: u64 = 100;
+
+/// The `i`-th term (from 0) of the Luby sequence 1, 1, 2, 1, 1, 2, 4, 1, ...
+fn luby(mut i: u64) -> u64 {
+    // Find the finite subsequence that contains index `i`, and its size.
+    let (mut size, mut seq) = (1u64, 0u32);
+    while size < i + 1 {
+        seq += 1;
+        size = 2 * size + 1;
+    }
+    while size - 1 != i {
+        size = (size - 1) >> 1;
+        seq -= 1;
+        i %= size;
+    }
+    1u64 << seq
 }
 
 impl Default for SatSolver {
@@ -223,6 +247,8 @@ impl SatSolver {
             clause_meta: vec![],
             conflicts_since_gc: 0,
             gc_threshold: 100,
+            conflict_budget: None,
+            restart_unit: Some(RESTART_UNIT),
         }
     }
 
@@ -725,17 +751,74 @@ impl SatSolver {
         true
     }
 
+    /// Solve without a conflict budget: always a verdict.
     pub fn solve_with_assumptions(
+        &mut self,
+        theory: Option<&mut dyn crate::theory::Theory>,
+        assumptions: &[Lit],
+    ) -> bool {
+        self.solve_with_remaining_budget(theory, assumptions, &mut None)
+            .expect("a search without a budget ends in a verdict")
+    }
+
+    /// Stop a search after this many conflicts and report no verdict.
+    /// `None`, the default, searches until there is one.
+    ///
+    /// Counted in conflicts, not seconds, so that the same problem gets the
+    /// same answer on a loaded machine.
+    pub fn set_conflict_budget(&mut self, budget: Option<u64>) {
+        self.conflict_budget = budget;
+    }
+
+    pub(crate) fn conflict_budget(&self) -> Option<u64> {
+        self.conflict_budget
+    }
+
+    /// Restart every `unit` times the Luby sequence in conflicts; `None`
+    /// never restarts. On by default, at [`RESTART_UNIT`].
+    pub fn set_restart_unit(&mut self, unit: Option<u64>) {
+        self.restart_unit = unit.filter(|&unit| unit > 0);
+    }
+
+    /// Solve under `assumptions`: `Some(true)` with a model, `Some(false)`
+    /// when there is none, and `None` when the conflict budget ran out first.
+    ///
+    /// Giving up leaves the solver usable: the trail is unwound to level 0
+    /// and the clauses learned so far stay, each implied by the clause set.
+    pub fn solve_limited(
+        &mut self,
+        theory: Option<&mut dyn crate::theory::Theory>,
+        assumptions: &[Lit],
+    ) -> Option<bool> {
+        let mut remaining = self.conflict_budget;
+        self.solve_with_remaining_budget(theory, assumptions, &mut remaining)
+    }
+
+    /// Charge search conflicts against a budget shared by the caller's refinements.
+    pub(crate) fn solve_with_remaining_budget(
         &mut self,
         mut theory: Option<&mut dyn crate::theory::Theory>,
         assumptions: &[Lit],
-    ) -> bool {
+        remaining: &mut Option<u64>,
+    ) -> Option<bool> {
         if !self.ok {
-            return false;
+            return Some(false);
         }
         if !self.restore_assumptions(assumptions) {
-            return false;
+            return Some(false);
         }
+        // Conflicts in this search, for the restart schedule; the budget
+        // is charged separately, against `remaining`.
+        let mut conflicts: u64 = 0;
+        // Restarts: give up the current decisions -- never the assumptions,
+        // which sit at levels `1..=assumptions.len()` -- every so many
+        // conflicts. Learned clauses, activities and saved phases stay, so
+        // the search resumes near where it was, minus the early decisions
+        // that conflict analysis has since learned were bad. There were none
+        // before, and a satisfiable problem whose first decisions went wrong
+        // could spend its whole budget below them.
+        let mut restarts: u64 = 0;
+        let mut next_restart = self.restart_unit.map(|unit| unit * luby(0));
 
         loop {
             let confl_opt = self.propagate();
@@ -753,11 +836,11 @@ impl SatSolver {
                             // then replay every query assumption before resuming search.
                             for clause in lemmas {
                                 if !self.add_clause(clause) {
-                                    return false;
+                                    return Some(false);
                                 }
                             }
                             if !self.restore_assumptions(assumptions) {
-                                return false;
+                                return Some(false);
                             }
                             continue;
                         }
@@ -768,7 +851,15 @@ impl SatSolver {
             if let Some(confl) = confl_opt {
                 // Conflict
                 if self.decision_level() <= assumptions.len() as u32 {
-                    return false; // Root or assumption level conflict -> UNSAT
+                    return Some(false); // Root or assumption level conflict -> UNSAT
+                }
+                conflicts += 1;
+                if let Some(remaining) = remaining {
+                    if *remaining == 0 {
+                        self.cancel_until(0);
+                        return None;
+                    }
+                    *remaining -= 1;
                 }
 
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
@@ -785,10 +876,10 @@ impl SatSolver {
                     self.cancel_until(0);
                     if !self.enqueue(learned_clause[0], None) || self.propagate().is_some() {
                         self.ok = false;
-                        return false;
+                        return Some(false);
                     }
                     if !assumptions.is_empty() && !self.restore_assumptions(assumptions) {
-                        return false;
+                        return Some(false);
                     }
                 } else {
                     // Do not backtrack past assumptions.
@@ -835,7 +926,7 @@ impl SatSolver {
 
                     // BCP will flip the asserting literal.
                     if !self.enqueue(lit0, Some(c_idx)) {
-                        return false;
+                        return Some(false);
                     }
                 }
 
@@ -844,13 +935,21 @@ impl SatSolver {
                     self.gc_learned();
                 }
             } else {
+                if next_restart.is_some_and(|at| conflicts >= at) {
+                    restarts += 1;
+                    next_restart = self
+                        .restart_unit
+                        .map(|unit| conflicts + unit * luby(restarts));
+                    self.cancel_until(assumptions.len() as u32);
+                    continue;
+                }
                 // No conflict, make a decision
                 if let Some(next_lit) = self.pick_branch_lit() {
                     self.trail_lim.push(self.trail.len());
                     self.enqueue(next_lit, None);
                 } else {
                     // All variables assigned -> SAT!
-                    return true;
+                    return Some(true);
                 }
             }
         }
@@ -860,6 +959,12 @@ impl SatSolver {
 #[cfg(test)]
 mod retention_regressions {
     use super::*;
+
+    #[test]
+    fn the_luby_sequence_is_the_luby_sequence() {
+        let first: Vec<u64> = (0..15).map(luby).collect();
+        assert_eq!(first, [1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8]);
+    }
 
     #[test]
     fn garbage_collection_keeps_every_glue_clause() {
@@ -909,6 +1014,34 @@ mod retention_regressions {
             sat.clause_meta.iter().flatten().any(|m| m.lbd == 3),
             "the first learned clause spans three decision levels"
         );
+    }
+
+    #[test]
+    fn successive_searches_charge_the_same_remaining_budget() {
+        let one_conflict = || {
+            let mut sat = SatSolver::new();
+            let a = Lit::new(1, false);
+            let b = Lit::new(2, false);
+            sat.add_clause(vec![a, b]);
+            sat.add_clause(vec![a, b.not()]);
+            sat.var_bump_activity(1);
+            sat
+        };
+
+        let mut remaining = Some(1);
+        let mut first = one_conflict();
+        assert_eq!(
+            first.solve_with_remaining_budget(None, &[], &mut remaining),
+            Some(true)
+        );
+        assert_eq!(remaining, Some(0));
+
+        let mut second = one_conflict();
+        assert_eq!(
+            second.solve_with_remaining_budget(None, &[], &mut remaining),
+            None
+        );
+        assert!(second.solve());
     }
 
     #[test]

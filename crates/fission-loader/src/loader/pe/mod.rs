@@ -120,6 +120,27 @@ mod symbol_type {
     pub const DT_FCN: u16 = 2;
 }
 
+/// Address space a PE or TE image needs above its base.
+///
+/// Every RVA, section extent and table index in these formats is a 32-bit
+/// quantity, and the loader forms `image_base + rva (+ size)` in dozens of
+/// places. Refusing an image whose base leaves less than this much room makes
+/// all of those sums exact, rather than checking each one. Real images sit far
+/// below the limit: user-mode bases are under 2^47, and Windows kernel images
+/// load around `0xFFFFF800_00000000`, eight terabytes short of the top.
+const IMAGE_BASE_HEADROOM: u64 = 1 << 34;
+
+/// Refuse an image base so high that `image_base + rva` can wrap.
+pub(in crate::loader) fn ensure_image_base_is_mappable(image_base: u64) -> Result<()> {
+    if image_base > u64::MAX - IMAGE_BASE_HEADROOM {
+        return Err(err!(
+            loader,
+            "MalformedHeader: image base {image_base:#x} leaves no address space for the image"
+        ));
+    }
+    Ok(())
+}
+
 impl PeLoader {
     pub fn parse(data: DataBuffer, path: String) -> Result<LoadedBinary> {
         let main_started = std::time::Instant::now();
@@ -138,13 +159,15 @@ impl PeLoader {
             PeOptionalHeader::Pe32Plus(_) => true,
         };
 
-        let (image_base, entry_point, _section_alignment) = match &pe_file.optional_header {
+        let (image_base, entry_rva, _section_alignment) = match &pe_file.optional_header {
             PeOptionalHeader::Pe32(opt) | PeOptionalHeader::Pe32Plus(opt) => (
                 opt.image_base,
-                opt.image_base + opt.address_of_entry_point as u64,
+                opt.address_of_entry_point,
                 opt.section_alignment,
             ),
         };
+        ensure_image_base_is_mappable(image_base)?;
+        let entry_point = image_base + u64::from(entry_rva);
 
         let spec_started = std::time::Instant::now();
         let (architecture, load_spec) =
@@ -820,7 +843,13 @@ impl<'a> PeLoaderImpl<'a> {
     fn read_coff_symbol(&self, offset: u64) -> Result<CoffSymbol> {
         let name_bytes = self.reader().slice(offset as usize, 8)?;
         let name = if name_bytes[0..4] == [0, 0, 0, 0] {
-            SymbolName::LongName(u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()))
+            // An offset into the string table, whose first four bytes are its
+            // size. One inside the size names nothing, and the symbol is left
+            // unnamed rather than named after the size's bytes.
+            match u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()) {
+                0..4 => SymbolName::ShortName(String::new()),
+                offset => SymbolName::LongName(offset),
+            }
         } else {
             let len = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
             SymbolName::ShortName(String::from_utf8_lossy(&name_bytes[..len]).to_string())
@@ -844,8 +873,11 @@ impl<'a> PeLoaderImpl<'a> {
             let section_rva = (section_va - image_base) as u32;
             let section_size = section.virtual_size as u32;
 
-            // Check if RVA is within this section
-            if rva >= section_rva && rva < section_rva + section_size {
+            // Check if RVA is within this section. The end is formed in 64
+            // bits: `VirtualAddress + VirtualSize` is free to exceed 2^32.
+            if rva >= section_rva
+                && u64::from(rva) < u64::from(section_rva) + u64::from(section_size)
+            {
                 let delta = rva - section_rva;
                 if u64::from(delta) >= section.file_size {
                     return None;
@@ -948,6 +980,17 @@ impl<'a> PeLoaderImpl<'a> {
                     if name_rva == 0 || func_idx >= function_count {
                         continue;
                     }
+                    // A name RVA that maps nowhere used to fall back to file
+                    // offset 0 and name the export after the DOS header
+                    // (`MZ\u{90}`). Such an entry has no name: leave it to the
+                    // ordinal pass below, as an export with no name entry is.
+                    let Some(name) = self
+                        .rva_to_file_offset(name_rva, image_base)
+                        .map(|name_offset| self.read_string_at(name_offset))
+                        .filter(|name| !name.is_empty())
+                    else {
+                        continue;
+                    };
                     named.insert(func_idx);
                     let func_rva = self
                         .read_u32(funcs_offset + u64::from(func_idx) * 4)
@@ -955,8 +998,6 @@ impl<'a> PeLoaderImpl<'a> {
                     if func_rva == 0 || is_forwarder(func_rva) {
                         continue;
                     }
-                    let name_offset = self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
-                    let name = self.read_string_at(name_offset);
                     push_export(self, name, func_rva);
                 }
             }
@@ -1799,6 +1840,35 @@ mod tests {
         );
     }
 
+    /// A COFF symbol whose name field is zero in its first four bytes names
+    /// its string at that offset in the string table, whose first four bytes
+    /// are the table's size. An offset below 4 points into the size: the
+    /// symbol has no name, and it used to be named after those bytes.
+    #[test]
+    fn a_coff_symbol_name_inside_the_string_table_size_is_no_name() {
+        let symbol = |offset: u32| {
+            let mut data = vec![0u8; 18];
+            data[4..8].copy_from_slice(&offset.to_le_bytes());
+            data
+        };
+        let name_of = |data: &[u8]| {
+            let loader = PeLoaderImpl {
+                data,
+                sections: &[],
+                is_64bit: true,
+                language_id: "x86:LE:64:default".to_string(),
+            };
+            loader.read_coff_symbol(0).expect("symbol").name
+        };
+        for offset in 0..4 {
+            assert!(
+                matches!(name_of(&symbol(offset)), SymbolName::ShortName(ref n) if n.is_empty()),
+                "offset {offset}"
+            );
+        }
+        assert!(matches!(name_of(&symbol(4)), SymbolName::LongName(4)));
+    }
+
     /// An image with one section mapping RVA 0x1000.. to file offset 0x200..
     /// and an export directory at RVA 0x1000 (size 0x100).
     fn export_fixture(
@@ -1868,6 +1938,24 @@ mod tests {
                 ("Named".to_string(), 0x1_4000_2000),
                 // ordinal base 5 + index 2
                 ("Ordinal_7".to_string(), 0x1_4000_2100),
+            ]
+        );
+    }
+
+    /// A name RVA outside every section: the lookup fell back to file offset
+    /// 0, so the export was named after the DOS header's `MZ` signature.
+    #[test]
+    fn an_export_whose_name_is_not_in_the_image_is_known_by_its_ordinal() {
+        let (mut data, sections) =
+            export_fixture(1, &[0x2000, 0x2010], &[("Good", 0), ("Lost", 1)]);
+        data[0..3].copy_from_slice(b"MZ\x90");
+        // Second entry of the name-pointer table (RVA 0x1060 -> file 0x260).
+        data[0x264..0x268].copy_from_slice(&0x0009_0000u32.to_le_bytes());
+        assert_eq!(
+            exports_of(&data, &sections),
+            vec![
+                ("Good".to_string(), 0x1_4000_2000),
+                ("Ordinal_2".to_string(), 0x1_4000_2010),
             ]
         );
     }

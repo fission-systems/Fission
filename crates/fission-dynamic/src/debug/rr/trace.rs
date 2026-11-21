@@ -422,7 +422,7 @@ impl RRDebugger {
                 // Update RIP/position from 'frame' or 'when' if present
                 if let Some(MiValue::Const(when)) = results.get("when") {
                     if let Ok(pos) = when.parse::<u64>() {
-                        self.current_position = pos;
+                        self.note_position(pos);
                     }
                 }
 
@@ -433,6 +433,17 @@ impl RRDebugger {
             }
             _ => {}
         }
+    }
+
+    /// Record where the replay now stands.
+    ///
+    /// rr does not report a trace's length over GDB/MI, so the end of the
+    /// timeline is the furthest position this session has stood at. It was
+    /// never set at all, which left `timeline_range` empty and `step_count`
+    /// zero however far a replay had gone.
+    fn note_position(&mut self, position: u64) {
+        self.current_position = position;
+        self.max_position = self.max_position.max(position);
     }
 
     /// Detect target architecture from GDB session
@@ -569,7 +580,7 @@ impl TimeTravelDebugger for RRDebugger {
         // Fetch registers after seek
         let _reg_resp = self.send_command("-data-list-register-values x")?;
 
-        self.current_position = position;
+        self.note_position(position);
 
         Ok(ExecutionSnapshot::new(
             position,
@@ -860,6 +871,35 @@ mod tests {
         assert!(response_ends_read(&result_with_token(None, "done"), 5));
         // An error for this command ends it too.
         assert!(response_ends_read(&result_with_token(Some(5), "error"), 5));
+    }
+
+    fn stopped_at(when: &str) -> MiResponse {
+        let mut results = HashMap::new();
+        results.insert("when".to_string(), MiValue::Const(when.to_string()));
+        MiResponse::ExecAsync {
+            token: None,
+            class: "stopped".to_string(),
+            results,
+        }
+    }
+
+    #[test]
+    fn the_timeline_reaches_as_far_as_the_replay_has_been() {
+        let mut rr = RRDebugger::new();
+        rr.state = RRState::Replaying;
+        // Nothing seen yet: there is no range to report.
+        assert_eq!(rr.timeline_range(), None);
+        assert_eq!(rr.step_count(), 0);
+
+        rr.process_response_state(&stopped_at("42"));
+        assert_eq!(rr.current_position(), Some(42));
+        assert_eq!(rr.timeline_range(), Some((0, 42)));
+        assert_eq!(rr.step_count(), 42);
+
+        // Going back moves the position, not the end of what was seen.
+        rr.process_response_state(&stopped_at("7"));
+        assert_eq!(rr.current_position(), Some(7));
+        assert_eq!(rr.timeline_range(), Some((0, 42)));
     }
 
     #[test]

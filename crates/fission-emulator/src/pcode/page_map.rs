@@ -10,7 +10,6 @@
 //! - surface executable-page writes for SMC (JIT cache invalidation)
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 /// Page protection bits (same shape as POSIX PROT_* / QEMU PAGE_*).
 pub mod prot {
@@ -98,12 +97,19 @@ impl GuestMapping {
     }
 }
 
-/// Sparse page flag table + region inventory for user-mode guest address space.
+/// The guest's virtual memory map for user-mode: which ranges exist and what
+/// may be done to them.
+///
+/// The mappings *are* the page table. There used to be a second one beside
+/// them -- a map from every page's address to its flags -- so that mapping a
+/// range cost an entry per page: a guest `mmap` of a terabyte, which a kernel
+/// answers by writing down one interval, asked the host for a quarter of a
+/// billion tree nodes. The two tables also had to be kept in agreement by
+/// hand, and had already disagreed once.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PageMap {
-    /// Page base address → protection flags (must include VALID when mapped).
-    flags: BTreeMap<u64, u8>,
-    /// Ordered list of mappings (non-overlapping, coalesced where possible).
+    /// Ordered, non-overlapping, page-aligned mappings, coalesced where
+    /// neighbours agree. A page's flags are its mapping's `prot`.
     mappings: Vec<GuestMapping>,
     /// Next address hint for anonymous `mmap` without a fixed base.
     pub mmap_hint: u64,
@@ -124,7 +130,6 @@ impl Default for PageMap {
 impl PageMap {
     pub fn new() -> Self {
         Self {
-            flags: BTreeMap::new(),
             mappings: Vec::new(),
             // High enough to avoid typical ELF load ranges; still below stack.
             mmap_hint: 0x0000_0000_6000_0000,
@@ -159,6 +164,72 @@ impl PageMap {
         self.brk = aligned;
     }
 
+    /// The mapping that holds `addr`.
+    fn mapping_at(&self, addr: u64) -> Option<&GuestMapping> {
+        let index = self.mappings.partition_point(|m| m.end <= addr);
+        self.mappings.get(index).filter(|m| m.start <= addr)
+    }
+
+    /// The mappings that overlap `[start, end)`, as an index range.
+    fn overlapping(&self, start: u64, end: u64) -> std::ops::Range<usize> {
+        let lo = self.mappings.partition_point(|m| m.end <= start);
+        let hi = self.mappings.partition_point(|m| m.start < end);
+        lo..hi.max(lo)
+    }
+
+    /// Whether every page of `[start, end)` is mapped.
+    fn covers(&self, start: u64, end: u64) -> bool {
+        let mut at = start;
+        while at < end {
+            match self.mapping_at(at) {
+                Some(m) => at = m.end,
+                None => return false,
+            }
+        }
+        true
+    }
+
+    /// Rewrite what lies in the page-aligned `[start, end)`: each overlapped
+    /// mapping keeps the parts of itself outside the range, and `inside`
+    /// says what becomes of the part within it (nothing, when it is `None`).
+    fn rewrite_range(
+        &mut self,
+        start: u64,
+        end: u64,
+        inside: impl Fn(&GuestMapping) -> Option<(u8, bool)>,
+    ) {
+        let range = self.overlapping(start, end);
+        let mut pieces = Vec::with_capacity(range.len() + 2);
+        for m in &self.mappings[range.clone()] {
+            if m.start < start {
+                pieces.push(GuestMapping {
+                    start: m.start,
+                    end: start,
+                    prot: m.prot,
+                    anon: m.anon,
+                });
+            }
+            if let Some((prot, anon)) = inside(m) {
+                pieces.push(GuestMapping {
+                    start: m.start.max(start),
+                    end: m.end.min(end),
+                    prot,
+                    anon,
+                });
+            }
+            if m.end > end {
+                pieces.push(GuestMapping {
+                    start: end,
+                    end: m.end,
+                    prot: m.prot,
+                    anon: m.anon,
+                });
+            }
+        }
+        self.mappings.splice(range, pieces);
+        self.coalesce_mappings();
+    }
+
     /// Map `[start, start+len)` with the given protection. Overlapping pages
     /// are replaced while unaffected portions of partially overlapped
     /// mappings are preserved.
@@ -175,6 +246,10 @@ impl PageMap {
         let end_addr = start.saturating_add(len);
         let start = page_align_down(start);
         let end = page_align_up(end_addr);
+        if start >= end {
+            // Entirely inside the top page, which has no boundary above it.
+            return;
+        }
         page_prot |= prot::VALID;
         if anon {
             page_prot |= prot::ANON;
@@ -184,43 +259,17 @@ impl PageMap {
             page_prot |= prot::WRITE_ORG;
         }
 
-        let mut page = start;
-        while page < end {
-            self.flags.insert(page, page_prot);
-            page += PAGE_SIZE;
-        }
-
-        let mut next = Vec::with_capacity(self.mappings.len() + 2);
-        for mapping in self.mappings.drain(..) {
-            if mapping.end <= start || mapping.start >= end {
-                next.push(mapping);
-                continue;
-            }
-            if mapping.start < start {
-                next.push(GuestMapping {
-                    start: mapping.start,
-                    end: start,
-                    prot: mapping.prot,
-                    anon: mapping.anon,
-                });
-            }
-            if mapping.end > end {
-                next.push(GuestMapping {
-                    start: end,
-                    end: mapping.end,
-                    prot: mapping.prot,
-                    anon: mapping.anon,
-                });
-            }
-        }
-        self.mappings = next;
-        self.mappings.push(GuestMapping {
-            start,
-            end,
-            prot: page_prot,
-            anon,
-        });
-        self.mappings.sort_by_key(|m| m.start);
+        self.rewrite_range(start, end, |_| None);
+        let at = self.mappings.partition_point(|m| m.start < start);
+        self.mappings.insert(
+            at,
+            GuestMapping {
+                start,
+                end,
+                prot: page_prot,
+                anon,
+            },
+        );
         self.coalesce_mappings();
     }
 
@@ -232,37 +281,7 @@ impl PageMap {
         let end_addr = start.saturating_add(len);
         let start = page_align_down(start);
         let end = page_align_up(end_addr);
-        let mut page = start;
-        while page < end {
-            self.flags.remove(&page);
-            page += PAGE_SIZE;
-        }
-        // Split / trim overlapping mappings.
-        let mut next = Vec::new();
-        for m in self.mappings.drain(..) {
-            if m.end <= start || m.start >= end {
-                next.push(m);
-                continue;
-            }
-            if m.start < start {
-                next.push(GuestMapping {
-                    start: m.start,
-                    end: start,
-                    prot: m.prot,
-                    anon: m.anon,
-                });
-            }
-            if m.end > end {
-                next.push(GuestMapping {
-                    start: end,
-                    end: m.end,
-                    prot: m.prot,
-                    anon: m.anon,
-                });
-            }
-        }
-        self.mappings = next;
-        self.mappings.sort_by_key(|m| m.start);
+        self.rewrite_range(start, end, |_| None);
     }
 
     pub fn mprotect(&mut self, start: u64, len: u64, new_prot: u8) {
@@ -283,62 +302,21 @@ impl PageMap {
             new_prot |= prot::WRITE_ORG;
         }
         // Fail if any page is unmapped — do not partially apply.
-        let mut page = start;
-        while page < end {
-            if !self.flags.get(&page).is_some_and(|f| *f & prot::VALID != 0) {
-                return false;
-            }
-            page += PAGE_SIZE;
+        if !self.covers(start, end) {
+            return false;
         }
-        page = start;
-        while page < end {
-            if let Some(f) = self.flags.get_mut(&page) {
-                let anon = *f & prot::ANON;
-                *f = new_prot | anon;
-            }
-            page += PAGE_SIZE;
-        }
-        // Keep the mapping list in step with the page flags. A mapping that
-        // only partly overlaps the range is split, as `map_region` and
-        // `unmap_region` do, so the part outside the range keeps its old
-        // protection and the part inside takes the new one.
-        let mut next = Vec::with_capacity(self.mappings.len() + 2);
-        for m in self.mappings.drain(..) {
-            if m.end <= start || m.start >= end {
-                next.push(m);
-                continue;
-            }
-            if m.start < start {
-                next.push(GuestMapping {
-                    start: m.start,
-                    end: start,
-                    prot: m.prot,
-                    anon: m.anon,
-                });
-            }
-            next.push(GuestMapping {
-                start: m.start.max(start),
-                end: m.end.min(end),
-                prot: new_prot | if m.anon { prot::ANON } else { 0 },
-                anon: m.anon,
-            });
-            if m.end > end {
-                next.push(GuestMapping {
-                    start: end,
-                    end: m.end,
-                    prot: m.prot,
-                    anon: m.anon,
-                });
-            }
-        }
-        self.mappings = next;
-        self.mappings.sort_by_key(|m| m.start);
-        self.coalesce_mappings();
+        // A mapping that only partly overlaps the range is split, so the part
+        // outside keeps its old protection and the part inside takes the new
+        // one. Whether a page is anonymous is not something `mprotect`
+        // changes.
+        self.rewrite_range(start, end, |m| {
+            Some((new_prot | (m.prot & prot::ANON), m.anon))
+        });
         true
     }
 
     pub fn page_flags(&self, addr: u64) -> Option<u8> {
-        self.flags.get(&page_align_down(addr)).copied()
+        self.mapping_at(addr).map(|m| m.prot)
     }
 
     pub fn is_mapped(&self, addr: u64) -> bool {
@@ -346,7 +324,12 @@ impl PageMap {
     }
 
     pub fn check_access(&self, addr: u64, kind: AccessKind) -> Result<(), PageFault> {
-        match self.page_flags(addr) {
+        Self::permit(self.page_flags(addr), addr, kind)
+    }
+
+    /// Whether a page with these flags (`None`: no page) allows `kind`.
+    fn permit(flags: Option<u8>, addr: u64, kind: AccessKind) -> Result<(), PageFault> {
+        match flags {
             None => Err(PageFault::NotMapped { addr, kind }),
             Some(f) if f & prot::VALID == 0 => Err(PageFault::NotMapped { addr, kind }),
             Some(f) if f & kind.required_prot() == 0 => Err(PageFault::Prot {
@@ -359,21 +342,23 @@ impl PageMap {
     }
 
     /// Check every byte of a multi-byte access.
+    ///
+    /// A mapping at a time, so the cost is in how many mappings the range
+    /// crosses and not in how long it is: the length is the guest's to choose.
     pub fn check_range(&self, addr: u64, size: usize, kind: AccessKind) -> Result<(), PageFault> {
         if size == 0 {
             return Ok(());
         }
-        let end = addr.saturating_add(size as u64 - 1);
-        let mut page = page_align_down(addr);
-        let last = page_align_down(end);
-        while page <= last {
-            self.check_access(page, kind)?;
-            if page == last {
-                break;
+        let last = addr.saturating_add(size as u64 - 1);
+        let mut at = page_align_down(addr);
+        loop {
+            let mapping = self.mapping_at(at);
+            Self::permit(mapping.map(|m| m.prot), at, kind)?;
+            match mapping {
+                Some(m) if last >= m.end => at = m.end,
+                _ => return Ok(()),
             }
-            page = page.saturating_add(PAGE_SIZE);
         }
-        Ok(())
     }
 
     /// Calculate the contiguous readable byte count starting at `addr`, up to `max_len`.
@@ -382,45 +367,42 @@ impl PageMap {
     /// and returns the number of contiguous readable bytes before the first unmapped
     /// or unreadable page boundary, capped at `max_len`.
     pub fn readable_extent(&self, addr: u64, max_len: usize) -> usize {
-        if max_len == 0 {
-            return 0;
+        let mut at = addr;
+        let mut available = 0u64;
+        while available < max_len as u64 && self.check_access(at, AccessKind::Read).is_ok() {
+            let Some(m) = self.mapping_at(at) else { break };
+            available = available.saturating_add(m.end - at);
+            at = m.end;
         }
-        let mut page = page_align_down(addr);
-        if self.check_access(page, AccessKind::Read).is_err() {
-            return 0;
-        }
-        // Bytes available in the initial page from `addr` to page end
-        let page_offset = (addr - page) as usize;
-        let mut available = (PAGE_SIZE as usize).saturating_sub(page_offset);
-        if available >= max_len {
-            return max_len;
-        }
-        loop {
-            let next_page = page.saturating_add(PAGE_SIZE);
-            if next_page == page || self.check_access(next_page, AccessKind::Read).is_err() {
-                break;
-            }
-            page = next_page;
-            available = available.saturating_add(PAGE_SIZE as usize);
-            if available >= max_len {
-                return max_len;
-            }
-        }
-        available.min(max_len)
+        available.min(max_len as u64) as usize
     }
 
     /// Whether no page of `[start, start + len)` is mapped.
     pub fn range_is_free(&self, start: u64, len: u64) -> bool {
         let first = page_align_down(start);
         let end = page_align_up(start.saturating_add(len.max(1)));
-        let mut page = first;
-        while page < end {
-            if self.flags.get(&page).is_some_and(|f| *f & prot::VALID != 0) {
-                return false;
-            }
-            page += PAGE_SIZE;
+        self.overlapping(first, end).is_empty()
+    }
+
+    /// The parts of `[start, start + len)` (page-rounded) that no mapping
+    /// covers, as `(start, length)` pairs in address order.
+    pub fn unmapped_ranges(&self, start: u64, len: u64) -> Vec<(u64, u64)> {
+        let mut gaps = Vec::new();
+        if len == 0 {
+            return gaps;
         }
-        true
+        let end = page_align_up(start.saturating_add(len));
+        let mut at = page_align_down(start);
+        for m in &self.mappings[self.overlapping(at, end)] {
+            if m.start > at {
+                gaps.push((at, m.start - at));
+            }
+            at = m.end;
+        }
+        if at < end {
+            gaps.push((at, end - at));
+        }
+        gaps
     }
 
     /// `mmap`'s placement rule. With `MAP_FIXED` the range is mapped exactly
@@ -519,8 +501,9 @@ impl PageMap {
         if request == 0 {
             return self.brk;
         }
-        // Failure: cannot move below heap base — return current break.
-        if request < self.brk_base {
+        // Failure: cannot move below heap base, or past the end of the
+        // address space — return current break.
+        if request < self.brk_base || request > self.max_address() {
             return self.brk;
         }
         let old_brk = self.brk;
@@ -555,19 +538,11 @@ impl PageMap {
         if size == 0 {
             return false;
         }
-        let end = addr.saturating_add(size as u64 - 1);
-        let mut page = page_align_down(addr);
-        let last = page_align_down(end);
-        while page <= last {
-            if self.page_flags(page).is_some_and(|f| f & prot::EXEC != 0) {
-                return true;
-            }
-            if page == last {
-                break;
-            }
-            page = page.saturating_add(PAGE_SIZE);
-        }
-        false
+        let last = addr.saturating_add(size as u64 - 1);
+        let range = self.overlapping(page_align_down(addr), last.saturating_add(1));
+        self.mappings[range]
+            .iter()
+            .any(|m| m.prot & prot::EXEC != 0)
     }
 
     /// Collect distinct page bases in a write range that currently have EXEC.
@@ -576,24 +551,25 @@ impl PageMap {
         if size == 0 {
             return out;
         }
-        let end = addr.saturating_add(size as u64 - 1);
-        let mut page = page_align_down(addr);
-        let last = page_align_down(end);
-        while page <= last {
-            if self.page_flags(page).is_some_and(|f| f & prot::EXEC != 0) {
+        let first = page_align_down(addr);
+        let last = page_align_down(addr.saturating_add(size as u64 - 1));
+        let range = self.overlapping(first, last.saturating_add(1));
+        for m in &self.mappings[range] {
+            if m.prot & prot::EXEC == 0 {
+                continue;
+            }
+            let mut page = m.start.max(first);
+            while page < m.end && page <= last {
                 out.push(page);
+                page += PAGE_SIZE;
             }
-            if page == last {
-                break;
-            }
-            page = page.saturating_add(PAGE_SIZE);
         }
         out
     }
 
     fn region_free(&self, start: u64, len: u64) -> bool {
-        let end = start.saturating_add(len);
-        !self.mappings.iter().any(|m| m.start < end && m.end > start)
+        self.overlapping(start, start.saturating_add(len))
+            .is_empty()
     }
 
     fn coalesce_mappings(&mut self) {
@@ -644,6 +620,61 @@ mod tests {
             0
         );
         assert_eq!(pm.mmap_anon(u64::MAX, prot::RW), 0);
+    }
+
+    /// Mapping, checking, re-protecting and unmapping a range cost what the
+    /// number of mappings costs, not what its length does. With a table
+    /// entry per page each of these walked the range -- here, a quarter of a
+    /// billion pages -- and the first of them allocated as it went.
+    #[test]
+    fn a_terabyte_mapping_is_one_entry_and_is_checked_without_walking_it() {
+        const BASE: u64 = 0x1_0000_0000;
+        const LEN: u64 = 1 << 40;
+        let mut pm = PageMap::new();
+        pm.map_region(BASE, LEN, prot::RW, true);
+        assert_eq!(pm.mappings().len(), 1);
+        assert!(
+            pm.check_range(BASE, usize::MAX >> 24, AccessKind::Write)
+                .is_ok()
+        );
+        assert!(
+            pm.check_range(BASE + 1, LEN as usize, AccessKind::Read)
+                .is_err()
+        );
+        assert_eq!(pm.readable_extent(BASE + 5, usize::MAX), LEN as usize - 5);
+        assert!(!pm.range_is_free(0, u64::MAX));
+        assert!(!pm.range_has_exec(0, usize::MAX));
+
+        assert!(pm.mprotect_checked(BASE + 0x1000, LEN - 0x2000, prot::READ));
+        assert_eq!(pm.mappings().len(), 3);
+        assert!(pm.check_access(BASE, AccessKind::Write).is_ok());
+        assert!(
+            pm.check_access(BASE + (LEN >> 1), AccessKind::Write)
+                .is_err()
+        );
+        assert!(pm.check_access(BASE + LEN - 1, AccessKind::Write).is_ok());
+        assert!(!pm.mprotect_checked(BASE, LEN + 0x1000, prot::READ));
+
+        assert_eq!(
+            pm.unmapped_ranges(BASE - 0x2000, LEN + 0x3000),
+            vec![(BASE - 0x2000, 0x2000), (BASE + LEN, 0x1000)]
+        );
+        pm.unmap_region(0, u64::MAX);
+        assert!(pm.mappings().is_empty());
+        assert!(pm.range_is_free(BASE, LEN));
+    }
+
+    /// The break does not move past the end of the address space.
+    #[test]
+    fn brk_beyond_the_address_space_fails_closed() {
+        let mut pm = PageMap::new();
+        pm.set_brk_base(0x5000_0000);
+        assert_eq!(pm.set_brk(1 << 60), 0x5000_0000);
+        assert_eq!(pm.set_brk(pm.max_address() + 1), 0x5000_0000);
+        assert!(pm.mappings().is_empty());
+        // Positive control: a large break inside it is granted.
+        assert_eq!(pm.set_brk(0x50_0000_0000), 0x50_0000_0000);
+        assert_eq!(pm.mappings().len(), 1);
     }
 
     #[test]

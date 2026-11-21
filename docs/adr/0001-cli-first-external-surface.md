@@ -1,7 +1,7 @@
 # ADR 0001: CLI-first external surface
 
 **Status:** Accepted  
-**Last verified:** 2026-05-02
+**Last verified:** 2026-11-21
 
 ## Context
 
@@ -15,4 +15,11 @@ Treat **`fission_cli`** as the **primary supported external product surface** wh
 
 - Contract tests and release gates emphasize CLI behavior and JSON outputs.
 - Crate-level semver for unpublished internals is secondary to CLI semver ([`docs/VERSIONING.md`](../VERSIONING.md)).
-- Desktop (`fission-tauri`) builds on the same pipeline assumptions but does not redefine semantic contracts.
+- ~~Desktop (`fission-tauri`) builds on the same pipeline assumptions but does not redefine semantic contracts.~~
+
+## Update (2026-11-21)
+
+The desktop app and the TUI have since been removed: Fission is agent-first, and
+the CLI with its JSON contract is the only product surface
+([`docs/roadmap/1.0-criteria.md`](../roadmap/1.0-criteria.md)). The decision above
+stands, with no second surface left to keep consistent with it.

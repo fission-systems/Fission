@@ -101,6 +101,17 @@ impl Drop for ProtectGuard {
     }
 }
 
+/// A step that executes the instruction under a breakpoint with the
+/// breakpoint lifted. Its single-step exception puts the `INT3` back.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StepOffBreakpoint {
+    pub(crate) thread_id: u32,
+    pub(crate) address: u64,
+    /// The caller asked for one step: report it. Otherwise the step only
+    /// clears the way for a `continue`, and execution goes on.
+    pub(crate) report: bool,
+}
+
 /// Windows debugger implementation
 pub struct WindowsDebugger {
     /// Current debug state
@@ -120,6 +131,8 @@ pub struct WindowsDebugger {
     pub(crate) pending_continue_status: Option<NTSTATUS>,
     /// Active hardware breakpoints: address → DR slot index (0-3).
     pub(crate) hw_breakpoints: std::collections::BTreeMap<u64, u8>,
+    /// A step off a breakpoint whose single-step exception has not arrived.
+    pub(crate) step_off: Option<StepOffBreakpoint>,
     #[cfg(test)]
     pub(crate) test_memory: Option<std::collections::BTreeMap<u64, u8>>,
 }
@@ -138,6 +151,7 @@ impl WindowsDebugger {
             is_wow64: None,
             pending_continue_status: None,
             hw_breakpoints: std::collections::BTreeMap::new(),
+            step_off: None,
             #[cfg(test)]
             test_memory: None,
         }
@@ -505,12 +519,30 @@ impl WindowsDebugger {
                     } else {
                         // User breakpoint or step-over temp BP
                         self.state.status = DebugStatus::Suspended;
-                        // Clean up temporary breakpoints
-                        if let Some(bp) = self.state.breakpoints.get(&address) {
+                        let ours = self
+                            .state
+                            .breakpoints
+                            .get(&address)
+                            .filter(|bp| {
+                                bp.enabled
+                                    && bp.kind == crate::debug::types::BreakpointKind::Software
+                            })
+                            .cloned();
+                        if let Some(bp) = ours {
+                            // `ExceptionAddress` is the INT3; the thread's
+                            // instruction pointer is already one byte past it.
+                            // Resuming from there runs the replaced
+                            // instruction from its second byte.
+                            if let Err(error) = self.set_thread_pc(thread_id, address) {
+                                self.state.last_event = Some(format!(
+                                    "Could not move thread {thread_id} back onto the breakpoint at 0x{address:x}: {error}"
+                                ));
+                            }
                             if bp.temporary {
-                                let orig = bp.original_byte;
-                                let _ = self.write_memory(address, &[orig]);
+                                let _ = self.write_memory(address, &[bp.original_byte]);
                                 self.state.breakpoints.remove(&address);
+                            } else if let Some(bp) = self.state.breakpoints.get_mut(&address) {
+                                bp.hits = bp.hits.saturating_add(1);
                             }
                         }
                         self.state.last_event =
@@ -524,6 +556,19 @@ impl WindowsDebugger {
                         )
                     }
                 } else if code_raw == EXCEPTION_SINGLE_STEP_CODE {
+                    // The step off a breakpoint ended: the breakpoint goes back.
+                    let stepped_off = self.step_off.filter(|step| step.thread_id == thread_id);
+                    if let Some(step) = stepped_off {
+                        self.step_off = None;
+                        let still_set =
+                            self.state.breakpoints.get(&step.address).is_some_and(|bp| {
+                                bp.enabled
+                                    && bp.kind == crate::debug::types::BreakpointKind::Software
+                            });
+                        if still_set {
+                            let _ = self.write_memory(step.address, &[0xCC]);
+                        }
+                    }
                     // Hardware breakpoints also raise STATUS_SINGLE_STEP; inspect Dr6.
                     if let Some(hw_addr) = self.check_hw_breakpoint_hit(thread_id) {
                         self.state.status = DebugStatus::Suspended;
@@ -536,6 +581,11 @@ impl WindowsDebugger {
                             }),
                             DBG_CONTINUE,
                         )
+                    } else if stepped_off.is_some_and(|step| !step.report) {
+                        // Only the way past a breakpoint for a `continue`:
+                        // nothing to report, and the target runs on.
+                        self.state.status = DebugStatus::Running;
+                        (None, DBG_CONTINUE)
                     } else {
                         self.state.status = DebugStatus::Suspended;
                         self.state.last_event =
@@ -1210,6 +1260,190 @@ impl ExecutionBackend for WindowsDebugger {
 mod tests {
     use super::*;
     use crate::debug::types::DebugEvent;
+
+    fn exception_event(thread_id: u32, code: u32, address: u64) -> DEBUG_EVENT {
+        let mut event = DEBUG_EVENT::default();
+        event.dwProcessId = 1234;
+        event.dwThreadId = thread_id;
+        event.dwDebugEventCode = EXCEPTION_DEBUG_EVENT;
+        event.u.Exception.ExceptionRecord.ExceptionCode = NTSTATUS(code as i32);
+        event.u.Exception.ExceptionRecord.ExceptionAddress = address as *mut c_void;
+        event.u.Exception.dwFirstChance = 1;
+        event
+    }
+
+    /// A debugger past its system breakpoint, with a persistent breakpoint
+    /// at 0x401000 in its test memory.
+    fn debugger_with_breakpoint() -> WindowsDebugger {
+        let mut dbg = WindowsDebugger::new();
+        dbg.state.attached_pid = Some(1234);
+        dbg.state.system_breakpoint_consumed = true;
+        dbg.set_test_memory(0x401000, &[0x55, 0x48, 0x89, 0xE5]);
+        dbg.set_sw_breakpoint(0x401000).expect("set breakpoint");
+        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0xCC]);
+        dbg
+    }
+
+    #[test]
+    fn a_persistent_breakpoint_stays_armed_and_counts_its_hit() {
+        let mut dbg = debugger_with_breakpoint();
+        let (event, _) =
+            dbg.process_debug_event(&exception_event(7, EXCEPTION_BREAKPOINT_CODE, 0x401000));
+        assert!(matches!(
+            event,
+            Some(DebugEvent::BreakpointHit {
+                address: 0x401000,
+                thread_id: 7
+            })
+        ));
+        let bp = &dbg.state.breakpoints[&0x401000];
+        assert_eq!(bp.hits, 1);
+        assert_eq!(bp.original_byte, 0x55);
+        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0xCC]);
+    }
+
+    #[test]
+    fn the_step_off_a_breakpoint_re_arms_it_and_reports_only_when_asked() {
+        for report in [false, true] {
+            let mut dbg = debugger_with_breakpoint();
+            // Lifted for the step, as `step_off_breakpoint` leaves it.
+            dbg.write_memory(0x401000, &[0x55]).unwrap();
+            dbg.step_off = Some(StepOffBreakpoint {
+                thread_id: 7,
+                address: 0x401000,
+                report,
+            });
+            let (event, _) =
+                dbg.process_debug_event(&exception_event(7, EXCEPTION_SINGLE_STEP_CODE, 0x401001));
+            assert_eq!(
+                dbg.read_memory(0x401000, 1).unwrap(),
+                [0xCC],
+                "the breakpoint is back (report = {report})"
+            );
+            assert!(dbg.step_off.is_none());
+            if report {
+                assert!(matches!(
+                    event,
+                    Some(DebugEvent::SingleStep { thread_id: 7 })
+                ));
+                assert_eq!(dbg.state.status, DebugStatus::Suspended);
+            } else {
+                assert!(
+                    event.is_none(),
+                    "a continue's step is not an event: {event:?}"
+                );
+                assert_eq!(dbg.state.status, DebugStatus::Running);
+            }
+        }
+    }
+
+    #[test]
+    fn a_single_step_of_another_thread_does_not_finish_the_step_off() {
+        let mut dbg = debugger_with_breakpoint();
+        dbg.write_memory(0x401000, &[0x55]).unwrap();
+        dbg.step_off = Some(StepOffBreakpoint {
+            thread_id: 7,
+            address: 0x401000,
+            report: false,
+        });
+        let (event, _) =
+            dbg.process_debug_event(&exception_event(9, EXCEPTION_SINGLE_STEP_CODE, 0x500000));
+        assert!(matches!(
+            event,
+            Some(DebugEvent::SingleStep { thread_id: 9 })
+        ));
+        assert!(dbg.step_off.is_some(), "thread 7's step is still pending");
+        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0x55]);
+    }
+
+    /// The address of `ntdll!NtTerminateProcess` in the debuggee, from its
+    /// own export table.
+    fn nt_terminate_process(debugger: &mut WindowsDebugger) -> FissionResult<u64> {
+        let ntdll = debugger
+            .state
+            .modules
+            .values()
+            .find(|module| module.name.eq_ignore_ascii_case("ntdll.dll"))
+            .map(|module| module.base_address)
+            .ok_or_else(|| FissionError::debug("ntdll.dll is not loaded"))?;
+        debugger
+            .get_module_exports(ntdll)?
+            .into_iter()
+            .find(|export| export.name == "NtTerminateProcess")
+            .map(|export| export.address)
+            .ok_or_else(|| FissionError::debug("ntdll exports no NtTerminateProcess"))
+    }
+
+    /// A breakpoint stop leaves the thread on the breakpoint, and continuing
+    /// runs the instruction under it and keeps the breakpoint.
+    ///
+    /// `ExitProcess` reaches `NtTerminateProcess` twice. The instruction
+    /// pointer used to be left one byte past the `INT3`, so the first stop
+    /// reported an address the thread was not at, and continuing ran
+    /// `NtTerminateProcess` from its second byte.
+    #[test]
+    fn a_breakpoint_stop_rewinds_the_thread_and_continuing_keeps_the_breakpoint() {
+        let mut debugger = WindowsDebugger::new();
+        let command = vec!["/C".to_string(), "exit 0".to_string()];
+        let result = (|| -> FissionResult<(u32, u32)> {
+            ExecutionBackend::launch(&mut debugger, r"C:\Windows\System32\cmd.exe", &command)?;
+            // Run to the system breakpoint; ntdll is loaded by then.
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                if std::time::Instant::now() > deadline {
+                    return Err(FissionError::debug("no initial breakpoint"));
+                }
+                match ExecutionBackend::poll_event(&mut debugger, 500)? {
+                    Some(DebugEvent::BreakpointHit { .. }) => break,
+                    Some(_) => ExecutionBackend::continue_execution(&mut debugger)?,
+                    None => {}
+                }
+            }
+            let target = nt_terminate_process(&mut debugger)?;
+            ExecutionBackend::set_sw_breakpoint(&mut debugger, target)?;
+            ExecutionBackend::continue_execution(&mut debugger)?;
+
+            let mut hits = 0;
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            loop {
+                if std::time::Instant::now() > deadline {
+                    return Err(FissionError::debug("the target did not exit"));
+                }
+                match ExecutionBackend::poll_event(&mut debugger, 500)? {
+                    Some(DebugEvent::BreakpointHit { address, thread_id }) => {
+                        if address != target {
+                            return Err(FissionError::debug(format!(
+                                "hit at 0x{address:x}, expected 0x{target:x}"
+                            )));
+                        }
+                        let pc = ExecutionBackend::fetch_registers(&mut debugger, thread_id)?.pc;
+                        if pc != target {
+                            return Err(FissionError::debug(format!(
+                                "stopped at the breakpoint 0x{target:x} with the PC at 0x{pc:x}"
+                            )));
+                        }
+                        hits += 1;
+                        ExecutionBackend::continue_execution(&mut debugger)?;
+                    }
+                    Some(DebugEvent::ProcessExited { exit_code }) => return Ok((hits, exit_code)),
+                    Some(DebugEvent::Exception { code, address, .. }) => {
+                        return Err(FissionError::debug(format!(
+                            "exception 0x{code:08x} at 0x{address:x}"
+                        )));
+                    }
+                    Some(_) => ExecutionBackend::continue_execution(&mut debugger)?,
+                    None => {}
+                }
+            }
+        })();
+        let _ = ExecutionBackend::terminate(&mut debugger);
+        let (hits, exit_code) = result.expect("run to exit through the breakpoint");
+        assert_eq!(exit_code, 0);
+        assert!(
+            hits >= 2,
+            "ExitProcess calls NtTerminateProcess twice; the breakpoint was hit {hits} time(s)"
+        );
+    }
 
     #[test]
     fn debugger_new_not_attached() {
