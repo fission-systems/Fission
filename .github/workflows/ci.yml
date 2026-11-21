@@ -4,7 +4,9 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    branches: ["main"]
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+  merge_group:
+    types: [checks_requested]
   workflow_dispatch:
 
 permissions:
@@ -13,8 +15,8 @@ permissions:
   actions: write
 
 concurrency:
-  group: ci-fast-${{ github.workflow }}-${{ github.ref }}
-  # PR: supersede stale runs. Push/main: queue instead of killing mid-job.
+  group: ci-fast-${{ github.event.pull_request.number || github.run_id }}
+  # PRs supersede their own stale run. Pushes and merge candidates each retain a result.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -37,8 +39,14 @@ jobs:
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
       run_debugger_tests: ${{ steps.filter.outputs.run_debugger_tests }}
-      run_cli_smoke: ${{ steps.impact.outputs.run_cli_smoke || steps.filter.outputs.run_cli_smoke }}
+      run_cli_smoke: ${{ steps.impact.outputs.run_cli_smoke == 'true' || steps.filter.outputs.run_cli_smoke == 'true' }}
       run_macos_test: ${{ steps.filter.outputs.run_macos_test }}
+      run_actionlint: ${{ steps.filter.outputs.run_actionlint }}
+      run_platform_debugger: ${{ steps.filter.outputs.run_platform_debugger }}
+      run_solver_diff: ${{ steps.filter.outputs.run_solver_diff }}
+      run_loader_fixtures: ${{ steps.filter.outputs.run_loader_fixtures }}
+      run_decomp_corpus: ${{ steps.filter.outputs.run_decomp_corpus }}
+      run_package_check: ${{ steps.filter.outputs.run_package_check }}
       test_crates: ${{ steps.impact.outputs.crates }}
       run_interactive_runtime_tests: ${{ steps.impact.outputs.run_interactive_runtime_tests }}
       run_script_emulator_tests: ${{ steps.impact.outputs.run_script_emulator_tests }}
@@ -55,156 +63,15 @@ jobs:
       - name: Classify changed paths
         id: filter
         shell: bash
-        run: |
-          set -euo pipefail
-
-          # --- collect changed files ---
-          FULL_VALIDATION=false
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch origin "${{ github.base_ref }}" --depth=1
-            BASE="origin/${{ github.base_ref }}"
-            CHANGED=$(git diff --name-only "$BASE"...HEAD || true)
-          elif [ "${{ github.event_name }}" = "push" ]; then
-            BEFORE="${{ github.event.before }}"
-            if [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-              CHANGED=$(git show --name-only --pretty=format: HEAD || true)
-            else
-              CHANGED=$(git diff --name-only "$BEFORE"...HEAD || true)
-            fi
-          else
-            # workflow_dispatch: use a workspace manifest sentinel so the
-            # impact resolver selects every package without duplicating names.
-            CHANGED="Cargo.toml"
-            FULL_VALIDATION=true
-          fi
-
-          echo "Changed files:"
-          echo "$CHANGED"
-
-          if [ -z "$CHANGED" ]; then
-            # empty diff — fail-safe full rust lane
-            CHANGED="Cargo.toml"
-            FULL_VALIDATION=true
-          fi
-
-          has() { echo "$CHANGED" | grep -Eq "$1"; }
-
-          RUST=false
-          UTILS=false
-          SCRIPTS=false
-          CI=false
-          SECURITY_META=false
-          DOCS=false
-          OTHER=false
-          DEBUGGER_TESTS=false
-
-          while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            case "$f" in
-              crates/*|Cargo.toml|Cargo.lock|.cargo/*|rust-toolchain|rust-toolchain.toml|clippy.toml)
-                RUST=true ;;
-              utils/*)
-                UTILS=true ;;
-              scripts/*)
-                SCRIPTS=true ;;
-              .github/workflows/*|.github/actions/*|.github/scripts/*)
-                CI=true ;;
-              deny.toml|licenserc.yaml|.github/dependabot.yml|.github/licenserc.yaml)
-                SECURITY_META=true ;;
-              docs/*|wiki/*|*.md|.github/ISSUE_TEMPLATE/*.yml|.github/ISSUE_TEMPLATE/*.yaml)
-                DOCS=true ;;
-              *)
-                # unknown paths are treated as rust-adjacent for safety
-                OTHER=true ;;
-            esac
-
-            case "$f" in
-              crates/fission-dynamic/*|\
-              crates/fission-loader/src/loader/elf/*|\
-              crates/fission-cli/src/cli/args/debug.rs|\
-              crates/fission-cli/src/cli/args/mod.rs|\
-              crates/fission-cli/src/cli/oneshot/debug*.rs|\
-              crates/fission-cli/tests/debug_*.rs)
-                DEBUGGER_TESTS=true ;;
-            esac
-          done <<< "$CHANGED"
-
-          # Lane selection (most specific first)
-          if [ "$RUST" = false ] && [ "$UTILS" = false ] && [ "$SCRIPTS" = false ] \
-              && [ "$CI" = false ] && [ "$SECURITY_META" = false ] && [ "$OTHER" = false ] \
-              && [ "$DOCS" = true ]; then
-            LANE=docs
-          elif [ "$RUST" = false ] && [ "$UTILS" = false ] && [ "$OTHER" = false ] \
-              && [ "$SECURITY_META" = false ] && [ "$CI" = false ] && [ "$SCRIPTS" = true ]; then
-            LANE=scripts
-          elif [ "$RUST" = false ] && [ "$UTILS" = false ] && [ "$OTHER" = false ] \
-              && { [ "$CI" = true ] || [ "$SECURITY_META" = true ]; }; then
-            LANE=ci
-          else
-            LANE=rust
-          fi
-
-          # Job toggles
-          case "$LANE" in
-            docs)
-              RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=false; RUN_SCRIPTS=false
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
-              ;;
-            scripts)
-              RUN_SECURITY=false; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
-              ;;
-            ci)
-              RUN_SECURITY=$SECURITY_META; RUN_LINT=false; RUN_PASS=true; RUN_SCRIPTS=true
-              RUN_TESTS=false; RUN_SMOKE=false; RUN_MACOS=false
-              # Script checks include a YAML parse of every workflow file.
-              if [ "$SECURITY_META" = true ]; then RUN_SECURITY=true; fi
-              ;;
-            rust)
-              RUN_SECURITY=true; RUN_LINT=true; RUN_PASS=true; RUN_SCRIPTS=$SCRIPTS
-              RUN_TESTS=true; RUN_SMOKE=true
-              if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-                RUN_MACOS=true
-              else
-                RUN_MACOS=false
-              fi
-              ;;
-          esac
-
-          if [ "$FULL_VALIDATION" = true ]; then
-            DEBUGGER_TESTS=true
-          fi
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RUN_SCRIPTS=true
-          fi
-
-          {
-            echo "lane=${LANE}"
-            echo "run_security=${RUN_SECURITY}"
-            echo "run_lint=${RUN_LINT}"
-            echo "run_pass_gate=${RUN_PASS}"
-            echo "run_script_checks=${RUN_SCRIPTS}"
-            echo "run_tests=${RUN_TESTS}"
-            echo "run_debugger_tests=${DEBUGGER_TESTS}"
-            echo "run_cli_smoke=${RUN_SMOKE}"
-            echo "run_macos_test=${RUN_MACOS}"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Resolved lane=${LANE}"
-          echo "  security=${RUN_SECURITY} lint=${RUN_LINT} pass_gate=${RUN_PASS} scripts=${RUN_SCRIPTS}"
-          echo "  tests=${RUN_TESTS} smoke=${RUN_SMOKE} macos_test=${RUN_MACOS}"
-
-          if [ "$LANE" = "rust" ]; then
-            printf '%s\n' "$CHANGED" > "$RUNNER_TEMP/fission-changed-paths.txt"
-          fi
+        run: python3 scripts/ci/change_plan.py --paths "$RUNNER_TEMP/fission-changed-paths.txt" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust for package impact selection
-        if: steps.filter.outputs.lane == 'rust'
+        if: steps.filter.outputs.run_tests == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Resolve affected crate suites
         id: impact
-        if: steps.filter.outputs.lane == 'rust'
+        if: steps.filter.outputs.run_tests == 'true'
         shell: bash
         run: python3 scripts/ci/select_affected_crates.py < "$RUNNER_TEMP/fission-changed-paths.txt" >> "$GITHUB_OUTPUT"
 
@@ -263,28 +130,16 @@ jobs:
           done
           echo "OK: bash -n ok (${#shs[@]} files)"
 
-      - name: Workflow YAML parse (.github/workflows)
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          try:
-              import yaml
-          except ImportError:
-              import subprocess, sys
-              subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", "pyyaml"])
-              import yaml
-          errors = 0
-          for p in sorted(Path(".github/workflows").glob("*.yml")):
-              try:
-                  yaml.safe_load(p.read_text())
-                  print("OK", p)
-              except Exception as e:
-                  print("FAIL", p, e)
-                  errors += 1
-          raise SystemExit(errors)
-          PY
+      - name: CI classifier and tooling tests
+        run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+
+      - name: Install actionlint
+        if: needs.changes.outputs.run_actionlint == 'true'
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Lint GitHub workflows
+        if: needs.changes.outputs.run_actionlint == 'true'
+        run: '"$(go env GOPATH)/bin/actionlint" -shellcheck= -pyflakes='
 
   # Anti-overfitting / owner-boundary lint
   pass-gate-lint:
@@ -469,6 +324,43 @@ jobs:
       crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
 
+  platform-debugger:
+    needs: [changes]
+    if: needs.changes.outputs.run_platform_debugger == 'true'
+    uses: ./.github/workflows/reusable-premerge.yml
+    with:
+      suite: native-debugger
+
+  solver-diff:
+    needs: [changes]
+    if: needs.changes.outputs.run_solver_diff == 'true'
+    uses: ./.github/workflows/reusable-premerge.yml
+    with:
+      suite: solver
+
+  loader-fixtures:
+    needs: [changes]
+    if: needs.changes.outputs.run_loader_fixtures == 'true'
+    uses: ./.github/workflows/reusable-premerge.yml
+    with:
+      suite: loader
+
+  decomp-corpus:
+    needs: [changes]
+    if: needs.changes.outputs.run_decomp_corpus == 'true'
+    uses: ./.github/workflows/reusable-premerge.yml
+    with:
+      suite: decompiler
+
+  package-check:
+    name: Package candidate rehearsal
+    needs: [changes]
+    if: needs.changes.outputs.run_package_check == 'true'
+    uses: ./.github/workflows/cd.yml
+    with:
+      source_sha: ${{ github.sha }}
+      version: v0.0.0-dryrun
+
   # Final summary — lane-aware required jobs
   ci-summary:
     name: CI Summary
@@ -483,6 +375,11 @@ jobs:
         test-linux-debugger,
         cli-smoke-linux,
         test-macos,
+        platform-debugger,
+        solver-diff,
+        loader-fixtures,
+        decomp-corpus,
+        package-check,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -539,6 +436,12 @@ jobs:
           require_if "${{ needs.changes.outputs.run_debugger_tests }}" "Linux debugger tests" "${{ needs.test-linux-debugger.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_cli_smoke }}" "CLI smoke" "${{ needs.cli-smoke-linux.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_macos_test }}" "macOS tests" "${{ needs.test-macos.result }}" || FAILED=1
+
+          require_if "${{ needs.changes.outputs.run_platform_debugger }}" "platform-debugger" "${{ needs.platform-debugger.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_solver_diff }}" "solver-diff" "${{ needs.solver-diff.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_loader_fixtures }}" "loader-fixtures" "${{ needs.loader-fixtures.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             exit 1

@@ -119,7 +119,7 @@ jobs:
           cache-on-failure: true
 
       - name: Install cargo-nextest
-        if: ${{ matrix.lane != 'extras' }}
+        if: ${{ matrix.lane != 'extras' || inputs.run_interactive_runtime_tests || inputs.run_script_emulator_tests }}
         uses: taiki-e/install-action@nextest
 
       - name: Install system dependencies (Linux · base)
@@ -173,6 +173,7 @@ jobs:
             "${package_flags[@]}" \
             "${feature_flags[@]+"${feature_flags[@]}"}" \
             --locked \
+            --no-tests=fail \
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
@@ -229,6 +230,7 @@ jobs:
             "${feature_flags[@]+"${feature_flags[@]}"}" \
             "${exclude_flags[@]+"${exclude_flags[@]}"}" \
             --locked \
+            --no-tests=fail \
             --no-fail-fast \
             --retries ${{ inputs.retries }} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
@@ -238,7 +240,8 @@ jobs:
               -p fission-static \
               "${feature_flags[@]+"${feature_flags[@]}"}" \
               --locked \
-              --no-fail-fast \
+              --no-tests=fail \
+            --no-fail-fast \
               --retries ${{ inputs.retries }} \
               ${{ inputs.profile == 'release' && '--release' || '' }}
           fi
@@ -255,12 +258,12 @@ jobs:
       - name: Test optional features (interactive_runtime)
         if: ${{ inputs.run_interactive_runtime_tests && matrix.lane != 'core' }}
         shell: bash
-        run: cargo test -p fission-dynamic --features interactive_runtime --locked
+        run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features interactive_runtime
 
       - name: Test optional features (script emulator)
         if: ${{ inputs.run_script_emulator_tests && matrix.lane != 'core' }}
         shell: bash
-        run: cargo test -p fission-script --features emulator --locked
+        run: cargo nextest run --locked --no-tests=fail -p fission-script --features emulator
 
       - name: Check optional feature (emulator softfloat)
         if: ${{ inputs.run_emulator_softfloat_check && matrix.lane != 'core' }}

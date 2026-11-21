@@ -1,0 +1,111 @@
+name: Reusable pre-merge runtime gates
+
+on:
+  workflow_call:
+    inputs:
+      suite:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  native-debugger:
+    if: inputs.suite == 'native-debugger'
+    name: Debugger process control (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: native-debugger-${{ runner.os }}
+      - uses: taiki-e/install-action@nextest
+      - name: Linux live debugger
+        if: runner.os == 'Linux'
+        run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features interactive_runtime --test linux_debug_launch
+      - name: Windows live debugger
+        if: runner.os == 'Windows'
+        run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features windows_native_debugger -E 'test(windows_native_backend_)'
+      - name: macOS live debugger
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          sudo -n DevToolsSecurity -enable
+          scripts/macos/run-live-debugger-tests.sh
+
+  solver:
+    if: inputs.suite == 'solver'
+    name: Solver differential (Z3)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    env:
+      FISSION_DIFF_CASES: "12"
+      FISSION_DIFF_DEPTH: "2"
+      FISSION_DIFF_JOBS: "2"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - name: Install Z3 4.13.4
+        run: |
+          set -euo pipefail
+          archive=z3-4.13.4-x64-glibc-2.35
+          curl --fail --location --retry 3 "https://github.com/Z3Prover/z3/releases/download/z3-4.13.4/${archive}.zip" -o "$RUNNER_TEMP/z3.zip"
+          unzip -q "$RUNNER_TEMP/z3.zip" -d "$RUNNER_TEMP"
+          binary="$RUNNER_TEMP/$archive/bin/z3"
+          "$binary" -version | grep -F 'Z3 version 4.13.4'
+          echo "FISSION_Z3=$binary" >> "$GITHUB_ENV"
+      - name: Compare bit-vectors and arrays
+        run: |
+          cargo nextest run --locked --no-tests=fail --release -p fission-solver --test differential_z3 --run-ignored only \
+            -E 'test(the_solver_agrees_with_z3_on_random_bitvector_formulas) | test(array_formulas_agree_with_z3)'
+
+  fixtures:
+    if: inputs.suite == 'loader' || inputs.suite == 'decompiler'
+    name: Binary fixtures (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.suite == 'loader' && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
+    env:
+      FISSION_BENCHMARK_NO_CACHE: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: premerge-fixtures-${{ runner.os }}
+      - name: Build release CLI
+        run: cargo build --locked --release -p fission-cli
+      - name: Check ELF and PE fixtures
+        if: runner.os == 'Linux'
+        run: |
+          python3 scripts/ci/decompiler_smoke.py target/release/fission_cli crates/fission-sleigh/testdata/a64_csel_select.so --symbol sel_two
+          python3 scripts/ci/decompiler_smoke.py target/release/fission_cli crates/fission-loader/testdata/x64_pdb_struct_test.exe --symbol start
+      - name: Check x86-64 ELF fixture
+        if: inputs.suite == 'decompiler'
+        run: python3 scripts/ci/decompiler_smoke.py target/release/fission_cli crates/fission-sleigh/testdata/x64_stale_arg_register.elf
+      - name: Check Mach-O fixture
+        if: runner.os == 'macOS'
+        run: |
+          clang -O0 -g .github/fixtures/test_functions.c -o "$RUNNER_TEMP/macho-smoke"
+          python3 scripts/ci/decompiler_smoke.py target/release/fission_cli "$RUNNER_TEMP/macho-smoke" --symbol main

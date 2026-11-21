@@ -36,8 +36,8 @@ Fission's CI/CD pipeline is designed with **standardization**, **reusability**, 
 │  - ci.yml (Fast Gate · L0)             │
 │  - ci-heavy.yml (Heavy · L1)           │
 │  - release-e2e.yml (Release E2E · L2)  │
-│  - release-tag.yml (tag after L0–L2)   │
-│  - cd.yml (CD Release · L3)            │
+│  - release-tag.yml (verify and publish)   │
+│  - cd.yml (candidate packages)            │
 │  - ci-cd-monitor.yml (Status)          │
 │  - fuzz.yml (Fuzzing)                  │
 └─────────────────────────────────────────┘
@@ -146,57 +146,24 @@ python3 -c "import json; json.load(open('smoke_corpus.json'))"
 
 # 2. Test failure
 cargo test --all
-
-
-
----
-
-### 3. Release Tag + E2E (release-tag.yml · release-e2e.yml)
-
-**Preferred path (conservative):**
-
-1. Wait for **CI Fast Gate** and **CI Heavy** green on the target `main` commit.
-2. Actions → **Release Tag (CI green)** → set `tag` / `ref`.
-3. Workflow verifies L0+L1, runs **Release E2E** (release CLI + PE smoke + multi-decomp + fast NIR-check without latest promotion), then pushes an annotated tag on the **verified SHA**.
-4. Tag push starts **CD Release** (`cd.yml`).
-
-Do **not** auto-tag every `main` push. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
-
-### 4. Release / CD (cd.yml)
-
-**When is it triggered?**
-- Push of `v*.*.*` tag (or bare `X.Y.Z`)
-
-**Runtime:** ~45 minutes
-
-**Build targets:**
-```
-- Linux:   x86_64-unknown-linux-gnu
-- macOS:   aarch64-apple-darwin
-- Windows: x86_64-pc-windows-msvc
-```
-
-**Success criteria:**
-- [ ] All 3 platform binaries created
-- [ ] Each binary packaged
-- [ ] SHA256 checksums generated
-- [ ] Uploaded to GitHub Release
-
-**How to release (preferred):**
-```text
-Actions → "Release Tag (CI green)" → tag=v0.2.0 ref=main
-# → verifies L0+L1, runs L2 E2E, pushes tag → CD builds
-# → Release page: https://github.com/fission-systems/Fission/releases
-# → Write release notes (web UI)
-```
-
-**Manual tag (not recommended; bypasses L2 unless you run Release E2E first):**
-```bash
-git tag v0.2.0 <green-sha>
-git push origin v0.2.0
 ```
 
 ---
+
+### 3. Release candidate and publication
+
+Dispatch `Release Tag (CI green)` on main with a version and candidate SHA.
+The workflow verifies the exact main push Fast Gate and Heavy runs, then calls
+release E2E and the five-platform package builder. The publish job attests and
+publishes those package bytes through a draft. A SemVer tag push uses the same
+gate. See [CI and release gates](../docs/CI_RELEASE_GATES.md) for the runbook.
+
+
+### 4. Package rehearsal
+
+`cd.yml` is a reusable workflow. The Fast Gate calls it for packaging changes
+to rehearse all five targets with the PR merge candidate. The release workflow
+uses the same builder on the verified candidate SHA.
 
 ## Customizing Workflows
 
