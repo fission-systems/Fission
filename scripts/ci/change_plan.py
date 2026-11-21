@@ -26,6 +26,19 @@ RELEASE = (
     "scripts/release/", "install.sh", ".github/scripts/check_decomp_output.py", ".github/actions/setup-utils/",
 )
 METADATA = {"deny.toml", "licenserc.yaml", ".github/dependabot.yml", ".github/licenserc.yaml"}
+# The pre-merge lanes' own definitions. A change here is tested by running every
+# lane it defines, not only by linting it: a lane nobody has seen run is unproven.
+PREMERGE = (
+    ".github/workflows/reusable-premerge.yml", "scripts/ci/decompiler_smoke.py",
+    "scripts/macos/", ".github/fixtures/",
+)
+# The nightly full-dataset sweep cannot run on a PR; one binary through the same
+# script proves the download, strip, decompile and scoring path still works.
+SWEEP = (
+    ".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
+    "scripts/quality/decbench_scoring.py", "scripts/quality/decbench_sample_set_gate.py",
+    "scripts/quality/decbench-ci-requirements.txt",
+)
 
 
 def git(*args: str) -> bytes:
@@ -96,7 +109,8 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     lane = "rust" if rust else "ci" if workflows or security else "scripts" if scripts else "docs"
     full = any(path in SHARED or path.startswith(".cargo/") for path in paths)
     before_merge = event in {"pull_request", "merge_group"}
-    native = full or any(path.startswith(DEBUGGER) for path in paths)
+    lanes = before_merge and any(path.startswith(PREMERGE) for path in paths)
+    native = full or lanes or any(path.startswith(DEBUGGER) for path in paths)
     return lane, {
         "run_security": rust or security,
         "run_lint": rust,
@@ -108,10 +122,11 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
         "run_cli_smoke": workflows,
         "run_macos_test": rust and not before_merge,
         "run_platform_debugger": native and before_merge,
-        "run_solver_diff": before_merge and (full or any(path.startswith("crates/fission-solver/") for path in paths)),
-        "run_loader_fixtures": before_merge and (full or any(path.startswith("crates/fission-loader/") for path in paths)),
-        "run_decomp_corpus": before_merge and (full or any(path.startswith(DECOMPILER) for path in paths)),
+        "run_solver_diff": lanes or before_merge and (full or any(path.startswith("crates/fission-solver/") for path in paths)),
+        "run_loader_fixtures": lanes or before_merge and (full or any(path.startswith("crates/fission-loader/") for path in paths)),
+        "run_decomp_corpus": lanes or before_merge and (full or any(path.startswith(DECOMPILER) for path in paths)),
         "run_package_check": before_merge and any(path.startswith(RELEASE) for path in paths),
+        "run_sweep_smoke": before_merge and any(path.startswith(SWEEP) for path in paths),
     }
 
 

@@ -47,6 +47,7 @@ jobs:
       run_loader_fixtures: ${{ steps.filter.outputs.run_loader_fixtures }}
       run_decomp_corpus: ${{ steps.filter.outputs.run_decomp_corpus }}
       run_package_check: ${{ steps.filter.outputs.run_package_check }}
+      run_sweep_smoke: ${{ steps.filter.outputs.run_sweep_smoke }}
       test_crates: ${{ steps.impact.outputs.crates }}
       run_interactive_runtime_tests: ${{ steps.impact.outputs.run_interactive_runtime_tests }}
       run_script_emulator_tests: ${{ steps.impact.outputs.run_script_emulator_tests }}
@@ -361,6 +362,15 @@ jobs:
       source_sha: ${{ github.sha }}
       version: v0.0.0-dryrun
 
+  # The nightly full-dataset sweep, run on one binary when its definition changes.
+  sweep-smoke:
+    name: DecBench sweep smoke
+    needs: [changes]
+    if: needs.changes.outputs.run_sweep_smoke == 'true'
+    uses: ./.github/workflows/decbench-sweep.yml
+    with:
+      only: binaries/O0/base-passwd/update-passwd
+
   # Final summary — lane-aware required jobs
   ci-summary:
     name: CI Summary
@@ -380,6 +390,7 @@ jobs:
         loader-fixtures,
         decomp-corpus,
         package-check,
+        sweep-smoke,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -442,6 +453,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_loader_fixtures }}" "loader-fixtures" "${{ needs.loader-fixtures.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "DecBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             exit 1

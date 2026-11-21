@@ -35,6 +35,16 @@ hashes, scores statically on stripped inputs, and preserves its row-level report
 The 250-row sample-set gate below remains a local development tool. See
 [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.
 
+The nightly and the local sweep score with different DecBench code. The local
+`scorer/vendor/decbench` is a snapshot with no upstream history; CI installs
+the public upstream commit that produced the pinned revision's published scores.
+On the same CLI and 970 rows over 18 binaries (every opt level, ELF x86-64,
+ELF ARM and PE) the two agree on status everywhere; on decompiled output except
+18 PE rows, whose stripped inputs differ; on GED except one row with identical
+output (GED's known nondeterminism); and on type_match except 12 x86-64 O2 and
+O2-noinline rows. Compare a nightly with a nightly and a local run
+with a local run, not one with the other.
+
 ## CFG parser: rust-joern
 
 GED's source- and decompiled-side CFGs come from

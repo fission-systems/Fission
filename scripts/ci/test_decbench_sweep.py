@@ -23,6 +23,30 @@ class SweepTests(unittest.TestCase):
         self.assertEqual(sum(map(len, shards)), len(entries))
         self.assertEqual(shards, sweep.partition(list(reversed(entries)), 3))
 
+    def test_only_names_one_exact_binary_in_any_shard(self):
+        entries = [{"binary_path": f"binaries/O0/p/{n}", "functions": list(range(n + 1))} for n in range(7)]
+        chosen = sweep.select(entries, 3, 0, "binaries/O0/p/5")
+        self.assertEqual([entry["binary_path"] for entry in chosen], ["binaries/O0/p/5"])
+        # A prefix is not a name: it selects nothing, not every binary under it.
+        with self.assertRaisesRegex(ValueError, "empty"):
+            sweep.select(entries, 3, 0, "binaries/O0/p/")
+
+    def test_smoke_requires_every_stage_to_produce_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            rows = Path(temp) / "rows.jsonl"
+            scored = {"status": "ok", "ged": 3, "type_match": 0.5}
+            rows.write_text(json.dumps(scored) + "\n")
+            with contextlib.redirect_stdout(io.StringIO()):
+                sweep.smoke_check(rows, 0)
+            for missing in ("ged", "type_match"):
+                partial = {key: value for key, value in scored.items() if key != missing}
+                rows.write_text(json.dumps(partial) + "\n")
+                with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                    sweep.smoke_check(rows, 0)
+            rows.write_text(json.dumps(scored) + "\n")
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                sweep.smoke_check(rows, 1)
+
     def test_full_report_rejects_missing_rows_and_detects_regressions(self):
         entries = [{"binary_path": "binary", "functions": ["one", "two"]}]
         meta = {"sha": "test", "cli_sha256": "test", "shard": 0, "crashes": 0, "provenance": {}}

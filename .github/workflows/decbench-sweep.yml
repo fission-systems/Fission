@@ -4,13 +4,21 @@ on:
   schedule:
     - cron: "25 1 * * *"
   workflow_dispatch:
+  # Fast Gate calls this with one binary when the sweep itself changes, so the
+  # nightly definition is exercised before it lands rather than after.
+  workflow_call:
+    inputs:
+      only:
+        description: "One manifest binary path to score instead of the full sweep"
+        required: true
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: decbench-full-${{ github.ref }}
+  group: decbench-full-${{ github.ref }}-${{ inputs.only || 'full' }}
   cancel-in-progress: false
 
 env:
@@ -29,7 +37,9 @@ jobs:
     steps:
       - name: Plan shards
         id: matrix
-        run: python3 -c 'import json, os; print("shards=" + json.dumps(list(range(int(os.environ["DECBENCH_SHARDS"])))))' >> "$GITHUB_OUTPUT"
+        env:
+          ONLY: ${{ inputs.only }}
+        run: python3 -c 'import json, os; print("shards=" + json.dumps([0] if os.environ["ONLY"] else list(range(int(os.environ["DECBENCH_SHARDS"])))))' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -61,7 +71,7 @@ jobs:
           retention-days: 2
 
   sweep:
-    name: DecBench shard ${{ matrix.shard }}
+    name: ${{ inputs.only && 'DecBench sweep smoke' || format('DecBench shard {0}', matrix.shard) }}
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 165
@@ -72,6 +82,7 @@ jobs:
         shard: ${{ fromJSON(needs.build.outputs.shards) }}
     env:
       SHARD: ${{ matrix.shard }}
+      ONLY: ${{ inputs.only }}
       RUST_JOERN_DIR: ${{ github.workspace }}/toolchain/joern
     steps:
       - uses: actions/checkout@v7
@@ -94,19 +105,25 @@ jobs:
           chmod +x toolchain/fission_cli
       - name: Static decompile and score assigned manifest entries
         run: |
+          set -euo pipefail
+          only=()
+          if [[ -n "$ONLY" ]]; then only=(--only "$ONLY"); fi
           python scripts/quality/decbench_full_sweep.py --data "$RUNNER_TEMP/decbench" --shards "$DECBENCH_SHARDS" \
-            run --cli toolchain/fission_cli --shard "$SHARD" --out shard
+            run --cli toolchain/fission_cli --shard "$SHARD" "${only[@]}" --out shard
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: decbench-shard-${{ matrix.shard }}
+          name: ${{ inputs.only && 'decbench-smoke' || format('decbench-shard-{0}', matrix.shard) }}
           path: shard
           if-no-files-found: error
           retention-days: 3
 
   report:
     name: DecBench full coverage and regression report
-    needs: sweep
+    needs: [build, sweep]
+    # A failed shard still gets a report: it names the missing shard instead of
+    # leaving the run with no summary at all.
+    if: ${{ always() && !inputs.only && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -129,9 +146,11 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          run_ids="$(gh api "repos/$REPOSITORY/actions/workflows/decbench-sweep.yml/runs?branch=main&status=success&per_page=10"             --jq '.workflow_runs[] | select(.event == "schedule" or .event == "workflow_dispatch") | .id')"
+          run_ids="$(gh api "repos/$REPOSITORY/actions/workflows/decbench-sweep.yml/runs?branch=main&status=success&per_page=10" \
+            --jq '.workflow_runs[] | select(.event == "schedule" or .event == "workflow_dispatch") | .id')"
           for run_id in $run_ids; do
-            available="$(gh api "repos/$REPOSITORY/actions/runs/$run_id/artifacts?name=decbench-full"               --jq '[.artifacts[] | select(.name == "decbench-full" and .expired == false)] | length')"
+            available="$(gh api "repos/$REPOSITORY/actions/runs/$run_id/artifacts?name=decbench-full" \
+              --jq '[.artifacts[] | select(.name == "decbench-full" and .expired == false)] | length')"
             if [[ "$available" -gt 0 ]]; then
               gh run download "$run_id" --repo "$REPOSITORY" --name decbench-full --dir baseline
               break

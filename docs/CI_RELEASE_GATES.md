@@ -17,7 +17,12 @@ it is the queue's base and synthetic head. Each main push keeps its own run.
 Superseded updates to the same PR can still cancel older PR runs.
 
 Changes to CI definitions run actionlint, the CI tool tests, affected Rust tests
-and a CLI smoke run. Enabled nextest suites fail if they discover no tests. An
+and a CLI smoke run. A change to a lane's own definition also runs that lane:
+editing `reusable-premerge.yml`, its smoke script, `scripts/macos/` or the
+checked-in fixtures runs every pre-merge lane, and editing the DecBench sweep
+(workflow, script, scorer or its pinned requirements) runs the nightly workflow
+on one binary, which fails unless decompilation, GED and type scoring all
+produced data. Enabled nextest suites fail if they discover no tests. An
 enabled lane whose job is skipped, cancelled or failed makes `CI Summary` fail.
 
 The native debugger lane exercises Linux, Windows and macOS processes on hosted
@@ -48,6 +53,15 @@ O2-noinline. CI downloads only the manifest, binaries and published source CFGs.
 Binaries stay non-executable and only pass through static inspection, stripping
 and decompilation. The grader reads original symbols and DWARF separately.
 Runs disable decompilation and metric caches.
+
+The scorer is upstream DecBench at `0cba66d66e9af0f8555c9844eb2a868440c366c1`,
+the last commit before upstream #113 (2026-10-31) stopped counting inlined
+callees' variables as a function's type ground truth. The pinned dataset's
+published scores predate that change, and only the scorer that produced them can
+be compared with them: crontab O2 `usage` has one variable after #113 and 19
+before, and every published tool's score for it is a multiple of 1/19. The sweep
+refuses to run with any other installed decbench. Move the scorer pin together
+with the dataset revision, never alone.
 
 The report checks every expected row, records decompilation status and output
 hashes, and reports GED perfect count with total distance and type-match coverage

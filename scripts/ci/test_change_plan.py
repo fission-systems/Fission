@@ -25,6 +25,26 @@ class ChangePlanTests(unittest.TestCase):
         for job in ("run_platform_debugger", "run_solver_diff", "run_loader_fixtures", "run_decomp_corpus"):
             self.assertTrue(jobs[job], job)
 
+    def test_premerge_definition_changes_run_every_premerge_lane(self):
+        lanes = ("run_platform_debugger", "run_solver_diff", "run_loader_fixtures", "run_decomp_corpus")
+        for path in (".github/workflows/reusable-premerge.yml", "scripts/ci/decompiler_smoke.py",
+                     "scripts/macos/sign-debugger.sh"):
+            _, jobs = plan([path], "pull_request")
+            for job in lanes:
+                self.assertTrue(jobs[job], (path, job))
+        # After merge there is nothing left to gate.
+        _, jobs = plan([".github/workflows/reusable-premerge.yml"], "push")
+        for job in lanes:
+            self.assertFalse(jobs[job], job)
+
+    def test_sweep_changes_run_the_sweep_smoke_before_merge(self):
+        for path in (".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
+                     "scripts/quality/decbench-ci-requirements.txt"):
+            self.assertTrue(plan([path], "pull_request")[1]["run_sweep_smoke"], path)
+            self.assertTrue(plan([path], "merge_group")[1]["run_sweep_smoke"], path)
+            self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)
+        self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
+
     def test_docs_do_not_select_runtime_jobs(self):
         self.assertEqual(plan(["docs/CLI.md"], "pull_request"), ("docs", {
             name: False for name in plan(["docs/CLI.md"], "pull_request")[1]

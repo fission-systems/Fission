@@ -6,22 +6,25 @@ from __future__ import annotations
 import argparse
 import collections
 import hashlib
-from importlib.metadata import version
 import json
 import math
 import os
-import re
 import shutil
 import signal
 import subprocess
 import tempfile
+from importlib.metadata import version
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 from urllib.request import urlopen
 
 DATASET = "noelo-lab/decbench-dataset"
 REVISION = "815eb96f130b6d2ef7fa600e04669bf20139bf27"
-DECBENCH = "b65837037c7e93dbd3db01e72fa8d46641686dcb"
+# The scorer that produced the pinned revision's published scores. Upstream #113
+# (2026-10-31) stopped counting inlined callees' variables as a function's own
+# type ground truth; the 2026-10-09 published numbers predate it, so a later
+# scorer cannot be compared with them. Move this with REVISION, never alone.
+DECBENCH = "0cba66d66e9af0f8555c9844eb2a868440c366c1"
 JOERN = "a2c16ece800f0843df21f6bb09efed2d0430a83a"
 MANIFEST = "configs/full/manifest.json"
 REPO = Path(__file__).resolve().parents[2]
@@ -79,6 +82,17 @@ def partition(entries: list[dict], count: int) -> list[list[dict]]:
         buckets[shard].append(entry)
         sizes[shard] += len(entry["functions"])
     return buckets
+
+
+def select(entries: list[dict], shards: int, shard: int, only: str | None) -> list[dict]:
+    if only:
+        # One named binary, wherever the partition puts it: the PR smoke run.
+        items = [entry for entry in entries if entry["binary_path"] == only]
+    else:
+        items = partition(entries, shards)[shard]
+    if not items:
+        raise ValueError("empty shard selection")
+    return items
 
 
 def strip_and_resolve(original: Path, stripped: Path, names: list[str]) -> dict[str, int]:
@@ -247,17 +261,30 @@ def score(entry: dict, root: Path, cli: Path, api: dict) -> tuple[list[dict], in
     return rows, crashes
 
 
+def installed_scorer() -> str | None:
+    """The commit pip recorded for the installed decbench, if it came from git."""
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    try:
+        recorded = distribution("decbench").read_text("direct_url.json")
+    except PackageNotFoundError:
+        return None
+    return json.loads(recorded or "{}").get("vcs_info", {}).get("commit_id")
+
+
 def run(args) -> None:
     from decbench_scoring import load
 
+    # The provenance below names DECBENCH; make that true of what is imported.
+    if installed_scorer() != DECBENCH:
+        raise SystemExit(
+            f"installed decbench is {installed_scorer()}, expected {DECBENCH}: "
+            "pip install -r scripts/quality/decbench-ci-requirements.txt"
+        )
     os.environ["FISSION_BENCHMARK_NO_CACHE"] = "1"
     os.environ["DECBENCH_NO_CACHE"] = "1"
     api = load(REPO)
-    items = partition(manifest(args.data), args.shards)[args.shard]
-    if args.only:
-        items = [entry for entry in items if args.only in entry["binary_path"]]
-    if not items:
-        raise ValueError("empty shard selection")
+    items = select(manifest(args.data), args.shards, args.shard, args.only)
     args.out.mkdir(parents=True, exist_ok=True)
     crashes = 0
     with (args.out / "rows.jsonl").open("w") as out:
@@ -283,6 +310,21 @@ def run(args) -> None:
         "provenance": provenance, "cli_sha256": digest(args.cli),
         "sha": os.environ.get("GITHUB_SHA"), "shard": args.shard, "crashes": crashes,
     }))
+    if args.only:
+        smoke_check(args.out / "rows.jsonl", crashes)
+
+
+def smoke_check(rows_path: Path, crashes: int) -> None:
+    """A smoke run passes only if every stage produced data: decompiled
+    functions, GED against a source CFG and a type score. A broken scorer
+    import or CFG parser shows up as rows with no scores, not as an error."""
+    rows = [json.loads(line) for line in rows_path.read_text().splitlines()]
+    ok = sum(row["status"] == "ok" for row in rows)
+    ged = sum("ged" in row for row in rows)
+    types = sum("type_match" in row for row in rows)
+    print(f"smoke: {len(rows)} rows, {ok} decompiled, {ged} with GED, {types} with type_match, {crashes} crashes")
+    if crashes or not ok or not ged or not types:
+        raise SystemExit("smoke run did not exercise every sweep stage")
 
 
 def read_rows(paths):
@@ -371,8 +413,11 @@ def main():
     sub = parser.add_subparsers(dest="mode", required=True)
     worker = sub.add_parser("run")
     worker.add_argument("--cli", type=Path, required=True)
-    worker.add_argument("--shard", type=int, required=True)
-    worker.add_argument("--only", help="Select a binary path substring for a local smoke run")
+    worker.add_argument("--shard", type=int, default=0)
+    worker.add_argument(
+        "--only",
+        help="Score one manifest binary path (any shard) and require every stage to produce data",
+    )
     worker.add_argument("--out", type=Path, required=True)
     worker.set_defaults(command=run)
     collect = sub.add_parser("report")
