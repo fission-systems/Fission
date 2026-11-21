@@ -109,8 +109,18 @@ pub enum DebugCommand {
     SwitchThread(DebugSwitchThreadArgs),
     /// Poll for the next debug event
     Event(DebugEventArgs),
+    /// Step back one instruction (a recording emulator session only)
+    BackStep,
+    /// Move to an execution step, backwards or forwards (a recording emulator session only)
+    Seek(DebugSeekArgs),
     /// Run a list of debugger commands against one live session
     Session(DebugSessionArgs),
+}
+
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugSeekArgs {
+    /// Instructions executed since launch, as `step` and `continue` report it
+    pub step: u64,
 }
 
 /// Output controls for the side-effect-free capability query.
@@ -168,6 +178,19 @@ pub struct DebugSessionArgs {
     /// Carry on after a command fails instead of stopping there
     #[arg(long)]
     pub keep_going: bool,
+
+    /// Record the emulated execution so `back-step` and `seek <STEP>` can
+    /// move backwards (emulator only)
+    ///
+    /// A snapshot is kept every `--record-interval` instructions, and a seek
+    /// re-executes forward from the nearest one, so registers and memory are
+    /// exact at every step. Costs memory in proportion to the writes made.
+    #[arg(long)]
+    pub record: bool,
+
+    /// Instructions between recorded snapshots (with `--record`)
+    #[arg(long, value_name = "N", default_value_t = 64, requires = "record")]
+    pub record_interval: u64,
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,

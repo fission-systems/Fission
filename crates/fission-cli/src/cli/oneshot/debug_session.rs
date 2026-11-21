@@ -235,6 +235,20 @@ fn execute(
             backend.step_out()?;
             execution_progress(backend, thread_id, "step_out")?
         }
+        DebugCommand::BackStep => {
+            let now = backend
+                .execution_step()
+                .ok_or_else(|| anyhow::anyhow!("this backend does not count execution steps"))?;
+            if now == 0 {
+                bail!("already at the first instruction; there is no step before it");
+            }
+            backend.seek_step(now - 1)?;
+            execution_progress(backend, thread_id, "back_step")?
+        }
+        DebugCommand::Seek(a) => {
+            backend.seek_step(a.step)?;
+            execution_progress(backend, thread_id, "seek")?
+        }
         DebugCommand::Regs => {
             let regs = backend.fetch_registers(thread_id)?;
             json!({ "action": "regs", "registers": registers_json(&regs) })
@@ -341,6 +355,9 @@ fn execution_progress(
     Ok(json!({
         "action": action,
         "pc": pc,
+        // Instructions executed since launch, where the backend counts them:
+        // the position `seek` takes.
+        "step": backend.execution_step(),
         // Why it stopped, which `Suspended` cannot say: a breakpoint and a
         // program that ran out of code look the same otherwise.
         "stop": backend.stop_reason(),
@@ -363,6 +380,9 @@ fn start_session(
     let mut builder = fission_dynamic::debug::DebugSession::new();
     if use_emulator {
         builder = builder.with_emulator();
+        if args.record {
+            builder = builder.with_emulator_recording(args.record_interval);
+        }
     }
     let mut session = builder.build();
     let pid = if let Some(pid) = args.attach {

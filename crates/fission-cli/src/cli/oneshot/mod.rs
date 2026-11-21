@@ -5,6 +5,7 @@
 mod analysis_db;
 mod assessment;
 mod binary_info;
+mod call;
 mod callgraph;
 #[cfg(feature = "debugger")]
 mod debug;
@@ -356,6 +357,7 @@ fn run() -> Result<()> {
         ParsedInvocation::Schema(args) => crate::cli::contract::run_schema(&args),
         ParsedInvocation::Skill => crate::cli::skill::run_skill(),
         ParsedInvocation::Languages(args) => languages::run(&args),
+        ParsedInvocation::Call(args) => call::run(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
