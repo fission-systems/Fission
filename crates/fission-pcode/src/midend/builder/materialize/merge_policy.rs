@@ -155,6 +155,13 @@ impl<'a> PreviewBuilder<'a> {
         let block_idx = self.lowering_block_index(block);
         let key = VarnodeKey::from(output);
         for succ_idx in self.successors.get(block_idx)? {
+            let Some(name) = self
+                .explicit_merge_bindings
+                .get(&(*succ_idx, key.clone()))
+                .cloned()
+            else {
+                continue;
+            };
             let Some(reach_proof) =
                 self.prove_definition_reaches_block_entry(block_idx, op_idx, output, *succ_idx)
             else {
@@ -162,9 +169,7 @@ impl<'a> PreviewBuilder<'a> {
             };
             debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));
             debug_assert_eq!(reach_proof.target_block(), *succ_idx);
-            if let Some(name) = self.explicit_merge_bindings.get(&(*succ_idx, key.clone())) {
-                return Some(name.clone());
-            }
+            return Some(name);
         }
         if let Some(name) =
             self.merge_binding_name_for_direct_successor_accumulator(block, op_idx, output, rhs)
@@ -172,13 +177,18 @@ impl<'a> PreviewBuilder<'a> {
             return Some(name);
         }
 
+        let (merge_idx, merge_addr, _, _) =
+            self.first_output_use_site_outside_block_by_index(block_idx, op_idx, output)?;
+        let pred_count = self.predecessors.get(merge_idx).map_or(0, Vec::len);
+        let duplicate_start = self.duplicate_start_merge_block(merge_addr);
+        if !(pred_count > 2 || (duplicate_start && pred_count == 2)) {
+            return None;
+        }
+
         let proof = self.describe_merge_binding_candidate_proof(block, op_idx, output, rhs)?;
-        let duplicate_start = self.duplicate_start_merge_block(proof.merge_block);
         if !self.merge_binding_proof_allows_predecessor_assignment(&proof, duplicate_start) {
             return None;
         }
-        let (merge_idx, merge_addr, _, _) =
-            self.first_output_use_site_outside_block_by_index(block_idx, op_idx, output)?;
         let reach_proof =
             self.prove_definition_reaches_block_entry(block_idx, op_idx, output, merge_idx)?;
         debug_assert_eq!(reach_proof.definition_site(), (block_idx, op_idx));

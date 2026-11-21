@@ -37,6 +37,10 @@ const SIGSTOP: i32 = 17;
 /// Single-step traps absorbed after stepping off a breakpoint before one is
 /// reported as a real event.
 const MAX_ABSORBED_STEP_TRAPS: u32 = 8;
+/// Give the resumed thread time to finish leaving its trace stop before
+/// requesting another one. An immediate SIGSTOP can race the old stop while
+/// the worker is exiting and leave the detached process stopped.
+const DETACH_STEP_GRACE: Duration = Duration::from_millis(30);
 /// How long to wait for the Mach task port before reporting that access is
 /// not authorized. Long enough for a granted request, short enough that a
 /// headless caller is not stuck on a prompt it cannot answer.
@@ -550,11 +554,16 @@ impl MacOSDebugger {
             if mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0).is_err() {
                 break;
             }
-            mach::request_stop(pid);
+            let stop_at = Instant::now() + DETACH_STEP_GRACE;
+            let mut stop_requested = false;
             let stopped = loop {
                 match mach::poll_stop(pid) {
                     Ok(Some(outcome)) => break outcome,
                     Ok(None) if Instant::now() < deadline => {
+                        if !stop_requested && Instant::now() >= stop_at {
+                            mach::request_stop(pid);
+                            stop_requested = true;
+                        }
                         std::thread::sleep(Duration::from_millis(1));
                     }
                     Ok(None) | Err(_) => {

@@ -145,6 +145,59 @@ pub(crate) fn render_one_function_on_large_stack(
     }
 }
 
+struct PersistentDecompWorker {
+    request_tx: mpsc::SyncSender<FunctionInfo>,
+    result_rx: mpsc::Receiver<FunctionRenderResult>,
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl PersistentDecompWorker {
+    fn spawn(
+        worker_idx: usize,
+        binary: Arc<fission_loader::loader::LoadedBinary>,
+        facts: Arc<FactStore>,
+        config: RenderConfig,
+        stack_size_bytes: usize,
+    ) -> Result<Self, std::io::Error> {
+        let (request_tx, request_rx) = mpsc::sync_channel::<FunctionInfo>(0);
+        let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
+        let handle = thread::Builder::new()
+            .name(format!("fission-rust-decomp-worker-{worker_idx}"))
+            .stack_size(stack_size_bytes)
+            .spawn(move || {
+                while let Ok(func) = request_rx.recv() {
+                    let func_for_panic = func.clone();
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        render_one_function_inner(binary.as_ref(), facts.as_ref(), &func, config)
+                    }))
+                    .unwrap_or_else(|_| {
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func_for_panic,
+                            "worker thread panicked while rendering function".to_string(),
+                            config,
+                        )
+                    });
+                    if result_tx.send(result).is_err() {
+                        break;
+                    }
+                }
+            })?;
+        Ok(Self {
+            request_tx,
+            result_rx,
+            handle: Some(handle),
+        })
+    }
+
+    fn shutdown(mut self) {
+        drop(self.request_tx);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
 pub(crate) fn run_worker_fanout_fanin(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     facts: Arc<FactStore>,
@@ -156,6 +209,7 @@ pub(crate) fn run_worker_fanout_fanin(
     let (task_tx, task_rx) = mpsc::channel::<FunctionInfo>();
     let task_rx = Arc::new(Mutex::new(task_rx));
     let (result_tx, result_rx) = mpsc::channel::<FunctionRenderResult>();
+    let timeout = config.timeout_ms.filter(|ms| *ms > 0);
 
     let mut worker_handles = Vec::with_capacity(worker_count);
     for worker_idx in 0..worker_count {
@@ -163,73 +217,126 @@ pub(crate) fn run_worker_fanout_fanin(
         let tx = result_tx.clone();
         let binary = Arc::clone(&binary);
         let facts = Arc::clone(&facts);
-        let spawn = thread::Builder::new()
-            .name(format!("fission-rust-decomp-worker-{worker_idx}"))
-            .stack_size(stack_size_bytes)
-            .spawn(move || {
-                loop {
-                    let task = match rx.lock() {
-                        Ok(locked) => locked.recv(),
-                        Err(_) => return,
-                    };
-                    let func = match task {
-                        Ok(func) => func,
-                        Err(_) => return,
-                    };
-                    let rendered = if config.timeout_ms.filter(|ms| *ms > 0).is_some() {
-                        // Per-task timeout guard (same mechanism as the
-                        // single-function path): without this, a function
-                        // whose structuring never hits a budget checkpoint
-                        // can wedge this persistent worker forever, silently
-                        // shrinking the pool by one and -- if worker_count is
-                        // 1, as it is for small function counts -- hanging
-                        // the whole batch. The stuck computation's own thread
-                        // is still abandoned in the background (Rust has no
-                        // thread cancellation), but the queue keeps moving.
-                        // This needs its own spawned watchdog thread, since
-                        // that's the only way to bound this worker's wait.
-                        render_one_function_on_large_stack(
+        let mut builder =
+            thread::Builder::new().name(format!("fission-rust-decomp-supervisor-{worker_idx}"));
+        if timeout.is_none() {
+            builder = builder.stack_size(stack_size_bytes);
+        }
+        let spawn = builder.spawn(move || {
+            let mut persistent_child: Option<PersistentDecompWorker> = None;
+            loop {
+                let task = match rx.lock() {
+                    Ok(locked) => locked.recv(),
+                    Err(_) => break,
+                };
+                let func = match task {
+                    Ok(func) => func,
+                    Err(_) => break,
+                };
+                let rendered = if let Some(timeout_ms) = timeout {
+                    // Reuse one `stack_size_bytes` worker thread across tasks
+                    // so we keep thread-local SLEIGH/type caches warm and
+                    // avoid per-function 32 MiB OS thread creation/teardown,
+                    // while still detaching and replacing a wedged worker on
+                    // hard timeout or unexpected disconnect.
+                    if persistent_child.is_none() {
+                        match PersistentDecompWorker::spawn(
+                            worker_idx,
                             Arc::clone(&binary),
                             Arc::clone(&facts),
-                            &func,
                             config,
                             stack_size_bytes,
+                        ) {
+                            Ok(worker) => persistent_child = Some(worker),
+                            Err(err) => {
+                                if tx
+                                    .send(make_internal_error_result(
+                                        binary.as_ref(),
+                                        &func,
+                                        format!("failed to spawn render worker: {err}"),
+                                        config,
+                                    ))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                    let worker = persistent_child
+                        .as_mut()
+                        .expect("persistent worker initialized");
+                    if worker.request_tx.send(func.clone()).is_err() {
+                        if let Some(dead) = persistent_child.take() {
+                            dead.shutdown();
+                        }
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func,
+                            "worker thread exited before receiving a render task".to_string(),
+                            config,
                         )
                     } else {
-                        // No timeout configured (the default): this worker
-                        // thread already runs with `stack_size_bytes` of
-                        // stack (see `.stack_size(stack_size_bytes)` on this
-                        // thread's own spawn above), so routing through
-                        // `render_one_function_on_large_stack` would just
-                        // spawn -- and immediately join -- a second
-                        // large-stack OS thread for no benefit: with no
-                        // timeout, a hang blocks this worker either way,
-                        // spawned-and-joined or not. A `sample` profile of a
-                        // `--all` batch run showed `thread_start` at ~9% of
-                        // self-time, almost entirely this redundant spawn.
-                        let func_owned = func.clone();
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            render_one_function_inner(
-                                binary.as_ref(),
-                                facts.as_ref(),
-                                &func_owned,
-                                config,
-                            )
-                        }))
-                        .unwrap_or_else(|_| {
-                            make_internal_error_result(
-                                binary.as_ref(),
-                                &func_owned,
-                                "worker thread panicked while rendering function".to_string(),
-                                config,
-                            )
-                        })
-                    };
-                    if tx.send(rendered).is_err() {
-                        return;
+                        match worker
+                            .result_rx
+                            .recv_timeout(Duration::from_millis(timeout_ms))
+                        {
+                            Ok(result) => result,
+                            Err(mpsc::RecvTimeoutError::Timeout) => {
+                                // Detach without joining; the next task spawns a
+                                // fresh large-stack child thread.
+                                if let Some(mut wedged) = persistent_child.take() {
+                                    wedged.handle.take();
+                                }
+                                make_internal_error_result(
+                                    binary.as_ref(),
+                                    &func,
+                                    render_timeout_message(timeout_ms),
+                                    config,
+                                )
+                            }
+                            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                                if let Some(dead) = persistent_child.take() {
+                                    dead.shutdown();
+                                }
+                                make_internal_error_result(
+                                    binary.as_ref(),
+                                    &func,
+                                    "worker thread exited before returning a render result"
+                                        .to_string(),
+                                    config,
+                                )
+                            }
+                        }
                     }
+                } else {
+                    let func_owned = func.clone();
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        render_one_function_inner(
+                            binary.as_ref(),
+                            facts.as_ref(),
+                            &func_owned,
+                            config,
+                        )
+                    }))
+                    .unwrap_or_else(|_| {
+                        make_internal_error_result(
+                            binary.as_ref(),
+                            &func_owned,
+                            "worker thread panicked while rendering function".to_string(),
+                            config,
+                        )
+                    })
+                };
+                if tx.send(rendered).is_err() {
+                    break;
                 }
-            });
+            }
+            if let Some(worker) = persistent_child {
+                worker.shutdown();
+            }
+        });
 
         if let Ok(handle) = spawn {
             worker_handles.push(handle);
@@ -237,8 +344,12 @@ pub(crate) fn run_worker_fanout_fanin(
     }
     drop(result_tx);
 
-    for func in functions {
-        if task_tx.send(func.clone()).is_err() {
+    // Schedule largest functions first (LPT) to avoid long-tail stragglers;
+    // `rust_decomp::mod` re-sorts outputs by entry address before formatting.
+    let mut scheduled = functions.to_vec();
+    scheduled.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.address.cmp(&b.address)));
+    for func in scheduled {
+        if task_tx.send(func).is_err() {
             break;
         }
     }

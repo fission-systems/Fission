@@ -475,6 +475,9 @@ pub fn poll_stop(pid: u32) -> Result<Option<WaitOutcome>, i32> {
     if result < 0 {
         return Err(unsafe { *libc_errno() });
     }
+    if unsafe { status.si_pid() } == 0 {
+        return Ok(None);
+    }
     match status.si_code {
         libc::CLD_TRAPPED | libc::CLD_STOPPED => {
             wait_pid(pid, WNOHANG | WUNTRACED).map(|status| status.map(decode_wait_status))

@@ -388,13 +388,13 @@ fn build_c_target(name: &str, source: &str) -> (PathBuf, PathBuf) {
 fn launch_to_self_stop(
     target: &std::path::Path,
     report: &std::path::Path,
+    exit_gate: Option<&std::path::Path>,
 ) -> (MacOSDebugger, u32, u64) {
     let mut debugger = MacOSDebugger::new();
+    let mut args = vec![report.to_str().unwrap().to_string()];
+    args.extend(exit_gate.map(|path| path.to_str().unwrap().to_string()));
     let pid = debugger
-        .launch(
-            target.to_str().unwrap(),
-            &[report.to_str().unwrap().to_string()],
-        )
+        .launch(target.to_str().unwrap(), &args)
         .expect("launch");
     let _ = next_event(&mut debugger);
     debugger.continue_execution().unwrap();
@@ -412,6 +412,7 @@ const WORKER_THREAD_TARGET: &str = r#"
 #include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
+#include <unistd.h>
 __attribute__((noinline)) int marker(int x) { return x + 5; }
 static void *worker(void *arg) { return (void *)(long)marker(2); }
 int main(int argc, char **argv) {
@@ -423,6 +424,9 @@ int main(int argc, char **argv) {
     void *result = 0;
     pthread_create(&thread, 0, worker, 0);
     pthread_join(thread, &result);
+    if (argc > 2) {
+        while (access(argv[2], F_OK) != 0) usleep(1000);
+    }
     return (int)(long)result;
 }
 "#;
@@ -437,7 +441,7 @@ fn a_breakpoint_hit_on_another_thread_is_reported_for_that_thread() {
         return;
     }
     let (target, report) = build_c_target("worker-hit", WORKER_THREAD_TARGET);
-    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     let main_pc = debugger.fetch_registers(pid).unwrap().pc;
 
     debugger.set_sw_breakpoint(marker).expect("set breakpoint");
@@ -477,7 +481,7 @@ fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
         return;
     }
     let (target, report) = build_c_target("worker-step", WORKER_THREAD_TARGET);
-    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(marker).expect("set breakpoint");
     debugger.continue_execution().unwrap();
     let worker = match next_event(&mut debugger) {
@@ -520,14 +524,29 @@ fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
 
 #[test]
 fn dropping_an_active_worker_step_releases_the_target() {
+    check_drop_during_worker_step(false);
+}
+
+#[test]
+fn dropping_an_active_worker_step_detaches_a_target_that_keeps_running() {
+    check_drop_during_worker_step(true);
+}
+
+fn check_drop_during_worker_step(keep_running: bool) {
     use std::os::unix::process::ExitStatusExt;
     use std::time::{Duration, Instant};
 
     if !enabled() {
         return;
     }
-    let (target, report) = build_c_target("drop-worker-step", WORKER_THREAD_TARGET);
-    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    let fixture = if keep_running {
+        "drop-worker-detach"
+    } else {
+        "drop-worker-step"
+    };
+    let (target, report) = build_c_target(fixture, WORKER_THREAD_TARGET);
+    let exit_gate = keep_running.then(|| report.with_file_name("allow-exit"));
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, exit_gate.as_deref());
     debugger.set_sw_breakpoint(marker).unwrap();
     debugger.continue_execution().unwrap();
     assert!(matches!(
@@ -544,6 +563,9 @@ fn dropping_an_active_worker_step_releases_the_target() {
     // collecting the stop and the debugger still owns the peer suspensions.
     debugger.single_step().unwrap();
     drop(debugger);
+    if let Some(exit_gate) = exit_gate {
+        std::fs::write(exit_gate, []).expect("allow the detached target to exit");
+    }
 
     unsafe extern "C" {
         fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
@@ -556,7 +578,8 @@ fn dropping_an_active_worker_step_releases_the_target() {
         // SAFETY: waitpid receives our child's PID and an initialized status slot.
         let waited = unsafe { waitpid(pid, &mut status, 1) }; // WNOHANG
         if waited == pid {
-            assert_eq!(std::process::ExitStatus::from_raw(status).code(), Some(7));
+            let status = std::process::ExitStatus::from_raw(status);
+            assert_eq!(status.code(), Some(7), "target exited with {status}");
             return;
         }
         assert_eq!(waited, 0, "waitpid: {}", std::io::Error::last_os_error());
@@ -608,7 +631,7 @@ fn a_breakpoint_on_a_faulting_instruction_reports_the_fault_and_stays_set() {
         return;
     }
     let (target, report) = build_c_target("fault", FAULTING_INSTRUCTION_TARGET);
-    let (mut debugger, pid, load) = launch_to_self_stop(&target, &report);
+    let (mut debugger, pid, load) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(load).expect("set breakpoint");
 
     debugger.continue_execution().unwrap();
@@ -690,7 +713,7 @@ fn a_breakpoint_is_put_back_when_a_signal_ends_the_step_off_it() {
         return;
     }
     let (target, report) = build_c_target("signal", SIGNALLING_INSTRUCTION_TARGET);
-    let (mut debugger, _pid, syscall) = launch_to_self_stop(&target, &report);
+    let (mut debugger, _pid, syscall) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(syscall).expect("set breakpoint");
 
     let mut hits = 0;
@@ -730,7 +753,7 @@ fn a_step_that_lands_on_a_breakpoint_is_a_step() {
         return;
     }
     let (target, report) = build_reporting_target("step-onto");
-    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     // The first instruction of an unoptimised function: `sub sp, sp, #16`
     // (four bytes) or `push %rbp` (one byte).
     #[cfg(target_arch = "aarch64")]
