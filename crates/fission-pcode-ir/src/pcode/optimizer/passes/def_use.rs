@@ -61,26 +61,58 @@ pub struct DefUseInfo {
 pub struct DefUseTracker {
     /// Map from varnode ID to its def-use info
     def_use: HashMap<VarnodeId, DefUseInfo>,
+    /// Number of definitions per varnode across the function
+    def_counts: HashMap<VarnodeId, usize>,
     /// Varnodes whose non-zero mask is not tracked and stays "any bit".
     ///
     /// The mask is one value per varnode, not per program point, so it only
     /// describes a varnode that holds a single value for its whole life. See
     /// [`DefUseTracker::find_untracked_nz`].
     nz_untracked: std::collections::HashSet<VarnodeId>,
+    /// Varnodes (read or written) whose storage overlaps another distinct varnode in the function.
+    overlapping_storage: std::collections::HashSet<VarnodeId>,
+}
+
+fn collect_overlapping_ids<'a>(
+    ids: impl Iterator<Item = &'a VarnodeId>,
+) -> std::collections::HashSet<VarnodeId> {
+    let mut sorted: Vec<&VarnodeId> = ids.collect();
+    sorted.sort_by_key(|id| (id.space_id, id.offset, id.size));
+    let mut active: Vec<(&VarnodeId, u64)> = Vec::new();
+    let mut overlapping = std::collections::HashSet::new();
+    for id in sorted {
+        if let Some((prev, _)) = active.first()
+            && prev.space_id != id.space_id
+        {
+            active.clear();
+        }
+        active.retain(|(_, end)| *end > id.offset);
+        let end = id.offset.saturating_add(u64::from(id.size.max(1)));
+        if !active.is_empty() {
+            overlapping.insert(id.clone());
+            overlapping.extend(active.iter().map(|(other, _)| (*other).clone()));
+        }
+        active.push((id, end));
+    }
+    overlapping
 }
 
 impl DefUseTracker {
     pub fn new() -> Self {
         Self {
             def_use: HashMap::new(),
+            def_counts: HashMap::new(),
             nz_untracked: std::collections::HashSet::new(),
+            overlapping_storage: std::collections::HashSet::new(),
         }
     }
 
     /// Build def-use chains for a function
     pub fn build(&mut self, func: &PcodeFunction) {
         self.def_use.clear();
+        self.def_counts.clear();
         self.nz_untracked.clear();
+        self.overlapping_storage.clear();
 
         // Pass 1: Find all definitions
         for (block_idx, block) in func.blocks.iter().enumerate() {
@@ -89,6 +121,7 @@ impl DefUseTracker {
                     let vn_id = VarnodeId::from(out);
                     let op_ref = OpRef { block_idx, op_idx };
 
+                    *self.def_counts.entry(vn_id.clone()).or_insert(0) += 1;
                     self.def_use
                         .entry(vn_id)
                         .or_insert_with(|| DefUseInfo {
@@ -125,8 +158,10 @@ impl DefUseTracker {
             }
         }
 
+        self.overlapping_storage = collect_overlapping_ids(self.def_use.keys());
+
         // Pass 3: Compute non-zero masks
-        self.find_untracked_nz(func);
+        self.find_untracked_nz();
         self.compute_nz_masks(func);
 
         // Pass 4: Compute consume masks
@@ -140,6 +175,25 @@ impl DefUseTracker {
         }
         let vn_id = VarnodeId::from(vn);
         self.def_use.get(&vn_id)
+    }
+
+    /// Return how many times `vn` is defined across the function.
+    pub fn def_count(&self, vn: &Varnode) -> usize {
+        if vn.is_constant {
+            return 0;
+        }
+        self.def_counts
+            .get(&VarnodeId::from(vn))
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Return whether `vn` overlaps a distinct read or written varnode in the function.
+    pub fn has_overlapping_storage(&self, vn: &Varnode) -> bool {
+        if vn.is_constant {
+            return false;
+        }
+        self.overlapping_storage.contains(&VarnodeId::from(vn))
     }
 
     /// Check if a varnode is defined (written)
@@ -214,18 +268,9 @@ impl DefUseTracker {
     /// - shares no storage with a different, written varnode (`eax` / `ax`).
     ///
     /// Everything else keeps "any bit may be set".
-    fn find_untracked_nz(&mut self, func: &PcodeFunction) {
-        let mut def_counts: HashMap<VarnodeId, usize> = HashMap::new();
-        for block in &func.blocks {
-            for op in &block.ops {
-                if let Some(out) = &op.output {
-                    *def_counts.entry(VarnodeId::from(out)).or_insert(0) += 1;
-                }
-            }
-        }
-
+    fn find_untracked_nz(&mut self) {
         for (id, info) in &self.def_use {
-            let tracked = def_counts.get(id) == Some(&1)
+            let tracked = self.def_counts.get(id) == Some(&1)
                 && info.def.is_some_and(|def| {
                     info.uses
                         .iter()
@@ -237,25 +282,8 @@ impl DefUseTracker {
         }
 
         // Written varnodes that overlap a different written varnode.
-        let mut written: Vec<&VarnodeId> = def_counts.keys().collect();
-        written.sort_by_key(|id| (id.space_id, id.offset, id.size));
-        let mut active: Vec<(&VarnodeId, u64)> = Vec::new();
-        let mut overlapping: Vec<VarnodeId> = Vec::new();
-        for id in written {
-            if let Some((prev, _)) = active.first() {
-                if prev.space_id != id.space_id {
-                    active.clear();
-                }
-            }
-            active.retain(|(_, end)| *end > id.offset);
-            let end = id.offset.saturating_add(u64::from(id.size.max(1)));
-            if !active.is_empty() {
-                overlapping.push(id.clone());
-                overlapping.extend(active.iter().map(|(other, _)| (*other).clone()));
-            }
-            active.push((id, end));
-        }
-        self.nz_untracked.extend(overlapping);
+        self.nz_untracked
+            .extend(collect_overlapping_ids(self.def_counts.keys()));
     }
 
     fn compute_nz_masks(&mut self, func: &PcodeFunction) {
@@ -431,9 +459,21 @@ impl DefUseTracker {
 
         // Initialize:
         // - If a varnode is an output of an op, set consume to 0.
-        // - We will accumulate consume masks from uses.
-        for info in self.def_use.values_mut() {
-            info.consume_mask = 0;
+        // - Varnodes that overlap a sub/super-register or distinct alias in the
+        //   same space are seeded as fully consumed so backward bit-liveness and
+        //   dead-bit elimination do not drop partially-read writes.
+        for (id, info) in &mut self.def_use {
+            info.consume_mask = if self.overlapping_storage.contains(id) {
+                match id.size {
+                    1 => 0xFF,
+                    2 => 0xFFFF,
+                    4 => 0xFFFF_FFFF,
+                    8 => u64::MAX,
+                    _ => u64::MAX,
+                }
+            } else {
+                0
+            };
         }
 
         // Iterative propagation
@@ -451,6 +491,7 @@ impl DefUseTracker {
                         | PcodeOpcode::BranchInd
                         | PcodeOpcode::Call
                         | PcodeOpcode::CallInd
+                        | PcodeOpcode::CallOther
                         | PcodeOpcode::Return => u64::MAX,
 
                         // Propagate from output's consume mask
@@ -557,20 +598,23 @@ impl DefUseTracker {
                             // A = Subpiece(B, offset)
                             // Consumes bits of B at [offset..offset+size]
                             if op.inputs.len() >= 2 {
-                                let offset = if op.inputs[1].is_constant {
-                                    op.inputs[1].constant_val as u32
+                                let out_mask = op
+                                    .output
+                                    .as_ref()
+                                    .filter(|out| out.size > 0 && out.size <= 8)
+                                    .map_or(u64::MAX, |out| self.size_mask(out.size));
+                                let out_req = input_consume_req & out_mask;
+                                let shifted_req = if !op.inputs[1].is_constant {
+                                    if out_req == 0 { 0 } else { u64::MAX }
                                 } else {
-                                    0
-                                };
-                                // Create mask for the slice in B's space
-                                // The consumed bits of A (input_consume_req) map to B at (req << (offset*8))
-                                // A slice starting at or past bit 64 (e.g. the high half of a
-                                // 16-byte register) is not representable in the u64 mask, so
-                                // stay conservative: everything is consumed.
-                                let shifted_req = match offset.checked_mul(8) {
-                                    Some(shift) if shift < 64 => input_consume_req << shift,
-                                    _ if input_consume_req == 0 => 0,
-                                    _ => u64::MAX,
+                                    let offset = op.inputs[1].constant_val as u32;
+                                    // Map consumed bits of A to B at `[offset*8 .. (offset+size)*8)`.
+                                    // Slices starting at or past bit 64 cannot fit in a u64 mask.
+                                    match offset.checked_mul(8) {
+                                        Some(shift) if shift < 64 => out_req << shift,
+                                        _ if out_req == 0 => 0,
+                                        _ => u64::MAX,
+                                    }
                                 };
                                 if self.add_consume(&op.inputs[0], shifted_req) {
                                     changed = true;
@@ -578,14 +622,33 @@ impl DefUseTracker {
                             }
                         }
 
-                        PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
+                        PcodeOpcode::IntZExt => {
                             // A = ZExt(B)
-                            // B is consumed where A is consumed (low bits)
+                            // B is consumed only where A is consumed in the low bits.
                             if !op.inputs.is_empty() {
-                                // Mask input_consume_req to B's size
-                                let b_size = op.inputs[0].size;
-                                let b_mask = self.size_mask(b_size);
+                                let b_mask = self.size_mask(op.inputs[0].size);
                                 if self.add_consume(&op.inputs[0], input_consume_req & b_mask) {
+                                    changed = true;
+                                }
+                            }
+                        }
+
+                        PcodeOpcode::IntSExt => {
+                            // A = SExt(B)
+                            // Any consumed bit of A above B's width reads a copy of B's sign bit.
+                            if !op.inputs.is_empty() {
+                                let b_size = op.inputs[0].size;
+                                let consumed = if b_size == 0 || b_size > 8 {
+                                    u64::MAX
+                                } else {
+                                    let b_mask = self.size_mask(b_size);
+                                    let mut req = input_consume_req & b_mask;
+                                    if (input_consume_req & !b_mask) != 0 {
+                                        req |= b_mask ^ (b_mask >> 1);
+                                    }
+                                    req
+                                };
+                                if self.add_consume(&op.inputs[0], consumed) {
                                     changed = true;
                                 }
                             }
