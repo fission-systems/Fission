@@ -10,7 +10,7 @@ const CONFIG_FILE: &str = "config.toml";
 static TEMP_FILE_SERIAL: AtomicU64 = AtomicU64::new(0);
 
 /// Write `content` to `path` atomically via a sibling temp file and rename.
-pub(crate) fn write_file_atomically(path: &Path, content: &[u8]) -> std::io::Result<()> {
+pub fn write_file_atomically(path: &Path, content: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent)?;
     }
