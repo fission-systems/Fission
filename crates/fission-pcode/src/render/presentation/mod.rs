@@ -1721,6 +1721,43 @@ mod tests {
         NirType::Int { bits, signed }
     }
 
+    #[test]
+    fn batched_use_counts_match_per_variable_counts_in_nested_statements() {
+        let ty = int_ty(32, true);
+        let stmts = [HirStmt::For {
+            init: Some(Box::new(HirStmt::Assign {
+                lhs: HirLValue::Var("index".into()),
+                rhs: HirExpr::Const(0, ty.clone()),
+            })),
+            cond: Some(HirExpr::Var("more".into())),
+            update: Some(Box::new(HirStmt::Assign {
+                lhs: HirLValue::Var("index".into()),
+                rhs: HirExpr::Var("index".into()),
+            })),
+            body: vec![HirStmt::If {
+                cond: HirExpr::Var("more".into()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Deref {
+                        ptr: Box::new(HirExpr::Var("destination".into())),
+                        ty,
+                    },
+                    rhs: HirExpr::AddressOfLocal("local".into()),
+                }],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Var("index".into())))],
+            }],
+        }];
+        let mut uses = HashMap::new();
+        count_all_uses_in_stmts(&stmts, &mut uses);
+        assert_eq!(uses.len(), 4);
+        for name in ["index", "more", "destination", "local", "unused"] {
+            assert_eq!(
+                uses.get(name).copied().unwrap_or(0),
+                count_uses_in_stmts(&stmts, name),
+                "{name}"
+            );
+        }
+    }
+
     fn local(name: &str) -> NirBinding {
         NirBinding {
             name: name.into(),
