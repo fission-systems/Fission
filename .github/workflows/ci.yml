@@ -9,10 +9,10 @@ on:
     types: [checks_requested]
   workflow_dispatch:
 
+# The cache service (rust-cache, sccache) authenticates with the runner's own
+# token, not GITHUB_TOKEN, so no job here needs more than read access.
 permissions:
   contents: read
-  # sccache GHA backend writes action caches
-  actions: write
 
 concurrency:
   group: ci-fast-${{ github.event.pull_request.number || github.run_id }}
@@ -56,7 +56,7 @@ jobs:
       run_plugin_interactive_check: ${{ steps.impact.outputs.run_plugin_interactive_check }}
       run_cli_alt_feature_checks: ${{ steps.impact.outputs.run_cli_alt_feature_checks }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           lfs: false
@@ -69,7 +69,9 @@ jobs:
 
       - name: Install Rust for package impact selection
         if: steps.filter.outputs.run_tests == 'true'
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
       - name: Resolve affected crate suites
         id: impact
@@ -103,7 +105,7 @@ jobs:
     if: needs.changes.outputs.run_script_checks == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           lfs: false
           submodules: false
@@ -145,6 +147,12 @@ jobs:
         if: needs.changes.outputs.run_actionlint == 'true'
         run: '"$(go env GOPATH)/bin/actionlint" -shellcheck= -pyflakes='
 
+      # Workflow security: unpinned actions, template injection into shell,
+      # over-broad token permissions. High severity fails the job.
+      - name: Audit GitHub workflows (zizmor)
+        if: needs.changes.outputs.run_actionlint == 'true'
+        run: pipx run zizmor==1.32.0 --offline --min-severity high --format github .github/workflows
+
   # Anti-overfitting / owner-boundary lint
   pass-gate-lint:
     name: Pass-Gate Lint (anti-overfitting)
@@ -152,7 +160,7 @@ jobs:
     if: needs.changes.outputs.run_pass_gate == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           lfs: false
           submodules: false
@@ -381,6 +389,9 @@ jobs:
     name: DecBench sweep smoke
     needs: [changes]
     if: needs.changes.outputs.run_sweep_smoke == 'true'
+    permissions:
+      contents: read
+      actions: read
     uses: ./.github/workflows/reusable-decbench-sweep.yml
     with:
       only: binaries/O0/base-passwd/update-passwd

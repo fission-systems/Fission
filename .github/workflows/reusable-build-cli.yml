@@ -23,6 +23,8 @@ on:
         description: "Upload artifact to GitHub Actions"
 
 env:
+  FISSION_IN_PROFILE: ${{ inputs.profile }}
+  FISSION_IN_TARGET: ${{ inputs.target }}
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -30,7 +32,7 @@ jobs:
     runs-on: ${{ inputs.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           lfs: false
           submodules: false
@@ -38,22 +40,28 @@ jobs:
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: ${{ inputs.target || '' }}
 
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           shared-key: fission-cli-${{ runner.os }}-${{ inputs.profile }}
           cache-on-failure: true
 
       - name: Build fission-cli (${{ inputs.profile }})
+        shell: bash
         run: |
-          cargo build -p fission-cli --locked ${{ inputs.profile == 'release' && '--release' || '' }} ${{ inputs.target && format('--target {0}', inputs.target) || '' }} --verbose
+          set -euo pipefail
+          args=()
+          if [ "${FISSION_IN_PROFILE}" = "release" ]; then args+=(--release); fi
+          if [ -n "${FISSION_IN_TARGET}" ]; then args+=(--target "${FISSION_IN_TARGET}"); fi
+          cargo build -p fission-cli --locked ${args[@]+"${args[@]}"} --verbose
 
       - name: sccache stats
         if: always()
@@ -64,13 +72,13 @@ jobs:
         id: locate
         shell: bash
         run: |
-          if [ "${{ inputs.profile }}" = "release" ]; then
+          if [ "${FISSION_IN_PROFILE}" = "release" ]; then
             PROFILE_DIR="release"
           else
             PROFILE_DIR="debug"
           fi
 
-          TARGET="${{ inputs.target }}"
+          TARGET="${FISSION_IN_TARGET}"
           if [ -n "$TARGET" ]; then
             TARGET_DIR="target/$TARGET/$PROFILE_DIR"
           else
@@ -104,7 +112,7 @@ jobs:
 
       - name: Upload Binary Artifact
         if: ${{ inputs.upload_artifact }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fission-cli-${{ inputs.os }}-${{ inputs.profile }}-${{ github.sha }}
           path: ${{ steps.locate.outputs.binary_path }}

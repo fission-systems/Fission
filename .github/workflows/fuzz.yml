@@ -42,7 +42,7 @@ jobs:
           #   crate_dir: crates/fission-pcode
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
         with:
           lfs: false
@@ -52,12 +52,13 @@ jobs:
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
       - name: Install Rust (nightly)
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb # nightly
         with:
+          toolchain: nightly
           components: llvm-tools-preview
 
       - name: Cache cargo-fuzz
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/cargo-fuzz
           key: cargo-fuzz-${{ runner.os }}-v1
@@ -82,7 +83,7 @@ jobs:
       # Each run starts from what earlier runs found. The corpus used to be
       # uploaded and never read back, so every run began from the seeds.
       - name: Restore corpus from earlier runs
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
@@ -100,7 +101,7 @@ jobs:
 
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: fuzz-crashes-${{ matrix.target }}-${{ github.sha }}
           path: |
@@ -109,7 +110,7 @@ jobs:
 
       - name: Save corpus for the next run
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}

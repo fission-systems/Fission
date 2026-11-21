@@ -16,6 +16,7 @@ on:
         description: "Crates to run Miri on (comma-separated)"
 
 env:
+  FISSION_IN_CRATES: ${{ inputs.crates }}
   CARGO_TERM_COLOR: always
   # Strict provenance: catch ptr-int casts that may not be portable.
   #
@@ -32,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
         with:
           lfs: false
@@ -42,12 +43,13 @@ jobs:
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
       - name: Install Rust (nightly + Miri)
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@6a52aad76a94a5fbc50d567bb5be24419801c1fb # nightly
         with:
+          toolchain: nightly
           components: miri, rust-src
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: miri-nightly
 
@@ -65,7 +67,7 @@ jobs:
         run: |
           set +e
           FAILED=0
-          crates="${{ inputs.crates }}"
+          crates="${FISSION_IN_CRATES}"
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]}"; do
             crate="$(echo "$crate" | tr -d '[:space:]')"
@@ -85,7 +87,7 @@ jobs:
 
       - name: Upload Miri output on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: miri-output-${{ github.sha }}
           path: /tmp/miri-*.txt

@@ -46,7 +46,7 @@ jobs:
             exe: fission_cli.exe
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -55,19 +55,20 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: ${{ matrix.target }}
 
@@ -150,7 +151,7 @@ jobs:
           (cd dist && sha256sum "${name}" > "${name}.sha256")
 
       - name: Upload packaged artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-${{ matrix.target }}
           path: dist/
@@ -163,7 +164,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.source_sha }}
           persist-credentials: false
@@ -172,7 +173,7 @@ jobs:
         uses: ./.github/actions/setup-utils
 
       - name: Collect archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: dist-*
           path: dist
@@ -230,7 +231,7 @@ jobs:
           sha256sum "${targets[@]}" ./*.sha256 > SHA256SUMS
           jq -n --arg sha "$SOURCE_SHA" --arg tag "$RELEASE_TAG"             '{sha: $sha, tag: $tag}' > release.json
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-candidate-dist
           path: dist/

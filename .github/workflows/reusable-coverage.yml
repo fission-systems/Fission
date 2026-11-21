@@ -19,6 +19,8 @@ on:
         description: "Coverage warn threshold % for fission-pcode (warning only, not failure)"
 
 env:
+  FISSION_IN_CRATES: ${{ inputs.crates }}
+  FISSION_IN_WARN_THRESHOLD_PCT: ${{ inputs.warn_threshold_pct }}
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -29,7 +31,7 @@ jobs:
     # Coverage is diagnostic; tool or infrastructure failures must not block L1.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
         with:
           lfs: false
@@ -39,17 +41,20 @@ jobs:
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
       - name: Install Rust (stable + llvm-tools)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           components: llvm-tools-preview
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: coverage
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@a138c079db095d22c78af31fc3e0890136adf687 # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install system dependencies (Linux)
         run: |
@@ -63,7 +68,7 @@ jobs:
       - name: Generate coverage report (HTML + LCOV)
         shell: bash
         run: |
-          crates="${{ inputs.crates }}"
+          crates="${FISSION_IN_CRATES}"
           crate_flags=()
           IFS=',' read -ra CRATE_ARRAY <<< "$crates"
           for crate in "${CRATE_ARRAY[@]}"; do
@@ -115,7 +120,7 @@ jobs:
               sys.exit(0)
 
           pct = (hit_lines / found_lines) * 100
-          threshold = ${{ inputs.warn_threshold_pct }}
+          threshold = ${FISSION_IN_WARN_THRESHOLD_PCT}
           print(f"fission-pcode coverage: {pct:.1f}% ({hit_lines}/{found_lines} lines)")
           if pct < threshold:
               print(f"WARNING: Coverage {pct:.1f}% is below warn threshold {threshold}%")
@@ -178,7 +183,7 @@ jobs:
 
       - name: Upload coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: coverage-report-${{ github.sha }}
           path: coverage/

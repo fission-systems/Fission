@@ -54,9 +54,25 @@ licenses and sources are checked on every Rust or metadata change, and Heavy
 checks advisories every night. The sccache setup fails open. Every push to main
 runs workspace fmt and clippy, whatever it changed.
 
+## Checks on the checks
+
+- Workflows: every third-party action is pinned to a commit SHA (Dependabot
+  updates the pins monthly), inputs reach shell code through `env`, and no
+  workflow grants `actions: write`. Any workflow change runs actionlint and
+  zizmor; a high-severity zizmor finding fails Script Checks.
+- Determinism: the PR fixture lane decompiles each fixture three times (1 and
+  4 threads) and fails if any function's text differs. The nightly
+  `determinism.yml` does the same four times over a fixed DecBench sample of
+  37 binaries and 12,505 functions (`scripts/ci/determinism_check.py`, static
+  decompilation only). On main today 26 of those functions differ, so it
+  reports into a `ci-red` issue and does not gate releases; add it to Heavy's
+  summary once it is green.
+- The PR fixture lane builds the release CLI with overflow checks and debug
+  assertions on.
+
 ## Scheduled runs report into issues
 
-Heavy, fuzz and the DecBench sweep end with `reusable-report-red.yml`. While a
+Heavy, fuzz, determinism and the DecBench sweep end with `reusable-report-red.yml`. While a
 workflow is red on main there is one open issue titled `CI red: <workflow>`
 with the `ci-red` label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs

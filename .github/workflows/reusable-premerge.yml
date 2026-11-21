@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   native-debugger:
@@ -22,15 +21,19 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-utils
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           shared-key: native-debugger-${{ runner.os }}
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
       - name: Linux live debugger
         if: runner.os == 'Linux'
         run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features interactive_runtime --test linux_debug_launch
@@ -59,12 +62,16 @@ jobs:
       FISSION_DIFF_DEPTH: "2"
       FISSION_DIFF_JOBS: "2"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
       - name: Install Z3 4.13.4
         run: |
           set -euo pipefail
@@ -90,13 +97,21 @@ jobs:
         os: ${{ fromJSON(inputs.suite == 'loader' && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     env:
       FISSION_BENCHMARK_NO_CACHE: "1"
+      # Release speed with the checks a debug build has: integer overflow and
+      # debug assertions panic instead of wrapping silently. A plain release
+      # build hid real overflows (a debug sweep found four panic sites; the
+      # ELF fuzz target found another).
+      CARGO_PROFILE_RELEASE_OVERFLOW_CHECKS: "true"
+      CARGO_PROFILE_RELEASE_DEBUG_ASSERTIONS: "true"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-utils
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           shared-key: premerge-fixtures-${{ runner.os }}
       - name: Build release CLI
