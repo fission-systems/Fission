@@ -22,6 +22,11 @@
 
 use super::memory::{MemoryError, MemoryRegion};
 
+// Shared by the `ptrace` backends; compiled everywhere so its tests run on
+// every host.
+#[cfg_attr(not(any(target_os = "linux", target_os = "macos")), allow(dead_code))]
+pub(crate) mod trap;
+
 // Platform-specific modules
 #[cfg(target_os = "windows")]
 pub mod windows;
