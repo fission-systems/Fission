@@ -1373,6 +1373,23 @@ yet model all IEEE cases must not be consumed as <code>Sat</code> or <code>Unsat
 verifiers share one result classifier: only <code>Unsat</code> maps to <code>Equivalent</code>.</p>
 <p>Arrays are outside this QF_BV matrix and are checked through the solver's
 separate array/memory-oracle path.</p>
+<p>A read is decided only when <code>ArrayTheory</code> wrote axioms that describe it.
+Two shapes it does not describe return <code>Unknown</code>, and
+<code>tests/array_sort_contract.rs</code> holds both with a control beside each:</p>
+<ul>
+<li><strong>A store whose value is wider than the array's element.</strong> The axiom
+  <code>select(store(a, i, v), i) == v</code> compares an element with <code>v</code> by
+  zero-extending the element, so it asserted that <code>v</code>'s high bits are zero:
+  <code>v == 0x1234</code> stored into a byte array made the problem UNSAT. SMT-LIB has
+  no such store to take a meaning from. A narrower value is zero-extended,
+  like every other unsigned operand.</li>
+<li><strong>An array whose index or element is not a 1-to-64-bit scalar.</strong> The theory
+  skips it, so a read through a narrow index was free bits with no record,
+  and <code>a[i] != a[i + 0]</code> was SAT.</li>
+</ul>
+<p>An index whose width differs from the array's index sort is compared by
+zero-extension in every axiom, so the array behaves as a map from the
+zero-extended index; that is consistent, and it is what an address means.</p>
 <h2 id="incremental-query-contracts">Incremental query contracts<a class="headerlink" href="#incremental-query-contracts" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Unsigned mixed-width subtraction zero-extends the subtrahend <strong>before</strong>
