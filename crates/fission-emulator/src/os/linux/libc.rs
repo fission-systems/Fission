@@ -252,12 +252,43 @@ impl SimProcedure for Snprintf {
 }
 
 /// libc `stat` / `__xstat` style: write a synthetic TargetStat for known VFS paths.
-pub struct Stat;
+///
+/// `stat(path, buf)` and glibc's `__xstat(ver, path, buf)` differ by a
+/// leading version argument. One handler served both as `(path, buf)`, so
+/// for `__xstat` the version was read as the path and **the structure was
+/// written over the path string**.
+pub(super) enum Stat {
+    Plain,
+    Versioned,
+    Versioned64,
+}
 impl SimProcedure for Stat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        use crate::os::linux::abi::TargetStat;
-        let path = emu.read_arg(0).unwrap_or(0);
-        let statbuf = emu.read_arg(1).unwrap_or(0);
+        use crate::os::linux::abi::{LibcStatCall, StatLayout, TargetStat};
+        let (path_arg, call) = match self {
+            Self::Plain => {
+                let glibc = emu
+                    .binary
+                    .inner()
+                    .symbol_version_names
+                    .get("stat")
+                    .is_some_and(|version| version.starts_with("GLIBC_"));
+                (0, LibcStatCall::Stat { glibc })
+            }
+            Self::Versioned => (
+                1,
+                LibcStatCall::Xstat {
+                    version: emu.read_arg(0)?,
+                },
+            ),
+            Self::Versioned64 => (1, LibcStatCall::Xstat64),
+        };
+        let Some(layout) = StatLayout::for_libc(&emu.arch, call) else {
+            emu.write_return_val(u64::MAX)?;
+            return Ok(HleResult::Continue);
+        };
+        let path = emu.read_arg(path_arg).unwrap_or(0);
+        let statbuf = emu.read_arg(path_arg + 1).unwrap_or(0);
         let name = read_string(emu, path).unwrap_or_default();
         let mut st = TargetStat::default();
         if let Some(content) = emu.vfs.path_seeds.get(&name).cloned().or_else(|| {
@@ -281,7 +312,7 @@ impl SimProcedure for Stat {
         }
         let _ = emu
             .state
-            .write_space(emu.state.ram_space(), statbuf, &st.to_bytes());
+            .write_space(emu.state.ram_space(), statbuf, &st.to_bytes(layout));
         tracing::info!("SimProcedure: stat(\"{}\") -> 0", name);
         emu.write_return_val(0)?;
         Ok(HleResult::Continue)
@@ -407,17 +438,14 @@ impl SimProcedure for LibcStartMain {
         } else {
             super::POST_MAIN_EXIT_STUB_32
         };
-        let ptr_size = if is_64bit { 8 } else { 4 };
-        let sp_reg = emu.arch.sp_reg;
-        if let Ok(sp) = emu.read_register_u64(sp_reg) {
-            let bytes = stub.to_le_bytes();
-            let _ = emu
-                .state
-                .write_space(emu.state.ram_space(), sp, &bytes[..ptr_size]);
-        }
-        // musl main(int argc, char **argv): rdi=argc, rsi=argv
-        let _ = emu.write_register_u64("RDI", argc);
-        let _ = emu.write_register_u64("RSI", argv);
+        // main(int argc, char **argv), entered the way this guest calls a
+        // function and returning to the stub. This named x86-64's `RDI` and
+        // `RSI` and put the return address on the stack whatever the guest
+        // was -- so an i386 `main` read its arguments from the stack slots
+        // `__libc_start_main`'s own had been in, and an ARM or AArch64 one
+        // got `main`'s address as `argc` and returned through a link register
+        // nobody had set.
+        emu.set_call_frame(&[argc, argv], stub)?;
         Ok(HleResult::JumpTo(main_fn))
     }
 }
@@ -900,6 +928,52 @@ mod tests {
         emu.write_register_u64("RDI", 99).unwrap();
         Write.run(&mut emu).expect("write");
         assert_eq!(emu.read_register_u64("RAX").unwrap(), u64::MAX);
+    }
+
+    /// glibc's `__xstat(ver, path, buf)` has a version argument before the
+    /// path. Served as `stat(path, buf)`, the version was taken for the path
+    /// and the structure was written over the path string.
+    #[test]
+    fn xstat_reads_its_path_after_the_version_and_fills_the_buffer() {
+        let mut emu = tiny_emu();
+        let env = LinuxEnv::new();
+        let path = emu.heap_alloc(32).expect("path");
+        let buf = emu.heap_alloc(256).expect("stat buffer");
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, path, b"/etc/passwd\0").unwrap();
+        emu.vfs.seed_path("/etc/passwd", b"root:x:0:0".to_vec());
+        emu.write_register_u64("RDI", 1).unwrap(); // _STAT_VER
+        emu.write_register_u64("RSI", path).unwrap();
+        emu.write_register_u64("RDX", buf).unwrap();
+        env.simos
+            .procedures
+            .get("__xstat")
+            .expect("__xstat is served")
+            .run(&mut emu)
+            .expect("__xstat");
+        assert_eq!(emu.read_register_u64("RAX").unwrap(), 0);
+        assert_eq!(
+            emu.state.read_space(ram, path, 12).unwrap(),
+            b"/etc/passwd\0",
+            "the path is still the path"
+        );
+        // x86-64 `struct stat`: st_mode at 24, st_size at 48.
+        let stat = emu.state.read_space(ram, buf, 144).unwrap();
+        assert_eq!(u32::from_le_bytes(stat[24..28].try_into().unwrap()), 0x81B4);
+        assert_eq!(u64::from_le_bytes(stat[48..56].try_into().unwrap()), 10);
+
+        // Positive control: `stat(path, buf)` takes them in that order.
+        let buf2 = emu.heap_alloc(256).expect("stat buffer");
+        emu.write_register_u64("RDI", path).unwrap();
+        emu.write_register_u64("RSI", buf2).unwrap();
+        env.simos
+            .procedures
+            .get("stat")
+            .unwrap()
+            .run(&mut emu)
+            .unwrap();
+        let stat = emu.state.read_space(ram, buf2, 144).unwrap();
+        assert_eq!(u64::from_le_bytes(stat[48..56].try_into().unwrap()), 10);
     }
 
     #[test]

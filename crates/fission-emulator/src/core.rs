@@ -2043,6 +2043,42 @@ impl Emulator {
         }
     }
 
+    /// Set up a call the guest is about to land in: `args` where this guest's
+    /// calling convention passes them, and `return_to` where it keeps the
+    /// return address.
+    ///
+    /// For use at the moment a call has just been made -- so on a
+    /// stack-return architecture the stack pointer is at the return-address
+    /// slot, with stack arguments above it, and on a link-register one the
+    /// address goes in that register.
+    pub fn set_call_frame(&mut self, args: &[u64], return_to: u64) -> Result<()> {
+        let width = usize::from(self.arch.pointer_size).min(8);
+        // Register names are `'static`, so they outlive this borrow of `arch`.
+        let regs: Vec<&'static str> = self.arch.cc.arg_regs().to_vec();
+        let sp = self.read_register_u64(self.arch.sp_reg)?;
+        let ram = self.state.ram_space();
+        for (index, &value) in args.iter().enumerate() {
+            match regs.get(index) {
+                Some(reg) => self.write_register_u64(reg, value)?,
+                None => {
+                    let offset = self.arch.cc.stack_arg_offset(index - regs.len());
+                    self.state.write_space(
+                        ram,
+                        sp.wrapping_add(offset),
+                        &value.to_le_bytes()[..width],
+                    )?;
+                }
+            }
+        }
+        match self.arch.cc.return_addr_reg() {
+            Some(reg) => self.write_register_u64(reg, return_to)?,
+            None => self
+                .state
+                .write_space(ram, sp, &return_to.to_le_bytes()[..width])?,
+        }
+        Ok(())
+    }
+
     /// Write `value` to the return-value register according to `arch.cc`.
     pub fn write_return_val(&mut self, value: u64) -> Result<()> {
         let reg = self.arch.cc.return_reg();

@@ -59,9 +59,10 @@ impl LinuxEnv {
         simos.register_procedure("printf", Box::new(libc::Printf));
         simos.register_procedure("snprintf", Box::new(libc::Snprintf));
         simos.register_procedure("__snprintf_chk", Box::new(libc::Snprintf));
-        simos.register_procedure("stat", Box::new(libc::Stat));
-        simos.register_procedure("__xstat", Box::new(libc::Stat));
-        simos.register_procedure("__xstat64", Box::new(libc::Stat));
+        simos.register_procedure("stat", Box::new(libc::Stat::Plain));
+        // glibc: __xstat(ver, path, buf).
+        simos.register_procedure("__xstat", Box::new(libc::Stat::Versioned));
+        simos.register_procedure("__xstat64", Box::new(libc::Stat::Versioned64));
         simos.register_procedure("read", Box::new(libc::Read));
         simos.register_procedure("getline", Box::new(libc::Getline));
         simos.register_procedure("write", Box::new(libc::Write));
@@ -236,7 +237,7 @@ impl OsEnvironment for LinuxEnv {
                     } else {
                         u32::from_le_bytes(cur.try_into().unwrap_or([0; 4])) as u64
                     };
-                    if dynlink::is_resolved_got_target(val) {
+                    if dynlink::is_bound_got_slot(state, binary, val) {
                         tracing::debug!(
                             "PLT/GOT keep resolved: {} @ 0x{:X} → 0x{:X}",
                             name,
@@ -461,6 +462,17 @@ impl OsEnvironment for LinuxEnv {
             "syscall" | "sysenter" => {
                 tracing::info!("Linux HLE: Instruct userop '{}' called", userop_name);
             }
+            // `int 0x80`: i386 Linux's system call gate. The instruction
+            // lifts to `target = swi(0x80); call [target]`, so the userop's
+            // *value* is where execution goes next. Nothing answered it, the
+            // value read as zero, and a 32-bit guest's first system call was
+            // a jump to address 0 -- no i386 guest could make one at all.
+            // Serve the call, then resume at the instruction after it.
+            "swi" if inputs.first() == Some(&0x80) && emu.arch.name.starts_with("x86:LE:32") => {
+                let result = self.dispatch_hle(emu, "syscall")?;
+                emu.callother_result = emu.current_instruction_fallthrough();
+                return Ok(result);
+            }
             // Processor semantics rather than OS services: barriers,
             // exclusive access, hints. The same answer under every
             // environment, so it is written once.
@@ -570,11 +582,11 @@ fn check_syscall_taint(emu: &mut Emulator, number: u64) {
         .unwrap_or_else(|| format!("syscall_{number}"));
     let pc = emu.current_instruction_pc();
 
-    let regs = ["RDI", "RSI", "RDX", "R10", "R8", "R9"];
-    let mut args = [0u64; 6];
-    for (slot, reg) in args.iter_mut().zip(regs) {
-        *slot = emu.read_register_u64(reg).unwrap_or(0);
-    }
+    // The registers this guest passes syscall arguments in. They were
+    // x86-64's by name, which on any other architecture do not exist: every
+    // argument read as zero, so nothing was ever reported.
+    let regs = syscall_conv::SyscallAbi::for_arch(&emu.arch).args;
+    let args = emu.syscall_args();
 
     for (index, reg) in regs.iter().enumerate() {
         if let Some(set) = emu.register_taint(reg) {
@@ -616,22 +628,29 @@ fn check_syscall_taint(emu: &mut Emulator, number: u64) {
 /// has run, and the length that matters is what it actually returned, not what
 /// was asked for.
 fn taint_syscall_output(emu: &mut Emulator, number: u64) {
-    // (buffer argument register, length: from the return value or an argument)
-    let (buf_reg, len_from_ret) = match number {
+    // (buffer argument index, length: from the return value or an argument).
+    // `number` is the canonical one, so these are right for every guest; the
+    // registers are looked up by the guest's ABI, not named.
+    let (buf_arg, len_from_ret) = match number {
         // read(fd, buf, count) / recvfrom(fd, buf, len, ...) -> bytes read
-        0 | 45 => ("RSI", true),
+        0 | 45 => (1, true),
         // getrandom(buf, buflen, flags) -> bytes written
-        318 => ("RDI", true),
+        318 => (0, true),
         _ => return,
     };
-    let Ok(addr) = emu.read_register_u64(buf_reg) else {
+    let abi = syscall_conv::SyscallAbi::for_arch(&emu.arch);
+    let Ok(addr) = emu.read_register_u64(abi.args[buf_arg]) else {
         return;
     };
     if addr == 0 {
         return;
     }
     let len = if len_from_ret {
-        let ret = emu.read_register_u64("RAX").unwrap_or(0) as i64;
+        // Sign-extended from the register's own width: a 32-bit guest's -1
+        // is not four billion bytes.
+        let width = u32::from(emu.arch.pointer_size).min(8) * 8;
+        let raw = emu.read_register_u64(abi.result).unwrap_or(0);
+        let ret = ((raw << (64 - width)) as i64) >> (64 - width);
         if ret <= 0 {
             return;
         }

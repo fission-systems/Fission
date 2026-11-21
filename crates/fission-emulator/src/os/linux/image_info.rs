@@ -118,7 +118,8 @@ pub fn load_elf_image(
     // A kernel maps `PT_LOAD` segments with `p_flags`, copies `p_filesz` bytes
     // and zeroes up to `p_memsz`. Doing the same here costs forty lines of
     // header parsing and removes a whole class of "it nearly works".
-    let mapped_segments = map_program_headers(state, inner)?;
+    let segments = map_program_headers(state, inner)?;
+    let mapped_segments = segments.is_some();
 
     // 2) Sections still describe the image -- and where the program headers
     //    are unreadable (a relocatable object, a synthesised binary) they are
@@ -182,8 +183,12 @@ pub fn load_elf_image(
         start_data = end_code;
     }
 
-    // Program break: page after highest mapped image byte.
-    let brk_base = page_align_up(max_end.max(image_base));
+    // Program break: page after highest mapped image byte. What is mapped is
+    // what the program headers say, so their end counts whether or not a
+    // section describes it: a binary whose section table is stripped, or
+    // covers less than its segments do, had the heap start inside its image.
+    let segment_end = segments.as_ref().map_or(0, |s| s.end);
+    let brk_base = page_align_up(max_end.max(segment_end).max(image_base));
     state.page_map.set_brk_base(brk_base);
 
     // 2) Dynlink after main image is resident (RELA/JUMP_SLOT on live GOT).
@@ -225,10 +230,15 @@ pub fn load_elf_image(
         .cloned()
         .unwrap_or_else(|| "fission-guest".into());
 
-    // PHDR heuristics: image base or first RX section (loader may not expose phdr VA).
-    let phdr_addr = image_base;
-    let phent = if is_64bit { 56 } else { 32 };
-    let phnum = inner.sections.len().min(64) as u64;
+    // AT_PHDR / AT_PHENT / AT_PHNUM: the program header table as it sits in
+    // guest memory. A static libc walks it to find its own `PT_TLS`, and the
+    // dynamic loader to find everything. These were the image base and the
+    // number of *sections*, so the walk read the ELF header as program
+    // headers, for a count that had nothing to do with them.
+    let (phdr_addr, phent, phnum) = match &segments {
+        Some(s) => (s.phdr_addr.unwrap_or(image_base), s.phent, s.phnum),
+        None => (image_base, if is_64bit { 56 } else { 32 }, 0),
+    };
 
     let mut info = ImageInfo {
         load_addr: image_base,
@@ -485,13 +495,21 @@ mod tests {
         bytes[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes());
         let binary = LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
         let mut state = MachineState::new();
-        assert!(!map_program_headers(&mut state, binary.inner()).unwrap());
+        assert!(
+            map_program_headers(&mut state, binary.inner())
+                .unwrap()
+                .is_none()
+        );
 
         // Positive control: the untouched fixture's headers are read and its
         // segment mapped.
         let binary = LoadedBinary::from_bytes(fixture(), "fixture".into()).unwrap();
         let mut state = MachineState::new();
-        assert!(map_program_headers(&mut state, binary.inner()).unwrap());
+        assert!(
+            map_program_headers(&mut state, binary.inner())
+                .unwrap()
+                .is_some()
+        );
         assert!(state.page_map.is_mapped(binary.inner().entry_point));
     }
 
@@ -508,7 +526,11 @@ mod tests {
         bytes[header + 0x28..header + 0x30].copy_from_slice(&(1u64 << 40).to_le_bytes());
         let binary = LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
         let mut state = MachineState::new();
-        assert!(map_program_headers(&mut state, binary.inner()).unwrap());
+        assert!(
+            map_program_headers(&mut state, binary.inner())
+                .unwrap()
+                .is_some()
+        );
 
         // Mapped to its end, zero past the file's bytes, and resident only
         // where the file put something.
@@ -528,6 +550,44 @@ mod tests {
             state.read_space(ram, vaddr, filesz as usize).unwrap(),
             vec![0u8; filesz as usize]
         );
+    }
+
+    /// The heap starts after the image the program headers map, whatever the
+    /// section table covers. Here a binary that has a section table gets a
+    /// segment larger in memory than any section says -- the shape of a
+    /// stripped or hand-linked binary whose `.bss` no section describes --
+    /// and the break was placed inside it.
+    ///
+    /// (A binary with *no* section table is not the case: the loader
+    /// synthesises sections from its segments, so their end is already
+    /// right.)
+    #[test]
+    fn the_program_break_starts_after_the_segments_not_the_sections() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_static_printf_malloc.elf");
+        let mut bytes = std::fs::read(path).expect("read ELF fixture");
+        let header = last_load_header(&bytes);
+        let vaddr = u64::from_le_bytes(bytes[header + 0x10..header + 0x18].try_into().unwrap());
+        let memsz = 0x40_0000u64;
+        bytes[header + 0x28..header + 0x30].copy_from_slice(&memsz.to_le_bytes());
+        let binary = LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
+        assert!(
+            binary
+                .inner()
+                .sections
+                .iter()
+                .all(|s| s.virtual_address + s.virtual_size < vaddr + memsz),
+            "the sections end before the segment does"
+        );
+        let mut state = MachineState::new();
+        let info = load_elf_image(&mut state, &binary, &ProcessArgs::default()).unwrap();
+        assert!(
+            info.brk >= vaddr + memsz,
+            "brk 0x{:X} is inside the segment ending at 0x{:X}",
+            info.brk,
+            vaddr + memsz
+        );
+        assert!(state.page_map.is_mapped(vaddr + memsz - 1));
     }
 
     /// And one that does not fit the address space at all is an error.
@@ -556,7 +616,20 @@ fn user_space_end(is_64bit: bool) -> u64 {
     if is_64bit { 1 << 47 } else { 1 << 32 }
 }
 
-/// Map every `PT_LOAD`, the way a kernel does. Returns whether any were found.
+/// What mapping the program headers established.
+struct LoadedSegments {
+    /// One past the highest address any `PT_LOAD` occupies.
+    end: u64,
+    /// Where the program header table is in guest memory, when a segment
+    /// holds it.
+    phdr_addr: Option<u64>,
+    /// `e_phentsize` and `e_phnum`.
+    phent: u64,
+    phnum: u64,
+}
+
+/// Map every `PT_LOAD`, the way a kernel does. `None` when there are no
+/// readable program headers or none of them loads anything.
 ///
 /// Reads the program headers straight out of the file bytes rather than going
 /// through the loader's section view, because the two answer different
@@ -565,10 +638,10 @@ fn user_space_end(is_64bit: bool) -> u64 {
 fn map_program_headers(
     state: &mut MachineState,
     inner: &fission_loader::loader::LoadedBinaryInner,
-) -> Result<bool> {
+) -> Result<Option<LoadedSegments>> {
     let file = inner.data.as_slice();
     if file.len() < 64 || &file[..4] != b"\x7fELF" {
-        return Ok(false);
+        return Ok(None);
     }
     let is_64 = file[4] == 2;
     let little = file[5] != 2;
@@ -617,15 +690,22 @@ fn map_program_headers(
     // fields were then read from past it.
     let header_size = if is_64 { 56 } else { 32 };
     if phoff == 0 || phentsize < header_size || phnum == 0 {
-        return Ok(false);
+        return Ok(None);
     }
 
     const PT_LOAD: u32 = 1;
+    const PT_PHDR: u32 = 6;
     const PF_X: u32 = 1;
     const PF_W: u32 = 2;
     const PF_R: u32 = 4;
 
     let mut mapped = false;
+    let mut end_of_image = 0u64;
+    // Where the table is in memory: `PT_PHDR` says so outright; without one
+    // it is wherever the segment that contains the table's file bytes puts
+    // them.
+    let mut phdr_addr = None;
+    let table_end = phoff.saturating_add(phnum.saturating_mul(phentsize));
     for i in 0..phnum {
         let base = match phoff.checked_add(i.saturating_mul(phentsize)) {
             Some(b)
@@ -655,8 +735,17 @@ fn map_program_headers(
                 u64::from(u32_at(base + 20)),
             )
         };
+        if p_type == PT_PHDR {
+            phdr_addr = Some(p_vaddr);
+        }
         if p_type != PT_LOAD || p_memsz == 0 {
             continue;
+        }
+        if phdr_addr.is_none()
+            && p_offset <= phoff
+            && table_end <= p_offset.saturating_add(p_filesz)
+        {
+            phdr_addr = Some(p_vaddr.wrapping_add((phoff - p_offset) as u64));
         }
 
         let mut page_prot = prot::VALID;
@@ -703,6 +792,12 @@ fn map_program_headers(
             .with_context(|| format!("map PT_LOAD at 0x{p_vaddr:X}"))?;
         tracing::debug!("PT_LOAD 0x{p_vaddr:X}..0x{end:X} prot=0x{page_prot:02X}");
         mapped = true;
+        end_of_image = end_of_image.max(end);
     }
-    Ok(mapped)
+    Ok(mapped.then_some(LoadedSegments {
+        end: end_of_image,
+        phdr_addr,
+        phent: phentsize as u64,
+        phnum: phnum as u64,
+    }))
 }
