@@ -42,6 +42,7 @@ pub(crate) fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     Some(u32::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
 }
 
+#[cfg(test)]
 pub(crate) fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     let end = offset.checked_add(8)?;
     Some(u64::from_le_bytes(bytes.get(offset..end)?.try_into().ok()?))
@@ -557,7 +558,7 @@ mod tests {
 
     /// The bytes at `rva` in an image whose new section was appended by
     /// `append_import_section`.
-    fn at_rva(image: &[u8], headers: &PeHeaders, rva: u32) -> &[u8] {
+    fn at_rva<'a>(image: &'a [u8], headers: &PeHeaders, rva: u32) -> &'a [u8] {
         let last = headers
             .section_offset(headers.number_of_sections as usize - 1)
             .unwrap();

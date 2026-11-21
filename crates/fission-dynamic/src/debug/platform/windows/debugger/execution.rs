@@ -2,7 +2,79 @@ use super::*;
 use fission_core::{FissionError, Result as FissionResult};
 
 impl WindowsDebugger {
+    /// Move a thread's instruction pointer, keeping the named register and the
+    /// state's program counter in step.
+    pub(super) fn set_thread_pc(&mut self, thread_id: u32, pc: u64) -> FissionResult<()> {
+        let mut registers = self.fetch_registers(thread_id)?;
+        registers.pc = pc;
+        for name in ["RIP", "EIP"] {
+            if registers.get(name).is_some() {
+                registers.set(name, pc);
+            }
+        }
+        self.set_registers(thread_id, &registers)
+    }
+
+    /// Arm the trap flag so the thread stops after one instruction.
+    fn set_trap_flag(&mut self, thread_id: u32) -> FissionResult<()> {
+        let mut registers = self.fetch_registers(thread_id)?;
+        let name = if registers.get("RFLAGS").is_some() {
+            "RFLAGS"
+        } else {
+            "EFLAGS"
+        };
+        let flags = registers.get(name).unwrap_or(0x202) | 0x100;
+        registers.set(name, flags);
+        self.set_registers(thread_id, &registers)
+    }
+
+    /// If the current thread stands on one of our persistent breakpoints, run
+    /// its instruction with the original byte back in place and resume.
+    ///
+    /// Returns whether it did; the single-step exception that ends the step
+    /// re-arms the breakpoint (see `process_debug_event`). Without this a
+    /// thread resumed on a breakpoint executes the `INT3` again and stops
+    /// where it stood, for ever.
+    fn step_off_breakpoint(&mut self, report: bool) -> FissionResult<bool> {
+        let Some(thread_id) = self.state.last_thread_id.or(self.state.main_thread_id) else {
+            return Ok(false);
+        };
+        let Ok(registers) = self.fetch_registers(thread_id) else {
+            return Ok(false);
+        };
+        let address = registers.pc;
+        let Some(original_byte) = self
+            .state
+            .breakpoints
+            .get(&address)
+            .filter(|bp| {
+                bp.enabled
+                    && !bp.temporary
+                    && bp.kind == crate::debug::types::BreakpointKind::Software
+            })
+            .map(|bp| bp.original_byte)
+        else {
+            return Ok(false);
+        };
+        self.write_memory(address, &[original_byte])?;
+        if let Err(error) = self.set_trap_flag(thread_id) {
+            let _ = self.write_memory(address, &[0xCC]);
+            return Err(error);
+        }
+        self.step_off = Some(super::StepOffBreakpoint {
+            thread_id,
+            address,
+            report,
+        });
+        self.continue_pending_debug_event()?;
+        self.state.status = DebugStatus::Running;
+        Ok(true)
+    }
+
     pub(super) fn continue_execution(&mut self) -> FissionResult<()> {
+        if self.step_off_breakpoint(false)? {
+            return Ok(());
+        }
         self.continue_pending_debug_event()?;
         if self.state.status != DebugStatus::Terminated {
             self.state.status = DebugStatus::Running;
@@ -11,6 +83,9 @@ impl WindowsDebugger {
     }
 
     pub(super) fn single_step(&mut self) -> FissionResult<()> {
+        if self.step_off_breakpoint(true)? {
+            return Ok(());
+        }
         let tid = self
             .state
             .last_thread_id
