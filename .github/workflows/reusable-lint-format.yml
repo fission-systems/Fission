@@ -28,7 +28,7 @@ jobs:
     # the affected packages selected by the caller.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           lfs: false
@@ -40,15 +40,16 @@ jobs:
         run: python3 scripts/test/no_benchmark_fixture_refs_in_crates.py
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
         with:
+          toolchain: stable
           components: clippy,rustfmt
 
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           shared-key: fission-lint-${{ runner.os }}
           cache-on-failure: true

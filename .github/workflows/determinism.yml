@@ -1,0 +1,52 @@
+name: Decompiler determinism
+
+# The same input must decompile to the same text on every run (AGENTS.md core
+# rule 4). Measured on main 9dd3bb658 before this was added: 26 of 12,505
+# functions in 5 of 37 binaries differ across four runs. Until main is
+# deterministic this reports into a `ci-red` issue rather than gating releases;
+# once it is green, add it to Heavy's summary.
+
+on:
+  schedule:
+    - cron: "45 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: determinism-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # A fixed, hash-ordered DecBench sample (37 binaries, 12,505 functions),
+  # four runs each at 1 and 4 threads; static decompilation only.
+  determinism:
+    name: Decompiler determinism (DecBench sample)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-determinism-${{ runner.os }}
+      - name: Build release CLI
+        run: cargo build --locked --release -p fission-cli
+      - name: Decompile the sample four times and compare
+        run: python3 scripts/ci/determinism_check.py --data "$RUNNER_TEMP/decbench" --cli target/release/fission_cli
+
+  report:
+    needs: determinism
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.determinism.result }}
+      detail: "the run's job summary lists each binary and the addresses whose output differed"

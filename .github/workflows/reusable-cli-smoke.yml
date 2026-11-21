@@ -15,6 +15,8 @@ on:
         description: "Cargo profile for fission_cli (debug|release)"
 
 env:
+  FISSION_IN_BINARY_RELATIVE_PATH: ${{ inputs.binary_relative_path }}
+  FISSION_IN_PROFILE: ${{ inputs.profile }}
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -26,16 +28,18 @@ jobs:
     env:
       FISSION_SLEIGH_SPEC_DIR: ${{ github.workspace }}/utils/sleigh-specs
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           lfs: false
 
 
       - name: Setup Utils
         uses: ./.github/actions/setup-utils
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install MinGW-w64 (PE smoke fixture)
         run: |
@@ -46,7 +50,7 @@ jobs:
       - name: Build PE smoke fixture (MinGW-w64)
         run: |
           set -euo pipefail
-          OUT="${{ inputs.binary_relative_path }}"
+          OUT="${FISSION_IN_BINARY_RELATIVE_PATH}"
           mkdir -p "$(dirname "${OUT}")"
           x86_64-w64-mingw32-gcc -O2 -g -m64 -static \
             .github/fixtures/test_functions.c \
@@ -56,7 +60,7 @@ jobs:
       - name: Build fission_cli
         run: |
           set -euo pipefail
-          if [ "${{ inputs.profile }}" = "release" ]; then
+          if [ "${FISSION_IN_PROFILE}" = "release" ]; then
             cargo build -p fission-cli --locked --release
           else
             cargo build -p fission-cli --locked
@@ -65,23 +69,23 @@ jobs:
       - name: fission_cli info
         run: |
           set -euo pipefail
-          BIN="${{ inputs.binary_relative_path }}"
-          CLI="./target/${{ inputs.profile }}/fission_cli"
+          BIN="${FISSION_IN_BINARY_RELATIVE_PATH}"
+          CLI="./target/${FISSION_IN_PROFILE}/fission_cli"
           "${CLI}" info "${BIN}"
 
       - name: fission_cli list --json (PE smoke)
         run: |
           set -euo pipefail
-          BIN="${{ inputs.binary_relative_path }}"
-          CLI="./target/${{ inputs.profile }}/fission_cli"
+          BIN="${FISSION_IN_BINARY_RELATIVE_PATH}"
+          CLI="./target/${FISSION_IN_PROFILE}/fission_cli"
           "${CLI}" list "${BIN}" --json
           echo "list_ok"
 
       - name: fission_cli decomp --json (PE smoke)
         run: |
           set -euo pipefail
-          BIN="${{ inputs.binary_relative_path }}"
-          CLI="./target/${{ inputs.profile }}/fission_cli"
+          BIN="${FISSION_IN_BINARY_RELATIVE_PATH}"
+          CLI="./target/${FISSION_IN_PROFILE}/fission_cli"
           ADDR="$("${CLI}" list "${BIN}" --json | python3 "${{ github.workspace }}/.github/scripts/pick_pe_smoke_decomp_addr.py")"
           echo "decomp addr: ${ADDR}"
           OUT=$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)

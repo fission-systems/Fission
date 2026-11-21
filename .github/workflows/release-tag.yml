@@ -33,7 +33,7 @@ jobs:
     steps:
       - name: Resolve candidate and check CI on its exact SHA
         id: gate
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_TAG: ${{ inputs.tag }}
@@ -118,10 +118,10 @@ jobs:
       TAG: ${{ needs.verify-gates.outputs.tag }}
       SHA: ${{ needs.verify-gates.outputs.sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.verify-gates.outputs.sha }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: release-candidate-dist
           path: dist
@@ -133,7 +133,7 @@ jobs:
           jq -e --arg tag "$TAG" --arg sha "$SHA" '.tag == $tag and .sha == $sha' release.json
           sha256sum -c SHA256SUMS
       - name: Attest the verified archives, CLI and manifests
-        uses: actions/attest@v4
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
           subject-path: "dist/*"
       - name: Create or verify tag and populate draft release

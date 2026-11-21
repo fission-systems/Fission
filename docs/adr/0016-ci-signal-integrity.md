@@ -1,6 +1,6 @@
 # ADR 0016: CI signal integrity
 
-**Status:** Accepted (phase 1 implemented; phases 2–4 proposed)
+**Status:** Accepted (phase 1 and hardening implemented; phases 2–4 proposed)
 **Last verified:** 2026-11-21
 **Builds on:** PR #980 (exact-SHA change plans, merge-group support, pre-merge
 lanes, nightly DecBench sweep, release promotion)
@@ -46,6 +46,19 @@ Four rules, each a response to a row above.
    `--no-tests=fail`; a lane's definition changing runs the lane (#980). A gate
    that fires on a change it cannot be about (a removal) is narrowed, not
    worked around with a placeholder test.
+
+## Hardening, and what was measured before adding it
+
+Each check below was measured on main (9dd3bb658) before it was added, so its
+cost and what it catches are known rather than assumed.
+
+| Check | Measured | Where it runs |
+|---|---|---|
+| Third-party actions pinned to commit SHAs; template expansions moved into `env`; no workflow-wide `actions: write` | zizmor 1.32.0: 92 unpinned actions (one a branch, `dtolnay/rust-toolchain@stable`), 18 template injections, 2 over-broad permissions, all high severity; 0 after. Caches authenticate with the runner token, so dropping `actions: write` costs nothing | zizmor (high severity) in Script Checks whenever a workflow changes |
+| Decompiler determinism | 2,868 functions over 18 DecBench binaries, decompiled at 1, 8 and 8 threads: one function (`dpkg-query` O0 `dpkg_options_parse`) printed `printforhelp = help_str;` or `*(unsigned long long *)(&printforhelp) = help_str;`, 8 runs to 4, even single-threaded. The nightly sample, run on main: 26 of 12,505 functions in 5 of 37 binaries differ across four runs (10 minutes locally) | PR fixtures: 3 runs each (all deterministic today). Nightly `determinism.yml`: reports into a `ci-red` issue, not yet a release gate; it joins Heavy once main is deterministic |
+| Overflow checks and debug assertions in release builds | 0 panics over the same 2,868 functions; the 83 errors are lift failures on PE data symbols. Kept because the class has occurred (four panic sites from a debug sweep, the `align_up` fuzz crash) and costs little on the fixture lane | PR fixture lane |
+| Retry masking | 0 tests passed only on retry in 59 recent green test jobs | Not changed |
+| Hangs | nextest already terminates a test after 120 s | Not changed |
 
 ## Phases
 

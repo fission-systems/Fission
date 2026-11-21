@@ -77,6 +77,9 @@ on:
           long enough to outweigh that. Off: one job runs everything in order.
 
 env:
+  FISSION_IN_EXCLUDE_CRATES: ${{ inputs.exclude_crates }}
+  FISSION_IN_FEATURES: ${{ inputs.features }}
+  FISSION_IN_RETRIES: ${{ inputs.retries }}
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
   CARGO_NET_RETRY: "10"
@@ -93,7 +96,7 @@ jobs:
       matrix:
         lane: ${{ fromJSON(inputs.parallel_lanes && '["core","extras"]' || '["all"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           lfs: false
           # wiki submodule is not needed for crate tests
@@ -103,13 +106,15 @@ jobs:
         uses: ./.github/actions/setup-utils
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
 
       - name: Setup sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           # Share cache across Fast Gate / Heavy jobs on the same OS+profile.
           # The extras lane builds different targets (doctests, feature
@@ -120,7 +125,9 @@ jobs:
 
       - name: Install cargo-nextest
         if: ${{ matrix.lane != 'extras' || inputs.run_interactive_runtime_tests || inputs.run_script_emulator_tests }}
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
 
       - name: Install system dependencies (Linux · base)
         if: runner.os == 'Linux'
@@ -175,7 +182,7 @@ jobs:
             --locked \
             --no-tests=fail \
             --no-fail-fast \
-            --retries ${{ inputs.retries }} \
+            --retries ${FISSION_IN_RETRIES} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
 
       # Doctests: nextest does not run doctests — run once with multi -p
@@ -212,14 +219,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          features="${{ inputs.features }}"
+          features="${FISSION_IN_FEATURES}"
           feature_flags=()
           if [ -n "$features" ]; then
             feature_flags+=(--features "$features")
           fi
           exclude_flags=()
-          if [ -n "${{ inputs.exclude_crates }}" ]; then
-            IFS=',' read -ra EX <<< "${{ inputs.exclude_crates }}"
+          if [ -n "${FISSION_IN_EXCLUDE_CRATES}" ]; then
+            IFS=',' read -ra EX <<< "${FISSION_IN_EXCLUDE_CRATES}"
             for c in "${EX[@]+"${EX[@]}"}"; do
               c="$(echo "$c" | tr -d '[:space:]')"
               [ -z "$c" ] && continue
@@ -233,17 +240,17 @@ jobs:
             --locked \
             --no-tests=fail \
             --no-fail-fast \
-            --retries ${{ inputs.retries }} \
+            --retries ${FISSION_IN_RETRIES} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
           # fission-static is often excluded from workspace GUI path; still test it.
-          if echo "${{ inputs.exclude_crates }}" | tr ',' '\n' | grep -qx 'fission-static'; then
+          if echo "${FISSION_IN_EXCLUDE_CRATES}" | tr ',' '\n' | grep -qx 'fission-static'; then
             cargo nextest run \
               -p fission-static \
               "${feature_flags[@]+"${feature_flags[@]}"}" \
               --locked \
               --no-tests=fail \
             --no-fail-fast \
-              --retries ${{ inputs.retries }} \
+              --retries ${FISSION_IN_RETRIES} \
               ${{ inputs.profile == 'release' && '--release' || '' }}
           fi
 
