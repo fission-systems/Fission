@@ -29,7 +29,9 @@ impl Default for ArrayTheory {
     }
 }
 
-fn has_supported_scalar_array_sort(array: &SymExpr) -> bool {
+/// Whether `array` maps 1-to-64-bit indices to 1-to-64-bit elements: the
+/// only arrays [`ArrayTheory`] writes axioms for.
+pub(crate) fn has_supported_scalar_array_sort(array: &SymExpr) -> bool {
     matches!(
         array.get_sort(),
         Sort::Array { domain, range }

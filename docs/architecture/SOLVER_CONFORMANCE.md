@@ -48,6 +48,24 @@ verifiers share one result classifier: only `Unsat` maps to `Equivalent`.
 Arrays are outside this QF_BV matrix and are checked through the solver's
 separate array/memory-oracle path.
 
+A read is decided only when `ArrayTheory` wrote axioms that describe it.
+Two shapes it does not describe return `Unknown`, and
+`tests/array_sort_contract.rs` holds both with a control beside each:
+
+- **A store whose value is wider than the array's element.** The axiom
+  `select(store(a, i, v), i) == v` compares an element with `v` by
+  zero-extending the element, so it asserted that `v`'s high bits are zero:
+  `v == 0x1234` stored into a byte array made the problem UNSAT. SMT-LIB has
+  no such store to take a meaning from. A narrower value is zero-extended,
+  like every other unsigned operand.
+- **An array whose index or element is not a 1-to-64-bit scalar.** The theory
+  skips it, so a read through a narrow index was free bits with no record,
+  and `a[i] != a[i + 0]` was SAT.
+
+An index whose width differs from the array's index sort is compared by
+zero-extension in every axiom, so the array behaves as a map from the
+zero-extended index; that is consistent, and it is what an address means.
+
 ## Incremental query contracts
 
 - Unsigned mixed-width subtraction zero-extends the subtrahend **before**
