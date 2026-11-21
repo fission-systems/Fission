@@ -142,7 +142,8 @@ fn mutation_sites(d: &[u8]) -> Vec<(usize, usize)> {
     sites
 }
 
-fn sweep(fixture: &str) -> Findings {
+/// Sweep shard `index` of `of` over `fixture` (see [`mutation::shard`]).
+fn sweep(fixture: &str, index: usize, of: usize) -> Findings {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("testdata")
         .join(fixture);
@@ -153,23 +154,45 @@ fn sweep(fixture: &str) -> Findings {
         "{fixture}: found only {} sites",
         sites.len()
     );
-    mutation::sweep(&base, &sites, false, |data| {
+    mutation::sweep(&base, &mutation::shard(&sites, index, of), false, |data| {
         let _ = LoadedBinary::from_bytes(data, "mutated.elf".to_string());
     })
 }
 
 fn assert_no_panics(fixture: &str) {
-    assert_clean(fixture, &sweep(fixture));
+    assert_shard_clean(fixture, 0, 1);
+}
+
+fn assert_shard_clean(fixture: &str, index: usize, of: usize) {
+    assert_clean(fixture, &sweep(fixture, index, of));
+}
+
+// The two dynamically linked fixtures are the long sweeps -- some thousands
+// of loads of a 30 KB image each -- so they run as shards.
+
+#[test]
+fn mutated_x64_dynamic_elf_never_panics_shard_0() {
+    assert_shard_clean("x64_dyn_lsda_test.elf", 0, 3);
 }
 
 #[test]
-fn mutated_x64_dynamic_elf_never_panics() {
-    assert_no_panics("x64_dyn_lsda_test.elf");
+fn mutated_x64_dynamic_elf_never_panics_shard_1() {
+    assert_shard_clean("x64_dyn_lsda_test.elf", 1, 3);
 }
 
 #[test]
-fn mutated_x64_elf_with_debug_info_never_panics() {
-    assert_no_panics("x64_dyn_split_debug_test.elf");
+fn mutated_x64_dynamic_elf_never_panics_shard_2() {
+    assert_shard_clean("x64_dyn_lsda_test.elf", 2, 3);
+}
+
+#[test]
+fn mutated_x64_elf_with_debug_info_never_panics_shard_0() {
+    assert_shard_clean("x64_dyn_split_debug_test.elf", 0, 2);
+}
+
+#[test]
+fn mutated_x64_elf_with_debug_info_never_panics_shard_1() {
+    assert_shard_clean("x64_dyn_split_debug_test.elf", 1, 2);
 }
 
 #[test]

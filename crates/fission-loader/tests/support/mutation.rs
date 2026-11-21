@@ -137,6 +137,14 @@ impl Findings {
     }
 }
 
+/// Every `of`-th site starting at `index`: one slice of a sweep too long for
+/// a single test's time budget. Each shard is its own test, so a test runner
+/// that gives every test a process runs them side by side.
+pub fn shard(sites: &[(usize, usize)], index: usize, of: usize) -> Vec<(usize, usize)> {
+    assert!(index < of, "shard {index} of {of}");
+    sites.iter().copied().skip(index).step_by(of).collect()
+}
+
 /// Load every single-field mutation of `base` and report what went wrong.
 ///
 /// `sites` are `(file offset, width)` pairs; each is overwritten with each of

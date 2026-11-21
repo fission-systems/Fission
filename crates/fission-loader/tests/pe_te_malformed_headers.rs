@@ -96,21 +96,28 @@ fn pe_mutation_sites(d: &[u8]) -> Vec<(usize, usize)> {
     sites
 }
 
-fn assert_pe_sweep_clean(name: &str) {
+/// Sweep shard `index` of `of` over the PE fixture `name`.
+fn assert_pe_sweep_clean(name: &str, index: usize, of: usize) {
     let base = fixture(name);
     let sites = pe_mutation_sites(&base);
     assert!(sites.len() > 80, "{name}: found only {} sites", sites.len());
+    let sites = mutation::shard(&sites, index, of);
     assert_clean(name, &sweep(&base, &sites, false, load));
 }
 
 #[test]
 fn mutated_x64_pe_never_panics() {
-    assert_pe_sweep_clean("x64_pdb_struct_test.exe");
+    assert_pe_sweep_clean("x64_pdb_struct_test.exe", 0, 1);
 }
 
 #[test]
-fn mutated_x64_pe_with_exception_tables_never_panics() {
-    assert_pe_sweep_clean("x64_seh_guarded_test.exe");
+fn mutated_x64_pe_with_exception_tables_never_panics_shard_0() {
+    assert_pe_sweep_clean("x64_seh_guarded_test.exe", 0, 2);
+}
+
+#[test]
+fn mutated_x64_pe_with_exception_tables_never_panics_shard_1() {
+    assert_pe_sweep_clean("x64_seh_guarded_test.exe", 1, 2);
 }
 
 /// A PE32+ whose `ImageBase` leaves no room for a 32-bit RVA above it: every
