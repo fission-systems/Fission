@@ -1171,7 +1171,9 @@ fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType
         PreHirLValue::Deref { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
-            if let NirType::Ptr(inner) = ptr_ty {
+            if let NirType::Ptr(inner) = ptr_ty
+                && pointee_may_retype_access(&inner, ty)
+            {
                 *ty = *inner;
             }
         }
@@ -1183,7 +1185,9 @@ fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
@@ -1203,10 +1207,7 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             // (A pointer's width is the target's, which this table does
             // not know, so a pointer on either side is not compared.)
             if let NirType::Ptr(inner) = ptr_ty
-                && !matches!(*inner, NirType::Unknown)
-                && (matches!(*inner, NirType::Ptr(_))
-                    || matches!(ty, NirType::Ptr(_) | NirType::Unknown)
-                    || type_byte_size(&inner) == type_byte_size(ty))
+                && pointee_may_retype_access(&inner, ty)
             {
                 *ty = *inner;
             }
@@ -1244,12 +1245,32 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
         _ => {}
     }
+}
+
+/// Whether a pointer's inferred pointee may replace the type of a memory
+/// access made through it.
+///
+/// The access type of a load, a store or an indexed element is also how many
+/// bytes the machine moves (and, for an index, the scale of the address), and
+/// that width comes from the p-code op, not from inference. The pointee may
+/// refine it -- signedness, pointer-ness -- but never erase or resize it: a
+/// one-byte `STORE` through a pointer inferred as `struct *` printed as a
+/// 44-byte store, and one through `unsigned long long *` as an 8-byte store.
+/// A pointer's width is the target's, which this table does not know, so a
+/// pointer on either side is not compared.
+fn pointee_may_retype_access(pointee: &NirType, access: &NirType) -> bool {
+    !matches!(pointee, NirType::Unknown)
+        && (matches!(pointee, NirType::Ptr(_))
+            || matches!(access, NirType::Ptr(_) | NirType::Unknown)
+            || type_byte_size(pointee) == type_byte_size(access))
 }
 
 #[cfg(test)]
