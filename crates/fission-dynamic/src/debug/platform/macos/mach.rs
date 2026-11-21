@@ -490,10 +490,12 @@ pub fn poll_stop(pid: u32) -> Result<Option<WaitOutcome>, i32> {
     }
 }
 
-pub fn request_stop(pid: u32) {
-    // SAFETY: this PID belongs to the tracee. A process that just exited will
-    // still be observed by poll_stop.
-    unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+/// A signal sent to a traced process surfaces as a ptrace stop. SIGCONT
+/// also lets the target run if a pending copy is delivered after detaching.
+pub fn request_trace_stop(pid: u32) {
+    // SAFETY: the active trace relationship identifies this PID. An exited
+    // tracee remains waitable until its process owner collects the status.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
 }
 
 /// How a `waitpid` status word decodes.
