@@ -120,7 +120,7 @@ impl<'a> CppAnalyzer<'a> {
                 .binary
                 .sections
                 .iter()
-                .map(|s| s.virtual_address + s.virtual_size)
+                .map(|s| s.virtual_address.saturating_add(s.virtual_size))
                 .max()
                 .unwrap_or(0);
             let max_rva = max_va.saturating_sub(image_base) as u32;
@@ -591,7 +591,7 @@ impl<'a> CppAnalyzer<'a> {
                 // Check if the pointer falls within an executable section
                 let mut is_executable = false;
                 for sec in &self.binary.sections {
-                    if ptr >= sec.virtual_address && ptr < sec.virtual_address + sec.virtual_size {
+                    if ptr >= sec.virtual_address && ptr - sec.virtual_address < sec.virtual_size {
                         if sec.is_executable {
                             is_executable = true;
                         }

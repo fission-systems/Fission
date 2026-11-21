@@ -2,6 +2,22 @@
 
 use super::*;
 
+/// File offset of relocation entry `index` in a table starting at `start`,
+/// if the whole entry lies inside a file of `len` bytes.
+///
+/// `start` and `entry_size` come from a section header, so the sums are
+/// checked: `start + index * entry_size` near `usize::MAX` wrapped in release
+/// builds, passed the bounds test, and read from the start of the file.
+fn relocation_entry_offset(
+    start: usize,
+    index: usize,
+    entry_size: usize,
+    len: usize,
+) -> Option<usize> {
+    let offset = start.checked_add(index.checked_mul(entry_size)?)?;
+    (offset.checked_add(entry_size)? <= len).then_some(offset)
+}
+
 pub(super) fn ppc64_function_descriptor_map_64(
     full_data: &[u8],
     shdrs: &[Elf64Shdr],
@@ -40,10 +56,10 @@ pub(super) fn ppc64_function_descriptor_map_64(
             .unwrap_or(0);
         let start = relocation_section.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -95,10 +111,10 @@ pub(super) fn riscv_relocation_patches_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -274,10 +290,10 @@ pub(super) fn loongarch_relocation_patches_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
@@ -342,10 +358,10 @@ pub(super) fn loongarch_relocation_patches_32(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u32(offset) else {
                 break;
             };
@@ -453,10 +469,10 @@ pub(super) fn arm_relocation_patches_32(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u32(offset) else {
                 break;
             };
@@ -671,10 +687,10 @@ pub(super) fn x86_64_relocation_patches_64(
         let count = (shdr.sh_size as usize).checked_div(entry_size).unwrap_or(0);
         let start = shdr.sh_offset as usize;
         for index in 0..count {
-            let offset = start + index * entry_size;
-            if offset + entry_size > full_data.len() {
+            let Some(offset) = relocation_entry_offset(start, index, entry_size, full_data.len())
+            else {
                 break;
-            }
+            };
             let Ok(r_offset) = reader.u64(offset) else {
                 break;
             };
