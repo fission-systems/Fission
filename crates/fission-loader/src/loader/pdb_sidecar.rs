@@ -723,11 +723,31 @@ fn resolve_signature_from_id_index(
     }
 }
 
+/// How many type records one name or signature may pass through.
+///
+/// Type records refer to each other by index, and nothing in the format
+/// stops a pointer, modifier or array from naming itself or an ancestor; the
+/// resolvers below followed such a chain until the stack overflowed. Real
+/// types nest a handful of levels (`const char *const *` is four).
+const MAX_TYPE_DEPTH: usize = 64;
+
 fn resolve_signature_from_type_index(
     type_index: TypeIndex,
     type_information: &pdb::TypeInformation<'_>,
     type_finder: &pdb::TypeFinder<'_>,
 ) -> Option<(Option<String>, Vec<String>)> {
+    resolve_signature_at_depth(type_index, type_information, type_finder, 0)
+}
+
+fn resolve_signature_at_depth(
+    type_index: TypeIndex,
+    type_information: &pdb::TypeInformation<'_>,
+    type_finder: &pdb::TypeFinder<'_>,
+    depth: usize,
+) -> Option<(Option<String>, Vec<String>)> {
+    if depth >= MAX_TYPE_DEPTH {
+        return None;
+    }
     let item = type_finder.find(type_index).ok()?;
     match item.parse().ok()? {
         TypeData::Procedure(proc) => Some((
@@ -761,10 +781,11 @@ fn resolve_signature_from_type_index(
                 parameters,
             ))
         }
-        TypeData::Modifier(modifier) => resolve_signature_from_type_index(
+        TypeData::Modifier(modifier) => resolve_signature_at_depth(
             modifier.underlying_type,
             type_information,
             type_finder,
+            depth + 1,
         ),
         _ => None,
     }
@@ -797,15 +818,28 @@ fn resolve_symbol_type_name(
     _id_information: Option<&pdb::IdInformation<'_>>,
     _id_finder: Option<&pdb::IdFinder<'_>>,
 ) -> Option<String> {
+    resolve_type_name_at_depth(type_index, type_information, type_finder, 0)
+}
+
+fn resolve_type_name_at_depth(
+    type_index: TypeIndex,
+    type_information: &pdb::TypeInformation<'_>,
+    type_finder: &pdb::TypeFinder<'_>,
+    depth: usize,
+) -> Option<String> {
+    if depth >= MAX_TYPE_DEPTH {
+        return None;
+    }
     let item = type_finder.find(type_index).ok()?;
     let data = item.parse().ok()?;
-    resolve_type_data_name(data, type_information, type_finder)
+    resolve_type_data_name(data, type_information, type_finder, depth)
 }
 
 fn resolve_type_data_name(
     data: TypeData<'_>,
     type_information: &pdb::TypeInformation<'_>,
     type_finder: &pdb::TypeFinder<'_>,
+    depth: usize,
 ) -> Option<String> {
     match data {
         TypeData::Primitive(primitive) => Some(format!("{primitive:?}")),
@@ -813,30 +847,27 @@ fn resolve_type_data_name(
         TypeData::Enumeration(enumeration) => Some(enumeration.name.to_string().into_owned()),
         TypeData::Union(union) => Some(union.name.to_string().into_owned()),
         TypeData::Pointer(pointer) => {
-            let base = resolve_symbol_type_name(
+            let base = resolve_type_name_at_depth(
                 pointer.underlying_type,
                 type_information,
                 type_finder,
-                None,
-                None,
+                depth + 1,
             )
             .unwrap_or_else(|| "void".to_string());
             Some(format!("{base}*"))
         }
-        TypeData::Modifier(modifier) => resolve_symbol_type_name(
+        TypeData::Modifier(modifier) => resolve_type_name_at_depth(
             modifier.underlying_type,
             type_information,
             type_finder,
-            None,
-            None,
+            depth + 1,
         ),
         TypeData::Array(array) => {
-            let base = resolve_symbol_type_name(
+            let base = resolve_type_name_at_depth(
                 array.element_type,
                 type_information,
                 type_finder,
-                None,
-                None,
+                depth + 1,
             )
             .unwrap_or_else(|| "void".to_string());
             Some(format!("{base}[]"))
@@ -1175,5 +1206,40 @@ mod tests {
                 "frame {total_frame_bytes:#x}: no offset reaches past it"
             );
         }
+    }
+
+    /// The method fixture's PDB with the `this` pointer record (type 0x1001,
+    /// an `LF_POINTER` at file offset 0x7064) pointing at itself. Following
+    /// it recursed until the stack overflowed; with a depth bound the load
+    /// finishes and `this` simply has no resolvable pointee.
+    #[test]
+    fn a_pointer_type_that_points_at_itself_is_not_followed_forever() {
+        const THIS_POINTER_RECORD: usize = 0x7064;
+        const LF_POINTER: u16 = 0x1002;
+
+        let testdata = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let exe = dir.path().join("x64_pdb_method_test.exe");
+        std::fs::copy(testdata.join("x64_pdb_method_test.exe"), &exe).expect("copy exe");
+        let mut pdb = std::fs::read(testdata.join("x64_pdb_method_test.pdb")).expect("read pdb");
+        let kind = u16::from_le_bytes([pdb[THIS_POINTER_RECORD + 2], pdb[THIS_POINTER_RECORD + 3]]);
+        assert_eq!(kind, LF_POINTER, "the fixture's record moved");
+        let underlying = THIS_POINTER_RECORD + 4;
+        assert_eq!(
+            u32::from_le_bytes(pdb[underlying..underlying + 4].try_into().unwrap()),
+            0x1000,
+            "the fixture's pointer no longer names `Widget`"
+        );
+        pdb[underlying..underlying + 4].copy_from_slice(&0x1001u32.to_le_bytes());
+        std::fs::write(dir.path().join("x64_pdb_method_test.pdb"), &pdb).expect("write pdb");
+
+        let binary = LoadedBinary::from_file(&exe).expect("load");
+        let scale = binary
+            .pdb_functions
+            .values()
+            .find(|function| function.name.contains("scale"))
+            .expect("the PDB was still read");
+        let names: Vec<&str> = scale.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["this", "factor", "bias"]);
     }
 }

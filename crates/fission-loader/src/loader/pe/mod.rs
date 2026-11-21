@@ -843,7 +843,13 @@ impl<'a> PeLoaderImpl<'a> {
     fn read_coff_symbol(&self, offset: u64) -> Result<CoffSymbol> {
         let name_bytes = self.reader().slice(offset as usize, 8)?;
         let name = if name_bytes[0..4] == [0, 0, 0, 0] {
-            SymbolName::LongName(u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()))
+            // An offset into the string table, whose first four bytes are its
+            // size. One inside the size names nothing, and the symbol is left
+            // unnamed rather than named after the size's bytes.
+            match u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()) {
+                0..4 => SymbolName::ShortName(String::new()),
+                offset => SymbolName::LongName(offset),
+            }
         } else {
             let len = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
             SymbolName::ShortName(String::from_utf8_lossy(&name_bytes[..len]).to_string())
@@ -1832,6 +1838,35 @@ mod tests {
             loader.exact_relative_jump_export_target(thunk_rva as u32, image_base),
             Some(image_base + target_rva)
         );
+    }
+
+    /// A COFF symbol whose name field is zero in its first four bytes names
+    /// its string at that offset in the string table, whose first four bytes
+    /// are the table's size. An offset below 4 points into the size: the
+    /// symbol has no name, and it used to be named after those bytes.
+    #[test]
+    fn a_coff_symbol_name_inside_the_string_table_size_is_no_name() {
+        let symbol = |offset: u32| {
+            let mut data = vec![0u8; 18];
+            data[4..8].copy_from_slice(&offset.to_le_bytes());
+            data
+        };
+        let name_of = |data: &[u8]| {
+            let loader = PeLoaderImpl {
+                data,
+                sections: &[],
+                is_64bit: true,
+                language_id: "x86:LE:64:default".to_string(),
+            };
+            loader.read_coff_symbol(0).expect("symbol").name
+        };
+        for offset in 0..4 {
+            assert!(
+                matches!(name_of(&symbol(offset)), SymbolName::ShortName(ref n) if n.is_empty()),
+                "offset {offset}"
+            );
+        }
+        assert!(matches!(name_of(&symbol(4)), SymbolName::LongName(4)));
     }
 
     /// An image with one section mapping RVA 0x1000.. to file offset 0x200..
