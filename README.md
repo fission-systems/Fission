@@ -105,13 +105,17 @@ Beyond decompilation, the same binary covers:
 | | |
 |---|---|
 | `callgraph`, `xrefs` | Call and reference graphs |
+| `whatis`, `types` | What is at an address (function, section, symbols, source line); recovered classes and structs |
 | `hex`, `search`, `patch` | Read bytes, find patterns, write a patched copy |
-| `identify`, `similar` | Library-function recognition (Ghidra FID databases) and structural similarity |
-| `db` | Names, notes and breakpoints kept beside the binary, with undo and diff |
+| `identify`, `similar`, `api` | Library-function recognition (Ghidra FID databases), structural similarity, known API prototypes |
+| `db` | Names, signatures, notes, breakpoints and watchpoints kept beside the binary, with undo and diff |
 | `script` | Rhai scripts over a read-only view of the binary |
-| `debug`, `sandbox` | Emulation, and native debugging on Linux and macOS (Windows behind a build feature) |
+| `sandbox` | Run a binary in the emulator: behaviour log, coverage, taint, symbolic exploration that solves for inputs, time travel, snapshots |
+| `call` | Run one function in the emulator with chosen arguments |
+| `debug` | Emulated and native debugging (Linux, macOS; Windows behind a build feature), with reverse stepping in recorded emulator sessions |
 | `verify` | Emulator- and solver-backed checking of decompiled output |
-| `raw-pcode`, `pcode-stages`, `nir-stats` | The IR at each stage, for debugging the decompiler itself |
+| `languages`, `--base` | The processor languages `--language` takes; load raw firmware or shellcode at an address |
+| `raw-pcode`, `pcode-stages`, `nir-stats`, `pcode-topology` | The IR at each stage, for debugging the decompiler itself |
 
 The full reference is [`docs/CLI.md`](docs/CLI.md).
 

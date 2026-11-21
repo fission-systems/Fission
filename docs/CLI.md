@@ -29,6 +29,15 @@ The CLI is intentionally split into explicit subcommands:
 - `debug` (headless emulation and platform-native debugger commands)
 - `db` (saved analyst decisions, history, undo/redo, and comparison)
 - `skill` (the agent usage guide, compiled into the binary)
+- `raw-pcode`, `pcode-stages`, `nir-stats`, `pcode-topology` (the IR at each stage)
+- `hex`, `search`, `patch` (bytes: read, find, write a patched copy)
+- `callgraph`, `identify`, `similar` (call graph, FID library recognition, structural similarity)
+- `types`, `whatis`, `api` (recovered types, what is at an address, a known API's prototype)
+- `languages` (the SLEIGH language IDs `--language` accepts)
+- `sandbox` (run a binary in the emulator: behaviour, coverage, taint, symbolic exploration, time travel)
+- `call` (run one function in the emulator with chosen arguments)
+- `verify` (check decompiled output against the machine code)
+- `schema` (the `--contract v1` envelope and error codes)
 
 Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
 
@@ -282,6 +291,51 @@ fission_cli patch app.exe --addr 0x140001760 --bytes "31 c0 c3" --output patched
 
 See [Patch Command](#patch-command) for the flags and for what `patch` refuses.
 
+### Load a raw image
+
+Firmware, shellcode and memory dumps have no container header to detect an
+architecture from. `--base` loads the whole file as one executable section
+mapped at that address; `--language` says what it holds, and `--entry` (default:
+the base) seeds the first function. Both are global, so they go before the
+subcommand like `--language`:
+
+```bash
+fission_cli languages --processor arm            # the IDs --language accepts
+fission_cli languages --json
+fission_cli --language x86:LE:64:default --base 0x400000 disasm shellcode.bin --addr 0x400000
+fission_cli --language ARM:LE:32:v8 --base 0x8000000 --entry 0x8000101 decomp firmware.bin --addr 0x8000100
+```
+
+`--base` without `--language`, `--entry` without `--base` or outside the image,
+and a headerless file given only `--language` each fail with what to add.
+Commands that load the file their own way (`sandbox`, `verify`, `call`, `db`,
+`script`, `debug`) warn that they ignore both flags.
+
+### Ask what something is
+
+```bash
+fission_cli whatis app.elf --addr 0x401140 --json    # function + offset, section, symbols, relocations, source line
+fission_cli types app.elf --json                      # recovered classes, structs and enums with fields
+fission_cli types app.elf --source dwarf --name point
+fission_cli api CreateFileW                           # a known API's prototype; no binary needed
+fission_cli api memcpy --32 --json
+```
+
+`whatis` answers from the typed program-metadata snapshot (`fission-analysis-db`)
+plus the DWARF line table. `types` lists what the loader recovered from the
+binary's own metadata; each type names the analysis that produced it
+(`source`: `cpp_rtti`, `dwarf`, `pdb`, `go`, `rust_vtable`, `objc`, `swift`,
+`pe_header`, `elf_header`, `te_header`). Objective-C, Swift and Rust-vtable
+recovery have no test coverage yet, so their types carry `"verified": false`.
+
+`disasm --json` rows carry `source: {file, line}` wherever a DWARF line table
+covers the instruction; a binary without one gets no `source` key at all.
+
+`identify --function ADDR --json` without a match reports the function's FID
+hashes (`full_hash`, `specific_hash`, `code_unit_count`), or `hashed: false`
+when the function could not be hashed (too short, an unsupported operand
+shape, or a failed decode) -- the two causes of "no match" are different.
+
 ---
 
 ## Debug Command
@@ -381,6 +435,27 @@ Treat a supported operation as an implementation capability, not as proof
 that a target exists, is accessible, or will execute successfully. Inspect the
 per-operation conditions and handle runtime errors and partial analysis.
 
+### Stepping back (emulator sessions)
+
+An emulator session started with `--record` keeps a snapshot every
+`--record-interval` instructions (default 64) and one at launch, so it can move
+backwards:
+
+```bash
+fission_cli debug --emulator session ./guest.elf --record \
+  -c step -c step -c step -c back-step -c regs -c 'seek 1' -c regs --json
+```
+
+`back-step` returns to the previous instruction and `seek <STEP>` to any
+instruction count, backwards or forwards; registers and memory are exact,
+because a seek restores the nearest snapshot and re-executes from there. Every
+`step`, `continue`, `back-step` and `seek` result carries `step`, the
+instruction count `seek` takes. Without `--record`, and outside a session,
+both commands fail and say so; native backends do not implement them.
+
+`debug hw-bp` fails on every host: hardware breakpoints are not part of the
+debugger interface (it used to exit 0 off Windows without setting anything).
+
 ---
 
 ## Sandbox Execution Evidence
@@ -401,6 +476,53 @@ A successful CLI process means the sandbox/report command completed. Inspect
 `halt_requested`, the guest `exit_code`, output and quality budgets to determine
 the target's verdict. Some crackmes exit zero on both correct and incorrect
 input. An instruction-bound run without a guest exit is incomplete.
+
+### Symbolic exploration
+
+`--sym-explore` treats standard input as symbolic and forks at every branch
+that depends on it. With `--json` the report's `symbolic` section has the
+per-stash counts and, for every path that reached a `--find` address or ended,
+the input values that drive execution down it:
+
+```sh
+fission_cli sandbox ./crackme.elf --stdin-mock X --sym-explore \
+  --find 0x4000a2 --avoid 0x4000ab --json
+# "symbolic": { "found": [ { "pc": 4194466, "inputs": [ { "name": "stdin_140737488350712", "value": 65 } ] } ], ... }
+```
+
+Inputs are named `stdin_<address>` after the buffer byte they were read into,
+in read order; `inputs: null` means the solver found the path unsatisfiable or
+could not decide. `--sym-max-steps` bounds the rounds (default 64); at most 64
+states are listed, and the rest are counted in `omitted`.
+
+### Time travel and snapshots
+
+```sh
+fission_cli sandbox ./guest.elf --ttd-record 1 --ttd-seek 8 --ttd-read 0x400078:4 --json
+fission_cli sandbox ./guest.elf --snapshot-at 0x401000 --snapshot-out at_main.snapshot
+fission_cli sandbox ./guest.elf --restore-snapshot at_main.snapshot --json
+```
+
+After `--ttd-seek` the report's `ttd_state` holds the step, the PC, the general
+registers and every `--ttd-read ADDR:SIZE` range. A seek before the first
+recorded snapshot fails rather than guessing. `--snapshot-out` writes the
+`--snapshot-at` snapshot, and fails when the run never reached that address
+(the address must start a translated block). `--dump-trace` writes the
+emulator's event trace -- decode errors and HLE dispatches, not every
+instruction; use `--coverage` for which code ran.
+
+### Engine, time and linking
+
+| Flag | Effect |
+|---|---|
+| `--interp` | Run on the p-code interpreter instead of the JIT (`FISSION_EMU_INTERP`); the report's `tbs_compiled` is 0 |
+| `--timeout-ms N` | Stop after N ms of wall-clock time |
+| `--dynlink` | Linux ELF: map the guest's own `PT_INTERP` loader from the host (`FISSION_ENABLE_DYNLINK`) |
+| `--ld-so PATH` | The host loader for `--dynlink` (`FISSION_LD_SO`) |
+| `--lib-path DIR` | Searched first for `DT_NEEDED` libraries, repeatable (`FISSION_LIB_PATH`) |
+| `--lazy-bind` | Bind PLT slots on first call (`FISSION_LAZY_BIND`) |
+
+A flag that is not given leaves its environment variable in charge.
 
 The default x86-64 Linux HLE path supplies bounded runtime guard/header storage
 before main; it does not implement full module TLS. Stack-check failure halts
@@ -453,6 +575,35 @@ report its count next to the `diverged` count.
 The `concrete` tier compares the pre-structuring tree with the printed one on
 boundary inputs, and `symbolic` asks the solver to prove them equivalent for
 loop-free bodies; neither consults the machine code.
+
+`--seed N` chooses the ground-truth tier's initial states (arguments,
+registers, memory); run `n` of a seed is always the same state, so a
+divergence is replayable from its seed and run. JSON output echoes `seed` and
+carries each tier's result as fields: `checked` (inputs that agreed),
+`counterexamples` (each with `run`, `args`, `prehir_result`, `hir_result`,
+`emulator_result`, `detail`), `proved` for the symbolic tier, and `reason`.
+Single-function JSON keeps each tier's original string and puts the fields
+under `tiers`; batch lines add them to the tier objects.
+
+## Call Command
+
+`call` runs one function of the binary in the emulator with the arguments you
+give, from a freshly loaded image each time, and reports how it ended.
+
+```sh
+fission_cli call app.elf --name add --arg 2 --arg 3 --json
+fission_cli call app.elf --addr 0x401130 --arg -1 --arg 0x10 --json
+fission_cli call app.elf --name reload_after_call --stub-calls 0 --json
+```
+
+Arguments go into the calling convention's integer argument slots: decimal,
+`0x` hex, or negative (taken as the 64-bit two's complement). `outcome` is
+`returned` (with `return_value`), `instruction_budget` (`--max-inst`, default
+1,000,000), `process_exited`, or `stopped` with a reason. With
+`--stub-calls VALUE` each call the function makes is stopped instead of run:
+its argument registers are recorded in `calls`, VALUE is returned, and every
+byte stored outside the function's frame is listed in `writes`. This executes
+the binary's code in the emulator; use it only on binaries you may run.
 
 ## Decomp Command
 
@@ -573,6 +724,19 @@ fission_cli decomp app.exe --addr 0x140001000 --output out.c
 
 Emits extra progress and setup detail.
 
+#### What `--json` carries per function
+
+Besides `code`, each record has `variables` (recovered locals and parameters,
+with types), `line_mappings` (which instructions each output line came from),
+and, from the same render:
+
+- `globals`: every global the code declares, with its C `type` and `address`
+  (`null` when several symbols share the name);
+- `frame`: stack slots whose offset from the canonical frame address is proven
+  (`name`, `cfa_offset`), in address order;
+- `declared_callees`: callees called through a declared prototype -- one
+  recorded with `db sig`, or a known declaration -- rather than a recovered one.
+
 #### `--no-header`
 
 Suppresses the generated function banner comment in the text output.
@@ -644,6 +808,20 @@ Add `--detections` on the base metadata path (without `--sections`, `--imports`,
 ```bash
 fission_cli info app.exe --detections
 fission_cli info app.exe --detections --json
+```
+
+### Identity (`--identity`)
+
+`--identity --json` emits the evidence-backed identity report: detections with
+their evidence, section entropy, overlay, and for PE images a `pe` summary --
+TLS directory presence, the TLS callback count and their addresses
+(`tls_callbacks`, code the loader runs before the entry point), debug-directory
+kinds, the CodeView record (`codeview`: PDB `path`, `guid`, `age`, what a symbol
+server indexes it by) -- and `rich_header` with its `records` (`product_id`,
+`build_number`, `count` per contributing tool).
+
+```bash
+fission_cli info app.exe --identity --json
 ```
 
 ### JSON mode
@@ -797,8 +975,12 @@ fission_cli db sample.exe undo --json
 fission_cli db sample.exe redo --json
 ```
 
-Removal commands are `rm-name`, `rm-sig`, `rm-note`, and `rm-bp`, each taking an
-address. Each changed `db` edit records one revision with typed before/after
+`watch ADDR [--size N] [--read] [--no-write]` records a data watchpoint (a
+write watch of one byte by default) that debug sessions restore along with the
+breakpoints.
+
+Removal commands are `rm-name`, `rm-sig`, `rm-note`, `rm-bp`, and `rm-watch`,
+each taking an address. Each changed `db` edit records one revision with typed before/after
 values. Its success JSON retains the existing fields and adds `revision` (an
 integer, or `null` for an unchanged decision). Success is emitted after saving.
 Undo/redo return the ID of the revision they moved.
