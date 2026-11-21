@@ -18,6 +18,7 @@
 
 use super::mach::{self, WaitOutcome};
 use super::regs;
+use crate::debug::platform::trap::{TrapCause, classify_trap, overlay_original_bytes};
 use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{
@@ -41,6 +42,21 @@ const MAX_ABSORBED_STEP_TRAPS: u32 = 8;
 /// headless caller is not stuck on a prompt it cannot answer.
 const TASK_PORT_TIMEOUT: Duration = Duration::from_secs(8);
 
+/// A single step that has been started and whose trap has not been seen.
+///
+/// Only the stepped thread runs while it is in flight: every other thread is
+/// held, so the trap that ends it can only be that thread's, and no thread
+/// runs through a breakpoint that was lifted for the step.
+struct StepInFlight {
+    thread_id: u32,
+    port: mach::mach_port_t,
+    /// The step was armed in the thread's own state rather than by `PT_STEP`,
+    /// and has to be disarmed there.
+    hardware: bool,
+    /// The threads that were suspended for it.
+    held: Vec<mach::mach_port_t>,
+}
+
 /// macOS debugger implementation.
 pub struct MacOSDebugger {
     state: DebugState,
@@ -49,6 +65,9 @@ pub struct MacOSDebugger {
     task: Option<mach::mach_port_t>,
     /// Thread ports from the last stop, main thread first.
     threads: Vec<mach::mach_port_t>,
+    /// The id each port in `threads` is reported under, in the same order.
+    thread_ids: Vec<u32>,
+    step_in_flight: Option<StepInFlight>,
     /// Bytes the breakpoint instruction replaced, by address.
     inserted: HashMap<u64, Vec<u8>>,
     /// A signal the target stopped for that is delivered when it resumes.
@@ -61,6 +80,11 @@ pub struct MacOSDebugger {
     step_off_pc: Option<u64>,
     /// How many of those traps were absorbed since the step-off.
     absorbed_step_traps: u32,
+    /// A single step ended in a stop for some other signal, so its own trap
+    /// may still be on its way. Seen: the signal's handler is entered on the
+    /// next resume and a `SIGTRAP` arrives at its first instruction, with
+    /// nothing asked of the target.
+    stale_step_trap: bool,
     /// Events produced while establishing a stop, delivered by `poll_event`.
     pending_events: VecDeque<DebugEvent>,
     ttd_timeline: Option<Arc<Mutex<Timeline>>>,
@@ -74,10 +98,13 @@ impl MacOSDebugger {
             target_pid: None,
             task: None,
             threads: Vec::new(),
+            thread_ids: Vec::new(),
+            step_in_flight: None,
             inserted: HashMap::new(),
             pending_signal: 0,
             step_off_pc: None,
             absorbed_step_traps: 0,
+            stale_step_trap: false,
             pending_events: VecDeque::new(),
             ttd_timeline: None,
         }
@@ -112,6 +139,7 @@ impl MacOSDebugger {
     }
 
     fn release_ports(&mut self) {
+        self.thread_ids.clear();
         for port in self.threads.drain(..) {
             mach::release_port(port);
         }
@@ -130,6 +158,7 @@ impl MacOSDebugger {
             mach::release_port(port);
         }
         self.state.threads.clear();
+        self.thread_ids.clear();
         for (index, port) in ports.iter().enumerate() {
             let is_main = index == 0;
             let id = if is_main {
@@ -137,6 +166,7 @@ impl MacOSDebugger {
             } else {
                 mach::thread_unique_id(*port).unwrap_or(index as u64) as u32
             };
+            self.thread_ids.push(id);
             self.state.threads.insert(
                 id,
                 ThreadInfo {
@@ -151,6 +181,11 @@ impl MacOSDebugger {
         Ok(())
     }
 
+    /// Where `thread_id` is in `threads`.
+    fn thread_index(&self, thread_id: u32) -> Option<usize> {
+        self.thread_ids.iter().position(|id| *id == thread_id)
+    }
+
     fn thread_port(&self, thread_id: u32) -> FissionResult<mach::mach_port_t> {
         let pid = self.pid()?;
         // The main thread is reported under the pid, and is the only thread of
@@ -162,12 +197,152 @@ impl MacOSDebugger {
                 .copied()
                 .ok_or_else(|| FissionError::debug("The target has no threads"));
         }
-        self.threads
-            .iter()
-            .copied()
-            .skip(1)
-            .find(|port| mach::thread_unique_id(*port).map(|id| id as u32) == Ok(thread_id))
+        self.thread_index(thread_id)
+            .and_then(|index| self.threads.get(index).copied())
             .ok_or_else(|| FissionError::debug(format!("No thread {thread_id}")))
+    }
+
+    /// The thread a resume acts on: the one the last stop was reported for,
+    /// or the main thread when that one is gone.
+    fn current_thread_index(&self) -> usize {
+        self.state
+            .current_thread_id
+            .and_then(|id| self.thread_index(id))
+            .unwrap_or(0)
+    }
+
+    /// Whether the thread's own exception state says it last trapped on a
+    /// breakpoint instruction. `None` when the kernel would not say.
+    fn trapped_on_breakpoint(&self, thread_id: u32) -> Option<bool> {
+        let port = self.thread_port(thread_id).ok()?;
+        let mut words = [0u32; regs::EXCEPTION_STATE_WORDS];
+        mach::get_thread_state(port, regs::EXCEPTION_STATE_FLAVOR, &mut words).ok()?;
+        Some(regs::trapped_on_breakpoint(&words))
+    }
+
+    fn set_hardware_single_step(port: mach::mach_port_t, on: bool) -> Result<(), String> {
+        let mut words = vec![0u32; regs::SINGLE_STEP_STATE_WORDS];
+        mach::get_thread_state(port, regs::SINGLE_STEP_STATE_FLAVOR, &mut words)?;
+        regs::set_single_step(&mut words, on);
+        mach::set_thread_state(port, regs::SINGLE_STEP_STATE_FLAVOR, &words)
+    }
+
+    /// Start one instruction on the thread at `index`, with every other
+    /// thread held. The trap that ends it arrives through `waitpid`.
+    ///
+    /// `PT_STEP` steps the task's first thread and no other, so any other
+    /// thread is stepped through its own state and a plain continue.
+    fn begin_step(&mut self, index: usize, signal: i32) -> FissionResult<()> {
+        let pid = self.pid()?;
+        let port = *self
+            .threads
+            .get(index)
+            .ok_or_else(|| FissionError::debug("The target has no threads"))?;
+        let thread_id = self.thread_ids.get(index).copied().unwrap_or(pid);
+        let held: Vec<mach::mach_port_t> = self
+            .threads
+            .iter()
+            .enumerate()
+            .filter(|(other, _)| *other != index)
+            .filter(|(_, other)| mach::suspend_thread(**other).is_ok())
+            .map(|(_, other)| *other)
+            .collect();
+        let hardware = index != 0;
+        self.step_in_flight = Some(StepInFlight {
+            thread_id,
+            port,
+            hardware,
+            held,
+        });
+        let started = if hardware {
+            Self::set_hardware_single_step(port, true)
+                .map_err(FissionError::debug)
+                .and_then(|()| {
+                    mach::ptrace_request(mach::PT_CONTINUE, pid, 1, signal)
+                        .map(|_| ())
+                        .map_err(|errno| {
+                            FissionError::debug(format!("Continue failed: errno {errno}"))
+                        })
+                })
+        } else {
+            mach::ptrace_request(mach::PT_STEP, pid, 1, signal)
+                .map(|_| ())
+                .map_err(|errno| FissionError::debug(format!("PT_STEP failed: errno {errno}")))
+        };
+        if let Err(error) = started {
+            self.finish_step();
+            return Err(error);
+        }
+        self.state.status = DebugStatus::Running;
+        Ok(())
+    }
+
+    /// Undo what [`Self::begin_step`] set up, and say which thread it stepped.
+    ///
+    /// Called with the ports the step was started with, before the thread
+    /// list is refreshed. If the target is gone the calls fail and are
+    /// ignored: there is nothing left to release.
+    fn finish_step(&mut self) -> Option<u32> {
+        let step = self.step_in_flight.take()?;
+        if step.hardware {
+            let _ = Self::set_hardware_single_step(step.port, false);
+        }
+        for port in step.held {
+            let _ = mach::resume_thread(port);
+        }
+        Some(step.thread_id)
+    }
+
+    /// Which thread a `SIGTRAP` stop is about, its registers, and why.
+    ///
+    /// `waitpid` reports the process, not the thread. A step in flight
+    /// answers it: every other thread was held. Otherwise the thread is found
+    /// by where each one stands -- the one whose own exception state says it
+    /// executed a breakpoint first, since on a machine whose breakpoint
+    /// advances the counter another thread can merely be standing one byte
+    /// past a breakpointed instruction.
+    fn trap_thread(&self, stepped: Option<u32>) -> FissionResult<(u32, Vec<u32>, TrapCause)> {
+        let pid = self.pid()?;
+        if let Some(thread_id) = stepped {
+            if let Ok(words) = self.state_words(thread_id) {
+                return Ok((thread_id, words, TrapCause::Step));
+            }
+        }
+        let current = self
+            .state
+            .current_thread_id
+            .filter(|id| self.thread_index(*id).is_some())
+            .unwrap_or(pid);
+        let order = std::iter::once(current)
+            .chain(self.thread_ids.iter().copied().filter(|id| *id != current));
+        let mut standing_on_one = None;
+        for thread_id in order {
+            let Ok(words) = self.state_words(thread_id) else {
+                continue;
+            };
+            let cause = classify_trap(
+                regs::program_counter(&words),
+                regs::PC_ADVANCE_AFTER_BREAKPOINT,
+                false,
+                |address| self.inserted.contains_key(&address),
+            );
+            if matches!(cause, TrapCause::Breakpoint { .. }) {
+                if self.trapped_on_breakpoint(thread_id) == Some(true) {
+                    return Ok((thread_id, words, cause));
+                }
+                standing_on_one.get_or_insert((thread_id, words, cause));
+            }
+        }
+        match standing_on_one {
+            Some(found) => Ok(found),
+            // Not one of ours: reported against the current thread.
+            None => {
+                let words = self
+                    .state_words(current)
+                    .or_else(|_| self.state_words(pid))?;
+                Ok((current, words, TrapCause::Step))
+            }
+        }
     }
 
     fn state_words(&self, thread_id: u32) -> FissionResult<Vec<u32>> {
@@ -176,10 +351,6 @@ impl MacOSDebugger {
         mach::get_thread_state(port, regs::THREAD_STATE_FLAVOR, &mut words)
             .map_err(FissionError::debug)?;
         Ok(words)
-    }
-
-    fn main_thread_id(&self) -> u32 {
-        self.target_pid.unwrap_or_default()
     }
 
     fn record_ttd_snapshot(&mut self, thread_id: u32, registers: RegisterState) {
@@ -209,6 +380,8 @@ impl MacOSDebugger {
     }
 
     fn mark_gone(&mut self, status: DebugStatus) {
+        self.finish_step();
+        self.stale_step_trap = false;
         self.release_ports();
         self.inserted.clear();
         self.target_pid = None;
@@ -239,43 +412,58 @@ impl MacOSDebugger {
                 }))
             }
             WaitOutcome::Stopped(signal) => {
+                // With the ports the step was started with, before they are
+                // refreshed below.
+                let stepped = self.finish_step();
                 self.state.status = DebugStatus::Suspended;
                 self.state.event_count = self.state.event_count.saturating_add(1);
                 self.refresh_threads()?;
-                let mut words = self.state_words(pid)?;
-                let mut pc = regs::program_counter(&words);
                 let stepped_off_at = self.step_off_pc;
-                self.state.last_thread_id = Some(pid);
-                self.state.current_thread_id = Some(pid);
+                let stale_step_trap = std::mem::replace(
+                    &mut self.stale_step_trap,
+                    stepped.is_some() && signal != SIGTRAP,
+                );
 
                 if signal == SIGTRAP {
-                    let candidate = pc.checked_sub(regs::PC_ADVANCE_AFTER_BREAKPOINT);
-                    if let Some(address) = candidate.filter(|a| self.inserted.contains_key(a)) {
+                    let (thread_id, mut words, cause) = self.trap_thread(stepped)?;
+                    self.state.last_thread_id = Some(thread_id);
+                    self.state.current_thread_id = Some(thread_id);
+                    let pc = regs::program_counter(&words);
+
+                    if let TrapCause::Breakpoint { address } = cause {
                         if pc != address {
                             // INT3 leaves the PC one byte past the breakpoint;
                             // put it back so the original instruction runs.
                             regs::set_program_counter(&mut words, address);
                             mach::set_thread_state(
-                                self.thread_port(pid)?,
+                                self.thread_port(thread_id)?,
                                 regs::THREAD_STATE_FLAVOR,
                                 &words,
                             )
                             .map_err(FissionError::debug)?;
-                            pc = address;
                         }
                         if let Some(breakpoint) = self.state.breakpoints.get_mut(&address) {
                             breakpoint.hits = breakpoint.hits.saturating_add(1);
                         }
+                        self.step_off_pc = None;
                         let registers = regs::to_registers(&words);
                         self.state.registers = Some(registers.clone());
-                        self.record_ttd_snapshot(pid, registers);
-                        return Ok(Some(DebugEvent::BreakpointHit {
-                            address: pc,
-                            thread_id: pid,
-                        }));
+                        self.record_ttd_snapshot(thread_id, registers);
+                        return Ok(Some(DebugEvent::BreakpointHit { address, thread_id }));
+                    }
+                    // The late trap of a step a signal cut short: nothing was
+                    // asked of the target, so this is not an event. Once, so
+                    // a target that really traps here is still reported.
+                    if stepped.is_none() && stale_step_trap {
+                        mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0).map_err(|errno| {
+                            FissionError::debug(format!("Continue failed: errno {errno}"))
+                        })?;
+                        self.state.status = DebugStatus::Running;
+                        return Ok(None);
                     }
                     // Bounded, so a target genuinely trapping here is reported.
-                    if stepped_off_at == Some(pc)
+                    if stepped.is_none()
+                        && stepped_off_at == Some(pc)
                         && self.absorbed_step_traps < MAX_ABSORBED_STEP_TRAPS
                     {
                         // The extra trap right after a step-off: nothing ran,
@@ -290,10 +478,14 @@ impl MacOSDebugger {
                     self.step_off_pc = None;
                     let registers = regs::to_registers(&words);
                     self.state.registers = Some(registers.clone());
-                    self.record_ttd_snapshot(pid, registers);
-                    return Ok(Some(DebugEvent::SingleStep { thread_id: pid }));
+                    self.record_ttd_snapshot(thread_id, registers);
+                    return Ok(Some(DebugEvent::SingleStep { thread_id }));
                 }
 
+                let words = self.state_words(pid)?;
+                let pc = regs::program_counter(&words);
+                self.state.last_thread_id = Some(pid);
+                self.state.current_thread_id = Some(pid);
                 self.step_off_pc = None;
                 // Any other signal: report it and deliver it on resume. SIGSTOP
                 // is not passed on: delivering it again would just stop the
@@ -346,57 +538,86 @@ impl MacOSDebugger {
             .map_err(FissionError::debug)
     }
 
-    fn current_pc(&self) -> FissionResult<u64> {
-        Ok(regs::program_counter(
-            &self.state_words(self.main_thread_id())?,
-        ))
-    }
-
     /// Resume the target, first stepping off a breakpoint it is stopped on.
     ///
-    /// Resuming with the breakpoint instruction still in place would trap on
-    /// the same instruction forever; the original is put back for one step.
-    /// Returns an event when that step already ended the run.
+    /// Acts on the thread the last stop was reported for. Resuming with the
+    /// breakpoint instruction still in place would trap on the same
+    /// instruction forever; the original is put back for one step of that
+    /// thread, with the others held so none of them runs through the gap.
+    /// A stop that already ended the run is queued as an event.
     fn resume(&mut self, step: bool) -> FissionResult<()> {
         let pid = self.pid()?;
         let signal = std::mem::take(&mut self.pending_signal);
-        let pc = self.current_pc()?;
-        let on_breakpoint = self.inserted.contains_key(&pc);
+        let index = self.current_thread_index();
+        let thread_id = self.thread_ids.get(index).copied().unwrap_or(pid);
+        let pc = regs::program_counter(&self.state_words(thread_id)?);
 
-        if on_breakpoint {
-            self.write_original(pc)?;
-            mach::ptrace_request(mach::PT_STEP, pid, 1, signal)
-                .map_err(|errno| FissionError::debug(format!("PT_STEP failed: errno {errno}")))?;
-            self.state.status = DebugStatus::Running;
-            let outcome = self.wait_blocking(Duration::from_secs(10))?;
-            // The target may have exited or faulted during the step.
-            if !matches!(outcome, WaitOutcome::Stopped(SIGTRAP)) {
-                if let Some(event) = self.event_for_stop(outcome)? {
-                    self.pending_events.push_back(event);
-                }
-                return Ok(());
-            }
-            self.write_breakpoint(pc)?;
+        if !self.inserted.contains_key(&pc) {
             if step {
-                if let Some(event) = self.event_for_stop(outcome)? {
-                    self.pending_events.push_back(event);
-                }
-                return Ok(());
+                return self.begin_step(index, signal);
             }
-            // Stepped off the breakpoint; now run.
-            self.step_off_pc = Some(self.current_pc()?);
-            self.absorbed_step_traps = 0;
-            mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0)
-                .map_err(|errno| FissionError::debug(format!("Continue failed: errno {errno}")))?;
-        } else {
-            let request = if step {
-                mach::PT_STEP
-            } else {
-                mach::PT_CONTINUE
-            };
-            mach::ptrace_request(request, pid, 1, signal)
+            mach::ptrace_request(mach::PT_CONTINUE, pid, 1, signal)
                 .map_err(|errno| FissionError::debug(format!("Resume failed: errno {errno}")))?;
+            self.state.status = DebugStatus::Running;
+            return Ok(());
         }
+
+        self.write_original(pc)?;
+        let mut signal = signal;
+        let mut empty_traps = 0;
+        let outcome = loop {
+            let outcome = self
+                .begin_step(index, std::mem::take(&mut signal))
+                .and_then(|()| self.wait_blocking(Duration::from_secs(10)));
+            let outcome = match outcome {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    self.finish_step();
+                    let _ = self.write_breakpoint(pc);
+                    return Err(error);
+                }
+            };
+            // macOS sometimes answers a step with a trap that ran nothing:
+            // the thread still stands on the breakpoint address. Taking that
+            // for the step puts the breakpoint back under a thread that then
+            // executes it, and one arrival is reported as two hits. Step
+            // again, a bounded number of times so an instruction that
+            // branches to itself still ends the wait.
+            let ran_nothing = matches!(outcome, WaitOutcome::Stopped(SIGTRAP))
+                && empty_traps < MAX_ABSORBED_STEP_TRAPS
+                && self
+                    .state_words(thread_id)
+                    .is_ok_and(|words| regs::program_counter(&words) == pc);
+            if !ran_nothing {
+                break outcome;
+            }
+            empty_traps += 1;
+            self.finish_step();
+        };
+        // The breakpoint goes back whatever ended the step -- a signal that
+        // arrived during it included -- unless the process is gone and there
+        // is no memory left to write. It used to stay lifted after any stop
+        // that was not the step's own trap, and never triggered again.
+        if matches!(outcome, WaitOutcome::Stopped(_)) {
+            if let Err(error) = self.write_breakpoint(pc) {
+                self.finish_step();
+                return Err(error);
+            }
+        }
+        if step || !matches!(outcome, WaitOutcome::Stopped(SIGTRAP)) {
+            // The step the caller asked for, or the exit or signal that came
+            // instead of it.
+            if let Some(event) = self.event_for_stop(outcome)? {
+                self.pending_events.push_back(event);
+            }
+            return Ok(());
+        }
+        // Stepped off the breakpoint; now run.
+        self.finish_step();
+        self.step_off_pc = Some(regs::program_counter(&self.state_words(thread_id)?));
+        self.absorbed_step_traps = 0;
+        mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0)
+            .map_err(|errno| FissionError::debug(format!("Continue failed: errno {errno}")))?;
         self.state.status = DebugStatus::Running;
         Ok(())
     }
@@ -874,14 +1095,13 @@ impl ExecutionBackend for MacOSDebugger {
         })?;
         // The target's memory shows our breakpoint instructions; callers want
         // the program's bytes.
-        for (&breakpoint, original) in &self.inserted {
-            for (index, byte) in original.iter().enumerate() {
-                let at = breakpoint + index as u64;
-                if at >= address && at < address + size as u64 {
-                    bytes[(at - address) as usize] = *byte;
-                }
-            }
-        }
+        overlay_original_bytes(
+            &mut bytes,
+            address,
+            self.inserted
+                .iter()
+                .map(|(breakpoint, original)| (*breakpoint, original.as_slice())),
+        );
         Ok(bytes)
     }
 

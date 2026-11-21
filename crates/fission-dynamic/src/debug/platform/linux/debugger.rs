@@ -2,6 +2,7 @@
 //!
 //! This module provides debugging capabilities on Linux using the ptrace system call.
 
+use crate::debug::platform::trap::{TrapCause, classify_trap, overlay_original_bytes};
 use crate::debug::timeline::Timeline;
 use crate::debug::traits::ExecutionBackend;
 use crate::debug::types::{
@@ -42,7 +43,14 @@ pub struct LinuxDebugger {
     pending_events: VecDeque<DebugEvent>,
     /// Session-owned timeline for snapshots at ptrace stop boundaries.
     ttd_timeline: Option<Arc<Mutex<Timeline>>>,
+    /// The tracee was last resumed to execute one instruction, so the trap
+    /// that follows is that step and not a breakpoint, wherever it lands.
+    resumed_by_step: bool,
 }
+
+/// How far past an `INT3` the instruction pointer is when the trap is
+/// reported.
+const PC_ADVANCE_AFTER_BREAKPOINT: u64 = 1;
 
 impl LinuxDebugger {
     /// Create a new Linux debugger instance
@@ -52,6 +60,7 @@ impl LinuxDebugger {
             target_pid: None,
             pending_events: VecDeque::new(),
             ttd_timeline: None,
+            resumed_by_step: false,
         }
     }
 
@@ -162,6 +171,33 @@ impl LinuxDebugger {
         self.stop_ttd_recording();
         self.pending_events
             .push_back(DebugEvent::ProcessExited { exit_code });
+    }
+
+    /// Put the program's own byte back under every software breakpoint.
+    ///
+    /// A tracee that is let go with `INT3` still in its code runs until it
+    /// reaches one and dies of a `SIGTRAP` nobody is there to take.
+    fn restore_breakpoint_bytes(&self, pid: u32) -> FissionResult<()> {
+        for breakpoint in self.state.breakpoints.values() {
+            if breakpoint.enabled
+                && breakpoint.kind == crate::debug::types::BreakpointKind::Software
+            {
+                Self::poke_byte(pid, breakpoint.address, breakpoint.original_byte)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Take the tracee's registers as the state of the stop just reached, and
+    /// record them on the timeline.
+    fn note_stop(&mut self, pid: u32) -> FissionResult<RegisterState> {
+        self.state.status = DebugStatus::Suspended;
+        self.state.last_thread_id = Some(pid);
+        self.state.current_thread_id = Some(pid);
+        let registers = self.fetch_registers(pid)?;
+        self.state.registers = Some(registers.clone());
+        self.record_ttd_snapshot(pid, registers.clone());
+        Ok(registers)
     }
 
     fn record_ttd_snapshot(&mut self, thread_id: u32, registers: RegisterState) {
@@ -310,6 +346,17 @@ fn module_name(path: &str) -> String {
 impl Default for LinuxDebugger {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl Drop for LinuxDebugger {
+    fn drop(&mut self) {
+        // A debugger that goes away without detaching leaves its breakpoint
+        // instructions in the tracee, and the tracee stopped until this
+        // process exits. Best effort: the tracee may already be gone.
+        if self.target_pid.is_some() {
+            let _ = self.detach();
+        }
     }
 }
 
@@ -657,10 +704,14 @@ impl ExecutionBackend for LinuxDebugger {
             .target_pid
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
 
+        // Leave no breakpoint instruction behind in a process we let go of.
+        self.restore_breakpoint_bytes(pid)?;
         ptrace::detach(Pid::from_raw(pid as i32), None).map_err(|e| {
             FissionError::debug(format!("Failed to detach from process {}: {}", pid, e))
         })?;
 
+        self.state.breakpoints.clear();
+        self.resumed_by_step = false;
         self.target_pid = None;
         self.state.attached_pid = None;
         self.state.status = DebugStatus::Detached;
@@ -708,6 +759,7 @@ impl ExecutionBackend for LinuxDebugger {
         ptrace::cont(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Continue failed: {}", e)))?;
 
+        self.resumed_by_step = false;
         self.state.status = DebugStatus::Running;
         Ok(())
     }
@@ -724,7 +776,10 @@ impl ExecutionBackend for LinuxDebugger {
         // with it lifted; report it as the single-step event it is.
         match self.step_over_breakpoint(pid)? {
             Some(nix::sys::wait::WaitStatus::Stopped(_, nix::sys::signal::Signal::SIGTRAP)) => {
-                self.state.status = DebugStatus::Suspended;
+                // The stop is already here, so its state is taken now: the
+                // registers and the timeline otherwise still describe the
+                // breakpoint that was just left.
+                self.note_stop(pid)?;
                 self.pending_events
                     .push_back(DebugEvent::SingleStep { thread_id: pid });
                 return Ok(());
@@ -748,6 +803,7 @@ impl ExecutionBackend for LinuxDebugger {
         ptrace::step(Pid::from_raw(pid as i32), None)
             .map_err(|e| FissionError::debug(format!("Single step failed: {}", e)))?;
 
+        self.resumed_by_step = true;
         self.state.status = DebugStatus::Running;
         Ok(())
     }
@@ -802,20 +858,21 @@ impl ExecutionBackend for LinuxDebugger {
                     }));
                 }
                 WaitStatus::Stopped(_, signal) => {
+                    let stepped = std::mem::take(&mut self.resumed_by_step);
                     self.state.status = DebugStatus::Suspended;
                     self.state.last_thread_id = Some(pid);
                     self.state.current_thread_id = Some(pid);
                     self.state.event_count = self.state.event_count.saturating_add(1);
-                    let registers = self.fetch_registers(pid)?;
-                    self.state.registers = Some(registers.clone());
-                    self.record_ttd_snapshot(pid, registers.clone());
+                    let mut registers = self.fetch_registers(pid)?;
 
                     if signal == Signal::SIGTRAP {
-                        let breakpoint_address = registers
-                            .pc
-                            .checked_sub(1)
-                            .filter(|address| self.state.breakpoints.contains_key(address));
-                        if let Some(address) = breakpoint_address {
+                        let cause = classify_trap(
+                            registers.pc,
+                            PC_ADVANCE_AFTER_BREAKPOINT,
+                            stepped,
+                            |address| self.state.breakpoints.contains_key(&address),
+                        );
+                        if let TrapCause::Breakpoint { address } = cause {
                             if let Some(breakpoint) = self.state.breakpoints.get_mut(&address) {
                                 breakpoint.hits = breakpoint.hits.saturating_add(1);
                             }
@@ -823,17 +880,27 @@ impl ExecutionBackend for LinuxDebugger {
                             // on the breakpoint so the stop, and the next resume,
                             // are at the instruction the breakpoint replaced.
                             Self::set_pc(pid, address)?;
-                            self.state.registers = Some(self.fetch_registers(pid)?);
-                            return Ok(Some(crate::debug::types::DebugEvent::BreakpointHit {
-                                address,
-                                thread_id: pid,
-                            }));
+                            registers = self.fetch_registers(pid)?;
                         }
-                        return Ok(Some(crate::debug::types::DebugEvent::SingleStep {
-                            thread_id: pid,
+                        // Recorded after the rewind: the timeline holds the
+                        // stop that is reported, not the byte after it.
+                        self.state.registers = Some(registers.clone());
+                        self.record_ttd_snapshot(pid, registers);
+                        return Ok(Some(match cause {
+                            TrapCause::Breakpoint { address } => {
+                                crate::debug::types::DebugEvent::BreakpointHit {
+                                    address,
+                                    thread_id: pid,
+                                }
+                            }
+                            TrapCause::Step => {
+                                crate::debug::types::DebugEvent::SingleStep { thread_id: pid }
+                            }
                         }));
                     }
 
+                    self.state.registers = Some(registers.clone());
+                    self.record_ttd_snapshot(pid, registers.clone());
                     return Ok(Some(crate::debug::types::DebugEvent::Exception {
                         code: signal as u32,
                         address: registers.pc,
@@ -860,6 +927,20 @@ impl ExecutionBackend for LinuxDebugger {
             )?;
 
         let original_byte = (original_word & 0xFF) as u8;
+
+        // A second breakpoint at the same address would read the first one's
+        // INT3 as the program's byte, and removing it would then "restore"
+        // an INT3 for good.
+        if self.state.breakpoints.contains_key(&address) {
+            return Err(FissionError::debug(format!(
+                "A breakpoint already exists at 0x{address:x}"
+            )));
+        }
+        if original_byte == 0xCC {
+            return Err(FissionError::debug(format!(
+                "0x{address:x} already holds a breakpoint instruction"
+            )));
+        }
 
         // Write INT3 (0xCC) using ptrace POKEDATA
         let new_word = (original_word & !0xFF) | 0xCC;
@@ -958,7 +1039,29 @@ impl ExecutionBackend for LinuxDebugger {
             ))
         })?;
 
+        // The tracee's memory shows our breakpoint instructions; callers want
+        // the program's bytes.
+        let originals: Vec<(u64, [u8; 1])> = self
+            .state
+            .breakpoints
+            .values()
+            .filter(|bp| bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software)
+            .map(|bp| (bp.address, [bp.original_byte]))
+            .collect();
+        overlay_original_bytes(
+            &mut buffer,
+            address,
+            originals
+                .iter()
+                .map(|(address, original)| (*address, original.as_slice())),
+        );
+
         Ok(buffer)
+    }
+
+    fn list_breakpoints(&self) -> Vec<Breakpoint> {
+        // A `BTreeMap` keyed by address: already in address order.
+        self.state.breakpoints.values().cloned().collect()
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
@@ -1221,6 +1324,62 @@ mod tests {
         Err("no debug event within 5 seconds".to_string())
     }
 
+    /// Set a breakpoint on `/bin/true`'s entry point, run to it, and return the
+    /// entry's runtime address.
+    ///
+    /// Break where the program will arrive, not where it is stopped: a
+    /// breakpoint at the PC being continued from is stepped over (as in gdb).
+    /// The launch stop is in the dynamic loader, so use the main executable's
+    /// own entry point, which the loader jumps to.
+    #[cfg(target_arch = "x86_64")]
+    fn run_to_entry_breakpoint(debugger: &mut LinuxDebugger) -> Result<u64, String> {
+        use crate::debug::types::DebugEvent;
+
+        let exe = std::fs::canonicalize("/bin/true").map_err(|e| e.to_string())?;
+        let image = std::fs::read(&exe).map_err(|e| e.to_string())?;
+        let e_entry = u64::from_le_bytes(
+            image
+                .get(0x18..0x20)
+                .ok_or("ELF header too short")?
+                .try_into()
+                .map_err(|_| "ELF header too short".to_string())?,
+        );
+        let report = debugger.list_modules().map_err(|e| e.to_string())?;
+        let module = report
+            .modules
+            .iter()
+            .find(|module| std::path::Path::new(&module.path) == exe)
+            .ok_or_else(|| format!("{} is not in the module list", exe.display()))?;
+        let ModuleAddressTransform::Resolved { load_bias, .. } = &module.address_transform else {
+            return Err(format!(
+                "no resolved ELF transform for {}: {:?}",
+                module.path, module.address_transform
+            ));
+        };
+        let entry = u64::try_from(i128::from(e_entry) + i128::from(*load_bias))
+            .map_err(|_| "entry point is outside the address space".to_string())?;
+        debugger
+            .set_sw_breakpoint(entry)
+            .map_err(|e| e.to_string())?;
+        debugger.continue_execution().map_err(|e| e.to_string())?;
+
+        match next_event(debugger)? {
+            DebugEvent::BreakpointHit { address, .. } if address == entry => Ok(entry),
+            other => Err(format!(
+                "expected a breakpoint hit at {entry:#x}, got {other:?}"
+            )),
+        }
+    }
+
+    /// Kill and reap a tracee, whatever state the test left it in.
+    #[cfg(target_arch = "x86_64")]
+    fn kill_tracee(pid: u32) {
+        let child = nix::unistd::Pid::from_raw(pid as i32);
+        if nix::sys::ptrace::kill(child).is_ok() {
+            let _ = nix::sys::wait::waitpid(child, None);
+        }
+    }
+
     /// An INT3 advances RIP past itself before the trap is reported. Reporting
     /// `BreakpointHit { address }` while leaving RIP at `address + 1` resumes
     /// the process in the middle of the instruction the breakpoint replaced.
@@ -1238,47 +1397,7 @@ mod tests {
             .expect("launch a child under ptrace");
 
         let outcome = (|| -> Result<(), String> {
-            // Break where the program will arrive, not where it is stopped: a
-            // breakpoint at the PC being continued from is stepped over (as in
-            // gdb). The launch stop is in the dynamic loader, so use the main
-            // executable's own entry point, which the loader jumps to.
-            let exe = std::fs::canonicalize("/bin/true").map_err(|e| e.to_string())?;
-            let image = std::fs::read(&exe).map_err(|e| e.to_string())?;
-            let e_entry = u64::from_le_bytes(
-                image
-                    .get(0x18..0x20)
-                    .ok_or("ELF header too short")?
-                    .try_into()
-                    .map_err(|_| "ELF header too short".to_string())?,
-            );
-            let report = debugger.list_modules().map_err(|e| e.to_string())?;
-            let module = report
-                .modules
-                .iter()
-                .find(|module| std::path::Path::new(&module.path) == exe)
-                .ok_or_else(|| format!("{} is not in the module list", exe.display()))?;
-            let ModuleAddressTransform::Resolved { load_bias, .. } = &module.address_transform
-            else {
-                return Err(format!(
-                    "no resolved ELF transform for {}: {:?}",
-                    module.path, module.address_transform
-                ));
-            };
-            let entry = u64::try_from(i128::from(e_entry) + i128::from(*load_bias))
-                .map_err(|_| "entry point is outside the address space".to_string())?;
-            debugger
-                .set_sw_breakpoint(entry)
-                .map_err(|e| e.to_string())?;
-            debugger.continue_execution().map_err(|e| e.to_string())?;
-
-            match next_event(&mut debugger)? {
-                DebugEvent::BreakpointHit { address, .. } if address == entry => {}
-                other => {
-                    return Err(format!(
-                        "expected a breakpoint hit at {entry:#x}, got {other:?}"
-                    ));
-                }
-            }
+            let entry = run_to_entry_breakpoint(&mut debugger)?;
             let pc = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
             if pc != entry {
                 return Err(format!(
@@ -1297,12 +1416,243 @@ mod tests {
         })();
 
         // Whatever happened, do not leave the child behind.
-        let child = nix::unistd::Pid::from_raw(pid as i32);
-        if nix::sys::ptrace::kill(child).is_ok() {
-            let _ = nix::sys::wait::waitpid(child, None);
-        }
-
+        kill_tracee(pid);
         assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
+
+    /// The timeline and the debugger's own register state describe the stop
+    /// that was reported. The snapshot of a breakpoint stop was taken before
+    /// RIP was put back, one byte past the breakpoint; a step off a breakpoint
+    /// queued its event without reading the registers at all, so the state
+    /// still showed the breakpoint that had just been left.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn the_timeline_and_the_state_follow_the_stop_that_is_reported() {
+        use crate::debug::timeline::Timeline;
+        use crate::debug::types::DebugEvent;
+        use std::sync::{Arc, Mutex};
+
+        let timeline = Arc::new(Mutex::new(Timeline::new()));
+        let mut debugger = LinuxDebugger::new();
+        debugger.set_timeline(timeline.clone());
+        let pid = debugger
+            .launch("/bin/true", &[])
+            .expect("launch a child under ptrace");
+        let recorded_pc = || {
+            timeline
+                .lock()
+                .unwrap()
+                .latest_snapshot()
+                .map(|snapshot| snapshot.registers.pc)
+        };
+
+        let outcome = (|| -> Result<(), String> {
+            // Positive control: the launch stop was recorded where it is.
+            let launch_pc = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            if recorded_pc() != Some(launch_pc) {
+                return Err(format!(
+                    "the launch stop at {launch_pc:#x} was recorded as {:x?}",
+                    recorded_pc()
+                ));
+            }
+
+            let entry = run_to_entry_breakpoint(&mut debugger)?;
+            if recorded_pc() != Some(entry) {
+                return Err(format!(
+                    "the breakpoint stop at {entry:#x} was recorded as {:x?}",
+                    recorded_pc()
+                ));
+            }
+
+            // One step off the breakpoint.
+            debugger.single_step().map_err(|e| e.to_string())?;
+            match next_event(&mut debugger)? {
+                DebugEvent::SingleStep { .. } => {}
+                other => return Err(format!("expected a single step, got {other:?}")),
+            }
+            let pc = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            if pc == entry {
+                return Err("the step did not move the instruction pointer".to_string());
+            }
+            let state_pc = debugger.get_state().registers.map(|registers| registers.pc);
+            if state_pc != Some(pc) {
+                return Err(format!(
+                    "after the step the PC is {pc:#x} but the state says {state_pc:x?}"
+                ));
+            }
+            if recorded_pc() != Some(pc) {
+                return Err(format!(
+                    "the step to {pc:#x} was recorded as {:x?}",
+                    recorded_pc()
+                ));
+            }
+
+            // A second step, not from a breakpoint, is a step too.
+            debugger.single_step().map_err(|e| e.to_string())?;
+            match next_event(&mut debugger)? {
+                DebugEvent::SingleStep { .. } => Ok(()),
+                other => Err(format!("expected a second single step, got {other:?}")),
+            }
+        })();
+
+        kill_tracee(pid);
+        assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
+
+    /// One byte of the tracee's memory as the kernel has it, without the
+    /// debugger's view laid over it.
+    #[cfg(target_arch = "x86_64")]
+    fn raw_byte(pid: u32, address: u64) -> Result<u8, String> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let mut file =
+            std::fs::File::open(format!("/proc/{pid}/mem")).map_err(|e| e.to_string())?;
+        file.seek(SeekFrom::Start(address))
+            .map_err(|e| e.to_string())?;
+        let mut byte = [0u8; 1];
+        file.read_exact(&mut byte).map_err(|e| e.to_string())?;
+        Ok(byte[0])
+    }
+
+    /// Attach to a fresh `sleep`, run `body` with the debugger and an address
+    /// in the tracee's code, then make sure the child is gone.
+    #[cfg(target_arch = "x86_64")]
+    fn with_attached_sleeper(
+        body: impl FnOnce(&mut LinuxDebugger, u32, u64) -> Result<(), String>,
+    ) {
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("spawn a child to attach to");
+        let pid = child.id();
+        let mut debugger = LinuxDebugger::new();
+        let outcome = debugger
+            .attach(pid)
+            .map_err(|e| e.to_string())
+            .and_then(|()| debugger.fetch_registers(pid).map_err(|e| e.to_string()))
+            .and_then(|registers| body(&mut debugger, pid, registers.pc));
+        drop(debugger);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
+
+    /// Detaching puts the program's bytes back. `detach` used to leave every
+    /// `INT3` in the tracee, which then died on the first one it reached.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn detach_restores_the_byte_under_every_breakpoint() {
+        with_attached_sleeper(|debugger, pid, pc| {
+            let first = raw_byte(pid, pc)?;
+            let second = raw_byte(pid, pc + 1)?;
+            debugger.set_sw_breakpoint(pc).map_err(|e| e.to_string())?;
+            debugger
+                .set_sw_breakpoint(pc + 1)
+                .map_err(|e| e.to_string())?;
+            // Positive control: the breakpoints really are in the tracee.
+            if raw_byte(pid, pc)? != 0xCC || raw_byte(pid, pc + 1)? != 0xCC {
+                return Err("the breakpoint instructions were not written".to_string());
+            }
+            // And a reader of the debugger sees the program, not them.
+            let seen = debugger.read_memory(pc, 2).map_err(|e| e.to_string())?;
+            if seen != [first, second] {
+                return Err(format!(
+                    "read_memory shows {seen:02x?}, the program has {:02x?}",
+                    [first, second]
+                ));
+            }
+            if debugger.list_breakpoints().len() != 2 {
+                return Err("two breakpoints were set and are not both listed".to_string());
+            }
+
+            debugger.detach().map_err(|e| e.to_string())?;
+            let after = [raw_byte(pid, pc)?, raw_byte(pid, pc + 1)?];
+            if after != [first, second] {
+                return Err(format!(
+                    "after detach the tracee holds {after:02x?} at {pc:#x}, not {:02x?}",
+                    [first, second]
+                ));
+            }
+            if !debugger.get_state().breakpoints.is_empty() {
+                return Err("a detached debugger still lists breakpoints".to_string());
+            }
+            Ok(())
+        });
+    }
+
+    /// Dropping the debugger lets the tracee go the same way.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn dropping_the_debugger_restores_the_bytes_too() {
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new("/bin/sleep")
+            .arg("30")
+            .stdin(Stdio::null())
+            .spawn()
+            .expect("spawn a child to attach to");
+        let pid = child.id();
+        let outcome = (|| -> Result<(), String> {
+            let mut debugger = LinuxDebugger::new();
+            debugger.attach(pid).map_err(|e| e.to_string())?;
+            let pc = debugger.fetch_registers(pid).map_err(|e| e.to_string())?.pc;
+            let original = raw_byte(pid, pc)?;
+            debugger.set_sw_breakpoint(pc).map_err(|e| e.to_string())?;
+            if raw_byte(pid, pc)? != 0xCC {
+                return Err("the breakpoint instruction was not written".to_string());
+            }
+            drop(debugger);
+            let after = raw_byte(pid, pc)?;
+            if after != original {
+                return Err(format!(
+                    "after the drop the tracee holds {after:02x} at {pc:#x}, not {original:02x}"
+                ));
+            }
+            Ok(())
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(outcome.is_ok(), "{}", outcome.unwrap_err());
+    }
+
+    /// A second breakpoint at an address that has one is refused. It used to
+    /// be accepted, read the first one's `INT3` as the program's byte, and
+    /// "restore" that `INT3` when it was removed.
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn a_second_breakpoint_at_the_same_address_is_refused() {
+        with_attached_sleeper(|debugger, pid, pc| {
+            let original = raw_byte(pid, pc)?;
+            debugger.set_sw_breakpoint(pc).map_err(|e| e.to_string())?;
+            if debugger.set_sw_breakpoint(pc).is_ok() {
+                return Err("a second breakpoint at the same address was accepted".to_string());
+            }
+            let recorded = debugger
+                .get_state()
+                .breakpoints
+                .get(&pc)
+                .map(|bp| bp.original_byte);
+            if recorded != Some(original) {
+                return Err(format!(
+                    "the breakpoint records {recorded:02x?} as the program's byte, not {original:02x}"
+                ));
+            }
+            debugger
+                .remove_sw_breakpoint(pc)
+                .map_err(|e| e.to_string())?;
+            let after = raw_byte(pid, pc)?;
+            if after != original {
+                return Err(format!(
+                    "after removing the breakpoint the tracee holds {after:02x}, not {original:02x}"
+                ));
+            }
+            // Positive control: with the breakpoint gone it can be set again.
+            debugger.set_sw_breakpoint(pc).map_err(|e| e.to_string())?;
+            Ok(())
+        });
     }
 
     /// `attach` must not return until the tracee is in ptrace-stop: the

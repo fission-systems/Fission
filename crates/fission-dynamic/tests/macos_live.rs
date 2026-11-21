@@ -362,3 +362,357 @@ fn attach_to_a_running_process_and_let_it_go() {
     child.kill().unwrap();
     let _ = child.wait();
 }
+
+/// Compile `source` into its own directory and return the binary and the file
+/// it reports addresses to (its first argument).
+fn build_c_target(name: &str, source: &str) -> (PathBuf, PathBuf) {
+    let dir =
+        std::env::temp_dir().join(format!("fission-macos-live-{}-{name}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let source_path = dir.join("target.c");
+    std::fs::write(&source_path, source).unwrap();
+    let binary = dir.join("target");
+    let status = std::process::Command::new("cc")
+        .arg("-O0")
+        .arg("-o")
+        .arg(&binary)
+        .arg(&source_path)
+        .status()
+        .expect("a C compiler is needed for the live tests");
+    assert!(status.success());
+    (binary, dir.join("address.txt"))
+}
+
+/// Launch `target`, run it to the `SIGSTOP` it raises after reporting its
+/// addresses, and return the debugger, the pid and the first address.
+fn launch_to_self_stop(
+    target: &std::path::Path,
+    report: &std::path::Path,
+) -> (MacOSDebugger, u32, u64) {
+    let mut debugger = MacOSDebugger::new();
+    let pid = debugger
+        .launch(
+            target.to_str().unwrap(),
+            &[report.to_str().unwrap().to_string()],
+        )
+        .expect("launch");
+    let _ = next_event(&mut debugger);
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::Exception { code, .. } => assert_eq!(code, 17, "SIGSTOP"),
+        other => panic!("expected the target's own SIGSTOP, got {other:?}"),
+    }
+    let (address, _) = reported_addresses(report);
+    (debugger, pid, address)
+}
+
+/// `marker` is called on a second thread; the main thread waits in
+/// `pthread_join`.
+const WORKER_THREAD_TARGET: &str = r#"
+#include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+__attribute__((noinline)) int marker(int x) { return x + 5; }
+static void *worker(void *arg) { return (void *)(long)marker(2); }
+int main(int argc, char **argv) {
+    FILE *f = fopen(argv[1], "w");
+    fprintf(f, "%lx\n%lx\n", (unsigned long)&marker, 0UL);
+    fclose(f);
+    raise(SIGSTOP);
+    pthread_t thread;
+    void *result = 0;
+    pthread_create(&thread, 0, worker, 0);
+    pthread_join(thread, &result);
+    return (int)(long)result;
+}
+"#;
+
+/// The stop says which thread hit the breakpoint, and that thread stands on
+/// it. Reading the main thread's counter for every `SIGTRAP` saw the main
+/// thread parked in `pthread_join`, called the stop a single step, and left
+/// the worker to execute the breakpoint instruction again for ever.
+#[test]
+fn a_breakpoint_hit_on_another_thread_is_reported_for_that_thread() {
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_c_target("worker-hit", WORKER_THREAD_TARGET);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    let main_pc = debugger.fetch_registers(pid).unwrap().pc;
+
+    debugger.set_sw_breakpoint(marker).expect("set breakpoint");
+    debugger.continue_execution().unwrap();
+    let worker = match next_event(&mut debugger) {
+        DebugEvent::BreakpointHit { address, thread_id } => {
+            assert_eq!(address, marker);
+            thread_id
+        }
+        other => panic!("expected a breakpoint hit on the worker thread, got {other:?}"),
+    };
+    assert_ne!(
+        worker, pid,
+        "the hit is the worker's, not the main thread's"
+    );
+    assert_eq!(debugger.fetch_registers(worker).unwrap().pc, marker);
+    assert_ne!(
+        debugger.fetch_registers(pid).unwrap().pc,
+        marker,
+        "the main thread is somewhere else (it was at {main_pc:#x})"
+    );
+    assert_eq!(debugger.list_breakpoints()[0].hits, 1);
+    assert_eq!(debugger.get_state().current_thread_id, Some(worker));
+
+    // Continuing steps the worker off the breakpoint and the program ends.
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::ProcessExited { exit_code } => assert_eq!(exit_code, 7),
+        other => panic!("expected exit after the worker's breakpoint, got {other:?}"),
+    }
+}
+
+/// A step from a breakpoint on another thread moves that thread, and only it.
+#[test]
+fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_c_target("worker-step", WORKER_THREAD_TARGET);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    debugger.set_sw_breakpoint(marker).expect("set breakpoint");
+    debugger.continue_execution().unwrap();
+    let worker = match next_event(&mut debugger) {
+        DebugEvent::BreakpointHit { thread_id, .. } => thread_id,
+        other => panic!("expected a breakpoint hit, got {other:?}"),
+    };
+    assert_ne!(worker, pid);
+    let main_before = debugger.fetch_registers(pid).unwrap().pc;
+
+    debugger.single_step().expect("step the worker");
+    match next_event(&mut debugger) {
+        DebugEvent::SingleStep { thread_id } => assert_eq!(thread_id, worker),
+        other => panic!("expected the worker's single step, got {other:?}"),
+    }
+    let worker_pc = debugger.fetch_registers(worker).unwrap().pc;
+    assert_ne!(worker_pc, marker, "the worker ran one instruction");
+    assert!(
+        worker_pc > marker && worker_pc - marker <= 16,
+        "one instruction on from {marker:#x}, not {worker_pc:#x}"
+    );
+    assert_eq!(
+        debugger.fetch_registers(pid).unwrap().pc,
+        main_before,
+        "the main thread did not move during the worker's step"
+    );
+    // A second step, with no breakpoint under it, is still the worker's.
+    debugger.single_step().expect("step the worker again");
+    match next_event(&mut debugger) {
+        DebugEvent::SingleStep { thread_id } => assert_eq!(thread_id, worker),
+        other => panic!("expected the worker's second step, got {other:?}"),
+    }
+    assert_ne!(debugger.fetch_registers(worker).unwrap().pc, worker_pc);
+
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::ProcessExited { exit_code } => assert_eq!(exit_code, 7),
+        other => panic!("expected exit after stepping the worker, got {other:?}"),
+    }
+}
+
+/// `load` is one instruction that reads through its argument. Called first
+/// with a null pointer it faults; the handler jumps back and it is called
+/// again with a valid one.
+const FAULTING_INSTRUCTION_TARGET: &str = r#"
+#include <setjmp.h>
+#include <signal.h>
+#include <stdio.h>
+int load(int *pointer);
+#if defined(__aarch64__)
+__asm__(".text\n.globl _load\n.p2align 2\n_load:\n ldr w0, [x0]\n ret\n");
+#else
+__asm__(".text\n.globl _load\n_load:\n movl (%rdi), %eax\n ret\n");
+#endif
+static sigjmp_buf again;
+static void on_fault(int signal) { siglongjmp(again, 1); }
+static int value = 9;
+int main(int argc, char **argv) {
+    FILE *f = fopen(argv[1], "w");
+    fprintf(f, "%lx\n%lx\n", (unsigned long)&load, 0UL);
+    fclose(f);
+    signal(SIGSEGV, on_fault);
+    signal(SIGBUS, on_fault);
+    raise(SIGSTOP);
+    if (sigsetjmp(again, 1) == 0) {
+        return load(0);
+    }
+    return load(&value);
+}
+"#;
+
+/// A breakpoint on an instruction that faults reports the hit, then the
+/// fault at that instruction, and is hit again when the instruction is
+/// reached a second time.
+#[test]
+fn a_breakpoint_on_a_faulting_instruction_reports_the_fault_and_stays_set() {
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_c_target("fault", FAULTING_INSTRUCTION_TARGET);
+    let (mut debugger, pid, load) = launch_to_self_stop(&target, &report);
+    debugger.set_sw_breakpoint(load).expect("set breakpoint");
+
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::BreakpointHit { address, .. } => assert_eq!(address, load),
+        other => panic!("expected the first call to hit the breakpoint, got {other:?}"),
+    }
+
+    // Leaving the breakpoint runs the faulting load.
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::Exception { code, address, .. } => {
+            assert!(code == 11 || code == 10, "SIGSEGV or SIGBUS, got {code}");
+            assert_eq!(address, load, "the fault is at the load");
+        }
+        other => panic!("expected the load to fault, got {other:?}"),
+    }
+    // The program's bytes are still what a reader sees, and the breakpoint is
+    // still listed.
+    assert_eq!(debugger.list_breakpoints().len(), 1);
+
+    // The fault is delivered, the handler jumps back, and `load` is called
+    // again: the breakpoint must still be there.
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::BreakpointHit { address, .. } => assert_eq!(address, load),
+        other => {
+            panic!("expected the second call to hit the breakpoint again, got {other:?}")
+        }
+    }
+    assert_eq!(debugger.fetch_registers(pid).unwrap().pc, load);
+    assert_eq!(debugger.list_breakpoints()[0].hits, 2);
+
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::ProcessExited { exit_code } => assert_eq!(exit_code, 9),
+        other => panic!("expected exit with the loaded value, got {other:?}"),
+    }
+}
+
+/// `fire` is `kill(pid, signal)` as three instructions; the address reported
+/// is the system call instruction itself.
+const SIGNALLING_INSTRUCTION_TARGET: &str = r#"
+#include <signal.h>
+#include <stdio.h>
+#include <unistd.h>
+int fire(int pid, int signal);
+#if defined(__aarch64__)
+__asm__(".text\n.globl _fire\n.p2align 2\n_fire:\n mov x16, #37\n svc #0x80\n ret\n");
+#define SYSCALL_OFFSET 4
+#else
+__asm__(".text\n.globl _fire\n_fire:\n movl $0x2000025, %eax\n syscall\n ret\n");
+#define SYSCALL_OFFSET 5
+#endif
+static volatile int delivered;
+static void on_signal(int signal) { delivered++; }
+int main(int argc, char **argv) {
+    FILE *f = fopen(argv[1], "w");
+    fprintf(f, "%lx\n%lx\n", (unsigned long)&fire + SYSCALL_OFFSET, 0UL);
+    fclose(f);
+    signal(SIGUSR1, on_signal);
+    raise(SIGSTOP);
+    fire(getpid(), SIGUSR1);
+    fire(getpid(), SIGUSR1);
+    return delivered;
+}
+"#;
+
+/// A breakpoint survives a signal that arrives while it is lifted.
+///
+/// Leaving a breakpoint runs its instruction with the breakpoint taken out.
+/// Here that instruction is a system call that signals the process itself, so
+/// the step ends with the signal's stop, past the instruction, instead of
+/// with its own trap. The breakpoint has to be back in place all the same:
+/// the second call must hit it again.
+#[test]
+fn a_breakpoint_is_put_back_when_a_signal_ends_the_step_off_it() {
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_c_target("signal", SIGNALLING_INSTRUCTION_TARGET);
+    let (mut debugger, _pid, syscall) = launch_to_self_stop(&target, &report);
+    debugger.set_sw_breakpoint(syscall).expect("set breakpoint");
+
+    let mut hits = 0;
+    let mut signals = 0;
+    let exit_code = loop {
+        debugger.continue_execution().unwrap();
+        match next_event(&mut debugger) {
+            DebugEvent::BreakpointHit { address, .. } => {
+                assert_eq!(address, syscall);
+                hits += 1;
+            }
+            // SIGUSR1 is 30 on macOS.
+            DebugEvent::Exception { code: 30, .. } => signals += 1,
+            DebugEvent::ProcessExited { exit_code } => break exit_code,
+            other => panic!("unexpected event {other:?} after {hits} hits"),
+        }
+        assert!(hits + signals < 16, "the target is not making progress");
+    };
+    // Positive control: both signals were raised and handled, so the system
+    // call ran twice.
+    assert_eq!(exit_code, 2, "both calls delivered their signal");
+    assert_eq!(signals, 2, "both signal stops were reported");
+    assert_eq!(hits, 2, "the second call hit the breakpoint too");
+}
+
+/// A completed step is a step, wherever it lands.
+///
+/// Stepping from one breakpoint onto the next instruction, which has a
+/// breakpoint of its own: that instruction has not run, so nothing was hit.
+/// With a breakpoint instruction that does not advance the counter the stop
+/// used to be read as a hit; with one that does, the step off a one-byte
+/// instruction was read as a hit of the breakpoint just left and the counter
+/// was moved back onto it.
+#[test]
+fn a_step_that_lands_on_a_breakpoint_is_a_step() {
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_reporting_target("step-onto");
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    // The first instruction of an unoptimised function: `sub sp, sp, #16`
+    // (four bytes) or `push %rbp` (one byte).
+    #[cfg(target_arch = "aarch64")]
+    let next = marker + 4;
+    #[cfg(target_arch = "x86_64")]
+    let next = marker + 1;
+    debugger
+        .set_sw_breakpoint(marker)
+        .expect("first breakpoint");
+    debugger.set_sw_breakpoint(next).expect("second breakpoint");
+
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::BreakpointHit { address, .. } => assert_eq!(address, marker),
+        other => panic!("expected the first breakpoint, got {other:?}"),
+    }
+
+    debugger
+        .single_step()
+        .expect("step off the first breakpoint");
+    match next_event(&mut debugger) {
+        DebugEvent::SingleStep { thread_id } => assert_eq!(thread_id, pid),
+        other => panic!("expected a single step onto {next:#x}, got {other:?}"),
+    }
+    assert_eq!(debugger.fetch_registers(pid).unwrap().pc, next);
+    let hits: Vec<u64> = debugger.list_breakpoints().iter().map(|b| b.hits).collect();
+    assert_eq!(hits, [1, 0], "the second breakpoint has not been hit");
+
+    // Both breakpoints are still set, and running on leaves through the
+    // second one to the end of the program.
+    debugger.continue_execution().unwrap();
+    match next_event(&mut debugger) {
+        DebugEvent::ProcessExited { exit_code } => assert_eq!(exit_code, 7),
+        other => panic!("expected exit, got {other:?}"),
+    }
+}
