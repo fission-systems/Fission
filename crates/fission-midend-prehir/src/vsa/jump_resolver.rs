@@ -172,7 +172,69 @@ fn contains_referenced_label(stmts: &[PreHirStmt], targets: &HashSet<String>) ->
     false
 }
 
-fn strip_switch_breaks(stmts: &mut Vec<PreHirStmt>) {
+fn contains_any_label(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. } => contains_any_label(body),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_any_label(then_body) || contains_any_label(else_body),
+        PreHirStmt::For {
+            init, body, update, ..
+        } => {
+            init.as_deref()
+                .is_some_and(|s| contains_any_label(std::slice::from_ref(s)))
+                || contains_any_label(body)
+                || update
+                    .as_deref()
+                    .is_some_and(|s| contains_any_label(std::slice::from_ref(s)))
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|c| contains_any_label(&c.body)) || contains_any_label(default)
+        }
+        _ => false,
+    })
+}
+
+fn contains_switch_owned_break(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Break => true,
+        PreHirStmt::Block(inner) => contains_switch_owned_break(inner),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => contains_switch_owned_break(then_body) || contains_switch_owned_break(else_body),
+        // Loops and inner switches own their own `Break` statements.
+        PreHirStmt::While { .. }
+        | PreHirStmt::DoWhile { .. }
+        | PreHirStmt::For { .. }
+        | PreHirStmt::Switch { .. } => false,
+        _ => false,
+    })
+}
+
+fn arm_always_exits_switch(stmts: &[PreHirStmt]) -> bool {
+    let Some(last) = stmts.last() else {
+        return false;
+    };
+    match last {
+        PreHirStmt::Break | PreHirStmt::Return(_) | PreHirStmt::Goto(_) => true,
+        PreHirStmt::Block(inner) => arm_always_exits_switch(inner),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => arm_always_exits_switch(then_body) && arm_always_exits_switch(else_body),
+        _ => false,
+    }
+}
+
+fn strip_tail_switch_breaks(stmts: &mut Vec<PreHirStmt>) {
     while let Some(last) = stmts.last() {
         match last {
             PreHirStmt::Break => {
@@ -188,9 +250,101 @@ fn strip_switch_breaks(stmts: &mut Vec<PreHirStmt>) {
                     break;
                 }
             }
+            PreHirStmt::If { .. } => {
+                if let Some(PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                }) = stmts.last_mut()
+                {
+                    strip_switch_breaks(std::rc::Rc::make_mut(then_body));
+                    strip_switch_breaks(std::rc::Rc::make_mut(else_body));
+                }
+                break;
+            }
             _ => break,
         }
     }
+}
+
+fn fold_early_break_ifs(stmts: &mut Vec<PreHirStmt>) {
+    for idx in (0..stmts.len()).rev() {
+        if idx + 1 >= stmts.len() {
+            continue;
+        }
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &stmts[idx]
+        else {
+            continue;
+        };
+        let tail = &stmts[idx + 1..];
+        if contains_any_label(tail) || contains_switch_owned_break(tail) {
+            continue;
+        }
+        let then_exits = arm_always_exits_switch(then_body);
+        let else_exits = arm_always_exits_switch(else_body);
+        let then_has_break = contains_switch_owned_break(then_body);
+        let else_has_break = contains_switch_owned_break(else_body);
+
+        if then_exits && else_exits && (then_has_break || else_has_break) {
+            let mut stripped_then = (**then_body).clone();
+            let mut stripped_else = (**else_body).clone();
+            strip_switch_breaks(&mut stripped_then);
+            strip_switch_breaks(&mut stripped_else);
+            if !contains_switch_owned_break(&stripped_then)
+                && !contains_switch_owned_break(&stripped_else)
+            {
+                stmts.truncate(idx + 1);
+                if let PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } = &mut stmts[idx]
+                {
+                    *std::rc::Rc::make_mut(then_body) = stripped_then;
+                    *std::rc::Rc::make_mut(else_body) = stripped_else;
+                }
+            }
+        } else if then_exits && then_has_break && !else_has_break {
+            let mut stripped_then = (**then_body).clone();
+            strip_switch_breaks(&mut stripped_then);
+            if !contains_switch_owned_break(&stripped_then) {
+                let tail_stmts = stmts.split_off(idx + 1);
+                if let PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } = &mut stmts[idx]
+                {
+                    *std::rc::Rc::make_mut(then_body) = stripped_then;
+                    std::rc::Rc::make_mut(else_body).extend(tail_stmts);
+                }
+            }
+        } else if else_exits && else_has_break && !then_has_break {
+            let mut stripped_else = (**else_body).clone();
+            strip_switch_breaks(&mut stripped_else);
+            if !contains_switch_owned_break(&stripped_else) {
+                let tail_stmts = stmts.split_off(idx + 1);
+                if let PreHirStmt::If {
+                    then_body,
+                    else_body,
+                    ..
+                } = &mut stmts[idx]
+                {
+                    std::rc::Rc::make_mut(then_body).extend(tail_stmts);
+                    *std::rc::Rc::make_mut(else_body) = stripped_else;
+                }
+            }
+        }
+    }
+}
+
+fn strip_switch_breaks(stmts: &mut Vec<PreHirStmt>) {
+    strip_tail_switch_breaks(stmts);
+    fold_early_break_ifs(stmts);
 }
 
 fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<String>) -> bool {
@@ -207,6 +361,7 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<S
             cases,
             default,
         } = &stmts[i]
+            && !crate::util::expr_has_side_effecting_call(expr)
         {
             let range = eval_expr(expr, env);
             if let Some(v) = range.singleton_value() {
@@ -232,11 +387,13 @@ fn refine_stmts(stmts: &mut Vec<PreHirStmt>, env: &RangeEnv, targets: &HashSet<S
                         .unwrap_or_else(|| default.clone());
                     let mut replacement_stmts = std::rc::Rc::unwrap_or_clone(replacement);
                     strip_switch_breaks(&mut replacement_stmts);
-                    stmts.splice(i..=i, replacement_stmts);
-                    add_dispatcher_shape_recoveries(1);
-                    changed = true;
-                    // Don't advance i — the replacement stmts need processing.
-                    continue;
+                    if !contains_switch_owned_break(&replacement_stmts) {
+                        stmts.splice(i..=i, replacement_stmts);
+                        add_dispatcher_shape_recoveries(1);
+                        changed = true;
+                        // Don't advance i — the replacement stmts need processing.
+                        continue;
+                    }
                 }
             }
         }
@@ -320,17 +477,20 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv, targets: &HashSet<String>)
             }
 
             // Constant condition elimination.
-            let range = eval_expr(cond, env);
-            if let Some(v) = range.singleton_value() {
-                let (active, dead) = if v != 0 {
-                    (then_body, else_body)
-                } else {
-                    (else_body, then_body)
-                };
-                if !contains_referenced_label(dead, targets) {
-                    let replacement = std::rc::Rc::make_mut(active).drain(..).collect::<Vec<_>>();
-                    *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
-                    return true;
+            if !crate::util::expr_has_side_effecting_call(cond) {
+                let range = eval_expr(cond, env);
+                if let Some(v) = range.singleton_value() {
+                    let (active, dead) = if v != 0 {
+                        (then_body, else_body)
+                    } else {
+                        (else_body, then_body)
+                    };
+                    if !contains_referenced_label(dead, targets) {
+                        let replacement =
+                            std::rc::Rc::make_mut(active).drain(..).collect::<Vec<_>>();
+                        *stmt = PreHirStmt::Block(std::rc::Rc::new(replacement));
+                        return true;
+                    }
                 }
             }
             changed
@@ -338,9 +498,9 @@ fn refine_stmt(stmt: &mut PreHirStmt, env: &RangeEnv, targets: &HashSet<String>)
         PreHirStmt::While { body, cond } => {
             let changed = refine_stmts(std::rc::Rc::make_mut(body), env, targets);
             // If condition is provably false, remove the loop.
-            let range = eval_expr(cond, env);
-            if range.singleton_value() == Some(0) {
-                if !contains_referenced_label(body, targets) {
+            if !crate::util::expr_has_side_effecting_call(cond) {
+                let range = eval_expr(cond, env);
+                if range.singleton_value() == Some(0) && !contains_referenced_label(body, targets) {
                     *stmt = PreHirStmt::Block(std::rc::Rc::new(vec![]));
                     return true;
                 }
@@ -512,6 +672,7 @@ mod pr_review_regressions {
     use crate::ir::{
         NirType, PreHirBinaryOp, PreHirBinding, PreHirExpr, PreHirLValue, PreHirSwitchCase,
     };
+    use std::rc::Rc;
     #[test]
     fn review_bottom_seeding_must_not_enable_bool_width_comparison_misfold() {
         let ty = NirType::Int {
@@ -562,5 +723,337 @@ mod pr_review_regressions {
             ),
             "x=1; signed x<0 is false, but Bool width truncation selected the true arm"
         );
+    }
+
+    #[test]
+    fn strip_switch_breaks_removes_tail_if_breaks_inside_enclosing_loop() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let assign = |name: &str, v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: PreHirExpr::Const(v, u32_ty.clone()),
+        };
+        let mut func = PreHirFunction {
+            name: "nested_if_breaks".to_string(),
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Var("loop_cond".to_string()),
+                body: Rc::new(vec![PreHirStmt::Switch {
+                    expr: PreHirExpr::Const(1, u32_ty.clone()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: Rc::new(vec![PreHirStmt::If {
+                            cond: PreHirExpr::Var("c".to_string()),
+                            then_body: Rc::new(vec![assign("y", 1), PreHirStmt::Break]),
+                            else_body: Rc::new(vec![assign("y", 2), PreHirStmt::Break]),
+                        }]),
+                    }],
+                    default: Rc::new(vec![PreHirStmt::Break]),
+                }]),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_jump_resolver_pass(&mut func));
+        let PreHirStmt::While { body, .. } = &func.body[0] else {
+            panic!("expected while");
+        };
+        assert_eq!(body.len(), 1);
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &body[0]
+        else {
+            panic!("expected inlined if, got {body:?}");
+        };
+        assert_eq!(then_body.as_slice(), &[assign("y", 1)]);
+        assert_eq!(else_body.as_slice(), &[assign("y", 2)]);
+    }
+
+    #[test]
+    fn strip_switch_breaks_folds_early_exit_if_before_trailing_stmt() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let assign = |name: &str, v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: PreHirExpr::Const(v, u32_ty.clone()),
+        };
+        let mut func = PreHirFunction {
+            name: "early_if_break".to_string(),
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Var("loop_cond".to_string()),
+                body: Rc::new(vec![PreHirStmt::Switch {
+                    expr: PreHirExpr::Const(1, u32_ty.clone()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: Rc::new(vec![
+                            PreHirStmt::If {
+                                cond: PreHirExpr::Var("c".to_string()),
+                                then_body: Rc::new(vec![assign("y", 1), PreHirStmt::Break]),
+                                else_body: Rc::new(vec![]),
+                            },
+                            assign("y", 2),
+                            PreHirStmt::Break,
+                        ]),
+                    }],
+                    default: Rc::new(vec![PreHirStmt::Break]),
+                }]),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_jump_resolver_pass(&mut func));
+        let PreHirStmt::While { body, .. } = &func.body[0] else {
+            panic!("expected while");
+        };
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &body[0]
+        else {
+            panic!("expected inlined if, got {body:?}");
+        };
+        assert_eq!(then_body.as_slice(), &[assign("y", 1)]);
+        assert_eq!(else_body.as_slice(), &[assign("y", 2)]);
+    }
+
+    #[test]
+    fn strip_switch_breaks_preserves_inner_loop_break_and_blocks_partial_non_tail_inline() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let assign = |name: &str, v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: PreHirExpr::Const(v, u32_ty.clone()),
+        };
+
+        // Inner loop break must stay intact while outer switch break is stripped.
+        let mut with_inner_loop = PreHirFunction {
+            name: "inner_loop_break".to_string(),
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Var("outer".to_string()),
+                body: Rc::new(vec![PreHirStmt::Switch {
+                    expr: PreHirExpr::Const(1, u32_ty.clone()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: Rc::new(vec![
+                            PreHirStmt::While {
+                                cond: PreHirExpr::Var("inner".to_string()),
+                                body: Rc::new(vec![PreHirStmt::Break]),
+                            },
+                            PreHirStmt::Break,
+                        ]),
+                    }],
+                    default: Rc::new(vec![PreHirStmt::Break]),
+                }]),
+            }],
+            ..Default::default()
+        };
+        assert!(apply_jump_resolver_pass(&mut with_inner_loop));
+        let PreHirStmt::While { body, .. } = &with_inner_loop.body[0] else {
+            panic!("expected outer while");
+        };
+        assert_eq!(body.len(), 1);
+        assert!(matches!(
+            &body[0],
+            PreHirStmt::While { body: inner, .. } if inner.as_slice() == [PreHirStmt::Break]
+        ));
+
+        // Partial nested conditional break followed by another statement cannot drop the
+        // switch break without leaking into the outer loop or skipping fallthrough.
+        let mut with_partial_non_tail = PreHirFunction {
+            name: "partial_non_tail_break".to_string(),
+            body: vec![PreHirStmt::While {
+                cond: PreHirExpr::Var("outer".to_string()),
+                body: Rc::new(vec![PreHirStmt::Switch {
+                    expr: PreHirExpr::Const(1, u32_ty.clone()),
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: Rc::new(vec![
+                            PreHirStmt::If {
+                                cond: PreHirExpr::Var("c1".to_string()),
+                                then_body: Rc::new(vec![PreHirStmt::If {
+                                    cond: PreHirExpr::Var("c2".to_string()),
+                                    then_body: Rc::new(vec![assign("y", 1), PreHirStmt::Break]),
+                                    else_body: Rc::new(vec![]),
+                                }]),
+                                else_body: Rc::new(vec![]),
+                            },
+                            assign("y", 2),
+                            PreHirStmt::Break,
+                        ]),
+                    }],
+                    default: Rc::new(vec![]),
+                }]),
+            }],
+            ..Default::default()
+        };
+        assert!(!apply_jump_resolver_pass(&mut with_partial_non_tail));
+        let PreHirStmt::While { body, .. } = &with_partial_non_tail.body[0] else {
+            panic!("expected outer while");
+        };
+        assert!(matches!(&body[0], PreHirStmt::Switch { .. }));
+    }
+
+    #[test]
+    fn jump_resolver_prunes_cases_via_solver_and_abstains_on_div_float_and_calls() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let f32_ty = NirType::Float { bits: 32 };
+        let ret = |v: i64| PreHirStmt::Return(Some(PreHirExpr::Const(v, i32_ty.clone())));
+
+        // Solver infers `x` in [1, 3) from `if (c) x = 1; else x = 2;`, pruning cases 0 and 3.
+        let mut func = PreHirFunction {
+            name: "range_prune".to_string(),
+            locals: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: i32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c".to_string()),
+                    then_body: Rc::new(vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".to_string()),
+                        rhs: PreHirExpr::Const(1, i32_ty.clone()),
+                    }]),
+                    else_body: Rc::new(vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("x".to_string()),
+                        rhs: PreHirExpr::Const(2, i32_ty.clone()),
+                    }]),
+                },
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Var("x".to_string()),
+                    cases: vec![
+                        PreHirSwitchCase {
+                            values: vec![0],
+                            body: Rc::new(vec![ret(10)]),
+                        },
+                        PreHirSwitchCase {
+                            values: vec![1],
+                            body: Rc::new(vec![ret(11)]),
+                        },
+                        PreHirSwitchCase {
+                            values: vec![2],
+                            body: Rc::new(vec![ret(12)]),
+                        },
+                        PreHirSwitchCase {
+                            values: vec![3],
+                            body: Rc::new(vec![ret(13)]),
+                        },
+                    ],
+                    default: Rc::new(vec![ret(-1)]),
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(apply_jump_resolver_pass(&mut func));
+        let PreHirStmt::Switch { cases, .. } = &func.body[1] else {
+            panic!("expected switch");
+        };
+        let kept: Vec<i64> = cases
+            .iter()
+            .flat_map(|c| c.values.iter().copied())
+            .collect();
+        assert_eq!(kept, vec![1, 2]);
+
+        // Signed Div `-4 / 2` must NOT fold to unsigned `0x7fff_fffe`.
+        let mut div_func = PreHirFunction {
+            name: "signed_div_guard".to_string(),
+            body: vec![PreHirStmt::Switch {
+                expr: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Div,
+                    lhs: Box::new(PreHirExpr::Const(-4, i32_ty.clone())),
+                    rhs: Box::new(PreHirExpr::Const(2, i32_ty.clone())),
+                    ty: i32_ty.clone(),
+                },
+                cases: vec![
+                    PreHirSwitchCase {
+                        values: vec![-2],
+                        body: Rc::new(vec![ret(1)]),
+                    },
+                    PreHirSwitchCase {
+                        values: vec![0x7fff_fffe],
+                        body: Rc::new(vec![ret(2)]),
+                    },
+                ],
+                default: Rc::new(vec![ret(3)]),
+            }],
+            ..Default::default()
+        };
+        assert!(!apply_jump_resolver_pass(&mut div_func));
+
+        // Float arithmetic inside a Switch condition must NOT fold as integer bits.
+        let one_f = PreHirExpr::Const(i64::from(1.0_f32.to_bits()), f32_ty.clone());
+        let two_f = PreHirExpr::Const(i64::from(2.0_f32.to_bits()), f32_ty.clone());
+        let float_eq = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(one_f.clone()),
+                rhs: Box::new(one_f),
+                ty: f32_ty,
+            }),
+            rhs: Box::new(two_f),
+            ty: NirType::Bool,
+        };
+        let mut float_func = PreHirFunction {
+            name: "float_guard".to_string(),
+            body: vec![PreHirStmt::Switch {
+                expr: float_eq,
+                cases: vec![
+                    PreHirSwitchCase {
+                        values: vec![0],
+                        body: Rc::new(vec![ret(0)]),
+                    },
+                    PreHirSwitchCase {
+                        values: vec![1],
+                        body: Rc::new(vec![ret(1)]),
+                    },
+                ],
+                default: Rc::new(vec![ret(2)]),
+            }],
+            ..Default::default()
+        };
+        assert!(!apply_jump_resolver_pass(&mut float_func));
+
+        // Side-effecting call masked by `& 0` must NOT be dropped by Switch/If folding.
+        let call_masked = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(PreHirExpr::Call {
+                origin: None,
+                target: "side_effect".to_string(),
+                args: vec![],
+                ty: i32_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0, i32_ty.clone())),
+            ty: NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        };
+        let mut call_func = PreHirFunction {
+            name: "side_effect_guard".to_string(),
+            body: vec![PreHirStmt::Switch {
+                expr: call_masked,
+                cases: vec![PreHirSwitchCase {
+                    values: vec![0],
+                    body: Rc::new(vec![ret(1)]),
+                }],
+                default: Rc::new(vec![ret(2)]),
+            }],
+            ..Default::default()
+        };
+        assert!(!apply_jump_resolver_pass(&mut call_func));
     }
 }
