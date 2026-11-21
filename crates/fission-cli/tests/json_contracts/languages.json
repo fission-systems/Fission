@@ -1,0 +1,17 @@
+{
+  "command": [
+    "languages",
+    "--json"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "endian": "string",
+        "id": "string",
+        "processor": "string",
+        "size": "number",
+        "variant": "string"
+      }
+    }
+  }
+}

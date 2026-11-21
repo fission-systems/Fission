@@ -1,0 +1,35 @@
+{
+  "command": [
+    "call",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--addr",
+    "0x201640",
+    "--stub-calls",
+    "0",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "args": {
+        "array": "any"
+      },
+      "calls": {
+        "array": {
+          "object": {
+            "args": {
+              "array": "string"
+            },
+            "site": "string"
+          }
+        }
+      },
+      "outcome": "string",
+      "return_value": "string",
+      "stub_return": "string",
+      "writes": {
+        "array": "any"
+      }
+    }
+  }
+}

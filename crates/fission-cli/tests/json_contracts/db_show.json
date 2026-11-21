@@ -1,0 +1,88 @@
+{
+  "command": [
+    "--db",
+    "/var/folders/65/l9m02xg91b11jdfch2cycz9m0000gn/T/fission-contract-58714-db-show/fixture.fission.json",
+    "db",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "show",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "binary_hash": "string",
+      "binary_path": "string",
+      "breakpoints": {
+        "array": "string"
+      },
+      "comments": {
+        "map": {
+          "object": {
+            "text": "string"
+          }
+        }
+      },
+      "history": {
+        "object": {
+          "cursor": "number",
+          "next_id": "number",
+          "revisions": {
+            "array": {
+              "object": {
+                "changes": {
+                  "array": {
+                    "object": {
+                      "after": {
+                        "array": {
+                          "object": {
+                            "address": "string",
+                            "on_read": "bool",
+                            "on_write": "bool",
+                            "size": "number"
+                          }
+                        }
+                      },
+                      "before": {
+                        "array": "any"
+                      },
+                      "kind": "string"
+                    }
+                  }
+                },
+                "id": "number"
+              }
+            }
+          }
+        }
+      },
+      "names": {
+        "map": "string"
+      },
+      "schema_version": "number",
+      "signatures": {
+        "map": {
+          "object": {
+            "params": {
+              "array": {
+                "object": {
+                  "name": "string",
+                  "type": "string"
+                }
+              }
+            },
+            "returns": "string"
+          }
+        }
+      },
+      "watchpoints": {
+        "array": {
+          "object": {
+            "address": "string",
+            "on_read": "bool",
+            "on_write": "bool",
+            "size": "number"
+          }
+        }
+      }
+    }
+  }
+}

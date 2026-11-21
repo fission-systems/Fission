@@ -1,0 +1,21 @@
+{
+  "command": [
+    "hex",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--count",
+    "16",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "bytes": "string",
+      "file_offset": "string",
+      "length": "number",
+      "section": "string"
+    }
+  }
+}

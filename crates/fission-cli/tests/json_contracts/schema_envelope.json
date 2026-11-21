@@ -1,0 +1,215 @@
+{
+  "command": [
+    "schema"
+  ],
+  "shape": {
+    "object": {
+      "$schema": "string",
+      "allOf": {
+        "array": {
+          "object": {
+            "if": {
+              "object": {
+                "properties": {
+                  "object": {
+                    "ok": {
+                      "object": {
+                        "const": "bool"
+                      }
+                    }
+                  }
+                },
+                "required": {
+                  "array": "string"
+                }
+              }
+            },
+            "then": {
+              "object": {
+                "required": {
+                  "array": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "string",
+      "properties": {
+        "object": {
+          "command": {
+            "object": {
+              "type": "string"
+            }
+          },
+          "contract": {
+            "object": {
+              "const": "string"
+            }
+          },
+          "data": {
+            "object": {
+              "description": "string",
+              "x-data-schema": "string"
+            }
+          },
+          "elapsed_ms": {
+            "object": {
+              "minimum": "number",
+              "type": "string"
+            }
+          },
+          "error": {
+            "object": {
+              "properties": {
+                "object": {
+                  "code": {
+                    "object": {
+                      "description": "string",
+                      "type": "string"
+                    }
+                  },
+                  "context": {
+                    "object": {
+                      "type": "string"
+                    }
+                  },
+                  "hint": {
+                    "object": {
+                      "type": "string"
+                    }
+                  },
+                  "kind": {
+                    "object": {
+                      "enum": {
+                        "array": "string"
+                      }
+                    }
+                  },
+                  "message": {
+                    "object": {
+                      "type": "string"
+                    }
+                  },
+                  "retryable": {
+                    "object": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": {
+                "array": "string"
+              },
+              "type": "string"
+            }
+          },
+          "ok": {
+            "object": {
+              "type": "string"
+            }
+          },
+          "schema_version": {
+            "object": {
+              "description": "string",
+              "minimum": "number",
+              "type": "string"
+            }
+          },
+          "summary": {
+            "object": {
+              "description": "string",
+              "properties": {
+                "object": {
+                  "failed": {
+                    "object": {
+                      "minimum": "number",
+                      "type": "string"
+                    }
+                  },
+                  "succeeded": {
+                    "object": {
+                      "minimum": "number",
+                      "type": "string"
+                    }
+                  },
+                  "total": {
+                    "object": {
+                      "minimum": "number",
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": {
+                "array": "string"
+              },
+              "type": "string"
+            }
+          },
+          "tool": {
+            "object": {
+              "properties": {
+                "object": {
+                  "commit": {
+                    "object": {
+                      "type": {
+                        "array": "string"
+                      }
+                    }
+                  },
+                  "name": {
+                    "object": {
+                      "type": "string"
+                    }
+                  },
+                  "version": {
+                    "object": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "required": {
+                "array": "string"
+              },
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "object": {
+              "items": {
+                "object": {
+                  "properties": {
+                    "object": {
+                      "code": {
+                        "object": {
+                          "type": "string"
+                        }
+                      },
+                      "message": {
+                        "object": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "required": {
+                    "array": "string"
+                  },
+                  "type": "string"
+                }
+              },
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": {
+        "array": "string"
+      },
+      "title": "string",
+      "type": "string"
+    }
+  }
+}

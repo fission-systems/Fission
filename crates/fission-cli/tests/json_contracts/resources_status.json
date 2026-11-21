@@ -1,0 +1,49 @@
+{
+  "command": [
+    "resources",
+    "status",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "resource_roots": {
+        "array": {
+          "object": {
+            "exists": "bool",
+            "kind": "string",
+            "path": "string"
+          }
+        }
+      },
+      "resources": {
+        "object": {
+          "die_corpus_present": "bool",
+          "die_dir": "string",
+          "die_pe_json_present": "bool",
+          "die_pe_signatures_json": "string",
+          "fid_dir": "string",
+          "fid_present": "bool",
+          "fidb_java_dir": "null",
+          "fidb_java_present": "bool",
+          "generic_clib_64_pipe_text": "string",
+          "generic_clib_64_pipe_text_present": "bool",
+          "generic_clib_pipe_text": "string",
+          "generic_clib_pipe_text_present": "bool",
+          "mac_osx_pipe_text": "string",
+          "mac_osx_pipe_text_present": "bool",
+          "patterns_dir": "string",
+          "patterns_present": "bool",
+          "signatures_base": "string",
+          "win32_typeinfo": "string",
+          "win32_typeinfo_present": "bool",
+          "win_api_pipe_text": "string",
+          "win_api_pipe_text_present": "bool",
+          "workspace_root": "string"
+        }
+      },
+      "signature_paths": {
+        "array": "any"
+      }
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "command": [
+    "raw-pcode",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "decode_address": "string",
+      "decoded_instructions": "number",
+      "entry_address": "string",
+      "pcode": {
+        "object": {
+          "blocks": {
+            "array": {
+              "object": {
+                "index": "number",
+                "ops": {
+                  "array": {
+                    "object": {
+                      "address": "number",
+                      "asm_mnemonic": "string",
+                      "inputs": {
+                        "array": {
+                          "object": {
+                            "constant_val": "number",
+                            "is_constant": "bool",
+                            "offset": "number",
+                            "size": "number",
+                            "space_id": "number"
+                          }
+                        }
+                      },
+                      "opcode": "string",
+                      "output": {
+                        "object": {
+                          "constant_val": "number",
+                          "is_constant": "bool",
+                          "offset": "number",
+                          "size": "number",
+                          "space_id": "number"
+                        }
+                      },
+                      "seq_num": "number"
+                    }
+                  }
+                },
+                "start_address": "number",
+                "successors": {
+                  "array": "number"
+                }
+              }
+            }
+          }
+        }
+      },
+      "stop_reason": "string",
+      "template_source_counts": {
+        "object": {
+          "sla_construct_tpl": "number"
+        }
+      }
+    }
+  }
+}
