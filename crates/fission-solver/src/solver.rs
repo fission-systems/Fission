@@ -1,4 +1,5 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
+use crate::cnf::Lit;
 use crate::theory::bitvector::LoweredAssumption;
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
@@ -133,6 +134,54 @@ impl Solver {
         self.check_sat_with_oracle(None, &[])
     }
 
+    /// Lower temporary constraints before publishing any new array axioms.
+    /// Definitional CNF clauses can be retained even when the query is rejected.
+    fn lower_query_assumptions(
+        &mut self,
+        extra: &[SymExpr],
+    ) -> std::result::Result<Vec<Lit>, SatResult> {
+        if !self.bv_theory.unsupported().is_empty() {
+            return Err(SatResult::Unknown);
+        }
+        let mut lower = |expressions: &[SymExpr]| {
+            let mut literals = Vec::new();
+            for expression in expressions {
+                let lowered = self.bv_theory.lower_to_literal(expression, &mut self.sat);
+                let unsupported = self.bv_theory.aig.take_unsupported();
+                if !unsupported.is_empty() {
+                    tracing::debug!(?unsupported, "cannot lower query constraint");
+                    return Err(SatResult::Unknown);
+                }
+                match lowered {
+                    LoweredAssumption::Literal(lit) => literals.push(lit),
+                    LoweredAssumption::TriviallyTrue => {}
+                    LoweredAssumption::Refuted | LoweredAssumption::TriviallyFalse => {
+                        return Err(SatResult::Unsat);
+                    }
+                }
+            }
+            Ok(literals)
+        };
+
+        let assumptions = lower(extra)?;
+        if extra
+            .iter()
+            .any(|expr| self.array_theory.has_new_terms(expr))
+        {
+            let mut array_theory = self.array_theory.clone();
+            for expr in extra {
+                array_theory.add_expr(expr);
+            }
+            for lemma in lower(&array_theory.take_lemmas())? {
+                if !self.sat.add_clause(vec![lemma]) {
+                    return Err(SatResult::Unsat);
+                }
+            }
+            self.array_theory = array_theory;
+        }
+        Ok(assumptions)
+    }
+
     pub fn check_sat_with_oracle(
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
@@ -142,7 +191,6 @@ impl Solver {
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
-        let is_true = |e: &SymExpr| matches!(e, SymExpr::Const { val: 1, size: 1 });
         for e in self.assertions.iter().chain(extra.iter()) {
             if is_false(e) {
                 return Ok(SatResult::Unsat);
@@ -153,35 +201,16 @@ impl Solver {
             return Ok(self.refuted());
         }
 
-        for e in extra {
-            self.assert_array_lemmas_for(e);
-        }
-        if !self.bv_theory.load_into_sat(&mut self.sat) {
-            return Ok(self.refuted());
-        }
+        let assumptions = match self.lower_query_assumptions(extra) {
+            Ok(assumptions) => assumptions,
+            Err(result) => return Ok(result),
+        };
 
         loop {
             loop_count += 1;
             if loop_count > 10 {
                 tracing::warn!("CEGAR loop exceeded 10 iterations, bailing out");
                 return Ok(SatResult::Unknown);
-            }
-
-            // Lower extra constraints to assumptions
-            let mut assumptions = Vec::new();
-            for e in extra {
-                if is_true(e) {
-                    continue;
-                }
-                if is_false(e) {
-                    return Ok(SatResult::Unsat);
-                }
-                match self.bv_theory.lower_to_literal(e, &mut self.sat) {
-                    LoweredAssumption::Literal(lit) => assumptions.push(lit),
-                    LoweredAssumption::TriviallyTrue => {}
-                    LoweredAssumption::TriviallyFalse => return Ok(SatResult::Unsat),
-                    LoweredAssumption::Refuted => return Ok(self.refuted()),
-                }
             }
 
             // 3. Solve pure boolean SAT problem with assumptions
@@ -286,9 +315,7 @@ impl Solver {
     /// unconstrained bits, so "no model" is not a statement about the problem
     /// that was asked.
     ///
-    /// The record is per solver and sticky, so a miss in one query's extra
-    /// constraints makes later queries on the same solver `Unknown` too --
-    /// conservative, and never wrong.
+    /// Lowering misses in permanent constraints remain active in every query.
     fn refuted(&self) -> SatResult {
         if self.bv_theory.unsupported().is_empty() {
             SatResult::Unsat

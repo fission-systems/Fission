@@ -225,6 +225,10 @@ impl AigManager {
         &self.unsupported
     }
 
+    pub(crate) fn take_unsupported(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.unsupported)
+    }
+
     pub fn note_unsupported(&mut self, what: String) {
         if !self.unsupported.contains(&what) {
             self.unsupported.push(what);

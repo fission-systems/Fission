@@ -4,6 +4,7 @@ use crate::theory::{Theory, TheoryStatus};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[derive(Clone)]
 pub struct ArrayTheory {
     /// Maps an Array base expression to its Selects.
     parent_selects: HashMap<SymExpr, Vec<SymExpr>>,
@@ -68,6 +69,20 @@ impl ArrayTheory {
     /// synthesized while unwinding store chains).
     pub fn select_terms(&self) -> impl Iterator<Item = &SymExpr> {
         self.select_order.iter()
+    }
+
+    pub(crate) fn has_new_terms(&self, expr: &SymExpr) -> bool {
+        let mut found = false;
+        expr.visit_preorder(&mut |node| {
+            if matches!(
+                node,
+                SymExpr::ArraySelect { .. } | SymExpr::ArrayStore { .. }
+            ) && !self.processed_terms.contains(node)
+            {
+                found = true;
+            }
+        });
+        found
     }
 
     /// Recursively register every `ArraySelect` and `ArrayStore` within `expr`

@@ -119,3 +119,29 @@ fn the_same_read_of_a_covered_array_is_refuted() {
     ));
     assert_eq!(solver.check_sat().expect("check_sat"), SatResult::Unsat);
 }
+
+#[test]
+fn an_unsupported_array_assumption_does_not_change_later_queries() {
+    let memory = SymExpr::new_array_var("m", 4, 8);
+    let value = SymExpr::new_var("v", 16);
+    let written = store(&memory, SymExpr::new_const(0, 4), value.clone());
+    let unsupported = eq(
+        select(&written, SymExpr::new_const(1, 4)),
+        SymExpr::new_const(0, 8),
+    );
+
+    let mut solver = Solver::new();
+    solver.assert(eq(value, SymExpr::new_const(0x1234, 16)));
+    assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
+    for _ in 0..2 {
+        assert_eq!(
+            solver
+                .check_sat_with_oracle(None, std::slice::from_ref(&unsupported))
+                .unwrap(),
+            SatResult::Unknown
+        );
+        assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
+    }
+    solver.assert(unsupported);
+    assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
+}
