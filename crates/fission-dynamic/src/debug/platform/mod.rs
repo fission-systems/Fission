@@ -22,6 +22,11 @@
 
 use super::memory::{MemoryError, MemoryRegion};
 
+// The byte layouts the Windows backend reads; compiled everywhere so their
+// tests run on every host.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) mod windows_layout;
+
 // Platform-specific modules
 #[cfg(target_os = "windows")]
 pub mod windows;
