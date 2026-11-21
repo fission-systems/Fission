@@ -1654,9 +1654,7 @@ fn collect_pointer_assignment_types(
 
 fn record_pointer_assignment(out: &mut HashMap<String, Option<NirType>>, name: &str, ty: NirType) {
     if !matches!(ty, NirType::Ptr(_)) {
-        if let Some(slot) = out.get_mut(name) {
-            *slot = None;
-        }
+        out.insert(name.to_string(), None);
         return;
     }
     match out.get_mut(name) {
@@ -1720,12 +1718,19 @@ fn propagate_pointer_assignment_types(func: &mut PreHirFunction) -> bool {
     if inferred.is_empty() {
         return false;
     }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let mut changed = false;
     for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
         let Some(Some(ty)) = inferred.get(binding.name.as_str()) else {
             continue;
         };
-        if !matches!(binding.ty, NirType::Ptr(_)) {
+        let compatible = binding.surface_type_name.is_none()
+            && match &binding.ty {
+                NirType::Unknown => true,
+                NirType::Int { bits, .. } => *bits == pointer_bits,
+                _ => false,
+            };
+        if compatible {
             binding.ty = ty.clone();
             changed = true;
         }
@@ -3787,5 +3792,35 @@ mod tests {
             }
             _ => panic!("expected Assign"),
         }
+    }
+
+    #[test]
+    fn mixed_scalar_then_pointer_assignment_does_not_promote_local_to_pointer() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32 = NirType::Ptr(Box::new(u32_ty.clone()));
+        let body = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_owned()),
+                rhs: PreHirExpr::Const(0, u32_ty.clone()),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_owned()),
+                rhs: PreHirExpr::Var("p".to_owned()),
+            },
+        ];
+        let mut func = make_func(
+            vec![
+                make_binding_with_ty("p", ptr_u32),
+                make_binding_with_ty("x", NirType::Unknown),
+            ],
+            body,
+        );
+        func.is_64bit = true;
+
+        assert!(!super::propagate_pointer_assignment_types(&mut func));
+        assert_eq!(func.locals[1].ty, NirType::Unknown);
     }
 }
