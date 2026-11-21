@@ -1240,6 +1240,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#what-a-required-check-may-depend-on" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a required check may depend on
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#scheduled-runs-report-into-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scheduled runs report into issues
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#nightly-decbench" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1321,7 +1343,7 @@
 <tr>
 <td>Heavy</td>
 <td>Nightly or workflow dispatch</td>
-<td>Linux workspace tests, Windows and macOS coverage, MSRV and compile surface</td>
+<td>Linux workspace tests, Windows and macOS coverage, MSRV, compile surface and the RustSec advisory check</td>
 </tr>
 <tr>
 <td>DecBench full sweep</td>
@@ -1368,10 +1390,25 @@ Packaging changes rehearse all five targets on PRs and merge candidates.</p>
 <li>Configure GitHub's merge queue for <code>main</code> with the existing required check
    names. Begin with one candidate at a time. Verify the queue reports both
    checks on its synthetic SHA before requiring it for all merges.</li>
-<li>Update or disable <code>auto-merge-approved-prs.yml</code> once the queue is active so
-   merge strategy is controlled by the queue. Set an approval requirement for
-   CI and release policy changes when an independent reviewer is available.</li>
+<li>Set an approval requirement for CI and release policy changes when an
+   independent reviewer is available. (The auto-merge workflow is gone; merges
+   are explicit.)</li>
 </ol>
+<h2 id="what-a-required-check-may-depend-on">What a required check may depend on<a class="headerlink" href="#what-a-required-check-may-depend-on" title="Permanent link">&para;</a></h2>
+<p><a href="../adr/0016-ci-signal-integrity/">ADR 0016</a> holds the reasoning and the
+measurements. In short: a required check depends only on the change. The
+RustSec advisory database moves on its own schedule, so a PR checks advisories
+only when it changes <code>Cargo.lock</code>, <code>deny.toml</code> or <code>.cargo/audit.toml</code>; bans,
+licenses and sources are checked on every Rust or metadata change, and Heavy
+checks advisories every night. The sccache setup fails open. Every push to main
+runs workspace fmt and clippy, whatever it changed.</p>
+<h2 id="scheduled-runs-report-into-issues">Scheduled runs report into issues<a class="headerlink" href="#scheduled-runs-report-into-issues" title="Permanent link">&para;</a></h2>
+<p>Heavy, fuzz and the DecBench sweep end with <code>reusable-report-red.yml</code>. While a
+workflow is red on main there is one open issue titled <code>CI red: &lt;workflow&gt;</code>
+with the <code>ci-red</code> label; each further red run comments with its SHA and run,
+and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
+only on its schedule, restores its corpus from earlier runs, and attaches crash
+inputs to the run for 30 days.</p>
 <h2 id="nightly-decbench">Nightly DecBench<a class="headerlink" href="#nightly-decbench" title="Permanent link">&para;</a></h2>
 <p>The source is <a href="https://huggingface.co/datasets/noelo-lab/decbench-dataset">noelo-lab/decbench-dataset</a>,
 revision <code>815eb96f130b6d2ef7fa600e04669bf20139bf27</code>, config <code>full</code>.
