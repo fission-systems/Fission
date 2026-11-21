@@ -20,6 +20,7 @@ mod hex;
 mod identify;
 mod inventory;
 mod languages;
+mod lookup;
 mod nir_stats;
 mod patch;
 mod pcode_diagnostics;
@@ -44,6 +45,7 @@ pub use functions::{build_functions_response, function_info_to_fn_entry};
 use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
+pub use lookup::LookupQuery;
 use nir_stats::emit_nir_stats;
 pub use patch::PatchRequest;
 use patch::run_patch;
@@ -358,6 +360,7 @@ fn run() -> Result<()> {
         ParsedInvocation::Skill => crate::cli::skill::run_skill(),
         ParsedInvocation::Languages(args) => languages::run(&args),
         ParsedInvocation::Call(args) => call::run(&args),
+        ParsedInvocation::Api(args) => lookup::run_api(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -1171,6 +1174,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.callgraph_cmd {
         return Ok(run_callgraph(cli, &binary)?);
+    }
+
+    if let Some(query) = &cli.lookup {
+        return lookup::run(cli, &binary, query);
     }
 
     if cli.identify_cmd {

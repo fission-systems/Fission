@@ -284,6 +284,7 @@ impl LoadedBinary {
                     name: ty.name,
                     mangled_name: ty.mangled_name,
                     kind: format!("{:?}", ty.kind),
+                    source: "swift".to_string(),
                     fields: ty
                         .fields
                         .into_iter()

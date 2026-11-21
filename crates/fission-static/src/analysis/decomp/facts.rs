@@ -385,6 +385,7 @@ impl FactStore {
                         name: user_struct.name,
                         mangled_name: String::new(),
                         kind: "struct".to_string(),
+                        source: "user_sidecar".to_string(),
                         fields: user_struct
                             .fields
                             .into_iter()
@@ -1441,6 +1442,7 @@ mod tests {
             name: name.to_string(),
             mangled_name: String::new(),
             kind: "struct".to_string(),
+            source: "test".to_string(),
             fields: fields
                 .into_iter()
                 .map(|(field, offset)| InferredFieldInfo {
