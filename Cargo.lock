@@ -937,6 +937,7 @@ dependencies = [
  "fission-plugin",
  "fission-sleigh",
  "fission-ttd",
+ "libc",
  "nix 0.28.0",
  "rkyv",
  "serde",

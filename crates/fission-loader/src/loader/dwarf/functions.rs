@@ -158,7 +158,9 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                             }
                             DwTag(0x0b) => {
                                 // DW_TAG_lexical_block
-                                if let Some((lo, hi)) = self.lexical_block_range(entry)? {
+                                if let Some((lo, hi)) =
+                                    self.lexical_block_range(entry, &unit, &dwarf)?
+                                {
                                     scope_stack.push((func_depth, lo, hi));
                                 }
                             }
@@ -171,7 +173,8 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
                 // Look for DW_TAG_subprogram at any level
                 if entry.tag() == DwTag(0x2e) {
                     // DW_TAG_subprogram — start collecting
-                    let Some(address) = self.get_attr_u64(entry, DwAt(0x11))? else {
+                    let Some(address) = self.get_attr_address(entry, DwAt(0x11), &unit, &dwarf)?
+                    else {
                         continue; // Declaration-only / inlined
                     };
 
@@ -213,7 +216,7 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
 
                     let name = crate::loader::demangle::demangle(&raw_name);
                     let frame_base = self.extract_frame_base(entry, &unit)?;
-                    let size = self.subprogram_size(entry, address)?;
+                    let size = self.subprogram_size(entry, address, &unit, &dwarf)?;
 
                     current_func = Some(FuncBuilder {
                         address,
@@ -289,17 +292,12 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
         &self,
         entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
         low_pc: u64,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
     ) -> Result<u64, gimli::Error> {
-        let end = match entry.attr_value(DwAt(0x12))? {
-            Some(gimli::AttributeValue::Addr(v)) => v,
-            Some(gimli::AttributeValue::Udata(v)) => low_pc.saturating_add(v),
-            Some(gimli::AttributeValue::Data1(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data2(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data4(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data8(v)) => low_pc.saturating_add(v),
-            _ => return Ok(0),
-        };
-        Ok(end.saturating_sub(low_pc))
+        Ok(self
+            .high_pc(entry, low_pc, unit, dwarf)?
+            .map_or(0, |end| end.saturating_sub(low_pc)))
     }
 
     /// Extract the single-operation form of `DW_AT_frame_base` used by the
@@ -345,20 +343,32 @@ impl<'a> super::analyzer::DwarfAnalyzer<'a> {
     fn lexical_block_range(
         &self,
         entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
     ) -> Result<Option<(u64, u64)>, gimli::Error> {
-        let Some(low_pc) = self.get_attr_u64(entry, DwAt(0x11))? else {
+        let Some(low_pc) = self.get_attr_address(entry, DwAt(0x11), unit, dwarf)? else {
             return Ok(None);
         };
-        let high_pc = match entry.attr_value(DwAt(0x12))? {
-            Some(gimli::AttributeValue::Addr(v)) => v,
-            Some(gimli::AttributeValue::Udata(v)) => low_pc.saturating_add(v),
-            Some(gimli::AttributeValue::Data1(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data2(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data4(v)) => low_pc.saturating_add(u64::from(v)),
-            Some(gimli::AttributeValue::Data8(v)) => low_pc.saturating_add(v),
-            _ => return Ok(None),
-        };
-        Ok(Some((low_pc, high_pc)))
+        Ok(self
+            .high_pc(entry, low_pc, unit, dwarf)?
+            .map(|end| (low_pc, end)))
+    }
+
+    fn high_pc(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        low_pc: u64,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
+    ) -> Result<Option<u64>, gimli::Error> {
+        let attr = DwAt(0x12);
+        if let Some(address) = self.get_attr_address(entry, attr, unit, dwarf)? {
+            return Ok(Some(address));
+        }
+        // A constant high_pc encodes a length from low_pc.
+        Ok(self
+            .get_attr_u64(entry, attr)?
+            .map(|size| low_pc.saturating_add(size)))
     }
 
     /// Extract parameter information from a DW_TAG_formal_parameter DIE

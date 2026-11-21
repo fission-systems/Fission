@@ -538,6 +538,48 @@ impl MacOSDebugger {
             .map_err(FissionError::debug)
     }
 
+    /// Stay traced while resuming from a hardware step. A late step trap can
+    /// otherwise reach the target after PT_DETACH and terminate it.
+    fn detach_after_hardware_step(&self, pid: u32, thread_id: u32) {
+        let step_pc = self
+            .state_words(thread_id)
+            .ok()
+            .map(|words| regs::program_counter(&words));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        for _ in 0..MAX_ABSORBED_STEP_TRAPS {
+            if mach::ptrace_request(mach::PT_CONTINUE, pid, 1, 0).is_err() {
+                break;
+            }
+            mach::request_stop(pid);
+            let stopped = loop {
+                match mach::poll_stop(pid) {
+                    Ok(Some(outcome)) => break outcome,
+                    Ok(None) if Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                    Ok(None) | Err(_) => {
+                        let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, 0);
+                        return;
+                    }
+                }
+            };
+            match stopped {
+                WaitOutcome::Stopped(SIGTRAP)
+                    if step_pc.is_some_and(|pc| {
+                        self.state_words(thread_id)
+                            .is_ok_and(|words| regs::program_counter(&words) == pc)
+                    }) && self.trapped_on_breakpoint(thread_id) == Some(false) => {}
+                WaitOutcome::Stopped(signal) => {
+                    let signal = if signal == SIGSTOP { 0 } else { signal };
+                    let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, signal);
+                    return;
+                }
+                WaitOutcome::Exited(_) | WaitOutcome::Signaled(_) => return,
+            }
+        }
+        let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, 0);
+    }
+
     /// Resume the target, first stepping off a breakpoint it is stopped on.
     ///
     /// Acts on the thread the last stop was reported for. Resuming with the
@@ -635,12 +677,20 @@ impl Drop for MacOSDebugger {
         if let Some(pid) = self.target_pid {
             // PT_DETACH requires a ptrace stop. An asynchronous step may
             // still be on its way to one when the backend is dropped.
-            if self.step_in_flight.is_some()
-                && matches!(
-                    self.wait_blocking(Duration::from_secs(1)),
-                    Ok(WaitOutcome::Exited(_) | WaitOutcome::Signaled(_))
-                )
-            {
+            let hardware_thread = self
+                .step_in_flight
+                .as_ref()
+                .filter(|step| step.hardware)
+                .map(|step| step.thread_id);
+            let stop = self
+                .step_in_flight
+                .is_some()
+                .then(|| self.wait_blocking(Duration::from_secs(1)))
+                .and_then(Result::ok);
+            if matches!(
+                stop,
+                Some(WaitOutcome::Exited(_) | WaitOutcome::Signaled(_))
+            ) {
                 self.mark_gone(DebugStatus::Terminated);
                 return;
             }
@@ -650,7 +700,12 @@ impl Drop for MacOSDebugger {
             // Release the Mach suspensions while the thread ports still
             // refer to the threads that were held for this step.
             self.finish_step();
-            let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, 0);
+            if let (Some(thread_id), Some(WaitOutcome::Stopped(SIGTRAP))) = (hardware_thread, stop)
+            {
+                self.detach_after_hardware_step(pid, thread_id);
+            } else {
+                let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, 0);
+            }
         }
         self.release_ports();
     }
