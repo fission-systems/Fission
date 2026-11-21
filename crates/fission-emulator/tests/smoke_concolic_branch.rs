@@ -142,6 +142,35 @@ fn smoke_directed_search_finds_target() {
     assert_eq!(mgr.stash_len("found"), 1);
 }
 
+/// A state that reached the success branch carries the input that took it:
+/// the solver's model gives the stdin byte `A`, whatever byte the run was
+/// actually fed. The other branch's state solves to some other byte.
+#[test]
+fn solve_inputs_names_the_byte_that_takes_each_branch() {
+    use fission_emulator::sym::SimulationManager;
+    use fission_emulator::sym::exploration::DirectedSearch;
+
+    let emu = load_emu(b"B", true).unwrap_or_else(|e| panic!("{e:#}"));
+    let mut mgr = SimulationManager::new(emu).with_max_steps(16);
+    mgr.use_technique(Box::new(DirectedSearch::new(0x4000a2, vec![0x4000ab])));
+    mgr.explore().unwrap_or_else(|e| panic!("explore: {e:#}"));
+    let found = mgr.stashes.get("found").cloned().unwrap_or_default();
+    assert_eq!(
+        found.len(),
+        1,
+        "{:?}",
+        mgr.stashes.keys().collect::<Vec<_>>()
+    );
+    let inputs = mgr.solve_inputs(&found[0]).expect("satisfiable path");
+    assert_eq!(inputs.len(), 1, "{inputs:?}");
+    assert!(inputs[0].name.starts_with("stdin_"));
+    assert_eq!(inputs[0].value, u64::from(b'A'));
+
+    let report = mgr.report(8);
+    assert_eq!(report.found.len(), 1);
+    assert_eq!(report.stashes.get("found"), Some(&1));
+}
+
 /// Verify SimState snapshots and isolates VFS and stdin_buffer.
 #[test]
 fn smoke_vfs_and_stdin_isolated_in_simstate() {
