@@ -1921,6 +1921,48 @@ impl Emulator {
         Ok(())
     }
 
+    /// Record a time-travel snapshot of the machine as it is now: the
+    /// registers, and the memory writes since the previous snapshot. The run
+    /// loop calls this every recording interval; a debugger calls it once at
+    /// launch, so a session that only single-steps (and so never reaches the
+    /// loop's check) still has a step to seek back to.
+    pub fn record_ttd_snapshot(&mut self) {
+        if !self.ttd.is_recording() {
+            return;
+        }
+        self.ttd_last_snapshot_inst = self.inst_count;
+        let regs = self.register_state();
+        let deltas: Vec<fission_ttd::MemoryDelta> = self
+            .state
+            .trace_mem_writes
+            .iter()
+            .map(|(addr, old, new)| fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone()))
+            .collect();
+        let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self
+            .state
+            .trace_shadow_writes
+            .iter()
+            .map(
+                |(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
+                    space_id: *space_id,
+                    address: *addr,
+                    old_node: *old_node,
+                    new_node: *new_node,
+                },
+            )
+            .collect();
+        self.ttd
+            .record_step_with_memory(self.inst_count, regs, 0, deltas, shadow_deltas);
+        self.state.trace_mem_writes.clear();
+        self.state.trace_mem_reads.clear();
+        self.state.trace_shadow_writes.clear();
+        tracing::trace!(
+            "TTD: recorded step {} at PC=0x{:X}",
+            self.inst_count,
+            self.pc
+        );
+    }
+
     /// Seek the TTD timeline to a given instruction step index.
     ///
     /// 1. Restore the nearest snapshot at or before `target_step` (registers +
@@ -2686,39 +2728,7 @@ impl Emulator {
                 && self.inst_count / self.ttd_snapshot_interval
                     > self.ttd_last_snapshot_inst / self.ttd_snapshot_interval
             {
-                self.ttd_last_snapshot_inst = self.inst_count;
-                let regs = self.register_state();
-                let deltas: Vec<fission_ttd::MemoryDelta> = self
-                    .state
-                    .trace_mem_writes
-                    .iter()
-                    .map(|(addr, old, new)| {
-                        fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone())
-                    })
-                    .collect();
-                let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self
-                    .state
-                    .trace_shadow_writes
-                    .iter()
-                    .map(
-                        |(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
-                            space_id: *space_id,
-                            address: *addr,
-                            old_node: *old_node,
-                            new_node: *new_node,
-                        },
-                    )
-                    .collect();
-                self.ttd
-                    .record_step_with_memory(self.inst_count, regs, 0, deltas, shadow_deltas);
-                self.state.trace_mem_writes.clear();
-                self.state.trace_mem_reads.clear();
-                self.state.trace_shadow_writes.clear();
-                tracing::trace!(
-                    "TTD: recorded step {} at PC=0x{:X}",
-                    self.inst_count,
-                    self.pc
-                );
+                self.record_ttd_snapshot();
             }
         };
         if self.ttd.is_recording() {

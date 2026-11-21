@@ -1121,6 +1121,10 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         // The one command that owns a live machine for its whole duration.
         // Every arm around it re-attaches to a pid between invocations, which
         // an emulated process cannot survive.
+        DebugCommand::BackStep | DebugCommand::Seek(_) => anyhow::bail!(
+            "`back-step` and `seek` move a recorded execution, which exists only inside \
+             one session: run them in `debug --emulator session --record`"
+        ),
         DebugCommand::Session(args) => super::debug_session::run_session(args, emulator),
 
         DebugCommand::Imports(args) => {
