@@ -1251,6 +1251,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#checks-on-the-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checks on the checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#scheduled-runs-report-into-issues" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1402,8 +1413,24 @@ only when it changes <code>Cargo.lock</code>, <code>deny.toml</code> or <code>.c
 licenses and sources are checked on every Rust or metadata change, and Heavy
 checks advisories every night. The sccache setup fails open. Every push to main
 runs workspace fmt and clippy, whatever it changed.</p>
+<h2 id="checks-on-the-checks">Checks on the checks<a class="headerlink" href="#checks-on-the-checks" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Workflows: every third-party action is pinned to a commit SHA (Dependabot
+  updates the pins monthly), inputs reach shell code through <code>env</code>, and no
+  workflow grants <code>actions: write</code>. Any workflow change runs actionlint and
+  zizmor; a high-severity zizmor finding fails Script Checks.</li>
+<li>Determinism: the PR fixture lane decompiles each fixture three times (1 and
+  4 threads) and fails if any function's text differs. The nightly
+  <code>determinism.yml</code> does the same four times over a fixed DecBench sample of
+  37 binaries and 12,505 functions (<code>scripts/ci/determinism_check.py</code>, static
+  decompilation only). On main today 26 of those functions differ, so it
+  reports into a <code>ci-red</code> issue and does not gate releases; add it to Heavy's
+  summary once it is green.</li>
+<li>The PR fixture lane builds the release CLI with overflow checks and debug
+  assertions on.</li>
+</ul>
 <h2 id="scheduled-runs-report-into-issues">Scheduled runs report into issues<a class="headerlink" href="#scheduled-runs-report-into-issues" title="Permanent link">&para;</a></h2>
-<p>Heavy, fuzz and the DecBench sweep end with <code>reusable-report-red.yml</code>. While a
+<p>Heavy, fuzz, determinism and the DecBench sweep end with <code>reusable-report-red.yml</code>. While a
 workflow is red on main there is one open issue titled <code>CI red: &lt;workflow&gt;</code>
 with the <code>ci-red</code> label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs

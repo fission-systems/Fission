@@ -1251,6 +1251,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#hardening-and-what-was-measured-before-adding-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hardening, and what was measured before adding it
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#phases" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1293,7 +1304,7 @@
 
 
 <h1 id="adr-0016-ci-signal-integrity">ADR 0016: CI signal integrity<a class="headerlink" href="#adr-0016-ci-signal-integrity" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Accepted (phase 1 implemented; phases 2–4 proposed)
+<p><strong>Status:</strong> Accepted (phase 1 and hardening implemented; phases 2–4 proposed)
 <strong>Last verified:</strong> 2026-11-21
 <strong>Builds on:</strong> PR #980 (exact-SHA change plans, merge-group support, pre-merge
 lanes, nightly DecBench sweep, release promotion)</p>
@@ -1364,6 +1375,45 @@ green and red mean what they say. Measured over the same 30 days
    that fires on a change it cannot be about (a removal) is narrowed, not
    worked around with a placeholder test.</li>
 </ol>
+<h2 id="hardening-and-what-was-measured-before-adding-it">Hardening, and what was measured before adding it<a class="headerlink" href="#hardening-and-what-was-measured-before-adding-it" title="Permanent link">&para;</a></h2>
+<p>Each check below was measured on main (9dd3bb658) before it was added, so its
+cost and what it catches are known rather than assumed.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Measured</th>
+<th>Where it runs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Third-party actions pinned to commit SHAs; template expansions moved into <code>env</code>; no workflow-wide <code>actions: write</code></td>
+<td>zizmor 1.32.0: 92 unpinned actions (one a branch, <code>dtolnay/rust-toolchain@stable</code>), 18 template injections, 2 over-broad permissions, all high severity; 0 after. Caches authenticate with the runner token, so dropping <code>actions: write</code> costs nothing</td>
+<td>zizmor (high severity) in Script Checks whenever a workflow changes</td>
+</tr>
+<tr>
+<td>Decompiler determinism</td>
+<td>2,868 functions over 18 DecBench binaries, decompiled at 1, 8 and 8 threads: one function (<code>dpkg-query</code> O0 <code>dpkg_options_parse</code>) printed <code>printforhelp = help_str;</code> or <code>*(unsigned long long *)(&amp;printforhelp) = help_str;</code>, 8 runs to 4, even single-threaded. The nightly sample, run on main: 26 of 12,505 functions in 5 of 37 binaries differ across four runs (10 minutes locally)</td>
+<td>PR fixtures: 3 runs each (all deterministic today). Nightly <code>determinism.yml</code>: reports into a <code>ci-red</code> issue, not yet a release gate; it joins Heavy once main is deterministic</td>
+</tr>
+<tr>
+<td>Overflow checks and debug assertions in release builds</td>
+<td>0 panics over the same 2,868 functions; the 83 errors are lift failures on PE data symbols. Kept because the class has occurred (four panic sites from a debug sweep, the <code>align_up</code> fuzz crash) and costs little on the fixture lane</td>
+<td>PR fixture lane</td>
+</tr>
+<tr>
+<td>Retry masking</td>
+<td>0 tests passed only on retry in 59 recent green test jobs</td>
+<td>Not changed</td>
+</tr>
+<tr>
+<td>Hangs</td>
+<td>nextest already terminates a test after 120 s</td>
+<td>Not changed</td>
+</tr>
+</tbody>
+</table>
 <h2 id="phases">Phases<a class="headerlink" href="#phases" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
