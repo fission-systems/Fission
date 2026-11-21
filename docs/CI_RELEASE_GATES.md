@@ -56,6 +56,21 @@ runs workspace fmt and clippy, whatever it changed.
 
 ## Checks on the checks
 
+- Speed: every Rust PR counts instructions executed by its base and head CLIs
+  on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
+  runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
+  compares main with the last good night and fails at +3%. Dispatch it with
+  `accept_baseline` to accept a slowdown that is worth it.
+- Decompiler changes: a PR that can move output gets an output diff on a
+  fixed DecBench sample (about 3,000 functions) in its job summary: the
+  functions whose text changed first, then GED and type_match before and after.
+  Report-only; open the changed functions before trusting a score.
+- Nightly: fuzzing of six targets (ELF, PE, Mach-O, COFF, any format, SLEIGH
+  decode) seeded from the loader fixtures; an 8 GiB memory ceiling on the
+  eight largest DecBench binaries; decompiler determinism. Weekly: mutation
+  testing of lines changed on main, four of 48 rotating slices, report-only.
+  Each reports into a `ci-red` issue when it fails.
+
 - Workflows: every third-party action is pinned to a commit SHA (Dependabot
   updates the pins monthly), inputs reach shell code through `env`, and no
   workflow grants `actions: write`. Any workflow change runs actionlint and

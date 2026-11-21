@@ -1,0 +1,30 @@
+# cargo-fuzz workspace for the parent crate (`fission-sleigh`).
+#
+# Run from `crates/fission-sleigh`: `cargo fuzz run fuzz_sleigh_decode`.
+# The SLEIGH specs come from the resource bundle: set FISSION_RESOURCE_ROOT to
+# the checkout's `utils/` when running outside it.
+# Scheduled CI: `.github/workflows/fuzz.yml`.
+[workspace]
+
+[package]
+name = "fission-sleigh-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.fission-sleigh]
+path = ".."
+
+[[bin]]
+name = "fuzz_sleigh_decode"
+path = "fuzz_targets/fuzz_sleigh_decode.rs"
+test = false
+doc = false
+bench = false

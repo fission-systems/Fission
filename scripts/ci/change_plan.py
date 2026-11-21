@@ -36,6 +36,8 @@ DEPENDENCY_SET = {
 PREMERGE = (
     ".github/workflows/reusable-premerge.yml", "scripts/ci/decompiler_smoke.py",
     "scripts/macos/", ".github/fixtures/",
+    ".github/workflows/reusable-base-head.yml", "scripts/ci/output_diff.py",
+    "scripts/ci/speed_compare.py",
 )
 # The nightly full-dataset sweep cannot run on a PR; one binary through the same
 # script proves the download, strip, decompile and scoring path still works.

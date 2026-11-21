@@ -91,14 +91,9 @@ fn build_from(fixture: &str, max_inst: u64, interpret: bool) -> Emulator {
     emu
 }
 
-/// A 32-bit PE, from the dev corpus rather than `testdata` -- there is no
-/// 32-bit fixture in the crate, and this shape needs a real CRT to exercise.
+/// A 32-bit PE with a real MinGW CRT, which this shape needs to exercise.
 fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-m32_O0.exe");
-    if !path.is_file() {
-        return None;
-    }
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x86_control_flow.exe");
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::windows::loader::load_pe(&mut state, &binary).expect("pe");
@@ -118,20 +113,12 @@ fn build_pe32(max_inst: u64, interpret: bool) -> Option<Emulator> {
     Some(emu)
 }
 
-/// An aarch64 ELF, from the dev corpus: there is no aarch64 fixture in the
-/// crate and this architecture's SIMD is where the engines are newest.
+/// A static musl AArch64 ELF: this architecture's SIMD is where the engines
+/// are newest. Both this and the PE32 fixture used to come from a local dev
+/// corpus and skipped when it was absent -- which was everywhere, CI included,
+/// so neither test had run. They are now built from `testdata/src/control_flow.c`.
 fn build_aarch64(max_inst: u64, interpret: bool) -> Option<Emulator> {
-    let path = std::env::var_os("FISSION_SWEEP_ROOT")
-        .map(PathBuf::from)
-        .map(|root| root.join("c/control_flow_gcc-aarch64_O0"))
-        .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-                "../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0",
-            )
-        });
-    if !path.is_file() {
-        return None;
-    }
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/aarch64_control_flow.elf");
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");
@@ -414,8 +401,7 @@ fn the_engines_agree_on_a_32_bit_process() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_pe32(500_000, false), build_pe32(500_000, true))
     else {
-        eprintln!("skipping: dev corpus not present");
-        return;
+        panic!("PE32 fixture did not build an emulator");
     };
 
     jitted.add_observer(Box::new(PcTrace::default()));
@@ -460,7 +446,7 @@ fn the_engines_agree_on_a_32_bit_process() {
     }
 }
 
-/// Both engines run the safe, static AArch64 dev-corpus binary through libc
+/// Both engines run the static AArch64 fixture through libc
 /// and `main`, return the source-level result 27, and take the same instruction
 /// path. Startup exercises `DCZID_EL0` and `DC ZVA` in musl's memset routine.
 #[test]
@@ -468,8 +454,7 @@ fn the_engines_agree_on_aarch64() {
     let (Some(mut jitted), Some(mut interpreted)) =
         (build_aarch64(60_000, false), build_aarch64(60_000, true))
     else {
-        eprintln!("skipping: dev corpus not present");
-        return;
+        panic!("AArch64 fixture did not build an emulator");
     };
 
     jitted.add_observer(Box::new(PcTrace::default()));
@@ -537,8 +522,7 @@ fn the_engines_agree_on_aarch64() {
 #[test]
 fn aarch64_dc_zva_zeroes_one_profiled_cache_block() {
     let Some(mut emu) = build_aarch64(60_000, false) else {
-        eprintln!("skipping: dev corpus not present");
-        return;
+        panic!("AArch64 fixture did not build an emulator");
     };
 
     assert_eq!(emu.read_register_u64("dczid_el0").unwrap(), 4);
