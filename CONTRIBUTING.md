@@ -156,12 +156,16 @@ cargo build
 # Build fission-cli
 cargo build -p fission-cli --release
 
-# Run tests
-cargo test
+# Run tests (nextest is the default runner)
+cargo nextest run -p fission-pcode
 
-# Run with logging
-RUST_LOG=debug cargo run
+# Run the CLI with logging, from the repo root (it reads ./utils)
+RUST_LOG=debug cargo run -p fission-cli -- info path/to/binary
 ```
+
+Fission is agent-first: the CLI and its JSON contract are the product
+surface. There is no GUI or TUI; both were built and deliberately removed
+(see [`docs/roadmap/1.0-criteria.md`](./docs/roadmap/1.0-criteria.md)).
 
 ### IDE Setup
 
@@ -176,7 +180,6 @@ Install extensions:
 ```json
 {
   "rust-analyzer.checkOnSave.command": "clippy",
-  "rust-analyzer.cargo.features": ["gui", "cli"],
   "editor.formatOnSave": true
 }
 ```
@@ -196,15 +199,16 @@ Install extensions:
 Follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/). Use `rustfmt` and `clippy`:
 
 ```bash
-# Format code
-cargo fmt
+# Format code -- CI runs `cargo fmt --all --check`
+cargo fmt --all
 
-# Lint code
-cargo clippy -- -D warnings
-
-# Fix automatically
-cargo clippy --fix
+# Lint code -- CI's exact line
+cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity
 ```
+
+Run `cargo fmt --all` with your change, not as a separate sweep, and never
+run `rustfmt` on a single file: it follows `mod` declarations into files you
+did not touch (see [`AGENTS.md`](./AGENTS.md)).
 
 ### Code Organization
 
@@ -212,7 +216,7 @@ Fission is a **Cargo workspace**. There is **no** single-crate `src/analysis` la
 
 **Authoritative map:** [`docs/PROJECT_MAP.md`](./docs/PROJECT_MAP.md) — workspace members, `benchmark/`, `docs/`, `utils/`, `vendor/`, and CI roots.
 
-**Ownership table:** [`AGENTS.md`](./AGENTS.md) — where to implement fixes (“canonical owner”), anti-patterns, and automation alignment.
+**Ownership table:** [`AGENTS.md`](./AGENTS.md) — where to implement fixes (“canonical owner”), anti-patterns, and how quality is measured.
 
 ### Naming Conventions
 
@@ -388,10 +392,10 @@ git commit -m "feat(cli): add --strings flag"
 4. **Write tests**
 5. **Run checks**
    ```bash
-   cargo fmt -- --check
-   cargo clippy --workspace --exclude fission-tauri -- -D warnings
-   cargo test -p fission-pcode -p fission-loader --verbose
-    cargo build -p fission-cli --release
+   cargo fmt --all --check
+   cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity
+   cargo nextest run -p <crates you touched>
+   cargo build -p fission-cli --release
    ```
 
 6. **Update documentation**
@@ -410,27 +414,10 @@ git commit -m "feat(cli): add --strings flag"
 
 ### PR Template
 
-```markdown
-## Description
-Brief description of changes
-
-## Type of Change
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-
-## Testing
-How was this tested?
-
-## Screenshots (if applicable)
-Add screenshots for GUI changes
-
-## Checklist
-- [ ] Code follows style guidelines
-- [ ] Tests added
-- [ ] Documentation updated
-```
+GitHub fills in [`.github/pull_request_template.md`](./.github/pull_request_template.md)
+when you open a pull request. If your change can alter decompiler output, its
+"Benchmark Impact" block needs a DecBench measurement (see
+[`docs/BENCHMARK_DECBENCH.md`](./docs/BENCHMARK_DECBENCH.md)).
 
 ### Review Process
 
@@ -458,27 +445,30 @@ Fission uses a two-layer CI strategy to keep local development fast while preser
 
 ### 1) Fast PR Gate (`.github/workflows/ci.yml`)
 
-Runs on pull requests and pushes to `main`:
+Runs on pull requests and pushes to `main`. Jobs run only for the paths a
+change touches (`Detect changes`):
 
-- Linux fast gate
-  - `cargo deny` and Node security audit
-  - formatting/lint checks
-  - focused Rust test set
-  - decompiler smoke test
-- macOS build/test
-- Windows build/test
+- Security check (`cargo deny`, `cargo audit`)
+- Lint & Format, Script Checks, and the anti-overfitting Pass-Gate Lint
+- Tests (Linux), split into core and extras
+- Native Debugger Tests (Linux)
+- CLI Smoke (Linux, PE sample)
+- Tests (macOS)
 
 This is the main merge gate and should fail quickly when regressions are introduced.
 
 ### 2) Heavy Validation (`.github/workflows/ci-heavy.yml`)
 
-Runs on `main`, nightly schedule, and manual dispatch:
+Runs nightly and on manual dispatch (not on every push to `main`):
 
-- Linux full validation
-  - broader Rust test coverage
-  - decompiler smoke validation
-- Windows heavy build/test
-- MSRV check and extended coverage
+- Heavy Build & Test and Heavy Tests (Windows)
+- Native Win32 Debugger (Windows)
+- Heavy Build (macOS)
+- Full Tests (Linux, extended) and Compile Surface (all features)
+- MSRV check and code coverage
+
+Because the Windows debugger tests run only here, dispatch it on a branch
+that touches them and check that job before calling the change verified.
 
 Heavy checks may take longer and are intentionally offloaded to GitHub.
 
@@ -512,47 +502,50 @@ mod tests {
 
 ### Integration Tests
 
-Place in `tests/` directory:
+Place in the crate's `tests/` directory. CLI tests run the built binary
+from the repo root, as `crates/fission-cli/tests/*_cli.rs` do:
 
 ```rust
-// tests/cli_tests.rs
-use assert_cmd::Command;
+// crates/fission-cli/tests/info_cli.rs
+use std::process::Command;
 
 #[test]
-fn test_cli_info() {
-    Command::cargo_bin("fission_cli")
-        .unwrap()
-        .args(&["--info", "test/struct_test.exe"])
-        .assert()
-        .success()
-        .stdout(predicates::str::contains("Binary Information"));
+fn info_reports_the_format() {
+    let output = Command::new(env!("CARGO_BIN_EXE_fission_cli"))
+        .args(["info", "crates/fission-dir/testdata/ground_truth_fixture.elf", "--json"])
+        .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+        .output()
+        .expect("run fission_cli");
+    assert!(output.status.success(), "{output:?}");
 }
 ```
 
 ### Running Tests
 
 ```bash
-# All tests
-cargo test
+# One crate (nextest is the default runner)
+cargo nextest run -p fission-loader
 
-# Specific test
-cargo test test_load_pe
+# One test by name
+cargo nextest run -p fission-loader test_load_pe
 
 # With output
-cargo test -- --nocapture
+cargo nextest run -p fission-loader test_load_pe --no-capture
 
-# Integration tests only
-cargo test --test cli_tests
+# Doctests (nextest does not run them)
+cargo test --doc -p fission-loader
 ```
+
+Every new test needs a positive control: disable the fix and show the test
+fails. A test that cannot fail proves nothing.
 
 ### Test Coverage
 
-```bash
-# Install tarpaulin
-cargo install cargo-tarpaulin
+CI measures coverage with `cargo-llvm-cov` (`.github/workflows/reusable-coverage.yml`):
 
-# Generate coverage report
-cargo tarpaulin --out Html
+```bash
+cargo install cargo-llvm-cov
+cargo llvm-cov nextest -p fission-loader --html
 ```
 
 ---
@@ -615,7 +608,7 @@ cargo doc --document-private-items
 ### Contributing Beyond Code
 
 - **Documentation** - Improve guides, fix typos
-- **Design** - UI/UX improvements, logos, graphics
+- **Agent ergonomics** - CLI and JSON contract improvements, error messages
 - **Testing** - Test on different platforms
 - **Triage** - Help organize issues
 - **Translation** - Internationalization (future)

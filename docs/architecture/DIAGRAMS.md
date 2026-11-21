@@ -15,7 +15,7 @@ flowchart TD
     Dynamic["fission-dynamic<br/>runtime/debug analysis support"]
     TTD["fission-ttd<br/>time-travel / trace-adjacent support"]
     Plugin["fission-plugin<br/>contracts, hooks, runtime"]
-    Surfaces["CLI / GUI / scripts / debugger / reports<br/>consume-only surfaces"]
+    Surfaces["CLI + JSON contract / scripts / debugger / reports<br/>consume-only surfaces"]
 
     Loader --> Static
     Static --> Decompiler

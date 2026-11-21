@@ -5,7 +5,7 @@ Scope: repository root
 
 ## Overview
 
-Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-native lifting feeds Rust-owned NIR/HIR normalization, structuring, rendering, and automation quality lanes.
+Fission is a Rust-first reverse-engineering/decompilation workspace. Ghidra-native lifting feeds Rust-owned NIR/HIR normalization, structuring and rendering. The product surface is the CLI and its JSON contract; there is no GUI or TUI, by design.
 
 **Repository layout (directories + workspace crates):** see [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md). Use this file plus the tree below when navigating; avoid duplicating full crate lists in multiple docs.
 
@@ -31,7 +31,7 @@ Fission/
 ├── utils/                    # Checked-in signatures, type info, benchmark support data
 ├── vendor/                   # Ghidra, RetDec, other reference code
 ├── scripts/benchmark/        # Benchmark setup / history helpers
-├── scripts/test/             # Smoke / fuzz / automation helpers
+├── scripts/test/             # Fuzz, path-literal and fixture checks, crackme workflow
 └── .github/workflows/        # CI/CD source of truth
 ```
 
@@ -68,7 +68,7 @@ Read the nearest child file before editing those areas.
 1. Fix behavior at the canonical owner, not downstream UI/surface layers.
 2. Prefer algorithmic CFG / dom / postdom / SCC facts over lexical or binary-specific shortcuts.
 3. Use typed contracts; do not invent parallel telemetry payloads outside `NirBuildStats`.
-4. Keep behavior deterministic when outputs feed snapshots, metrics, or automation comparisons.
+4. Keep behavior deterministic when outputs feed snapshots, metrics, or benchmark comparisons.
 5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
 6. Do not hardcode repository-local resource paths in code; when `/Users/sjkim1127/Fission/utils` has reusable signatures, type info, benchmark support data, or other checked-in resources, route access through existing `PathConfig`, `PATHS`, `resource_roots`, or utility loaders instead of embedding absolute paths.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
@@ -80,7 +80,7 @@ Read the nearest child file before editing those areas.
 
 - Do not patch semantic gaps only in printer/UI output.
 - Do not add one-off binary-specific shortcuts without invariant-based guards.
-- Do not duplicate the same metric definition across pcode and automation.
+- Do not duplicate the same metric definition across pcode and benchmark scripts.
 - Do not treat `fission-cli` as a semantic repair layer.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
 - Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
@@ -120,7 +120,7 @@ submodules and rewrites files you never touched.
 
 - Use `cargo nextest run` as the default local Rust test runner. Use `cargo test` only when checking doctests, harness-specific behavior, or when nextest is unavailable.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
-- For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and CLI/TUI surfaces as needed).
+- For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and the CLI as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
 - If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and keep artifacts under `benchmark/artifacts/`.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
@@ -256,15 +256,15 @@ functions:
 
 Before adding production code for builder, materialize, normalize, structuring, type/data recovery, **or HIR presentation readability** fixes intended as quality work, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show **measured** row anchor, owner proof, invariant proof, and validation matrix before implementation starts. **No row measurement → no quality implementation.**
 
-Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and smoke/automation regression checks are part of the quality claim.
+Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and DecBench regression checks are part of the quality claim.
 
 1. **Anchor the row (measured):** record the source file, binary, address, function name, current behavior status, case pass count, semantic/static scores, top missing/extra features, and a short pseudocode/goto baseline. Synthetic IR alone is not an anchor.
-2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, HIR presentation, printer, or benchmark/automation. Fix behavior at that owner (not printer-only semantic patches).
+2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, HIR presentation, printer, or benchmark scripts. Fix behavior at that owner (not printer-only semantic patches).
 3. **Add focused coverage:** add or update the smallest targeted Rust/Python test that captures the invariant. Synthetic tests are necessary but not sufficient for decompiler-quality claims.
 4. **Make the scoped change:** keep production changes invariant-based, not function/address/sample-specific. Do not add runtime/build dependencies on `vendor/` reference tools.
 5. **Run local checks:** run the targeted test first, then the relevant crate checks/builds from the Build/Test section. If a known unrelated test is already failing, call it out explicitly.
 6. **Run the focused benchmark / real decomp:** rerun the exact DecBench row (gate `--dump`) or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
-7. **Check regressions:** after a focused improvement, run the broader smoke manifest or automation lane. Existing pass rows must not regress, and weighted semantic/static scores should not drop without an explicit tradeoff.
+7. **Check regressions:** after a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress, and total distance and type scores should not get worse without an explicit tradeoff.
 8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only, telemetry-only, or fixture-only presentation change is **not** a quality fix unless the measured row (or agreed multi-row sample) moves.
 
 ## Regression-Prevention Workflow Prompt
@@ -332,13 +332,13 @@ Regression-prevention workflow:
 
 1. Start from a concrete DecBench row or small sample function.
 2. Record baseline behavior, case pass count, semantic/static score, stdout/stderr, line/byte size, and top feature gaps.
-3. Diagnose the canonical owner before editing: SLEIGH/raw p-code, NIR materialization, type/data recovery, structuring, cleanup, printer, benchmark, or automation.
+3. Diagnose the canonical owner before editing: SLEIGH/raw p-code, NIR materialization, type/data recovery, structuring, cleanup, printer, or benchmark scripts.
 4. Make the smallest invariant-based production change at that owner.
 5. Add targeted coverage for the invariant before or with the fix.
 6. Run the targeted test, relevant crate checks/tests, and release CLI build when benchmark validation needs it.
 7. Run the focused DecBench measurement with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`) for semantic changes.
 8. Compare against the baseline and inspect candidate artifacts, not just aggregate scores.
-9. Run smoke or automation regression checks after focused improvement.
+9. Run the broader DecBench regression check after focused improvement.
 10. Report whether quality improved, stayed unchanged, or regressed. Separate test/telemetry changes from semantic fixes.
 11. Commit and push intermittently only from `main`, and stage only intended hunks in a dirty worktree.
 ```
