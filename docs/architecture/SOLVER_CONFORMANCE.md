@@ -34,6 +34,13 @@ The exhaustive checks are in `crates/fission-solver/tests/soundness_probe.rs`.
 Wider boundary coverage lives in `tests/bit_width_contract.rs` and the AST
 unit tests. The optional `tests/differential_z3.rs` process oracle is a second
 implementation check; it is ignored by default and has no Z3 or FFI dependency.
+It covers what the 4-bit matrix cannot: widths up to 64 bits, operands of
+different widths, arrays (`QF_ABV`) with and without a memory oracle, the
+folding constructors, the model behind every `Sat`, and a solver asked several
+questions in a row. `crates/fission-solver/AGENTS.md` lists its modes.
+
+A query may be bounded with `Solver::set_conflict_budget`. One that runs out
+returns `Unknown` with `UnknownReason::ConflictBudget`; it is never a verdict.
 
 ## Unsupported Operations
 

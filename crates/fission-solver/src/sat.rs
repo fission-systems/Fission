@@ -194,6 +194,8 @@ pub struct SatSolver {
     conflicts_since_gc: u32,
     /// GC fires when conflicts_since_gc >= gc_threshold; threshold grows after each GC.
     gc_threshold: u32,
+    /// Conflicts one search may spend before it gives up without a verdict.
+    conflict_budget: Option<u64>,
 }
 
 impl Default for SatSolver {
@@ -223,6 +225,7 @@ impl SatSolver {
             clause_meta: vec![],
             conflicts_since_gc: 0,
             gc_threshold: 100,
+            conflict_budget: None,
         }
     }
 
@@ -725,17 +728,44 @@ impl SatSolver {
         true
     }
 
+    /// Solve without a conflict budget: always a verdict.
     pub fn solve_with_assumptions(
+        &mut self,
+        theory: Option<&mut dyn crate::theory::Theory>,
+        assumptions: &[Lit],
+    ) -> bool {
+        let budget = self.conflict_budget.take();
+        let verdict = self.solve_limited(theory, assumptions);
+        self.conflict_budget = budget;
+        verdict.expect("a search without a budget ends in a verdict")
+    }
+
+    /// Stop a search after this many conflicts and report no verdict.
+    /// `None`, the default, searches until there is one.
+    ///
+    /// Counted in conflicts, not seconds, so that the same problem gets the
+    /// same answer on a loaded machine.
+    pub fn set_conflict_budget(&mut self, budget: Option<u64>) {
+        self.conflict_budget = budget;
+    }
+
+    /// Solve under `assumptions`: `Some(true)` with a model, `Some(false)`
+    /// when there is none, and `None` when the conflict budget ran out first.
+    ///
+    /// Giving up leaves the solver usable: the trail is unwound to level 0
+    /// and the clauses learned so far stay, each implied by the clause set.
+    pub fn solve_limited(
         &mut self,
         mut theory: Option<&mut dyn crate::theory::Theory>,
         assumptions: &[Lit],
-    ) -> bool {
+    ) -> Option<bool> {
         if !self.ok {
-            return false;
+            return Some(false);
         }
         if !self.restore_assumptions(assumptions) {
-            return false;
+            return Some(false);
         }
+        let mut conflicts: u64 = 0;
 
         loop {
             let confl_opt = self.propagate();
@@ -753,11 +783,11 @@ impl SatSolver {
                             // then replay every query assumption before resuming search.
                             for clause in lemmas {
                                 if !self.add_clause(clause) {
-                                    return false;
+                                    return Some(false);
                                 }
                             }
                             if !self.restore_assumptions(assumptions) {
-                                return false;
+                                return Some(false);
                             }
                             continue;
                         }
@@ -768,7 +798,15 @@ impl SatSolver {
             if let Some(confl) = confl_opt {
                 // Conflict
                 if self.decision_level() <= assumptions.len() as u32 {
-                    return false; // Root or assumption level conflict -> UNSAT
+                    return Some(false); // Root or assumption level conflict -> UNSAT
+                }
+                conflicts += 1;
+                if self
+                    .conflict_budget
+                    .is_some_and(|budget| conflicts > budget)
+                {
+                    self.cancel_until(0);
+                    return None;
                 }
 
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
@@ -785,10 +823,10 @@ impl SatSolver {
                     self.cancel_until(0);
                     if !self.enqueue(learned_clause[0], None) || self.propagate().is_some() {
                         self.ok = false;
-                        return false;
+                        return Some(false);
                     }
                     if !assumptions.is_empty() && !self.restore_assumptions(assumptions) {
-                        return false;
+                        return Some(false);
                     }
                 } else {
                     // Do not backtrack past assumptions.
@@ -835,7 +873,7 @@ impl SatSolver {
 
                     // BCP will flip the asserting literal.
                     if !self.enqueue(lit0, Some(c_idx)) {
-                        return false;
+                        return Some(false);
                     }
                 }
 
@@ -850,7 +888,7 @@ impl SatSolver {
                     self.enqueue(next_lit, None);
                 } else {
                     // All variables assigned -> SAT!
-                    return true;
+                    return Some(true);
                 }
             }
         }
