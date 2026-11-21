@@ -58,10 +58,13 @@ jobs:
       - name: Build scorer support
         run: |
           set -euo pipefail
-          cargo build --locked --release --lib --manifest-path ci-rust-joern/Cargo.toml
+          # actions/checkout can only place it inside this workspace, where
+          # cargo takes it for an undeclared member of Fission's workspace.
+          mv ci-rust-joern "$RUNNER_TEMP/rust-joern"
+          cargo build --locked --release --lib --manifest-path "$RUNNER_TEMP/rust-joern/Cargo.toml"
           mkdir -p toolchain/joern/python toolchain/joern/target/release
-          cp -R ci-rust-joern/python/. toolchain/joern/python/
-          cp ci-rust-joern/target/release/librust_joern.so toolchain/joern/target/release/
+          cp -R "$RUNNER_TEMP/rust-joern/python/." toolchain/joern/python/
+          cp "$RUNNER_TEMP/rust-joern/target/release/librust_joern.so" toolchain/joern/target/release/
           cp target/release/fission_cli toolchain/
       - uses: actions/upload-artifact@v4
         with:
