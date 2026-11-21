@@ -2,6 +2,16 @@ name: Reusable Security Check
 
 on:
   workflow_call:
+    inputs:
+      advisories:
+        description: >-
+          Also check the RustSec advisory database. Its answer changes when an
+          advisory is published, not when the code does, so pull requests check
+          it only when they change the dependency set; the nightly Heavy run
+          checks it every day.
+        type: boolean
+        required: false
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -19,15 +29,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Setup sccache
-        uses: ./.github/actions/setup-sccache
-
-      - name: Cache Rust Build
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: fission-security-${{ runner.os }}
-          cache-on-failure: true
-
       - name: Verify Cargo.lock is consistent (--locked sanity)
         run: cargo metadata --locked --format-version 1 > /dev/null
 
@@ -36,15 +37,22 @@ jobs:
         with:
           tool: cargo-deny
 
-      - name: "Cargo Deny: Check Advisories, Bans, Licenses, Sources"
-        run: cargo deny check all
+      # Deterministic for a given Cargo.lock and deny.toml.
+      - name: "Cargo Deny: bans, licenses, sources"
+        run: cargo deny check bans licenses sources
+
+      - name: "Cargo Deny: advisories"
+        if: inputs.advisories
+        run: cargo deny check advisories
 
       - name: Install cargo-audit
+        if: inputs.advisories
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
 
       - name: "Cargo Audit: Check for Known Security Vulnerabilities"
+        if: inputs.advisories
         run: |
           # --deny warnings: treat advisory warnings as errors
           # cranelift-jit 0.133.1 pins memmap2 0.2.x but only calls map_anon;

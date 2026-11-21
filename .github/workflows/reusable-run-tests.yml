@@ -200,10 +200,11 @@ jobs:
           if [ -n "$features" ]; then
             feature_flags+=(--features "$features")
           fi
-          # Soft: doctests are not release-blocking in Fast Gate historically.
+          # A doctest that fails must fail the job; `|| true` here meant no
+          # doctest could ever fail CI.
           cargo test --doc "${package_flags[@]+"${package_flags[@]}"}" \
             "${feature_flags[@]+"${feature_flags[@]}"}" --locked \
-            ${{ inputs.profile == 'release' && '--release' || '' }} || true
+            ${{ inputs.profile == 'release' && '--release' || '' }}
 
       # --- Full workspace mode ---
       - name: Run Full Test Suite (All Crates) [nextest]
@@ -251,7 +252,7 @@ jobs:
         shell: bash
         run: |
           cargo test --doc --workspace --locked \
-            ${{ inputs.profile == 'release' && '--release' || '' }} || true
+            ${{ inputs.profile == 'release' && '--release' || '' }}
 
       # These suites exercise non-default features. Fast Gate enables each only
       # when the feature owner or one of its dependencies is affected.

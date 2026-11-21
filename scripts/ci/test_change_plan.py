@@ -45,6 +45,25 @@ class ChangePlanTests(unittest.TestCase):
             self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)
         self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
 
+    def test_advisories_gate_a_pr_only_when_it_changes_dependencies(self):
+        for path in ("Cargo.lock", "Cargo.toml", "crates/fission-cli/Cargo.toml",
+                     "deny.toml", ".cargo/audit.toml", ".cargo/config.toml"):
+            for event in ("pull_request", "merge_group"):
+                _, jobs = plan([path], event)
+                self.assertTrue(jobs["run_security"], (path, event))
+                self.assertTrue(jobs["run_advisories"], (path, event))
+        # Ordinary code changes still run bans/licenses/sources, not advisories:
+        # 113 of 137 failed PR runs in 30 days were one advisory published the
+        # day 105 PRs were open.
+        _, jobs = plan(["crates/fission-loader/src/lib.rs"], "pull_request")
+        self.assertTrue(jobs["run_security"])
+        self.assertFalse(jobs["run_advisories"])
+
+    def test_every_push_to_main_compiles_the_workspace(self):
+        # Two green PRs broke main's build; the next push changed only docs.
+        self.assertTrue(plan(["docs/CLI.md"], "push")[1]["run_lint"])
+        self.assertFalse(plan(["docs/CLI.md"], "pull_request")[1]["run_lint"])
+
     def test_docs_do_not_select_runtime_jobs(self):
         self.assertEqual(plan(["docs/CLI.md"], "pull_request"), ("docs", {
             name: False for name in plan(["docs/CLI.md"], "pull_request")[1]

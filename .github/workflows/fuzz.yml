@@ -1,11 +1,8 @@
 name: Fuzz
 
+# Fuzzing is not a gate: a run finds what it finds in its time budget, so it
+# runs on a schedule and reports into an issue instead of turning a push red.
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - "crates/fission-loader/**"
-      - "crates/fission-pcode/**"
   schedule:
     # Run nightly at 02:00 UTC
     - cron: "0 2 * * *"
@@ -82,6 +79,15 @@ jobs:
             echo "Seed helper script not found in repository; continuing with current corpus"
           fi
 
+      # Each run starts from what earlier runs found. The corpus used to be
+      # uploaded and never read back, so every run began from the seeds.
+      - name: Restore corpus from earlier runs
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
       - name: Run fuzzer — ${{ matrix.target }}
         working-directory: ${{ matrix.crate_dir }}
         run: |
@@ -101,13 +107,19 @@ jobs:
             ${{ matrix.crate_dir }}/fuzz/artifacts/${{ matrix.target }}/
           retention-days: 30
 
-      - name: Upload corpus
+      - name: Save corpus for the next run
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/cache/save@v4
         with:
-          name: fuzz-corpus-${{ matrix.target }}-${{ github.sha }}
-          path: |
-            ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}/
-          retention-days: 7
-          if-no-files-found: ignore
+          path: ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
 
+  report:
+    needs: fuzz
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.fuzz.result }}
+      detail: "crash inputs are attached to the run as fuzz-crashes-<target>-<sha>; reproduce with cargo fuzz run <target> <file>"

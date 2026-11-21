@@ -132,10 +132,19 @@ jobs:
       crates: "fission-pcode-ir,fission-cspec,fission-pcode,fission-loader"
       warn_threshold_pct: 60
 
+  # The advisory database changes daily; pull requests check it only when they
+  # change dependencies, so this is where a new advisory surfaces.
+  advisories:
+    name: Security advisories (daily)
+    uses: ./.github/workflows/reusable-security-check.yml
+    with:
+      advisories: true
+
   # Final summary for the nightly and manual validation run.
   heavy-summary:
     name: Heavy Validation Summary
     needs:
+      - advisories
       - build-macos-heavy
       - test-windows-heavy
       - test-windows-native-debugger
@@ -168,6 +177,7 @@ jobs:
           require_success "Windows heavy tests" "${{ needs.test-windows-heavy.result }}"
           require_success "Windows native debugger" "${{ needs.test-windows-native-debugger.result }}"
           require_success "MSRV" "${{ needs.msrv-check.result }}"
+          require_success "Security advisories" "${{ needs.advisories.result }}"
 
           # Coverage is warn-only even when run
           if [ "${{ needs.coverage.result }}" = "failure" ]; then
@@ -183,3 +193,12 @@ jobs:
           fi
           echo "OK: Heavy validation checks passed for this event!"
           echo "INFO: Heavy runs nightly or on demand; dispatch it for a release candidate SHA before tagging."
+
+  report:
+    needs: heavy-summary
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.heavy-summary.result }}
