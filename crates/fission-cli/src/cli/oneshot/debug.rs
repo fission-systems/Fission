@@ -1,6 +1,6 @@
 //! Debugger CLI dispatch across the selected native or emulator backend.
 //!
-//! One-shot model: each command loads the session state from a temp file,
+//! One-shot model: each command loads the session state from a private directory,
 //! executes the operation, prints output, and persists state back.
 
 use crate::cli::args::DebugCommand;
@@ -8,6 +8,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+
+mod process_identity;
+use process_identity::process_identity;
 
 fn print_capabilities_text(report: &fission_dynamic::debug::DebugBackendCapabilities) {
     println!("Backend: {:?}", report.backend);
@@ -38,13 +41,83 @@ fn print_capabilities_text(report: &fission_dynamic::debug::DebugBackendCapabili
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct DebugStateFile {
     pid: u32,
+    #[serde(default)]
+    process_identity: Option<String>,
     last_thread_id: Option<u32>,
     breakpoints: Vec<u64>,
 }
 
+impl DebugStateFile {
+    fn verify_process(&self) -> Result<()> {
+        let expected = self.process_identity.as_deref().context(
+            "This debug session has no process identity. Run `fission_cli debug attach <pid>` again.",
+        )?;
+        let current = process_identity(self.pid).with_context(|| {
+            format!(
+                "cannot identify process {} for this debug session",
+                self.pid
+            )
+        })?;
+        anyhow::ensure!(
+            current == expected,
+            "Debug session for PID {} expired. Run `fission_cli debug attach <pid>` again.",
+            self.pid
+        );
+        Ok(())
+    }
+}
+
 /// Where one-shot sessions keep their state between invocations.
-fn state_dir() -> PathBuf {
-    std::env::temp_dir()
+#[cfg(unix)]
+fn state_dir() -> Result<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    // SAFETY: geteuid takes no arguments and does not access caller memory.
+    let owner = unsafe { libc::geteuid() };
+    let temp = std::env::temp_dir().canonicalize()?;
+    for parent in temp.ancestors() {
+        let meta = std::fs::metadata(parent)?;
+        anyhow::ensure!(
+            (meta.uid() == owner || meta.uid() == 0)
+                && (meta.mode() & 0o022 == 0 || meta.mode() & 0o1000 != 0),
+            "Debugger session path has an untrusted parent: {}",
+            parent.display()
+        );
+    }
+    let dir = temp.join(format!("fission-debug-{owner}"));
+    ensure_private_state_dir(&dir, owner)?;
+    Ok(dir)
+}
+
+#[cfg(unix)]
+fn ensure_private_state_dir(dir: &Path, owner: u32) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
+
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error).context("create debugger session directory"),
+    }
+    let meta = std::fs::symlink_metadata(dir)?;
+    anyhow::ensure!(
+        meta.is_dir() && meta.uid() == owner && meta.mode() & 0o077 == 0,
+        "Debugger session directory must be private and owned by the current user: {}",
+        dir.display()
+    );
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn state_dir() -> Result<PathBuf> {
+    let dir = fission_core::core::resource_roots::fission_cache_dir()
+        .context("No user cache directory for debugger sessions")?
+        .join("debug-sessions");
+    std::fs::create_dir_all(&dir)?;
+    anyhow::ensure!(
+        std::fs::symlink_metadata(&dir)?.is_dir(),
+        "Invalid debugger session directory"
+    );
+    Ok(dir)
 }
 
 fn state_path_in(dir: &Path, pid: u32) -> PathBuf {
@@ -82,11 +155,11 @@ fn save_state_in(dir: &Path, state: &DebugStateFile) -> Result<()> {
 }
 
 fn save_state(state: &DebugStateFile) -> Result<()> {
-    save_state_in(&state_dir(), state)
+    save_state_in(&state_dir()?, state)
 }
 
-fn remove_state(pid: u32) {
-    let _ = std::fs::remove_file(state_path_in(&state_dir(), pid));
+fn remove_state(dir: &Path, pid: u32) {
+    let _ = std::fs::remove_file(state_path_in(dir, pid));
 }
 
 /// The pid a state file belongs to, if `name` is exactly
@@ -102,11 +175,8 @@ fn state_file_pid(name: &str) -> Option<u32> {
 
 /// The session state files in `dir`, most recently written first.
 ///
-/// Only regular files named `fission-debug-<pid>.json` count. The shared
-/// temporary directory holds whatever else starts with the same prefix -- a
-/// directory, a leftover of another tool -- and taking the first entry with
-/// the prefix made every `debug` command fail on it. The order is fixed so
-/// that the session picked is not whichever one the directory lists first.
+/// Only regular files named `fission-debug-<pid>.json` count. The order is
+/// fixed so that the active session is the one written most recently.
 fn state_files_in(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
     let mut files: Vec<(std::time::SystemTime, u32, PathBuf)> = Vec::new();
     for entry in std::fs::read_dir(dir)?.filter_map(|e| e.ok()) {
@@ -135,17 +205,27 @@ fn state_files_in(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
 }
 
 fn find_active_state_in(dir: &Path) -> Result<DebugStateFile> {
-    let Some((_, path)) = state_files_in(dir)?.into_iter().next() else {
+    let Some((pid, path)) = state_files_in(dir)?.into_iter().next() else {
         anyhow::bail!("No active debug session. Run `fission_cli debug attach <pid>` first.");
     };
-    let data = std::fs::read_to_string(&path)
+    read_state(pid, &path)
+}
+
+fn read_state(pid: u32, path: &Path) -> Result<DebugStateFile> {
+    let data = std::fs::read_to_string(path)
         .with_context(|| format!("read debug session state {}", path.display()))?;
-    serde_json::from_str(&data)
-        .with_context(|| format!("debug session state {} is not valid", path.display()))
+    let state: DebugStateFile = serde_json::from_str(&data)
+        .with_context(|| format!("debug session state {} is not valid", path.display()))?;
+    anyhow::ensure!(
+        pid == state.pid,
+        "Debug session PID does not match {}",
+        path.display()
+    );
+    Ok(state)
 }
 
 fn find_active_state() -> Result<DebugStateFile> {
-    find_active_state_in(&state_dir())
+    find_active_state_in(&state_dir()?)
 }
 
 /// Hex digits to bytes; whitespace and commas between them are ignored.
@@ -298,10 +378,20 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
     // them can validate that a session exists and then talk to a backend that
     // was never attached to it -- which six of them did, and answered "Not
     // attached" to a session that was there.
-    let attach_active = || -> Result<(DebugStateFile, fission_dynamic::debug::DebugSession)> {
-        let state = find_active_state()?;
+    let attach_saved = |state: &DebugStateFile| -> Result<fission_dynamic::debug::DebugSession> {
+        anyhow::ensure!(
+            !emulator,
+            "Emulated debug sessions exist only in the process that launched them"
+        );
+        state.verify_process()?;
         let mut session = build_session();
         session.attach(state.pid)?;
+        state.verify_process()?;
+        Ok(session)
+    };
+    let attach_active = || -> Result<(DebugStateFile, fission_dynamic::debug::DebugSession)> {
+        let state = find_active_state()?;
+        let session = attach_saved(&state)?;
         Ok((state, session))
     };
 
@@ -330,6 +420,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
             let state = DebugStateFile {
                 pid: args.pid,
+                process_identity: Some(process_identity(args.pid)?),
                 last_thread_id: session.debugger.get_state().main_thread_id,
                 breakpoints: Vec::new(),
             };
@@ -354,16 +445,25 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Detach => {
-            let sessions = state_files_in(&state_dir())?;
+            anyhow::ensure!(
+                !emulator,
+                "Emulated debug sessions exist only in the process that launched them"
+            );
+            let dir = state_dir()?;
+            let sessions = state_files_in(&dir)?;
             if sessions.is_empty() {
                 anyhow::bail!("No active debug session found.");
             }
             let mut detached = 0usize;
-            for (pid, _) in sessions {
-                let mut session = build_session();
-                let _ = session.attach(pid);
-                let _ = session.detach();
-                remove_state(pid);
+            for (pid, path) in sessions {
+                let state = read_state(pid, &path)?;
+                if state.verify_process().is_err() {
+                    remove_state(&dir, pid);
+                    continue;
+                }
+                let mut session = attach_saved(&state)?;
+                session.detach()?;
+                remove_state(&dir, pid);
                 detached += 1;
             }
             println!("Detached from {} session(s).", detached);
@@ -548,10 +648,17 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
             let state = DebugStateFile {
                 pid,
+                process_identity: if emulator {
+                    None
+                } else {
+                    Some(process_identity(pid)?)
+                },
                 last_thread_id: session.debugger.get_state().main_thread_id,
                 breakpoints: Vec::new(),
             };
-            save_state(&state)?;
+            if !emulator {
+                save_state(&state)?;
+            }
 
             if args.json {
                 println!(
@@ -582,7 +689,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::Stop => {
             let (state, mut session) = attach_active()?;
             session.debugger.terminate()?;
-            remove_state(state.pid);
+            remove_state(&state_dir()?, state.pid);
             println!("Terminated PID {}.", state.pid);
             Ok(())
         }
@@ -1074,9 +1181,34 @@ mod tests {
     fn state(pid: u32) -> DebugStateFile {
         DebugStateFile {
             pid,
+            process_identity: None,
             last_thread_id: Some(pid),
             breakpoints: vec![0x1000],
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn a_session_can_verify_its_current_process() {
+        let pid = std::process::id();
+        let mut current = state(pid);
+        current.process_identity = Some(process_identity(pid).unwrap());
+        assert!(current.verify_process().is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn debugger_state_directory_is_private() {
+        use std::os::unix::fs::MetadataExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("session");
+        let owner = temp.path().metadata().unwrap().uid();
+        ensure_private_state_dir(&path, owner).unwrap();
+        ensure_private_state_dir(&path, owner).unwrap();
+        let meta = path.metadata().unwrap();
+        assert_eq!(meta.uid(), owner);
+        assert_eq!(meta.mode() & 0o077, 0);
     }
 
     #[test]
