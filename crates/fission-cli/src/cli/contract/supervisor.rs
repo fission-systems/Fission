@@ -100,6 +100,10 @@ fn has_json_flag(child_args: &[OsString]) -> bool {
         .any(|arg| arg == "--json" || arg == "-j")
 }
 
+fn always_emits_json(command: &str) -> bool {
+    command == "schema"
+}
+
 /// Run the supervisor when contract mode is requested. `None` means "not
 /// requested": the caller continues with the normal CLI.
 pub fn maybe_supervise() -> Option<i32> {
@@ -131,7 +135,7 @@ fn supervise(request: Request, start: Instant) -> i32 {
     if wants_help(&request.child_args) {
         return passthrough(&request.child_args);
     }
-    if !has_json_flag(&request.child_args) {
+    if !always_emits_json(&command) && !has_json_flag(&request.child_args) {
         return fail(
             &command,
             "json_required",
@@ -533,5 +537,12 @@ mod tests {
         let args = os(&["--resource-root", "dir", "decomp", "a.exe"]);
         assert_eq!(command_name(&args), "decomp");
         assert_eq!(command_name(&os(&["a.exe"])), "unknown");
+    }
+
+    #[test]
+    fn schema_always_emits_json_and_needs_no_json_flag() {
+        assert!(always_emits_json("schema"));
+        assert!(!always_emits_json("decomp"));
+        assert_eq!(command_name(&os(&["schema", "--list"])), "schema");
     }
 }
