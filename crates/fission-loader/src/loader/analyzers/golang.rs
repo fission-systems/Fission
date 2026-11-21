@@ -802,28 +802,21 @@ mod tests {
     use super::*;
     use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
-    /// Load the Go test binary built at /tmp/go_test_bin/go_test_binary and
-    /// verify that detect_go_version() returns a valid "go1.X.Y" string.
+    /// Load the committed Go fixture (`testdata/go_hello/`, go1.25.5) and
+    /// verify that detect_go_version() reads its version. This read a binary
+    /// from `/tmp/go_test_bin` that only one machine ever had, and skipped
+    /// everywhere else.
     #[test]
     fn test_detect_go_version_real_binary() {
-        let path = std::path::Path::new("/tmp/go_test_bin/go_test_binary");
-        if !path.exists() {
-            eprintln!(
-                "skipped: /tmp/go_test_bin/go_test_binary not found (run: cd /tmp/go_test_bin && go build -o go_test_binary .)"
-            );
-            return;
-        }
-        let binary = LoadedBinary::from_file(path).expect("should load Go binary");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/go_hello_linux_amd64.elf");
+        let binary = LoadedBinary::from_file(&path).expect("should load the committed Go fixture");
 
         eprintln!("format: {}", binary.format);
         eprintln!("go_version: {:?}", binary.go_version);
 
         let ver = binary.go_version.as_deref().unwrap_or("");
-        assert!(
-            ver.starts_with("go1."),
-            "expected go version starting with go1., got: {:?}",
-            ver
-        );
+        assert_eq!(ver, "go1.25.5", "the fixture was built with go1.25.5");
         eprintln!("detected Go version: {}", ver);
 
         // Verify GoAnalyzer also sees it directly

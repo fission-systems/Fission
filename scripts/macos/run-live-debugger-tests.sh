@@ -10,4 +10,4 @@ bin="$(printf '%s\n' "$out" | sed -n 's/.*(\(target[^)]*macos_live-[^)]*\)).*/\1
 signed="$(mktemp -d)/macos_live"
 cp "$bin" "$signed"
 scripts/macos/sign-debugger.sh "$signed"
-FISSION_MACOS_LIVE_DEBUG_TESTS=1 "$signed" --test-threads=1 "$@"
+"$signed" --ignored --test-threads=1 "$@"

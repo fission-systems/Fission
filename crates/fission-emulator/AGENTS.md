@@ -118,7 +118,7 @@ cargo nextest run -p fission-emulator
 
 # Optional real-binary smoke (static musl x86_64 hello)
 #   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
-#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_linux
+#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator --run-ignored only smoke_optional
 
 # Sandbox CLI
 cargo build -p fission-cli --release

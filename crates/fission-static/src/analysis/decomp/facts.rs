@@ -1929,12 +1929,11 @@ mod tests {
         let binary = LoadedBinary::from_file(&path).expect("load ARMv7-M fixture");
         let store = FactStore::from_binary(&binary);
 
-        let Some(decoded) = store.get_cached_decoded_function(0x0800_0020) else {
-            // No bundled ARM FID database on this checkout: the sweep returns
-            // before decoding anything, so there is nothing to assert about.
-            eprintln!("skipping: FID sweep cached nothing for the ARM fixture");
-            return;
-        };
+        // The ARM FID databases are committed under `utils/`, so the sweep
+        // always runs; caching nothing is the failure, not an absent input.
+        let decoded = store
+            .get_cached_decoded_function(0x0800_0020)
+            .expect("the FID sweep cached no decode for the ARM fixture");
         let addresses: Vec<u64> = decoded.instructions.iter().map(|i| i.address).collect();
         assert_eq!(
             addresses,
