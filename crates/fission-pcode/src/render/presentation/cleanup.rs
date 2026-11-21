@@ -258,12 +258,8 @@ pub(super) fn eliminate_pure_dead_assigns(
     // treat `if { x = e; } return x;` as dead `x` (use lives outside the if body).
     let mut any = false;
     for _ in 0..16 {
-        let mut defs = HashMap::new();
-        count_defs_in_stmts(&func.body, &mut defs);
-        let use_counts: HashMap<String, usize> = defs
-            .keys()
-            .map(|n| (n.clone(), count_uses_in_stmts(&func.body, n)))
-            .collect();
+        let mut use_counts = HashMap::new();
+        count_all_uses_in_stmts(&func.body, &mut use_counts);
         let changed = eliminate_pure_dead_in_stmts(
             &mut func.body,
             &formal,

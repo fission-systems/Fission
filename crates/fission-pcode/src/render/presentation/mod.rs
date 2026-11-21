@@ -553,6 +553,123 @@ fn count_uses_in_expr(expr: &HirExpr, name: &str) -> usize {
     }
 }
 
+/// Count every rvalue/address-taken variable use across `stmts` in one pass.
+pub(super) fn count_all_uses_in_stmts(stmts: &[HirStmt], out: &mut HashMap<String, usize>) {
+    for stmt in stmts {
+        count_all_uses_in_stmt(stmt, out);
+    }
+}
+
+fn count_all_uses_in_stmt(stmt: &HirStmt, out: &mut HashMap<String, usize>) {
+    match stmt {
+        HirStmt::Assign { lhs, rhs } => {
+            count_all_uses_in_lvalue(lhs, out);
+            count_all_uses_in_expr(rhs, out);
+        }
+        HirStmt::Expr(e) | HirStmt::Return(Some(e)) | HirStmt::VaStart { va_list: e, .. } => {
+            count_all_uses_in_expr(e, out);
+        }
+        HirStmt::Return(None)
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+        HirStmt::Block(body) => count_all_uses_in_stmts(body, out),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { body, cond } => {
+            count_all_uses_in_expr(cond, out);
+            count_all_uses_in_stmts(body, out);
+        }
+        HirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            count_all_uses_in_expr(cond, out);
+            count_all_uses_in_stmts(then_body, out);
+            count_all_uses_in_stmts(else_body, out);
+        }
+        HirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(i) = init {
+                count_all_uses_in_stmt(i, out);
+            }
+            if let Some(c) = cond {
+                count_all_uses_in_expr(c, out);
+            }
+            if let Some(u) = update {
+                count_all_uses_in_stmt(u, out);
+            }
+            count_all_uses_in_stmts(body, out);
+        }
+        HirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            count_all_uses_in_expr(expr, out);
+            for case in cases {
+                count_all_uses_in_stmts(&case.body, out);
+            }
+            count_all_uses_in_stmts(default, out);
+        }
+    }
+}
+
+fn count_all_uses_in_lvalue(lhs: &HirLValue, out: &mut HashMap<String, usize>) {
+    match lhs {
+        HirLValue::Var(_) => {}
+        HirLValue::Deref { ptr, .. } => count_all_uses_in_expr(ptr, out),
+        HirLValue::Index { base, index, .. } => {
+            count_all_uses_in_expr(base, out);
+            count_all_uses_in_expr(index, out);
+        }
+        HirLValue::FieldAccess { base, .. } => count_all_uses_in_expr(base, out),
+    }
+}
+
+fn count_all_uses_in_expr(expr: &HirExpr, out: &mut HashMap<String, usize>) {
+    match expr {
+        HirExpr::Var(n) | HirExpr::AddressOfLocal(n) => {
+            *out.entry(n.clone()).or_insert(0) += 1;
+        }
+        HirExpr::AddressOfGlobal(_) | HirExpr::Const(_, _) => {}
+        HirExpr::Unary { expr, .. } | HirExpr::Cast { expr, .. } => {
+            count_all_uses_in_expr(expr, out);
+        }
+        HirExpr::Binary { lhs, rhs, .. } => {
+            count_all_uses_in_expr(lhs, out);
+            count_all_uses_in_expr(rhs, out);
+        }
+        HirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_all_uses_in_expr(cond, out);
+            count_all_uses_in_expr(then_expr, out);
+            count_all_uses_in_expr(else_expr, out);
+        }
+        HirExpr::Call { args, .. } => {
+            for a in args {
+                count_all_uses_in_expr(a, out);
+            }
+        }
+        HirExpr::Load { ptr, .. }
+        | HirExpr::PtrOffset { base: ptr, .. }
+        | HirExpr::FieldAccess { base: ptr, .. }
+        | HirExpr::AggregateCopy { src: ptr, .. } => count_all_uses_in_expr(ptr, out),
+        HirExpr::Index { base, index, .. } => {
+            count_all_uses_in_expr(base, out);
+            count_all_uses_in_expr(index, out);
+        }
+    }
+}
+
 // ── Passes ───────────────────────────────────────────────────────────────────
 
 fn flatten_redundant_blocks(stmts: &mut Vec<HirStmt>) -> bool {

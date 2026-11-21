@@ -12,11 +12,10 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<(usize, u64, usize, u32, bool, usize, String)> {
         let mut best_prior_def: Option<(usize, u64, usize, u32, bool, usize, String)> = None;
-        // Every candidate asks for its distance to the same block, so one
-        // backward search from that block answers them all; a forward search
-        // per candidate was a BFS of the function for each block that writes
-        // the register.
-        let mut distances_to_pred: Option<HashMap<usize, usize>> = None;
+        // Every candidate asks for reachability + shortest distance to the same
+        // block, so one backward BFS from `pred_idx` answers all candidates
+        // instead of re-running a forward BFS per candidate block.
+        let mut distances_to_pred: Option<Vec<usize>> = None;
         for candidate_idx in 0..self.pcode.blocks.len() {
             if candidate_idx == pred_idx {
                 continue;
@@ -29,14 +28,13 @@ impl<'a> PreviewBuilder<'a> {
             else {
                 continue;
             };
-            if !self.block_can_reach(candidate_idx, pred_idx, pred_idx) {
+            let distances =
+                distances_to_pred.get_or_insert_with(|| self.forward_distances_to(pred_idx));
+            let distance = distances.get(candidate_idx).copied().unwrap_or(usize::MAX);
+            if distance == usize::MAX {
                 continue;
             }
-            let distance = distances_to_pred
-                .get_or_insert_with(|| self.forward_distances_to(pred_idx))
-                .get(&candidate_idx)
-                .copied()
-                .unwrap_or(usize::MAX);
+            debug_assert!(self.block_can_reach(candidate_idx, pred_idx, pred_idx));
             debug_assert_eq!(
                 distance,
                 self.shortest_forward_distance(candidate_idx, pred_idx)
@@ -161,21 +159,27 @@ impl<'a> PreviewBuilder<'a> {
 
     /// [`Self::shortest_forward_distance`] to `target_idx` from every block
     /// that reaches it, by one search over the reversed successor edges.
-    fn forward_distances_to(&self, target_idx: usize) -> HashMap<usize, usize> {
-        let mut reversed: HashMap<usize, Vec<usize>> = HashMap::default();
+    fn forward_distances_to(&self, target_idx: usize) -> Vec<usize> {
+        let n = self.pcode.blocks.len().max(self.successors.len());
+        if target_idx >= n {
+            return Vec::new();
+        }
+        let mut reversed = vec![Vec::new(); n];
         for (from, succs) in self.successors.iter().enumerate() {
             for &to in succs {
-                reversed.entry(to).or_default().push(from);
+                if to < n {
+                    reversed[to].push(from);
+                }
             }
         }
-        let mut distances: HashMap<usize, usize> = HashMap::default();
-        distances.insert(target_idx, 0);
+        let mut distances = vec![usize::MAX; n];
+        distances[target_idx] = 0;
         let mut queue = std::collections::VecDeque::from([target_idx]);
         while let Some(idx) = queue.pop_front() {
-            let next = distances[&idx] + 1;
-            for &pred in reversed.get(&idx).map(Vec::as_slice).unwrap_or_default() {
-                if let std::collections::hash_map::Entry::Vacant(slot) = distances.entry(pred) {
-                    slot.insert(next);
+            let next = distances[idx] + 1;
+            for &pred in &reversed[idx] {
+                if distances[pred] == usize::MAX {
+                    distances[pred] = next;
                     queue.push_back(pred);
                 }
             }
@@ -1049,6 +1053,21 @@ impl<'a> PreviewBuilder<'a> {
         let scan_started = diag.then(std::time::Instant::now);
         let mut lowered_candidate_count = 0usize;
         let mut pending: HashMap<VarnodeKey, PendingMergeBinding> = HashMap::default();
+        // Avoid recomputing `collect_join_incoming_values(block_idx, output)`
+        // multiple times per candidate op across the predecessors.
+        let mut join_cache: HashMap<
+            VarnodeKey,
+            Option<(
+                Vec<u64>,
+                Vec<String>,
+                usize,
+                bool,
+                bool,
+                usize,
+                BTreeSet<MergeBindingCandidateIncomingKind>,
+            )>,
+        > = HashMap::default();
+        let has_binary_preds = predecessor_idxs.len() == 2;
         for pred_idx in predecessor_idxs {
             let Some(pred_block) = self.pcode.blocks.get(pred_idx) else {
                 continue;
@@ -1070,7 +1089,7 @@ impl<'a> PreviewBuilder<'a> {
                 ) {
                     continue;
                 }
-                let Some((consumer_block_idx, _, _, _)) =
+                let Some((consumer_block_idx, consumer_block_addr, consumer_op_idx, _)) =
                     self.first_output_use_site_outside_block_by_index(pred_idx, op_idx, output)
                 else {
                     continue;
@@ -1079,6 +1098,9 @@ impl<'a> PreviewBuilder<'a> {
                     continue;
                 }
                 lowered_candidate_count += 1;
+                // Preserve exact lowering order/side effects (`lower_varnode` can
+                // seed passthrough register bindings) even when the candidate
+                // fails the structural join filters below.
                 let Some(rhs) = self.with_lowering_site(
                     LoweringSite {
                         block_idx: pred_idx,
@@ -1089,31 +1111,98 @@ impl<'a> PreviewBuilder<'a> {
                 else {
                     continue;
                 };
-                let Ok(proof) =
-                    self.describe_explicit_merge_binding_trial(pred_block, op_idx, output, &rhs)
-                else {
-                    continue;
-                };
-                if proof.merge_block != block.start_address {
+                if !has_binary_preds || consumer_block_addr != block.start_address {
                     continue;
                 }
-                let Some(join_proof) =
-                    self.describe_join_merge_missing_proof(pred_block, op_idx, output, &rhs)
+                let Some(consumer_op) = block.ops.get(consumer_op_idx) else {
+                    continue;
+                };
+                if consumer_op.opcode == PcodeOpcode::MultiEqual {
+                    continue;
+                }
+                let key = VarnodeKey::from(output);
+                if block.ops[..consumer_op_idx].iter().any(|candidate| {
+                    candidate
+                        .output
+                        .as_ref()
+                        .is_some_and(|out| Self::varnode_matches_key(out, &key))
+                }) {
+                    continue;
+                }
+                let matched_inputs = consumer_op
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, input)| {
+                        Self::varnode_matches_key(input, &key).then_some(idx)
+                    })
+                    .collect::<Vec<_>>();
+                let consumer_kind =
+                    Self::classify_disallowed_single_consumer_kind(consumer_op, &matched_inputs);
+                if !matches!(
+                    consumer_kind,
+                    DisallowedSingleConsumerConsumerKind::OtherData
+                        | DisallowedSingleConsumerConsumerKind::StoreValue
+                ) {
+                    continue;
+                }
+
+                let join_info = join_cache
+                    .entry(key.clone())
+                    .or_insert_with(|| self.collect_join_incoming_values(block_idx, output));
+                let Some((
+                    predecessor_blocks,
+                    incoming_values,
+                    incoming_value_count,
+                    _values_same_across_preds,
+                    _has_conflicting_incoming,
+                    distinct_incoming_value_count,
+                    incoming_value_kinds,
+                )) = join_info.as_ref()
                 else {
                     continue;
                 };
-                let key = VarnodeKey::from(output);
+                if predecessor_blocks.len() != 2 {
+                    continue;
+                }
+                let missing_incoming_count = predecessor_blocks
+                    .len()
+                    .saturating_sub(*incoming_value_count);
+                if missing_incoming_count > 0 {
+                    continue;
+                }
+                let conflicting_incoming_count = distinct_incoming_value_count.saturating_sub(1);
+                if conflicting_incoming_count != 1 {
+                    continue;
+                }
+                if !incoming_value_kinds.iter().all(|kind| {
+                    matches!(
+                        kind,
+                        MergeBindingCandidateIncomingKind::VarOrConst
+                            | MergeBindingCandidateIncomingKind::Arithmetic
+                    )
+                }) {
+                    continue;
+                }
+                let result = Self::classify_merge_binding_candidate_result(
+                    missing_incoming_count,
+                    conflicting_incoming_count,
+                    incoming_value_kinds,
+                    consumer_kind,
+                );
+                if !matches!(result, MergeBindingCandidateResult::PhiLikeBindingCandidate) {
+                    continue;
+                }
+                let rhs_kind = Self::classify_disallowed_single_consumer_rhs_kind(&rhs);
                 let entry = pending.entry(key).or_insert_with(|| PendingMergeBinding {
                     output: output.clone(),
-                    predecessor_blocks: join_proof.predecessor_blocks.clone(),
-                    incoming_value_kinds: proof.incoming_value_kinds.clone(),
-                    incoming_values: join_proof.incoming_values.clone(),
-                    rhs_kind: proof.rhs_kind,
+                    predecessor_blocks: predecessor_blocks.clone(),
+                    incoming_value_kinds: incoming_value_kinds.iter().copied().collect(),
+                    incoming_values: incoming_values.clone(),
+                    rhs_kind,
                     incoming_by_pred: HashMap::default(),
                 });
-                entry
-                    .incoming_by_pred
-                    .insert(pred_block.start_address, rhs.clone());
+                entry.incoming_by_pred.insert(pred_block.start_address, rhs);
             }
         }
         if let Some(started) = scan_started {
