@@ -332,6 +332,35 @@ mod tests {
     }
 
     #[test]
+    fn type_context_uses_pointer_aliases_from_the_current_debug_snapshot() {
+        use fission_loader::loader::dwarf::DwarfPointerTypeInfo;
+        use std::sync::Arc;
+
+        let mut binary =
+            LoadedBinaryBuilder::new("debug-alias.elf".to_string(), DataBuffer::Heap(vec![]))
+                .format("ELF")
+                .is_64bit(true)
+                .build()
+                .expect("build test binary");
+        let name = "RecordPointer".to_string();
+        for (pointee, depth) in [("FirstRecord", 1), ("SecondRecord", 2)] {
+            Arc::make_mut(&mut binary.dwarf_pointer_types).insert(
+                name.clone(),
+                DwarfPointerTypeInfo {
+                    name: name.clone(),
+                    pointee_name: pointee.to_string(),
+                    pointer_depth: depth,
+                },
+            );
+            let facts = FactStore::from_binary(&binary);
+            let context = build_nir_type_context_from_facts(&binary, &facts, 0);
+            let alias = &context.pointer_type_aliases[&name];
+            assert_eq!(alias.pointee_name, pointee);
+            assert_eq!(alias.pointer_depth, depth);
+        }
+    }
+
+    #[test]
     fn loader_imports_drive_preview_iat_target_refs_before_function_names() {
         let binary = LoadedBinaryBuilder::new("sample.exe".to_string(), DataBuffer::Heap(vec![]))
             .format("PE")
