@@ -17,8 +17,8 @@ Scope: `crates/fission-solver`
 | `Solver` | `src/solver.rs` | Node registry, assertions, `check_sat` with a memory-oracle CEGAR loop, `is_true`/`is_false`/`min`/`max` |
 | `AigManager` | `src/aig.rs` | Bit-blasting to an and-inverter graph: adders, comparisons, multiply, unsigned and signed divide/remainder/modulus, if-then-else, and shifts by constant or symbolic amounts (a barrel shifter) |
 | `CnfBuilder` | `src/cnf.rs` | Tseitin encoding of the AIG |
-| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored collection of learned clauses |
-| `smtlib` | `src/smtlib.rs` | QF_BV SMT-LIB 2 printer, so answers can be compared with another solver |
+| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored collection of learned clauses, an optional conflict budget |
+| `smtlib` | `src/smtlib.rs` | SMT-LIB 2 printer (QF_BV, and QF_ABV once an array is read), so answers can be compared with another solver |
 | theories | `src/theory/` | Bitvector (eager bit-blasting) and array (select/store) |
 
 ## Key Invariants
@@ -37,6 +37,7 @@ Scope: `crates/fission-solver`
 12. **Unsatisfiability is sticky** — once `add_clause` returns `false` the solver stays inconsistent (`ok`), and every later `add_clause` and `solve` says so. Callers ignored that `false` (`Solver::assert` does; the loader stopped at it and dropped the rest), and the next `solve` ran on a partial clause set.
 13. **Only learned clauses are collected, and never a locked one** — `clause_meta` marks each clause; input clauses and theory lemmas are `None`. Collection used to pair learned-clause metadata with clause indices through a boundary nothing ever set, and deleted input clauses once search passed a hundred conflicts: pigeonhole problems and bit-vector problems from five bits up came back SAT. A clause that is the reason for a current assignment is kept.
 14. **Check circuits against definitions, not against Z3** — the division circuit is ported from Z3 (MIT); a test that agrees with Z3 shows the port is faithful, not that it is right. `tests/soundness_probe.rs` checks the declared QF_BV conformance matrix against SMT-LIB definitions; see `docs/architecture/SOLVER_CONFORMANCE.md`.
+15. **A search that gives up says so** — `Solver::set_conflict_budget` bounds a query in SAT conflicts (not seconds, so the answer does not depend on the machine's load); past it `check_sat` returns `Unknown` and `Solver::last_unknown()` reports `UnknownReason::ConflictBudget`. The default is no budget. `SatSolver::solve_limited` returns `None` for the same event; the `bool` entry points never give up. A derived query (`eval`, `min`, `max`, `is_true`, `is_false`) that ran out returns its "not proven" answer, and `last_unknown()` is how a caller tells that from a real one.
 
 ## `SymExpr` AST Reference
 
@@ -66,9 +67,34 @@ Scope: `crates/fission-solver`
 Bit-blasting and CDCL exist; constant folding exists for the common constructors. What is missing, roughly in order of what a benchmark would need first:
 
 1. **Sign extension and rotation nodes** — callers build sign extension from `Ite` today, which is correct but larger than a direct circuit (Z3 reference: `mk_sign_extend`, `mk_ext_rotate_left_right` in `src/ast/rewriter/bit_blaster/bit_blaster_tpl_def.h`). Symbolic float arithmetic and comparisons that do not model all IEEE cases return `Unknown`.
-2. **An SMT-LIB QF_BV reader** — to run standard benchmarks, whose `:status` is the answer key. The other direction exists: `smtlib::script` prints a problem, and `tests/differential_z3.rs` (ignored; needs a `z3` binary) compares verdicts on random formulas. Run it with `FISSION_Z3=/opt/homebrew/bin/z3 FISSION_DIFF_CASES=2000 FISSION_DIFF_DEPTH=3 cargo test --release -p fission-solver --test differential_z3 -- --ignored --nocapture`. Its first run found the four defects in invariants 9 and 11-13; a disagreement is a bug in one of the two solvers.
+2. **An SMT-LIB QF_BV reader** — to run standard benchmarks, whose `:status` is the answer key. The other direction exists: `smtlib::script` prints a problem, and `tests/differential_z3.rs` (ignored; needs a `z3` binary) compares answers on random formulas. Its first run found the four defects in invariants 9 and 11-13; a disagreement is a bug in one of the two solvers. See *The z3 differential* below.
 3. **Word-level simplification before blasting** — Z3's `bv_rewriter.cpp` is the reference; add rules only where Fission's own queries show a cost.
 4. **Model extraction** — After `Sat`, extract concrete variable assignments from the learned model.
+
+## The z3 differential
+
+`tests/differential_z3.rs` is the oracle for anything that touches `aig.rs`, `sat.rs`, `solver.rs`, `ast.rs` or `theory/`. z3 runs as a separate process; nothing is linked. Run all of it, in **both** profiles (overflow checks exist only in debug):
+
+```bash
+FISSION_Z3=/opt/homebrew/bin/z3 FISSION_DIFF_CASES=2000 \
+  cargo test --release -p fission-solver --test differential_z3 -- --ignored --nocapture --test-threads=1
+```
+
+| Test | What it draws |
+|---|---|
+| `the_solver_agrees_with_z3_on_random_bitvector_formulas` | The original: one width of 4-8 bits per formula |
+| `wide_bitvector_formulas_agree_with_z3` | Widths 1-64, constants on boundaries (zero divisors, shift amounts at and past the width, the sign bit), concat and extract |
+| `mixed_width_formulas_agree_with_z3` | Operands of different widths under the zero-extending operations |
+| `array_formulas_agree_with_z3` | `select` over `store` chains and array `ite`, small index sorts so slots alias |
+| `memory_backed_formulas_agree_with_z3` | `space_<n>` arrays answered through a `MemoryOracle`, as the emulator uses them |
+| `formulas_built_through_the_constructors_agree_with_z3` | z3 gets the formula as written; this solver gets it rebuilt through `SymExpr::new_*` |
+| `a_solver_asked_many_questions_agrees_with_z3`, `..._many_wide_questions_...` | One solver, several queries: assertions between them, extra conditions, `is_true`, `is_false`, `eval`, `min`, `max` |
+
+Every `Sat` is also checked as a model: the values read back for each variable and each array read are pinned in z3's copy, which must stay satisfiable. A failure is shrunk before it is printed. `FISSION_DIFF_SEED` picks the stream, `FISSION_DIFF_ONLY=<case>` reruns one case, `FISSION_DIFF_CONFLICTS` sets the conflict budget (0 for none) and `FISSION_DIFF_JOBS` the worker count.
+
+Three outcomes are not failures and are counted apart: `gave up: conflict budget` (this solver ran out, shown with what z3 answered; a cost, tracked as capability), `declined: oracle refinement rounds`, and `unknown in z3`. Any other `declined` fails the run: every operation these generators use has a circuit.
+
+The differential cannot see what z3 has no term for -- an ill-sorted array term, a constant whose payload has bits above its width. Whatever this solver accepts beyond SMT-LIB needs a test against its own definition, or an `Unknown`.
 
 ## Anti-Patterns
 

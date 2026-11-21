@@ -11,6 +11,20 @@ pub enum SatResult {
     Unknown,
 }
 
+/// Why a query came back [`SatResult::Unknown`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UnknownReason {
+    /// The problem holds something lowering has no circuit for; these are
+    /// the entries of `bv_theory.unsupported()`.
+    Unsupported(Vec<String>),
+    /// The search spent its conflict budget (see
+    /// [`Solver::set_conflict_budget`]) without reaching a verdict.
+    ConflictBudget,
+    /// The memory oracle kept contradicting the model after the bounded
+    /// number of refinement rounds.
+    OracleRefinement,
+}
+
 pub trait MemoryOracle {
     fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8>;
 }
@@ -28,6 +42,8 @@ pub struct Solver {
     pub array_theory: crate::theory::array::ArrayTheory,
     pub sat: crate::sat::SatSolver,
     pub lowered_assertions: usize,
+    /// Why the most recent query was `Unknown`, if it was.
+    last_unknown: Option<UnknownReason>,
 }
 
 impl Default for Solver {
@@ -89,6 +105,7 @@ impl Solver {
             array_theory: crate::theory::array::ArrayTheory::new(),
             sat: crate::sat::SatSolver::new(),
             lowered_assertions: 0,
+            last_unknown: None,
         }
     }
 
@@ -142,12 +159,44 @@ impl Solver {
         self.check_sat_with_oracle(None, &[])
     }
 
+    /// Bound every later query to this many SAT conflicts; one that needs
+    /// more answers `Unknown` instead of searching on. `None`, the default,
+    /// never gives up. A budget is counted in conflicts so that a verdict
+    /// does not depend on how busy the machine is.
+    pub fn set_conflict_budget(&mut self, budget: Option<u64>) {
+        self.sat.set_conflict_budget(budget);
+    }
+
+    /// Why the most recent query answered `Unknown`; `None` if it reached a
+    /// verdict. `eval`, `min`, `max`, `is_true` and `is_false` are built from
+    /// queries, so after one of them this describes the last query it made.
+    pub fn last_unknown(&self) -> Option<&UnknownReason> {
+        self.last_unknown.as_ref()
+    }
+
     pub fn check_sat_with_oracle(
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
         extra: &[SymExpr],
     ) -> Result<SatResult> {
+        let result = self.check_sat_inner(oracle, extra)?;
+        self.last_unknown = match result {
+            SatResult::Unknown => Some(self.last_unknown.take().unwrap_or_else(|| {
+                UnknownReason::Unsupported(self.bv_theory.unsupported().to_vec())
+            })),
+            _ => None,
+        };
+        Ok(result)
+    }
+
+    fn check_sat_inner(
+        &mut self,
+        oracle: Option<&dyn MemoryOracle>,
+        extra: &[SymExpr],
+    ) -> Result<SatResult> {
+        self.last_unknown = None;
         let mut loop_count = 0;
+        let mut remaining_conflicts = self.sat.conflict_budget();
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
@@ -173,6 +222,7 @@ impl Solver {
             loop_count += 1;
             if loop_count > 10 {
                 tracing::warn!("CEGAR loop exceeded 10 iterations, bailing out");
+                self.last_unknown = Some(UnknownReason::OracleRefinement);
                 return Ok(SatResult::Unknown);
             }
 
@@ -194,11 +244,17 @@ impl Solver {
             }
 
             // 3. Solve pure boolean SAT problem with assumptions
-            if !self
-                .sat
-                .solve_with_assumptions(Some(&mut self.array_theory), &assumptions)
-            {
-                return Ok(self.refuted());
+            match self.sat.solve_with_remaining_budget(
+                Some(&mut self.array_theory),
+                &assumptions,
+                &mut remaining_conflicts,
+            ) {
+                Some(true) => {}
+                Some(false) => return Ok(self.refuted()),
+                None => {
+                    self.last_unknown = Some(UnknownReason::ConflictBudget);
+                    return Ok(SatResult::Unknown);
+                }
             }
 
             // 4. Model Extraction
