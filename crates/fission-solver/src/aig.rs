@@ -737,8 +737,16 @@ impl AigManager {
                         a_bits.len()
                     ));
                     self.fresh_bits(a_bits.len().max(1))
-                } else if let SymExpr::Const { val, .. } = b.as_ref() {
-                    Self::shift_by_constant(&a_bits, *val, kind)
+                } else if let SymExpr::Const { val, size } = b.as_ref() {
+                    // The amount is its low `size` bits, as it would be if
+                    // it were lowered: a payload with bits above its width
+                    // is not a larger shift.
+                    let amount = if *size >= 64 {
+                        *val
+                    } else {
+                        val & ((1u64 << size) - 1)
+                    };
+                    Self::shift_by_constant(&a_bits, amount, kind)
                 } else {
                     let amount = self.lower_expr(b);
                     self.add_shift(&a_bits, &amount, kind)

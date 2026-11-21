@@ -145,3 +145,36 @@ fn an_unsupported_array_assumption_does_not_change_later_queries() {
     solver.assert(unsupported);
     assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
 }
+
+/// A query that is `Unknown` because of its own extra condition says why,
+/// even though that reason is dropped afterwards so it cannot leak into the
+/// next query. The control is the next query: decided, with no reason.
+#[test]
+fn an_unsupported_assumption_is_named_in_last_unknown() {
+    use fission_solver::UnknownReason;
+    let memory = SymExpr::new_array_var("m", 4, 8);
+    let value = SymExpr::new_var("v", 16);
+    let written = store(&memory, SymExpr::new_const(0, 4), value.clone());
+    let unsupported = eq(
+        select(&written, SymExpr::new_const(1, 4)),
+        SymExpr::new_const(0, 8),
+    );
+
+    let mut solver = Solver::new();
+    solver.assert(eq(value, SymExpr::new_const(0x1234, 16)));
+    assert_eq!(
+        solver
+            .check_sat_with_oracle(None, std::slice::from_ref(&unsupported))
+            .unwrap(),
+        SatResult::Unknown
+    );
+    match solver.last_unknown() {
+        Some(UnknownReason::Unsupported(why)) => assert!(
+            why.iter().any(|w| w.contains("ArrayStore")),
+            "the reason names the wide store: {why:?}"
+        ),
+        other => panic!("expected an Unsupported reason, got {other:?}"),
+    }
+    assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
+    assert_eq!(solver.last_unknown(), None);
+}

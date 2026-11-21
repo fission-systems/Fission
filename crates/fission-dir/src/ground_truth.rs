@@ -19,8 +19,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use crate::call_sites::MachineFlow;
 use crate::emu_driver::{CallStub, EmulatorHarness, ObservedCall, StubbedEnd};
 use crate::eval::{
-    CallEvent, World, hir_addressed_locals, hir_free_names, hir_mentioned_names, normalize,
-    prehir_addressed_locals, run_hir, run_prehir, width_of,
+    CallEvent, UndefinedRead, World, hir_addressed_locals, hir_free_names, hir_mentioned_names,
+    normalize, prehir_addressed_locals, run_hir, run_prehir, width_of,
 };
 use crate::initial_state::{InitialState, RunPlan};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
@@ -249,6 +249,9 @@ pub fn check_ground_truth_with(
     let mut checked = 0usize;
     let mut emulator_errors = 0usize;
     let mut first_interpreter_error: Option<String> = None;
+    // Runs where both sides read what nothing defined, and the first one.
+    let mut unknown_runs = 0usize;
+    let mut first_unknown: Option<String> = None;
     let mut first_emulator_error: Option<String> = None;
 
     for run in 0..plan.runs {
@@ -282,6 +285,14 @@ pub fn check_ground_truth_with(
             continue;
         }
         let bound = harness.registers(&free);
+        let below_entry = match harness.frame_below_entry() {
+            Ok(range) => range,
+            Err(err) => {
+                first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
+                emulator_errors += 1;
+                continue;
+            }
+        };
         let (cfa, frame) = match (harness.cfa(), harness.frame_range()) {
             (Ok(cfa), Ok(frame)) => (cfa, frame),
             (Err(err), _) | (_, Err(err)) => {
@@ -339,6 +350,7 @@ pub fn check_ground_truth_with(
                 no_return_sites: Some(&no_return_sites),
                 local_addresses: Some(&hir_locals),
                 call_writes: Some(&call_writes),
+                undefined_frame: Some(&below_entry),
             };
             let prehir_r = match &prehir_locals {
                 Ok(locals) => run_prehir(
@@ -369,13 +381,19 @@ pub fn check_ground_truth_with(
         // The printed tree is what is being checked. PreHIR is compared when
         // it runs, but a PreHIR the interpreter cannot run (it can name storage
         // the printed tree resolved) does not stop the printed tree's check.
-        let hir_run = match &hir_r {
-            Ok(run) => run,
-            Err(err) => {
-                first_interpreter_error.get_or_insert_with(|| format!("hir: {err}"));
-                continue;
-            }
-        };
+        // A tree that read something nothing defined still has its run
+        // weighed against the machine's: see below.
+        let tree_undefined = hir_r
+            .as_ref()
+            .err()
+            .and_then(|err| err.downcast_ref::<UndefinedRead>())
+            .cloned();
+        if let Err(err) = &hir_r
+            && tree_undefined.is_none()
+        {
+            first_interpreter_error.get_or_insert_with(|| format!("hir: {err}"));
+            continue;
+        }
         let prehir_run = prehir_r.as_ref().ok();
 
         let stub = CallStub {
@@ -409,6 +427,38 @@ pub fn check_ground_truth_with(
                 continue;
             }
         };
+
+        // What C leaves undefined: a variable before any assignment, or a
+        // frame byte nothing in the run wrote. When both sides read such a
+        // thing the run says nothing (`UNKNOWN`); when only the decompiled
+        // code does, it reads what the machine never needed, which is a
+        // difference.
+        match (&tree_undefined, machine.undefined_frame_read) {
+            (Some(read), Some(at)) => {
+                unknown_runs += 1;
+                first_unknown.get_or_insert_with(|| {
+                    format!("hir: {read}; the machine read frame byte {at:#x}, which nothing wrote")
+                });
+                continue;
+            }
+            (Some(read), None) => {
+                checked += 1;
+                divergences.push(Divergence {
+                    run: Some(state.run()),
+                    args: args.to_vec(),
+                    prehir_result: None,
+                    hir_result: None,
+                    emulator_result: machine_ret
+                        .map(|raw| normalize(mask_to_width(raw, return_bits), &hir.return_type)),
+                    detail: Some(format!(
+                        "hir: {read}; the machine read only what the run defined"
+                    )),
+                });
+                continue;
+            }
+            (None, _) => {}
+        }
+        let hir_run = hir_r.as_ref().expect("an error was handled above");
 
         checked += 1;
         let norm = |v: i64| normalize(mask_to_width(v as u64, return_bits), &hir.return_type);
@@ -482,6 +532,15 @@ pub fn check_ground_truth_with(
     }
     if !suspects.is_empty() {
         return VerifyOutcome::Suspect(suspects);
+    }
+    if checked == 0 && unknown_runs > 0 {
+        return VerifyOutcome::Inconclusive {
+            reason: format!(
+                "both sides read state nothing defined, in all {unknown_runs} runs that \
+                 finished; first: {}",
+                first_unknown.unwrap_or_default()
+            ),
+        };
     }
     if checked == 0 {
         if emulator_errors > 0 {
