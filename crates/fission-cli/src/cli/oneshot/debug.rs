@@ -7,7 +7,7 @@ use crate::cli::args::DebugCommand;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn print_capabilities_text(report: &fission_dynamic::debug::DebugBackendCapabilities) {
     println!("Backend: {:?}", report.backend);
@@ -42,32 +42,175 @@ struct DebugStateFile {
     breakpoints: Vec<u64>,
 }
 
-fn state_path(pid: u32) -> PathBuf {
-    std::env::temp_dir().join(format!("fission-debug-{pid}.json"))
+/// Where one-shot sessions keep their state between invocations.
+fn state_dir() -> PathBuf {
+    std::env::temp_dir()
+}
+
+fn state_path_in(dir: &Path, pid: u32) -> PathBuf {
+    dir.join(format!("fission-debug-{pid}.json"))
+}
+
+/// Write the state file so that a reader sees the old file or the new one,
+/// never a truncated one: the bytes go to a sibling file that is then renamed
+/// over the target. `File::create` on the target itself empties it first, and
+/// a `debug` command running at that moment failed to parse an empty file.
+fn save_state_in(dir: &Path, state: &DebugStateFile) -> Result<()> {
+    let path = state_path_in(dir, state.pid);
+    let data = serde_json::to_string_pretty(state)?;
+    // The leading dot keeps the scratch file out of `state_files_in`.
+    let scratch = dir.join(format!(
+        ".fission-debug-{}.json.{}.tmp",
+        state.pid,
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&scratch);
+    let written = (|| -> std::io::Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&scratch)?;
+        file.write_all(data.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&scratch, &path)
+    })();
+    if written.is_err() {
+        let _ = std::fs::remove_file(&scratch);
+    }
+    written.with_context(|| format!("write debug session state to {}", path.display()))
 }
 
 fn save_state(state: &DebugStateFile) -> Result<()> {
-    let path = state_path(state.pid);
-    let data = serde_json::to_string_pretty(state)?;
-    let mut file = std::fs::File::create(&path)?;
-    file.write_all(data.as_bytes())?;
-    Ok(())
+    save_state_in(&state_dir(), state)
 }
 
 fn remove_state(pid: u32) {
-    let _ = std::fs::remove_file(state_path(pid));
+    let _ = std::fs::remove_file(state_path_in(&state_dir(), pid));
 }
 
-fn hex_bytes_from_str(s: &str) -> Result<Vec<u8>> {
-    let s = s.replace(',', "").replace(' ', "");
-    if s.len() % 2 != 0 {
-        anyhow::bail!("hex data length must be even (got {})", s.len());
+/// The pid a state file belongs to, if `name` is exactly
+/// `fission-debug-<pid>.json`.
+fn state_file_pid(name: &str) -> Option<u32> {
+    let pid = name.strip_prefix("fission-debug-")?.strip_suffix(".json")?;
+    // `parse` alone accepts a leading `+`.
+    if pid.is_empty() || !pid.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
-        .collect::<Result<Vec<u8>, _>>()
-        .with_context(|| format!("Invalid hex data: {}", s))
+    pid.parse().ok()
+}
+
+/// The session state files in `dir`, most recently written first.
+///
+/// Only regular files named `fission-debug-<pid>.json` count. The shared
+/// temporary directory holds whatever else starts with the same prefix -- a
+/// directory, a leftover of another tool -- and taking the first entry with
+/// the prefix made every `debug` command fail on it. The order is fixed so
+/// that the session picked is not whichever one the directory lists first.
+fn state_files_in(dir: &Path) -> Result<Vec<(u32, PathBuf)>> {
+    let mut files: Vec<(std::time::SystemTime, u32, PathBuf)> = Vec::new();
+    for entry in std::fs::read_dir(dir)?.filter_map(|e| e.ok()) {
+        let Some(pid) = entry.file_name().to_str().and_then(state_file_pid) else {
+            continue;
+        };
+        // `metadata` follows a symbolic link; `file_type` does not, and a link
+        // is not a state file this command wrote.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        files.push((modified, pid, entry.path()));
+    }
+    files.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
+    Ok(files
+        .into_iter()
+        .map(|(_, pid, path)| (pid, path))
+        .collect())
+}
+
+fn find_active_state_in(dir: &Path) -> Result<DebugStateFile> {
+    let Some((_, path)) = state_files_in(dir)?.into_iter().next() else {
+        anyhow::bail!("No active debug session. Run `fission_cli debug attach <pid>` first.");
+    };
+    let data = std::fs::read_to_string(&path)
+        .with_context(|| format!("read debug session state {}", path.display()))?;
+    serde_json::from_str(&data)
+        .with_context(|| format!("debug session state {} is not valid", path.display()))
+}
+
+fn find_active_state() -> Result<DebugStateFile> {
+    find_active_state_in(&state_dir())
+}
+
+/// Hex digits to bytes; whitespace and commas between them are ignored.
+///
+/// Works on bytes, not on `str` indices: slicing two bytes at a time out of
+/// the text panicked when a multi-byte character straddled the cut (`"0é0"`
+/// is four bytes, an even length, and not hex).
+pub(super) fn hex_bytes_from_str(s: &str) -> Result<Vec<u8>> {
+    let digits: Vec<u8> = s
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b',')
+        .collect();
+    if digits.len() % 2 != 0 {
+        anyhow::bail!("hex data length must be even (got {})", digits.len());
+    }
+    digits
+        .chunks_exact(2)
+        .map(|pair| {
+            let high = (pair[0] as char).to_digit(16)?;
+            let low = (pair[1] as char).to_digit(16)?;
+            Some((high * 16 + low) as u8)
+        })
+        .collect::<Option<Vec<u8>>>()
+        .ok_or_else(|| anyhow::anyhow!("Invalid hex data: {}", s))
+}
+
+/// `value` as a JSON string literal, quotes included.
+///
+/// A name typed on the command line goes into `--json` output; pasted between
+/// two quote characters as it was, a `"` or a backslash in it ended the string
+/// early and the line was no longer JSON.
+fn json_string(value: &str) -> String {
+    serde_json::Value::from(value).to_string()
+}
+
+fn dll_breakpoint_json(action: &str, dll: &str) -> String {
+    format!(
+        "{{\"status\":\"ok\",\"action\":{},\"dll\":{}}}",
+        json_string(action),
+        json_string(dll)
+    )
+}
+
+fn set_register_json(register: &str, value: u64) -> String {
+    format!(
+        "{{\"status\":\"ok\",\"action\":\"set_register\",\"register\":{},\"value\":\"0x{:x}\"}}",
+        json_string(register),
+        value
+    )
+}
+
+fn get_flag_json(flag: &str, value: bool) -> String {
+    format!(
+        "{{\"status\":\"ok\",\"flag\":{},\"value\":{}}}",
+        json_string(flag),
+        value
+    )
+}
+
+fn set_flag_json(flag: &str, value: bool) -> String {
+    format!(
+        "{{\"status\":\"ok\",\"action\":\"set_flag\",\"flag\":{},\"value\":{}}}",
+        json_string(flag),
+        value
+    )
 }
 
 fn print_regs(regs: &fission_dynamic::debug::types::RegisterState, json: bool) {
@@ -149,6 +292,19 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         builder.build()
     };
 
+    // The active session's state and a backend attached to its process.
+    //
+    // Every command that works on a session goes through this, so none of
+    // them can validate that a session exists and then talk to a backend that
+    // was never attached to it -- which six of them did, and answered "Not
+    // attached" to a session that was there.
+    let attach_active = || -> Result<(DebugStateFile, fission_dynamic::debug::DebugSession)> {
+        let state = find_active_state()?;
+        let mut session = build_session();
+        session.attach(state.pid)?;
+        Ok((state, session))
+    };
+
     match args.command {
         DebugCommand::Capabilities(capability_args) => {
             // Constructing a backend is side-effect free. In particular, this
@@ -198,51 +354,31 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Detach => {
-            let entries: Vec<_> = std::fs::read_dir(std::env::temp_dir())?
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.file_name()
-                        .to_str()
-                        .map_or(false, |n| n.starts_with("fission-debug-"))
-                })
-                .collect();
-            if entries.is_empty() {
+            let sessions = state_files_in(&state_dir())?;
+            if sessions.is_empty() {
                 anyhow::bail!("No active debug session found.");
             }
             let mut detached = 0usize;
-            for entry in entries {
-                let name = entry.file_name();
-                let fname = name.to_string_lossy();
-                if let Some(pid_str) = fname
-                    .strip_prefix("fission-debug-")
-                    .and_then(|s| s.strip_suffix(".json"))
-                {
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        let mut session = build_session();
-                        let _ = session.attach(pid);
-                        let _ = session.detach();
-                        remove_state(pid);
-                        detached += 1;
-                    }
-                }
+            for (pid, _) in sessions {
+                let mut session = build_session();
+                let _ = session.attach(pid);
+                let _ = session.detach();
+                remove_state(pid);
+                detached += 1;
             }
             println!("Detached from {} session(s).", detached);
             Ok(())
         }
 
         DebugCommand::Continue => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.continue_execution()?;
             println!("Continuing PID {}...", state.pid);
             Ok(())
         }
 
         DebugCommand::Step => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.single_step()?;
 
             if let Some(tid) = state.last_thread_id {
@@ -253,9 +389,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Bp(args) => {
-            let mut state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (mut state, mut session) = attach_active()?;
             session.debugger.set_sw_breakpoint(args.addr)?;
             if !state.breakpoints.contains(&args.addr) {
                 state.breakpoints.push(args.addr);
@@ -273,9 +407,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::RmBp(args) => {
-            let mut state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (mut state, mut session) = attach_active()?;
             session.debugger.remove_sw_breakpoint(args.addr)?;
             state.breakpoints.retain(|&a| a != args.addr);
             save_state(&state)?;
@@ -312,9 +444,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Regs => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             let tid = state
                 .last_thread_id
                 .or(session.debugger.get_state().main_thread_id)
@@ -325,17 +455,14 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Read(args) => {
-            find_active_state()?;
-            let session = build_session();
+            let (_, session) = attach_active()?;
             let mem = session.debugger.read_memory(args.addr, args.size)?;
             print_hex_dump(args.addr, &mem, args.json);
             Ok(())
         }
 
         DebugCommand::Write(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let bytes = hex_bytes_from_str(&args.data)?;
             session.debugger.write_memory(args.addr, &bytes)?;
             if args.json {
@@ -351,9 +478,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Modules(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let report_result = session.debugger.list_modules();
             let detach_result = session.debugger.detach();
             let report = report_result?;
@@ -405,8 +530,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Threads => {
-            find_active_state()?;
-            let session = build_session();
+            let (_, session) = attach_active()?;
             let threads = session.debugger.get_state().threads.clone();
             println!("Active threads ({}):", threads.len());
             for (tid, info) in threads {
@@ -449,18 +573,14 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Pause => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.pause()?;
             println!("Break requested for PID {}.", state.pid);
             Ok(())
         }
 
         DebugCommand::Stop => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.terminate()?;
             remove_state(state.pid);
             println!("Terminated PID {}.", state.pid);
@@ -468,9 +588,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::StepOver => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.step_over()?;
             if let Some(tid) = state.last_thread_id {
                 let regs = session.debugger.fetch_registers(tid)?;
@@ -480,9 +598,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::StepOut => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.step_out()?;
             if let Some(tid) = state.last_thread_id {
                 let regs = session.debugger.fetch_registers(tid)?;
@@ -492,9 +608,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Skip => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             session.debugger.skip_instruction()?;
             if let Some(tid) = state.last_thread_id {
                 let regs = session.debugger.fetch_registers(tid)?;
@@ -504,9 +618,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::SwitchThread(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.set_current_thread(args.tid)?;
             if args.json {
                 println!(
@@ -520,9 +632,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Event(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let event = session.debugger.poll_event(args.timeout_ms)?;
             if args.json {
                 let report = match event {
@@ -546,9 +656,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::BpEnable(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.enable_breakpoint(args.addr)?;
             if args.json {
                 println!(
@@ -562,9 +670,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::BpDisable(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.disable_breakpoint(args.addr)?;
             if args.json {
                 println!(
@@ -578,8 +684,15 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::BpList(args) => {
-            find_active_state()?;
-            let session = build_session();
+            let (state, mut session) = attach_active()?;
+            // A backend built for this invocation knows no breakpoints; the
+            // ones this session set are in its state file. Put them back for
+            // the listing, so it shows the session's breakpoints and what the
+            // backend recorded for each. One that can no longer be set (its
+            // module was unloaded) is simply not listed.
+            for address in &state.breakpoints {
+                let _ = session.debugger.set_sw_breakpoint(*address);
+            }
             let bps = session.debugger.list_breakpoints();
             if args.json {
                 let arr: Vec<_> = bps
@@ -613,9 +726,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::MemBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let kind = match args.kind {
                 crate::cli::args::MemoryBpKindArg::Read => {
                     fission_dynamic::debug::types::MemoryBpKind::Read
@@ -648,9 +759,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::RmMemBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.remove_memory_breakpoint(args.addr)?;
             if args.json {
                 println!(
@@ -664,15 +773,10 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::DllBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.set_dll_breakpoint(&args.name)?;
             if args.json {
-                println!(
-                    "{{\"status\":\"ok\",\"action\":\"set_dll_breakpoint\",\"dll\":\"{}\"}}",
-                    args.name
-                );
+                println!("{}", dll_breakpoint_json("set_dll_breakpoint", &args.name));
             } else {
                 println!("DLL breakpoint set for '{}'", args.name);
             }
@@ -680,14 +784,12 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::RmDllBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.remove_dll_breakpoint(&args.name)?;
             if args.json {
                 println!(
-                    "{{\"status\":\"ok\",\"action\":\"remove_dll_breakpoint\",\"dll\":\"{}\"}}",
-                    args.name
+                    "{}",
+                    dll_breakpoint_json("remove_dll_breakpoint", &args.name)
                 );
             } else {
                 println!("DLL breakpoint removed for '{}'", args.name);
@@ -696,9 +798,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::ExBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session
                 .debugger
                 .set_exception_breakpoint(args.code as u32)?;
@@ -714,9 +814,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::RmExBp(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session
                 .debugger
                 .remove_exception_breakpoint(args.code as u32)?;
@@ -732,18 +830,13 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::SetReg(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (state, mut session) = attach_active()?;
             let tid = state
                 .last_thread_id
                 .ok_or_else(|| anyhow::anyhow!("No thread available"))?;
             session.debugger.set_register(tid, &args.name, args.value)?;
             if args.json {
-                println!(
-                    "{{\"status\":\"ok\",\"action\":\"set_register\",\"register\":\"{}\",\"value\":\"0x{:x}\"}}",
-                    args.name, args.value
-                );
+                println!("{}", set_register_json(&args.name, args.value));
             } else {
                 println!("Register {} = 0x{:016x}", args.name, args.value);
             }
@@ -751,15 +844,10 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::GetFlag(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, session) = attach_active()?;
             let value = session.debugger.get_flag(&args.name)?;
             if args.json {
-                println!(
-                    "{{\"status\":\"ok\",\"flag\":\"{}\",\"value\":{}}}",
-                    args.name, value
-                );
+                println!("{}", get_flag_json(&args.name, value));
             } else {
                 println!("Flag {} = {}", args.name, value);
             }
@@ -767,18 +855,13 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::SetFlag(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let value = args
                 .value
                 .ok_or_else(|| anyhow::anyhow!("Flag value required for set-flag"))?;
             session.debugger.set_flag(&args.name, value)?;
             if args.json {
-                println!(
-                    "{{\"status\":\"ok\",\"action\":\"set_flag\",\"flag\":\"{}\",\"value\":{}}}",
-                    args.name, value
-                );
+                println!("{}", set_flag_json(&args.name, value));
             } else {
                 println!("Flag {} = {}", args.name, value);
             }
@@ -786,9 +869,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Alloc(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let addr = session.debugger.remote_alloc(args.addr, args.size)?;
             if args.json {
                 println!(
@@ -802,9 +883,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Free(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             session.debugger.remote_free(args.addr)?;
             if args.json {
                 println!(
@@ -818,9 +897,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::GetProtect(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, session) = attach_active()?;
             let rights = session.debugger.get_page_rights(args.addr)?;
             if args.json {
                 println!(
@@ -834,9 +911,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::SetProtect(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, mut session) = attach_active()?;
             let protect = args
                 .protect
                 .ok_or_else(|| anyhow::anyhow!("Protection flags required for set-protect"))?;
@@ -858,8 +933,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::StackPeek(args) => {
-            find_active_state()?;
-            let session = build_session();
+            let (_, session) = attach_active()?;
             let value = session.debugger.stack_peek(args.offset)?;
             if args.json {
                 println!(
@@ -873,8 +947,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::StackPop(args) => {
-            find_active_state()?;
-            let mut session = build_session();
+            let (_, mut session) = attach_active()?;
             let value = session.debugger.stack_pop()?;
             if args.json {
                 println!(
@@ -888,8 +961,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::StackPush(args) => {
-            find_active_state()?;
-            let mut session = build_session();
+            let (_, mut session) = attach_active()?;
             session.debugger.stack_push(args.value)?;
             if args.json {
                 println!(
@@ -903,9 +975,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Find(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, session) = attach_active()?;
             let pattern = hex_bytes_from_str(&args.pattern)?;
             let results = session
                 .debugger
@@ -926,9 +996,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::Exports(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, session) = attach_active()?;
             let exports = session.debugger.get_module_exports(args.base)?;
             if args.json {
                 let arr: Vec<_> = exports
@@ -957,9 +1025,7 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         DebugCommand::Session(args) => super::debug_session::run_session(args, emulator),
 
         DebugCommand::Imports(args) => {
-            let state = find_active_state()?;
-            let mut session = build_session();
-            session.attach(state.pid)?;
+            let (_, session) = attach_active()?;
             let imports = session.debugger.get_module_imports(args.base)?;
             if args.json {
                 let arr: Vec<_> = imports
@@ -991,20 +1057,214 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
     }
 }
 
-fn find_active_state() -> Result<DebugStateFile> {
-    let entries: Vec<_> = std::fs::read_dir(std::env::temp_dir())?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.file_name()
-                .to_str()
-                .map_or(false, |n| n.starts_with("fission-debug-"))
-        })
-        .collect();
-    if entries.is_empty() {
-        anyhow::bail!("No active debug session. Run `fission_cli debug attach <pid>` first.");
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "fission-cli-debug-state-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
-    let entry = entries.into_iter().next().unwrap();
-    let data = std::fs::read_to_string(entry.path())?;
-    let state: DebugStateFile = serde_json::from_str(&data)?;
-    Ok(state)
+
+    fn state(pid: u32) -> DebugStateFile {
+        DebugStateFile {
+            pid,
+            last_thread_id: Some(pid),
+            breakpoints: vec![0x1000],
+        }
+    }
+
+    #[test]
+    fn hex_with_a_multi_byte_character_is_an_error_not_a_panic() {
+        // Four bytes, so the even-length check passed, and the two-byte slice
+        // then cut `é` in half.
+        for text in ["0é0", "é", "00é1", "ｆｆ"] {
+            let error = hex_bytes_from_str(text).expect_err(text);
+            assert!(error.to_string().contains("hex"), "{text}: {error}");
+        }
+    }
+
+    #[test]
+    fn hex_parses_with_and_without_separators() {
+        // Positive control: what parsed before still parses to the same bytes.
+        assert_eq!(hex_bytes_from_str("CC90").unwrap(), [0xCC, 0x90]);
+        assert_eq!(
+            hex_bytes_from_str("cc 90,0f\t0B").unwrap(),
+            [0xCC, 0x90, 0x0F, 0x0B]
+        );
+        assert_eq!(hex_bytes_from_str("").unwrap(), Vec::<u8>::new());
+        assert!(hex_bytes_from_str("abc").is_err(), "odd length");
+        assert!(hex_bytes_from_str("zz").is_err(), "not hex");
+        assert!(hex_bytes_from_str("+1").is_err(), "a sign is not a digit");
+    }
+
+    fn parsed(line: &str) -> serde_json::Value {
+        serde_json::from_str(line).unwrap_or_else(|e| panic!("not JSON ({e}): {line}"))
+    }
+
+    #[test]
+    fn a_name_with_quotes_and_backslashes_stays_one_json_string() {
+        let hostile = "a\"b\\c\n\",\"injected\":\"x";
+        let line = dll_breakpoint_json("set_dll_breakpoint", hostile);
+        assert_eq!(parsed(&line)["dll"], hostile);
+        assert!(parsed(&line).get("injected").is_none());
+
+        let line = set_register_json(hostile, 0x10);
+        assert_eq!(parsed(&line)["register"], hostile);
+        assert_eq!(parsed(&line)["value"], "0x10");
+
+        assert_eq!(parsed(&get_flag_json(hostile, true))["flag"], hostile);
+        assert_eq!(parsed(&set_flag_json(hostile, false))["flag"], hostile);
+        assert_eq!(parsed(&set_flag_json(hostile, false))["value"], false);
+    }
+
+    #[test]
+    fn an_ordinary_name_prints_the_line_it_always_did() {
+        // Positive control: the escaping changes nothing for a plain name.
+        assert_eq!(
+            dll_breakpoint_json("set_dll_breakpoint", "kernel32.dll"),
+            r#"{"status":"ok","action":"set_dll_breakpoint","dll":"kernel32.dll"}"#
+        );
+        assert_eq!(
+            dll_breakpoint_json("remove_dll_breakpoint", "kernel32.dll"),
+            r#"{"status":"ok","action":"remove_dll_breakpoint","dll":"kernel32.dll"}"#
+        );
+        assert_eq!(
+            set_register_json("rax", 0x2a),
+            r#"{"status":"ok","action":"set_register","register":"rax","value":"0x2a"}"#
+        );
+        assert_eq!(
+            get_flag_json("zf", true),
+            r#"{"status":"ok","flag":"zf","value":true}"#
+        );
+        assert_eq!(
+            set_flag_json("cf", false),
+            r#"{"status":"ok","action":"set_flag","flag":"cf","value":false}"#
+        );
+    }
+
+    #[test]
+    fn only_a_regular_pid_named_json_file_is_a_session() {
+        let dir = scratch_dir("filter");
+        // Things that start with the prefix and are not a session's state.
+        std::fs::create_dir(dir.join("fission-debug-backup")).unwrap();
+        std::fs::create_dir(dir.join("fission-debug-12.json")).unwrap();
+        std::fs::write(dir.join("fission-debug-notes.txt"), "x").unwrap();
+        std::fs::write(dir.join("fission-debug-abc.json"), "{}").unwrap();
+        std::fs::write(dir.join("fission-debug-+5.json"), "{}").unwrap();
+        std::fs::write(dir.join("fission-debug-.json"), "{}").unwrap();
+
+        let error = find_active_state_in(&dir).expect_err("nothing here is a session");
+        assert!(
+            error.to_string().contains("No active debug session"),
+            "{error:#}"
+        );
+
+        // With a real one among them, that is the one found.
+        save_state_in(&dir, &state(77)).unwrap();
+        assert_eq!(find_active_state_in(&dir).unwrap().pid, 77);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_session_written_last_is_the_active_one() {
+        let dir = scratch_dir("order");
+        save_state_in(&dir, &state(300)).unwrap();
+        save_state_in(&dir, &state(100)).unwrap();
+        save_state_in(&dir, &state(200)).unwrap();
+        let at = |seconds: u64| std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds);
+        for (pid, seconds) in [(300, 1_000), (100, 3_000), (200, 2_000)] {
+            std::fs::File::options()
+                .write(true)
+                .open(state_path_in(&dir, pid))
+                .unwrap()
+                .set_modified(at(seconds))
+                .unwrap();
+        }
+        let order: Vec<u32> = state_files_in(&dir)
+            .unwrap()
+            .into_iter()
+            .map(|(pid, _)| pid)
+            .collect();
+        assert_eq!(order, [100, 200, 300]);
+        assert_eq!(find_active_state_in(&dir).unwrap().pid, 100);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_leaves_one_complete_file_and_no_scratch_file() {
+        let dir = scratch_dir("save");
+        save_state_in(&dir, &state(41)).unwrap();
+        let mut second = state(41);
+        second.breakpoints = vec![0x2000, 0x3000];
+        save_state_in(&dir, &second).unwrap();
+
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["fission-debug-41.json"]);
+        assert_eq!(
+            find_active_state_in(&dir).unwrap().breakpoints,
+            [0x2000, 0x3000]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A reader running while the state is being rewritten must never see a
+    /// file it cannot parse. Writing in place empties the file before the new
+    /// bytes arrive, and a reader in that window got an empty document.
+    #[test]
+    fn a_reader_never_sees_a_half_written_state_file() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let dir = scratch_dir("atomic");
+        save_state_in(&dir, &state(9)).unwrap();
+        let path = state_path_in(&dir, 9);
+        let done = Arc::new(AtomicBool::new(false));
+
+        let reader = {
+            let done = Arc::clone(&done);
+            let path = path.clone();
+            std::thread::spawn(move || {
+                let mut reads = 0u32;
+                let mut bad = Vec::new();
+                while !done.load(Ordering::Relaxed) {
+                    // The file is replaced, never absent.
+                    match std::fs::read_to_string(&path) {
+                        Ok(text) => {
+                            reads += 1;
+                            if serde_json::from_str::<DebugStateFile>(&text).is_err() {
+                                bad.push(text);
+                            }
+                        }
+                        Err(error) => bad.push(format!("read failed: {error}")),
+                    }
+                }
+                (reads, bad)
+            })
+        };
+
+        let mut next = state(9);
+        for round in 0..400u64 {
+            next.breakpoints = (0..64).map(|i| round * 0x1000 + i).collect();
+            save_state_in(&dir, &next).unwrap();
+        }
+        done.store(true, Ordering::Relaxed);
+        let (reads, bad) = reader.join().unwrap();
+        assert!(reads > 0, "the reader never ran");
+        assert!(
+            bad.is_empty(),
+            "{} of {reads} reads saw a broken state file, first: {:?}",
+            bad.len(),
+            bad.first()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
