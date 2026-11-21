@@ -28,7 +28,9 @@ RELEASE = (
 METADATA = {"deny.toml", "licenserc.yaml", ".github/dependabot.yml", ".github/licenserc.yaml"}
 # Files that change which advisories apply. Anything else leaves the advisory
 # answer to the advisory database, which Heavy checks nightly.
-DEPENDENCY_SET = {"Cargo.lock", "deny.toml", ".cargo/audit.toml"}
+DEPENDENCY_SET = {
+    "Cargo.lock", "deny.toml", ".cargo/audit.toml", ".cargo/config", ".cargo/config.toml",
+}
 # The pre-merge lanes' own definitions. A change here is tested by running every
 # lane it defines, not only by linting it: a lane nobody has seen run is unproven.
 PREMERGE = (
@@ -95,6 +97,10 @@ def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
 
 
 def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
+    # Cargo.lock can already contain a dependency newly enabled by a manifest.
+    dependency_change = any(
+        path in DEPENDENCY_SET or path.rsplit("/", 1)[-1] == "Cargo.toml" for path in paths
+    )
     rust = False
     scripts = False
     workflows = False
@@ -116,12 +122,12 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     lanes = before_merge and any(path.startswith(PREMERGE) for path in paths)
     native = full or lanes or any(path.startswith(DEBUGGER) for path in paths)
     return lane, {
-        "run_security": rust or security,
+        "run_security": rust or security or dependency_change or event == "workflow_dispatch",
         # A push to main always compiles the whole workspace: two PRs that are
         # each green can still fail to build together, and a docs-only push is
         # the next chance to notice.
         "run_lint": rust or event == "push",
-        "run_advisories": event == "workflow_dispatch" or any(path in DEPENDENCY_SET for path in paths),
+        "run_advisories": event == "workflow_dispatch" or dependency_change,
         "run_pass_gate": lane != "docs",
         "run_script_checks": workflows or scripts or security or event == "workflow_dispatch",
         "run_actionlint": workflows or event == "workflow_dispatch",

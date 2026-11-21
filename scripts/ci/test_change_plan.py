@@ -46,8 +46,12 @@ class ChangePlanTests(unittest.TestCase):
         self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
 
     def test_advisories_gate_a_pr_only_when_it_changes_dependencies(self):
-        for path in ("Cargo.lock", "deny.toml", ".cargo/audit.toml"):
-            self.assertTrue(plan([path], "pull_request")[1]["run_advisories"], path)
+        for path in ("Cargo.lock", "Cargo.toml", "crates/fission-cli/Cargo.toml",
+                     "deny.toml", ".cargo/audit.toml", ".cargo/config.toml"):
+            for event in ("pull_request", "merge_group"):
+                _, jobs = plan([path], event)
+                self.assertTrue(jobs["run_security"], (path, event))
+                self.assertTrue(jobs["run_advisories"], (path, event))
         # Ordinary code changes still run bans/licenses/sources, not advisories:
         # 113 of 137 failed PR runs in 30 days were one advisory published the
         # day 105 PRs were open.
