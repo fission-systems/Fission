@@ -13,6 +13,9 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             decomp_sec,
             variables,
             line_mappings,
+            globals,
+            frame,
+            declared_callees,
         } => {
             let mut obj = serde_json::json!({
                 "address": addr_str,
@@ -24,6 +27,9 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "fallback_reason": fallback_reason,
                 "variables": variables,
                 "line_mappings": line_mappings,
+                "globals": globals,
+                "frame": frame,
+                "declared_callees": declared_callees,
                 "line_mapping_source": "fission_ssa_assignment_definition",
             "call_mapping_source": "fission_pcode_call_operation",
             });

@@ -1821,6 +1821,14 @@ pub struct PrintedGlobal {
     pub address: Option<u64>,
 }
 
+impl PrintedGlobal {
+    /// The C type its declaration spells, e.g. `uint` or `char *`, for a
+    /// consumer that reads the global as data rather than from the text.
+    pub fn type_name(&self) -> String {
+        print_type(&self.ty)
+    }
+}
+
 /// The globals `hir` is printed with, as the printer declares them.
 pub(crate) fn printed_globals(
     hir: &HirFunction,
@@ -2609,6 +2617,30 @@ mod global_decl_tests {
                 .any(|global| global.name == "current_user" && global.address == Some(0x2000)),
             "{globals:?}"
         );
+    }
+
+    #[test]
+    fn printed_global_type_name_is_the_declared_c_type() {
+        let global = PrintedGlobal {
+            name: "counter".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+            address: Some(0x4010),
+        };
+        assert_eq!(global.type_name(), print_type(&global.ty));
+        assert!(
+            global.type_name().contains("uint"),
+            "{}",
+            global.type_name()
+        );
+        assert!(global.type_name().contains('*'), "{}", global.type_name());
+        let unknown = PrintedGlobal {
+            ty: NirType::Unknown,
+            ..global
+        };
+        assert_eq!(unknown.type_name(), "undefined");
     }
 
     #[test]
