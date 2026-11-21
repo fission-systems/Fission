@@ -15,12 +15,11 @@ dataset revision, checked against the manifest's hash, and only decompiled
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import os
-import subprocess
 import sys
 from pathlib import Path
+
+from decompiler_smoke import decompile_codes
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quality"))
 import decbench_full_sweep as sweep  # noqa: E402
@@ -38,19 +37,6 @@ def sample(entries: list[dict]) -> list[dict]:
         chosen.append(entry)
         total += len(entry["functions"])
     return chosen
-
-
-def decompile(cli: Path, binary: Path, resources: Path, threads: int) -> dict[str, str]:
-    env = dict(os.environ, RAYON_NUM_THREADS=str(threads), FISSION_BENCHMARK_NO_CACHE="1")
-    result = subprocess.run(
-        [str(cli), "--resource-root", str(resources), "--no-db", "decomp", str(binary),
-         "--all", "--json", "--no-header", "--no-warnings"],
-        capture_output=True, text=True, env=env, timeout=1800, check=True,
-    )
-    return {
-        str(entry.get("address")): hashlib.sha256(str(entry.get("code")).encode()).hexdigest()
-        for entry in json.loads(result.stdout)
-    }
 
 
 def differing(runs: list[dict[str, str]]) -> list[str]:
@@ -76,7 +62,8 @@ def main() -> int:
         binary = sweep.fetch(entry["binary_path"], args.data)
         if binary.stat().st_size != entry["size"] or sweep.digest(binary) != entry["sha256"]:
             raise SystemExit(f"dataset binary hash or size differs for {entry['binary_path']}")
-        runs = [decompile(args.cli, binary, args.resources, threads) for threads in THREADS]
+        runs = [decompile_codes(args.cli, binary, workers, resources=args.resources, timeout=1800)
+                for workers in THREADS]
         total += len(runs[0])
         bad = differing(runs)
         print(f"{entry['binary_path']}: {len(runs[0])} functions, {len(bad)} differ", flush=True)

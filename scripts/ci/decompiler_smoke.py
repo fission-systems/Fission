@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 
 
-def run(cli: Path, *args: str, threads: int | None = None) -> str:
+def run(cli: Path, *args: str, workers: int | None = None, timeout: int = 180) -> str:
     env = dict(os.environ)
-    if threads is not None:
-        env["RAYON_NUM_THREADS"] = str(threads)
+    if workers is not None:
+        env["FISSION_RUST_DECOMP_WORKERS"] = str(workers)
+        env["FISSION_BENCHMARK_NO_CACHE"] = "1"
     result = subprocess.run(
-        [str(cli), *args], check=True, capture_output=True, text=True, timeout=180, env=env
+        [str(cli), *args], check=True, capture_output=True, text=True, timeout=timeout, env=env
     )
     if not result.stdout.strip():
         raise ValueError(f"{args[0]} returned empty output")
@@ -42,20 +43,34 @@ def check(cli: Path, fixture: Path, symbol: str | None) -> None:
     check_determinism(cli, fixture)
 
 
-def code_by_address(output: str) -> dict[str, str]:
-    entries = json.loads(output)
-    entries = entries if isinstance(entries, list) else [entries]
-    return {
-        str(entry.get("address")): hashlib.sha256(str(entry.get("code")).encode()).hexdigest()
-        for entry in entries
-    }
+def decompile_codes(
+    cli: Path, binary: Path, workers: int, *, resources: Path | None = None, timeout: int = 180,
+) -> dict[str, str]:
+    prefix = ("--resource-root", str(resources)) if resources is not None else ()
+    output = json.loads(run(
+        cli, *prefix, "--no-db", "decomp", str(binary), "--all", "--json", "--benchmark",
+        "--no-header", "--no-warnings", workers=workers, timeout=timeout,
+    ))
+    entries = output["functions"]
+    if not entries:
+        raise ValueError(f"{binary.name}: no functions were decompiled")
+    expected = min(workers, len(entries))
+    actual = output["_meta"]["worker_count"]
+    if actual != expected:
+        raise ValueError(f"{binary.name}: CLI reported {actual} workers, expected {expected}")
+    codes = {}
+    for entry in entries:
+        address = str(entry["address"])
+        if address in codes:
+            raise ValueError(f"{binary.name}: duplicate function address {address}")
+        codes[address] = hashlib.sha256(str(entry.get("code")).encode()).hexdigest()
+    return codes
 
 
 def check_determinism(cli: Path, fixture: Path) -> None:
     """The same input must decompile to the same text, whatever the thread
     count (AGENTS.md core rule 4: outputs feed snapshots and benchmarks)."""
-    args = ("decomp", str(fixture), "--all", "--json", "--no-header", "--no-warnings")
-    runs = [code_by_address(run(cli, *args, threads=threads)) for threads in (1, 4, 4)]
+    runs = [decompile_codes(cli, fixture, workers) for workers in (1, 4, 4)]
     differing = sorted(
         address for address in runs[0] if len({r.get(address) for r in runs}) != 1
     )
