@@ -12,7 +12,7 @@ Declared in root [`Cargo.toml`](../Cargo.toml) `workspace.members`:
 |------------|----------------|
 | [`crates/fission-core`](../crates/fission-core) | Shared core types/utilities |
 | [`crates/fission-loader`](../crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
-| [`crates/fission-analysis-protocol`](../crates/fission-analysis-protocol) | Target-independent analysis backend, resource capability, and HTTP/worker wire contracts |
+| [`crates/fission-analysis-protocol`](../crates/fission-analysis-protocol) | Result shapes `fission_cli` prints as JSON (`list`, `callgraph`, `disasm`) |
 | [`crates/fission-analysis-db`](../crates/fission-analysis-db) | Immutable typed program metadata snapshots |
 | [`crates/fission-pcode-ir`](../crates/fission-pcode-ir) | p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies) |
 | [`crates/fission-cspec`](../crates/fission-cspec) | cspec / ldefs / pspec parsing, register model (`RegisterNamer`), entry parameter-arity inference (ADR 0012 amendment) |
