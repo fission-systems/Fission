@@ -476,13 +476,13 @@ impl MachineState {
     /// took the host down (`capacity overflow`) on its way to a page fault.
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
         if size > MAX_GUEST_BUFFER {
-            // The fault it would have been, where it is one.
-            self.check_ram_access(
-                space_id,
-                addr,
-                size,
-                crate::pcode::page_map::AccessKind::Read,
-            )?;
+            // Preserve page faults without populating lazy pages for a
+            // request that will be rejected regardless of the mapping.
+            if self.enforce_page_faults && space_id == self.spaces_layout.ram {
+                self.page_map
+                    .check_range(addr, size, crate::pcode::page_map::AccessKind::Read)
+                    .map_err(|e| anyhow::anyhow!(e))?;
+            }
             bail!("guest read of {size} bytes at 0x{addr:X} is larger than any buffer it could be");
         }
         let mut out = vec![0u8; size];
