@@ -29,7 +29,7 @@ path = "src/lib.rs"
 # watchpoints, stepping, sessions and machine scripting all shipped in
 # nothing. Measured cost of including it: 19.44 MB -> 19.82 MB, 2%.
 default = ["allocator-mimalloc", "debugger"]
-debugger = ["dep:fission-dynamic", "fission-script/emulator"]
+debugger = ["dep:fission-dynamic", "dep:windows-sys", "fission-script/emulator"]
 windows_native_debugger = ["debugger", "fission-dynamic/windows_native_debugger"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
@@ -77,3 +77,6 @@ test = false
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", optional = true, features = ["Win32_Foundation", "Win32_System_Threading"] }
