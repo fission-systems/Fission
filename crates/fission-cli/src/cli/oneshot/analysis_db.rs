@@ -220,6 +220,46 @@ pub fn run(args: DbArgs) -> Result<()> {
                 || format!("0x{addr:012x}  breakpoint removed"),
             );
         }
+
+        DbCommand::Watch {
+            addr,
+            size,
+            read,
+            no_write,
+        } => {
+            if size == 0 {
+                bail!("a watchpoint needs at least one byte (--size)");
+            }
+            let watch = fission_project::Watch {
+                address: addr,
+                size,
+                on_read: read,
+                on_write: !no_write,
+            };
+            project.add_watchpoint(watch);
+            report(
+                &mut reports,
+                json!({
+                    "action": "watch",
+                    "address": format!("0x{addr:x}"),
+                    "size": size,
+                    "on_read": read,
+                    "on_write": !no_write,
+                }),
+                || format!("0x{addr:012x}  watchpoint ({size} bytes)"),
+            );
+        }
+
+        DbCommand::RmWatch { addr } => {
+            if !project.remove_watchpoint(addr) {
+                bail!("no watchpoint recorded at 0x{addr:x}");
+            }
+            report(
+                &mut reports,
+                json!({ "action": "rm-watch", "address": format!("0x{addr:x}") }),
+                || format!("0x{addr:012x}  watchpoint removed"),
+            );
+        }
     }
 
     let revision = if history_move {

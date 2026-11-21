@@ -68,6 +68,8 @@ pub enum ParsedInvocation {
     Languages(LanguagesArgs),
     /// Call one function in the emulator with chosen arguments
     Call(CallArgs),
+    /// A known API's prototype from the bundled type library
+    Api(ApiArgs),
 }
 
 /// `fission_cli call`: run one function of the binary in the emulator, from
@@ -304,6 +306,12 @@ enum CliCommand {
     Callgraph(CallgraphArgs),
     /// Identify functions against bundled Ghidra FID (Function ID) signature databases
     Identify(IdentifyArgs),
+    /// List the types (classes, structs, enums) the loader recovered from metadata
+    Types(TypesArgs),
+    /// Say what is at an address: function, section, symbols, relocations, source line
+    Whatis(WhatisArgs),
+    /// Look up a known API's prototype in the bundled type library
+    Api(ApiArgs),
     /// Fuzzy function similarity (structural, not exact-match -- a BSim-inspired analog)
     Similar(SimilarArgs),
     /// Operator-oriented inventory and batch emitters
@@ -435,6 +443,25 @@ pub enum DbCommand {
     },
     /// Forget a breakpoint
     RmBp {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
+    /// Remember a data watchpoint for the next debug session
+    Watch {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+        /// Bytes watched from the address
+        #[arg(long, default_value_t = 1)]
+        size: u64,
+        /// Also stop when the bytes are read
+        #[arg(long)]
+        read: bool,
+        /// Do not stop when the bytes are written (with --read: reads only)
+        #[arg(long, requires = "read")]
+        no_write: bool,
+    },
+    /// Forget a watchpoint
+    RmWatch {
         #[arg(value_parser = parse_hex_address)]
         addr: u64,
     },
@@ -1090,6 +1117,63 @@ struct IdentifyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "List the types the loader recovered from the binary's own metadata: C++ RTTI classes, DWARF and PDB structs and enums, Go types, Objective-C classes, Swift types, Rust vtables, and the container's header structures.\n\nEach type says which analysis produced it (`source`). Objective-C, Swift and Rust-vtable recovery have no test coverage yet, so those types carry `\"verified\": false`.",
+    after_help = "Examples:\n  fission_cli types app.elf --json\n  fission_cli types app.elf --source dwarf --name point"
+)]
+struct TypesArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Only types from this analysis (`cpp_rtti`, `dwarf`, `pdb`, `go`,
+    /// `rust_vtable`, `objc`, `swift`, `pe_header`, `elf_header`, `te_header`)
+    #[arg(long, value_name = "SOURCE")]
+    source: Option<String>,
+
+    /// Only types whose name contains this (case-insensitive)
+    #[arg(long, value_name = "TEXT")]
+    name: Option<String>,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Say what is at an address in one call: the function containing it, the section or memory block, the symbols and relocations there, the DWARF source line, and any note recorded in the analysis database.",
+    after_help = "Examples:\n  fission_cli whatis app.elf --addr 0x401130 --json"
+)]
+struct WhatisArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// The address to describe
+    #[arg(long, value_parser = parse_hex_address)]
+    addr: u64,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Look up a known API (Windows API, C runtime) in the bundled type library and print its prototype: return type, parameter names and types, and whether it is variadic. No binary is needed.",
+    after_help = "Examples:\n  fission_cli api CreateFileW\n  fission_cli api memcpy --json"
+)]
+pub struct ApiArgs {
+    /// The function name, e.g. `CreateFileW`
+    pub name: String,
+
+    /// Use the 32-bit library instead of the 64-bit one
+    #[arg(long = "32")]
+    pub bits32: bool,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim. Without `--index`, functions are compared within the input binary. Build or update a portable offline feature index with `--update-index`, then query it with `--index`. Index identity is based on binary content hash and function entry; names and paths are result provenance.",
     after_help = "Examples:\n  fission_cli similar app.exe\n  fission_cli similar app.exe --function 0x140001000\n  fission_cli similar app.exe --update-index corpus.json\n  fission_cli similar query.exe --index corpus.json --function 0x140001000 --json"
 )]
@@ -1234,6 +1318,9 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "skill",
     "languages",
     "call",
+    "types",
+    "whatis",
+    "api",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1409,6 +1496,7 @@ fn raw_load_warnings(
         ParsedInvocation::Skill => "skill",
         ParsedInvocation::Languages(_) => "languages",
         ParsedInvocation::Call(_) => "call",
+        ParsedInvocation::Api(_) => "api",
     };
     [
         ("--base", raw_base.is_some()),
@@ -1617,6 +1705,26 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = callgraph.common.verbose;
                     args
                 }
+                CliCommand::Types(types) => {
+                    let mut args = OneShotArgs::with_binary(types.binary);
+                    args.lookup = Some(crate::cli::oneshot::LookupQuery::Types {
+                        source: types.source,
+                        name: types.name,
+                    });
+                    args.json = types.common.json;
+                    args.verbose = types.common.verbose;
+                    args
+                }
+                CliCommand::Whatis(whatis) => {
+                    let mut args = OneShotArgs::with_binary(whatis.binary);
+                    args.lookup = Some(crate::cli::oneshot::LookupQuery::Whatis {
+                        address: whatis.addr,
+                    });
+                    args.json = whatis.common.json;
+                    args.verbose = whatis.common.verbose;
+                    args
+                }
+                CliCommand::Api(api) => return ParsedInvocation::Api(api),
                 CliCommand::Identify(identify) => {
                     let mut args = OneShotArgs::with_binary(identify.binary);
                     args.identify_cmd = true;
@@ -1738,6 +1846,7 @@ mod tests {
             ParsedInvocation::Skill => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Languages(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Call(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Api(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1756,6 +1865,7 @@ mod tests {
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
             ParsedInvocation::Call(_) => panic!("legacy parser cannot emit call"),
+            ParsedInvocation::Api(_) => panic!("legacy parser cannot emit api"),
         }
     }
 

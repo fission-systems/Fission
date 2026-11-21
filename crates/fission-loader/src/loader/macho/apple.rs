@@ -993,6 +993,7 @@ impl ObjCClassInfo {
             name: self.name.clone(),
             mangled_name: String::new(),
             kind: "ObjCClass".to_string(),
+            source: "objc".to_string(),
             fields: self
                 .ivars
                 .iter()
