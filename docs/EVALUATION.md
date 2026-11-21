@@ -4,7 +4,7 @@
 
 This guide is the canonical external evaluation path for Fission.
 
-It is written for teams evaluating Fission in a headless workflow from the CLI, without depending on the desktop UI or internal contributor documentation.
+It is written for teams evaluating Fission from the CLI, the only product surface (there is no GUI or TUI, by design), without depending on internal contributor documentation.
 
 Today, the best-supported evaluation surface is:
 

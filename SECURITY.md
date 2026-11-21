@@ -12,7 +12,7 @@ Please **email the repository maintainer** (GitHub profile contact) rather than 
 
 Include:
 
-- Affected component (`fission-cli`, loader, automation lane, etc.)
+- Affected component (`fission-cli`, loader, emulator, debugger, etc.)
 - Minimal reproduction steps **without attaching malicious binaries**
 - Impact hypothesis (remote vs local, integrity vs confidentiality)
 
@@ -22,7 +22,7 @@ Allow a reasonable coordination window before public disclosure.
 
 Fission parses untrusted binaries **locally**. Not every crash or rejection counts as a security vulnerability:
 
-- **File as a normal bug** (public GitHub issue is fine): deterministic failures on **benign or synthetic** fixtures; incorrect lifted output or automation deltas with **no plausible sandbox escape**; detector misclassification when impact stays analytical-only.
+- **File as a normal bug** (public GitHub issue is fine): deterministic failures on **benign or synthetic** fixtures; incorrect lifted output or benchmark deltas with **no plausible sandbox escape**; detector misclassification when impact stays analytical-only.
 - **Use coordinated disclosure first** (email, not a public issue): suspected memory corruption exploitable beyond fail-fast abort; confidentiality or integrity breaks outside “CLI user analyzes local file”; anything that looks like a viable sandbox/container escape.
 
 If you are unsure, email first—we can triage quickly.

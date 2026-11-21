@@ -4,13 +4,15 @@
 
 ## Change Type
 
-- [ ] Decompiler semantics / IR / structuring
+- [ ] Decompiler semantics / IR / structuring / types
+- [ ] SLEIGH lifting
 - [ ] Loader / binary format support
 - [ ] Static facts / native preparation
 - [ ] Decompilation orchestration / Rust-Sleigh
-- [ ] CLI / product surface
-- [ ] Desktop UI / Dioxus
-- [ ] Benchmark / automation
+- [ ] Verification (`fission-dir`) / solver
+- [ ] Emulator / dynamic analysis / TTD
+- [ ] CLI / JSON contract
+- [ ] Benchmark / measurement scripts
 - [ ] Documentation only
 - [ ] Build / CI / release infrastructure
 
@@ -18,23 +20,25 @@
 
 <!-- Check every area you materially changed; reviewers use this for routing. -->
 
-- [ ] **NIR / structuring / pcode** (`crates/fission-pcode/`, `AGENTS.md` “NIR structuring”)
+- [ ] **NIR / structuring / pcode** (`crates/fission-pcode/`, `crates/fission-midend-*`; `AGENTS.md` "NIR structuring")
+- [ ] **SLEIGH** (`crates/fission-sleigh/`, `crates/fission-cspec/`)
 - [ ] **Static facts / native prep** (`crates/fission-static/`)
 - [ ] **Decompilation orchestration / Rust-Sleigh** (`crates/fission-decompiler/`)
-- [ ] **Loader / binary parsing** (`crates/fission-loader/`)
-- [ ] **CLI / UX** (`crates/fission-cli/`)
-- [ ] **Benchmark harness / corpus** (`benchmark/config/`, `scripts/quality/decbench_*`; see [`docs/BENCHMARK_DECBENCH.md`](../docs/BENCHMARK_DECBENCH.md))
+- [ ] **Loader / binary parsing / metadata** (`crates/fission-loader/`, `crates/fission-analysis-db/`, `crates/fission-signatures/`)
+- [ ] **Verification / solver** (`crates/fission-dir/`, `crates/fission-solver/`)
+- [ ] **Emulator / dynamic / TTD** (`crates/fission-emulator/`, `crates/fission-dynamic/`, `crates/fission-ttd/`)
+- [ ] **CLI / JSON contract** (`crates/fission-cli/`)
+- [ ] **Benchmark scripts** (`benchmark/config/`, `scripts/quality/decbench_*`; see [`docs/BENCHMARK_DECBENCH.md`](../docs/BENCHMARK_DECBENCH.md))
 - [ ] **Docs / process only** (no semantic code paths)
 - [ ] **CI / release plumbing** (`.github/`, `docs/RELEASE.md`)
 
 ## Validation
 
-- [ ] `cargo fmt --all -- --check`
-- [ ] `cargo clippy --workspace --all-targets`
-- [ ] `cargo test --all`
-- [ ] Source semantic smoke
-- [ ] Feature-shape canaries
-- [ ] Full/source-owned benchmark lane, if relevant
+- [ ] `cargo fmt --all --check`
+- [ ] `cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity` (CI's exact line)
+- [ ] `cargo nextest run -p <crates touched>`
+- [ ] Each new test fails with the fix disabled (positive control)
+- [ ] DecBench measurement, if decompiler output can change (see below)
 - [ ] Not run — reason:
 
 <details>
@@ -48,19 +52,25 @@
 
 ## Benchmark Impact
 
-<!-- Paste paths or key metric deltas when relevant. Use `n/a` for docs-only changes. -->
+<!--
+Required when decompiler output can change. Run with caches disabled
+(`FISSION_BENCHMARK_NO_CACHE=1`) and report total distance next to the
+perfect count: the count alone has ranked a regression as a win. Say which
+DecBench config was measured. Use `n/a` for changes that cannot change output.
+-->
 
 ```text
-source_semantic_summary: <path or n/a>
-weighted_semantic_similarity: <before> -> <after>
-behavior_pass_rate: <before> -> <after>
-comparison_outcome: <improved|regressed|mixed|unchanged|n/a>
+config:            <sample-set gate | full-dataset config name | n/a>
+GED perfect:       <before> -> <after>
+GED total distance: <before> -> <after>
+Types perfect:     <before> -> <after>
+rows changed:      <count, and whether output text changed or only the score>
 ```
 
 ## Telemetry and Reporting
 
 - [ ] Changes to decompiler semantics or inventory output: **confirmed** [`NirBuildStats`](../crates/fission-midend-core/src/ir/build_stats.rs) consumers stay aligned, or this PR updates them together with tests.
-- [ ] No parallel ad-hoc telemetry JSON outside the established `summary.json` / benchmark contracts ([`docs/QUALITY_METRICS.md`](../docs/QUALITY_METRICS.md)).
+- [ ] No parallel ad-hoc telemetry JSON outside the established contracts ([`docs/QUALITY_METRICS.md`](../docs/QUALITY_METRICS.md)).
 
 ## ADR / Design Traceability
 
