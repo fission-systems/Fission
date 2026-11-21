@@ -13,7 +13,7 @@
 
 use crate::core::Emulator;
 use crate::os::env::HleResult;
-use crate::os::linux::abi::TargetStat;
+use crate::os::linux::abi::{StatLayout, TargetStat};
 use crate::os::linux::libc::read_string;
 use crate::os::procedure::SimProcedure;
 use crate::pcode::page_map::{page_align_up, prot};
@@ -22,6 +22,25 @@ use anyhow::Result;
 fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
     let ram = emu.state.ram_space();
     emu.state.write_space(ram, addr, data)
+}
+
+/// Lay `stat` out the way the `stat`-family syscall in progress reports it
+/// on this guest, and store it.
+fn write_stat(emu: &mut Emulator, statbuf: u64, stat: &TargetStat) -> Result<()> {
+    let number = emu.raw_syscall_number();
+    let layout = StatLayout::for_syscall(&emu.arch, number);
+    ram_write(emu, statbuf, &stat.to_bytes(layout))
+}
+
+/// A pointer-sized little-endian word of guest memory, or 0 where it cannot
+/// be read.
+fn read_word(emu: &mut Emulator, addr: u64) -> u64 {
+    let width = usize::from(emu.arch.pointer_size).min(8);
+    let mut raw = [0u8; 8];
+    if let Ok(bytes) = ram_read(emu, addr, width) {
+        raw[..width].copy_from_slice(&bytes);
+    }
+    u64::from_le_bytes(raw)
 }
 
 fn ram_read(emu: &mut Emulator, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -227,12 +246,12 @@ impl SimProcedure for SysFstat {
             let mut target_st = TargetStat::default();
             target_st.st_size = file.content.len() as i64;
             target_st.st_mode = 0x81B4;
-            ram_write(emu, statbuf, &target_st.to_bytes())?;
+            write_stat(emu, statbuf, &target_st)?;
             emu.set_syscall_return(0)?;
         } else if fd <= 2 {
             let mut target_st = TargetStat::default();
             target_st.st_mode = 0x2180; // char device-ish for stdio
-            ram_write(emu, statbuf, &target_st.to_bytes())?;
+            write_stat(emu, statbuf, &target_st)?;
             emu.set_syscall_return(0)?;
         } else {
             emu.set_syscall_return((-1i64) as u64)?;
@@ -262,7 +281,7 @@ impl SimProcedure for SysNewfstatat {
             target_st.st_size = content.len() as i64;
             target_st.st_blocks = (content.len() as i64 + 511) / 512;
         }
-        ram_write(emu, statbuf, &target_st.to_bytes())?;
+        write_stat(emu, statbuf, &target_st)?;
         emu.set_syscall_return(0)?;
         Ok(HleResult::Continue)
     }
@@ -306,31 +325,41 @@ impl SimProcedure for SysLseek {
 pub struct SysWritev;
 impl SimProcedure for SysWritev {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        // writev(fd, iov, iovcnt) — iovec is {void* base; size_t len}
+        // writev(fd, iov, iovcnt). `struct iovec` is two pointer-sized words,
+        // `{ void *base; size_t len; }`: 16 bytes on a 64-bit guest and 8 on
+        // a 32-bit one. It was read as 16 everywhere, which on a 32-bit guest
+        // turns each pair of entries into one whose pointer is a pointer and
+        // a length glued together.
         let fd = emu.syscall_arg(0);
         let iov = emu.syscall_arg(1);
-        let iovcnt = emu.syscall_arg(2) as usize;
-        let mut total = 0usize;
-        for i in 0..iovcnt.min(64) {
-            let base_off = iov + (i as u64) * 16;
-            let base = u64::from_le_bytes(
-                ram_read(emu, base_off, 8)
-                    .unwrap_or_else(|_| vec![0; 8])
-                    .try_into()
-                    .unwrap_or([0; 8]),
-            );
-            let len = u64::from_le_bytes(
-                ram_read(emu, base_off + 8, 8)
-                    .unwrap_or_else(|_| vec![0; 8])
-                    .try_into()
-                    .unwrap_or([0; 8]),
-            ) as usize;
+        let iovcnt = emu.syscall_arg(2);
+        // Linux: more than IOV_MAX entries is EINVAL.
+        const IOV_MAX: u64 = 1024;
+        if iovcnt > IOV_MAX {
+            emu.set_syscall_return((-22i64) as u64)?;
+            return Ok(HleResult::Continue);
+        }
+        let word = u64::from(emu.arch.pointer_size);
+        let mut total = 0i64;
+        for i in 0..iovcnt {
+            let entry = iov.wrapping_add(i * 2 * word);
+            let base = read_word(emu, entry);
+            let len = read_word(emu, entry.wrapping_add(word));
             if len == 0 {
                 continue;
             }
-            let data = ram_read(emu, base, len).unwrap_or_default();
-            if let Ok(n) = emu.guest_write(fd, &data) {
-                total += n;
+            let written = write_from_guest(emu, fd, base, len);
+            if written < 0 {
+                // An error before anything was written is the result;
+                // after, what was written is.
+                if total == 0 {
+                    total = written;
+                }
+                break;
+            }
+            total += written;
+            if (written as u64) < len {
+                break;
             }
         }
         tracing::info!("sys_writev({}, iovcnt={}) -> {}", fd, iovcnt, total);
