@@ -2181,7 +2181,7 @@ fn x64_call_float_return_uses_xmm0_carrier_and_type() {
         "the call result must be assigned through XMM0 rather than discarded:\n{code}"
     );
     assert!(
-        code.contains("extern double sub_2000();") || code.contains("extern double callee();"),
+        code.contains("extern double sub_2000(void);") || code.contains("extern double callee();"),
         "the selected call carrier must type the external declaration:\n{code}"
     );
 }
