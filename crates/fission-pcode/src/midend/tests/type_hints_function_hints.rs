@@ -1603,3 +1603,52 @@ fn preview_type_hints_renames_register_local_written_more_than_once() {
     assert!(rendered.contains("counter"));
     assert!(!rendered.contains("EBX"));
 }
+
+#[test]
+fn preview_type_hints_promotes_4byte_pointer_field_when_pointer_size_is_32bit() {
+    let mut func = HirFunction {
+        name: "read_ptr32_field".to_string(),
+        params: vec![NirBinding {
+            name: "param_1".to_string(),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+            surface_type_name: Some("struct Node32 *".to_string()),
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        }],
+        return_type: NirType::Ptr(Box::new(NirType::Unknown)),
+        body: vec![HirStmt::Return(Some(HirExpr::Load {
+            ptr: Box::new(HirExpr::Var("param_1".to_string())),
+            ty: NirType::Ptr(Box::new(NirType::Unknown)),
+        }))],
+        ..Default::default()
+    };
+
+    let mut context = PreviewTypeContext::default();
+    context.struct_types.insert(
+        "Node32".to_string(),
+        NirStructTypeHint {
+            name: "Node32".to_string(),
+            size: 8,
+            fields: vec![NirStructFieldHint {
+                name: "next".to_string(),
+                type_name: "struct Node32 *".to_string(),
+                offset: 0,
+                size: 4,
+            }],
+        },
+    );
+
+    let stats = crate::midend::builder::apply_preview_type_hints_with_stack_bias_and_pointer_size(
+        &mut func,
+        &context,
+        &crate::midend::HashMap::default(),
+        None,
+        4,
+    );
+    assert_eq!(stats.debug_struct_promotions, 1);
+    let rendered = print_hir_function(&func);
+    assert!(
+        rendered.contains("->next") || rendered.contains(".next"),
+        "{rendered}"
+    );
+}

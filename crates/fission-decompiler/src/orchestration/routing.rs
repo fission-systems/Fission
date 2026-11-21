@@ -125,7 +125,7 @@ fn render_selection_from_pcode(
     options: NirRenderOptions,
 ) -> Result<(NirSelection, Option<FactStore>), String> {
     let decomp_ctx = crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
-    match crate::render::render_nir_from_pcode_with_decomp_context(
+    match crate::render::render_nir_from_pcode_with_decomp_context_preserving_options(
         pcode,
         binary,
         address,
@@ -154,13 +154,12 @@ fn render_selection_from_pcode(
             ),
             None,
         )),
-        Err(err) => {
+        Err((recovery_options, err)) => {
             if err.contains("not a function (orphan block detected)") {
                 return Ok((NirRoutingResolver::nir_skipped(&err), None));
             }
             let recovery_decomp_ctx =
                 crate::context::DecompContext::from_facts(binary, fact_store.clone(), address);
-            let recovery_options = crate::render::nir_options_with_recovery(binary, false, false);
             if let Some((selection, learned_facts)) = try_structuring_recovery_from_pcode(
                 pcode,
                 binary,
