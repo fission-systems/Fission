@@ -6,7 +6,6 @@
 use std::ffi::c_void;
 use windows::Wdk::System::Threading::{NtQueryInformationThread, THREADINFOCLASS};
 use windows::Win32::Foundation::HANDLE;
-use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 
 /// One SEH record from the target thread.
 #[derive(Debug, Clone)]
@@ -20,7 +19,10 @@ pub struct SehRecord {
 /// Read the SEH chain for `thread_id` in `process`.
 ///
 /// Uses `NtQueryInformationThread` with `ThreadBasicInformation` to get the
-/// TEB address, then walks `ExceptionList` (TEB+0x00 on x64 = GS:[0]).
+/// TEB address, then walks the list `NtTib.ExceptionList` (TEB+0x00) points
+/// at. A 64-bit thread's chain is normally empty: x64 code registers its
+/// handlers in tables, not on this list. WOW64 threads' 32-bit chain is not
+/// read here.
 pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>, String> {
     #[repr(C)]
     struct ThreadBasicInformation {
@@ -40,6 +42,7 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
         )
         .map_err(|e| format!("OpenThread failed: {:?}", e))?
     };
+    let h_thread = super::OwnedHandle(h_thread);
 
     let mut tbi = ThreadBasicInformation {
         exit_status: 0,
@@ -52,7 +55,7 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
     let mut return_length: u32 = 0;
     let status = unsafe {
         NtQueryInformationThread(
-            h_thread,
+            h_thread.0,
             THREADINFOCLASS(0), // ThreadBasicInformation
             &mut tbi as *mut _ as *mut c_void,
             std::mem::size_of::<ThreadBasicInformation>() as u32,
@@ -71,49 +74,19 @@ pub fn read_seh_chain(process: HANDLE, thread_id: u32) -> Result<Vec<SehRecord>,
         return Err("TEB address is null".to_string());
     }
 
-    // On x64, ExceptionList is at TEB+0x00 (NtTib.ExceptionList)
-    let exception_list_addr = teb;
-    let mut current = exception_list_addr;
-    let mut records = Vec::new();
-    let max_depth = 64;
-
-    for _ in 0..max_depth {
-        if current == 0 || current == 0xFFFFFFFF {
-            break;
-        }
-
-        let mut next: u64 = 0;
-        let mut handler: u64 = 0;
-        let mut read = 0usize;
-
-        unsafe {
-            ReadProcessMemory(
-                process,
-                current as *const c_void,
-                &mut next as *mut _ as *mut c_void,
-                8,
-                Some(&mut read),
-            )
-            .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-
-            ReadProcessMemory(
-                process,
-                (current + 8) as *const c_void,
-                &mut handler as *mut _ as *mut c_void,
-                8,
-                Some(&mut read),
-            )
-            .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        }
-
-        records.push(SehRecord {
-            next,
-            handler,
-            handler_module: None, // Would need module list to resolve
-        });
-
-        current = next;
-    }
-
-    Ok(records)
+    // The chain starts at the pointer stored in `NtTib.ExceptionList`
+    // (TEB+0x00), not at the TEB: walking from the TEB itself read
+    // `ExceptionList` as `Next` and `NtTib.StackBase` as a handler.
+    let head: u64 = super::read_value(process, teb)?;
+    let read_pointer = |address: u64| super::read_value::<u64>(process, address).ok();
+    Ok(
+        crate::debug::platform::windows_layout::walk_seh_chain(head, 8, 64, read_pointer)
+            .into_iter()
+            .map(|link| SehRecord {
+                next: link.next,
+                handler: link.handler,
+                handler_module: None, // Would need module list to resolve
+            })
+            .collect(),
+    )
 }

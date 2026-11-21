@@ -22,6 +22,53 @@ pub mod seh;
 
 pub mod loader;
 pub mod memory;
+
+/// A kernel handle closed when it goes out of scope, so an early return
+/// cannot leak it.
+#[cfg(feature = "windows_native_debugger")]
+pub(crate) struct OwnedHandle(pub windows::Win32::Foundation::HANDLE);
+
+#[cfg(feature = "windows_native_debugger")]
+impl Drop for OwnedHandle {
+    fn drop(&mut self) {
+        // SAFETY: the handle was opened by the owner of this guard and is
+        // closed exactly once, here.
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+/// `size_of::<T>()` bytes read from the target into a `T`.
+///
+/// `ReadProcessMemory` can succeed with fewer bytes than were asked for; the
+/// fields after them were reported as whatever the variable held before.
+#[cfg(feature = "windows_native_debugger")]
+pub(crate) fn read_value<T: Copy + Default>(
+    process: windows::Win32::Foundation::HANDLE,
+    address: u64,
+) -> Result<T, String> {
+    let mut value = T::default();
+    let size = std::mem::size_of::<T>();
+    let mut read = 0usize;
+    // SAFETY: `value` is `size` writable bytes of a plain-data type.
+    unsafe {
+        windows::Win32::System::Diagnostics::Debug::ReadProcessMemory(
+            process,
+            address as *const std::ffi::c_void,
+            &mut value as *mut T as *mut std::ffi::c_void,
+            size,
+            Some(&mut read),
+        )
+    }
+    .map_err(|e| format!("ReadProcessMemory at 0x{address:x} failed: {e:?}"))?;
+    if read != size {
+        return Err(format!(
+            "ReadProcessMemory at 0x{address:x} read {read} of {size} bytes"
+        ));
+    }
+    Ok(value)
+}
 pub mod memory_map;
 pub mod modules;
 pub mod pe_raw;
