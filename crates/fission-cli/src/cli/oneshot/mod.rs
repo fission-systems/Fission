@@ -18,6 +18,7 @@ mod functions;
 mod hex;
 mod identify;
 mod inventory;
+mod languages;
 mod nir_stats;
 mod patch;
 mod pcode_diagnostics;
@@ -74,7 +75,9 @@ use std::io;
 /// that never carry an ELF/PE/Mach-O header to auto-detect from -- same as
 /// in Ghidra itself, where these need to be picked from a language list,
 /// not inferred. This is that manual picker for the CLI.
-fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Result<()> {
+fn language_descriptor(
+    language_id: &str,
+) -> Result<fission_core::architecture::ArchitectureDescriptor> {
     let known = fission_core::architecture::known_language_ids()
         .map_err(|e| anyhow::anyhow!("failed to load SLEIGH language manifest: {e}"))?;
     if !known.contains(language_id) {
@@ -110,6 +113,23 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
         anyhow::anyhow!("malformed --language id `{language_id}`: size `{size}` is not a number")
     })?;
 
+    let endian_word = match endian {
+        "LE" | "le" => "little",
+        "BE" | "be" => "big",
+        other => other,
+    };
+    Ok(fission_core::architecture::ArchitectureDescriptor {
+        processor: processor.to_string(),
+        endian: endian_word.to_string(),
+        bitness,
+        variant: variant.to_string(),
+        abi: None,
+        raw_machine: "cli-language-override".to_string(),
+    })
+}
+
+fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Result<()> {
+    let architecture = language_descriptor(language_id)?;
     binary.load_spec = Some(fission_core::architecture::BinaryLoadSpec::new(
         binary.format.clone(),
         binary.image_base,
@@ -118,21 +138,54 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
         "cli-language-override",
     ));
     binary.arch_spec = language_id.to_string();
-    binary.is_64bit = bitness == 64;
-    let endian_word = match endian {
-        "LE" | "le" => "little",
-        "BE" | "be" => "big",
-        other => other,
-    };
-    binary.architecture = Some(fission_core::architecture::ArchitectureDescriptor {
-        processor: processor.to_string(),
-        endian: endian_word.to_string(),
-        bitness,
-        variant: variant.to_string(),
-        abi: None,
-        raw_machine: "cli-language-override".to_string(),
-    });
+    binary.is_64bit = architecture.bitness == 64;
+    binary.architecture = Some(architecture);
     Ok(())
+}
+
+/// Load `data` as a raw image mapped at `base`: one executable section
+/// holding the whole file, one function at `entry`. A raw image carries no
+/// header, so the language is the caller's to give.
+fn load_raw_image(
+    data: Vec<u8>,
+    path: String,
+    base: u64,
+    entry: Option<u64>,
+    language_id: Option<&str>,
+) -> Result<LoadedBinary> {
+    let language_id = language_id.ok_or_else(|| {
+        anyhow::anyhow!(
+            "--base loads the file as a raw image, which says nothing about what it holds; \
+             give --language too (`fission_cli languages` lists the IDs)"
+        )
+    })?;
+    let architecture = language_descriptor(language_id)?;
+    let entry = entry.unwrap_or(base);
+    let end = base.checked_add(data.len() as u64).ok_or_else(|| {
+        anyhow::anyhow!("--base 0x{base:x} plus the file's size overflows the address space")
+    })?;
+    anyhow::ensure!(
+        (base..end).contains(&entry),
+        "--entry 0x{entry:x} is outside the image (0x{base:x}..0x{end:x})"
+    );
+    let hint = fission_loader::loader::formats::raw::RawLoadHint {
+        image_base: base,
+        entry_point: entry,
+        architecture,
+        load_spec: fission_core::architecture::BinaryLoadSpec::new(
+            "Raw Binary",
+            base,
+            language_id,
+            "default",
+            "cli-raw-load",
+        ),
+    };
+    fission_loader::loader::formats::raw::BinaryLoader::parse_with_hint(
+        fission_loader::loader::DataBuffer::Heap(data),
+        path,
+        hint,
+    )
+    .map_err(|err| anyhow::anyhow!("failed to load raw image: {err}"))
 }
 
 /// Print a one-time stderr warning when the DIE detection engine
@@ -302,6 +355,7 @@ fn run() -> Result<()> {
         ParsedInvocation::Verify(args) => run_verify(args),
         ParsedInvocation::Schema(args) => crate::cli::contract::run_schema(&args),
         ParsedInvocation::Skill => crate::cli::skill::run_skill(),
+        ParsedInvocation::Languages(args) => languages::run(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -964,11 +1018,33 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         None => binary_data,
     };
 
-    let mut binary = LoadedBinary::from_bytes(
-        binary_data.clone(),
-        cli.binary.to_string_lossy().to_string(),
-    )
-    .with_context(|| format!("failed to parse binary `{}`", cli.binary.display()))?;
+    anyhow::ensure!(
+        cli.raw_entry.is_none() || cli.raw_base.is_some(),
+        "--entry only applies to a raw image; give --base too"
+    );
+    let mut binary = match cli.raw_base {
+        Some(base) => load_raw_image(
+            binary_data.clone(),
+            cli.binary.to_string_lossy().to_string(),
+            base,
+            cli.raw_entry,
+            cli.language_override.as_deref(),
+        )?,
+        None => LoadedBinary::from_bytes(
+            binary_data.clone(),
+            cli.binary.to_string_lossy().to_string(),
+        )
+        .with_context(|| {
+            if cli.language_override.is_some() {
+                format!(
+                    "failed to parse binary `{}` (to read it as a raw image, give --base <ADDR>)",
+                    cli.binary.display()
+                )
+            } else {
+                format!("failed to parse binary `{}`", cli.binary.display())
+            }
+        })?,
+    };
 
     if let Some(language_id) = cli.language_override.as_deref() {
         apply_language_override(&mut binary, language_id)?;

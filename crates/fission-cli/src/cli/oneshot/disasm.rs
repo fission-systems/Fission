@@ -152,11 +152,15 @@ pub(super) fn disassemble(
         let instr_json: Vec<serde_json::Value> = instructions
             .iter()
             .map(|(ip, bytes, mnemonic)| {
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "address": format!("0x{:x}", ip),
                     "bytes": bytes,
                     "instruction": mnemonic,
-                })
+                });
+                if let Some(source) = source_line(binary, *ip) {
+                    row["source"] = source;
+                }
+                row
             })
             .collect();
         let json_output = serde_json::to_string_pretty(&instr_json).map_err(|e| {
@@ -237,6 +241,9 @@ pub(super) fn disassemble_function(
                     if !note.is_empty() {
                         row["refers_to"] = serde_json::json!(note);
                     }
+                    if let Some(source) = source_line(binary, *ip) {
+                        row["source"] = source;
+                    }
                     row
                 })
                 .collect::<Vec<_>>(),
@@ -315,4 +322,16 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("not in any section"));
     }
+}
+
+/// The DWARF line-table row covering `address`, if the binary has one. A row
+/// with line 0 is a marker for code with no source line, so it is not one.
+pub(crate) fn source_line(
+    binary: &fission_loader::loader::LoadedBinary,
+    address: u64,
+) -> Option<serde_json::Value> {
+    binary
+        .line_for_address(address)
+        .filter(|row| row.line > 0)
+        .map(|row| serde_json::json!({ "file": row.file, "line": row.line }))
 }
