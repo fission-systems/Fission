@@ -88,6 +88,8 @@ fission_cli search ./target.bin --text 'license'               # addresses, feed
 fission_cli search ./target.bin --bytes '48 8b ?? 24' --section .text --limit 20
 fission_cli --contract v1 hex ./target.bin --addr 0x401230 --count 64 --json
 fission_cli --contract v1 disasm ./target.bin --addr 0x401230 --function --json
+fission_cli --contract v1 whatis ./target.bin --addr 0x401230 --json
+fission_cli --contract v1 types ./target.bin --json
 ```
 
 - Addresses are virtual addresses in hex, the same ones every command speaks.
@@ -97,6 +99,12 @@ fission_cli --contract v1 disasm ./target.bin --addr 0x401230 --function --json
   window (`--count`).
 - Use `hex` for lookup tables and encoded data (immediate bytes, XOR keys), and
   `search --value` for a constant in the binary's endianness.
+- `whatis` names the function (and offset), section, symbols and relocations at an
+  address, and the source line when the binary has DWARF; `disasm --json` rows
+  carry the same `source`.
+- `types` lists the classes and structs the loader recovered from metadata, with
+  fields. Types marked `"verified": false` (Objective-C, Swift, Rust vtables) come
+  from untested recovery: confirm them before relying on a layout.
 
 ## Decompile
 
@@ -121,8 +129,9 @@ fission_cli --contract v1 decomp ./target.bin --addresses-file addrs.txt --json
   `fission_cli inventory function-facts` (JSONL plus a summary), which is a
   different workflow from `decomp --all`.
 - Each item has `code`, `variables` (name, type, size, stack offset), `line_mappings`
-  (printed line to instruction addresses, only where provable), `engine_used`,
-  `fell_back` and `fallback_reason`. A failed item carries an `error` string and
+  (printed line to instruction addresses, only where provable), `globals` (name, C
+  type, address), `frame` (stack slots by frame offset), `declared_callees`,
+  `engine_used`, `fell_back` and `fallback_reason`. A failed item carries an `error` string and
   `fell_back: true`; do not read its `code` as a result.
 - `--timeout-ms` sets a per-call time limit. A function that hits it is reported as
   a timeout; retry that address alone with a larger value.
@@ -154,9 +163,20 @@ fission_cli --contract v1 sandbox ./target.bin --json --max-inst 100000 \
 - Some programs exit 0 on both the right and the wrong input. Compare the output
   text, and run wrong, truncated, extended and empty inputs as controls.
 - A run that hit `--max-inst` without a guest exit is incomplete. Do not report it.
+- To find the input that reaches a branch, explore symbolically: stdin is the
+  symbolic input, and each found path comes with the solved bytes.
+- To test one function, call it with your own arguments instead of running the
+  whole program.
 - `fission_cli verify --addr 0x... --tier concrete|ground-truth|symbolic|all` checks
   Fission's own IR against the machine code; use it when you suspect the
-  decompiler, not the program.
+  decompiler, not the program. JSON results carry `counterexamples` as fields and
+  the `seed` that reproduces them.
+
+```bash
+fission_cli --contract v1 sandbox ./target.bin --stdin-mock X --sym-explore --find 0x4011a2 --avoid 0x4011c0 --json
+fission_cli --contract v1 call ./target.bin --name check --arg 7 --json
+fission_cli --contract v1 call ./target.bin --addr 0x401230 --stub-calls 0 --json
+```
 - `raw-pcode`, `pcode-stages` and `nir-stats` show the lift beneath a suspect line.
 
 The sandbox is an emulator with a modelled Linux x86-64 runtime, not a full libc or
@@ -175,6 +195,7 @@ fission_cli db ./target.bin name 0x401230 check_password --json
 fission_cli db ./target.bin note 0x401230 'xors input with 0x24' --json
 fission_cli db ./target.bin show --json
 fission_cli db ./target.bin undo --json
+fission_cli db ./target.bin watch 0x404010 --size 4 --json   # restored by debug sessions
 ```
 
 Keep solver scripts, derived keys and useful addresses in your own notes as well; a
@@ -194,6 +215,9 @@ fission_cli patch ./target.bin --addr 0x401760 --nop 5 --output patched.bin
 
 - `identify` matches functions against bundled Ghidra FID databases. It helps on
   statically linked binaries; on dynamically linked ones there is little to match.
+  A miss on `--function` reports the function's hashes, or that it could not be
+  hashed.
+- `fission_cli api CreateFileW` prints a known API's prototype; no binary needed.
 - `similar` builds a structural index across binaries
   (`--update-index functions.json`, then `--index functions.json --function 0x...`).
   Its fingerprints are opaque hashes: a high score is a lead, not proof that two
@@ -204,7 +228,7 @@ fission_cli patch ./target.bin --addr 0x401760 --nop 5 --output patched.bin
 | Input | What to do |
 |-------|------------|
 | Fat Mach-O | `--arch x86_64\|arm64\|arm64e` picks the slice; `info` marks the default. |
-| Headerless or firmware image | `--language processor:endian:size:variant` (for example `x86:LE:64:default`) skips auto-detection. |
+| Headerless or firmware image | `--language ID --base ADDR` (and `--entry ADDR`) loads it as a raw image; `fission_cli languages` lists the IDs. `--language` alone only relabels a file that has a header. |
 | Archive (`.zip`, `.tgz`) | Extract it and analyse the executable inside. |
 | Packed binary | Fission has no unpacker. Unpack with another tool first, then analyse the output. |
 | Missing signatures/detectors | `--resource-root DIR` or `FISSION_RESOURCE_ROOT`. |
