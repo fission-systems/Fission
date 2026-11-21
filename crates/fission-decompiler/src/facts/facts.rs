@@ -340,7 +340,16 @@ fn build_nir_call_prototype_summaries(
     // `insert` rather than `entry().or_insert`: this is the one source that
     // outranks the rest, and the imports pass above has already filled in
     // whatever a name happens to collide with in a signature database.
-    for (address, signature) in &binary.user_signatures {
+    //
+    // Summaries are keyed by name, and two functions can share one (static
+    // functions of different translation units: dash has an arithmetic
+    // `primary(token, val, op, noeval)` and a test-builtin `primary(n)`).
+    // Both maps below are `HashMap`s, whose order changes per process, so
+    // visit them in address order or the summary a name gets -- and the
+    // argument count of every call to it -- changes from run to run.
+    let mut user_signatures = binary.user_signatures.iter().collect::<Vec<_>>();
+    user_signatures.sort_unstable_by_key(|(address, _)| **address);
+    for (address, signature) in user_signatures {
         let Some(function) = binary.function_at_exact(*address) else {
             continue;
         };
@@ -371,7 +380,9 @@ fn build_nir_call_prototype_summaries(
         );
     }
 
-    for (&address, debug) in binary.dwarf_functions.iter() {
+    let mut dwarf_functions = binary.dwarf_functions.iter().collect::<Vec<_>>();
+    dwarf_functions.sort_unstable_by_key(|(address, _)| **address);
+    for (&address, debug) in dwarf_functions {
         if debug.name.is_empty() {
             continue;
         }
@@ -2640,7 +2651,7 @@ mod tests {
     use fission_pcode::midend::cspec::register_namer_for_abi;
     use fission_signatures::win_types::WindowsStructures;
     use fission_static::analysis::decomp::facts::FactStore;
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeSet, HashMap, HashSet};
 
     fn type_context_with_call_target(addr: u64, name: &str) -> NirTypeContext {
         let mut ctx = NirTypeContext::default();
@@ -2737,6 +2748,53 @@ mod tests {
         assert_eq!(hints.variadic_fixed_arity, Some(1));
         assert_eq!(hints.param_names, ["format"]);
         assert!(hints.param_type_names.keys().all(|index| *index == 0));
+    }
+
+    /// Two debug-info functions share a name with different arities. The
+    /// name-keyed summary used to keep whichever `HashMap` iteration reached
+    /// first, so the arity of every call to the name changed between runs.
+    /// Each fresh `HashMap` has fresh random keys, so rebuilding many times
+    /// in one process exposes the order dependence.
+    #[test]
+    fn same_named_debug_functions_summarise_in_address_order() {
+        let debug = |address: u64, arity: usize| DwarfFunctionInfo {
+            address,
+            name: "primary".to_string(),
+            return_type: Some("int".to_string()),
+            params: (0..arity)
+                .map(|index| DwarfParamInfo {
+                    name: format!("p{index}"),
+                    type_name: "int".to_string(),
+                    location: DwarfLocation::Unknown,
+                })
+                .collect(),
+            variadic: false,
+            local_vars: Vec::new(),
+            frame_base: DwarfFrameBase::Unknown,
+            size: 0,
+        };
+        let arities = (0..64)
+            .map(|_| {
+                let mut binary = LoadedBinaryBuilder::new(
+                    "shared-name.elf".to_string(),
+                    DataBuffer::Heap(Vec::new()),
+                )
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .entry_point(0x535a)
+                .is_64bit(true)
+                .build()
+                .expect("build shared-name fixture");
+                binary.dwarf_functions = std::sync::Arc::new(HashMap::from([
+                    (0x535a, debug(0x535a, 4)),
+                    (0x18a83, debug(0x18a83, 1)),
+                ]));
+                let summaries = super::build_nir_call_prototype_summaries(&HashMap::new(), &binary);
+                summaries["primary"].locked_exact_arity
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(arities, BTreeSet::from([Some(4)]));
     }
 
     #[test]
