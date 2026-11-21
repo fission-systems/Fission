@@ -2198,18 +2198,18 @@ fn cast_pointer_vars_in_bitop_text(mut text: String, ctx: &PrintCtx<'_>) -> Stri
         return text;
     }
     for (name, ty) in &ctx.var_types {
-        if !matches!(ty, NirType::Ptr(_)) {
+        if !matches!(ty, NirType::Ptr(_)) || !text.contains(*name) {
             continue;
         }
         for op in ["^", "&", "|"] {
-            text = text.replace(
-                &format!(" {op} {name}"),
-                &format!(" {op} (unsigned long long){name}"),
-            );
-            text = text.replace(
-                &format!("({name} {op} "),
-                &format!("((unsigned long long){name} {op} "),
-            );
+            let rhs_pat = format!(" {op} {name}");
+            if text.contains(&rhs_pat) {
+                text = text.replace(&rhs_pat, &format!(" {op} (unsigned long long){name}"));
+            }
+            let lhs_pat = format!("({name} {op} ");
+            if text.contains(&lhs_pat) {
+                text = text.replace(&lhs_pat, &format!("((unsigned long long){name} {op} "));
+            }
         }
     }
     text

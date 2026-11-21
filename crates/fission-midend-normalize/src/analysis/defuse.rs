@@ -964,9 +964,25 @@ fn record_address_contributors(
 ) {
     let mut address_names = HashSet::default();
     collect_address_provenance_vars(address, &mut address_names);
+    // Any node already in `out` has had its entire reachable dependency subgraph
+    // inserted, so pruning at `out` yields the exact same contributor set.
+    let mut worklist = Vec::new();
     for name in address_names {
-        for contributor in proof.nodes_reaching_from(&name) {
-            out.entry(contributor).or_insert_with(|| pointee.clone());
+        if proof.can_reach_roots.contains(&name) && !out.contains_key(&name) {
+            worklist.push(name);
+        }
+    }
+    while let Some(candidate) = worklist.pop() {
+        if !proof.can_reach_roots.contains(&candidate) || out.contains_key(&candidate) {
+            continue;
+        }
+        out.insert(candidate.clone(), pointee.clone());
+        if let Some(sources) = proof.dependencies.get(&candidate) {
+            for source in sources {
+                if proof.can_reach_roots.contains(source) && !out.contains_key(source) {
+                    worklist.push(source.clone());
+                }
+            }
         }
     }
 }
