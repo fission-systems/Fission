@@ -94,12 +94,43 @@ impl AigManager {
         self.array_axioms_enabled = enabled;
     }
 
-    fn has_array_axioms(array: &SymExpr) -> bool {
+    /// Why `ArrayTheory`'s axioms do not describe a read of `array`, if they
+    /// do not.
+    ///
+    /// A store whose value is wider than the array's element is one such
+    /// reason. The axiom for it is `select(store(a, i, v), i) == v`, and
+    /// equality zero-extends the narrower side -- the element -- so the
+    /// axiom asserts that `v`'s high bits are zero. With `v == 0x1234`
+    /// stored into a byte array that made the whole problem UNSAT, though no
+    /// assertion said anything of the kind. SMT-LIB has no such store to
+    /// take a meaning from, so the read is unsupported rather than given one.
+    fn array_axiom_gap(array: &SymExpr) -> Option<String> {
         match array {
-            SymExpr::Var { .. } => true,
-            SymExpr::ArrayStore { array, .. } => Self::has_array_axioms(array),
-            SymExpr::Ite { t, f, .. } => Self::has_array_axioms(t) && Self::has_array_axioms(f),
-            _ => false,
+            // `ArrayTheory` skips an array whose index or element is not a
+            // 1-to-64-bit scalar, and a read it wrote no axioms for is a
+            // free value: two reads at the same index could differ.
+            SymExpr::Var { sort, .. } => {
+                (!crate::theory::array::has_supported_scalar_array_sort(array))
+                    .then(|| format!("ArraySelect over an array of sort {sort:?}"))
+            }
+            SymExpr::ArrayStore {
+                array: inner,
+                value,
+                ..
+            } => {
+                let element = array.get_bit_width();
+                let stored = value.get_bit_width();
+                if stored > element {
+                    return Some(format!(
+                        "ArrayStore of a {stored}-bit value into {element}-bit elements"
+                    ));
+                }
+                Self::array_axiom_gap(inner)
+            }
+            SymExpr::Ite { t, f, .. } => {
+                Self::array_axiom_gap(t).or_else(|| Self::array_axiom_gap(f))
+            }
+            _ => Some("ArraySelect over a term without array axioms".to_string()),
         }
     }
 
@@ -192,6 +223,10 @@ impl AigManager {
     /// What lowering met and could not encode, in the order it was met.
     pub fn unsupported(&self) -> &[String] {
         &self.unsupported
+    }
+
+    pub(crate) fn take_unsupported(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.unsupported)
     }
 
     pub fn note_unsupported(&mut self, what: String) {
@@ -565,11 +600,15 @@ impl AigManager {
                     array.as_ref(),
                     SymExpr::Var { name, .. } if name.starts_with("space_")
                 );
-                let theory_backed = self.array_axioms_enabled && Self::has_array_axioms(array);
-                if !oracle_backed && !theory_backed {
-                    self.note_unsupported(
-                        "ArraySelect over a term without array axioms".to_string(),
-                    );
+                if !oracle_backed {
+                    let gap = if self.array_axioms_enabled {
+                        Self::array_axiom_gap(array)
+                    } else {
+                        Some("ArraySelect over a term without array axioms".to_string())
+                    };
+                    if let Some(gap) = gap {
+                        self.note_unsupported(gap);
+                    }
                 }
                 if let Some(bits) = self.array_select_map.get(expr) {
                     bits.clone()

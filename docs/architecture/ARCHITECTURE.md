@@ -138,12 +138,12 @@ the CFB header shape; MSI classification is not inferred from strings or names.
 Raw P-code and full benchmark lanes must skip these rows unless an extracted
 executable child is explicitly provided.
 
-Loader provenance is a public contract shared by CLI and GUI surfaces.
+Loader provenance is a public contract shared by the CLI, its JSON output and scripts.
 `FunctionInfo.origin`, `kind`, `is_import`, `is_export`, `is_thunk_like`,
 `external_library`, and `source_section` classify whether a record is code,
 entry, export, true import, import thunk, undefined external, debug-only symbol,
 or data-derived metadata. User-facing and decompile-seed function lists must go
-through `loader::function_view`; CLI and GUI must not reconstruct independent
+through `loader::function_view`; the CLI and scripts must not reconstruct independent
 function/import/export filtering rules.
 
 **Loader Parity and Enrichment Features.** To achieve strict parity with Ghidra's binary analysis ecosystem, `fission-loader` implements advanced metadata enrichment and validation layers:

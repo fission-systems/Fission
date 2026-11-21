@@ -2887,7 +2887,7 @@ fn deindirect_resolves_const_address_to_symbol() {
             ],
             ty: NirType::Unknown,
         })],
-        callee_summaries,
+        callee_summaries: callee_summaries.into(),
         ..Default::default()
     };
 
@@ -2959,7 +2959,7 @@ fn deindirect_resolves_var_initializer_to_symbol() {
             args: vec![PreHirExpr::Var("fn_ptr".to_string())],
             ty: NirType::Unknown,
         })],
-        callee_summaries,
+        callee_summaries: callee_summaries.into(),
         ..Default::default()
     };
 
@@ -3036,7 +3036,7 @@ fn deindirect_resolves_iat_load_to_symbol() {
             args: vec![iat_load, PreHirExpr::Var("param_1".to_string())],
             ty: NirType::Unknown,
         })],
-        callee_summaries,
+        callee_summaries: callee_summaries.into(),
         ..Default::default()
     };
 

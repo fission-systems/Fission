@@ -31,6 +31,23 @@ impl WindowsMemory {
     }
 }
 
+fn close_handle(handle: isize) {
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    // SAFETY: HANDLE is repr(transparent) over the value `OpenProcess` gave;
+    // it is closed once, by its owner.
+    unsafe {
+        let _ = CloseHandle(HANDLE(handle as _));
+    }
+}
+
+impl Drop for WindowsMemory {
+    fn drop(&mut self) {
+        if let Some(handle) = self.process_handle.take() {
+            close_handle(handle);
+        }
+    }
+}
+
 impl Default for WindowsMemory {
     fn default() -> Self {
         Self::new()
@@ -48,7 +65,11 @@ impl PlatformMemory for WindowsMemory {
             })?
         };
 
-        self.process_handle = Some(handle.0 as isize);
+        // Opening another process replaces the handle; the old one is closed
+        // rather than dropped on the floor.
+        if let Some(previous) = self.process_handle.replace(handle.0 as isize) {
+            close_handle(previous);
+        }
         Ok(())
     }
 

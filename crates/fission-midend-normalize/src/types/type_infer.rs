@@ -137,28 +137,37 @@ fn collect_value_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>) {
         PreHirExpr::Var(name) => {
             out.insert(name.clone());
         }
-        PreHirExpr::Cast { expr, .. }
-        | PreHirExpr::Unary { expr, .. }
-        | PreHirExpr::PtrOffset { base: expr, .. }
-        | PreHirExpr::AggregateCopy { src: expr, .. } => {
+        PreHirExpr::Cast { ty, expr } => {
+            if !matches!(ty, NirType::Bool | NirType::Float { .. })
+                && !matches!(ty, NirType::Int { bits, .. } if *bits < 32)
+            {
+                collect_value_provenance_vars(expr, out);
+            }
+        }
+        PreHirExpr::PtrOffset { base: expr, .. } | PreHirExpr::AggregateCopy { src: expr, .. } => {
             collect_value_provenance_vars(expr, out);
         }
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_value_provenance_vars(lhs, out);
-            collect_value_provenance_vars(rhs, out);
-        }
+        PreHirExpr::Binary { op, lhs, rhs, .. } => match op {
+            PreHirBinaryOp::Add => {
+                collect_value_provenance_vars(lhs, out);
+                collect_value_provenance_vars(rhs, out);
+            }
+            PreHirBinaryOp::Sub => {
+                collect_value_provenance_vars(lhs, out);
+            }
+            _ => {}
+        },
         PreHirExpr::Select {
-            cond,
             then_expr,
             else_expr,
             ..
         } => {
-            collect_value_provenance_vars(cond, out);
             collect_value_provenance_vars(then_expr, out);
             collect_value_provenance_vars(else_expr, out);
         }
         // The loaded value does not inherit the scalar role of its address.
-        PreHirExpr::Load { .. }
+        PreHirExpr::Unary { .. }
+        | PreHirExpr::Load { .. }
         | PreHirExpr::Index { .. }
         | PreHirExpr::FieldAccess { .. }
         | PreHirExpr::Call { .. }
@@ -2525,5 +2534,125 @@ mod tests {
             func.return_type, u8_ty,
             "genuine narrow return from u8 load must not be promoted to 32 bits"
         );
+    }
+
+    #[test]
+    fn scaled_param_offset_and_narrow_stack_slot_are_not_promoted_to_pointer() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let body = vec![
+            make_assign("local_4", PreHirExpr::Const(0, u32_ty.clone())),
+            make_assign(
+                "scaled",
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Cast {
+                        ty: i64_ty.clone(),
+                        expr: Box::new(PreHirExpr::Var("param_1".into())),
+                    }),
+                    rhs: Box::new(PreHirExpr::Const(4, i64_ty)),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            make_assign(
+                "addr",
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(PreHirExpr::AddressOfGlobal("table".into())),
+                    rhs: Box::new(PreHirExpr::Var("scaled".into())),
+                    ty: u64_ty.clone(),
+                },
+            ),
+            make_assign(
+                "loaded",
+                PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("addr".into())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+            make_assign(
+                "indirect",
+                PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Var("local_4".into())),
+                    ty: u32_ty.clone(),
+                },
+            ),
+        ];
+        let mut func = make_func(
+            vec![
+                make_typed_binding("local_4", u32_ty.clone(), NirBindingOrigin::StackOffset(4)),
+                make_binding("scaled"),
+                make_binding("addr"),
+                make_binding("loaded"),
+                make_binding("indirect"),
+            ],
+            body,
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+        func.params = vec![make_param("param_1", u32_ty.clone())];
+
+        super::apply_type_inference_pass(&mut func);
+
+        assert_eq!(func.params[0].ty, u32_ty);
+        assert_eq!(func.locals[0].ty, u32_ty);
+    }
+
+    #[test]
+    fn reused_scratch_with_multiple_param_assignments_does_not_promote_all_params() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let body = vec![
+            make_assign("scratch", PreHirExpr::Const(0, u64_ty.clone())),
+            make_assign("scratch", PreHirExpr::Var("param_1".into())),
+            make_assign("scratch", PreHirExpr::Var("param_2".into())),
+            make_assign(
+                "loaded",
+                PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("scratch".into())),
+                        rhs: Box::new(PreHirExpr::Const(0x1000, u64_ty.clone())),
+                        ty: u64_ty.clone(),
+                    }),
+                    ty: u8_ty,
+                },
+            ),
+        ];
+        let mut func = make_func(
+            vec![make_binding("scratch"), make_binding("loaded")],
+            body,
+            NirType::Unknown,
+        );
+        func.is_64bit = true;
+        func.params = vec![
+            make_param("param_1", u32_ty.clone()),
+            make_param("param_2", u32_ty.clone()),
+        ];
+
+        super::apply_type_inference_pass(&mut func);
+
+        assert_eq!(func.params[0].ty, u32_ty);
+        assert_eq!(func.params[1].ty, u32_ty);
     }
 }

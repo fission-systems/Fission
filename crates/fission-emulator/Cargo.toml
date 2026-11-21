@@ -21,7 +21,6 @@ fission-solver = { path = "../fission-solver" }
 anyhow = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
-byteorder = "1.4"
 serde = { version = "1.0", features = ["derive", "rc"] }
 bincode = "1.3.3"
 serde_json = "1.0.150"

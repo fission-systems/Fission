@@ -794,6 +794,141 @@ mod tests {
 
     const THREAD_FLAGS: u64 = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND | CLONE_THREAD;
 
+    /// `write(1, buf, (size_t)-1)` writes what is readable from `buf` on, as
+    /// Linux does, and a buffer that is not readable at all is `EFAULT`. The
+    /// read of the guest buffer allocated the requested count on the host.
+    #[test]
+    fn write_of_an_impossible_count_writes_the_readable_part() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        // The last five bytes of a mapping, with nothing mapped after it.
+        const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, 0x1000, 3, MAP_PRIVATE_ANONYMOUS, u64::MAX, 0],
+        );
+        let page = read_syscall_result(&mut emu) as u64;
+        assert!(!emu.state.page_map.is_mapped(page + 0x1000));
+        let text = page + 0x1000 - 5;
+        emu.state
+            .write_space(emu.state.ram_space(), text, b"hello")
+            .unwrap();
+
+        dispatch_syscall(&env, &mut emu, 1, [1, text, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 5);
+        assert!(emu.vfs.files[&1].content.ends_with(b"hello"));
+
+        dispatch_syscall(&env, &mut emu, 1, [1, page + 0x1000, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -14, "EFAULT");
+    }
+
+    /// A new mapping is zero for its whole length, whatever was mapped there
+    /// before. Only the first megabyte was cleared, so memory a program had
+    /// used, unmapped and mapped again came back holding its old contents --
+    /// to a `calloc` that trusts fresh pages, somebody else's data.
+    #[test]
+    fn a_reused_mapping_is_zero_past_its_first_megabyte() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        const MAP_PRIVATE_ANONYMOUS: u64 = 0x22;
+        const MAP_FIXED: u64 = 0x10;
+        const LEN: u64 = 0x30_0000;
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, LEN, 3, MAP_PRIVATE_ANONYMOUS, u64::MAX, 0],
+        );
+        let base = read_syscall_result(&mut emu) as u64;
+        let ram = emu.state.ram_space();
+        let (near, far) = (base + 0x800, base + 0x28_0000);
+        emu.state.write_space(ram, near, b"near").unwrap();
+        emu.state.write_space(ram, far, b"far!").unwrap();
+        // Positive control: the bytes are there before the remap.
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), b"far!");
+
+        dispatch_syscall(&env, &mut emu, 11, [base, LEN, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [base, LEN, 3, MAP_PRIVATE_ANONYMOUS | MAP_FIXED, u64::MAX, 0],
+        );
+        assert_eq!(read_syscall_result(&mut emu) as u64, base);
+        assert_eq!(emu.state.read_space(ram, near, 4).unwrap(), [0u8; 4]);
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), [0u8; 4]);
+    }
+
+    /// A file mapped without `PROT_WRITE` holds the file. Its bytes were
+    /// stored through the guest's own write check, which a read-only mapping
+    /// fails, so the mapping read as zeros.
+    #[test]
+    fn a_read_only_file_mapping_holds_the_file() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let fd = emu.vfs.open("lib.so", b"\x7fELF and the rest".to_vec());
+        const MAP_PRIVATE: u64 = 2;
+        const PROT_READ: u64 = 1;
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, 0x2000, PROT_READ, MAP_PRIVATE, fd, 4],
+        );
+        let base = read_syscall_result(&mut emu) as u64;
+        assert!(base > 0x1000, "mapped: 0x{base:X}");
+        let ram = emu.state.ram_space();
+        assert_eq!(
+            emu.state.read_space(ram, base, 12).unwrap(),
+            b" and the res"
+        );
+        // Past the end of the file the mapping is zero, and it stays
+        // read-only to the guest.
+        assert_eq!(
+            emu.state.read_space(ram, base + 0x1000, 8).unwrap(),
+            [0u8; 8]
+        );
+        assert!(emu.state.write_space(ram, base, b"x").is_err());
+    }
+
+    /// A terabyte of address space is one mapping, as it is to a kernel --
+    /// not a page-table entry (and a loop iteration) per page, which made
+    /// each of these calls a way to exhaust the host.
+    #[test]
+    fn a_huge_reservation_costs_one_mapping() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        const MAP_PRIVATE_ANONYMOUS_NORESERVE: u64 = 0x4022;
+        const LEN: u64 = 1 << 40;
+        let before = emu.state.page_map.mappings().len();
+        dispatch_syscall(
+            &env,
+            &mut emu,
+            9,
+            [0, LEN, 0, MAP_PRIVATE_ANONYMOUS_NORESERVE, u64::MAX, 0],
+        );
+        let base = read_syscall_result(&mut emu) as u64;
+        assert!(base > 0x1000 && base < 1 << 47, "mapped: 0x{base:X}");
+        assert_eq!(emu.state.page_map.mappings().len(), before + 1);
+        assert!(emu.state.page_map.is_mapped(base + LEN - 1));
+
+        // mprotect the middle, write there, then unmap all of it -- with a
+        // length that runs to the end of the address space.
+        dispatch_syscall(&env, &mut emu, 10, [base + (LEN >> 1), 0x2000, 3, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        let ram = emu.state.ram_space();
+        emu.state
+            .write_space(ram, base + (LEN >> 1), b"data")
+            .expect("the re-protected page takes a write");
+        assert!(emu.state.write_space(ram, base, b"data").is_err());
+        dispatch_syscall(&env, &mut emu, 11, [base, u64::MAX - base, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        assert!(!emu.state.page_map.is_mapped(base + (LEN >> 1)));
+    }
+
     /// `mmap` of zero bytes is `EINVAL`, and of more than the address space
     /// holds `ENOMEM`. The first was taken as one byte and mapped.
     #[test]

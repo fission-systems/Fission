@@ -495,8 +495,16 @@ impl Emulator {
     /// Bump-allocate `size` bytes from the guest heap (extends `brk` as needed).
     ///
     /// Aligns to 16 bytes. `free` is a no-op for this allocator (no reuse).
+    ///
+    /// Fails -- for the guest's `malloc`, with `NULL` -- when the break cannot
+    /// move that far: the size is the guest's, and `malloc((size_t)-1)` used
+    /// to saturate to the top of the address space and ask for all of it.
     pub fn heap_alloc(&mut self, size: u64) -> Result<u64> {
-        let size = size.max(1u64).saturating_add(15) & !15u64;
+        let size = size
+            .max(1)
+            .checked_add(15)
+            .map(|n| n & !15u64)
+            .ok_or_else(|| anyhow::anyhow!("heap_alloc of 0x{size:X} bytes overflows"))?;
         if self.heap_cursor == 0 {
             let base = self.state.page_map.brk.max(self.state.page_map.brk_base);
             if base == 0 {
@@ -505,15 +513,15 @@ impl Emulator {
             self.heap_cursor = self.state.page_map.brk.max(self.state.page_map.brk_base);
         }
         let ptr = self.heap_cursor;
-        let end = ptr.saturating_add(size);
-        if end > self.state.page_map.brk {
-            self.state.page_map.set_brk(end);
+        let end = ptr
+            .checked_add(size)
+            .ok_or_else(|| anyhow::anyhow!("heap_alloc of 0x{size:X} bytes overflows"))?;
+        if end > self.state.page_map.brk && self.state.page_map.set_brk(end) != end {
+            anyhow::bail!("heap_alloc of 0x{size:X} bytes: the break cannot reach 0x{end:X}");
         }
-        // Ensure bytes are resident under page-fault enforcement.
-        let zeros = vec![0u8; size as usize];
-        self.state
-            .write_space(self.state.ram_space(), ptr, &zeros)
-            .map_err(|e| anyhow::anyhow!("heap_alloc write 0x{ptr:X}: {e}"))?;
+        // Fresh from the allocator's point of view, so zero -- without
+        // building a host buffer the size of the request.
+        self.state.zero_range(ptr, size);
         self.heap_cursor = end;
         Ok(ptr)
     }
@@ -1402,16 +1410,7 @@ impl Emulator {
     /// paths that map or protect memory already do this; a front end writing
     /// through the debug backend needs the same.
     pub fn invalidate_translations(&mut self, address: u64, len: usize) {
-        let first = address & !0xFFF;
-        let last = address.saturating_add(len.saturating_sub(1) as u64) & !0xFFF;
-        let mut page = first;
-        loop {
-            self.jit_cache.invalidate_page(page);
-            if page >= last {
-                break;
-            }
-            page += 0x1000;
-        }
+        self.jit_cache.invalidate_range(address, len.max(1) as u64);
     }
 
     // ── Stepping ────────────────────────────────────────────────────────────
@@ -1466,7 +1465,11 @@ impl Emulator {
 
     /// Write bytes through the guest's virtual file system and echo standard
     /// output to the host when enabled. Guest stderr stays on host stderr.
-    pub fn guest_write(&mut self, fd: u64, bytes: &[u8]) -> Result<usize> {
+    pub fn guest_write(
+        &mut self,
+        fd: u64,
+        bytes: &[u8],
+    ) -> std::result::Result<usize, crate::os::vfs::VfsError> {
         let written = self.vfs.write(fd, bytes)?;
         if written > 0 {
             match fd {
@@ -2038,6 +2041,42 @@ impl Emulator {
             let bytes = self.state.read_space(ram, sp + stack_off, ptr_size)?;
             Ok(crate::arch::calling_convention::le_bytes_to_u64(&bytes))
         }
+    }
+
+    /// Set up a call the guest is about to land in: `args` where this guest's
+    /// calling convention passes them, and `return_to` where it keeps the
+    /// return address.
+    ///
+    /// For use at the moment a call has just been made -- so on a
+    /// stack-return architecture the stack pointer is at the return-address
+    /// slot, with stack arguments above it, and on a link-register one the
+    /// address goes in that register.
+    pub fn set_call_frame(&mut self, args: &[u64], return_to: u64) -> Result<()> {
+        let width = usize::from(self.arch.pointer_size).min(8);
+        // Register names are `'static`, so they outlive this borrow of `arch`.
+        let regs: Vec<&'static str> = self.arch.cc.arg_regs().to_vec();
+        let sp = self.read_register_u64(self.arch.sp_reg)?;
+        let ram = self.state.ram_space();
+        for (index, &value) in args.iter().enumerate() {
+            match regs.get(index) {
+                Some(reg) => self.write_register_u64(reg, value)?,
+                None => {
+                    let offset = self.arch.cc.stack_arg_offset(index - regs.len());
+                    self.state.write_space(
+                        ram,
+                        sp.wrapping_add(offset),
+                        &value.to_le_bytes()[..width],
+                    )?;
+                }
+            }
+        }
+        match self.arch.cc.return_addr_reg() {
+            Some(reg) => self.write_register_u64(reg, return_to)?,
+            None => self
+                .state
+                .write_space(ram, sp, &return_to.to_le_bytes()[..width])?,
+        }
+        Ok(())
     }
 
     /// Write `value` to the return-value register according to `arch.cc`.

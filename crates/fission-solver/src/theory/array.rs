@@ -4,6 +4,7 @@ use crate::theory::{Theory, TheoryStatus};
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
+#[derive(Clone)]
 pub struct ArrayTheory {
     /// Maps an Array base expression to its Selects.
     parent_selects: HashMap<SymExpr, Vec<SymExpr>>,
@@ -29,7 +30,9 @@ impl Default for ArrayTheory {
     }
 }
 
-fn has_supported_scalar_array_sort(array: &SymExpr) -> bool {
+/// Whether `array` maps 1-to-64-bit indices to 1-to-64-bit elements: the
+/// only arrays [`ArrayTheory`] writes axioms for.
+pub(crate) fn has_supported_scalar_array_sort(array: &SymExpr) -> bool {
     matches!(
         array.get_sort(),
         Sort::Array { domain, range }
@@ -66,6 +69,20 @@ impl ArrayTheory {
     /// synthesized while unwinding store chains).
     pub fn select_terms(&self) -> impl Iterator<Item = &SymExpr> {
         self.select_order.iter()
+    }
+
+    pub(crate) fn has_new_terms(&self, expr: &SymExpr) -> bool {
+        let mut found = false;
+        expr.visit_preorder(&mut |node| {
+            if matches!(
+                node,
+                SymExpr::ArraySelect { .. } | SymExpr::ArrayStore { .. }
+            ) && !self.processed_terms.contains(node)
+            {
+                found = true;
+            }
+        });
+        found
     }
 
     /// Recursively register every `ArraySelect` and `ArrayStore` within `expr`

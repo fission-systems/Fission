@@ -1699,7 +1699,11 @@ fn return_expr_type(
 /// The merge is monotone: types only move from weaker to stronger:
 /// `Unknown < Int(unsigned) < Int(signed) < Ptr(Unknown) < Ptr(known)`.
 /// An existing `Known` type is NEVER overwritten.
-fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> bool {
+fn merge_constraint(
+    binding: &mut PreHirBinding,
+    constraint: &UseConstraint,
+    pointer_bits: u32,
+) -> bool {
     if binding.surface_type_name.is_some() {
         return false;
     }
@@ -1732,16 +1736,20 @@ fn merge_constraint(binding: &mut PreHirBinding, constraint: &UseConstraint) -> 
         }
         (NirType::Ptr(_), _) => false,
 
-        // Pointer constraint — always upgrade when current is Unknown or Int.
-        (_, UseConstraint::Ptr(pointee)) => {
-            let new_ty = NirType::Ptr(Box::new(pointee.clone()));
-            if binding.ty != new_ty {
-                binding.ty = new_ty;
-                true
-            } else {
-                false
-            }
+        // Pointer constraint — only upgrade Unknown or pointer-width integer
+        // (or non-stack integer bindings).
+        (NirType::Unknown, UseConstraint::Ptr(pointee)) => {
+            binding.ty = NirType::Ptr(Box::new(pointee.clone()));
+            true
         }
+        (NirType::Int { bits, .. }, UseConstraint::Ptr(pointee))
+            if !matches!(binding.origin, Some(NirBindingOrigin::StackOffset(_)))
+                || *bits == pointer_bits =>
+        {
+            binding.ty = NirType::Ptr(Box::new(pointee.clone()));
+            true
+        }
+        (_, UseConstraint::Ptr(_)) => false,
 
         // Exact type from Cast context — only upgrade Unknown.
         (NirType::Unknown, UseConstraint::Exact(ty)) => {
@@ -1966,6 +1974,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         );
         propagate_logical_shift_constraints_through_aliases(&func.body, &mut constraints);
 
+        let pointer_bits = if func.is_64bit { 64 } else { 32 };
         let mut round_changed = current_flow_changed;
         for binding in func.locals.iter_mut().chain(func.params.iter_mut()) {
             if let Some(constraints_for) = constraints.get(&binding.name) {
@@ -1978,7 +1987,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
                     ) {
                         continue;
                     }
-                    round_changed |= merge_constraint(binding, constraint);
+                    round_changed |= merge_constraint(binding, constraint, pointer_bits);
                 }
             }
         }

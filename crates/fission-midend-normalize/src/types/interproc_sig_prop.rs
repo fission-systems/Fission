@@ -15,6 +15,7 @@ use fission_midend_core::ir::{
 };
 use fission_midend_prehir::{PreHirExpr, PreHirFunction, PreHirStmt};
 use indexmap::IndexMap;
+use std::sync::Arc;
 
 use super::{
     callsite_type_prop::{api_signature, is_known_api_signature, win_type_name_to_nir},
@@ -298,7 +299,7 @@ pub fn apply_interproc_callsite_arity_pass(func: &mut PreHirFunction) -> bool {
         }
     }
     for (key, summary) in summaries {
-        func.callee_summaries
+        Arc::make_mut(&mut func.callee_summaries)
             .entry(key)
             .and_modify(|existing| {
                 existing.prototype.min_arity = existing

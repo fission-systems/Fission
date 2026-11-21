@@ -32,7 +32,7 @@ fn snapshot_print_hir_function_minimal() {
         is_big_endian: false,
         suppress_entry_register_params: false,
         callee_observed_max_arity: IndexMap::new(),
-        callee_summaries: IndexMap::new(),
+        callee_summaries: Default::default(),
     };
     assert_snapshot!(print_hir_function(&func));
 }

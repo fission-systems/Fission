@@ -82,7 +82,7 @@ structuring/
 
 - Do not “fix” a guarded-tail failure by forcing a prettier printer shape.
 - Do not relax nested/nonlocal/loop/switch cases without explicit structural proof.
-- Do not broaden acceptance before measuring on 200/500-function automation samples.
+- Do not broaden acceptance before measuring on a DecBench sample of hundreds of functions.
 - Do not patch expression semantics inside structuring. Fix the owner that produced the expression or add a shared analysis fact structuring can consume.
 
 ## Validation

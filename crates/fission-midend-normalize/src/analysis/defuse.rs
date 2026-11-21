@@ -515,14 +515,24 @@ fn collect_address_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>)
         PreHirExpr::Var(name) => {
             out.insert(name.clone());
         }
-        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
-            collect_address_provenance_vars(expr, out);
+        PreHirExpr::Cast { ty, expr } => {
+            if !matches!(ty, NirType::Bool | NirType::Float { .. })
+                && !matches!(ty, NirType::Int { bits, .. } if *bits < 32)
+            {
+                collect_address_provenance_vars(expr, out);
+            }
         }
         PreHirExpr::PtrOffset { base, .. } => collect_address_provenance_vars(base, out),
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_address_provenance_vars(lhs, out);
-            collect_address_provenance_vars(rhs, out);
-        }
+        PreHirExpr::Binary { op, lhs, rhs, .. } => match op {
+            PreHirBinaryOp::Add => {
+                collect_address_provenance_vars(lhs, out);
+                collect_address_provenance_vars(rhs, out);
+            }
+            PreHirBinaryOp::Sub => {
+                collect_address_provenance_vars(lhs, out);
+            }
+            _ => {}
+        },
         PreHirExpr::Select {
             then_expr,
             else_expr,
@@ -531,7 +541,8 @@ fn collect_address_provenance_vars(expr: &PreHirExpr, out: &mut HashSet<String>)
             collect_address_provenance_vars(then_expr, out);
             collect_address_provenance_vars(else_expr, out);
         }
-        PreHirExpr::Load { .. }
+        PreHirExpr::Unary { .. }
+        | PreHirExpr::Load { .. }
         | PreHirExpr::Call { .. }
         | PreHirExpr::Index { .. }
         | PreHirExpr::FieldAccess { .. }

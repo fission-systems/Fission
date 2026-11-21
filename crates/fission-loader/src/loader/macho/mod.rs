@@ -27,6 +27,16 @@ impl MachoLoader {
         // Read Magic
         let bytes = data.as_slice();
         if let Some(slice) = select_fat_slice(bytes) {
+            // A universal file holds thin images. One whose slice is another
+            // universal file would send the loader through itself once per
+            // level, copying the remainder each time: a few thousand nested
+            // 28-byte headers are enough to run out of stack.
+            if is_universal_magic(&bytes[slice.clone()]) {
+                return Err(err!(
+                    loader,
+                    "MalformedHeader: universal Mach-O slice is itself a universal file"
+                ));
+            }
             // Back through the pipeline, not straight back into this loader:
             // a universal file's slices are not all Mach-O. Xcode ships fat
             // `.a`s whose every slice is a Unix archive, and recursing here
@@ -92,9 +102,16 @@ impl MachoLoader {
         for _ in 0..header.ncmds {
             let cmd_start = cursor;
             let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
+            let cmd_end = load_command_end(cmd_start, cmd_header.cmdsize, bytes.len())?;
 
             if cmd_header.cmd == LC_SEGMENT_64 {
                 let seg = SegmentCommand64::parse(&reader, cmd_start)?;
+                ensure_sections_fit(
+                    SegmentCommand64::SIZE,
+                    Section64::SIZE,
+                    seg.nsects,
+                    cmd_header.cmdsize,
+                )?;
                 let seg_name = extract_fixed_string(&seg.segname);
 
                 // Use __TEXT segment's vmaddr as image base (most reliable)
@@ -136,7 +153,7 @@ impl MachoLoader {
                     });
                 }
 
-                cursor = cmd_start + cmd_header.cmdsize as usize;
+                cursor = cmd_end;
                 continue;
             } else if cmd_header.cmd == LC_SYMTAB {
                 let symtab = SymtabCommand::parse(&reader, cmd_start)?;
@@ -148,7 +165,7 @@ impl MachoLoader {
                 // Parse LC_MAIN for entry point
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
                 // entryoff is offset from __TEXT segment start
-                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+                entry_point = macho_entry_point(text_segment_vmaddr, entry_cmd.entryoff)?;
             } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
                 if let Some(thread_entry) =
                     parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
@@ -166,7 +183,7 @@ impl MachoLoader {
             }
 
             // Skip command
-            cursor = cmd_start + cmd_header.cmdsize as usize;
+            cursor = cmd_end;
         }
 
         if image_base == u64::MAX {
@@ -307,9 +324,16 @@ impl MachoLoader {
         for _ in 0..header.ncmds {
             let cmd_start = cursor;
             let cmd_header = LoadCommand::parse(&reader, cmd_start)?;
+            let cmd_end = load_command_end(cmd_start, cmd_header.cmdsize, bytes.len())?;
 
             if cmd_header.cmd == LC_SEGMENT {
                 let seg = SegmentCommand32::parse(&reader, cmd_start)?;
+                ensure_sections_fit(
+                    SegmentCommand32::SIZE,
+                    Section32::SIZE,
+                    seg.nsects,
+                    cmd_header.cmdsize,
+                )?;
                 let seg_name = extract_fixed_string(&seg.segname);
                 if seg_name == "__TEXT" && seg.vmaddr != 0 {
                     text_segment_vmaddr = seg.vmaddr as u64;
@@ -345,7 +369,7 @@ impl MachoLoader {
                 dysymtab_info = Some(DysymtabCommand::parse(&reader, cmd_start)?);
             } else if cmd_header.cmd == LC_MAIN {
                 let entry_cmd = EntryPointCommand::parse(&reader, cmd_start)?;
-                entry_point = text_segment_vmaddr + entry_cmd.entryoff;
+                entry_point = macho_entry_point(text_segment_vmaddr, entry_cmd.entryoff)?;
             } else if matches!(cmd_header.cmd, LC_THREAD | LC_UNIXTHREAD) && entry_point == 0 {
                 if let Some(thread_entry) =
                     parse_macho_thread_entry_point(&reader, cmd_start, cmd_header.cmdsize, cputype)?
@@ -354,7 +378,7 @@ impl MachoLoader {
                 }
             }
 
-            cursor = cmd_start + cmd_header.cmdsize as usize;
+            cursor = cmd_end;
         }
 
         if image_base == u64::MAX {
@@ -534,7 +558,9 @@ impl MachoLoader {
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
 
             for i in 0..num_stubs {
-                let stub_addr = stubs.virtual_address + (i * stub_size);
+                let Some(stub_addr) = stubs.virtual_address.checked_add(i * stub_size) else {
+                    break;
+                };
 
                 // Read indirect symbol table entry
                 if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
@@ -570,7 +596,9 @@ impl MachoLoader {
             };
 
             for i in 0..num_entries {
-                let got_addr = got.virtual_address + (i * entry_size);
+                let Some(got_addr) = got.virtual_address.checked_add(i * entry_size) else {
+                    break;
+                };
 
                 // Read indirect symbol table entry (offset by stubs count)
                 if let Ok(sym_idx) =
@@ -692,7 +720,9 @@ impl MachoLoader {
             let stub_size = 6u64;
             let num_stubs = (stubs.virtual_size / stub_size).min(dysymtab.nindirectsyms as u64);
             for i in 0..num_stubs {
-                let stub_addr = stubs.virtual_address + i * stub_size;
+                let Some(stub_addr) = stubs.virtual_address.checked_add(i * stub_size) else {
+                    break;
+                };
                 if let Ok(sym_idx) = reader.u32((indirect_off + i * 4) as usize) {
                     if sym_idx < symtab.nsyms {
                         let name = Self::get_symbol_name_32(data, symtab, sym_idx, endian);
@@ -717,7 +747,9 @@ impl MachoLoader {
                 .map(|stubs| (stubs.virtual_size / 6) as u32)
                 .unwrap_or(0);
             for i in 0..num_entries {
-                let got_addr = got.virtual_address + i * entry_size;
+                let Some(got_addr) = got.virtual_address.checked_add(i * entry_size) else {
+                    break;
+                };
                 if let Ok(sym_idx) =
                     reader.u32((indirect_off + (stubs_count as u64 + i) * 4) as usize)
                 {
@@ -1631,28 +1663,48 @@ fn macho_arch_name(cputype: i32, cpusubtype: i32) -> String {
 /// Empty for a file that is not universal, so a caller can use a non-empty
 /// result as the test for "this file holds more than one architecture".
 pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
+    const FAT_HEADER: usize = 8;
+    const FAT_ARCH: usize = 20;
+
     let mut out = Vec::new();
-    if bytes.len() < 8 {
-        return out;
-    }
-    let Ok(head) = bytes[0..4].try_into() else {
-        return out;
-    };
-    if !matches!(u32::from_be_bytes(head), MACHO_FAT_MAGIC | MACHO_FAT_CIGAM) {
-        return out;
-    }
-    let Ok(count) = bytes[4..8].try_into() else {
+    let Some(magic) = bytes
+        .get(0..4)
+        .and_then(|head| head.try_into().ok())
+        .map(u32::from_be_bytes)
+    else {
         return out;
     };
-    let nfat_arch = u32::from_be_bytes(count) as usize;
-    let mut offset = 8usize;
-    for _ in 0..nfat_arch {
-        if offset + 20 > bytes.len() {
-            break;
-        }
-        let read = |at: usize| -> Option<u32> {
-            bytes[at..at + 4].try_into().ok().map(u32::from_be_bytes)
-        };
+    // The header is big-endian on disk whatever the slices are. `FAT_CIGAM`
+    // is the same header written little-endian: accept it, and then read it
+    // that way -- the magic used to be accepted and the fields still decoded
+    // big-endian, turning `nfat_arch = 1` into sixteen million.
+    let big_endian = match magic {
+        MACHO_FAT_MAGIC => true,
+        MACHO_FAT_CIGAM => false,
+        _ => return out,
+    };
+    let read = |at: usize| -> Option<u32> {
+        let word: [u8; 4] = bytes.get(at..at.checked_add(4)?)?.try_into().ok()?;
+        Some(if big_endian {
+            u32::from_be_bytes(word)
+        } else {
+            u32::from_le_bytes(word)
+        })
+    };
+    let Some(nfat_arch) = read(4).map(|count| count as usize) else {
+        return out;
+    };
+    // Slices follow the architecture table. One that starts inside it -- at
+    // offset 0 it is the whole file again -- is not a slice, and loading it
+    // sent the loader back into the same bytes until the stack ran out.
+    let Some(table_end) = nfat_arch
+        .checked_mul(FAT_ARCH)
+        .and_then(|table| table.checked_add(FAT_HEADER))
+    else {
+        return out;
+    };
+    for index in 0..nfat_arch {
+        let offset = FAT_HEADER + index * FAT_ARCH;
         let (Some(cputype), Some(cpusubtype), Some(slice_offset), Some(slice_size)) = (
             read(offset),
             read(offset + 4),
@@ -1663,7 +1715,7 @@ pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
         };
         let (cputype, cpusubtype) = (cputype as i32, cpusubtype as i32);
         let (slice_offset, slice_size) = (slice_offset as usize, slice_size as usize);
-        if slice_offset.saturating_add(slice_size) <= bytes.len() {
+        if slice_offset >= table_end && slice_offset.saturating_add(slice_size) <= bytes.len() {
             out.push(UniversalSlice {
                 arch: macho_arch_name(cputype, cpusubtype),
                 cputype,
@@ -1672,7 +1724,6 @@ pub fn universal_slices(bytes: &[u8]) -> Vec<UniversalSlice> {
                 size: slice_size,
             });
         }
-        offset += 20;
     }
     out
 }
@@ -1722,6 +1773,65 @@ fn select_fat_slice(bytes: &[u8]) -> Option<std::ops::Range<usize>> {
         .find_map(|wanted| slices.iter().find(|slice| slice.cputype == *wanted))
         .or_else(|| slices.first())
         .map(|slice| slice.offset..slice.offset + slice.size)
+}
+
+/// Whether `bytes` begin with either byte order of the universal magic.
+fn is_universal_magic(bytes: &[u8]) -> bool {
+    bytes
+        .get(0..4)
+        .and_then(|head| head.try_into().ok())
+        .map(u32::from_be_bytes)
+        .is_some_and(|magic| matches!(magic, MACHO_FAT_MAGIC | MACHO_FAT_CIGAM))
+}
+
+/// The offset just past the load command at `cmd_start`.
+///
+/// `cmdsize` is untrusted. A command shorter than its own eight-byte header
+/// cannot be stepped over -- `cmdsize == 0` leaves the cursor where it is, and
+/// the loader then re-read that command `ncmds` times, up to four billion,
+/// appending a segment's sections again on every pass. One that runs past the
+/// end of the file is not a command either. With both refused, every iteration
+/// advances by at least eight bytes inside the file, which bounds the loop by
+/// the file's length whatever `ncmds` claims.
+fn load_command_end(cmd_start: usize, cmdsize: u32, file_len: usize) -> Result<usize> {
+    const LOAD_COMMAND_HEADER: u32 = 8;
+    let end = cmd_start.checked_add(cmdsize as usize);
+    match end {
+        Some(end) if cmdsize >= LOAD_COMMAND_HEADER && end <= file_len => Ok(end),
+        _ => Err(err!(
+            loader,
+            "MalformedHeader: Mach-O load command at {cmd_start:#x} has size {cmdsize}"
+        )),
+    }
+}
+
+/// A segment command's section headers lie inside the command.
+fn ensure_sections_fit(
+    segment_size: usize,
+    section_size: usize,
+    nsects: u32,
+    cmdsize: u32,
+) -> Result<()> {
+    let needed = (nsects as usize)
+        .checked_mul(section_size)
+        .and_then(|sections| sections.checked_add(segment_size));
+    match needed {
+        Some(needed) if needed <= cmdsize as usize => Ok(()),
+        _ => Err(err!(
+            loader,
+            "MalformedHeader: Mach-O segment claims {nsects} sections in a {cmdsize}-byte command"
+        )),
+    }
+}
+
+/// `LC_MAIN`'s entry point: an offset from the start of `__TEXT`.
+fn macho_entry_point(text_vmaddr: u64, entryoff: u64) -> Result<u64> {
+    text_vmaddr.checked_add(entryoff).ok_or_else(|| {
+        err!(
+            loader,
+            "MalformedHeader: Mach-O entry offset {entryoff:#x} is outside the address space"
+        )
+    })
 }
 
 fn decode_macho_function_starts(fs_data: &[u8], base_addr: u64) -> Vec<u64> {

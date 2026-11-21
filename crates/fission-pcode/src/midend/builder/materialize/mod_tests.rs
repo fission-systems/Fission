@@ -6763,3 +6763,31 @@ fn a_definition_whose_input_is_rewritten_before_its_use_is_not_inlined() {
         "the load reads the pointer after its increment:\n{code}"
     );
 }
+
+#[test]
+fn canonical_x86_gpr64_name_ignores_constant_varnodes() {
+    let options = crate::midend::builder::materialize::test_support::test_options();
+    let pcode = pcode_function(vec![block(vec![op(
+        0,
+        PcodeOpcode::Return,
+        None,
+        vec![constant(0)],
+    )])]);
+    let builder = PreviewBuilder::new(&pcode, &options, None);
+    let zero_const = Varnode::constant(0, 4);
+    let zero_space = register(zero_const.space_id, 0, 4);
+    let eax = register(RUST_SLEIGH_REGISTER_SPACE_ID, 0, 4);
+
+    assert_eq!(
+        builder.canonical_x86_gpr64_name_for_value(&zero_const),
+        None
+    );
+    assert_eq!(
+        builder.canonical_x86_gpr64_name_for_value(&zero_space),
+        None
+    );
+    assert_eq!(
+        builder.canonical_x86_gpr64_name_for_value(&eax),
+        Some(("rax", 0))
+    );
+}

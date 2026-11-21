@@ -1421,6 +1421,20 @@ impl<'a> PreviewBuilder<'a> {
         let block = self.pcode.blocks.get(site.block as usize)?;
         let block_addr = block.start_address;
         let op = block.ops.get(site.op as usize)?.clone();
+        if let Some(output) = op.output.as_ref()
+            && (((site.op as usize + 1)..block.ops.len())
+                .any(|idx| self.op_clobbers_return_register_definition(block, idx, output))
+                || self
+                    .prove_definition_reaches_block_entry(
+                        site.block as usize,
+                        site.op as usize,
+                        output,
+                        merge_block_idx,
+                    )
+                    .is_none())
+        {
+            return None;
+        }
         self.with_lowering_site(
             LoweringSite {
                 block_idx: site.block as usize,

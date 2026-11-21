@@ -949,8 +949,9 @@ impl<'a> PreviewBuilder<'a> {
         if let Some(name) = self.materialized_output_names.get(&key) {
             return name.clone();
         }
-        let base = self
-            .sla_hw_name(output.offset, output.size)
+        let base = is_register_varnode(output)
+            .then(|| self.sla_hw_name(output.offset, output.size))
+            .flatten()
             .unwrap_or_else(|| format!("tmp_{:x}", output.offset));
         let name = self.ensure_live_register_binding(&base, output.size);
         self.materialized_output_names.insert(key, name.clone());

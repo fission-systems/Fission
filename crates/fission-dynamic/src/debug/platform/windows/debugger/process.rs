@@ -172,6 +172,22 @@ impl WindowsDebugger {
             .attached_pid
             .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
 
+        // Leave no breakpoint instruction behind in a process we let go of: it
+        // would die on the first one it reached, with no debugger to take the
+        // exception.
+        let armed: Vec<(u64, u8)> = self
+            .state
+            .breakpoints
+            .values()
+            .filter(|bp| bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software)
+            .map(|bp| (bp.address, bp.original_byte))
+            .collect();
+        for (address, original_byte) in armed {
+            self.write_memory(address, &[original_byte])?;
+        }
+        self.state.breakpoints.clear();
+        self.step_off = None;
+
         if self.pending_continue_status.is_some() {
             self.continue_pending_debug_event()?;
         }

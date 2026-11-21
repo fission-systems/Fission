@@ -27,6 +27,46 @@ pub enum SwiftTypeKind {
     Unknown,
 }
 
+/// Field offsets in the Objective-C 2 runtime structures this reads, which
+/// depend on the pointer size.
+///
+/// ```text
+/// class_t      isa, superclass, cache, vtable, data          (five pointers)
+/// class_ro_t   flags, instanceStart, instanceSize            (uint32 each)
+///              reserved                                      (uint32, 64-bit only)
+///              ivarLayout, name, baseMethods, baseProtocols,
+///              ivars, weakIvarLayout, baseProperties         (pointers)
+/// ```
+///
+/// The 64-bit offsets used to be applied to every image, so a 32-bit one
+/// (armv7, i386, arm64_32) had its class names, methods and ivars read from
+/// the wrong fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ObjcLayout {
+    /// `class_t::data`.
+    class_data: usize,
+    /// `class_ro_t::name`.
+    ro_name: usize,
+    /// `class_ro_t::baseMethods`.
+    ro_base_methods: usize,
+    /// `class_ro_t::ivars`.
+    ro_ivars: usize,
+}
+
+impl ObjcLayout {
+    fn for_pointer_size(ptr_size: usize) -> Self {
+        // The three uint32 fields, padded to a pointer boundary by `reserved`
+        // where pointers are eight bytes.
+        let ro_pointers = if ptr_size == 8 { 16 } else { 12 };
+        Self {
+            class_data: 4 * ptr_size,
+            ro_name: ro_pointers + ptr_size,
+            ro_base_methods: ro_pointers + 2 * ptr_size,
+            ro_ivars: ro_pointers + 4 * ptr_size,
+        }
+    }
+}
+
 /// Analyzer for Apple-specific metadata (Objective-C and Swift) in Mach-O binaries.
 pub struct AppleAnalyzer<'a> {
     binary: &'a LoadedBinary,
@@ -242,15 +282,17 @@ impl<'a> AppleAnalyzer<'a> {
                 ]);
 
                 // Resolve field name (relative offset from current position)
-                let name_va =
-                    ((va as i64) + (rec_offset as i64) + 8 + (name_ref_offset as i64)) as u64;
+                let name_va = va
+                    .wrapping_add(rec_offset as u64 + 8)
+                    .wrapping_add_signed(i64::from(name_ref_offset));
                 let field_name = self
                     .read_string_at(name_va)
                     .unwrap_or_else(|| format!("field_{}", i));
 
                 // Resolve type name
-                let type_va =
-                    ((va as i64) + (rec_offset as i64) + 4 + (type_ref_offset as i64)) as u64;
+                let type_va = va
+                    .wrapping_add(rec_offset as u64 + 4)
+                    .wrapping_add_signed(i64::from(type_ref_offset));
                 let type_name = self
                     .read_string_at(type_va)
                     .unwrap_or_else(|| "Unknown".to_string());
@@ -265,15 +307,16 @@ impl<'a> AppleAnalyzer<'a> {
             // Resolve nominal type name from mangled_type_offset
             let mut type_name = String::new();
             if mangled_type_offset != 0 {
-                let mangled_type_va =
-                    (((va as i64) + (desc_offset as i64)) + (mangled_type_offset as i64)) as u64;
+                let mangled_type_va = va
+                    .wrapping_add(desc_offset as u64)
+                    .wrapping_add_signed(i64::from(mangled_type_offset));
                 if let Some(mangled) = self.read_string_at(mangled_type_va) {
                     type_name = crate::loader::demangle::demangle(&mangled);
                 }
             }
 
             if type_name.is_empty() {
-                type_name = format!("SwiftType_{:x}", va + desc_offset as u64);
+                type_name = format!("SwiftType_{:x}", va.wrapping_add(desc_offset as u64));
             }
 
             types.push(SwiftTypeInfo {
@@ -357,23 +400,24 @@ impl<'a> AppleAnalyzer<'a> {
     fn parse_objc_class(&self, addr: u64) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
         let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let layout = ObjcLayout::for_pointer_size(ptr_size);
 
         let Some(class_data) = self.binary.get_bytes(addr, 40) else {
             return Ok(functions);
         };
         let isa_ptr = self.read_ptr(&class_data, 0, ptr_size) & !0x7;
-        let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size) & !0x7;
+        let ro_data_ptr = self.read_ptr(&class_data, layout.class_data, ptr_size) & !0x7;
 
         let Some(ro_data) = self.binary.get_bytes(ro_data_ptr, 64) else {
             return Ok(functions);
         };
-        let class_name_ptr = self.read_ptr(&ro_data, 24, ptr_size);
+        let class_name_ptr = self.read_ptr(&ro_data, layout.ro_name, ptr_size);
         let class_name = self
             .read_string(class_name_ptr)
             .unwrap_or_else(|| "Unknown".to_string());
 
         // Parse instance methods
-        let base_methods_ptr = self.read_ptr(&ro_data, 32, ptr_size);
+        let base_methods_ptr = self.read_ptr(&ro_data, layout.ro_base_methods, ptr_size);
         if base_methods_ptr != 0 {
             if let Ok(method_funcs) =
                 self.parse_objc_method_list(base_methods_ptr, &class_name, false)
@@ -385,10 +429,12 @@ impl<'a> AppleAnalyzer<'a> {
         // Parse class methods from metaclass
         if isa_ptr != 0 && isa_ptr != addr {
             if let Some(metaclass_data) = self.binary.get_bytes(isa_ptr, 40) {
-                let meta_ro_data_ptr = self.read_ptr(&metaclass_data, 32, ptr_size) & !0x7;
+                let meta_ro_data_ptr =
+                    self.read_ptr(&metaclass_data, layout.class_data, ptr_size) & !0x7;
                 if meta_ro_data_ptr != 0 {
                     if let Some(meta_ro_data) = self.binary.get_bytes(meta_ro_data_ptr, 64) {
-                        let meta_methods_ptr = self.read_ptr(&meta_ro_data, 32, ptr_size);
+                        let meta_methods_ptr =
+                            self.read_ptr(&meta_ro_data, layout.ro_base_methods, ptr_size);
                         if meta_methods_ptr != 0 {
                             if let Ok(method_funcs) =
                                 self.parse_objc_method_list(meta_methods_ptr, &class_name, true)
@@ -407,6 +453,7 @@ impl<'a> AppleAnalyzer<'a> {
     fn parse_objc_category(&self, addr: u64) -> Result<Vec<FunctionInfo>> {
         let mut functions = Vec::new();
         let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let layout = ObjcLayout::for_pointer_size(ptr_size);
 
         let Some(cat_data) = self.binary.get_bytes(addr, 48) else {
             return Ok(functions);
@@ -421,9 +468,9 @@ impl<'a> AppleAnalyzer<'a> {
         let mut class_name = String::new();
         if class_ptr != 0 {
             if let Some(class_data) = self.binary.get_bytes(class_ptr, 40) {
-                let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size) & !0x7;
+                let ro_data_ptr = self.read_ptr(&class_data, layout.class_data, ptr_size) & !0x7;
                 if let Some(ro_data) = self.binary.get_bytes(ro_data_ptr, 64) {
-                    let class_name_ptr = self.read_ptr(&ro_data, 24, ptr_size);
+                    let class_name_ptr = self.read_ptr(&ro_data, layout.ro_name, ptr_size);
                     if let Some(name) = self.read_string(class_name_ptr) {
                         class_name = name;
                     }
@@ -508,38 +555,23 @@ impl<'a> AppleAnalyzer<'a> {
 
     fn parse_objc_class_ivars(&self, addr: u64) -> Option<ObjCClassInfo> {
         let ptr_size = if self.binary.is_64bit { 8 } else { 4 };
+        let layout = ObjcLayout::for_pointer_size(ptr_size);
 
-        // class_t structure:
-        // 0: isa
-        // 8: superclass
-        // 16: cache
-        // 24: vtable
-        // 32: data (class_ro_t pointer)
+        // class_t is five pointers -- isa, superclass, cache, vtable, data --
+        // so `data` (the class_ro_t pointer) is at 32 or at 16.
         let class_data = self.binary.get_bytes(addr, 40)?;
-        let ro_data_ptr = self.read_ptr(&class_data, 32, ptr_size);
+        let ro_data_ptr = self.read_ptr(&class_data, layout.class_data, ptr_size);
 
         // Mask off the Swift bit if present (lower bits of pointer)
         let ro_data_ptr = ro_data_ptr & !0x7;
 
         let ro_data = self.binary.get_bytes(ro_data_ptr, 80)?;
 
-        // class_ro_t structure (64-bit):
-        // 0: flags (4 bytes)
-        // 4: instanceStart (4 bytes)
-        // 8: instanceSize (4 bytes)
-        // 12: reserved (4 bytes)
-        // 16: ivarLayout
-        // 24: name
-        // 32: baseMethods
-        // 40: baseProtocols
-        // 48: ivars
-        // 56: weakIvarLayout
-        // 64: baseProperties
-
-        let class_name_ptr = self.read_ptr(&ro_data, 24, ptr_size);
+        // class_ro_t: see `ObjcLayout`.
+        let class_name_ptr = self.read_ptr(&ro_data, layout.ro_name, ptr_size);
         let class_name = self.read_string(class_name_ptr)?;
 
-        let ivars_ptr = self.read_ptr(&ro_data, 48, ptr_size);
+        let ivars_ptr = self.read_ptr(&ro_data, layout.ro_ivars, ptr_size);
 
         let ivars = if ivars_ptr != 0 {
             self.parse_objc_ivar_list(ivars_ptr)
@@ -573,23 +605,22 @@ impl<'a> AppleAnalyzer<'a> {
             return ivars;
         }
 
-        let ivar_data = self
-            .binary
-            .get_bytes(addr + 8, (count as usize) * (entsize as usize));
+        let ivar_data = addr.checked_add(8).and_then(|first| {
+            self.binary
+                .get_bytes(first, (count as usize) * (entsize as usize))
+        });
         let Some(ivar_data) = ivar_data else {
             return ivars;
         };
 
-        // ivar_t structure (64-bit):
-        // 0: offset (pointer to int32)
-        // 8: name (pointer to string)
-        // 16: type (pointer to type encoding string)
-        // 24: alignment_raw (uint32)
-        // 28: size (uint32)
-
+        // ivar_t is three pointers -- offset (to an int32), name, type --
+        // then alignment_raw and size (uint32 each): 32 bytes, or 20. Only the
+        // pointers are read, so that is all an entry must have room for; the
+        // check used to demand 24 bytes whatever the pointer size, and the
+        // last 20-byte entry of every 32-bit list failed it.
         for i in 0..count as usize {
             let base = i * entsize as usize;
-            if base + 24 > ivar_data.len() {
+            if base + ptr_size * 3 > ivar_data.len() {
                 break;
             }
 
@@ -662,11 +693,23 @@ impl<'a> AppleAnalyzer<'a> {
             return Ok(functions);
         }
 
-        let Some(method_data) = self.binary.get_bytes(addr + 8, (count * entsize) as usize) else {
+        let Some(first_method) = addr.checked_add(8) else {
+            return Ok(functions);
+        };
+        let Some(method_data) = self
+            .binary
+            .get_bytes(first_method, (count * entsize) as usize)
+        else {
             return Ok(functions);
         };
 
-        let is_relative = (flags & 0x8000_0000) != 0 || entsize == 12;
+        // A relative ("small") method list is three 32-bit displacements and
+        // says so in the top bit of the entsize word. Twelve bytes without the
+        // flag is still taken as relative where pointers are eight bytes -- it
+        // cannot be three of those -- but in a 32-bit image twelve bytes is
+        // exactly three absolute pointers, and reading them as displacements
+        // lost every method.
+        let is_relative = (flags & 0x8000_0000) != 0 || (entsize == 12 && ptr_size == 8);
 
         for i in 0..count as usize {
             let m_off = i * entsize as usize;
@@ -688,8 +731,14 @@ impl<'a> AppleAnalyzer<'a> {
                     method_data[m_off + 11],
                 ]);
 
-                let name_va = ((addr + 8 + m_off as u64) as i64 + name_rel as i64) as u64;
-                let imp_va = ((addr + 8 + m_off as u64 + 8) as i64 + imp_rel as i64) as u64;
+                // Relative references: the field's own address plus a signed
+                // 32-bit displacement, wrapping like the pointer arithmetic
+                // it stands for.
+                let entry_va = first_method.wrapping_add(m_off as u64);
+                let name_va = entry_va.wrapping_add_signed(i64::from(name_rel));
+                let imp_va = entry_va
+                    .wrapping_add(8)
+                    .wrapping_add_signed(i64::from(imp_rel));
 
                 if let Some(sel_name) = self.read_string(name_va) {
                     functions.push(FunctionInfo {
@@ -957,5 +1006,261 @@ impl ObjCClassInfo {
             size: 0,
             metadata_address: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+
+    const BLOB: u64 = 0x1000;
+    const CLASSLIST: u64 = 0x2000;
+
+    /// One Objective-C class, `Widget`, laid out for the given pointer size:
+    /// an instance method `draw` at 0x3000, a class method `shared` at
+    /// 0x3010, and two `int` ivars, `_width` at offset 8 and `_height` at 12.
+    fn objc_image(ptr_size: usize) -> LoadedBinary {
+        const CLASS: u64 = 0x1000;
+        const META: u64 = 0x1040;
+        const RO: u64 = 0x1080;
+        const META_RO: u64 = 0x10c0;
+        const METHODS: u64 = 0x1100;
+        const CLASS_METHODS: u64 = 0x1140;
+        const IVARS: u64 = 0x1180;
+        const NAME: u64 = 0x1300;
+        const SEL_DRAW: u64 = 0x1310;
+        const SEL_SHARED: u64 = 0x1320;
+        const WIDTH_OFFSET: u64 = 0x1340;
+        const HEIGHT_OFFSET: u64 = 0x1344;
+        const IVAR_WIDTH: u64 = 0x1350;
+        const IVAR_HEIGHT: u64 = 0x1358;
+        const TYPE_INT: u64 = 0x1368;
+
+        let mut data = vec![0u8; 0x2100];
+        let ptr = |data: &mut Vec<u8>, at: u64, value: u64| {
+            let at = at as usize;
+            data[at..at + ptr_size].copy_from_slice(&value.to_le_bytes()[..ptr_size]);
+        };
+        let word = |data: &mut Vec<u8>, at: u64, value: u32| {
+            let at = at as usize;
+            data[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        };
+        let text = |data: &mut Vec<u8>, at: u64, value: &str| {
+            let at = at as usize;
+            data[at..at + value.len()].copy_from_slice(value.as_bytes());
+        };
+        let p = ptr_size as u64;
+        // class_ro_t: three uint32s (and `reserved` on 64-bit), then pointers.
+        let ro_pointers = if ptr_size == 8 { 16 } else { 12 };
+
+        // class_t: isa, superclass, cache, vtable, data.
+        ptr(&mut data, CLASS, META);
+        ptr(&mut data, CLASS + 4 * p, RO);
+        ptr(&mut data, META + 4 * p, META_RO);
+        // class_ro_t: ivarLayout, name, baseMethods, baseProtocols, ivars.
+        ptr(&mut data, RO + ro_pointers + p, NAME);
+        ptr(&mut data, RO + ro_pointers + 2 * p, METHODS);
+        ptr(&mut data, RO + ro_pointers + 4 * p, IVARS);
+        ptr(&mut data, META_RO + ro_pointers + p, NAME);
+        ptr(&mut data, META_RO + ro_pointers + 2 * p, CLASS_METHODS);
+
+        // method_list_t: entsize, count, then (name, types, imp).
+        for (list, selector, imp) in [
+            (METHODS, SEL_DRAW, 0x3000u64),
+            (CLASS_METHODS, SEL_SHARED, 0x3010),
+        ] {
+            word(&mut data, list, 3 * ptr_size as u32);
+            word(&mut data, list + 4, 1);
+            ptr(&mut data, list + 8, selector);
+            ptr(&mut data, list + 8 + 2 * p, imp);
+        }
+
+        // ivar_list_t: entsize, count, then (offset*, name, type, align, size).
+        let ivar_size = 3 * p + 8;
+        word(&mut data, IVARS, ivar_size as u32);
+        word(&mut data, IVARS + 4, 2);
+        for (index, (offset, name)) in [(WIDTH_OFFSET, IVAR_WIDTH), (HEIGHT_OFFSET, IVAR_HEIGHT)]
+            .into_iter()
+            .enumerate()
+        {
+            let entry = IVARS + 8 + index as u64 * ivar_size;
+            ptr(&mut data, entry, offset);
+            ptr(&mut data, entry + p, name);
+            ptr(&mut data, entry + 2 * p, TYPE_INT);
+        }
+        word(&mut data, WIDTH_OFFSET, 8);
+        word(&mut data, HEIGHT_OFFSET, 12);
+
+        text(&mut data, NAME, "Widget");
+        text(&mut data, SEL_DRAW, "draw");
+        text(&mut data, SEL_SHARED, "shared");
+        text(&mut data, IVAR_WIDTH, "_width");
+        text(&mut data, IVAR_HEIGHT, "_height");
+        text(&mut data, TYPE_INT, "i");
+
+        ptr(&mut data, CLASSLIST, CLASS);
+
+        let section = |name: &str, address: u64, size: u64| SectionInfo {
+            name: name.to_string(),
+            virtual_address: address,
+            virtual_size: size,
+            file_offset: address,
+            file_size: size,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        };
+        LoadedBinaryBuilder::new("objc".to_string(), DataBuffer::Heap(data))
+            .is_64bit(ptr_size == 8)
+            // The ivar list ends where the section does, as it does when the
+            // linker packs `__objc_const`: nothing after it to read by luck.
+            .add_section(section(
+                "__objc_const",
+                BLOB,
+                IVARS + 8 + 2 * ivar_size - BLOB,
+            ))
+            .add_section(section("__objc_strings", NAME, 0x100))
+            .add_section(section("__objc_classlist", CLASSLIST, p))
+            .build()
+            .expect("objc image")
+    }
+
+    fn assert_widget(ptr_size: usize) {
+        let binary = objc_image(ptr_size);
+        let analyzer = AppleAnalyzer::new(&binary);
+
+        let mut methods: Vec<(String, u64)> = analyzer
+            .analyze()
+            .expect("analyze")
+            .into_iter()
+            .map(|f| (f.name, f.address))
+            .collect();
+        methods.sort();
+        assert_eq!(
+            methods,
+            vec![
+                ("+[Widget shared]".to_string(), 0x3010),
+                ("-[Widget draw]".to_string(), 0x3000),
+            ],
+            "{ptr_size}-byte pointers"
+        );
+
+        let classes = analyzer.analyze_objc_ivars();
+        assert_eq!(classes.len(), 1, "{ptr_size}-byte pointers: {classes:?}");
+        assert_eq!(classes[0].name, "Widget");
+        let ivars: Vec<(&str, &str, u32)> = classes[0]
+            .ivars
+            .iter()
+            .map(|ivar| (ivar.name.as_str(), ivar.type_name.as_str(), ivar.offset))
+            .collect();
+        assert_eq!(
+            ivars,
+            vec![("_width", "int", 8), ("_height", "int", 12)],
+            "{ptr_size}-byte pointers"
+        );
+    }
+
+    #[test]
+    fn objc_class_metadata_is_read_with_64_bit_offsets() {
+        assert_widget(8);
+    }
+
+    /// A 32-bit image (armv7, i386, arm64_32) keeps `class_t::data` at 16 and
+    /// `class_ro_t`'s pointers from 12; the 64-bit offsets were used for both,
+    /// and the last 20-byte ivar of a list failed a 24-byte bounds check.
+    #[test]
+    fn objc_class_metadata_is_read_with_32_bit_offsets() {
+        assert_widget(4);
+    }
+
+    #[test]
+    fn objc_layout_matches_the_runtime_structures() {
+        assert_eq!(
+            ObjcLayout::for_pointer_size(8),
+            ObjcLayout {
+                class_data: 32,
+                ro_name: 24,
+                ro_base_methods: 32,
+                ro_ivars: 48,
+            }
+        );
+        assert_eq!(
+            ObjcLayout::for_pointer_size(4),
+            ObjcLayout {
+                class_data: 16,
+                ro_name: 16,
+                ro_base_methods: 20,
+                ro_ivars: 28,
+            }
+        );
+    }
+
+    /// One Swift field descriptor -- a struct with a single field -- in a
+    /// `__swift5_fieldmd` section at `fieldmd`, its names in a section that
+    /// follows it.
+    fn swift_image(fieldmd: u64) -> LoadedBinary {
+        let mut data = vec![0u8; 0x80];
+        // Descriptor: mangled name (+0x40), superclass, kind = struct,
+        // record size 12, one field.
+        data[0..4].copy_from_slice(&0x40i32.to_le_bytes());
+        data[8..10].copy_from_slice(&0u16.to_le_bytes());
+        data[10..12].copy_from_slice(&12u16.to_le_bytes());
+        data[12..16].copy_from_slice(&1u32.to_le_bytes());
+        // Field record at +16: flags, type name (from +20), field name (from +24).
+        data[20..24].copy_from_slice(&(0x50i32 - 20).to_le_bytes());
+        data[24..28].copy_from_slice(&(0x60i32 - 24).to_le_bytes());
+        data[0x40..0x46].copy_from_slice(b"Widget");
+        data[0x50..0x52].copy_from_slice(b"Si");
+        data[0x60..0x65].copy_from_slice(b"width");
+
+        let section = |name: &str, address: u64, offset: u64, size: u64| SectionInfo {
+            name: name.to_string(),
+            virtual_address: address,
+            virtual_size: size,
+            file_offset: offset,
+            file_size: size,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        };
+        LoadedBinaryBuilder::new("swift".to_string(), DataBuffer::Heap(data))
+            .is_64bit(true)
+            .add_section(section("__swift5_fieldmd", fieldmd, 0, 0x1c))
+            .add_section(section(
+                "__swift5_reflstr",
+                fieldmd.wrapping_add(0x40),
+                0x40,
+                0x40,
+            ))
+            .build()
+            .expect("swift image")
+    }
+
+    fn assert_swift_field(fieldmd: u64) {
+        let binary = swift_image(fieldmd);
+        let types = AppleAnalyzer::new(&binary)
+            .analyze_swift_types()
+            .expect("swift types");
+        assert_eq!(types.len(), 1, "{fieldmd:#x}: {types:?}");
+        assert_eq!(types[0].kind, SwiftTypeKind::Struct);
+        let fields: Vec<(&str, &str)> = types[0]
+            .fields
+            .iter()
+            .map(|field| (field.name.as_str(), field.type_name.as_str()))
+            .collect();
+        assert_eq!(fields, vec![("width", "Si")], "{fieldmd:#x}");
+    }
+
+    #[test]
+    fn swift_field_descriptor_resolves_its_relative_names() {
+        assert_swift_field(0x1_0000_0000);
+    }
+
+    /// The relative references were resolved through `i64`, so a descriptor
+    /// whose field records straddle 2^63 overflowed on the way.
+    #[test]
+    fn swift_relative_names_resolve_across_the_signed_boundary() {
+        assert_swift_field(0x7fff_ffff_ffff_fff0);
     }
 }

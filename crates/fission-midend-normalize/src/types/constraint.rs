@@ -1166,12 +1166,21 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
     }
 }
 
+fn pointee_may_retype_access(pointee: &NirType, access_ty: &NirType) -> bool {
+    !matches!(pointee, NirType::Unknown)
+        && (matches!(pointee, NirType::Ptr(_))
+            || matches!(access_ty, NirType::Ptr(_) | NirType::Unknown)
+            || type_byte_size(pointee) == type_byte_size(access_ty))
+}
+
 fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType>) {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
-            if let NirType::Ptr(inner) = ptr_ty {
+            if let NirType::Ptr(inner) = ptr_ty
+                && pointee_may_retype_access(&inner, ty)
+            {
                 *ty = *inner;
             }
         }
@@ -1183,7 +1192,9 @@ fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
@@ -1203,10 +1214,7 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             // (A pointer's width is the target's, which this table does
             // not know, so a pointer on either side is not compared.)
             if let NirType::Ptr(inner) = ptr_ty
-                && !matches!(*inner, NirType::Unknown)
-                && (matches!(*inner, NirType::Ptr(_))
-                    || matches!(ty, NirType::Ptr(_) | NirType::Unknown)
-                    || type_byte_size(&inner) == type_byte_size(ty))
+                && pointee_may_retype_access(&inner, ty)
             {
                 *ty = *inner;
             }
@@ -1244,12 +1252,32 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
         _ => {}
     }
+}
+
+/// Whether a pointer's inferred pointee may replace the type of a memory
+/// access made through it.
+///
+/// The access type of a load, a store or an indexed element is also how many
+/// bytes the machine moves (and, for an index, the scale of the address), and
+/// that width comes from the p-code op, not from inference. The pointee may
+/// refine it -- signedness, pointer-ness -- but never erase or resize it: a
+/// one-byte `STORE` through a pointer inferred as `struct *` printed as a
+/// 44-byte store, and one through `unsigned long long *` as an 8-byte store.
+/// A pointer's width is the target's, which this table does not know, so a
+/// pointer on either side is not compared.
+fn pointee_may_retype_access(pointee: &NirType, access: &NirType) -> bool {
+    !matches!(pointee, NirType::Unknown)
+        && (matches!(pointee, NirType::Ptr(_))
+            || matches!(access, NirType::Ptr(_) | NirType::Unknown)
+            || type_byte_size(pointee) == type_byte_size(access))
 }
 
 #[cfg(test)]
@@ -1314,6 +1342,78 @@ mod tests {
             rhs.clone()
         };
         assert_eq!(run(), load(u32_ty.clone()));
+    }
+
+    /// Run the pass over `stmt` with `p` bound to `p_ty`, and return the
+    /// rewritten statement. `y` has a type to solve, so the pass rewrites the
+    /// tree.
+    fn propagate_one(p_ty: NirType, stmt: PreHirStmt) -> PreHirStmt {
+        let mut func = PreHirFunction {
+            locals: vec![binding("p", p_ty), binding("y", NirType::Unknown)],
+            body: vec![
+                stmt,
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_owned()),
+                    rhs: PreHirExpr::Var("p".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+        apply_type_constraint_propagation(&mut func);
+        func.body[0].clone()
+    }
+
+    fn byte(signed: bool) -> NirType {
+        NirType::Int { bits: 8, signed }
+    }
+
+    /// `movb $0, (%rax)` through a pointer inferred as `struct *`: the store
+    /// is one byte. Taking the pointee for its type printed
+    /// `*(fission_agg44 *)p = 0`, a 44-byte store.
+    #[test]
+    fn a_store_keeps_its_width_when_the_pointee_is_wider() {
+        let store = |ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(aggregate(44)));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(false)));
+    }
+
+    /// An indexed element's type is also the scale of its address: `p[i]`
+    /// over bytes must not become `p[i]` over eight-byte words.
+    #[test]
+    fn an_indexed_store_keeps_its_element_width() {
+        let store = |elem_ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Index {
+                base: Box::new(PreHirExpr::Var("p".to_owned())),
+                index: Box::new(PreHirExpr::Const(3, NirType::Unknown)),
+                elem_ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(false)));
+    }
+
+    /// The pointee may still refine a store of the same width.
+    #[test]
+    fn a_same_width_pointee_still_refines_a_store() {
+        let store = |ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(byte(true)));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(true)));
     }
 
     #[test]
@@ -1604,5 +1704,62 @@ mod tests {
                 local.name
             );
         }
+    }
+
+    #[test]
+    fn pointee_width_mismatch_does_not_resize_load_or_deref_access() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![
+                binding("p", NirType::Ptr(Box::new(u64_ty))),
+                binding("q", NirType::Ptr(Box::new(u8_ty.clone()))),
+                binding("out", NirType::Unknown),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("out".to_owned()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                        ty: u8_ty.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Var("q".to_owned())),
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::Const(1, u32_ty.clone()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_type_constraint_propagation(&mut func);
+
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Load { ty, .. },
+                ..
+            } if *ty == u8_ty
+        ));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ty, .. },
+                ..
+            } if *ty == u32_ty
+        ));
     }
 }

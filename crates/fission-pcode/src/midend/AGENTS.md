@@ -31,7 +31,7 @@ midend/
 
 | Task | Location | Notes |
 |---|---|---|
-| Action pipeline framework | `action_pipeline/` | Pass/ActionGroup/Pipeline; see [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md) |
+| Action pipeline framework | `action_pipeline/` | Pass/ActionGroup/Pipeline; see [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../../docs/architecture/DECOMPILER_ACTIONS.md) |
 | Normalize group registry | `normalize/pipeline/groups.rs` | Ghidra-ordered ActionGroups; production driver via `run_normalize_pipeline` |
 | Canonical stage functions | `normalize/pipeline/stages.rs` | Shared pass sequence for each ActionGroup (1:1 parity) |
 | Pipeline helpers | `normalize/pipeline/run.rs` | `run_pass_logged`, cleanup families, admission summaries |
@@ -67,14 +67,14 @@ midend/
 - Do not implement an AI-proposed rule until it has been translated into an invariant owned by an existing builder/materialize/normalize/structuring/type-data component. Prompt output is not an owner.
 - Do not add owner-to-owner dependencies when a fact can be moved down into substrate. Existing cross-layer references are migration debt, not precedent.
 - Do not reintroduce deleted narrow idiom passes (`security_cookie`, `xor_swap`, `string_copy`, `recurrence`, `call_artifact`, `bitstream`, `likely_trash`) without a Ghidra Rule/Action reference.
-- Do not add parallel dead-code or bitmask transform layers; use the consolidated owners documented in [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../docs/architecture/DECOMPILER_ACTIONS.md).
+- Do not add parallel dead-code or bitmask transform layers; use the consolidated owners documented in [`docs/architecture/DECOMPILER_ACTIONS.md`](../../../../docs/architecture/DECOMPILER_ACTIONS.md).
 - Do not gate join/loop/cmov-class semantics on `CallingConvention::X86_32` alone, or maintain separate x64/ARM copies of the same rule; put convention differences in namer/cspec/CC tables.
 
 ## Pre-Implementation Gate
 
 Before adding semantic-layer production code, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../../../../docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) and apply [`ADR 0006`](../../../../docs/adr/0006-decompiler-quality-change-gate.md). The proposal must capture the row anchor, owner proof, invariant proof, and validation matrix.
 
-Extend the existing builder/materialize/normalize/structuring/type-data owner by default. Add a new pass, helper, or metric only after proving that no current owner covers the invariant. Targeted tests are required, but success also needs the crate-level gate, focused row rerun, and smoke/automation regression evidence.
+Extend the existing builder/materialize/normalize/structuring/type-data owner by default. Add a new pass, helper, or metric only after proving that no current owner covers the invariant. Targeted tests are required, but success also needs the crate-level gate, focused row rerun, and DecBench regression evidence.
 
 ## Regression Prevention
 
@@ -83,15 +83,15 @@ Every semantic fix must pass **both** the targeted unit test and the broader gat
 1. **Anchor the row:** Before fixing, record source file, binary, address, function name, current behavior status, semantic/static scores, and top missing features.
 2. **Add builder-level synthetic regression tests:** When a real binary sample reveals a bug, add the smallest invariant-based test that captures it (e.g., `loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param`).
 3. **Gate on crate-level tests:** Run `cargo nextest run -p fission-pcode`. If a pre-existing failure blocks the gate, mark it `#[ignore]` with a ticket or maintain an allowlist so new regressions are never masked.
-4. **Gate on smoke benchmark rows:** Add the fixed sample to the smoke manifest under `benchmark/config/`. Re-run the exact row with no stale decompilation cache, diff behavior status, case progress, and scores.
-5. **Check for cross-sample regressions:** After a focused improvement, run the broader smoke manifest or automation lane. Existing pass rows must not regress.
+4. **Re-run the motivating row:** Re-run the exact DecBench row (gate `--dump`) or real-binary decomp with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`), and diff the output and its scores.
+5. **Check for cross-sample regressions:** After a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress; report total distance next to the perfect count.
 
 ### Pre-merge checklist
 
-- [ ] Targeted unit test passes (`cargo nextest run --filter ...`)
+- [ ] Targeted unit test passes (`cargo nextest run -p fission-pcode <filter>`)
 - [ ] Crate-level unit tests pass (pre-existing failures explicitly called out)
-- [ ] Smoke benchmark row for the fixed sample shows improvement with no stale cache
-- [ ] No regression in other smoke rows (diff artifacts)
+- [ ] The motivating DecBench row shows the improvement with caches disabled
+- [ ] No regression on the broader DecBench measurement (total distance next to perfect count)
 - [ ] `cargo check -p fission-pcode` and `cargo build -p fission-cli --release` are clean (modulo existing warnings)
 
 ## Validation
