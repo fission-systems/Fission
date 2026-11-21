@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 pub type NirValueId = u32;
 pub type StackSlotId = u32;
@@ -718,7 +719,13 @@ pub struct HirFunction {
     /// [`IndexMap`] preserves insertion order for deterministic iteration / dumps.
     pub callee_observed_max_arity: IndexMap<String, usize>,
     /// Typed summaries derived from canonical call-target identity.
-    pub callee_summaries: IndexMap<String, CallSummary>,
+    ///
+    /// Shared, because the map holds a summary for every prototype the
+    /// program knows and almost every pass only reads it: a copy of the
+    /// function then costs one reference, and two copies that still share it
+    /// compare equal without being walked. A writer goes through
+    /// [`Arc::make_mut`].
+    pub callee_summaries: Arc<IndexMap<String, CallSummary>>,
 }
 
 impl Default for HirFunction {
@@ -740,7 +747,7 @@ impl Default for HirFunction {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: IndexMap::new(),
-            callee_summaries: IndexMap::new(),
+            callee_summaries: Arc::default(),
         }
     }
 }

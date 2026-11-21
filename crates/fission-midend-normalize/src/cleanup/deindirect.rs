@@ -77,7 +77,7 @@ pub fn apply_deindirect_pass(func: &mut PreHirFunction) -> bool {
 
     // 3. Build address-to-symbol mapping from the callee summaries in the function context.
     let mut addr_to_symbol = HashMap::<u64, String>::default();
-    for (symbol, summary) in &func.callee_summaries {
+    for (symbol, summary) in func.callee_summaries.iter() {
         if let Some(addr) = summary.target.address {
             addr_to_symbol.insert(addr, symbol.clone());
         }
@@ -413,7 +413,7 @@ mod tests {
                 args: vec![PreHirExpr::Var("tmp_100".to_string())],
                 ty: NirType::Unknown,
             })],
-            callee_summaries: summaries.clone(),
+            callee_summaries: summaries.clone().into(),
             ..Default::default()
         };
         assert!(
@@ -430,7 +430,7 @@ mod tests {
                 args: vec![PreHirExpr::Var("DAT_00405000".to_string())],
                 ty: NirType::Unknown,
             })],
-            callee_summaries: summaries,
+            callee_summaries: summaries.into(),
             ..Default::default()
         };
         assert!(
@@ -476,7 +476,7 @@ mod tests {
                     ty: NirType::Unknown,
                 }),
             ],
-            callee_summaries: summaries,
+            callee_summaries: summaries.into(),
             ..Default::default()
         };
 

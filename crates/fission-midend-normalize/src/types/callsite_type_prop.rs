@@ -133,8 +133,7 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
     // Build a lookup map from binding name to index in func.locals / func.params.
     let mut changed = false;
     let pointer_bits = if func.is_64bit { 64 } else { 32 };
-    let callee_summaries = func.callee_summaries.clone();
-    let void_receivers = drop_void_call_receivers(&mut func.body, &callee_summaries);
+    let void_receivers = drop_void_call_receivers(&mut func.body, &func.callee_summaries);
     let unused_receivers = drop_unused_call_receivers(func);
     let dropped_receivers = void_receivers + unused_receivers;
     if dropped_receivers > 0 {
@@ -1181,13 +1180,13 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([
                 (
                     "gettext".to_string(),
                     imported_variadic_summary("gettext", 1),
                 ),
                 ("error".to_string(), imported_variadic_summary("error", 3)),
-            ]),
+            ])),
         }
     }
 
@@ -1224,10 +1223,10 @@ mod tests {
                 }),
             ],
             is_64bit: caller_bits == 64,
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "sub_2000".to_string(),
                 direct_pointer_summary("sub_2000", summary_ty, summary_surface),
-            )]),
+            )])),
             ..Default::default()
         }
     }
@@ -1276,10 +1275,10 @@ mod tests {
                     ty: NirType::Unknown,
                 }),
             ],
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "typed_target".to_string(),
                 typed_target_summary,
-            )]),
+            )])),
             ..Default::default()
         };
 
@@ -2002,7 +2001,7 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "wrapper_foo".to_string(),
                 CallSummary {
                     target: CallTargetRef {
@@ -2040,7 +2039,7 @@ mod tests {
                         confidence: 160,
                     },
                 },
-            )]),
+            )])),
         };
 
         assert!(apply_callsite_type_prop_pass(&mut func));
@@ -2145,7 +2144,7 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "printf".to_string(),
                 CallSummary {
                     target: CallTargetRef {
@@ -2177,7 +2176,7 @@ mod tests {
                         confidence: 160,
                     },
                 },
-            )]),
+            )])),
         };
 
         assert!(!apply_callsite_type_prop_pass(&mut func));
@@ -2422,8 +2421,7 @@ mod tests {
         ));
 
         let mut internal = translated_error_fixture();
-        let summary = internal
-            .callee_summaries
+        let summary = std::sync::Arc::make_mut(&mut internal.callee_summaries)
             .get_mut("error")
             .expect("error summary");
         summary.target.provenance = CallTargetProvenance::Direct;
@@ -2512,7 +2510,7 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "wrapper_message_box".to_string(),
                 CallSummary {
                     target: CallTargetRef {
@@ -2550,7 +2548,7 @@ mod tests {
                         confidence: 160,
                     },
                 },
-            )]),
+            )])),
         };
 
         assert!(apply_callsite_type_prop_pass(&mut func));
@@ -2596,7 +2594,7 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "recursive_fib".to_string(),
                 CallSummary {
                     target: CallTargetRef {
@@ -2628,7 +2626,7 @@ mod tests {
                         confidence: 160,
                     },
                 },
-            )]),
+            )])),
         };
 
         assert!(apply_callsite_type_prop_pass(&mut func));
@@ -2667,7 +2665,7 @@ mod tests {
             is_big_endian: false,
             suppress_entry_register_params: false,
             callee_observed_max_arity: Default::default(),
-            callee_summaries: indexmap::IndexMap::from([(
+            callee_summaries: std::sync::Arc::new(indexmap::IndexMap::from([(
                 "known_without_signature".to_string(),
                 CallSummary {
                     target: CallTargetRef {
@@ -2699,7 +2697,7 @@ mod tests {
                         confidence: 0,
                     },
                 },
-            )]),
+            )])),
         };
 
         assert!(!apply_callsite_type_prop_pass(&mut func));
