@@ -16,6 +16,16 @@ The data and harness live outside this repository, under
 | CFG parser | `rust-joern`, built from source at `~/rust-joern` (see below) |
 | Sample-set kit | `vendor/decbench-evalkit/decbench-evalkit-sample-set` |
 
+
+## CI full sweep
+
+[DecBench full dataset sweep](../.github/workflows/decbench-sweep.yml) measures
+the published Hugging Face `full` manifest on Nightly. The pinned dataset
+revision contains 96,103 rows. The workflow shards the manifest, verifies binary
+hashes, scores statically on stripped inputs, and preserves its row-level report.
+The 250-row sample-set gate below remains a local development tool. See
+[CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.
+
 ## CFG parser: rust-joern
 
 GED's source- and decompiled-side CFGs come from

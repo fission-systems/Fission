@@ -181,15 +181,18 @@ def load(repo: Path) -> dict[str, Any]:
     sys.path.insert(0, str(repo / "vendor" / "decbench"))
     if os.environ.get("FISSION_BENCHMARK_NO_CACHE") == "1":
         os.environ.setdefault("DECBENCH_NO_CACHE", "1")
-    from decbench.decompilers.raw.fission_raw import _variables
+    from decbench.models.decompilation import VariableInfo
     from decbench.metrics.type_match import TypeMatchMetric, extract_ground_truth_types
+
+    def variables(record):
+        return [VariableInfo.model_validate(value) for value in record.get("variables", [])]
 
     _probe_parser()
     return {
         "compute_ged": compute_ged,
         "extract_decompiled_cfgs": extract_decompiled_cfgs,
         "load_published_source_cfgs": load_published_source_cfgs,
-        "variables": _variables,
+        "variables": variables,
         "TypeMatchMetric": TypeMatchMetric,
         "extract_ground_truth_types": extract_ground_truth_types,
     }
