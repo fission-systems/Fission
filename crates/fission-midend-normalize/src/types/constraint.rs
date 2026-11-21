@@ -1166,13 +1166,6 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
     }
 }
 
-fn pointee_may_retype_access(pointee: &NirType, access_ty: &NirType) -> bool {
-    !matches!(pointee, NirType::Unknown)
-        && (matches!(pointee, NirType::Ptr(_))
-            || matches!(access_ty, NirType::Ptr(_) | NirType::Unknown)
-            || type_byte_size(pointee) == type_byte_size(access_ty))
-}
-
 fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType>) {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
@@ -1414,6 +1407,33 @@ mod tests {
         };
         let p_ty = NirType::Ptr(Box::new(byte(true)));
         assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(true)));
+    }
+
+    /// The retype rule on its own, one case per branch. The store, load and
+    /// index tests above reach it through the pass; this pins the rule every
+    /// one of them shares.
+    #[test]
+    fn pointee_retypes_an_access_only_without_changing_its_width() {
+        let int = |bits| NirType::Int { bits, signed: true };
+        let ptr = || NirType::Ptr(Box::new(int(8)));
+        // An unknown pointee says nothing, whatever the access.
+        assert!(!pointee_may_retype_access(&NirType::Unknown, &int(32)));
+        assert!(!pointee_may_retype_access(
+            &NirType::Unknown,
+            &NirType::Unknown
+        ));
+        // A pointer's width is the target's, so a pointer on either side is not compared.
+        assert!(pointee_may_retype_access(&ptr(), &int(16)));
+        assert!(pointee_may_retype_access(&int(16), &ptr()));
+        // An unknown access has no width to keep.
+        assert!(pointee_may_retype_access(&int(16), &NirType::Unknown));
+        // Otherwise only a pointee of the access's width may replace it.
+        assert!(pointee_may_retype_access(
+            &int(32),
+            &NirType::Float { bits: 32 }
+        ));
+        assert!(!pointee_may_retype_access(&int(64), &int(8)));
+        assert!(!pointee_may_retype_access(&aggregate(44), &int(8)));
     }
 
     #[test]
