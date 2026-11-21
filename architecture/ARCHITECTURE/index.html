@@ -1716,12 +1716,12 @@ extractor/file-system owner is implemented. Compound Document detection validate
 the CFB header shape; MSI classification is not inferred from strings or names.
 Raw P-code and full benchmark lanes must skip these rows unless an extracted
 executable child is explicitly provided.</p>
-<p>Loader provenance is a public contract shared by CLI and GUI surfaces.
+<p>Loader provenance is a public contract shared by the CLI, its JSON output and scripts.
 <code>FunctionInfo.origin</code>, <code>kind</code>, <code>is_import</code>, <code>is_export</code>, <code>is_thunk_like</code>,
 <code>external_library</code>, and <code>source_section</code> classify whether a record is code,
 entry, export, true import, import thunk, undefined external, debug-only symbol,
 or data-derived metadata. User-facing and decompile-seed function lists must go
-through <code>loader::function_view</code>; CLI and GUI must not reconstruct independent
+through <code>loader::function_view</code>; the CLI and scripts must not reconstruct independent
 function/import/export filtering rules.</p>
 <p><strong>Loader Parity and Enrichment Features.</strong> To achieve strict parity with Ghidra's binary analysis ecosystem, <code>fission-loader</code> implements advanced metadata enrichment and validation layers:
 - <strong>PE Delay-Load Imports</strong>: Classifies delayed import directories (<code>ImgDelayDescr</code>) and generates placeholder/import symbols to feed downstream call analysis.

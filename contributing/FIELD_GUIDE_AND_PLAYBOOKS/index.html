@@ -1406,10 +1406,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#16-automation-reports" class="md-nav__link">
+  <a href="#16-benchmark-reports" class="md-nav__link">
     <span class="md-ellipsis">
       
-        16. Automation reports
+        16. Benchmark reports
       
     </span>
   </a>
@@ -1720,10 +1720,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#23-changing-automation-reports" class="md-nav__link">
+  <a href="#23-changing-benchmark-reports" class="md-nav__link">
     <span class="md-ellipsis">
       
-        23. Changing automation reports
+        23. Changing benchmark reports
       
     </span>
   </a>
@@ -1764,10 +1764,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#27-changing-tui-behavior" class="md-nav__link">
+  <a href="#27-changing-cli-behavior" class="md-nav__link">
     <span class="md-ellipsis">
       
-        27. Changing TUI behavior
+        27. Changing CLI behavior
       
     </span>
   </a>
@@ -1775,10 +1775,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#28-changing-dioxus-gui-behavior" class="md-nav__link">
+  <a href="#28-changing-agent-facing-output" class="md-nav__link">
     <span class="md-ellipsis">
       
-        28. Changing Dioxus GUI behavior
+        28. Changing agent-facing output
       
     </span>
   </a>
@@ -2470,10 +2470,10 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
 <li>Reporting check: state whether the change is semantic, presentational, telemetry-only, or documentation-only.</li>
 </ul>
-<h3 id="16-automation-reports">16. Automation reports<a class="headerlink" href="#16-automation-reports" title="Permanent link">&para;</a></h3>
+<h3 id="16-benchmark-reports">16. Benchmark reports<a class="headerlink" href="#16-benchmark-reports" title="Permanent link">&para;</a></h3>
 <p>Project canonical metrics and keep outputs deterministic.</p>
 <ul>
-<li>Owner check: identify the crate that owns automation reports before editing.</li>
+<li>Owner check: identify the script that owns the report (<code>scripts/quality/decbench_*</code>) before editing.</li>
 <li>Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.</li>
 <li>Coverage check: add focused coverage for the invariant rather than only inspecting output manually.</li>
 <li>Regression check: run the smallest useful test first and then the relevant crate check.</li>
@@ -2524,7 +2524,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="02-fixing-an-nir-materialization-bug">02. Fixing an NIR materialization bug<a class="headerlink" href="#02-fixing-an-nir-materialization-bug" title="Permanent link">&para;</a></h3>
@@ -2534,7 +2534,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="03-improving-hir-readability">03. Improving HIR readability<a class="headerlink" href="#03-improving-hir-readability" title="Permanent link">&para;</a></h3>
@@ -2544,7 +2544,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="04-changing-structuring-logic">04. Changing structuring logic<a class="headerlink" href="#04-changing-structuring-logic" title="Permanent link">&para;</a></h3>
@@ -2554,7 +2554,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="05-adding-a-new-nir-pass">05. Adding a new NIR pass<a class="headerlink" href="#05-adding-a-new-nir-pass" title="Permanent link">&para;</a></h3>
@@ -2564,7 +2564,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="06-debugging-an-if-else-recovery-failure">06. Debugging an if-else recovery failure<a class="headerlink" href="#06-debugging-an-if-else-recovery-failure" title="Permanent link">&para;</a></h3>
@@ -2574,7 +2574,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="07-debugging-a-loop-recovery-failure">07. Debugging a loop recovery failure<a class="headerlink" href="#07-debugging-a-loop-recovery-failure" title="Permanent link">&para;</a></h3>
@@ -2584,7 +2584,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="08-debugging-a-switch-recovery-failure">08. Debugging a switch recovery failure<a class="headerlink" href="#08-debugging-a-switch-recovery-failure" title="Permanent link">&para;</a></h3>
@@ -2594,7 +2594,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="09-cleaning-unnecessary-temporaries">09. Cleaning unnecessary temporaries<a class="headerlink" href="#09-cleaning-unnecessary-temporaries" title="Permanent link">&para;</a></h3>
@@ -2604,7 +2604,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="10-recovering-function-parameters">10. Recovering function parameters<a class="headerlink" href="#10-recovering-function-parameters" title="Permanent link">&para;</a></h3>
@@ -2614,7 +2614,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="11-recovering-local-variables">11. Recovering local variables<a class="headerlink" href="#11-recovering-local-variables" title="Permanent link">&para;</a></h3>
@@ -2624,7 +2624,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="12-recovering-return-values">12. Recovering return values<a class="headerlink" href="#12-recovering-return-values" title="Permanent link">&para;</a></h3>
@@ -2634,7 +2634,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="13-recovering-pointer-arithmetic">13. Recovering pointer arithmetic<a class="headerlink" href="#13-recovering-pointer-arithmetic" title="Permanent link">&para;</a></h3>
@@ -2644,7 +2644,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="14-recovering-arrays">14. Recovering arrays<a class="headerlink" href="#14-recovering-arrays" title="Permanent link">&para;</a></h3>
@@ -2654,7 +2654,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="15-recovering-struct-fields">15. Recovering struct fields<a class="headerlink" href="#15-recovering-struct-fields" title="Permanent link">&para;</a></h3>
@@ -2664,7 +2664,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="16-changing-loader-format-detection">16. Changing loader format detection<a class="headerlink" href="#16-changing-loader-format-detection" title="Permanent link">&para;</a></h3>
@@ -2674,7 +2674,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="17-adding-loader-provenance">17. Adding loader provenance<a class="headerlink" href="#17-adding-loader-provenance" title="Permanent link">&para;</a></h3>
@@ -2684,7 +2684,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="18-changing-import-handling">18. Changing import handling<a class="headerlink" href="#18-changing-import-handling" title="Permanent link">&para;</a></h3>
@@ -2694,7 +2694,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="19-changing-export-handling">19. Changing export handling<a class="headerlink" href="#19-changing-export-handling" title="Permanent link">&para;</a></h3>
@@ -2704,7 +2704,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="20-changing-resource-lookup">20. Changing resource lookup<a class="headerlink" href="#20-changing-resource-lookup" title="Permanent link">&para;</a></h3>
@@ -2714,7 +2714,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="21-changing-utility-manifests">21. Changing utility manifests<a class="headerlink" href="#21-changing-utility-manifests" title="Permanent link">&para;</a></h3>
@@ -2724,7 +2724,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="22-changing-signature-lookup">22. Changing signature lookup<a class="headerlink" href="#22-changing-signature-lookup" title="Permanent link">&para;</a></h3>
@@ -2734,17 +2734,17 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
-<h3 id="23-changing-automation-reports">23. Changing automation reports<a class="headerlink" href="#23-changing-automation-reports" title="Permanent link">&para;</a></h3>
+<h3 id="23-changing-benchmark-reports">23. Changing benchmark reports<a class="headerlink" href="#23-changing-benchmark-reports" title="Permanent link">&para;</a></h3>
 <p>Project <code>NirBuildStats</code> and other canonical counters; do not redefine metrics.</p>
 <ul>
 <li>Owner: identify the crate and module that owns the behavior before editing.</li>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="24-changing-json-report-contracts">24. Changing JSON report contracts<a class="headerlink" href="#24-changing-json-report-contracts" title="Permanent link">&para;</a></h3>
@@ -2754,7 +2754,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="25-changing-cli-output">25. Changing CLI output<a class="headerlink" href="#25-changing-cli-output" title="Permanent link">&para;</a></h3>
@@ -2764,7 +2764,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="26-changing-cli-command-parsing">26. Changing CLI command parsing<a class="headerlink" href="#26-changing-cli-command-parsing" title="Permanent link">&para;</a></h3>
@@ -2774,27 +2774,27 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
-<h3 id="27-changing-tui-behavior">27. Changing TUI behavior<a class="headerlink" href="#27-changing-tui-behavior" title="Permanent link">&para;</a></h3>
-<p>Preserve backend contracts and avoid UI-specific semantic rules.</p>
+<h3 id="27-changing-cli-behavior">27. Changing CLI behavior<a class="headerlink" href="#27-changing-cli-behavior" title="Permanent link">&para;</a></h3>
+<p>Keep the CLI a product surface: no semantic rules in command code (see <code>crates/fission-cli/AGENTS.md</code>).</p>
 <ul>
 <li>Owner: identify the crate and module that owns the behavior before editing.</li>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
-<h3 id="28-changing-dioxus-gui-behavior">28. Changing Dioxus GUI behavior<a class="headerlink" href="#28-changing-dioxus-gui-behavior" title="Permanent link">&para;</a></h3>
-<p>Consume shared contracts and avoid duplicate function filtering rules.</p>
+<h3 id="28-changing-agent-facing-output">28. Changing agent-facing output<a class="headerlink" href="#28-changing-agent-facing-output" title="Permanent link">&para;</a></h3>
+<p>Consume shared function views and keep the JSON contract stable (<code>fission_cli schema</code>); avoid duplicate function filtering rules.</p>
 <ul>
 <li>Owner: identify the crate and module that owns the behavior before editing.</li>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="29-changing-ai-integration-surfaces">29. Changing AI integration surfaces<a class="headerlink" href="#29-changing-ai-integration-surfaces" title="Permanent link">&para;</a></h3>
@@ -2804,7 +2804,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="30-changing-plugin-contracts">30. Changing plugin contracts<a class="headerlink" href="#30-changing-plugin-contracts" title="Permanent link">&para;</a></h3>
@@ -2814,7 +2814,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="31-changing-dynamic-analysis-support">31. Changing dynamic-analysis support<a class="headerlink" href="#31-changing-dynamic-analysis-support" title="Permanent link">&para;</a></h3>
@@ -2824,7 +2824,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="32-changing-time-travel-support">32. Changing time-travel support<a class="headerlink" href="#32-changing-time-travel-support" title="Permanent link">&para;</a></h3>
@@ -2834,7 +2834,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="33-adding-a-new-test-fixture">33. Adding a new test fixture<a class="headerlink" href="#33-adding-a-new-test-fixture" title="Permanent link">&para;</a></h3>
@@ -2844,7 +2844,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="34-adding-a-regression-test">34. Adding a regression test<a class="headerlink" href="#34-adding-a-regression-test" title="Permanent link">&para;</a></h3>
@@ -2854,7 +2854,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="35-updating-snapshots">35. Updating snapshots<a class="headerlink" href="#35-updating-snapshots" title="Permanent link">&para;</a></h3>
@@ -2864,7 +2864,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="36-investigating-benchmark-movement">36. Investigating benchmark movement<a class="headerlink" href="#36-investigating-benchmark-movement" title="Permanent link">&para;</a></h3>
@@ -2874,7 +2874,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="37-investigating-a-pass-count-change">37. Investigating a pass-count change<a class="headerlink" href="#37-investigating-a-pass-count-change" title="Permanent link">&para;</a></h3>
@@ -2884,7 +2884,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="38-investigating-a-size-change">38. Investigating a size change<a class="headerlink" href="#38-investigating-a-size-change" title="Permanent link">&para;</a></h3>
@@ -2894,7 +2894,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="39-investigating-a-ci-only-failure">39. Investigating a CI-only failure<a class="headerlink" href="#39-investigating-a-ci-only-failure" title="Permanent link">&para;</a></h3>
@@ -2904,7 +2904,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="40-investigating-a-resource-missing-failure">40. Investigating a resource-missing failure<a class="headerlink" href="#40-investigating-a-resource-missing-failure" title="Permanent link">&para;</a></h3>
@@ -2914,7 +2914,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="41-investigating-a-panic">41. Investigating a panic<a class="headerlink" href="#41-investigating-a-panic" title="Permanent link">&para;</a></h3>
@@ -2924,7 +2924,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="42-investigating-non-determinism">42. Investigating non-determinism<a class="headerlink" href="#42-investigating-non-determinism" title="Permanent link">&para;</a></h3>
@@ -2934,7 +2934,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="43-changing-dependencies">43. Changing dependencies<a class="headerlink" href="#43-changing-dependencies" title="Permanent link">&para;</a></h3>
@@ -2944,7 +2944,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="44-consulting-ghidra">44. Consulting Ghidra<a class="headerlink" href="#44-consulting-ghidra" title="Permanent link">&para;</a></h3>
@@ -2954,7 +2954,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="45-consulting-retdec">45. Consulting RetDec<a class="headerlink" href="#45-consulting-retdec" title="Permanent link">&para;</a></h3>
@@ -2964,7 +2964,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="46-touching-vendor-trees">46. Touching vendor trees<a class="headerlink" href="#46-touching-vendor-trees" title="Permanent link">&para;</a></h3>
@@ -2974,7 +2974,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="47-touching-utils">47. Touching <code>utils/</code><a class="headerlink" href="#47-touching-utils" title="Permanent link">&para;</a></h3>
@@ -2984,7 +2984,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="48-writing-architecture-docs">48. Writing architecture docs<a class="headerlink" href="#48-writing-architecture-docs" title="Permanent link">&para;</a></h3>
@@ -2994,7 +2994,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="49-writing-user-docs">49. Writing user docs<a class="headerlink" href="#49-writing-user-docs" title="Permanent link">&para;</a></h3>
@@ -3004,7 +3004,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="50-writing-troubleshooting-docs">50. Writing troubleshooting docs<a class="headerlink" href="#50-writing-troubleshooting-docs" title="Permanent link">&para;</a></h3>
@@ -3014,7 +3014,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="51-writing-release-notes">51. Writing release notes<a class="headerlink" href="#51-writing-release-notes" title="Permanent link">&para;</a></h3>
@@ -3024,7 +3024,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="52-preparing-a-commit">52. Preparing a commit<a class="headerlink" href="#52-preparing-a-commit" title="Permanent link">&para;</a></h3>
@@ -3034,7 +3034,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="53-preparing-a-pr">53. Preparing a PR<a class="headerlink" href="#53-preparing-a-pr" title="Permanent link">&para;</a></h3>
@@ -3044,7 +3044,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="54-reviewing-a-pr">54. Reviewing a PR<a class="headerlink" href="#54-reviewing-a-pr" title="Permanent link">&para;</a></h3>
@@ -3054,7 +3054,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="55-refactoring-shared-code">55. Refactoring shared code<a class="headerlink" href="#55-refactoring-shared-code" title="Permanent link">&para;</a></h3>
@@ -3064,7 +3064,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="56-adding-an-abstraction">56. Adding an abstraction<a class="headerlink" href="#56-adding-an-abstraction" title="Permanent link">&para;</a></h3>
@@ -3074,7 +3074,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="57-deleting-legacy-code">57. Deleting legacy code<a class="headerlink" href="#57-deleting-legacy-code" title="Permanent link">&para;</a></h3>
@@ -3084,7 +3084,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="58-changing-telemetry-names">58. Changing telemetry names<a class="headerlink" href="#58-changing-telemetry-names" title="Permanent link">&para;</a></h3>
@@ -3094,27 +3094,27 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="59-changing-public-structs">59. Changing public structs<a class="headerlink" href="#59-changing-public-structs" title="Permanent link">&para;</a></h3>
-<p>Consider CLI JSON, GUI, automation, and downstream compatibility.</p>
+<p>Consider the CLI JSON contract, scripts, and downstream compatibility.</p>
 <ul>
 <li>Owner: identify the crate and module that owns the behavior before editing.</li>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="60-changing-error-types">60. Changing error types<a class="headerlink" href="#60-changing-error-types" title="Permanent link">&para;</a></h3>
-<p>Keep errors typed enough for users and automation to act on.</p>
+<p>Keep errors typed enough for users and agents to act on.</p>
 <ul>
 <li>Owner: identify the crate and module that owns the behavior before editing.</li>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="61-changing-logging">61. Changing logging<a class="headerlink" href="#61-changing-logging" title="Permanent link">&para;</a></h3>
@@ -3124,7 +3124,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="62-changing-performance-sensitive-paths">62. Changing performance-sensitive paths<a class="headerlink" href="#62-changing-performance-sensitive-paths" title="Permanent link">&para;</a></h3>
@@ -3134,7 +3134,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="63-changing-memory-heavy-paths">63. Changing memory-heavy paths<a class="headerlink" href="#63-changing-memory-heavy-paths" title="Permanent link">&para;</a></h3>
@@ -3144,7 +3144,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="64-changing-parser-code">64. Changing parser code<a class="headerlink" href="#64-changing-parser-code" title="Permanent link">&para;</a></h3>
@@ -3154,7 +3154,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="65-changing-graph-algorithms">65. Changing graph algorithms<a class="headerlink" href="#65-changing-graph-algorithms" title="Permanent link">&para;</a></h3>
@@ -3164,7 +3164,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="66-changing-dataflow-analysis">66. Changing dataflow analysis<a class="headerlink" href="#66-changing-dataflow-analysis" title="Permanent link">&para;</a></h3>
@@ -3174,7 +3174,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="67-changing-fixed-point-loops">67. Changing fixed-point loops<a class="headerlink" href="#67-changing-fixed-point-loops" title="Permanent link">&para;</a></h3>
@@ -3184,7 +3184,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="68-changing-type-inference">68. Changing type inference<a class="headerlink" href="#68-changing-type-inference" title="Permanent link">&para;</a></h3>
@@ -3194,7 +3194,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="69-changing-abi-handling">69. Changing ABI handling<a class="headerlink" href="#69-changing-abi-handling" title="Permanent link">&para;</a></h3>
@@ -3204,7 +3204,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="70-changing-x86-behavior">70. Changing x86 behavior<a class="headerlink" href="#70-changing-x86-behavior" title="Permanent link">&para;</a></h3>
@@ -3214,7 +3214,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="71-changing-non-x86-behavior">71. Changing non-x86 behavior<a class="headerlink" href="#71-changing-non-x86-behavior" title="Permanent link">&para;</a></h3>
@@ -3224,7 +3224,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="72-changing-docs-only">72. Changing docs only<a class="headerlink" href="#72-changing-docs-only" title="Permanent link">&para;</a></h3>
@@ -3234,7 +3234,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h3 id="73-changing-logo-or-readme-assets">73. Changing logo or README assets<a class="headerlink" href="#73-changing-logo-or-readme-assets" title="Permanent link">&para;</a></h3>
@@ -3244,7 +3244,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.</li>
 <li>Coverage: add or update the smallest test that captures the invariant.</li>
 <li>Validation: run the targeted check first, then the relevant crate-level check.</li>
-<li>Regression: compare existing passing rows or smoke lanes when behavior is user-visible.</li>
+<li>Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.</li>
 <li>Report: separate mechanical change from quality improvement.</li>
 </ul>
 <h2 id="review-question-bank">Review Question Bank<a class="headerlink" href="#review-question-bank" title="Permanent link">&para;</a></h2>
@@ -3257,7 +3257,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>[ ] 05. Could this patch accidentally special-case one binary?</li>
 <li>[ ] 06. Could this have been fixed lower in the pipeline?</li>
 <li>[ ] 07. Does the printer now infer facts it does not own?</li>
-<li>[ ] 08. Does automation define a metric already owned by <code>NirBuildStats</code>?</li>
+<li>[ ] 08. Does a benchmark script define a metric already owned by <code>NirBuildStats</code>?</li>
 <li>[ ] 09. Does the loader fail closed on unsupported input?</li>
 <li>[ ] 10. Does resource lookup go through path configuration?</li>
 <li>[ ] 11. Are vendor files used only as reference material?</li>
@@ -3265,7 +3265,7 @@ decompiler quality loop. This document is the depth behind them.</p>
 <li>[ ] 13. Is output deterministic across machines?</li>
 <li>[ ] 14. Are local absolute paths absent from production code?</li>
 <li>[ ] 15. Does the CLI remain a product surface rather than a semantic owner?</li>
-<li>[ ] 16. Does GUI code consume shared function views?</li>
+<li>[ ] 16. Does CLI code consume shared function views?</li>
 <li>[ ] 17. Are errors typed enough to debug?</li>
 <li>[ ] 18. Are logs useful without being test-sensitive?</li>
 <li>[ ] 19. Are large binaries handled without unbounded memory growth?</li>

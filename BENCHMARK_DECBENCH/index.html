@@ -1273,6 +1273,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#baseline-main-5073a1c63-2026-11-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Baseline: main 5073a1c63 (2026-11-21)
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1313,6 +1324,13 @@
 <p>DecBench is the benchmark decompiler-quality work is measured on. It replaces
 the docker multi-decompiler loop described in
 <a href="../BENCHMARK_DOCKER/"><code>BENCHMARK_DOCKER.md</code></a>, which is retired.</p>
+<p><strong>Quality is measured on the whole dataset.</strong> Every quality claim cites the
+full-dataset sweep: all 96,103 functions of <code>noelo-lab/decbench-dataset</code>, broken
+down by config (<code>unoptimized</code>, <code>optimized</code>, <code>inlined</code>, <code>large</code>, <code>sample-set</code>),
+with the published tools recomputed on the same rows. The 250-function
+sample-set gate is the quick pre-check before a sweep, not the evidence. The
+published Fission leaderboard row covers 100 rows of a config, so a rank read off
+the leaderboard was never same-denominator.</p>
 <p>The data and harness live outside this repository, under
 <code>~/fission-benchmark</code> (the directory name is historical; it hosts DecBench):</p>
 <table>
@@ -1324,12 +1342,16 @@ the docker multi-decompiler loop described in
 </thead>
 <tbody>
 <tr>
-<td>Dataset (do not re-download)</td>
-<td><code>~/fission-benchmark/decbench-data</code> — binaries, published source CFGs, per-function scores of the other decompilers</td>
+<td>Dataset for the sweep</td>
+<td><code>~/fission-benchmark/decbench-full/data</code> — revision <code>815eb96f130b6d2ef7fa600e04669bf20139bf27</code> (the 2026-10-09 rebuild): every binary of the <code>full</code> manifest, published source CFGs, each config's <code>manifest.json</code> and <code>function_results.json</code> (per-function scores of every published tool); hashes verified against the Hub and the manifests</td>
 </tr>
 <tr>
-<td>Sweep harness</td>
-<td><code>~/fission-benchmark/decbench-harness/fullrun.py</code>, <code>fullagg.py</code> (legacy full-dataset sweep); <code>python -m fbench run</code> in the reorganised repository</td>
+<td>Full-dataset sweep</td>
+<td><code>~/fission-benchmark/decbench-full/sweep.py</code> (<code>run</code>, <code>report</code>, <code>diff</code>); its <code>README.md</code> documents every step</td>
+</tr>
+<tr>
+<td>Dataset for the gate</td>
+<td><code>~/fission-benchmark/decbench-data</code> — the July build the sample-set kit and gate floor were taken on; its binaries predate the 2026-10-09 rebuild, so do not sweep on it</td>
 </tr>
 <tr>
 <td>Python environment</td>
@@ -1385,22 +1407,22 @@ it is now close to zero.</p>
 <tr>
 <td>Script</td>
 <td><code>scripts/quality/decbench_sample_set_gate.py</code></td>
-<td><code>decbench-harness/fullrun.py</code> + <code>fullagg.py</code></td>
+<td><code>~/fission-benchmark/decbench-full/sweep.py</code></td>
 </tr>
 <tr>
 <td>Rows</td>
 <td>250 (233 scored for GED)</td>
-<td>up to 34,406 (<code>unoptimized</code> config)</td>
+<td>96,103 (<code>full</code> = <code>unoptimized</code> ∪ <code>optimized</code> ∪ <code>inlined</code>; <code>large</code> and <code>sample-set</code> are subsets)</td>
 </tr>
 <tr>
 <td>Time</td>
 <td>~5 min, ~10 min cold</td>
-<td>hours (dominated by a few huge binaries)</td>
+<td>hours; see the baseline below for measured wall and CPU time</td>
 </tr>
 <tr>
 <td>Use for</td>
-<td>quick signal; refuses a drop below a stored floor</td>
-<td>any ranking or release claim, same-row comparison</td>
+<td>quick pre-check; refuses a drop below a stored floor</td>
+<td><strong>every quality claim</strong>, ranking or release claim, same-row comparison with the published tools</td>
 </tr>
 </tbody>
 </table>
@@ -1437,19 +1459,178 @@ produced and <code>FISSION_BENCHMARK_NO_CACHE=1</code> still gives an honest bef
 <code>release</code>, <code>quick-release</code> and <code>debug</code>, and a stale build silently scores the
 wrong thing.</p>
 <h3 id="full-sweep">Full sweep<a class="headerlink" href="#full-sweep" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">cd</span><span class="w"> </span>~/fission-benchmark/decbench-harness
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullrun.py
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">CONFIG</span><span class="o">=</span>unoptimized<span class="w"> </span><span class="nv">CKPT</span><span class="o">=</span>/tmp/decbench-full-ckpt<span class="w"> </span>python3<span class="w"> </span>fullagg.py
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">PY</span><span class="o">=</span>~/fission-benchmark/.venv-decbench/bin/python
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">SWEEP</span><span class="o">=</span>~/fission-benchmark/decbench-full/sweep.py
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">$PY</span><span class="w"> </span>-I<span class="w"> </span><span class="nv">$SWEEP</span><span class="w"> </span>run<span class="w"> </span>--cli<span class="w"> </span>target/release/fission_cli<span class="w"> </span>--repo<span class="w"> </span><span class="s2">"</span><span class="nv">$PWD</span><span class="s2">"</span><span class="w"> </span>--label<span class="w"> </span>after<span class="w">   </span><span class="c1"># --config full by default</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nv">$PY</span><span class="w"> </span>-I<span class="w"> </span><span class="nv">$SWEEP</span><span class="w"> </span>diff<span class="w"> </span>~/fission-benchmark/decbench-full/runs/before<span class="w"> </span>~/fission-benchmark/decbench-full/runs/after
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="nv">$PY</span><span class="w"> </span>-I<span class="w"> </span><span class="nv">$SWEEP</span><span class="w"> </span>report<span class="w"> </span>~/fission-benchmark/decbench-full/runs/after<span class="w">                 </span><span class="c1"># summary.md / summary.json</span>
 </span></code></pre></div>
-<p>Environment: <code>CONFIG</code> (<code>unoptimized</code>, <code>optimized</code>, <code>inlined</code>, <code>large</code>, …),
-<code>CKPT</code> (one checkpoint per binary, so an interrupted sweep resumes), <code>LIMIT</code>
-(binaries), <code>ONLY</code> (comma-separated), <code>BINARY_WORKERS</code>, <code>JOERN_CHUNK</code>. <code>FISSION_BENCHMARK_NO_CACHE=1</code> disables the decompile / GED / type
-caches; <strong>use it for any before/after</strong>, otherwise the second run reads the
-first run's answers.</p>
-<p><code>fullagg.py</code> compares only on rows Fission actually scored. The published
-Fission row covers 100 of 34,406 functions, so quote same-row comparisons, not
-the leaderboard percentages.</p>
-<p><code>fullrun.py</code> runs <code>/Users/sjkim1127/Fission/target/release/fission_cli</code>.</p>
+<p>What one <code>run</code> does, per binary of the config:</p>
+<ul>
+<li>Fission sees only a stripped copy (<code>llvm-strip --strip-all -R .comment -R
+  .note.gnu.build-id</code>, DecBench's eval-kit recipe, checked by DecBench's own
+  <code>_verify_strip</code>). Names, addresses (<code>evalkit.resolve.name_to_addr</code>) and DWARF
+  ground-truth types come from the unstripped original, for grading only.</li>
+<li><code>fission_cli decomp --addresses-file</code> with <code>FISSION_BENCHMARK_NO_CACHE=1</code>, the
+  checkout as working directory, in chunks of 400 functions. A chunk that crashes,
+  times out or passes the memory cap is bisected until the failing function is
+  named, so one bad function costs that function, never its binary. Each call's
+  wall time, CPU time and peak RSS are recorded.</li>
+<li>The sha256 of every function's output is stored, so <code>diff</code> compares two runs on
+  output first and shows scores only for rows whose text changed (and how many
+  rows moved with identical text, i.e. scorer noise).</li>
+<li>GED and type_match use the same code as the gate (<code>decbench_scoring.py</code>, the
+  <code>decbench</code> package, rust-joern), frozen under <code>decbench-full/scorer/</code> with
+  their hashes recorded in each run.</li>
+<li><strong>byte_match is not run</strong>: it needs DecBench's recompile toolchain (gcc for each
+  target under <code>linux/amd64</code>), whose Docker image is gone. Results say "not run"
+  instead of 0, Union is reported as Union(GED, type), and the published tools
+  are recomputed on the same two metrics.</li>
+</ul>
+<p><code>report</code> gives, per config: rows, decompiled, failures, GED perfect next to total
+distance (and median/p90), type perfect and mean, Union(GED, type), decompile wall
+and CPU time; then Kuna, IDA, Binary Ninja, angr, Ghidra and the published Fission
+row on exactly the same rows, with GED distance compared on the rows every tool
+scored. Type numbers are not like-for-like across tools (Fission is scored through
+its structured variables, the published rows through each tool's adapter); use
+them for Fission's own before/after.</p>
+<p>A run resumes (one result file per binary) and refuses a different <code>fission_cli</code>
+or scorer in the same run directory. Re-scoring the rivals' published output
+through this GED path reproduces their published per-function GED on 84-87% of
+rows, totals within 3% (<code>validate_key.py</code>; the residue is that DecBench parses a
+rival's whole file while the check feeds each function alone, which does not
+apply to Fission's per-function submission).</p>
+<p>The previous harness (<code>decbench-harness/fullrun.py</code> + <code>fullagg.py</code>) ran on the
+July build's <code>unoptimized</code> config only and is superseded.</p>
+<h3 id="baseline-main-5073a1c63-2026-11-21">Baseline: <code>main</code> 5073a1c63 (2026-11-21)<a class="headerlink" href="#baseline-main-5073a1c63-2026-11-21" title="Permanent link">&para;</a></h3>
+<p>One <code>full</code> run, 4 workers: 34 min wall on a shared machine, 8,051 s CPU in
+<code>fission_cli</code>. 916 decompile calls, none failed; 22 rows have no DWARF address;
+0 decompile failures. byte_match not run.</p>
+<table>
+<thead>
+<tr>
+<th>config</th>
+<th style="text-align: right;">rows</th>
+<th style="text-align: right;">GED perfect / scored</th>
+<th style="text-align: right;">GED total distance</th>
+<th style="text-align: right;">type perfect / scored (mean)</th>
+<th style="text-align: right;">Union(GED, type)</th>
+<th style="text-align: right;">decompile wall / CPU (s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>full</td>
+<td style="text-align: right;">96,103</td>
+<td style="text-align: right;">32,136 / 90,459</td>
+<td style="text-align: right;">1,519,008</td>
+<td style="text-align: right;">5,799 / 86,934 (0.229)</td>
+<td style="text-align: right;">35,421 (36.9%)</td>
+<td style="text-align: right;">5,261 / 7,057</td>
+</tr>
+<tr>
+<td>unoptimized</td>
+<td style="text-align: right;">34,505</td>
+<td style="text-align: right;">13,475 / 32,973</td>
+<td style="text-align: right;">387,650</td>
+<td style="text-align: right;">3,650 / 31,181 (0.353)</td>
+<td style="text-align: right;">15,539 (45.0%)</td>
+<td style="text-align: right;">1,781 / 2,524</td>
+</tr>
+<tr>
+<td>optimized</td>
+<td style="text-align: right;">35,399</td>
+<td style="text-align: right;">11,151 / 33,135</td>
+<td style="text-align: right;">520,443</td>
+<td style="text-align: right;">1,495 / 32,054 (0.173)</td>
+<td style="text-align: right;">12,052 (34.0%)</td>
+<td style="text-align: right;">1,549 / 2,213</td>
+</tr>
+<tr>
+<td>inlined</td>
+<td style="text-align: right;">26,199</td>
+<td style="text-align: right;">7,510 / 24,351</td>
+<td style="text-align: right;">610,915</td>
+<td style="text-align: right;">654 / 23,699 (0.144)</td>
+<td style="text-align: right;">7,830 (29.9%)</td>
+<td style="text-align: right;">1,931 / 2,320</td>
+</tr>
+<tr>
+<td>large</td>
+<td style="text-align: right;">1,962</td>
+<td style="text-align: right;">6 / 1,920</td>
+<td style="text-align: right;">170,252</td>
+<td style="text-align: right;">2 / 1,924 (0.128)</td>
+<td style="text-align: right;">8 (0.4%)</td>
+<td style="text-align: right;">(subset)</td>
+</tr>
+<tr>
+<td>sample-set</td>
+<td style="text-align: right;">250</td>
+<td style="text-align: right;">69 / 246</td>
+<td style="text-align: right;">7,752</td>
+<td style="text-align: right;">18 / 228 (0.236)</td>
+<td style="text-align: right;">81 (32.4%)</td>
+<td style="text-align: right;">(subset)</td>
+</tr>
+</tbody>
+</table>
+<p>Same rows, published scores (<code>full</code>; Union(GED, type) counted only on rows
+Fission can be scored on, because the published source-CFG file lacks 1,137
+functions DecBench scored the rivals on; GED distance on the 67,263 rows every
+tool has a GED for):</p>
+<table>
+<thead>
+<tr>
+<th>tool</th>
+<th style="text-align: right;">Union(GED, type)</th>
+<th style="text-align: right;">GED perfect</th>
+<th style="text-align: right;">common-row GED distance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kuna 1.515</td>
+<td style="text-align: right;">38,102</td>
+<td style="text-align: right;">35,398</td>
+<td style="text-align: right;">879,499</td>
+</tr>
+<tr>
+<td>IDA 920</td>
+<td style="text-align: right;">37,437</td>
+<td style="text-align: right;">33,966</td>
+<td style="text-align: right;">955,356</td>
+</tr>
+<tr>
+<td>angr 9.3.4</td>
+<td style="text-align: right;">36,678</td>
+<td style="text-align: right;">32,510</td>
+<td style="text-align: right;">1,037,320</td>
+</tr>
+<tr>
+<td><strong>Fission main</strong></td>
+<td style="text-align: right;"><strong>35,421</strong></td>
+<td style="text-align: right;"><strong>32,136</strong></td>
+<td style="text-align: right;"><strong>1,227,074</strong></td>
+</tr>
+<tr>
+<td>Binary Ninja 5.3</td>
+<td style="text-align: right;">30,448</td>
+<td style="text-align: right;">26,048</td>
+<td style="text-align: right;">1,100,194</td>
+</tr>
+<tr>
+<td>Ghidra 12.1</td>
+<td style="text-align: right;">29,909</td>
+<td style="text-align: right;">25,835</td>
+<td style="text-align: right;">1,062,654</td>
+</tr>
+</tbody>
+</table>
+<p>Fission is 4th of six on Union in <code>full</code>, <code>unoptimized</code>, <code>optimized</code> and
+<code>inlined</code>, last on <code>large</code>, and 2nd on the sample set (81 against Kuna's 88).
+On total GED distance it is last in every config. The sample-set rank does
+not hold on the whole dataset, which is why the whole dataset is the measure.</p>
 <h2 id="rules">Rules<a class="headerlink" href="#rules" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Measure on the one output surface.</strong> <code>code</code> is the only output
@@ -1468,6 +1649,8 @@ the leaderboard percentages.</p>
   <code>~/fission-benchmark</code> carries published source CFGs for 64,231 functions that
   the sample set does not score; use it as the unseen split (it is <code>-O0</code> with
   symbols, so a shape visible only there is a different overfit).</li>
+<li><strong>Quality claims cite the full-dataset sweep</strong>, per config, total distance next
+  to the perfect count, failures included. The sample-set gate is a pre-check.</li>
 <li>Local results are never an official ranking. A leaderboard or release claim is
   the sweep, on same rows, from a tagged build.</li>
 </ul>

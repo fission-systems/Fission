@@ -1261,6 +1261,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#update-2026-11-21" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Update (2026-11-21)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1283,7 +1294,7 @@
 
 <h1 id="adr-0001-cli-first-external-surface">ADR 0001: CLI-first external surface<a class="headerlink" href="#adr-0001-cli-first-external-surface" title="Permanent link">&para;</a></h1>
 <p><strong>Status:</strong> Accepted<br />
-<strong>Last verified:</strong> 2026-05-02</p>
+<strong>Last verified:</strong> 2026-11-21</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p>External teams evaluate Fission headlessly and need stable invocation and observable artifacts. A prematurely frozen Rust crate API spreads semver liability across unrelated internals.</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
@@ -1292,8 +1303,13 @@
 <ul>
 <li>Contract tests and release gates emphasize CLI behavior and JSON outputs.</li>
 <li>Crate-level semver for unpublished internals is secondary to CLI semver (<a href="../../VERSIONING/"><code>docs/VERSIONING.md</code></a>).</li>
-<li>Desktop (<code>fission-tauri</code>) builds on the same pipeline assumptions but does not redefine semantic contracts.</li>
+<li>~~Desktop (<code>fission-tauri</code>) builds on the same pipeline assumptions but does not redefine semantic contracts.~~</li>
 </ul>
+<h2 id="update-2026-11-21">Update (2026-11-21)<a class="headerlink" href="#update-2026-11-21" title="Permanent link">&para;</a></h2>
+<p>The desktop app and the TUI have since been removed: Fission is agent-first, and
+the CLI with its JSON contract is the only product surface
+(<a href="../../roadmap/1.0-criteria/"><code>docs/roadmap/1.0-criteria.md</code></a>). The decision above
+stands, with no second surface left to keep consistent with it.</p>
 
 
 

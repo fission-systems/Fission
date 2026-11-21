@@ -1443,7 +1443,7 @@ open PRs as part of the same change.</p>
 </ul>
 <p><strong>Does not cover:</strong></p>
 <ul>
-<li>Full fission-benchmark docker corpus or Pages promotion</li>
+<li>The DecBench measurement (see <a href="../BENCHMARK_DECBENCH/"><code>BENCHMARK_DECBENCH.md</code></a>) or Pages promotion</li>
 <li>Official semantic leaderboard / <code>release_promotion_allowed</code> dashboard claims
   (still manual / evaluation path in <a href="../RELEASE/"><code>docs/RELEASE.md</code></a> § quality)</li>
 </ul>
@@ -1496,8 +1496,7 @@ A nightly run is sufficient when the candidate has not moved since it ran.</p>
   Windows release tests are on L1).</li>
 <li>Fast Gate no longer performs separate macOS/Windows CLI release builds on <code>main</code>;
   those release builds remain in L1 Heavy while L0 keeps the macOS test smoke signal.</li>
-<li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process and
-  skips webkit/GTK sysdeps unless GUI packages are required.</li>
+<li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process.</li>
 <li><strong>sccache</strong> (GitHub Actions backend) on lint / test / CLI build reusables via
   <a href="../.github/actions/setup-sccache"><code>.github/actions/setup-sccache</code></a>.</li>
 <li>Rust PRs use Cargo package metadata to select the changed crates and their
