@@ -197,10 +197,14 @@ impl SymExpr {
         }
         let width_bits = a.get_bit_width().max(b.get_bit_width());
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: v1.wrapping_add(*v2) & bitvector_mask(width_bits),
-                size: width_bits,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: v1.wrapping_add(v2) & bitvector_mask(width_bits),
+                    size: width_bits,
+                }
+            }
             (Self::Const { val: 0, size }, _) if *size <= b.get_bit_width() => b,
             (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
             _ => Self::Add(Box::new(a), Box::new(b)),
@@ -213,10 +217,14 @@ impl SymExpr {
         }
         let width_bits = a.get_bit_width().max(b.get_bit_width());
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: v1.wrapping_sub(*v2) & bitvector_mask(width_bits),
-                size: width_bits,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: v1.wrapping_sub(v2) & bitvector_mask(width_bits),
+                    size: width_bits,
+                }
+            }
             (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
             (a_expr, b_expr) if a_expr == b_expr => Self::Const {
                 val: 0,
@@ -232,10 +240,14 @@ impl SymExpr {
         }
         let width_bits = a.get_bit_width().max(b.get_bit_width());
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: v1 & v2 & bitvector_mask(width_bits),
-                size: width_bits,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: v1 & v2 & bitvector_mask(width_bits),
+                    size: width_bits,
+                }
+            }
             (Self::Const { val: 0, .. }, _) => Self::Const {
                 val: 0,
                 size: width_bits,
@@ -255,10 +267,14 @@ impl SymExpr {
         }
         let width_bits = a.get_bit_width().max(b.get_bit_width());
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: (v1 ^ v2) & bitvector_mask(width_bits),
-                size: width_bits,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: (v1 ^ v2) & bitvector_mask(width_bits),
+                    size: width_bits,
+                }
+            }
             (Self::Const { val: 0, size }, _) if *size <= b.get_bit_width() => b,
             (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
             (a, b) if a == b => Self::Const {
@@ -298,10 +314,14 @@ impl SymExpr {
             return Self::Eq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: if v1 == v2 { 1 } else { 0 },
-                size: 1,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: if v1 == v2 { 1 } else { 0 },
+                    size: 1,
+                }
+            }
             (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 1, size: 1 },
             _ => Self::Eq(Box::new(a), Box::new(b)),
         }
@@ -312,10 +332,14 @@ impl SymExpr {
             return Self::Neq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: if v1 != v2 { 1 } else { 0 },
-                size: 1,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: if v1 != v2 { 1 } else { 0 },
+                    size: 1,
+                }
+            }
             (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 0, size: 1 },
             _ => Self::Neq(Box::new(a), Box::new(b)),
         }
@@ -326,10 +350,14 @@ impl SymExpr {
             return Self::Ult(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
-            (Self::Const { val: v1, .. }, Self::Const { val: v2, .. }) => Self::Const {
-                val: if v1 < v2 { 1 } else { 0 },
-                size: 1,
-            },
+            (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                // The payload as lowering reads it: `size` bits and no more.
+                let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
+                Self::Const {
+                    val: if v1 < v2 { 1 } else { 0 },
+                    size: 1,
+                }
+            }
             _ => Self::Ult(Box::new(a), Box::new(b)),
         }
     }
@@ -456,17 +484,34 @@ impl SymExpr {
         }
     }
 
+    /// Negation flips the sign bit and touches nothing else -- on the bit
+    /// pattern, as lowering does. Going through `f64` to negate a 32-bit
+    /// constant quieted a signalling NaN on the way, so the folded constant
+    /// and the circuit disagreed about the payload.
     pub fn new_fneg(a: SymExpr) -> Self {
-        match Self::as_f64_bits(&a) {
-            Some((x, sz)) => Self::fconst(-x, sz),
-            None => Self::FNeg(Box::new(a)),
+        match a {
+            Self::Const {
+                val,
+                size: size @ (32 | 64),
+            } => Self::Const {
+                val: (val ^ (1u64 << (size - 1))) & bitvector_mask(size),
+                size,
+            },
+            _ => Self::FNeg(Box::new(a)),
         }
     }
 
+    /// Absolute value clears the sign bit; see [`Self::new_fneg`].
     pub fn new_fabs(a: SymExpr) -> Self {
-        match Self::as_f64_bits(&a) {
-            Some((x, sz)) => Self::fconst(x.abs(), sz),
-            None => Self::FAbs(Box::new(a)),
+        match a {
+            Self::Const {
+                val,
+                size: size @ (32 | 64),
+            } => Self::Const {
+                val: val & !(1u64 << (size - 1)) & bitvector_mask(size),
+                size,
+            },
+            _ => Self::FAbs(Box::new(a)),
         }
     }
 

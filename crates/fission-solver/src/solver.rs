@@ -68,6 +68,15 @@ fn read_oracle_value(
     Some(val & mask)
 }
 
+/// A constant's value: its low `size` bits, which is all lowering reads.
+fn constant_value(expr: &SymExpr) -> u64 {
+    match expr {
+        SymExpr::Const { val, size } if *size < 64 => val & ((1u64 << size) - 1),
+        SymExpr::Const { val, .. } => *val,
+        _ => unreachable!("only called on a constant"),
+    }
+}
+
 impl Solver {
     pub fn new() -> Self {
         let mut bv_theory = crate::theory::bitvector::BvTheorySolver::new();
@@ -396,7 +405,7 @@ impl Solver {
     /// Concrete shortcut: if const, compare directly.
     pub fn is_true(&mut self, expr: &SymExpr) -> bool {
         match expr {
-            SymExpr::Const { val, .. } => *val != 0,
+            SymExpr::Const { .. } => constant_value(expr) != 0,
             _ => {
                 // NOT(expr) must be *refuted*. `!satisfiable(..)` also counted
                 // `Unknown` as proof, which made "could not tell" read as
@@ -415,7 +424,7 @@ impl Solver {
     /// Concrete shortcut: if const, compare directly.
     pub fn is_false(&mut self, expr: &SymExpr) -> bool {
         match expr {
-            SymExpr::Const { val, .. } => *val == 0,
+            SymExpr::Const { .. } => constant_value(expr) == 0,
             _ => {
                 // `expr` must be refuted, for the same reason as `is_true`.
                 let positive = SymExpr::new_neq(expr.clone(), SymExpr::new_const(0, 1));
