@@ -333,18 +333,21 @@ fn classify_register_relative(
     }
 
     if matches_param || matches_local {
-        let pointer_size: i32 = if is_64bit { 8 } else { 4 };
+        let pointer_size: i64 = if is_64bit { 8 } else { 4 };
         // Anchored on a frame pointer, the register points at the saved frame
         // pointer: the return address is above it and the incoming parameters
         // start at `2 * ptr`, whatever the size of the frame below. Anchored
         // on the stack pointer it points at the bottom of the frame, and the
         // parameters start above the frame and the return address.
+        // In 64 bits: a frame size near `u32::MAX` plus the return address
+        // does not fit an `i32`, and the sum used to overflow there -- in
+        // release, to a negative threshold that made every slot a parameter.
         let threshold = if matches!(reg_name, "ebp" | "rbp" | "fbp") {
             2 * pointer_size
         } else {
-            i32::try_from(info.total_frame_bytes).unwrap_or(i32::MAX) + pointer_size
+            i64::from(info.total_frame_bytes) + pointer_size
         };
-        return if offset >= threshold {
+        return if i64::from(offset) >= threshold {
             VariableRole::Param
         } else {
             VariableRole::Local
@@ -733,16 +736,31 @@ fn resolve_signature_from_type_index(
             }),
             resolve_argument_list(proc.argument_list, type_information, type_finder),
         )),
-        TypeData::MemberFunction(proc) => Some((
-            Some(resolve_symbol_type_name(
-                proc.return_type,
+        TypeData::MemberFunction(proc) => {
+            // `LF_MFUNCTION` keeps `this` out of the argument list, but the
+            // function's own symbols list it as the first parameter, and
+            // parameter names are matched to these types by position.
+            let this = proc.this_pointer_type.map(|index| {
+                resolve_symbol_type_name(index, type_information, type_finder, None, None)
+                    .unwrap_or_default()
+            });
+            let mut parameters: Vec<String> = this.into_iter().collect();
+            parameters.extend(resolve_argument_list(
+                proc.argument_list,
                 type_information,
                 type_finder,
-                None,
-                None,
-            )?),
-            resolve_argument_list(proc.argument_list, type_information, type_finder),
-        )),
+            ));
+            Some((
+                Some(resolve_symbol_type_name(
+                    proc.return_type,
+                    type_information,
+                    type_finder,
+                    None,
+                    None,
+                )?),
+                parameters,
+            ))
+        }
         TypeData::Modifier(modifier) => resolve_signature_from_type_index(
             modifier.underlying_type,
             type_information,
@@ -1088,5 +1106,74 @@ mod tests {
         assert_eq!(field("x").offset, 0);
         assert_eq!(field("y").offset, 4);
         assert_eq!(field("z").offset, 8);
+    }
+
+    /// `Widget::scale(int factor, long bias)` from
+    /// `testdata/x64_pdb_method_test.cpp`. Its CodeView type keeps `this`
+    /// out of the argument list, but the function's own symbols list `this`
+    /// as the first parameter, and parameter names are matched to types by
+    /// position: leaving `this` out of the types gave `this` the type `int`,
+    /// `factor` the type `long`, and `bias` none.
+    #[test]
+    fn a_member_function_has_this_as_its_first_parameter() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_pdb_method_test.exe");
+        let binary = LoadedBinary::from_file(&path).expect("load PDB method fixture");
+        let scale = binary
+            .pdb_functions
+            .values()
+            .find(|function| function.name.contains("scale"))
+            .unwrap_or_else(|| panic!("no `scale` in {:?}", binary.pdb_functions));
+        let params: Vec<(&str, &str)> = scale
+            .params
+            .iter()
+            .map(|param| (param.name.as_str(), param.type_name.as_str()))
+            .collect();
+        assert_eq!(params.len(), 3, "{params:?}");
+        assert_eq!(params[0].0, "this");
+        assert!(params[0].1.contains("Widget"), "{params:?}");
+        assert!(params[0].1.ends_with('*'), "{params:?}");
+        assert_eq!(params[1].0, "factor");
+        assert!(
+            params[1].1.contains("I32") || params[1].1.contains("Int"),
+            "{params:?}"
+        );
+        assert_eq!(params[2].0, "bias");
+        assert!(!params[2].1.is_empty(), "{params:?}");
+
+        // The control: a free function's signature is unchanged.
+        let entry = binary
+            .pdb_functions
+            .values()
+            .find(|function| function.name == "entry")
+            .expect("entry");
+        assert!(entry.params.is_empty(), "{:?}", entry.params);
+    }
+
+    /// A frame of nearly 4 GiB: `i32::MAX + pointer_size` overflowed, and in
+    /// release the wrapped, negative threshold made every slot a parameter.
+    #[test]
+    fn classify_register_relative_survives_a_frame_size_near_the_limit() {
+        for total_frame_bytes in [u32::MAX, i32::MAX as u32, i32::MAX as u32 - 4] {
+            let info = FrameProcInfo {
+                total_frame_bytes,
+                param_fp_reg: Some("rsp"),
+                local_fp_reg: Some("rsp"),
+            };
+            assert!(
+                matches!(
+                    classify_register_relative(Some(&info), true, "rsp", 32),
+                    VariableRole::Local
+                ),
+                "frame {total_frame_bytes:#x}: offset 32 is a local"
+            );
+            assert!(
+                matches!(
+                    classify_register_relative(Some(&info), true, "rsp", i32::MAX),
+                    VariableRole::Local
+                ),
+                "frame {total_frame_bytes:#x}: no offset reaches past it"
+            );
+        }
     }
 }

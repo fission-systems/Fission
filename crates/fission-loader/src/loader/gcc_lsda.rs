@@ -141,17 +141,57 @@ impl<'a> Cursor<'a> {
     }
 }
 
-fn read_native(bytes: &[u8], is_64bit: bool) -> u64 {
-    if is_64bit {
-        let mut buf = [0u8; 8];
+/// How the target stores a pointer: its width and its byte order.
+///
+/// Everything fixed-width in an LSDA -- `udata2/4/8`, `sdata2/4/8`, an
+/// absolute pointer, and the slot a `DW_EH_PE_indirect` value points at -- is
+/// in the byte order of the object file. These were all read little-endian,
+/// so on a big-endian ELF every such field came out byte-swapped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PointerFormat {
+    pub is_64bit: bool,
+    pub little_endian: bool,
+}
+
+impl PointerFormat {
+    pub fn of(binary: &crate::loader::types::LoadedBinary) -> Self {
+        Self {
+            is_64bit: binary.is_64bit,
+            little_endian: binary.is_little_endian(),
+        }
+    }
+
+    pub fn pointer_size(self) -> usize {
+        if self.is_64bit { 8 } else { 4 }
+    }
+
+    /// The unsigned integer `bytes` (at most eight of them) spell.
+    fn unsigned(self, bytes: &[u8]) -> u64 {
         let n = bytes.len().min(8);
-        buf[..n].copy_from_slice(&bytes[..n]);
-        u64::from_le_bytes(buf)
-    } else {
-        let mut buf = [0u8; 4];
-        let n = bytes.len().min(4);
-        buf[..n].copy_from_slice(&bytes[..n]);
-        u32::from_le_bytes(buf) as u64
+        let mut buf = [0u8; 8];
+        if self.little_endian {
+            buf[..n].copy_from_slice(&bytes[..n]);
+            u64::from_le_bytes(buf)
+        } else {
+            buf[8 - n..].copy_from_slice(&bytes[..n]);
+            u64::from_be_bytes(buf)
+        }
+    }
+
+    /// The same, sign-extended from the width of `bytes`.
+    fn signed(self, bytes: &[u8]) -> u64 {
+        let n = bytes.len().min(8);
+        let value = self.unsigned(bytes);
+        if n == 0 || n == 8 {
+            return value;
+        }
+        let shift = 64 - 8 * n as u32;
+        (((value << shift) as i64) >> shift) as u64
+    }
+
+    /// A pointer-sized value; a short read is zero-extended.
+    pub fn pointer(self, bytes: &[u8]) -> u64 {
+        self.unsigned(&bytes[..bytes.len().min(self.pointer_size())])
     }
 }
 
@@ -171,7 +211,7 @@ fn read_encoded_value(
     cur: &mut Cursor<'_>,
     encoding: DwEhPe,
     field_vma: u64,
-    is_64bit: bool,
+    format: PointerFormat,
 ) -> Option<u64> {
     if encoding == gimli::constants::DW_EH_PE_omit {
         return None;
@@ -183,28 +223,15 @@ fn read_encoded_value(
     };
 
     let magnitude = match encoding.format() {
-        gimli::constants::DW_EH_PE_absptr => {
-            let ptr_size = if is_64bit { 8 } else { 4 };
-            read_native(cur.bytes(ptr_size)?, is_64bit)
-        }
+        gimli::constants::DW_EH_PE_absptr => format.pointer(cur.bytes(format.pointer_size())?),
         gimli::constants::DW_EH_PE_uleb128 => cur.uleb128()?,
-        gimli::constants::DW_EH_PE_udata2 => {
-            u16::from_le_bytes(cur.bytes(2)?.try_into().ok()?) as u64
-        }
-        gimli::constants::DW_EH_PE_udata4 => {
-            u32::from_le_bytes(cur.bytes(4)?.try_into().ok()?) as u64
-        }
-        gimli::constants::DW_EH_PE_udata8 => u64::from_le_bytes(cur.bytes(8)?.try_into().ok()?),
+        gimli::constants::DW_EH_PE_udata2 => format.unsigned(cur.bytes(2)?),
+        gimli::constants::DW_EH_PE_udata4 => format.unsigned(cur.bytes(4)?),
+        gimli::constants::DW_EH_PE_udata8 => format.unsigned(cur.bytes(8)?),
         gimli::constants::DW_EH_PE_sleb128 => cur.sleb128()? as u64,
-        gimli::constants::DW_EH_PE_sdata2 => {
-            i16::from_le_bytes(cur.bytes(2)?.try_into().ok()?) as i64 as u64
-        }
-        gimli::constants::DW_EH_PE_sdata4 => {
-            i32::from_le_bytes(cur.bytes(4)?.try_into().ok()?) as i64 as u64
-        }
-        gimli::constants::DW_EH_PE_sdata8 => {
-            i64::from_le_bytes(cur.bytes(8)?.try_into().ok()?) as u64
-        }
+        gimli::constants::DW_EH_PE_sdata2 => format.signed(cur.bytes(2)?),
+        gimli::constants::DW_EH_PE_sdata4 => format.signed(cur.bytes(4)?),
+        gimli::constants::DW_EH_PE_sdata8 => format.signed(cur.bytes(8)?),
         _ => return None,
     };
 
@@ -219,14 +246,13 @@ fn read_encoded(
     cur: &mut Cursor<'_>,
     encoding: DwEhPe,
     field_vma: u64,
-    is_64bit: bool,
+    format: PointerFormat,
     read_at: &dyn Fn(u64, usize) -> Option<Vec<u8>>,
 ) -> Option<u64> {
-    let mut value = read_encoded_value(cur, encoding, field_vma, is_64bit)?;
+    let mut value = read_encoded_value(cur, encoding, field_vma, format)?;
     if encoding.is_indirect() {
-        let ptr_size = if is_64bit { 8 } else { 4 };
-        let bytes = read_at(value, ptr_size)?;
-        value = read_native(&bytes, is_64bit);
+        let bytes = read_at(value, format.pointer_size())?;
+        value = format.pointer(&bytes);
     }
     Some(value)
 }
@@ -280,18 +306,12 @@ fn resolve_type_table(
     ttype_base: u64,
     ttype_encoding: DwEhPe,
     max_filter: i64,
-    is_64bit: bool,
+    format: PointerFormat,
     read_at: &dyn Fn(u64, usize) -> Option<Vec<u8>>,
     symbol_at: &dyn Fn(u64) -> Option<String>,
 ) -> Option<Vec<LsdaTypeEntry>> {
     let entry_size: u64 = match ttype_encoding.format() {
-        gimli::constants::DW_EH_PE_absptr => {
-            if is_64bit {
-                8
-            } else {
-                4
-            }
-        }
+        gimli::constants::DW_EH_PE_absptr => format.pointer_size() as u64,
         gimli::constants::DW_EH_PE_udata2 | gimli::constants::DW_EH_PE_sdata2 => 2,
         gimli::constants::DW_EH_PE_udata4 | gimli::constants::DW_EH_PE_sdata4 => 4,
         gimli::constants::DW_EH_PE_udata8 | gimli::constants::DW_EH_PE_sdata8 => 8,
@@ -311,13 +331,12 @@ fn resolve_type_table(
         let bytes = read_at(entry_vma, entry_size as usize)?;
         let mut cur = Cursor::at(&bytes, 0);
         let pre_indirect =
-            read_encoded_value(&mut cur, ttype_encoding, entry_vma, is_64bit).unwrap_or(0);
+            read_encoded_value(&mut cur, ttype_encoding, entry_vma, format).unwrap_or(0);
 
         let symbol = symbol_at(pre_indirect);
         let address = if ttype_encoding.is_indirect() {
-            let ptr_size = if is_64bit { 8 } else { 4 };
-            read_at(pre_indirect, ptr_size)
-                .map(|b| read_native(&b, is_64bit))
+            read_at(pre_indirect, format.pointer_size())
+                .map(|b| format.pointer(&b))
                 .unwrap_or(0)
         } else {
             pre_indirect
@@ -341,7 +360,7 @@ pub fn parse_lsda(
     data: &[u8],
     lsda_vma: u64,
     region_start: u64,
-    is_64bit: bool,
+    format: PointerFormat,
     read_at: &dyn Fn(u64, usize) -> Option<Vec<u8>>,
     symbol_at: &dyn Fn(u64) -> Option<String>,
 ) -> Option<LsdaInfo> {
@@ -352,7 +371,7 @@ pub fn parse_lsda(
         region_start
     } else {
         let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
-        read_encoded(&mut cur, lpstart_encoding, field_vma, is_64bit, read_at)?
+        read_encoded(&mut cur, lpstart_encoding, field_vma, format, read_at)?
     };
 
     let ttype_encoding = DwEhPe(cur.u8()?);
@@ -378,11 +397,11 @@ pub fn parse_lsda(
     let mut max_filter: i64 = 0;
     while cur.pos < call_site_table_end {
         let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
-        let cs_start = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
+        let cs_start = read_encoded(&mut cur, call_site_encoding, field_vma, format, read_at)?;
         let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
-        let cs_len = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
+        let cs_len = read_encoded(&mut cur, call_site_encoding, field_vma, format, read_at)?;
         let field_vma = lsda_vma.wrapping_add(cur.pos as u64);
-        let cs_lp = read_encoded(&mut cur, call_site_encoding, field_vma, is_64bit, read_at)?;
+        let cs_lp = read_encoded(&mut cur, call_site_encoding, field_vma, format, read_at)?;
         let cs_action = cur.uleb128()?;
 
         let landing_pad = if cs_lp != 0 {
@@ -415,7 +434,7 @@ pub fn parse_lsda(
             ttype_base,
             ttype_encoding,
             max_filter,
-            is_64bit,
+            format,
             read_at,
             symbol_at,
         )?,
@@ -430,8 +449,143 @@ pub fn parse_lsda(
 }
 
 #[cfg(test)]
+const LE64: PointerFormat = PointerFormat {
+    is_64bit: true,
+    little_endian: true,
+};
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    const BE64: PointerFormat = PointerFormat {
+        is_64bit: true,
+        little_endian: false,
+    };
+    const BE32: PointerFormat = PointerFormat {
+        is_64bit: false,
+        little_endian: false,
+    };
+
+    #[test]
+    fn fixed_width_fields_follow_the_byte_order_of_the_target() {
+        assert_eq!(LE64.unsigned(&[0x34, 0x12]), 0x1234);
+        assert_eq!(BE64.unsigned(&[0x12, 0x34]), 0x1234);
+        assert_eq!(BE64.unsigned(&[0x12, 0x34, 0x56, 0x78]), 0x1234_5678);
+        // -2 as sdata2 and sdata4, both orders.
+        assert_eq!(LE64.signed(&[0xfe, 0xff]), u64::MAX - 1);
+        assert_eq!(BE64.signed(&[0xff, 0xfe]), u64::MAX - 1);
+        assert_eq!(BE64.signed(&[0xff, 0xff, 0xff, 0xfe]), u64::MAX - 1);
+        assert_eq!(BE64.signed(&[0x7f, 0xff]), 0x7fff);
+        // A pointer is as wide as the target says, however much was read.
+        assert_eq!(
+            BE32.pointer(&[0x00, 0x40, 0x3d, 0xc0, 0xaa, 0xbb]),
+            0x0040_3dc0
+        );
+        assert_eq!(
+            BE64.pointer(&[0, 0, 0, 0, 0x00, 0x40, 0x3d, 0xc0]),
+            0x0040_3dc0
+        );
+    }
+
+    /// The `guarded()` LSDA of the test below as a big-endian target lays it
+    /// out: the `udata4` type-table entry is `00 40 3d c0`, not `c0 3d 40 00`.
+    /// Read little-endian, as every fixed-width field used to be, the caught
+    /// type's address comes out as `0xc03d4000`.
+    #[test]
+    fn parse_lsda_reads_a_big_endian_type_table() {
+        let data: [u8; 20] = [
+            0xff, 0x03, 0x11, 0x01, 0x08, 0x17, 0x05, 0x24, 0x01, 0x2d, 0x05, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x40, 0x3d, 0xc0,
+        ];
+        let lsda_vma = 0x40216c;
+        let read_at = |addr: u64, len: usize| {
+            let offset = addr.checked_sub(lsda_vma)?;
+            data.get(offset as usize..offset as usize + len)
+                .map(<[u8]>::to_vec)
+        };
+        let info = parse_lsda(&data, lsda_vma, 0x40120c, BE64, &read_at, &|_| None)
+            .expect("parse big-endian LSDA");
+        assert_eq!(
+            info.type_table,
+            vec![LsdaTypeEntry {
+                address: 0x403dc0,
+                symbol: None,
+            }]
+        );
+    }
+
+    /// A call-site table in `udata4`, big-endian: start 0x17, length 5,
+    /// landing pad 0x24.
+    #[test]
+    fn parse_lsda_reads_big_endian_fixed_width_call_sites() {
+        let data: [u8; 17] = [
+            0xff, 0xff, 0x03, 0x0d, 0x00, 0x00, 0x00, 0x17, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
+            0x00, 0x24, 0x00,
+        ];
+        let region_start = 0x1000;
+        let info = parse_lsda(&data, 0x2000, region_start, BE32, &|_, _| None, &|_| None)
+            .expect("parse big-endian call sites");
+        assert_eq!(
+            info.call_sites,
+            vec![LsdaCallSite {
+                start: region_start + 0x17,
+                end: region_start + 0x17 + 0x05,
+                landing_pad: Some(region_start + 0x24),
+                action_chain: vec![],
+            }]
+        );
+        // The same bytes on a little-endian target are a different table.
+        let little = PointerFormat {
+            is_64bit: false,
+            little_endian: true,
+        };
+        let swapped = parse_lsda(&data, 0x2000, region_start, little, &|_, _| None, &|_| None)
+            .expect("parse as little-endian");
+        assert_eq!(swapped.call_sites[0].start, region_start + 0x1700_0000);
+    }
+
+    /// Big-endian `DW_EH_PE_indirect` values in both `LPStart` and `TType`
+    /// resolve the pointer slot using the target's byte order.
+    #[test]
+    fn parse_lsda_resolves_big_endian_indirect_pointers() {
+        // lpstart: DW_EH_PE_indirect | DW_EH_PE_udata4 (0x83) -> slot 0x500000
+        // ttype:   DW_EH_PE_indirect | DW_EH_PE_udata4 (0x83), ttype_base offset 12
+        // call_site_encoding: uleb128 (0x01), call_site_table_len: 4
+        // call site: start 0x10, len 0x04, lp 0x20, action 1
+        // action table: filter 1, next 0
+        // type table (1 entry, 4 bytes): slot 0x500008
+        let data: [u8; 19] = [
+            0x83, 0x00, 0x50, 0x00, 0x00, // lpstart slot = 0x0050_0000 (BE)
+            0x83,
+            0x0c, // ttype_encoding = 0x83, ttype_base off = 12 (end of header + 12 = lsda+19)
+            0x01, 0x04, // call_site_encoding = uleb128, call_site_table_len = 4
+            0x10, 0x04, 0x20, 0x01, // call site
+            0x01, 0x00, // action table
+            0x00, 0x50, 0x00, 0x08, // type table entry slot = 0x0050_0008 (BE)
+        ];
+        let lsda_vma = 0x402000;
+        let read_at = |addr: u64, len: usize| -> Option<Vec<u8>> {
+            match addr {
+                0x50_0000 => return Some(0x0060_1234u64.to_be_bytes()[..len].to_vec()),
+                0x50_0008 => return Some(0x0070_5678u64.to_be_bytes()[..len].to_vec()),
+                _ => {}
+            }
+            let off = addr.checked_sub(lsda_vma)?;
+            data.get(off as usize..off as usize + len)
+                .map(<[u8]>::to_vec)
+        };
+        let info = parse_lsda(&data, lsda_vma, 0x401000, BE64, &read_at, &|_| None)
+            .expect("parse big-endian indirect LSDA");
+        assert_eq!(info.lp_start, 0x0060_1234);
+        assert_eq!(
+            info.type_table,
+            vec![LsdaTypeEntry {
+                address: 0x0070_5678,
+                symbol: None,
+            }]
+        );
+    }
 
     /// `risky()`'s LSDA from `testdata/x64_dyn_lsda_test.elf` (non-PIE),
     /// bytes cross-checked via `objdump -s -j .gcc_except_table` +
@@ -445,7 +599,7 @@ mod tests {
             0xff, 0xff, 0x01, 0x08, 0x29, 0x05, 0x47, 0x00, 0x3b, 0x22, 0x00, 0x00,
         ];
         let region_start = 0x4011a6;
-        let info = parse_lsda(&data, 0x402160, region_start, true, &|_, _| None, &|_| None)
+        let info = parse_lsda(&data, 0x402160, region_start, LE64, &|_, _| None, &|_| None)
             .expect("parse risky()'s LSDA");
 
         assert_eq!(info.lp_start, region_start); // lpstart_encoding omitted
@@ -488,7 +642,7 @@ mod tests {
             data.get(offset as usize..offset as usize + len)
                 .map(<[u8]>::to_vec)
         };
-        let info = parse_lsda(&data, lsda_vma, region_start, true, &read_at, &|_| None)
+        let info = parse_lsda(&data, lsda_vma, region_start, LE64, &read_at, &|_| None)
             .expect("parse guarded()'s LSDA");
 
         assert_eq!(info.lp_start, region_start);
@@ -546,7 +700,7 @@ mod action_chain_tests {
             0x403d40 => Some("typeinfo for int".to_string()),
             _ => None,
         };
-        parse_lsda(&GUARDED, LSDA_VMA, REGION, true, &read_at, &symbol_at)
+        parse_lsda(&GUARDED, LSDA_VMA, REGION, LE64, &read_at, &symbol_at)
     }
 
     #[test]
