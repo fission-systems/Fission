@@ -918,7 +918,7 @@ impl<'a> PreviewBuilder<'a> {
             is_big_endian: self.options.is_big_endian,
             suppress_entry_register_params: self.suppress_entry_register_params,
             callee_observed_max_arity: IndexMap::new(),
-            callee_summaries,
+            callee_summaries: callee_summaries.into(),
         })
     }
 
