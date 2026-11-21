@@ -1,0 +1,15 @@
+{
+  "command": [
+    "schema",
+    "--list"
+  ],
+  "shape": {
+    "object": {
+      "commands": {
+        "array": "string"
+      },
+      "contract": "string",
+      "note": "string"
+    }
+  }
+}

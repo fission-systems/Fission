@@ -1,0 +1,84 @@
+{
+  "command": [
+    "xrefs",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "analysis": {
+        "object": {
+          "layers": {
+            "array": {
+              "object": {
+                "candidate_units": "number",
+                "completed_units": "number",
+                "layer": "string",
+                "omitted_units": "number",
+                "records_emitted": "number",
+                "scope": "string",
+                "status": "string",
+                "unit": "string"
+              }
+            }
+          }
+        }
+      },
+      "refs": {
+        "array": {
+          "object": {
+            "confidence": "string",
+            "evidence": {
+              "object": {
+                "layer": "string",
+                "note": "string"
+              }
+            },
+            "id": "number",
+            "kind": "string",
+            "source": {
+              "object": {
+                "address": "number",
+                "category": {
+                  "object": {}
+                }
+              }
+            },
+            "target": {
+              "object": {
+                "address": "number"
+              }
+            }
+          }
+        }
+      },
+      "summary": {
+        "object": {
+          "by_kind": {
+            "object": {
+              "conditional_jump": "number",
+              "data_read": "number",
+              "export_ref": "number"
+            }
+          },
+          "by_layer": {
+            "object": {
+              "disassembly": "number",
+              "loader": "number"
+            }
+          },
+          "calls": "number",
+          "data": "number",
+          "exports": "number",
+          "globals": "number",
+          "imports": "number",
+          "jumps": "number",
+          "relocations": "number",
+          "strings": "number",
+          "total": "number"
+        }
+      }
+    }
+  }
+}

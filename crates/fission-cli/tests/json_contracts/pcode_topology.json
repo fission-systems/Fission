@@ -1,0 +1,84 @@
+{
+  "command": [
+    "pcode-topology",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "binary": {
+        "object": {
+          "compiler_id": "string",
+          "format": "string",
+          "image_base": "string",
+          "language_id": "string",
+          "path": "string"
+        }
+      },
+      "decode_stop_reason": "string",
+      "function": {
+        "object": {
+          "function_origin": "string",
+          "is_export": "bool",
+          "is_import": "bool",
+          "is_thunk_like": "bool",
+          "name": "string",
+          "requested_address": "string",
+          "resolved_address": "string",
+          "size": "number"
+        }
+      },
+      "raw_pcode_topology": {
+        "object": {
+          "block_count": "number",
+          "block_evidence_truncated": "bool",
+          "blocks": {
+            "array": {
+              "object": {
+                "index": "number",
+                "op_count": "number",
+                "start_address": "number",
+                "successors": {
+                  "array": "number"
+                },
+                "terminal_address": "number",
+                "terminal_opcode": "string",
+                "terminal_seq_num": "number",
+                "terminal_target": "null"
+              }
+            }
+          },
+          "edge_count": "number",
+          "op_count": "number",
+          "terminal_opcode_counts": {
+            "object": {
+              "CBranch": "number",
+              "Copy": "number",
+              "Return": "number"
+            }
+          }
+        }
+      },
+      "schema_version": "number",
+      "stage_status": {
+        "object": {
+          "decode": "string",
+          "load": "string",
+          "nir_build": "string",
+          "normalize": "string",
+          "raw_pcode": "string",
+          "render": "string",
+          "structuring": "string"
+        }
+      },
+      "template_source_counts": {
+        "object": {
+          "sla_construct_tpl": "number"
+        }
+      }
+    }
+  }
+}

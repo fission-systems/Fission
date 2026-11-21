@@ -1,0 +1,37 @@
+{
+  "command": [
+    "disasm",
+    "crates/fission-loader/testdata/x64_dwarf5_strx.elf",
+    "--addr",
+    "0x201130",
+    "--function",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "function": {
+        "object": {
+          "address": "string",
+          "name": "string",
+          "size": "string"
+        }
+      },
+      "instructions": {
+        "array": {
+          "object": {
+            "address": "string",
+            "bytes": "string",
+            "instruction": "string",
+            "source": {
+              "object": {
+                "file": "string",
+                "line": "number"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

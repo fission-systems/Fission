@@ -1,0 +1,109 @@
+{
+  "command": [
+    "nir-stats",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "binary": {
+        "object": {
+          "compiler_id": "string",
+          "format": "string",
+          "image_base": "string",
+          "language_id": "string",
+          "path": "string"
+        }
+      },
+      "function": {
+        "object": {
+          "function_origin": "string",
+          "is_export": "bool",
+          "is_import": "bool",
+          "is_thunk_like": "bool",
+          "name": "string",
+          "requested_address": "string",
+          "resolved_address": "string",
+          "size": "number"
+        }
+      },
+      "nir_build_stats": {
+        "object": {}
+      },
+      "owner_buckets": {
+        "array": "string"
+      },
+      "preview_hint_stats": {
+        "object": {}
+      },
+      "rust_sleigh_pipeline": {
+        "object": {
+          "decode_attempt_count": "number",
+          "decode_stop_reason": "string",
+          "entry_address": "number",
+          "instruction_limit": "number",
+          "max_bytes": "number",
+          "nir_fallback_kind": "null",
+          "nir_fallback_kind_refined": "null",
+          "nir_fallback_reason_summary": "null",
+          "pipeline_stage_status": {
+            "object": {
+              "decode": "string",
+              "nir_render": "string"
+            }
+          },
+          "raw_pcode_block_count": "number",
+          "raw_pcode_block_evidence_truncated": "bool",
+          "raw_pcode_blocks": {
+            "array": {
+              "object": {
+                "index": "number",
+                "op_count": "number",
+                "start_address": "number",
+                "successors": {
+                  "array": "number"
+                },
+                "terminal_address": "number",
+                "terminal_opcode": "string",
+                "terminal_seq_num": "number",
+                "terminal_target": "null"
+              }
+            }
+          },
+          "raw_pcode_edge_count": "number",
+          "raw_pcode_op_count": "number",
+          "raw_pcode_terminal_opcode_counts": {
+            "object": {
+              "CBranch": "number",
+              "Copy": "number",
+              "Return": "number"
+            }
+          },
+          "strict_indirect_retry_attempted": "bool",
+          "template_source_counts": {
+            "object": {
+              "sla_construct_tpl": "number"
+            }
+          },
+          "wrapper_probe_attempted": "bool",
+          "wrapper_probe_matched": "bool"
+        }
+      },
+      "schema_version": "number",
+      "stage_status": {
+        "object": {
+          "decode": "string",
+          "load": "string",
+          "nir_build": "string",
+          "normalize": "string",
+          "raw_pcode": "string",
+          "render": "string",
+          "structuring": "string"
+        }
+      }
+    }
+  }
+}

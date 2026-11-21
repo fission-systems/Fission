@@ -1,0 +1,134 @@
+{
+  "command": [
+    "info",
+    "crates/fission-loader/testdata/x64_pdb_struct_test.exe",
+    "--identity",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "arch": "string",
+      "bits": "number",
+      "entry": "string",
+      "exports": "number",
+      "format": "string",
+      "functions": "number",
+      "identity": {
+        "object": {
+          "detections": {
+            "array": {
+              "object": {
+                "confidence": "string",
+                "evidence": {
+                  "array": {
+                    "object": {
+                      "description": "string",
+                      "location": "string",
+                      "matched": "string",
+                      "source": "string"
+                    }
+                  }
+                },
+                "kind": "string",
+                "name": "string",
+                "negative_evidence": {
+                  "array": {
+                    "object": {
+                      "description": "string",
+                      "source": "string"
+                    }
+                  }
+                },
+                "score": "number",
+                "source": "string",
+                "version": "string"
+              }
+            }
+          },
+          "die_compat": {
+            "object": {
+              "rules_seen": "number",
+              "rules_skipped": "number",
+              "rules_supported": "number",
+              "signatures_matched": "number",
+              "signatures_seen": "number",
+              "signatures_with_supported_rules": "number",
+              "unsupported_primitives": {
+                "object": {
+                  "ep_pattern": "number"
+                }
+              }
+            }
+          },
+          "overlay": "null",
+          "pe": {
+            "object": {
+              "codeview": {
+                "object": {
+                  "age": "number",
+                  "guid": "string",
+                  "path": "string"
+                }
+              },
+              "debug_directory_kinds": {
+                "array": "string"
+              },
+              "entry_section": "string",
+              "tls_callback_count": "number",
+              "tls_directory_present": "bool"
+            }
+          },
+          "resources": {
+            "object": {
+              "die_corpus_present": "bool",
+              "die_corpus_root": "string",
+              "die_pe_json_present": "bool",
+              "die_sg_file_count": "number",
+              "fid_bf_count": "number",
+              "fid_present": "bool",
+              "pattern_json_count": "number",
+              "patterns_present": "bool",
+              "win_typeinfo_present": "bool"
+            }
+          },
+          "rich_header": {
+            "object": {
+              "present": "bool"
+            }
+          },
+          "schema_version": "number",
+          "section_entropy": {
+            "array": {
+              "object": {
+                "classification": "string",
+                "entropy": "number",
+                "section": "string"
+              }
+            }
+          },
+          "summary": {
+            "object": {
+              "confidence": "string",
+              "has_overlay": "bool",
+              "high_entropy_executable_sections": "number",
+              "packed_score": "number",
+              "weak_signal_count": "number"
+            }
+          },
+          "winapi_catalog": {
+            "object": {
+              "symbols_considered": "number",
+              "symbols_in_catalog": "number",
+              "symbols_not_in_catalog": "number"
+            }
+          }
+        }
+      },
+      "image_base": "string",
+      "imports": "number",
+      "path": "string",
+      "sections": "number"
+    }
+  }
+}

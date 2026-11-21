@@ -1,0 +1,24 @@
+{
+  "command": [
+    "info",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--exports",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "address": "string",
+        "external_library": "null",
+        "is_thunk_like": "bool",
+        "kind": "string",
+        "name": "string",
+        "origin": "string",
+        "size": "number",
+        "source_section": "string",
+        "thunk_target": "null"
+      }
+    }
+  }
+}
