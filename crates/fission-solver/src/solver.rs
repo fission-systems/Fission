@@ -187,6 +187,7 @@ impl Solver {
     ) -> Result<SatResult> {
         self.last_unknown = None;
         let mut loop_count = 0;
+        let mut remaining_conflicts = self.sat.conflict_budget();
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
@@ -234,10 +235,11 @@ impl Solver {
             }
 
             // 3. Solve pure boolean SAT problem with assumptions
-            match self
-                .sat
-                .solve_limited(Some(&mut self.array_theory), &assumptions)
-            {
+            match self.sat.solve_with_remaining_budget(
+                Some(&mut self.array_theory),
+                &assumptions,
+                &mut remaining_conflicts,
+            ) {
                 Some(true) => {}
                 Some(false) => return Ok(self.refuted()),
                 None => {

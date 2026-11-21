@@ -734,10 +734,8 @@ impl SatSolver {
         theory: Option<&mut dyn crate::theory::Theory>,
         assumptions: &[Lit],
     ) -> bool {
-        let budget = self.conflict_budget.take();
-        let verdict = self.solve_limited(theory, assumptions);
-        self.conflict_budget = budget;
-        verdict.expect("a search without a budget ends in a verdict")
+        self.solve_with_remaining_budget(theory, assumptions, &mut None)
+            .expect("a search without a budget ends in a verdict")
     }
 
     /// Stop a search after this many conflicts and report no verdict.
@@ -749,6 +747,10 @@ impl SatSolver {
         self.conflict_budget = budget;
     }
 
+    pub(crate) fn conflict_budget(&self) -> Option<u64> {
+        self.conflict_budget
+    }
+
     /// Solve under `assumptions`: `Some(true)` with a model, `Some(false)`
     /// when there is none, and `None` when the conflict budget ran out first.
     ///
@@ -756,8 +758,19 @@ impl SatSolver {
     /// and the clauses learned so far stay, each implied by the clause set.
     pub fn solve_limited(
         &mut self,
+        theory: Option<&mut dyn crate::theory::Theory>,
+        assumptions: &[Lit],
+    ) -> Option<bool> {
+        let mut remaining = self.conflict_budget;
+        self.solve_with_remaining_budget(theory, assumptions, &mut remaining)
+    }
+
+    /// Charge search conflicts against a budget shared by the caller's refinements.
+    pub(crate) fn solve_with_remaining_budget(
+        &mut self,
         mut theory: Option<&mut dyn crate::theory::Theory>,
         assumptions: &[Lit],
+        remaining: &mut Option<u64>,
     ) -> Option<bool> {
         if !self.ok {
             return Some(false);
@@ -765,8 +778,6 @@ impl SatSolver {
         if !self.restore_assumptions(assumptions) {
             return Some(false);
         }
-        let mut conflicts: u64 = 0;
-
         loop {
             let confl_opt = self.propagate();
 
@@ -800,13 +811,12 @@ impl SatSolver {
                 if self.decision_level() <= assumptions.len() as u32 {
                     return Some(false); // Root or assumption level conflict -> UNSAT
                 }
-                conflicts += 1;
-                if self
-                    .conflict_budget
-                    .is_some_and(|budget| conflicts > budget)
-                {
-                    self.cancel_until(0);
-                    return None;
+                if let Some(remaining) = remaining {
+                    if *remaining == 0 {
+                        self.cancel_until(0);
+                        return None;
+                    }
+                    *remaining -= 1;
                 }
 
                 let (learned_clause, mut backtrack_level) = self.analyze(confl);
@@ -947,6 +957,34 @@ mod retention_regressions {
             sat.clause_meta.iter().flatten().any(|m| m.lbd == 3),
             "the first learned clause spans three decision levels"
         );
+    }
+
+    #[test]
+    fn successive_searches_charge_the_same_remaining_budget() {
+        let one_conflict = || {
+            let mut sat = SatSolver::new();
+            let a = Lit::new(1, false);
+            let b = Lit::new(2, false);
+            sat.add_clause(vec![a, b]);
+            sat.add_clause(vec![a, b.not()]);
+            sat.var_bump_activity(1);
+            sat
+        };
+
+        let mut remaining = Some(1);
+        let mut first = one_conflict();
+        assert_eq!(
+            first.solve_with_remaining_budget(None, &[], &mut remaining),
+            Some(true)
+        );
+        assert_eq!(remaining, Some(0));
+
+        let mut second = one_conflict();
+        assert_eq!(
+            second.solve_with_remaining_budget(None, &[], &mut remaining),
+            None
+        );
+        assert!(second.solve());
     }
 
     #[test]
