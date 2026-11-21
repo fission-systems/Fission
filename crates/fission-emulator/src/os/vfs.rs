@@ -3,9 +3,35 @@
 //! Used by Linux open/openat/read and (when seeded) by the dynlink path so
 //! `ld.so` can open the main binary and libraries without a real host FS tree.
 
-use anyhow::{Result, bail};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+
+/// The largest a simulated file grows. Its bytes are host memory, and where a
+/// write lands is the guest's choice (`lseek` reaches any offset), so without
+/// a limit one byte written a terabyte in asks the host for the terabyte.
+/// Linux has the same notion -- `RLIMIT_FSIZE`, answered with `EFBIG`.
+pub const MAX_FILE_SIZE: usize = 1 << 30;
+
+/// Why a file operation failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum VfsError {
+    #[error("bad file descriptor: {0}")]
+    BadFd(u64),
+    #[error("write would grow the file past {MAX_FILE_SIZE} bytes")]
+    TooLarge,
+}
+
+impl VfsError {
+    /// The Linux `errno` this is reported as.
+    pub fn errno(self) -> i64 {
+        match self {
+            VfsError::BadFd(_) => 9,  // EBADF
+            VfsError::TooLarge => 27, // EFBIG
+        }
+    }
+}
+
+type Result<T> = std::result::Result<T, VfsError>;
 
 /// Represents a single file inside the Virtual File System.
 #[derive(Clone, Debug)]
@@ -49,15 +75,24 @@ impl SimFile {
         self.content[start..end].to_vec()
     }
 
-    pub fn write(&mut self, data: &[u8]) -> usize {
+    /// Store `data` at the cursor and advance it, growing the file (with
+    /// zeros in any gap) when the write ends past its end. A write that would
+    /// end past [`MAX_FILE_SIZE`] stores nothing and moves nothing.
+    pub fn write(&mut self, data: &[u8]) -> Result<usize> {
         let start = self.cursor;
-        let required_len = start + data.len();
-        if self.content.len() < required_len {
-            self.content.resize(required_len, 0);
+        let end = start
+            .checked_add(data.len())
+            .filter(|end| *end <= MAX_FILE_SIZE)
+            .ok_or(VfsError::TooLarge)?;
+        if data.is_empty() {
+            return Ok(0);
         }
-        self.content[start..required_len].copy_from_slice(data);
-        self.cursor += data.len();
-        data.len()
+        if self.content.len() < end {
+            self.content.resize(end, 0);
+        }
+        self.content[start..end].copy_from_slice(data);
+        self.cursor = end;
+        Ok(data.len())
     }
 
     pub fn seek(&mut self, offset: usize) {
@@ -177,19 +212,13 @@ impl SimVFS {
     }
 
     pub fn read(&mut self, fd: u64, count: usize) -> Result<Vec<u8>> {
-        if let Some(file) = self.files.get_mut(&fd) {
-            Ok(file.read(count))
-        } else {
-            bail!("Bad file descriptor: {}", fd)
-        }
+        let file = self.files.get_mut(&fd).ok_or(VfsError::BadFd(fd))?;
+        Ok(file.read(count))
     }
 
     pub fn write(&mut self, fd: u64, data: &[u8]) -> Result<usize> {
-        if let Some(file) = self.files.get_mut(&fd) {
-            Ok(file.write(data))
-        } else {
-            bail!("Bad file descriptor: {}", fd)
-        }
+        let file = self.files.get_mut(&fd).ok_or(VfsError::BadFd(fd))?;
+        file.write(data)
     }
 
     pub fn close(&mut self, fd: u64) -> Result<()> {
@@ -200,37 +229,37 @@ impl SimVFS {
         if self.files.remove(&fd).is_some() {
             Ok(())
         } else {
-            bail!("Bad file descriptor: {}", fd)
+            Err(VfsError::BadFd(fd))
         }
     }
 
     pub fn seek(&mut self, fd: u64, offset: usize) -> Result<usize> {
-        if let Some(file) = self.files.get_mut(&fd) {
-            file.seek(offset);
-            Ok(file.cursor)
-        } else {
-            bail!("Bad file descriptor: {}", fd)
-        }
+        let file = self.files.get_mut(&fd).ok_or(VfsError::BadFd(fd))?;
+        file.seek(offset);
+        Ok(file.cursor)
     }
 
     pub fn file_size(&self, fd: u64) -> Option<usize> {
         self.files.get(&fd).map(|f| f.size())
     }
 
-    /// Read a slice from an open FD without advancing the cursor (for mmap).
+    /// The bytes an open FD holds in `[offset, offset + len)`, without moving
+    /// its cursor: fewer than `len` where the file ends first, none where it
+    /// ends before `offset`.
+    pub fn file_bytes(&self, fd: u64, offset: usize, len: usize) -> Result<&[u8]> {
+        let file = self.files.get(&fd).ok_or(VfsError::BadFd(fd))?;
+        let size = file.content.len();
+        let start = offset.min(size);
+        let end = offset.saturating_add(len).min(size);
+        Ok(&file.content[start..end])
+    }
+
+    /// [`Self::file_bytes`] padded with zeros to exactly `len` bytes, which
+    /// is how a file-backed mapping reads past the end of its file. `len` is
+    /// a host allocation: pass one the caller has bounded.
     pub fn peek(&self, fd: u64, offset: usize, len: usize) -> Result<Vec<u8>> {
-        let file = self
-            .files
-            .get(&fd)
-            .ok_or_else(|| anyhow::anyhow!("Bad file descriptor: {fd}"))?;
-        if offset >= file.content.len() {
-            return Ok(vec![0; len]);
-        }
-        let end = (offset + len).min(file.content.len());
-        let mut out = file.content[offset..end].to_vec();
-        if out.len() < len {
-            out.resize(len, 0);
-        }
+        let mut out = self.file_bytes(fd, offset, len)?.to_vec();
+        out.resize(len, 0);
         Ok(out)
     }
 }
@@ -238,5 +267,52 @@ impl SimVFS {
 impl Default for SimVFS {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `lseek` may leave the cursor anywhere a `usize` reaches. A write there
+    /// computed `cursor + len` unchecked: an overflow panic in a debug build,
+    /// and in a release one a wrapped end that the slice then rejected.
+    #[test]
+    fn a_write_at_the_end_of_the_offset_range_fails_without_overflowing() {
+        let mut vfs = SimVFS::new();
+        let fd = vfs.open("scratch", Vec::new());
+        vfs.seek(fd, usize::MAX - 1).unwrap();
+        assert!(vfs.write(fd, b"abcd").is_err());
+        // The failed write moved nothing and stored nothing.
+        assert_eq!(vfs.file_size(fd), Some(0));
+        assert_eq!(vfs.files[&fd].cursor, usize::MAX - 1);
+    }
+
+    /// A file is as large as the host memory behind it, so a sparse write --
+    /// one byte a gigabyte past the start -- is refused rather than backed.
+    #[test]
+    fn a_write_far_past_the_end_is_refused_rather_than_backed_by_host_memory() {
+        let mut vfs = SimVFS::new();
+        let fd = vfs.open("scratch", Vec::new());
+        vfs.seek(fd, MAX_FILE_SIZE).unwrap();
+        assert_eq!(vfs.write(fd, b"x"), Err(VfsError::TooLarge));
+        assert_eq!(vfs.file_size(fd), Some(0));
+
+        // Positive control: the same write inside the limit is stored, with
+        // the gap reading as zeros.
+        vfs.seek(fd, 0x2000).unwrap();
+        assert_eq!(vfs.write(fd, b"x"), Ok(1));
+        assert_eq!(vfs.file_size(fd), Some(0x2001));
+        assert_eq!(vfs.peek(fd, 0x1fff, 2).unwrap(), [0, b'x']);
+    }
+
+    /// The range read for a mapping added `offset + len` unchecked.
+    #[test]
+    fn a_range_whose_end_overflows_is_what_the_file_holds_from_there() {
+        let mut vfs = SimVFS::new();
+        let fd = vfs.open("scratch", b"hello".to_vec());
+        assert_eq!(vfs.file_bytes(fd, 1, usize::MAX).unwrap(), b"ello");
+        assert_eq!(vfs.file_bytes(fd, usize::MAX, usize::MAX).unwrap(), b"");
+        assert_eq!(vfs.peek(fd, 3, 4).unwrap(), [b'l', b'o', 0, 0]);
     }
 }

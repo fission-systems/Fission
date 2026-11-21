@@ -513,7 +513,7 @@ impl SandboxMetricsReport {
             let result = vfs
                 .file_size(fd)
                 .ok_or_else(|| anyhow::anyhow!("guest console fd {fd} unavailable"))
-                .and_then(|len| vfs.peek(fd, 0, len));
+                .and_then(|len| Ok(vfs.peek(fd, 0, len)?));
             match result {
                 Ok(bytes) => (Some(bytes), None),
                 Err(error) => (None, Some(error.to_string())),

@@ -130,6 +130,39 @@ impl JitCache {
         }
     }
 
+    /// Invalidate the blocks on every page `[addr, addr + len)` touches.
+    ///
+    /// The range is whatever was unmapped or re-protected, and its length is
+    /// the guest's: walking it a page at a time made `munmap(p, 1 << 60)` a
+    /// loop the run never came back from. So the walk is over whichever is
+    /// shorter -- the pages of the range, or the pages that hold code.
+    pub fn invalidate_range(&self, addr: u64, len: u64) {
+        if len == 0 {
+            return;
+        }
+        const PAGE: u64 = 0x1000;
+        let first = addr & !(PAGE - 1);
+        let last = addr.saturating_add(len - 1) & !(PAGE - 1);
+        let span = (last - first) / PAGE + 1;
+        let pages: Vec<u64> = {
+            let ptb = self.page_to_blocks.read().unwrap();
+            if span <= ptb.len() as u64 {
+                (0..span)
+                    .map(|i| first + i * PAGE)
+                    .filter(|page| ptb.contains_key(page))
+                    .collect()
+            } else {
+                ptb.keys()
+                    .copied()
+                    .filter(|page| (first..=last).contains(page))
+                    .collect()
+            }
+        };
+        for page in pages {
+            self.invalidate_page(page);
+        }
+    }
+
     /// Drop every compiled block and unpublish every chain slot.
     ///
     /// QEMU's `tb_flush`, and needed for the same reason: instrumentation is

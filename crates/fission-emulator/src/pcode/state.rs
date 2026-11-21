@@ -203,6 +203,11 @@ pub struct MemoryAccess {
     pub data: Option<Vec<u8>>,
 }
 
+/// The most a single [`MachineState::read_space`] returns. Far more than any
+/// guest buffer this emulator handles, and the point is only that a length
+/// the guest made up is refused as an error instead of being allocated.
+pub const MAX_GUEST_BUFFER: usize = 1 << 30;
+
 pub type MemoryAccessHook = std::sync::Arc<dyn Fn(&MemoryAccess) + Send + Sync>;
 
 /// The contents of RAM nobody mapped, byte by byte.
@@ -411,19 +416,12 @@ impl MachineState {
             buf.copy_from_slice(&self.host_reg_file[start..start + size]);
             return Ok(());
         }
-        if self.enforce_page_faults && space_id == self.spaces_layout.ram {
-            use crate::pcode::page_map::AccessKind;
-            if self
-                .page_map
-                .check_range(addr, size, AccessKind::Read)
-                .is_err()
-            {
-                self.map_lazy_pages(addr, size);
-                self.page_map
-                    .check_range(addr, size, AccessKind::Read)
-                    .map_err(|e| anyhow::anyhow!(e))?;
-            }
-        }
+        self.check_ram_access(
+            space_id,
+            addr,
+            size,
+            crate::pcode::page_map::AccessKind::Read,
+        )?;
         // One lookup, not `contains_key` then `get_mut`: `spaces` is a HAMT
         // too, so the pair hashed the space id twice on every access.
         let space = self
@@ -469,10 +467,152 @@ impl MachineState {
         }
     }
 
+    /// Read `size` bytes into a fresh buffer.
+    ///
+    /// `size` is very often the guest's own number -- the count of a `write`,
+    /// the length of a string it says it has -- so one beyond
+    /// [`MAX_GUEST_BUFFER`] is refused before a host buffer of that size is
+    /// asked for. Building the buffer first meant a count of `(size_t)-1`
+    /// took the host down (`capacity overflow`) on its way to a page fault.
     pub fn read_space(&mut self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
+        if size > MAX_GUEST_BUFFER {
+            // The fault it would have been, where it is one.
+            self.check_ram_access(
+                space_id,
+                addr,
+                size,
+                crate::pcode::page_map::AccessKind::Read,
+            )?;
+            bail!("guest read of {size} bytes at 0x{addr:X} is larger than any buffer it could be");
+        }
         let mut out = vec![0u8; size];
         self.read_into(space_id, addr, &mut out)?;
         Ok(out)
+    }
+
+    /// The page-protection check of a RAM access, when faults are enforced.
+    /// Anything else -- another space, or enforcement off -- passes.
+    fn check_ram_access(
+        &mut self,
+        space_id: u64,
+        addr: u64,
+        size: usize,
+        kind: crate::pcode::page_map::AccessKind,
+    ) -> Result<()> {
+        if !self.enforce_page_faults || space_id != self.spaces_layout.ram {
+            return Ok(());
+        }
+        if self.page_map.check_range(addr, size, kind).is_err() {
+            self.map_lazy_pages(addr, size);
+            self.page_map
+                .check_range(addr, size, kind)
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+        Ok(())
+    }
+
+    /// Make `[addr, addr + len)` of RAM read as zero, as a kernel does when
+    /// it hands out fresh pages.
+    ///
+    /// Not a guest access: no protection check (a mapping may be created
+    /// read-only or with no access at all, and is zero all the same), no
+    /// hooks. And not a write of `len` zeros: a page nothing has been stored
+    /// in already reads as zero, so the cost is in the pages that exist, and
+    /// a page wholly inside the range is dropped rather than overwritten.
+    /// `len` is the guest's to choose -- an `mmap` length, a `.bss` size --
+    /// and must not become host memory by being asked for.
+    ///
+    /// Under TTD tracing the bytes and shadow that go are recorded like any
+    /// other write, so a seek back restores them.
+    pub fn zero_range(&mut self, addr: u64, len: u64) {
+        if len == 0 {
+            return;
+        }
+        let ram = self.spaces_layout.ram;
+        let Some(space) = self.spaces.get_mut(&ram) else {
+            return;
+        };
+        let page_size = space.page_size;
+        let last = addr.saturating_add(len - 1);
+        let first_page = addr & !(page_size - 1);
+        let last_page = last & !(page_size - 1);
+        let span = (last_page - first_page) / page_size + 1;
+        // Whichever is shorter: the pages of the range, or the pages there are.
+        let mut pages: Vec<u64> = if span <= space.pages.len() as u64 {
+            (0..span)
+                .map(|i| first_page + i * page_size)
+                .filter(|page| space.pages.contains_key(page))
+                .collect()
+        } else {
+            space
+                .pages
+                .keys()
+                .copied()
+                .filter(|page| (first_page..=last_page).contains(page))
+                .collect()
+        };
+        pages.sort_unstable();
+
+        for page in pages {
+            let from = addr.max(page);
+            let to = last.min(page + (page_size - 1));
+            let n = (to - from + 1) as usize;
+            if self.tracing_memory {
+                let mut old = vec![0u8; n];
+                space.read_into(from, &mut old);
+                if old.iter().any(|byte| *byte != 0) {
+                    self.trace_mem_writes.push((from, old, vec![0u8; n]));
+                }
+                for offset in 0..n as u64 {
+                    if let Some(node) = space.get_shadow(from + offset) {
+                        self.trace_shadow_writes
+                            .push((ram, from + offset, Some(node), None));
+                    }
+                }
+            }
+            if n as u64 == page_size {
+                space.pages.remove(&page);
+            } else {
+                // `AddressSpace::write` clears the shadow of what it writes.
+                let _ = space.write(from, &vec![0u8; n]);
+            }
+        }
+    }
+
+    /// Store `data` in RAM the way a kernel fills a page it is handing out --
+    /// a file's bytes behind a new mapping -- which no page protection
+    /// applies to: a read-only mapping of a file holds the file. Otherwise a
+    /// write like any other (traced, and it clears the shadow).
+    pub fn write_ram_unprotected(&mut self, addr: u64, data: &[u8]) -> Result<()> {
+        let enforce = std::mem::replace(&mut self.enforce_page_faults, false);
+        let ram = self.spaces_layout.ram;
+        let result = self.write_space(ram, addr, data);
+        self.enforce_page_faults = enforce;
+        result
+    }
+
+    /// Place a piece of a program image -- a segment, a section -- at `addr`:
+    /// `bytes` first, zeros for the rest of its `len`.
+    ///
+    /// `len` is what the file's headers claim and `bytes` is what the file
+    /// has. Only the second is copied; the remainder (`.bss`, usually) is
+    /// zero without being written, so a header naming a segment of a
+    /// terabyte costs what its mapping costs and no more. It used to be
+    /// built as one host buffer of `len` bytes and then stored page by page.
+    pub fn load_image_range(&mut self, addr: u64, len: u64, bytes: &[u8]) -> Result<()> {
+        self.zero_range(addr, len);
+        let take = bytes.len().min(usize::try_from(len).unwrap_or(usize::MAX));
+        self.write_ram_unprotected(addr, &bytes[..take])
+    }
+
+    /// How many of the `max_len` bytes at `addr` a guest read reaches before
+    /// it would fault. All of them where faults are not enforced, or where
+    /// unmapped memory is filled on demand.
+    pub fn readable_len(&self, addr: u64, max_len: usize) -> usize {
+        if !self.enforce_page_faults || self.lazy_memory.is_some() {
+            return max_len;
+        }
+        self.page_map.readable_extent(addr, max_len)
     }
 
     pub fn read_space_readonly(&self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {
@@ -491,19 +631,12 @@ impl MachineState {
             bail!("Attempted to write to const space");
         }
 
-        if self.enforce_page_faults && space_id == self.spaces_layout.ram {
-            use crate::pcode::page_map::AccessKind;
-            if self
-                .page_map
-                .check_range(addr, data.len(), AccessKind::Write)
-                .is_err()
-            {
-                self.map_lazy_pages(addr, data.len());
-                self.page_map
-                    .check_range(addr, data.len(), AccessKind::Write)
-                    .map_err(|e| anyhow::anyhow!(e))?;
-            }
-        }
+        self.check_ram_access(
+            space_id,
+            addr,
+            data.len(),
+            crate::pcode::page_map::AccessKind::Write,
+        )?;
 
         if self.tracing_memory && space_id == self.spaces_layout.ram {
             // Read the old value before overwriting so TTD can reconstruct undo deltas.
@@ -580,6 +713,109 @@ impl MachineState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn mapped_state() -> MachineState {
+        use crate::pcode::page_map::prot;
+        let mut state = MachineState::new();
+        state.enforce_page_faults = true;
+        state.page_map.map_region(0x10_0000, 0x4000, prot::RW, true);
+        state
+    }
+
+    fn ram_pages(state: &MachineState) -> usize {
+        state
+            .spaces
+            .get(&state.ram_space())
+            .map_or(0, |space| space.pages.len())
+    }
+
+    /// A read the guest sized is refused before a buffer of that size exists:
+    /// `vec![0; usize::MAX]` is a panic (`capacity overflow`), and it came
+    /// before the page check that would have refused the read.
+    #[test]
+    fn a_read_of_an_impossible_size_is_an_error_not_an_allocation() {
+        let mut state = mapped_state();
+        let ram = state.ram_space();
+        for size in [usize::MAX, isize::MAX as usize, 1 << 40] {
+            assert!(state.read_space(ram, 0x10_0000, size).is_err());
+        }
+        // The same without page protection to refuse it first.
+        state.enforce_page_faults = false;
+        assert!(state.read_space(ram, 0x10_0000, usize::MAX).is_err());
+        assert!(
+            state
+                .read_space(ram, 0x10_0000, MAX_GUEST_BUFFER + 1)
+                .is_err()
+        );
+
+        // Positive control: a read that fits is served.
+        state.write_space(ram, 0x10_0000, b"abc").unwrap();
+        assert_eq!(state.read_space(ram, 0x10_0000, 3).unwrap(), b"abc");
+    }
+
+    /// `zero_range` makes the range read as zero, drops the pages wholly
+    /// inside it instead of storing zeros in them, and touches nothing
+    /// outside it -- for any length, in time that depends on the pages there
+    /// are and not on the length asked for.
+    #[test]
+    fn zero_range_drops_whole_pages_and_clears_the_edges() {
+        let mut state = mapped_state();
+        let ram = state.ram_space();
+        state.write_space(ram, 0x10_0000, &[0xAA; 0x4000]).unwrap();
+        assert_eq!(ram_pages(&state), 4);
+
+        state.zero_range(0x10_0800, 0x2800);
+        assert_eq!(ram_pages(&state), 2, "the two pages wholly inside are gone");
+        let after = state.read_space(ram, 0x10_0000, 0x4000).unwrap();
+        assert!(
+            after[..0x800].iter().all(|b| *b == 0xAA),
+            "before the range"
+        );
+        assert!(after[0x800..0x3000].iter().all(|b| *b == 0), "the range");
+        assert!(
+            after[0x3000..].iter().all(|b| *b == 0xAA),
+            "after the range"
+        );
+
+        // A length no host could back, over the same memory.
+        state.zero_range(0, u64::MAX);
+        assert_eq!(ram_pages(&state), 0);
+        assert_eq!(state.read_space(ram, 0x10_3ff0, 16).unwrap(), [0u8; 16]);
+    }
+
+    /// Zeroing is not subject to the mapping's protection (a fresh read-only
+    /// mapping is zero too), and under tracing it records what it removed so
+    /// that a seek back can restore it.
+    #[test]
+    fn zero_range_ignores_protection_and_is_traced() {
+        use crate::pcode::page_map::prot;
+        let mut state = mapped_state();
+        let ram = state.ram_space();
+        state.write_space(ram, 0x10_1000, b"secret").unwrap();
+        state.set_shadow_memory(ram, 0x10_1002, 7);
+        state.page_map.mprotect(0x10_0000, 0x4000, prot::READ);
+        assert!(state.write_space(ram, 0x10_1000, b"x").is_err());
+
+        state.tracing_memory = true;
+        state.zero_range(0x10_1000, 0x1000);
+        assert_eq!(state.read_space(ram, 0x10_1000, 6).unwrap(), [0u8; 6]);
+        assert_eq!(state.get_shadow_memory(ram, 0x10_1002), None);
+        let (addr, old, new) = state.trace_mem_writes.last().expect("recorded");
+        assert_eq!(
+            (*addr, &old[..6], new.len()),
+            (0x10_1000, &b"secret"[..], 0x1000)
+        );
+        assert!(new.iter().all(|b| *b == 0));
+        assert_eq!(
+            state.trace_shadow_writes.last(),
+            Some(&(ram, 0x10_1002, Some(7), None))
+        );
+
+        // A page that held nothing is not a change, and is not recorded.
+        let recorded = state.trace_mem_writes.len();
+        state.zero_range(0x10_2000, 0x1000);
+        assert_eq!(state.trace_mem_writes.len(), recorded);
+    }
 
     /// With lazy memory installed, an unmapped page reads what the function
     /// says, takes writes, and records neither its fill nor anything else as

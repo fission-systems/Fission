@@ -143,12 +143,16 @@ pub fn load_elf_image(
         }
 
         if !mapped_segments {
-            let sec_data = binary.view_bytes(va, vsz as usize).unwrap_or(&[]);
-            let mut buf = vec![0u8; vsz as usize];
-            let n = sec_data.len().min(buf.len());
-            buf[..n].copy_from_slice(&sec_data[..n]);
+            if end > user_space_end(is_64bit) {
+                bail!(
+                    "section {} at 0x{va:X} ({vsz} bytes) does not fit the address space",
+                    sec.name
+                );
+            }
+            let size = usize::try_from(vsz).unwrap_or(usize::MAX);
+            let sec_data = binary.view_bytes(va, size).unwrap_or(&[]);
             state
-                .write_space(state.ram_space(), va, &buf)
+                .load_image_range(va, vsz, sec_data)
                 .with_context(|| format!("map section {} at 0x{:X}", sec.name, va))?;
             state.page_map.map_region(va, vsz, page_prot, false);
         }
@@ -443,6 +447,113 @@ mod tests {
         let argc = u64::from_le_bytes(bytes.try_into().unwrap());
         assert_eq!(argc, 2);
     }
+
+    fn fixture() -> Vec<u8> {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/linux_x64_hello_sys.elf");
+        std::fs::read(path).expect("read ELF fixture")
+    }
+
+    /// File offset of the fixture's last `PT_LOAD` program header.
+    fn last_load_header(bytes: &[u8]) -> usize {
+        let phoff = u64::from_le_bytes(bytes[0x20..0x28].try_into().unwrap()) as usize;
+        let phnum = u16::from_le_bytes(bytes[0x38..0x3a].try_into().unwrap()) as usize;
+        (0..phnum)
+            .map(|i| phoff + i * 56)
+            .filter(|at| u32::from_le_bytes(bytes[*at..*at + 4].try_into().unwrap()) == 1)
+            .next_back()
+            .expect("fixture has a PT_LOAD")
+    }
+
+    fn ram_pages(state: &MachineState) -> usize {
+        state
+            .spaces
+            .get(&state.ram_space())
+            .map_or(0, |space| space.pages.len())
+    }
+
+    /// `e_phentsize` of 1 with the table at the last byte of the file: there
+    /// was room for an "entry", so its fields were read -- from past the end
+    /// of the file, which is a panic. The loader accepts such a file, so this
+    /// is reachable from the bytes of a sample alone.
+    #[test]
+    fn a_program_header_entry_too_small_to_be_one_is_not_read() {
+        let mut bytes = fixture();
+        let len = bytes.len() as u64;
+        bytes[0x20..0x28].copy_from_slice(&(len - 1).to_le_bytes());
+        bytes[0x36..0x38].copy_from_slice(&1u16.to_le_bytes());
+        bytes[0x38..0x3a].copy_from_slice(&1u16.to_le_bytes());
+        let binary = LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
+        let mut state = MachineState::new();
+        assert!(!map_program_headers(&mut state, binary.inner()).unwrap());
+
+        // Positive control: the untouched fixture's headers are read and its
+        // segment mapped.
+        let binary = LoadedBinary::from_bytes(fixture(), "fixture".into()).unwrap();
+        let mut state = MachineState::new();
+        assert!(map_program_headers(&mut state, binary.inner()).unwrap());
+        assert!(state.page_map.is_mapped(binary.inner().entry_point));
+    }
+
+    /// A segment's `p_memsz` is the file's claim. One of a terabyte is a
+    /// terabyte of address space -- which a kernel grants -- and not a
+    /// terabyte of host memory: it was built as one buffer and stored page by
+    /// page (64 MiB measured as 16,385 resident pages before this).
+    #[test]
+    fn a_segment_far_larger_than_its_file_bytes_costs_only_those_bytes() {
+        let mut bytes = fixture();
+        let header = last_load_header(&bytes);
+        let vaddr = u64::from_le_bytes(bytes[header + 0x10..header + 0x18].try_into().unwrap());
+        let filesz = u64::from_le_bytes(bytes[header + 0x20..header + 0x28].try_into().unwrap());
+        bytes[header + 0x28..header + 0x30].copy_from_slice(&(1u64 << 40).to_le_bytes());
+        let binary = LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
+        let mut state = MachineState::new();
+        assert!(map_program_headers(&mut state, binary.inner()).unwrap());
+
+        // Mapped to its end, zero past the file's bytes, and resident only
+        // where the file put something.
+        assert!(state.page_map.is_mapped(vaddr + (1 << 40) - 1));
+        let ram = state.ram_space();
+        assert_eq!(
+            state.read_space(ram, vaddr + (1 << 39), 16).unwrap(),
+            [0u8; 16]
+        );
+        assert!(
+            (ram_pages(&state) as u64) <= filesz / PAGE_SIZE + 2,
+            "{} pages resident for {filesz} file bytes",
+            ram_pages(&state)
+        );
+        // Positive control: the file's own bytes are there.
+        assert_ne!(
+            state.read_space(ram, vaddr, filesz as usize).unwrap(),
+            vec![0u8; filesz as usize]
+        );
+    }
+
+    /// And one that does not fit the address space at all is an error.
+    #[test]
+    fn a_segment_that_does_not_fit_the_address_space_is_refused() {
+        for memsz in [1u64 << 47, u64::MAX] {
+            let mut bytes = fixture();
+            let header = last_load_header(&bytes);
+            bytes[header + 0x28..header + 0x30].copy_from_slice(&memsz.to_le_bytes());
+            let binary =
+                LoadedBinary::from_bytes(bytes, "crafted".into()).expect("loader accepts it");
+            let mut state = MachineState::new();
+            let error = load_elf_image(&mut state, &binary, &ProcessArgs::default())
+                .expect_err("a segment larger than the address space");
+            assert!(
+                format!("{error:#}").contains("does not fit the address space"),
+                "{error:#}"
+            );
+            assert_eq!(ram_pages(&state), 0, "nothing was stored");
+        }
+    }
+}
+
+/// One past the highest address a user-mode image may occupy.
+fn user_space_end(is_64bit: bool) -> u64 {
+    if is_64bit { 1 << 47 } else { 1 << 32 }
 }
 
 /// Map every `PT_LOAD`, the way a kernel does. Returns whether any were found.
@@ -500,7 +611,12 @@ fn map_program_headers(
             u16_at(0x2C) as usize,
         )
     };
-    if phoff == 0 || phentsize == 0 || phnum == 0 {
+    // An entry shorter than a program header is not one. The table was only
+    // required to have room for `e_phentsize` bytes per entry, so a crafted
+    // `e_phentsize` of 1 at the end of the file passed that and the header's
+    // fields were then read from past it.
+    let header_size = if is_64 { 56 } else { 32 };
+    if phoff == 0 || phentsize < header_size || phnum == 0 {
         return Ok(false);
     }
 
@@ -509,11 +625,15 @@ fn map_program_headers(
     const PF_W: u32 = 2;
     const PF_R: u32 = 4;
 
-    let ram = state.ram_space();
     let mut mapped = false;
     for i in 0..phnum {
         let base = match phoff.checked_add(i.saturating_mul(phentsize)) {
-            Some(b) if b + phentsize <= file.len() => b,
+            Some(b)
+                if b.checked_add(header_size)
+                    .is_some_and(|end| end <= file.len()) =>
+            {
+                b
+            }
             _ => break,
         };
         let (p_type, p_flags, p_offset, p_vaddr, p_filesz, p_memsz) = if is_64 {
@@ -555,6 +675,15 @@ fn map_program_headers(
         if page_prot & (prot::READ | prot::WRITE | prot::EXEC) == 0 {
             page_prot |= prot::READ;
         }
+        // `p_memsz` is the file's claim about how much address space the
+        // segment takes, and nothing had checked it: it was mapped a page at
+        // a time and then built as one host buffer, whatever it said.
+        let Some(end) = p_vaddr
+            .checked_add(p_memsz)
+            .filter(|end| *end <= user_space_end(is_64))
+        else {
+            bail!("PT_LOAD at 0x{p_vaddr:X} ({p_memsz} bytes) does not fit the address space");
+        };
         state
             .page_map
             .map_region(p_vaddr, p_memsz, page_prot, false);
@@ -562,19 +691,17 @@ fn map_program_headers(
         // `p_filesz` bytes from the file, then zeroes to `p_memsz` -- that
         // difference is `.bss`, which has no bytes to copy and must still be
         // there and zero.
-        let mut image = vec![0u8; p_memsz as usize];
         let avail = file.len().saturating_sub(p_offset);
-        let take = p_filesz.min(avail).min(image.len());
-        if take > 0 {
-            image[..take].copy_from_slice(&file[p_offset..p_offset + take]);
-        }
+        let take = p_filesz.min(avail);
+        let bytes = if take > 0 {
+            &file[p_offset..p_offset + take]
+        } else {
+            &[]
+        };
         state
-            .write_space(ram, p_vaddr, &image)
+            .load_image_range(p_vaddr, p_memsz, bytes)
             .with_context(|| format!("map PT_LOAD at 0x{p_vaddr:X}"))?;
-        tracing::debug!(
-            "PT_LOAD 0x{p_vaddr:X}..0x{:X} prot=0x{page_prot:02X}",
-            p_vaddr + p_memsz
-        );
+        tracing::debug!("PT_LOAD 0x{p_vaddr:X}..0x{end:X} prot=0x{page_prot:02X}");
         mapped = true;
     }
     Ok(mapped)

@@ -219,13 +219,7 @@ impl OsEnvironment for WindowsEnv {
                     size
                 };
                 if free_size > 0 {
-                    let page_start = addr & !0xFFFu64;
-                    let page_end = (addr.saturating_add(free_size) + 0xFFF) & !0xFFFu64;
-                    let mut p = page_start;
-                    while p < page_end {
-                        emu.jit_cache.invalidate_page(p);
-                        p = p.saturating_add(0x1000);
-                    }
+                    emu.jit_cache.invalidate_range(addr, free_size);
                     emu.state.page_map.unmap_region(addr, free_size);
                 }
                 emu.win_last_error = 0;
@@ -688,18 +682,8 @@ impl OsEnvironment for WindowsEnv {
                 let addr = match count.checked_mul(size) {
                     Some(bytes) => {
                         let addr = heap_alloc_mapped(emu, self, bytes);
-                        // Zeroed a page at a time, not with one host buffer
-                        // the size of the request.
-                        let zeros = [0u8; 0x1000];
-                        let mut done = 0usize;
-                        while addr != 0 && done < bytes {
-                            let n = (bytes - done).min(zeros.len());
-                            emu.state.write_space(
-                                emu.state.ram_space(),
-                                addr + done as u64,
-                                &zeros[..n],
-                            )?;
-                            done += n;
+                        if addr != 0 {
+                            emu.state.zero_range(addr, bytes as u64);
                         }
                         addr
                     }
@@ -1155,6 +1139,14 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
         page_prot |= prot::READ;
     }
     let size = dw_size.max(0x1000);
+    // The pages this call brings into being, which are the ones that start
+    // out zero. At an address the caller names, pages already there keep
+    // what they hold: committing committed memory changes nothing.
+    let fresh = if lp_address == 0 {
+        None
+    } else {
+        Some(emu.state.page_map.unmapped_ranges(lp_address, size))
+    };
     let base = if lp_address == 0 {
         emu.state.page_map.mmap_anon(size, page_prot)
     } else {
@@ -1170,9 +1162,14 @@ fn handle_virtual_alloc(emu: &mut Emulator) -> Result<()> {
         emu.write_return_val(0)?;
         return Ok(());
     }
-    let fill = (size as usize).min(0x10_0000);
-    let zeros = vec![0u8; fill];
-    let _ = emu.state.write_space(emu.state.ram_space(), base, &zeros);
+    // New pages are zero: all of them, whatever protection was asked for and
+    // whatever an earlier mapping left behind at these addresses. This wrote
+    // zeros over the first megabyte only, through the guest's own write
+    // check, and over pages that were already committed.
+    emu.jit_cache.invalidate_range(base, size);
+    for (start, len) in fresh.unwrap_or_else(|| vec![(base, size)]) {
+        emu.state.zero_range(start, len);
+    }
     tracing::info!(
         "VirtualAlloc(0x{:X}, 0x{:X}, type=0x{:X}, prot=0x{:X}) -> 0x{:X}",
         lp_address,
@@ -1206,12 +1203,7 @@ fn handle_virtual_protect(emu: &mut Emulator) -> Result<()> {
     }
     emu.state.page_map.mprotect(addr, size.max(1), p);
     // SMC
-    let mut page = addr & !0xFFF;
-    let end = (addr + size.max(1) + 0xFFF) & !0xFFF;
-    while page < end {
-        emu.jit_cache.invalidate_page(page);
-        page = page.saturating_add(0x1000);
-    }
+    emu.jit_cache.invalidate_range(addr, size.max(1));
     emu.write_return_val(1)?;
     Ok(())
 }
@@ -1327,9 +1319,17 @@ fn handle_create_file_w(emu: &mut Emulator) -> Result<()> {
 
 fn handle_rtl_zero_memory(emu: &mut Emulator) -> Result<()> {
     let dst = emu.read_arg(0)?;
-    let len = emu.read_arg(1)? as usize;
-    let zeros = vec![0u8; len.min(0x10_0000)];
-    emu.state.write_space(emu.state.ram_space(), dst, &zeros)?;
+    let len = emu.read_arg(1)?;
+    // The whole length, a bounded piece at a time: this stopped at the first
+    // megabyte and reported the rest as done.
+    let zeros = [0u8; 0x1000];
+    let mut done = 0u64;
+    while done < len {
+        let n = (len - done).min(zeros.len() as u64) as usize;
+        emu.state
+            .write_space(emu.state.ram_space(), dst.wrapping_add(done), &zeros[..n])?;
+        done += n as u64;
+    }
     emu.write_return_val(0)?;
     Ok(())
 }
@@ -1629,10 +1629,11 @@ fn handle_heap_alloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     let flags = emu.read_arg(1)?;
     let bytes = emu.read_arg(2)? as usize;
     let addr = heap_alloc_mapped(emu, env, bytes);
-    if (flags & 8) != 0 {
-        // HEAP_ZERO_MEMORY
-        let zeros = vec![0u8; bytes];
-        emu.state.write_space(emu.state.ram_space(), addr, &zeros)?;
+    if addr != 0 && (flags & 8) != 0 {
+        // HEAP_ZERO_MEMORY. Only for a block that exists -- this zeroed
+        // through a host buffer of the requested size before looking, so a
+        // request the heap refuses took the host down instead of being NULL.
+        emu.state.zero_range(addr, bytes as u64);
     }
     tracing::info!("HeapAlloc(size: {}) -> 0x{:X}", bytes, addr);
     emu.write_return_val(addr)?;
@@ -1676,9 +1677,8 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     }
     if (flags & 8) != 0 && bytes > keep {
         // HEAP_ZERO_MEMORY: the part past the old contents.
-        let zeros = vec![0u8; bytes - keep];
         emu.state
-            .write_space(emu.state.ram_space(), new_addr + keep as u64, &zeros)?;
+            .zero_range(new_addr + keep as u64, (bytes - keep) as u64);
     }
     env.heap.lock().unwrap().free(addr);
     tracing::info!("HeapReAlloc(0x{:X}, {}) -> 0x{:X}", addr, bytes, new_addr);
@@ -1686,15 +1686,33 @@ fn handle_heap_realloc(emu: &mut Emulator, env: &WindowsEnv) -> Result<()> {
     Ok(())
 }
 
+/// The `len` bytes of a console write's buffer, or `None` when the guest
+/// does not have that many readable bytes there -- for which the call
+/// answers `FALSE` and `ERROR_NOACCESS`, as Windows does, rather than
+/// stopping the run or (as it used to, for a length that overflowed or that
+/// no buffer could have) the host.
+fn console_buffer(emu: &mut Emulator, addr: u64, len: Option<usize>) -> Result<Option<Vec<u8>>> {
+    let ram = emu.state.ram_space();
+    let raw = len
+        .filter(|len| emu.state.readable_len(addr, *len) == *len)
+        .and_then(|len| emu.state.read_space(ram, addr, len).ok());
+    if raw.is_none() {
+        emu.win_last_error = 998; // ERROR_NOACCESS
+        emu.write_return_val(0)?;
+    }
+    Ok(raw)
+}
+
 fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
     let buf_ptr = emu.read_arg(1)?;
-    let n_chars = emu.read_arg(2)? as usize;
+    // A DWORD: the upper half of the register is not part of the argument.
+    let n_chars = (emu.read_arg(2)? & 0xFFFF_FFFF) as usize;
     let p_written = emu.read_arg(3)?;
 
-    let raw = emu
-        .state
-        .read_space(emu.state.ram_space(), buf_ptr, n_chars)?;
+    let Some(raw) = console_buffer(emu, buf_ptr, Some(n_chars))? else {
+        return Ok(());
+    };
     emu.guest_stdout(&raw);
 
     if p_written != 0 {
@@ -1711,12 +1729,13 @@ fn handle_write_console_a(emu: &mut Emulator) -> Result<()> {
 fn handle_write_console_w(emu: &mut Emulator) -> Result<()> {
     let _h_console = emu.read_arg(0)?;
     let buf_ptr = emu.read_arg(1)?;
-    let n_chars = emu.read_arg(2)? as usize;
+    // A DWORD: the upper half of the register is not part of the argument.
+    let n_chars = (emu.read_arg(2)? & 0xFFFF_FFFF) as usize;
     let p_written = emu.read_arg(3)?;
 
-    let raw = emu
-        .state
-        .read_space(emu.state.ram_space(), buf_ptr, n_chars * 2)?;
+    let Some(raw) = console_buffer(emu, buf_ptr, n_chars.checked_mul(2))? else {
+        return Ok(());
+    };
     let chars: Vec<u16> = raw
         .chunks_exact(2)
         .map(|c| u16::from_le_bytes([c[0], c[1]]))
@@ -2483,7 +2502,7 @@ mod heap_realloc_tests {
 
     /// A real emulator (a SysV x86-64 one; `HeapReAlloc`'s arguments are read
     /// through its calling convention: rdi, rsi, rdx, rcx).
-    fn emulator() -> Emulator {
+    pub(super) fn emulator() -> Emulator {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_static_printf_malloc.elf");
         let binary = fission_loader::loader::LoadedBinary::from_file(&path).expect("load ELF");
@@ -2547,6 +2566,111 @@ mod heap_realloc_tests {
 
         // A pointer the heap never returned is NULL, not a fresh allocation.
         assert_eq!(call_realloc(&mut emu, &env, 0, 0xdead_0000, 8), 0);
+    }
+}
+
+/// Sizes the guest chooses must not become host allocations of that size.
+#[cfg(test)]
+mod guest_size_tests {
+    use super::heap_realloc_tests::emulator;
+    use super::*;
+
+    fn set_args(emu: &mut Emulator, args: [u64; 4]) {
+        for (reg, value) in ["rdi", "rsi", "rdx", "rcx"].into_iter().zip(args) {
+            emu.write_register_u64(reg, value).unwrap();
+        }
+    }
+
+    /// `HeapAlloc(heap, HEAP_ZERO_MEMORY, (SIZE_T)-1)` is NULL. The zeroing
+    /// built a host buffer of the requested size before looking at whether
+    /// the allocation had succeeded.
+    #[test]
+    fn heap_alloc_of_an_impossible_size_with_zeroing_is_null() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        set_args(&mut emu, [0, 8, u64::MAX, 0]);
+        handle_heap_alloc(&mut emu, &env).expect("HeapAlloc");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 0);
+
+        // Positive control: an ordinary zeroed allocation is mapped and zero,
+        // even where the heap's pages held something before.
+        set_args(&mut emu, [0, 8, 0x3000, 0]);
+        handle_heap_alloc(&mut emu, &env).expect("HeapAlloc");
+        let block = emu.read_register_u64("rax").unwrap();
+        assert_ne!(block, 0);
+        let ram = emu.state.ram_space();
+        assert_eq!(
+            emu.state.read_space(ram, block, 0x3000).unwrap(),
+            vec![0u8; 0x3000]
+        );
+    }
+
+    fn virtual_alloc(emu: &mut Emulator, address: u64, size: u64) -> u64 {
+        const MEM_COMMIT_RESERVE: u64 = 0x3000;
+        const PAGE_READWRITE: u64 = 4;
+        set_args(emu, [address, size, MEM_COMMIT_RESERVE, PAGE_READWRITE]);
+        handle_virtual_alloc(emu).expect("VirtualAlloc");
+        emu.read_register_u64("rax").unwrap()
+    }
+
+    /// Pages `VirtualAlloc` brings into being are zero for the whole region,
+    /// and pages that were already committed keep their contents. It wrote
+    /// zeros over the first megabyte either way: stale bytes past it in a
+    /// region that reuses freed addresses, and a wiped megabyte when a
+    /// program committed memory it was already using.
+    #[test]
+    fn virtual_alloc_zeroes_new_pages_and_keeps_committed_ones() {
+        let mut emu = emulator();
+        const LEN: u64 = 0x30_0000;
+        let base = virtual_alloc(&mut emu, 0, LEN);
+        assert_ne!(base, 0);
+        let ram = emu.state.ram_space();
+        let far = base + 0x28_0000;
+        emu.state.write_space(ram, base, b"near").unwrap();
+        emu.state.write_space(ram, far, b"far!").unwrap();
+
+        // Committing what is committed changes nothing.
+        assert_eq!(virtual_alloc(&mut emu, base, LEN), base);
+        assert_eq!(emu.state.read_space(ram, base, 4).unwrap(), b"near");
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), b"far!");
+
+        // Released and allocated again, the same addresses are fresh.
+        emu.state.page_map.unmap_region(base, LEN);
+        assert_eq!(virtual_alloc(&mut emu, base, LEN), base);
+        assert_eq!(emu.state.read_space(ram, base, 4).unwrap(), [0u8; 4]);
+        assert_eq!(emu.state.read_space(ram, far, 4).unwrap(), [0u8; 4]);
+    }
+
+    /// `WriteConsoleW` doubled the character count unchecked, and both
+    /// console writes read a buffer of whatever length the guest named.
+    #[test]
+    fn a_console_write_of_an_impossible_length_fails_in_the_guest() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let text = heap_alloc_mapped(&mut emu, &env, 16);
+        let written = heap_alloc_mapped(&mut emu, &env, 8);
+        let ram = emu.state.ram_space();
+        emu.state.write_space(ram, text, b"h\0i\0").unwrap();
+
+        for count in [u64::MAX, 0x8000_0000, 0x7FFF_FFFF] {
+            set_args(&mut emu, [0, text, count, written]);
+            handle_write_console_w(&mut emu).expect("WriteConsoleW");
+            assert_eq!(emu.read_register_u64("rax").unwrap(), 0, "FALSE");
+            assert_eq!(emu.win_last_error, 998, "ERROR_NOACCESS");
+            set_args(&mut emu, [0, text, count, written]);
+            handle_write_console_a(&mut emu).expect("WriteConsoleA");
+            assert_eq!(emu.read_register_u64("rax").unwrap(), 0, "FALSE");
+        }
+        assert!(emu.vfs.files[&1].content.is_empty(), "nothing was written");
+
+        // Positive control: a real write succeeds and reports its length.
+        // The count is a DWORD, so whatever the upper half of the register
+        // holds is not part of it -- doubled unchecked, `1 << 63` overflowed.
+        set_args(&mut emu, [0, text, (1 << 63) | 2, written]);
+        handle_write_console_w(&mut emu).expect("WriteConsoleW");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), 1);
+        assert_eq!(emu.state.read_space(ram, written, 4).unwrap(), [2, 0, 0, 0]);
+        assert_eq!(emu.vfs.files[&1].content, b"hi");
     }
 }
 
