@@ -25,6 +25,27 @@ The data and harness live outside this repository, under
 | CFG parser | `rust-joern`, built from source at `~/rust-joern` (see below) |
 | Sample-set kit | `vendor/decbench-evalkit/decbench-evalkit-sample-set` |
 
+
+## CI full sweep
+
+[DecBench full dataset sweep](../.github/workflows/decbench-sweep.yml) measures
+the published Hugging Face `full` manifest on Nightly. The pinned dataset
+revision contains 96,103 rows. The workflow shards the manifest, verifies binary
+hashes, scores statically on stripped inputs, and preserves its row-level report.
+The 250-row sample-set gate below remains a local development tool. See
+[CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.
+
+The nightly and the local sweep install the same scorer (upstream DecBench
+`0cba66d`, see [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench)) and
+both refuse to run with another. On the same CLI and 970 rows over 18 binaries
+(every opt level, ELF x86-64, ELF ARM and PE) they agree on status and type_match
+on every row and on GED on all but one, whose output is identical (GED's known
+nondeterminism). Two differences remain: the local sweep fills functions missing
+from the published source CFGs with CFGs rebuilt from the dataset's `sources/`
+(rows marked `src_cfg: "regen"`, about 1,177 more GED rows; `SWEEP_SOURCE_CFGS=published`
+turns it off), and PE outputs can differ in text, not score, because the two
+pass resources differently.
+
 ## CFG parser: rust-joern
 
 GED's source- and decompiled-side CFGs come from

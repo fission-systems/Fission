@@ -57,7 +57,28 @@ echo "$status" | grep -Eq '"signatures_base": *"[^"]*share[/\\]+fission[/\\]+sig
   exit 1
 }
 
+run info "$(basename "$fixture")"
+run list "$(basename "$fixture")" --json > "$work/functions.json"
+addr=$(python - "$work/functions.json" <<'PYCODE'
+import json
+import sys
+from pathlib import Path
+
+functions = json.loads(Path(sys.argv[1]).read_text())
+for function in functions:
+    if function.get("name") == "sel_two" and not function.get("is_import"):
+        print(function["address"])
+        break
+else:
+    raise SystemExit("package smoke fixture is missing sel_two")
+PYCODE
+)
+run raw-pcode "$(basename "$fixture")" --addr "$addr" > "$work/raw-pcode"
+test -s "$work/raw-pcode"
+run decomp "$(basename "$fixture")" --addr "$addr" --json > "$work/decomp.json"
+python "$(dirname "$0")/../../.github/scripts/check_decomp_output.py" < "$work/decomp.json"
+
 out=$(run decomp "$(basename "$fixture")" --all)
-echo "$out" | head -12
+printf '%s\n' "$out" | sed -n '1,12p'
 echo "$out" | grep -q "Function:" || { echo "smoke: decomp produced no function" >&2; exit 1; }
 echo "smoke: ok ($(echo "$out" | grep -c 'Function:') functions from $(basename "$fixture"))"

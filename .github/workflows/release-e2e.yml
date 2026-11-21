@@ -42,9 +42,11 @@ jobs:
       - name: Resolve checkout ref
         id: resolve
         shell: bash
+        env:
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          REF="${{ inputs.ref }}"
+          REF="$INPUT_REF"
           if [ -z "${REF}" ]; then
             REF="${{ github.sha }}"
           fi
@@ -90,7 +92,7 @@ jobs:
           set -euo pipefail
           CLI="./target/release/fission_cli"
           "${CLI}" --version
-          "${CLI}" resources status || true
+          "${CLI}" resources status --json
 
       - name: PE info / list / decomp / raw-pcode
         run: |
@@ -103,7 +105,7 @@ jobs:
           echo "primary decomp addr: ${ADDR}"
           OUT="$("${CLI}" decomp "${BIN}" --addr "${ADDR}" --profile speed --timeout-ms 180000 --json)"
           echo "${OUT}" | python3 .github/scripts/check_decomp_output.py
-          "${CLI}" raw-pcode "${BIN}" --addr "${ADDR}" | head -n 40
+          "${CLI}" raw-pcode "${BIN}" --addr "${ADDR}" | sed -n '1,40p'
           echo "raw_pcode_ok"
 
       - name: Multi-function decomp smoke

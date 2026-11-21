@@ -13,6 +13,7 @@ A tagged release is eligible when:
 - **L0** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) has a successful **push** run on the tagged commit.
 - **L1** [`.github/workflows/ci-heavy.yml`](../.github/workflows/ci-heavy.yml) has a successful run on that same commit (main push, nightly, or dispatch).
 - **L2** [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml) succeeds on that commit (enforced by [release-tag.yml](../.github/workflows/release-tag.yml) before the tag is created).
+- **L3** All five archives pass installed-package checks before the release job tags and publishes the verified artifacts.
 - Prefer creating tags only via Actions → **Release Tag (CI green)** so the above are machine-checked and the tag points at the verified SHA.
 - [`cd.yml`](../.github/workflows/cd.yml) publishes all expected **`fission-cli`** assets:
   - `fission-<target>.tar.gz` (`.zip` on Windows) for the five targets below, each `bin/fission_cli` plus `share/fission/`

@@ -459,6 +459,45 @@ pub fn wait_pid(pid: u32, options: i32) -> Result<Option<i32>, i32> {
     }
 }
 
+/// Poll for a ptrace stop while leaving terminal status for the process owner.
+pub fn poll_stop(pid: u32) -> Result<Option<WaitOutcome>, i32> {
+    // SAFETY: waitid writes a siginfo_t for this PID. With WNOHANG the zeroed
+    // value has no event if the child has neither stopped nor exited.
+    let mut status: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    let result = unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid,
+            &mut status,
+            libc::WNOHANG | libc::WSTOPPED | libc::WEXITED | libc::WNOWAIT,
+        )
+    };
+    if result < 0 {
+        return Err(unsafe { *libc_errno() });
+    }
+    if unsafe { status.si_pid() } == 0 {
+        return Ok(None);
+    }
+    match status.si_code {
+        libc::CLD_TRAPPED | libc::CLD_STOPPED => {
+            wait_pid(pid, WNOHANG | WUNTRACED).map(|status| status.map(decode_wait_status))
+        }
+        libc::CLD_EXITED => Ok(Some(WaitOutcome::Exited(unsafe { status.si_status() }))),
+        libc::CLD_KILLED | libc::CLD_DUMPED => {
+            Ok(Some(WaitOutcome::Signaled(unsafe { status.si_status() })))
+        }
+        _ => Ok(None),
+    }
+}
+
+/// A signal sent to a traced process surfaces as a ptrace stop. SIGCONT
+/// also lets the target run if a pending copy is delivered after detaching.
+pub fn request_trace_stop(pid: u32) {
+    // SAFETY: the active trace relationship identifies this PID. An exited
+    // tracee remains waitable until its process owner collects the status.
+    unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
+}
+
 /// How a `waitpid` status word decodes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitOutcome {

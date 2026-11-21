@@ -1,0 +1,92 @@
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+from change_plan import event_paths, plan
+
+
+class ChangePlanTests(unittest.TestCase):
+    def test_workflow_changes_run_lint_and_a_real_test_job(self):
+        lane, jobs = plan([".github/workflows/ci.yml"], "pull_request")
+        self.assertEqual(lane, "ci")
+        self.assertTrue(jobs["run_actionlint"])
+        self.assertTrue(jobs["run_tests"])
+        self.assertTrue(jobs["run_cli_smoke"])
+
+    def test_merge_candidate_selects_runtime_jobs(self):
+        lane, jobs = plan(
+            ["crates/fission-dynamic/src/lib.rs", "crates/fission-solver/src/solver.rs",
+             "crates/fission-loader/src/loader/elf/mod.rs", "crates/fission-sleigh/src/lib.rs"],
+            "merge_group",
+        )
+        self.assertEqual(lane, "rust")
+        for job in ("run_platform_debugger", "run_solver_diff", "run_loader_fixtures", "run_decomp_corpus"):
+            self.assertTrue(jobs[job], job)
+
+    def test_premerge_definition_changes_run_every_premerge_lane(self):
+        lanes = ("run_platform_debugger", "run_solver_diff", "run_loader_fixtures", "run_decomp_corpus")
+        for path in (".github/workflows/reusable-premerge.yml", "scripts/ci/decompiler_smoke.py",
+                     "scripts/macos/sign-debugger.sh"):
+            _, jobs = plan([path], "pull_request")
+            for job in lanes:
+                self.assertTrue(jobs[job], (path, job))
+        # After merge there is nothing left to gate.
+        _, jobs = plan([".github/workflows/reusable-premerge.yml"], "push")
+        for job in lanes:
+            self.assertFalse(jobs[job], job)
+
+    def test_sweep_changes_run_the_sweep_smoke_before_merge(self):
+        for path in (".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
+                     "scripts/quality/decbench-ci-requirements.txt"):
+            self.assertTrue(plan([path], "pull_request")[1]["run_sweep_smoke"], path)
+            self.assertTrue(plan([path], "merge_group")[1]["run_sweep_smoke"], path)
+            self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)
+        self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
+
+    def test_docs_do_not_select_runtime_jobs(self):
+        self.assertEqual(plan(["docs/CLI.md"], "pull_request"), ("docs", {
+            name: False for name in plan(["docs/CLI.md"], "pull_request")[1]
+        }))
+
+    def test_stacked_pr_merge_group_and_rename_use_event_shas(self):
+        with tempfile.TemporaryDirectory() as temp:
+            prior = Path.cwd()
+            try:
+                os.chdir(temp)
+                self.git("init", "-q")
+                self.git("config", "user.name", "Test")
+                self.git("config", "user.email", "test@example.invalid")
+                Path("old.txt").touch()
+                self.git("add", "old.txt")
+                self.git("commit", "-qm", "stack parent")
+                base = self.git("rev-parse", "HEAD")
+                self.git("mv", "old.txt", "new.txt")
+                self.git("commit", "-qm", "stack child")
+                head = self.git("rev-parse", "HEAD")
+                expected = {"old.txt", "new.txt"}
+                self.assertEqual(
+                    set(event_paths("pull_request", {"pull_request": {
+                        "base": {"sha": base}, "head": {"sha": head},
+                    }}, head)), expected,
+                )
+                self.assertEqual(
+                    set(event_paths("merge_group", {"merge_group": {
+                        "base_sha": base, "head_sha": head,
+                    }}, head)), expected,
+                )
+                with self.assertRaises(ValueError):
+                    event_paths("merge_group", {"merge_group": {
+                        "base_sha": base, "head_sha": base,
+                    }}, head)
+            finally:
+                os.chdir(prior)
+
+    @staticmethod
+    def git(*args):
+        return subprocess.check_output(["git", *args], text=True).strip()
+
+
+if __name__ == "__main__":
+    unittest.main()

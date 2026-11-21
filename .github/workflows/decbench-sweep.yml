@@ -1,0 +1,172 @@
+name: DecBench full dataset sweep
+
+on:
+  schedule:
+    - cron: "25 1 * * *"
+  workflow_dispatch:
+  # Fast Gate calls this with one binary when the sweep itself changes, so the
+  # nightly definition is exercised before it lands rather than after.
+  workflow_call:
+    inputs:
+      only:
+        description: "One manifest binary path to score instead of the full sweep"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: decbench-full-${{ github.ref }}-${{ inputs.only || 'full' }}
+  cancel-in-progress: false
+
+env:
+  DECBENCH_SHARDS: "24"
+  FISSION_BENCHMARK_NO_CACHE: "1"
+  DECBENCH_NO_CACHE: "1"
+  RAYON_NUM_THREADS: "2"
+
+jobs:
+  build:
+    name: Build static decompiler and CFG parser
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+    steps:
+      - name: Plan shards
+        id: matrix
+        env:
+          ONLY: ${{ inputs.only }}
+        run: python3 -c 'import json, os; print("shards=" + json.dumps([0] if os.environ["ONLY"] else list(range(int(os.environ["DECBENCH_SHARDS"])))))' >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Fission
+        run: cargo build --locked --release -p fission-cli
+      - name: Check out pinned Rust Joern
+        uses: actions/checkout@v7
+        with:
+          repository: Noelo-Lab/rust-joern
+          ref: a2c16ece800f0843df21f6bb09efed2d0430a83a
+          path: ci-rust-joern
+          persist-credentials: false
+      - name: Build scorer support
+        run: |
+          set -euo pipefail
+          # actions/checkout can only place it inside this workspace, where
+          # cargo takes it for an undeclared member of Fission's workspace.
+          mv ci-rust-joern "$RUNNER_TEMP/rust-joern"
+          cargo build --locked --release --lib --manifest-path "$RUNNER_TEMP/rust-joern/Cargo.toml"
+          mkdir -p toolchain/joern/python toolchain/joern/target/release
+          cp -R "$RUNNER_TEMP/rust-joern/python/." toolchain/joern/python/
+          cp "$RUNNER_TEMP/rust-joern/target/release/librust_joern.so" toolchain/joern/target/release/
+          cp target/release/fission_cli toolchain/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: decbench-toolchain
+          path: toolchain
+          if-no-files-found: error
+          retention-days: 2
+
+  sweep:
+    name: ${{ inputs.only && 'DecBench sweep smoke' || format('DecBench shard {0}', matrix.shard) }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 165
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        shard: ${{ fromJSON(needs.build.outputs.shards) }}
+    env:
+      SHARD: ${{ matrix.shard }}
+      ONLY: ${{ inputs.only }}
+      RUST_JOERN_DIR: ${{ github.workspace }}/toolchain/joern
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: decbench-toolchain
+          path: toolchain
+      - name: Install pinned scorer and binary inspection tools
+        run: |
+          set -euo pipefail
+          python -m pip install -r scripts/quality/decbench-ci-requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends llvm binutils-mingw-w64
+          chmod +x toolchain/fission_cli
+      - name: Static decompile and score assigned manifest entries
+        run: |
+          set -euo pipefail
+          only=()
+          if [[ -n "$ONLY" ]]; then only=(--only "$ONLY"); fi
+          python scripts/quality/decbench_full_sweep.py --data "$RUNNER_TEMP/decbench" --shards "$DECBENCH_SHARDS" \
+            run --cli toolchain/fission_cli --shard "$SHARD" "${only[@]}" --out shard
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ inputs.only && 'decbench-smoke' || format('decbench-shard-{0}', matrix.shard) }}
+          path: shard
+          if-no-files-found: error
+          retention-days: 3
+
+  report:
+    name: DecBench full coverage and regression report
+    needs: [build, sweep]
+    # A failed shard still gets a report: it names the missing shard instead of
+    # leaving the run with no summary at all.
+    if: ${{ always() && !inputs.only && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: decbench-shard-*
+          path: incoming
+      - name: Arrange shard artifacts
+        run: |
+          set -euo pipefail
+          for directory in incoming/decbench-shard-*; do
+            mv "$directory" "incoming/${directory##*decbench-}"
+          done
+      - name: Find previous passing main sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_ids="$(gh api "repos/$REPOSITORY/actions/workflows/decbench-sweep.yml/runs?branch=main&status=success&per_page=10" \
+            --jq '.workflow_runs[] | select(.event == "schedule" or .event == "workflow_dispatch") | .id')"
+          for run_id in $run_ids; do
+            available="$(gh api "repos/$REPOSITORY/actions/runs/$run_id/artifacts?name=decbench-full" \
+              --jq '[.artifacts[] | select(.name == "decbench-full" and .expired == false)] | length')"
+            if [[ "$available" -gt 0 ]]; then
+              gh run download "$run_id" --repo "$REPOSITORY" --name decbench-full --dir baseline
+              break
+            fi
+          done
+      - name: Compare all rows with compatible baseline
+        run: |
+          python3 scripts/quality/decbench_full_sweep.py --data "$RUNNER_TEMP/decbench" --shards "$DECBENCH_SHARDS" \
+            report --input incoming --baseline baseline --out report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: decbench-full
+          path: report
+          if-no-files-found: error
+          retention-days: 35
