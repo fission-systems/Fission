@@ -41,7 +41,12 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
+          # Developer Tools alone is not enough on a hosted runner: task_for_pid
+          # still waits for an authorization nobody can grant and times out.
+          # The runner user must be in _developer and the taskport right open.
           sudo -n DevToolsSecurity -enable
+          sudo -n dseditgroup -o edit -a "$(id -un)" -t user _developer
+          sudo -n security authorizationdb write system.privilege.taskport allow
           scripts/macos/run-live-debugger-tests.sh
 
   solver:

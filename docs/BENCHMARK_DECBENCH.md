@@ -35,15 +35,16 @@ hashes, scores statically on stripped inputs, and preserves its row-level report
 The 250-row sample-set gate below remains a local development tool. See
 [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.
 
-The nightly and the local sweep score with different DecBench code. The local
-`scorer/vendor/decbench` is a snapshot with no upstream history; CI installs
-the public upstream commit that produced the pinned revision's published scores.
-On the same CLI and 970 rows over 18 binaries (every opt level, ELF x86-64,
-ELF ARM and PE) the two agree on status everywhere; on decompiled output except
-18 PE rows, whose stripped inputs differ; on GED except one row with identical
-output (GED's known nondeterminism); and on type_match except 12 x86-64 O2 and
-O2-noinline rows. Compare a nightly with a nightly and a local run
-with a local run, not one with the other.
+The nightly and the local sweep install the same scorer (upstream DecBench
+`0cba66d`, see [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench)) and
+both refuse to run with another. On the same CLI and 970 rows over 18 binaries
+(every opt level, ELF x86-64, ELF ARM and PE) they agree on status and type_match
+on every row and on GED on all but one, whose output is identical (GED's known
+nondeterminism). Two differences remain: the local sweep fills functions missing
+from the published source CFGs with CFGs rebuilt from the dataset's `sources/`
+(rows marked `src_cfg: "regen"`, about 1,177 more GED rows; `SWEEP_SOURCE_CFGS=published`
+turns it off), and PE outputs can differ in text, not score, because the two
+pass resources differently.
 
 ## CFG parser: rust-joern
 
