@@ -23,7 +23,7 @@
     
     
       
-        <title>CI / CD release gates (conservative) - Fission</title>
+        <title>CI and release gates - Fission</title>
       
     
     
@@ -74,7 +74,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#ci-cd-release-gates-conservative" class="md-skip">
+        <a href="#ci-and-release-gates" class="md-skip">
           Skip to content
         </a>
       
@@ -108,7 +108,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              CI / CD release gates (conservative)
+              CI and release gates
             
           </span>
         </div>
@@ -1229,10 +1229,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#design-principles" class="md-nav__link">
+  <a href="#pr-and-merge-queue" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design principles
+        PR and merge queue
       
     </span>
   </a>
@@ -1240,10 +1240,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#layers" class="md-nav__link">
+  <a href="#nightly-decbench" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Layers
+        Nightly DecBench
       
     </span>
   </a>
@@ -1251,54 +1251,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#main-branch-required-status-check" class="md-nav__link">
+  <a href="#promote-a-release" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Main branch required status check
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#what-release-e2e-covers-and-does-not" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What Release E2E covers (and does not)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#operator-runbook-tag-a-release" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Operator runbook (tag a release)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#l1-execution-nightly-and-release-candidates" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        L1 execution (nightly and release candidates)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#escape-hatches" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Escape hatches
+        Promote a release
       
     </span>
   </a>
@@ -1347,182 +1303,120 @@
   
 
 
-<h1 id="ci-cd-release-gates-conservative">CI / CD release gates (conservative)<a class="headerlink" href="#ci-cd-release-gates-conservative" title="Permanent link">&para;</a></h1>
-<p><strong>Last updated:</strong> 2026-09-29</p>
-<p>This document is the policy source for how Fission promotes a git commit to a
-<strong>SemVer tag</strong> and a <strong>GitHub Release</strong>. It aligns automation with
-<a href="../RELEASE/"><code>docs/RELEASE.md</code></a> and <a href="../VERSIONING/"><code>docs/VERSIONING.md</code></a>.</p>
-<h2 id="design-principles">Design principles<a class="headerlink" href="#design-principles" title="Permanent link">&para;</a></h2>
-<ol>
-<li><strong>No auto-tag on every <code>main</code> push.</strong> Tags are intentional promotions.</li>
-<li><strong>Layered gates:</strong> fast feedback on PR/push; thick checks before tag/CD.</li>
-<li><strong>Semantic quality ≠ official benchmark ranking.</strong> Release E2E is go/stop on
-   fixed fixtures; it must not publish to Pages / <code>results/latest.json</code>.</li>
-<li><strong>Documented gates must be machine-enforced</strong> where practical.</li>
-</ol>
-<h2 id="layers">Layers<a class="headerlink" href="#layers" title="Permanent link">&para;</a></h2>
+<h1 id="ci-and-release-gates">CI and release gates<a class="headerlink" href="#ci-and-release-gates" title="Permanent link">&para;</a></h1>
 <table>
 <thead>
 <tr>
-<th>Layer</th>
-<th>Workflow</th>
-<th>When</th>
-<th>Role</th>
+<th>Gate</th>
+<th>Trigger</th>
+<th>Required evidence</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>L0 Fast Gate</strong></td>
-<td><a href="../.github/workflows/ci.yml"><code>ci.yml</code></a></td>
-<td>PR + every <code>main</code> push</td>
-<td>Lint, security, changed-crate dependency tests, affected optional-feature suites, relevant CLI smoke, NIR gate. <strong>PR = Linux-first</strong>; macOS test smoke on <code>main</code> push. Windows release tests remain in L1. Docs/wiki-only short-circuits</td>
+<td>Fast Gate</td>
+<td>All PR targets, GitHub merge candidates and pushes to main</td>
+<td>Change plan from event SHAs, affected Linux tests and CLI smoke, plus the selected pre-merge lanes</td>
 </tr>
 <tr>
-<td><strong>L1 Heavy</strong></td>
-<td><a href="../.github/workflows/ci-heavy.yml"><code>ci-heavy.yml</code></a></td>
-<td>Nightly + manual dispatch</td>
-<td>Full Linux workspace tests and exhaustive feature compile-surface, Windows tests and native debugger, macOS release CLI build, MSRV, and non-blocking coverage. Dispatch it for the release candidate SHA before tagging.</td>
+<td>Heavy</td>
+<td>Nightly or workflow dispatch</td>
+<td>Linux workspace tests, Windows and macOS coverage, MSRV and compile surface</td>
 </tr>
 <tr>
-<td><strong>L2 Release E2E</strong></td>
-<td><a href="../.github/workflows/release-e2e.yml"><code>release-e2e.yml</code></a></td>
-<td>Before tag (and optional dispatch)</td>
-<td>Release-profile CLI + fixed PE smoke + raw-pcode + multi-function decomp</td>
+<td>DecBench full sweep</td>
+<td>Nightly or workflow dispatch</td>
+<td>24 shards with exact row coverage, per-function results, and comparison with a compatible passing main sweep</td>
 </tr>
 <tr>
-<td><strong>Tag</strong></td>
-<td><a href="../.github/workflows/release-tag.yml"><code>release-tag.yml</code></a></td>
-<td>Manual <code>workflow_dispatch</code> only</td>
-<td>Requires L0 + L1 green on the SHA, runs L2, then creates/pushes tag</td>
+<td>Release E2E and packages</td>
+<td>Intentional release dispatch or SemVer tag push</td>
+<td>L0 and L1 on the exact candidate SHA, release CLI E2E and five unpacked platform packages</td>
 </tr>
 <tr>
-<td><strong>L3 CD</strong></td>
-<td><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a></td>
-<td>Tag push <code>v*.*.*</code> / <code>X.Y.Z</code></td>
-<td>Multi-platform CLI archives (each includes <code>utils/</code>) → GitHub Release</td>
+<td>Publish</td>
+<td>Successful release candidate run</td>
+<td>SHA256 manifest and artifact provenance, complete draft release verified before publication</td>
 </tr>
 </tbody>
 </table>
-<h2 id="main-branch-required-status-check">Main branch required status check<a class="headerlink" href="#main-branch-required-status-check" title="Permanent link">&para;</a></h2>
-<p>Configure <code>main</code> branch protection to require these two Fast Gate checks by
-their exact check-run names:</p>
-<ul>
-<li><strong><code>Detect changes</code></strong> — the path/lane classifier, which must complete;</li>
-<li><strong><code>CI Summary</code></strong> — the aggregate gate for every lane-enabled check.</li>
-</ul>
-<p>Do not require lane-specific leaf contexts: the Fast Gate intentionally skips
-unrelated jobs for docs/scripts/CI-only changes, and its documented PR lane is
-Linux-first; the macOS smoke/build gates run after merge in L0/L1.</p>
-<p><code>CI Summary</code> runs for every Fast Gate lane, independently fails when change
-detection fails or returns an unknown lane, and checks that every lane-enabled
-job succeeded. Requiring both contexts keeps strict protection attached to the
-current lane-aware contract instead of retired or conditionally absent job
-names. If either check is renamed, update branch protection and recheck all
-open PRs as part of the same change.</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>main push ──► L0 Fast Gate
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>nightly or manual dispatch on candidate ref ──► L1 Heavy
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>                    │
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>                    ▼
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>     Actions / gh workflow run "Release Tag (CI green)"
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>                    │
-</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>                    ├─ verify L0 success (push event, that SHA)
-</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>                    ├─ verify L1 success (that SHA; any event)
-</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>                    ├─ run L2 Release E2E on that SHA
-</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>                    ├─ annotated tag push
-</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>                    └─ gh workflow run "CD Release" -f tag=vX.Y.Z  ──► L3 CD
-</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>                       (GITHUB_TOKEN tag pushes do not re-fire on.push CD;
-</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>                        workflow_dispatch is the reliable path)
-</span></code></pre></div>
-<h2 id="what-release-e2e-covers-and-does-not">What Release E2E covers (and does not)<a class="headerlink" href="#what-release-e2e-covers-and-does-not" title="Permanent link">&para;</a></h2>
-<p><strong>Covers (blocking for tag):</strong></p>
-<ul>
-<li><code>cargo build -p fission-cli --locked --release</code></li>
-<li>MinGW-built PE fixture from <a href="../.github/fixtures/test_functions.c"><code>.github/fixtures/test_functions.c</code></a></li>
-<li><code>info</code>, <code>list --json</code>, <code>decomp --json</code> (validated), <code>raw-pcode</code> at a listed address</li>
-<li>Decompile several listed functions (multi-addr smoke)</li>
-</ul>
-<p><strong>Does not cover:</strong></p>
-<ul>
-<li>The DecBench measurement (see <a href="../BENCHMARK_DECBENCH/"><code>BENCHMARK_DECBENCH.md</code></a>) or Pages promotion</li>
-<li>Official semantic leaderboard / <code>release_promotion_allowed</code> dashboard claims
-  (still manual / evaluation path in <a href="../RELEASE/"><code>docs/RELEASE.md</code></a> § quality)</li>
-</ul>
-<h2 id="operator-runbook-tag-a-release">Operator runbook (tag a release)<a class="headerlink" href="#operator-runbook-tag-a-release" title="Permanent link">&para;</a></h2>
+<h2 id="pr-and-merge-queue">PR and merge queue<a class="headerlink" href="#pr-and-merge-queue" title="Permanent link">&para;</a></h2>
+<p><code>Detect changes</code> and <code>CI Summary</code> are the stable, required check names. Fast Gate
+reads the event's exact base/head SHAs and checks the checked-out commit. For
+stacked PRs the base is the parent branch named in the event. For a merge group
+it is the queue's base and synthetic head. Each main push keeps its own run.
+Superseded updates to the same PR can still cancel older PR runs.</p>
+<p>Changes to CI definitions run actionlint, the CI tool tests, affected Rust tests
+and a CLI smoke run. A change to a lane's own definition also runs that lane:
+editing <code>reusable-premerge.yml</code>, its smoke script, <code>scripts/macos/</code> or the
+checked-in fixtures runs every pre-merge lane, and editing the DecBench sweep
+(workflow, script, scorer or its pinned requirements) runs the nightly workflow
+on one binary, which fails unless decompilation, GED and type scoring all
+produced data. Enabled nextest suites fail if they discover no tests. An
+enabled lane whose job is skipped, cancelled or failed makes <code>CI Summary</code> fail.</p>
+<p>The native debugger lane exercises Linux, Windows and macOS processes on hosted
+runners. The macOS job enables Developer Tools and signs the test executable.
+Run this job on a real PR before making the merge queue required. The solver
+lane uses a short differential suite with Z3 4.13.4. Loader changes cover ELF,
+PE and Mach-O fixtures, and decompiler changes add a small checked-in corpus.
+Packaging changes rehearse all five targets on PRs and merge candidates.</p>
+<p>Operator rollout:</p>
 <ol>
-<li>Land changes on <code>main</code> and wait for <strong>CI Fast Gate</strong> to pass on that commit.</li>
-<li>Run <strong>CI Heavy Validation</strong> manually on the release candidate ref and wait for
-   it to pass on the same commit. A nightly run counts when <code>main</code> has not moved
-   since that run.</li>
-<li>Actions → <strong>Release Tag (CI green)</strong> → set <code>tag</code> (<code>v0.1.4</code>) and <code>ref</code> (<code>main</code> or SHA),
-   or CLI:
-   <code>gh workflow run "Release Tag (CI green)" -f tag=v0.1.4 -f ref=main</code></li>
-<li>Workflow verifies L0+L1, runs L2, pushes the annotated tag, then runs
-   <code>gh workflow run "CD Release" -f tag=v0.1.4</code> (same-repo <code>workflow_dispatch</code>
-   is allowed to chain with <code>GITHUB_TOKEN</code>; bare tag push from the token is not).</li>
-<li><strong>CD Release</strong> builds Linux/macOS/Windows assets automatically.</li>
-<li>Edit GitHub Release notes; complete remaining checklist in
-   <a href="../RELEASE/"><code>docs/RELEASE.md</code></a>.</li>
+<li>Land the workflow changes with the existing main protection settings.</li>
+<li>Confirm a stacked PR publishes both checks. Confirm a native-debugger PR
+   actually runs the macOS and Windows process tests.</li>
+<li>Configure GitHub's merge queue for <code>main</code> with the existing required check
+   names. Begin with one candidate at a time. Verify the queue reports both
+   checks on its synthetic SHA before requiring it for all merges.</li>
+<li>Update or disable <code>auto-merge-approved-prs.yml</code> once the queue is active so
+   merge strategy is controlled by the queue. Set an approval requirement for
+   CI and release policy changes when an independent reviewer is available.</li>
 </ol>
-<p>Manual CD re-run for an existing tag:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>gh<span class="w"> </span>workflow<span class="w"> </span>run<span class="w"> </span><span class="s2">"CD Release"</span><span class="w"> </span>-f<span class="w"> </span><span class="nv">tag</span><span class="o">=</span>v0.1.4
+<h2 id="nightly-decbench">Nightly DecBench<a class="headerlink" href="#nightly-decbench" title="Permanent link">&para;</a></h2>
+<p>The source is <a href="https://huggingface.co/datasets/noelo-lab/decbench-dataset">noelo-lab/decbench-dataset</a>,
+revision <code>815eb96f130b6d2ef7fa600e04669bf20139bf27</code>, config <code>full</code>.
+Its manifest contains 96,103 function rows in 770 binaries across O0, O2 and
+O2-noinline. CI downloads only the manifest, binaries and published source CFGs.
+Binaries stay non-executable and only pass through static inspection, stripping
+and decompilation. The grader reads original symbols and DWARF separately.
+Runs disable decompilation and metric caches.</p>
+<p>The scorer is upstream DecBench at <code>0cba66d66e9af0f8555c9844eb2a868440c366c1</code>,
+the last commit before upstream #113 (2026-10-31) stopped counting inlined
+callees' variables as a function's type ground truth. The pinned dataset's
+published scores predate that change, and only the scorer that produced them can
+be compared with them: crontab O2 <code>usage</code> has one variable after #113 and 19
+before, and every published tool's score for it is a multiple of 1/19. The sweep
+refuses to run with any other installed decbench. Move the scorer pin together
+with the dataset revision, never alone.</p>
+<p>The report checks every expected row, records decompilation status and output
+hashes, and reports GED perfect count with total distance and type-match coverage
+and scores. It reports per-row changes against the latest passing main sweep
+when the corpus and scorer provenance match. A complete passing run establishes
+a baseline after a revision or scorer change. Build failures, process crashes,
+missing shards and previously successful rows now failing are blocking. Score
+deltas are observational and do not change the accepted baseline thresholds.
+Byte match is not run. See <a href="../BENCHMARK_DECBENCH/">the benchmark guide</a>.</p>
+<h2 id="promote-a-release">Promote a release<a class="headerlink" href="#promote-a-release" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Wait for a successful Fast Gate <strong>main push run</strong> and successful Heavy on
+   the same candidate SHA. Heavy can be dispatched on a named ref at that SHA.</li>
+<li>Dispatch on main with the version and exact candidate SHA.</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>gh<span class="w"> </span>workflow<span class="w"> </span>run<span class="w"> </span><span class="s2">"Release Tag (CI green)"</span><span class="w"> </span>--ref<span class="w"> </span>main<span class="w"> </span>-f<span class="w"> </span><span class="nv">tag</span><span class="o">=</span>vX.Y.Z<span class="w"> </span>-f<span class="w"> </span><span class="nv">ref</span><span class="o">=</span>&lt;candidate-sha&gt;
 </span></code></pre></div>
-<p>Benchmark measurement is not part of tagging. The docker image bake that
-<code>Release Tag</code> used to dispatch in <code>fission-benchmark</code> ("Publish Images") was
-retired with the docker loop; quality numbers for a release are measured
-locally on DecBench (<a href="../BENCHMARK_DECBENCH/"><code>BENCHMARK_DECBENCH.md</code></a>) and
-recorded in its changelog.</p>
-<p>Optional: run <strong>Release E2E Gate</strong> alone (dispatch) to pre-validate a SHA without tagging.</p>
-<h2 id="l1-execution-nightly-and-release-candidates">L1 execution (nightly and release candidates)<a class="headerlink" href="#l1-execution-nightly-and-release-candidates" title="Permanent link">&para;</a></h2>
-<p>Heavy does not run on every <code>main</code> push. Nightly and manual runs cover:</p>
-<ul>
-<li>Full Linux workspace tests (including <code>fission-static</code>)</li>
-<li>Windows release tests and native Win32 debugger tests</li>
-<li>macOS release CLI build</li>
-<li>MSRV</li>
-<li>Coverage (non-blocking)</li>
-</ul>
-<p>For a release, dispatch Heavy on the candidate branch or ref and wait for that
-run to finish before starting <strong>Release Tag (CI green)</strong>. The tag workflow
-accepts only a successful Heavy run whose head SHA exactly matches the target.
-A nightly run is sufficient when the candidate has not moved since it ran.</p>
-<p><strong>L0 performance notes (2026-07-17):</strong></p>
-<ul>
-<li>Path-filter <strong>lanes</strong>: <code>docs</code> | <code>scripts</code> | <code>ci</code> | <code>rust</code></li>
-<li><code>docs</code> — short-circuit green</li>
-<li><code>scripts</code> — pass-gate + Python/shell syntax only</li>
-<li><code>ci</code> — <code>.github/**</code>, CI metadata, or mixed CI/script edits → pass-gate + workflow YAML parse (+ security if <code>deny.toml</code>/dependabot)</li>
-<li><code>rust</code> — affected-package Linux Fast Gate (macOS test smoke on <code>main</code> push)</li>
-<li>PR Fast Gate no longer runs macOS/Windows tests (macOS smoke is on main L0;
-  Windows release tests are on L1).</li>
-<li>Fast Gate no longer performs separate macOS/Windows CLI release builds on <code>main</code>;
-  those release builds remain in L1 Heavy while L0 keeps the macOS test smoke signal.</li>
-<li><code>reusable-run-tests</code> runs multi-package nextest in <strong>one</strong> cargo process.</li>
-<li><strong>sccache</strong> (GitHub Actions backend) on lint / test / CLI build reusables via
-  <a href="../.github/actions/setup-sccache"><code>.github/actions/setup-sccache</code></a>.</li>
-<li>Rust PRs use Cargo package metadata to select the changed crates and their
-  reverse-dependency closure for Linux tests and Clippy. The CLI smoke runs only
-  when <code>fission-cli</code> is in that set. Non-default interactive-runtime,
-  script-emulator, emulator softfloat, plugin runtime, and alternate CLI
-  configurations run only when their package is affected. Workspace manifests,
-  lockfiles, unknown crate paths, and unknown resource paths fail safe to all
-  workspace packages.</li>
-<li><code>scripts/audit/compile_surface.sh</code> remains exhaustive, but runs in L1 Heavy
-  instead of every Rust PR. Fast Gate still checks formatting, Clippy for the
-  affected package set, and the affected test suites; release tagging still
-  requires successful Heavy validation on the exact candidate SHA.</li>
-</ul>
-<p><code>release-tag.yml</code> requires a successful <code>ci-heavy.yml</code> run on the target SHA.
-Scheduled and manually dispatched runs qualify; a run on an earlier commit does
-not satisfy the release gate.</p>
-<h2 id="escape-hatches">Escape hatches<a class="headerlink" href="#escape-hatches" title="Permanent link">&para;</a></h2>
-<ul>
-<li><strong>Emergency hot-fix tag without waiting for heavy:</strong> not supported by the
-  default gate. Prefer fixing heavy or using a documented exception in release
-  notes only after an explicit ops decision (temporary workflow input may be
-  added later; default remains full gates).</li>
-<li><strong>Local DecBench runs</strong> are the quality-loop tool; they never promote to an
-  official ranking (see <a href="../BENCHMARK_DECBENCH/"><code>docs/BENCHMARK_DECBENCH.md</code></a>).</li>
-</ul>
+<ol>
+<li>The workflow runs release E2E and stages all five packages before creating
+   any tag itself. A manually pushed SemVer tag enters the same verification
+   path and must already resolve to that verified SHA.</li>
+<li>The publish job downloads those exact artifacts, verifies their digests,
+   generates provenance attestations and populates a draft. It downloads the
+   draft attachments and verifies them before publishing. For a failed run,
+   rerun with the same tag and SHA. Published releases are not overwritten.</li>
+</ol>
+<p>After validating the workflow, configure tag protection and the <code>release</code>
+environment approval policy in GitHub. Enable immutable releases when the
+draft-to-publish flow has been tested. A workflow change does not modify these
+repository settings.</p>
 <h2 id="resource-bundle-utils-assets">Resource bundle (<code>utils/</code>) assets<a class="headerlink" href="#resource-bundle-utils-assets" title="Permanent link">&para;</a></h2>
 <p>Runtime data lives under <a href="../utils/"><code>utils/</code></a> (Sleigh specs, signatures, ghidra-data).
 It <strong>is</strong> checked into git as of 2026-08-19. Only <code>utils/source/</code> (the inputs the

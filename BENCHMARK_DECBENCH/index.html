@@ -1229,6 +1229,17 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#ci-full-sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI full sweep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#cfg-parser-rust-joern" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1371,6 +1382,23 @@ the leaderboard was never same-denominator.</p>
 </tr>
 </tbody>
 </table>
+<h2 id="ci-full-sweep">CI full sweep<a class="headerlink" href="#ci-full-sweep" title="Permanent link">&para;</a></h2>
+<p><a href="../.github/workflows/decbench-sweep.yml">DecBench full dataset sweep</a> measures
+the published Hugging Face <code>full</code> manifest on Nightly. The pinned dataset
+revision contains 96,103 rows. The workflow shards the manifest, verifies binary
+hashes, scores statically on stripped inputs, and preserves its row-level report.
+The 250-row sample-set gate below remains a local development tool. See
+<a href="../CI_RELEASE_GATES/#nightly-decbench">CI and release gates</a> for the CI policy.</p>
+<p>The nightly and the local sweep install the same scorer (upstream DecBench
+<code>0cba66d</code>, see <a href="../CI_RELEASE_GATES/#nightly-decbench">CI and release gates</a>) and
+both refuse to run with another. On the same CLI and 970 rows over 18 binaries
+(every opt level, ELF x86-64, ELF ARM and PE) they agree on status and type_match
+on every row and on GED on all but one, whose output is identical (GED's known
+nondeterminism). Two differences remain: the local sweep fills functions missing
+from the published source CFGs with CFGs rebuilt from the dataset's <code>sources/</code>
+(rows marked <code>src_cfg: "regen"</code>, about 1,177 more GED rows; <code>SWEEP_SOURCE_CFGS=published</code>
+turns it off), and PE outputs can differ in text, not score, because the two
+pass resources differently.</p>
 <h2 id="cfg-parser-rust-joern">CFG parser: rust-joern<a class="headerlink" href="#cfg-parser-rust-joern" title="Permanent link">&para;</a></h2>
 <p>GED's source- and decompiled-side CFGs come from
 <a href="https://github.com/Noelo-Lab/rust-joern">rust-joern</a>, not the JVM-backed

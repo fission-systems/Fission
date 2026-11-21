@@ -1512,6 +1512,7 @@
 <li><strong>L0</strong> <a href="../.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a> has a successful <strong>push</strong> run on the tagged commit.</li>
 <li><strong>L1</strong> <a href="../.github/workflows/ci-heavy.yml"><code>.github/workflows/ci-heavy.yml</code></a> has a successful run on that same commit (main push, nightly, or dispatch).</li>
 <li><strong>L2</strong> <a href="../.github/workflows/release-e2e.yml"><code>.github/workflows/release-e2e.yml</code></a> succeeds on that commit (enforced by <a href="../.github/workflows/release-tag.yml">release-tag.yml</a> before the tag is created).</li>
+<li><strong>L3</strong> All five archives pass installed-package checks before the release job tags and publishes the verified artifacts.</li>
 <li>Prefer creating tags only via Actions → <strong>Release Tag (CI green)</strong> so the above are machine-checked and the tag points at the verified SHA.</li>
 <li><a href="../.github/workflows/cd.yml"><code>cd.yml</code></a> publishes all expected <strong><code>fission-cli</code></strong> assets:</li>
 <li><code>fission-&lt;target&gt;.tar.gz</code> (<code>.zip</code> on Windows) for the five targets below, each <code>bin/fission_cli</code> plus <code>share/fission/</code></li>
