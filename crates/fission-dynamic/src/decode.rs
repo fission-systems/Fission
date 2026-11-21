@@ -186,16 +186,15 @@ pub fn create_decoder(language: &str) -> FissionResult<Box<dyn InstructionDecode
 mod tests {
     use super::*;
 
-    fn try_sleigh() -> Option<SleighDecoder> {
-        SleighDecoder::new("x86-64").ok()
+    /// The x86-64 `.sla` is committed under `utils/`, so a decoder that does
+    /// not build is a failure, not an absent input.
+    fn sleigh() -> SleighDecoder {
+        SleighDecoder::new("x86-64").expect("x86-64 Sleigh decoder from the committed utils/ specs")
     }
 
     #[test]
     fn sleigh_decoder_detects_call_e8() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         // E8 rel32 — CALL near
         let bytes = [0xE8, 0x10, 0x00, 0x00, 0x00, 0x90];
         let insn = decoder.decode_one(&bytes, 0x1000).unwrap();
@@ -206,10 +205,7 @@ mod tests {
 
     #[test]
     fn sleigh_decoder_detects_ret() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         let insn = decoder.decode_one(&[0xC3], 0x1000).unwrap();
         assert!(insn.is_return, "C3 should be RET: {:?}", insn);
         assert_eq!(insn.length, 1);
@@ -217,10 +213,7 @@ mod tests {
 
     #[test]
     fn sleigh_decoder_detects_conditional_branch() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         // 74 05 — JE +5
         let bytes = [0x74, 0x05, 0x90, 0x90, 0x90, 0x90, 0x90];
         let insn = decoder.decode_one(&bytes, 0x1000).unwrap();
@@ -231,10 +224,7 @@ mod tests {
 
     #[test]
     fn sleigh_decoder_decode_window_multiple() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         // NOP + NOP + RET
         let bytes = [0x90, 0x90, 0xC3];
         let insns = decoder.decode_window(&bytes, 0x1000, 10).unwrap();
@@ -247,10 +237,7 @@ mod tests {
 
     #[test]
     fn sleigh_decoder_call_rax_ff_d0() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         // FF D0 — CALL RAX
         let bytes = [0xFF, 0xD0, 0x90];
         let insn = decoder.decode_one(&bytes, 0x1000).unwrap();
@@ -260,10 +247,7 @@ mod tests {
 
     #[test]
     fn sleigh_decoder_jmp_not_call() {
-        let Some(decoder) = try_sleigh() else {
-            eprintln!("skip: Sleigh x86-64 runtime not available");
-            return;
-        };
+        let decoder = sleigh();
         // E9 rel32 — JMP near
         let bytes = [0xE9, 0x10, 0x00, 0x00, 0x00];
         let insn = decoder.decode_one(&bytes, 0x1000).unwrap();
@@ -273,13 +257,8 @@ mod tests {
 
     #[test]
     fn create_decoder_succeeds_for_x86_64() {
-        let decoder = create_decoder("x86-64");
-        // May fail if Sleigh .sla files are not available in the test environment
-        if let Ok(d) = decoder {
-            assert_eq!(d.architecture(), "x86-64");
-        } else {
-            eprintln!("skip: Sleigh x86-64 runtime not available for create_decoder");
-        }
+        let decoder = create_decoder("x86-64").expect("x86-64 decoder from committed specs");
+        assert_eq!(decoder.architecture(), "x86-64");
     }
 
     #[test]
