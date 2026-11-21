@@ -1337,6 +1337,78 @@ mod tests {
         assert_eq!(run(), load(u32_ty.clone()));
     }
 
+    /// Run the pass over `stmt` with `p` bound to `p_ty`, and return the
+    /// rewritten statement. `y` has a type to solve, so the pass rewrites the
+    /// tree.
+    fn propagate_one(p_ty: NirType, stmt: PreHirStmt) -> PreHirStmt {
+        let mut func = PreHirFunction {
+            locals: vec![binding("p", p_ty), binding("y", NirType::Unknown)],
+            body: vec![
+                stmt,
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_owned()),
+                    rhs: PreHirExpr::Var("p".to_owned()),
+                },
+            ],
+            ..Default::default()
+        };
+        apply_type_constraint_propagation(&mut func);
+        func.body[0].clone()
+    }
+
+    fn byte(signed: bool) -> NirType {
+        NirType::Int { bits: 8, signed }
+    }
+
+    /// `movb $0, (%rax)` through a pointer inferred as `struct *`: the store
+    /// is one byte. Taking the pointee for its type printed
+    /// `*(fission_agg44 *)p = 0`, a 44-byte store.
+    #[test]
+    fn a_store_keeps_its_width_when_the_pointee_is_wider() {
+        let store = |ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(aggregate(44)));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(false)));
+    }
+
+    /// An indexed element's type is also the scale of its address: `p[i]`
+    /// over bytes must not become `p[i]` over eight-byte words.
+    #[test]
+    fn an_indexed_store_keeps_its_element_width() {
+        let store = |elem_ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Index {
+                base: Box::new(PreHirExpr::Var("p".to_owned())),
+                index: Box::new(PreHirExpr::Const(3, NirType::Unknown)),
+                elem_ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(false)));
+    }
+
+    /// The pointee may still refine a store of the same width.
+    #[test]
+    fn a_same_width_pointee_still_refines_a_store() {
+        let store = |ty: NirType| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                ty,
+            },
+            rhs: PreHirExpr::Const(0, byte(false)),
+        };
+        let p_ty = NirType::Ptr(Box::new(byte(true)));
+        assert_eq!(propagate_one(p_ty, store(byte(false))), store(byte(true)));
+    }
+
     #[test]
     fn fieldless_aggregate_constant_refines_binding_to_same_width_integer() {
         let agg = aggregate(16);
