@@ -180,21 +180,6 @@ fn drain_events(backend: &mut dyn ExecutionBackend) -> Vec<Value> {
     out
 }
 
-fn hex_bytes(s: &str) -> Result<Vec<u8>> {
-    let s: String = s
-        .chars()
-        .filter(|c| !c.is_whitespace() && *c != ',')
-        .collect();
-    if s.len() % 2 != 0 {
-        bail!("hex data length must be even (got {})", s.len());
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
-        .collect::<Result<Vec<u8>, _>>()
-        .with_context(|| format!("invalid hex data: {s}"))
-}
-
 /// Run one command against the live session.
 ///
 /// Commands that only make sense against an OS process -- attaching to a pid,
@@ -273,7 +258,7 @@ fn execute(
             })
         }
         DebugCommand::Write(a) => {
-            let bytes = hex_bytes(&a.data)?;
+            let bytes = super::debug::hex_bytes_from_str(&a.data)?;
             backend.write_memory(a.addr, &bytes)?;
             json!({
                 "action": "write",

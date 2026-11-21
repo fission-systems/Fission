@@ -167,6 +167,113 @@ fn step_over_runs_the_call_and_comes_back() {
     );
 }
 
+/// Step until the next instruction is a call, and return its shape.
+fn walk_to_a_call(backend: &mut EmulatorBackend) -> fission_emulator::core::InstructionShape {
+    for _ in 0..4_000 {
+        let shape = backend
+            .emulator
+            .as_mut()
+            .unwrap()
+            .instruction_at_pc()
+            .expect("decode");
+        if shape.is_call {
+            return shape;
+        }
+        backend.single_step().expect("step");
+    }
+    panic!("the fixture makes a call in its first few thousand instructions");
+}
+
+fn drain_events(backend: &mut EmulatorBackend) -> Vec<fission_dynamic::debug::types::DebugEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = backend.poll_event(0).expect("poll") {
+        events.push(event);
+    }
+    events
+}
+
+/// A completed step reports itself, whichever kind of step it was.
+///
+/// Stepping over a call ends with the run outcome `Returned`, which had no
+/// event, so a front end waiting for the step to finish saw nothing at all.
+#[test]
+fn step_over_a_call_reports_a_single_step_like_any_other_step() {
+    use fission_dynamic::debug::types::DebugEvent;
+
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&fixture(), &[]).expect("launch");
+    let shape = walk_to_a_call(&mut backend);
+
+    // Positive control: an ordinary step, one instruction before, reported one.
+    let before_call = drain_events(&mut backend);
+    assert!(
+        matches!(before_call.last(), Some(DebugEvent::SingleStep { .. })),
+        "the steps up to the call reported no single step: {before_call:?}"
+    );
+
+    backend.step_over().expect("step over");
+    assert_eq!(backend.fetch_registers(1).unwrap().pc, shape.fall_through());
+    let events = drain_events(&mut backend);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, DebugEvent::SingleStep { thread_id: 1 })),
+        "stepping over the call at 0x{:X} reported {events:?}",
+        shape.address
+    );
+}
+
+/// A step over a call that fails takes its temporary breakpoint with it.
+#[test]
+fn a_failed_step_over_leaves_no_breakpoint_behind() {
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&fixture(), &[]).expect("launch");
+    let pc = walk_to_a_call(&mut backend).address;
+
+    // A direct call whose target nothing maps: `call rel32` to 0x7000_0000_0000.
+    let unmapped: u64 = 0x7000_0000_0000;
+    assert!(backend.read_memory(unmapped, 1).is_err());
+    let rel = (unmapped as i64 - (pc as i64 + 5)) as i32;
+    let mut call = vec![0xE8];
+    call.extend_from_slice(&rel.to_le_bytes());
+    // The code page is read-only to the guest; this is the test planting an
+    // instruction, not a guest write, so the page check is lifted for it.
+    {
+        let emu = backend.emulator.as_mut().unwrap();
+        let enforce = std::mem::replace(&mut emu.state.enforce_page_faults, false);
+        let ram = emu.state.ram_space();
+        emu.state
+            .write_space(ram, pc, &call)
+            .expect("patch the call");
+        emu.state.enforce_page_faults = enforce;
+        emu.invalidate_translations(pc, call.len());
+    }
+    let shape = backend
+        .emulator
+        .as_mut()
+        .unwrap()
+        .instruction_at_pc()
+        .expect("decode the patched call");
+    assert!(shape.is_call);
+    let fall_through = shape.fall_through();
+
+    // Positive control: nothing is set there beforehand.
+    let breakpoints = |backend: &EmulatorBackend| -> Vec<u64> {
+        backend.emulator.as_ref().unwrap().breakpoints().collect()
+    };
+    assert!(!breakpoints(&backend).contains(&fall_through));
+
+    let result = backend.step_over();
+    assert!(
+        result.is_err(),
+        "a call into unmapped memory completed: {result:?}"
+    );
+    assert!(
+        !breakpoints(&backend).contains(&fall_through),
+        "the temporary breakpoint at 0x{fall_through:X} outlived the failed step"
+    );
+}
+
 /// Stepping out arrives above the frame it started in.
 #[test]
 fn step_out_returns_from_the_function() {

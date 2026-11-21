@@ -224,31 +224,70 @@ impl GdbMiParser {
         } else if s.starts_with('[') {
             // List: [value1,value2,...] or [name="value",...]
             let end = self.find_matching_brace(s, '[', ']').unwrap_or(s.len());
-            let content = &Self::between(s, 1, end).trim();
-
-            let mut list = Vec::new();
-            if !content.is_empty() {
-                // Lists can contain values OR result pairs
-                if content.contains('=') && !content.starts_with('{') && !content.starts_with('"') {
-                    // It's a list of result pairs, treat as a list containing one tuple
-                    let results = self.parse_results(content);
-                    list.push(MiValue::Tuple(results));
-                } else {
-                    // List of values
-                    let mut rest = *content;
-                    while !rest.is_empty() {
-                        let (val, rem) = self.parse_value(rest);
-                        list.push(val);
-                        rest = rem.trim_start_matches(',').trim();
-                    }
-                }
-            }
+            let list = self.parse_list(Self::between(s, 1, end));
             (MiValue::List(list), Self::after(s, end))
         } else {
             // Raw identifier or number
             let end = s.find([',', '}', ']']).unwrap_or(s.len());
             (MiValue::Const(s[..end].to_string()), &s[end..])
         }
+    }
+
+    /// The elements between a list's brackets.
+    ///
+    /// GDB/MI allows two kinds of list: values (`["a",{...},[...]]`) and
+    /// results (`[frame={...},frame={...}]`). Each element is read for what it
+    /// is, so a nested list is a list and not a key that starts with `[`. A
+    /// result becomes a tuple holding that one pair: a list is where GDB
+    /// repeats a key (every entry of a backtrace is `frame=`), and one map
+    /// for the whole list would keep only the last of them.
+    fn parse_list(&self, content: &str) -> Vec<MiValue> {
+        let mut list = Vec::new();
+        let mut rest = content.trim();
+        while !rest.is_empty() {
+            let before = rest.len();
+            let (element, remaining) = self.parse_list_element(rest);
+            if let Some(element) = element {
+                list.push(element);
+            }
+            rest = remaining.trim_start();
+            rest = rest.strip_prefix(',').unwrap_or(rest).trim_start();
+            if rest.len() >= before {
+                // Nothing was consumed: `rest` starts with a closing delimiter
+                // that closes nothing (a `}` inside `[...]`). Drop it, or this
+                // loop pushes empty values for ever.
+                let mut chars = rest.chars();
+                chars.next();
+                rest = chars.as_str().trim_start();
+            }
+        }
+        list
+    }
+
+    /// One list element and what follows it. `None` when there was no element
+    /// to read at this position.
+    fn parse_list_element<'a>(&self, s: &'a str) -> (Option<MiValue>, &'a str) {
+        if s.starts_with(['"', '{', '[']) {
+            let (value, rest) = self.parse_value(s);
+            return (Some(value), rest);
+        }
+        // `name=value` when an `=` comes before anything that would end or
+        // start a value; otherwise a bare constant.
+        let stop = s
+            .find([',', '}', ']', '"', '{', '[', '='])
+            .unwrap_or(s.len());
+        if s[stop..].starts_with('=') {
+            let key = s[..stop].trim().to_string();
+            let (value, rest) = self.parse_value(&s[stop + 1..]);
+            let mut pair = HashMap::new();
+            pair.insert(key, value);
+            return (Some(MiValue::Tuple(pair)), rest);
+        }
+        let end = s.find([',', '}', ']']).unwrap_or(s.len());
+        if end == 0 {
+            return (None, s);
+        }
+        (Some(MiValue::Const(s[..end].trim().to_string())), &s[end..])
     }
 
     fn find_string_end(&self, s: &str) -> usize {
@@ -335,19 +374,31 @@ impl GdbMiParser {
         out
     }
 
+    /// The text of a stream record (`~"..."`, `@"..."`, `&"..."`).
+    ///
+    /// The payload is one C string. Only its own delimiters come off: trimming
+    /// every quote from both ends also took the quote of a trailing `\"`,
+    /// leaving a stray backslash where the text ended in a quote.
+    fn stream_text(&self, s: &str) -> String {
+        let s = s.trim();
+        if s.starts_with('"') {
+            let end = self.find_string_end(s);
+            self.unescape_string(Self::between(s, 1, end))
+        } else {
+            self.unescape_string(s)
+        }
+    }
+
     fn parse_console_stream(&self, s: &str) -> Option<MiResponse> {
-        let content = s.trim_matches('"');
-        Some(MiResponse::ConsoleStream(self.unescape_string(content)))
+        Some(MiResponse::ConsoleStream(self.stream_text(s)))
     }
 
     fn parse_target_stream(&self, s: &str) -> Option<MiResponse> {
-        let content = s.trim_matches('"');
-        Some(MiResponse::TargetStream(self.unescape_string(content)))
+        Some(MiResponse::TargetStream(self.stream_text(s)))
     }
 
     fn parse_log_stream(&self, s: &str) -> Option<MiResponse> {
-        let content = s.trim_matches('"');
-        Some(MiResponse::LogStream(self.unescape_string(content)))
+        Some(MiResponse::LogStream(self.stream_text(s)))
     }
 }
 
@@ -463,5 +514,124 @@ mod tests {
         assert_eq!(parser.unescape_string("no escapes"), "no escapes");
         // A trailing lone backslash is kept, not dropped.
         assert_eq!(parser.unescape_string("end\\"), "end\\");
+    }
+
+    fn list(value: &MiValue) -> &[MiValue] {
+        match value {
+            MiValue::List(items) => items,
+            other => panic!("expected a list, got {other:?}"),
+        }
+    }
+
+    /// Run `parse` on its own thread and fail if it does not come back: the
+    /// defect under test is a loop that never ends and allocates as it goes.
+    fn parse_within_a_second(line: &'static str) -> Vec<MiResponse> {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut parser = GdbMiParser::new();
+            parser.feed(line);
+            let _ = sender.send(parser.parse());
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .unwrap_or_else(|_| panic!("parsing {line:?} did not finish"))
+    }
+
+    #[test]
+    fn a_stray_closing_brace_inside_a_list_ends_the_parse() {
+        // `}` closes nothing inside `[...]`. The value loop read an empty
+        // constant there, consumed nothing, and read it again for ever.
+        for line in [
+            "^done,x=[}]\n",
+            "^done,x=[\"a\"}]\n",
+            "^done,x=[\"a\"},\"b\"]\n",
+            "^done,x=[}}}]\n",
+        ] {
+            let responses = parse_within_a_second(line);
+            assert_eq!(responses.len(), 1, "{line:?}");
+        }
+        // What is well formed around the stray delimiter is still read.
+        let results = first_result("^done,x=[\"a\"},\"b\"],y=\"1\"\n");
+        assert_eq!(
+            list(&results["x"]).iter().map(constant).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert_eq!(constant(&results["y"]), "1");
+    }
+
+    #[test]
+    fn a_list_inside_a_list_is_a_list() {
+        // `[[a="1"]]` was handed to the result parser because it contains an
+        // `=`, which produced a tuple with the key `[a`.
+        let results = first_result("^done,x=[[a=\"1\"],[\"p\",\"q\"]]\n");
+        let outer = list(&results["x"]);
+        assert_eq!(outer.len(), 2);
+        let first = list(&outer[0]);
+        assert_eq!(first.len(), 1);
+        assert_eq!(constant(&tuple(&first[0])["a"]), "1");
+        assert_eq!(
+            list(&outer[1]).iter().map(constant).collect::<Vec<_>>(),
+            ["p", "q"]
+        );
+    }
+
+    #[test]
+    fn a_result_list_keeps_every_entry_of_a_repeated_key() {
+        // The shape of `-stack-list-frames`: every entry has the key `frame`.
+        // One map for the list kept the last frame only.
+        let results = first_result(
+            "^done,stack=[frame={level=\"0\",func=\"inner\"},frame={level=\"1\",func=\"main\"}]\n",
+        );
+        let frames = list(&results["stack"]);
+        assert_eq!(frames.len(), 2);
+        let funcs: Vec<&str> = frames
+            .iter()
+            .map(|entry| constant(&tuple(&tuple(entry)["frame"])["func"]))
+            .collect();
+        assert_eq!(funcs, ["inner", "main"]);
+    }
+
+    #[test]
+    fn a_list_of_tuples_is_unchanged() {
+        // Positive control: the shape `-data-list-register-values` returns,
+        // which `RRDebugger::parse_registers` reads, is what it was.
+        let results = first_result(
+            "^done,register-values=[{number=\"0\",value=\"0x1\"},{number=\"16\",value=\"0x401000\"}]\n",
+        );
+        let registers = list(&results["register-values"]);
+        assert_eq!(registers.len(), 2);
+        assert_eq!(constant(&tuple(&registers[1])["number"]), "16");
+        assert_eq!(constant(&tuple(&registers[1])["value"]), "0x401000");
+        // And an empty list is empty.
+        assert!(list(&first_result("^done,x=[]\n")["x"]).is_empty());
+    }
+
+    fn stream(line: &str) -> String {
+        let mut parser = GdbMiParser::new();
+        parser.feed(line);
+        match parser.parse().into_iter().next() {
+            Some(
+                MiResponse::ConsoleStream(text)
+                | MiResponse::TargetStream(text)
+                | MiResponse::LogStream(text),
+            ) => text,
+            other => panic!("expected a stream record, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_stream_that_ends_in_an_escaped_quote_keeps_it() {
+        // `~"say \"hi\""`: the text ends in a quote. Trimming every quote from
+        // the end also took that one, leaving `say "hi\`.
+        assert_eq!(stream("~\"say \\\"hi\\\"\"\n"), "say \"hi\"");
+        assert_eq!(stream("&\"\\\"quoted\\\"\\n\"\n"), "\"quoted\"\n");
+        assert_eq!(stream("@\"\\\"\"\n"), "\"");
+    }
+
+    #[test]
+    fn a_plain_stream_is_unchanged() {
+        // Positive control for the test above.
+        assert_eq!(stream("~\"hello\\n\"\n"), "hello\n");
+        assert_eq!(stream("~\"\"\n"), "");
     }
 }

@@ -393,6 +393,7 @@ impl TeLoader {
         let entry_point_rva = reader.u32(8)?;
         let _base_of_code_rva = reader.u32(12)?;
         let image_base = reader.u64(16)?;
+        crate::loader::pe::ensure_image_base_is_mappable(image_base)?;
         let reloc_dir_rva = reader.u32(24)?;
         let reloc_dir_size = reader.u32(28)?;
         let debug_dir_rva = reader.u32(32)?;

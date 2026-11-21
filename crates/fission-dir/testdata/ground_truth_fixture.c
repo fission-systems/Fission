@@ -141,6 +141,15 @@ PLAIN long call_then_return(long a)
     return a;
 }
 
+/* Undefined reads (slice 4): a local read before anything assigns it, on
+ * purpose -- the machine reads stack garbage, and so does any faithful
+ * decompilation of it. */
+PLAIN int read_garbage(int a)
+{
+    volatile int x;
+    return a + x;
+}
+
 /* The canary check's failure path; nothing here links a libc. */
 PLAIN void __stack_chk_fail(void)
 {
