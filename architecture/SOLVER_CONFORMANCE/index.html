@@ -1261,6 +1261,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#constant-folding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constant folding
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1345,7 +1356,13 @@ unsatisfiability for exhaustive 4-bit inputs or operand pairs.</p>
 <p>The exhaustive checks are in <code>crates/fission-solver/tests/soundness_probe.rs</code>.
 Wider boundary coverage lives in <code>tests/bit_width_contract.rs</code> and the AST
 unit tests. The optional <code>tests/differential_z3.rs</code> process oracle is a second
-implementation check; it is ignored by default and has no Z3 or FFI dependency.</p>
+implementation check; it is ignored by default and has no Z3 or FFI dependency.
+It covers what the 4-bit matrix cannot: widths up to 64 bits, operands of
+different widths, arrays (<code>QF_ABV</code>) with and without a memory oracle, the
+folding constructors, the model behind every <code>Sat</code>, and a solver asked several
+questions in a row. <code>crates/fission-solver/AGENTS.md</code> lists its modes.</p>
+<p>A query may be bounded with <code>Solver::set_conflict_budget</code>. One that runs out
+returns <code>Unknown</code> with <code>UnknownReason::ConflictBudget</code>; it is never a verdict.</p>
 <h2 id="unsupported-operations">Unsupported Operations<a class="headerlink" href="#unsupported-operations" title="Permanent link">&para;</a></h2>
 <p>An operation without an exact circuit or a formula outside the supported
 width/shape rules (including widths above 64 bits) must make
@@ -1381,6 +1398,24 @@ incremental clause-sequence checks.</p>
 <p>Whole-array scalar projections, including nested array sorts, abstain before
 bit-blasting. Unsupported placeholders are capped at 64 bits regardless of
 array range width; array-valued model entries are never cast into <code>u64</code>.</p>
+<h2 id="constant-folding">Constant folding<a class="headerlink" href="#constant-folding" title="Permanent link">&para;</a></h2>
+<p><code>SymExpr::new_*</code> answers for constant operands without building a node, and a
+caller that builds the node gets the circuit. The two must give the same
+value; <code>tests/folding_agrees_with_lowering.rs</code> asserts <code>raw != folded</code> for
+each constructor and expects UNSAT.</p>
+<ul>
+<li>A constant's value is its low <code>size</code> bits. <code>SymExpr::Const</code> has public
+  fields, so a payload can carry more; lowering ignores the excess and the
+  folds now do too. <code>new_eq</code> of the 8-bit payloads <code>0x1ff</code> and <code>0xff</code> said
+  "different" where the circuit says "equal".</li>
+<li>The same holds for a constant shift amount, which lowering applies without
+  building a shifter: the 8-bit payload <code>0x101</code> shifts by one, not by 257.</li>
+<li>And for <code>is_true</code> / <code>is_false</code>, which answer for a constant without a
+  query: the 1-bit payload <code>2</code> is false.</li>
+<li><code>new_fneg</code> and <code>new_fabs</code> act on the sign bit of the bit pattern. Folding
+  a 32-bit constant through <code>f64</code> quieted a signalling NaN, so the folded
+  payload differed from the circuit's.</li>
+</ul>
 
 
 
