@@ -99,3 +99,13 @@ zig cc -target x86_64-linux-musl -nostdlib -Wl,-e,_start -Wl,--build-id=none \
 ```
 
 All three run only inside Fission's emulator.
+
+## Engine differential fixtures
+
+`aarch64_control_flow.elf` and `x86_control_flow.exe` drive both engines in
+`tests/interp_differential.rs`; the program returns 27. From `testdata/`:
+
+```sh
+zig cc -target aarch64-linux-musl -O0 -static -s -o aarch64_control_flow.elf src/control_flow.c
+zig cc -target x86-windows-gnu -O0 -s -o x86_control_flow.exe src/control_flow.c
+```
