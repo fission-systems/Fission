@@ -53,18 +53,25 @@
 ## Benchmark Impact
 
 <!--
-Required when decompiler output can change. Run with caches disabled
-(`FISSION_BENCHMARK_NO_CACHE=1`) and report total distance next to the
-perfect count: the count alone has ranked a regression as a win. Say which
-DecBench config was measured. Use `n/a` for changes that cannot change output.
+Required when decompiler output can change. Quality claims cite the DecBench
+full-dataset sweep (`~/fission-benchmark/decbench-full/sweep.py`); the
+250-function sample-set gate is the quick pre-check. Run with caches disabled
+(`FISSION_BENCHMARK_NO_CACHE=1`) and compare output hashes before scores
+(`sweep.py diff`). Report total distance next to the perfect count: the count
+alone has ranked a regression as a win. byte_match is not run locally, so
+Union here is GED or type. Use `n/a` for changes that cannot change output.
 -->
 
 ```text
-config:            <sample-set gate | full-dataset config name | n/a>
-GED perfect:       <before> -> <after>
-GED total distance: <before> -> <after>
-Types perfect:     <before> -> <after>
-rows changed:      <count, and whether output text changed or only the score>
+sample-set gate:    GED perfect <before> -> <after>, total distance <before> -> <after>
+
+full-dataset sweep, per config (<config>):
+  GED perfect:        <before> -> <after>
+  GED total distance: <before> -> <after>
+  Types perfect/mean: <before> -> <after>
+  Union (GED, type):  <before> -> <after>
+  failures:           <before> -> <after>
+  sweep.py diff:      <functions whose output changed>
 ```
 
 ## Telemetry and Reporting
