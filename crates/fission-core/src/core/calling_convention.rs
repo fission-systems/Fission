@@ -35,7 +35,7 @@ impl CallingConvention {
     /// independent of any per-function cspec/prototype data. Mirrors the
     /// per-architecture offsets `stack_slots.rs`'s `resolve_stack_address_inner`
     /// already hardcodes for its `StackBase::Rsp` case -- kept in one place
-    /// so a second consumer (`scalar_ssa.rs`'s `resolve_pointer_value`, whose
+    /// so a second consumer (the builder's `PointerResolver`, whose
     /// stack-pointer recognition was previously gated behind
     /// `cspec_stack_pointer_offset`, only populated when prototype/cspec data
     /// exists -- i.e. almost never for a stripped binary) doesn't need to

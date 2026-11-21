@@ -7,9 +7,7 @@
 //! COPY/CAST congruence.
 
 use super::dynamic_guards;
-use super::dynamic_guards::{
-    PointerRange, resolve_constant_input, resolve_pointer_input, resolve_pointer_value,
-};
+use super::dynamic_guards::{PointerRange, PointerResolver};
 use super::*;
 use crate::midend::cspec::RegisterNamer;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -833,7 +831,7 @@ impl MemoryLayout {
                 .copied()
                 .collect::<Vec<_>>(),
             // Unresolved region (not "resolved to Ram", genuinely unresolved
-            // -- `resolve_pointer_value` only ever returns `Some(Stack)` for
+            // -- the pointer resolver only ever returns `Some(Stack)` for
             // a chain provably rooted at the stack pointer): exclude Stack
             // partitions. A pointer whose def-use chain provably does not
             // trace back to the stack pointer cannot write to a stack local
@@ -905,6 +903,7 @@ fn compute_escaping_stack_storages(
     layout: &MemoryLayout,
 ) -> BTreeSet<SsaMemoryStorageKey> {
     let mut escaping = BTreeSet::new();
+    let mut pointers = PointerResolver::new(pcode, ssa, options);
     for (block_idx, block) in pcode.blocks.iter().enumerate() {
         for (op_idx, op) in block.ops.iter().enumerate() {
             let site = SsaOpSite {
@@ -914,27 +913,15 @@ fn compute_escaping_stack_storages(
             match op.opcode {
                 PcodeOpcode::Store if op.inputs.len() >= 2 => {
                     let value_index = op.inputs.len() - 1;
-                    mark_escaping_input(
-                        pcode,
-                        ssa,
-                        options,
-                        layout,
-                        site,
-                        value_index,
-                        &mut escaping,
-                    );
+                    if let Some(range) = pointers.input(site, value_index) {
+                        mark_escaping_range(layout, &range, &mut escaping);
+                    }
                 }
                 PcodeOpcode::Return => {
                     for input_index in 0..op.inputs.len() {
-                        mark_escaping_input(
-                            pcode,
-                            ssa,
-                            options,
-                            layout,
-                            site,
-                            input_index,
-                            &mut escaping,
-                        );
+                        if let Some(range) = pointers.input(site, input_index) {
+                            mark_escaping_range(layout, &range, &mut escaping);
+                        }
                     }
                 }
                 _ => {}
@@ -951,30 +938,11 @@ fn compute_escaping_stack_storages(
         {
             continue;
         }
-        let mut visiting = BTreeSet::new();
-        if let Some(range) = resolve_pointer_value(pcode, ssa, options, value.id, &mut visiting, 64)
-        {
+        if let Some(range) = pointers.value(value.id) {
             mark_escaping_range(layout, &range, &mut escaping);
         }
     }
     escaping
-}
-
-fn mark_escaping_input(
-    pcode: &PcodeFunction,
-    ssa: &NirScalarSsa,
-    options: &MlilPreviewOptions,
-    layout: &MemoryLayout,
-    site: SsaOpSite,
-    input_index: usize,
-    escaping: &mut BTreeSet<SsaMemoryStorageKey>,
-) {
-    let mut visiting = BTreeSet::new();
-    if let Some(range) =
-        resolve_pointer_input(pcode, ssa, options, site, input_index, &mut visiting, 64)
-    {
-        mark_escaping_range(layout, &range, escaping);
-    }
 }
 
 fn mark_escaping_range(
@@ -2358,6 +2326,7 @@ fn value_dominates_block_end(
 
 #[cfg(test)]
 mod tests {
+    use super::super::dynamic_guards::resolve_constant_input;
     use super::*;
     use crate::pcode::PcodeBasicBlock;
 
