@@ -296,7 +296,9 @@ impl<'a> DwarfAnalyzer<'a> {
     ) -> Result<Option<u64>, gimli::Error> {
         match entry.attr_value(attr_name)? {
             Some(AttributeValue::Addr(address)) => Ok(Some(address)),
-            Some(AttributeValue::DebugAddrIndex(index)) => Ok(Some(dwarf.address(unit, index)?)),
+            // A missing address table entry leaves this DIE's address unknown.
+            // The DIE and the other compilation units can still be read.
+            Some(AttributeValue::DebugAddrIndex(index)) => Ok(dwarf.address(unit, index).ok()),
             _ => Ok(None),
         }
     }
@@ -619,6 +621,27 @@ mod dwarf5_string_offsets_tests {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_dwarf5_strx.elf");
         LoadedBinary::from_file(&path).expect("load DWARF 5 fixture")
+    }
+
+    #[test]
+    fn unavailable_dwarf5_address_keeps_other_functions() {
+        let mut binary = fixture();
+        let address_section = binary
+            .inner_mut()
+            .sections
+            .iter_mut()
+            .find(|section| section.name == ".debug_addr")
+            .unwrap();
+        // Expose the header and the first indexed address to the analyzer.
+        address_section.file_size = 16;
+
+        let functions = DwarfAnalyzer::new(&binary).analyze_functions();
+        assert!(
+            functions
+                .iter()
+                .any(|function| function.name == "manhattan")
+        );
+        assert!(!functions.iter().any(|function| function.name == "entry"));
     }
 
     /// `testdata/dwarf5_strx.c` built with `-gdwarf-5`: every name is a
