@@ -68,9 +68,12 @@ impl DecompileResult {
     }
 
     pub fn to_protocol_response(&self) -> fission_analysis_protocol::DecompileResponse {
-        let fell_back = self.code.is_none();
+        let fell_back = self.code.is_none() || self.routing.fell_back;
         let reason = if fell_back {
-            Some("decompilation produced no output".to_string())
+            self.routing
+                .fallback_reason
+                .clone()
+                .or_else(|| Some("decompilation produced no output".to_string()))
         } else {
             None
         };
@@ -132,4 +135,28 @@ pub fn decompile_prebuilt_pcode(
     };
 
     Ok(DecompileResult::from_selection(selection))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DecompileResult;
+    use crate::types::NirRoutingResolver;
+
+    #[test]
+    fn to_protocol_response_honors_routing_fallback_when_code_is_present() {
+        let selection = NirRoutingResolver::nir_success(
+            "int rescued(void) { return 0; }".to_string(),
+            None,
+            None,
+            true,
+            Some("legacy_fallback: rescued after NIR error".to_string()),
+        );
+        let result = DecompileResult::from_selection(selection);
+        let response = result.to_protocol_response();
+        assert!(response.fell_back);
+        assert_eq!(
+            response.reason.as_deref(),
+            Some("legacy_fallback: rescued after NIR error")
+        );
+    }
 }

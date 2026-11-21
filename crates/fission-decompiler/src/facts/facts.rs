@@ -104,14 +104,45 @@ fn get_go_function_hints(name: &str, binary: &LoadedBinary) -> Option<NirFunctio
 ///
 /// Keyed by the binary's Blake3 hash, so two different binaries in one process
 /// do not share an entry and the same binary re-decompiled reuses one.
-static BINARY_SCOPED_RULES: LazyLock<Mutex<HashMap<String, Arc<Vec<NirCallParamRule>>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+const BINARY_SCOPED_RULES_CACHE_CAPACITY: usize = 256;
+
+static BINARY_SCOPED_RULES: LazyLock<
+    Mutex<lru::LruCache<(String, bool, u128), Arc<Vec<NirCallParamRule>>>>,
+> = LazyLock::new(|| {
+    Mutex::new(lru::LruCache::new(
+        std::num::NonZeroUsize::new(BINARY_SCOPED_RULES_CACHE_CAPACITY).expect("non-zero capacity"),
+    ))
+});
+
+fn target_refs_fingerprint(all_target_refs: &HashMap<u64, CallTargetRef>) -> u128 {
+    use std::hash::{Hash, Hasher};
+    let mut lo = 0u64;
+    let mut hi = 0u64;
+    for (&address, target_ref) in all_target_refs {
+        let mut h1 = std::collections::hash_map::DefaultHasher::new();
+        address.hash(&mut h1);
+        target_ref.symbol.hash(&mut h1);
+        let v1 = h1.finish();
+        let mut h2 = std::collections::hash_map::DefaultHasher::new();
+        0x9e37_79b9_7f4a_7c15u64.hash(&mut h2);
+        target_ref.symbol.hash(&mut h2);
+        address.hash(&mut h2);
+        let v2 = h2.finish();
+        lo = lo.wrapping_add(v1 ^ v1.rotate_left(17));
+        hi = hi.wrapping_add(v2 ^ v2.rotate_left(29));
+    }
+    (u128::from(hi) << 64) | u128::from(lo)
+}
 
 fn call_param_rules_for_binary(
     binary: &LoadedBinary,
     all_target_refs: &HashMap<u64, CallTargetRef>,
 ) -> Arc<Vec<NirCallParamRule>> {
-    let key = binary.hash.clone();
+    let key = (
+        binary.hash.clone(),
+        binary.is_64bit,
+        target_refs_fingerprint(all_target_refs),
+    );
     // The lock is held across the build on purpose. Releasing it to compute and
     // re-taking it to store lets every thread that arrives first miss: on an
     // 79-function `--all` run, 14 workers each built the same 716 rules,
@@ -121,13 +152,21 @@ fn call_param_rules_for_binary(
         Ok(cache) => cache,
         // A poisoned lock means another thread panicked mid-build. Fall back to
         // computing rather than propagating the panic.
-        Err(_) => return Arc::new(build_nir_call_param_rules(all_target_refs)),
+        Err(_) => {
+            return Arc::new(build_nir_call_param_rules_for_bitness(
+                all_target_refs,
+                binary.is_64bit,
+            ));
+        }
     };
     if let Some(hit) = cache.get(&key) {
         return Arc::clone(hit);
     }
-    let rules = Arc::new(build_nir_call_param_rules(all_target_refs));
-    cache.insert(key, Arc::clone(&rules));
+    let rules = Arc::new(build_nir_call_param_rules_for_bitness(
+        all_target_refs,
+        binary.is_64bit,
+    ));
+    cache.put(key, Arc::clone(&rules));
     rules
 }
 
@@ -344,12 +383,13 @@ fn build_nir_call_prototype_summaries(
         let Some(function) = binary.function_at_exact(*address) else {
             continue;
         };
-        if function.name.is_empty() {
+        let sanitized_name = sanitize_nir_symbol_name(&function.name);
+        if sanitized_name.is_empty() {
             continue;
         }
         let arity = signature.param_types.len();
         summaries.insert(
-            function.name.clone(),
+            sanitized_name,
             NirCallPrototypeSummary {
                 min_arity: arity,
                 max_arity: arity,
@@ -372,7 +412,8 @@ fn build_nir_call_prototype_summaries(
     }
 
     for (&address, debug) in binary.dwarf_functions.iter() {
-        if debug.name.is_empty() {
+        let sanitized_name = sanitize_nir_symbol_name(&debug.name);
+        if sanitized_name.is_empty() {
             continue;
         }
         // Debug info spells "returns nothing" as an absent `DW_AT_type`, which
@@ -394,25 +435,24 @@ fn build_nir_call_prototype_summaries(
         // call-site arity observations and inferred register slots.
         let variadic_fixed_arity =
             (debug.variadic && !binary.user_signatures.contains_key(&address)).then_some(arity);
-        let summary =
-            summaries
-                .entry(debug.name.clone())
-                .or_insert_with(|| NirCallPrototypeSummary {
-                    min_arity: arity,
-                    max_arity: arity,
-                    locked_exact_arity: variadic_fixed_arity.is_none().then_some(arity),
-                    variadic_fixed_arity,
-                    param_pointer_pointees: vec![None; arity],
-                    param_surface_type_names: debug
-                        .params
-                        .iter()
-                        .map(|param| {
-                            let type_name = param.type_name.trim();
-                            (!type_name.is_empty()).then(|| type_name.to_string())
-                        })
-                        .collect(),
-                    returns_void,
-                });
+        let summary = summaries
+            .entry(sanitized_name)
+            .or_insert_with(|| NirCallPrototypeSummary {
+                min_arity: arity,
+                max_arity: arity,
+                locked_exact_arity: variadic_fixed_arity.is_none().then_some(arity),
+                variadic_fixed_arity,
+                param_pointer_pointees: vec![None; arity],
+                param_surface_type_names: debug
+                    .params
+                    .iter()
+                    .map(|param| {
+                        let type_name = param.type_name.trim();
+                        (!type_name.is_empty()).then(|| type_name.to_string())
+                    })
+                    .collect(),
+                returns_void,
+            });
         if let Some(fixed_arity) = variadic_fixed_arity {
             summary.min_arity = fixed_arity;
             summary.max_arity = summary.max_arity.max(fixed_arity);
@@ -952,6 +992,20 @@ fn collect_raw_call_arities(stmts: &[fission_pcode::PreHirStmt], out: &mut HashM
 /// for the self-referential "rebuild the function I'm currently building"
 /// round trip (see `render.rs`'s 3-round loop), not for recording facts
 /// about a *different* function.
+fn unique_call_target_addrs_by_name(call_targets: &HashMap<u64, String>) -> HashMap<&str, u64> {
+    let mut name_counts: HashMap<&str, usize> = HashMap::new();
+    for name in call_targets.values() {
+        *name_counts.entry(name.as_str()).or_default() += 1;
+    }
+    let mut name_to_addr: HashMap<&str, u64> = HashMap::new();
+    for (addr, name) in call_targets {
+        if name_counts.get(name.as_str()).copied() == Some(1) {
+            name_to_addr.insert(name.as_str(), *addr);
+        }
+    }
+    name_to_addr
+}
+
 pub(crate) fn record_interprocedural_arity_facts(
     fact_store: &mut FactStore,
     type_context: &NirTypeContext,
@@ -965,16 +1019,7 @@ pub(crate) fn record_interprocedural_arity_facts(
     }
     // Bounded by this one function's own direct call targets, not the
     // whole binary's call_target index.
-    let mut name_counts: HashMap<&str, usize> = HashMap::new();
-    for name in type_context.call_targets.values() {
-        *name_counts.entry(name.as_str()).or_default() += 1;
-    }
-    let mut name_to_addr: HashMap<&str, u64> = HashMap::new();
-    for (addr, name) in &type_context.call_targets {
-        if name_counts.get(name.as_str()).copied() == Some(1) {
-            name_to_addr.insert(name.as_str(), *addr);
-        }
-    }
+    let name_to_addr = unique_call_target_addrs_by_name(&type_context.call_targets);
 
     let resolve_callee_addr = |callee_name: &str| -> Option<u64> {
         if let Some(&addr) = name_to_addr.get(callee_name) {
@@ -1067,17 +1112,7 @@ pub fn seed_whole_program_call_arity_facts(binary: &LoadedBinary, fact_store: &m
     let mut options = crate::seed_nir_render_options(binary);
     apply_spec_overrides(binary, &mut options);
 
-    let mut binary_name_counts: HashMap<&str, usize> = HashMap::new();
-    for f in &binary.functions {
-        *binary_name_counts.entry(f.name.as_str()).or_default() += 1;
-    }
-
-    let mut name_to_addr: HashMap<&str, u64> = HashMap::new();
-    for (addr, name) in &type_context.call_targets {
-        if binary_name_counts.get(name.as_str()).copied() == Some(1) {
-            name_to_addr.insert(name.as_str(), *addr);
-        }
-    }
+    let name_to_addr = unique_call_target_addrs_by_name(&type_context.call_targets);
 
     let resolve_callee_addr = |callee_name: &str| -> Option<u64> {
         if let Some(&addr) = name_to_addr.get(callee_name) {
@@ -1869,6 +1904,16 @@ fn summarize_modified_argument_register_slots(
         .iter()
         .flat_map(|block| block.ops.iter().map(|op| op.address))
         .collect::<HashSet<_>>();
+    let mut instruction_op_seqs = HashSet::new();
+    let mut op_seq_to_block = HashMap::new();
+    for block in &pcode.blocks {
+        for op in &block.ops {
+            instruction_op_seqs.insert((op.address, op.seq_num));
+            op_seq_to_block
+                .entry((op.address, op.seq_num))
+                .or_insert(block.index);
+        }
+    }
     let mut written_slots = BTreeSet::new();
     let mut saw_return = false;
 
@@ -1907,15 +1952,47 @@ fn summarize_modified_argument_register_slots(
                 return None;
             }
             if op.opcode.is_branch() {
-                let target = op.inputs.first()?.offset;
-                if !instruction_addresses.contains(&target) {
-                    return None;
-                }
-                if op_index == last_op_index
-                    && let Some(&target_index) = block_indices.get(&target)
-                    && !block.successors.contains(&target_index)
-                {
-                    return None;
+                let target_vn = op.inputs.first()?;
+                if target_vn.is_constant && target_vn.space_id == 0 {
+                    let raw = if target_vn.offset != 0 {
+                        target_vn.offset as u32
+                    } else {
+                        target_vn.constant_val as u32
+                    };
+                    let delta = i32::from_le_bytes(raw.to_le_bytes());
+                    let target_seq = if delta > 0 {
+                        op.seq_num.checked_add(delta as u32)
+                    } else if delta < 0 {
+                        op.seq_num.checked_sub(delta.unsigned_abs())
+                    } else {
+                        None
+                    }?;
+                    let within_same_block_forward = delta > 0
+                        && block.ops[op_index + 1..]
+                            .iter()
+                            .any(|later| later.seq_num == target_seq);
+                    let at_instruction = instruction_op_seqs.contains(&(op.address, target_seq));
+                    if !at_instruction && !within_same_block_forward {
+                        return None;
+                    }
+                    if op_index == last_op_index
+                        && let Some(&target_index) = op_seq_to_block.get(&(op.address, target_seq))
+                        && target_index != block.index
+                        && !block.successors.contains(&target_index)
+                    {
+                        return None;
+                    }
+                } else {
+                    let target = target_vn.offset;
+                    if !instruction_addresses.contains(&target) {
+                        return None;
+                    }
+                    if op_index == last_op_index
+                        && let Some(&target_index) = block_indices.get(&target)
+                        && !block.successors.contains(&target_index)
+                    {
+                        return None;
+                    }
                 }
             }
             let Some(output) = op.output.as_ref() else {
@@ -2441,6 +2518,10 @@ pub(crate) fn sanitize_nir_symbol_name(name: &str) -> String {
 /// targets. Exported by `bin/export_call_param_rules` so the runtime can load
 /// ~716 rules instead of walking 151,408 signatures to rediscover them.
 pub fn name_keyed_call_param_rules() -> Vec<NirCallParamRule> {
+    name_keyed_call_param_rules_for_bitness(true)
+}
+
+pub fn name_keyed_call_param_rules_for_bitness(is_64bit: bool) -> Vec<NirCallParamRule> {
     let mut rules = Vec::new();
     let Ok(structures) = WindowsStructures::try_new() else {
         return rules;
@@ -2448,6 +2529,7 @@ pub fn name_keyed_call_param_rules() -> Vec<NirCallParamRule> {
     let Ok(signatures) = SIGNATURE_RESOURCES.api_signatures() else {
         return rules;
     };
+    let pointer_size = if is_64bit { 8 } else { 4 };
     for sig in signatures {
         for (arg_index, param) in sig.params.iter().enumerate() {
             let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
@@ -2456,7 +2538,12 @@ pub fn name_keyed_call_param_rules() -> Vec<NirCallParamRule> {
             let Some(struct_def) = structures.get(&struct_name) else {
                 continue;
             };
-            if struct_def.size_64 == 0 {
+            let struct_size = if is_64bit {
+                struct_def.size_64
+            } else {
+                struct_def.size_32
+            };
+            if struct_size == 0 {
                 continue;
             }
             rules.push(NirCallParamRule {
@@ -2465,8 +2552,8 @@ pub fn name_keyed_call_param_rules() -> Vec<NirCallParamRule> {
                 arg_index,
                 pointer_alias: param.type_name.clone(),
                 pointee_alias: struct_name,
-                pointer_size: 8,
-                pointee_sizes: vec![struct_def.size_64 as u32],
+                pointer_size,
+                pointee_sizes: vec![struct_size as u32],
             });
         }
     }
@@ -2490,13 +2577,27 @@ static PRECOMPUTED_RULES: LazyLock<Option<Vec<NirCallParamRule>>> = LazyLock::ne
     serde_json::from_str(&text).ok()
 });
 
+static PRECOMPUTED_RULES_32: LazyLock<Vec<NirCallParamRule>> =
+    LazyLock::new(|| name_keyed_call_param_rules_for_bitness(false));
+
+#[cfg(test)]
 fn build_nir_call_param_rules(
     call_target_refs: &HashMap<u64, CallTargetRef>,
 ) -> Vec<NirCallParamRule> {
+    build_nir_call_param_rules_for_bitness(call_target_refs, true)
+}
+
+fn build_nir_call_param_rules_for_bitness(
+    call_target_refs: &HashMap<u64, CallTargetRef>,
+    is_64bit: bool,
+) -> Vec<NirCallParamRule> {
+    if !is_64bit {
+        return attach_addresses(&PRECOMPUTED_RULES_32, call_target_refs);
+    }
     if let Some(precomputed) = PRECOMPUTED_RULES.as_ref() {
         return attach_addresses(precomputed, call_target_refs);
     }
-    build_nir_call_param_rules_from_signatures(call_target_refs)
+    build_nir_call_param_rules_from_signatures(call_target_refs, is_64bit)
 }
 
 /// Expand name-keyed rules into per-address ones for this binary.
@@ -2534,64 +2635,12 @@ fn attach_addresses(
 
 fn build_nir_call_param_rules_from_signatures(
     call_target_refs: &HashMap<u64, CallTargetRef>,
+    is_64bit: bool,
 ) -> Vec<NirCallParamRule> {
-    let mut call_param_rules = Vec::new();
-    let Ok(structures) = WindowsStructures::try_new() else {
-        return call_param_rules;
-    };
-    let target_addresses_by_name = call_target_refs.iter().fold(
-        HashMap::<String, Vec<u64>>::new(),
-        |mut acc, (addr, target_ref)| {
-            acc.entry(target_ref.symbol.clone())
-                .or_default()
-                .push(*addr);
-            acc
-        },
-    );
-    let Ok(signatures) = SIGNATURE_RESOURCES.api_signatures() else {
-        return call_param_rules;
-    };
-    for sig in signatures {
-        for (arg_index, param) in sig.params.iter().enumerate() {
-            let Some(struct_name) = resolve_nir_struct_name(&param.type_name, &structures) else {
-                continue;
-            };
-            let Some(struct_def) = structures.get(&struct_name) else {
-                continue;
-            };
-            if struct_def.size_64 == 0 {
-                continue;
-            }
-            let addresses = target_addresses_by_name
-                .get(&sig.name)
-                .cloned()
-                .unwrap_or_default();
-            if addresses.is_empty() {
-                call_param_rules.push(NirCallParamRule {
-                    callee_address: None,
-                    callee_name: sig.name.clone(),
-                    arg_index,
-                    pointer_alias: param.type_name.clone(),
-                    pointee_alias: struct_name.clone(),
-                    pointer_size: 8,
-                    pointee_sizes: vec![struct_def.size_64 as u32],
-                });
-            } else {
-                for address in addresses {
-                    call_param_rules.push(NirCallParamRule {
-                        callee_address: Some(address),
-                        callee_name: sig.name.clone(),
-                        arg_index,
-                        pointer_alias: param.type_name.clone(),
-                        pointee_alias: struct_name.clone(),
-                        pointer_size: 8,
-                        pointee_sizes: vec![struct_def.size_64 as u32],
-                    });
-                }
-            }
-        }
-    }
-    call_param_rules
+    attach_addresses(
+        &name_keyed_call_param_rules_for_bitness(is_64bit),
+        call_target_refs,
+    )
 }
 
 fn resolve_nir_struct_name(type_name: &str, structures: &WindowsStructures) -> Option<String> {
@@ -3651,5 +3700,216 @@ mod tests {
             .structuring_hints(0x2000)
             .expect("hints for unique_fn");
         assert_eq!(hints.param_names.len(), 1);
+    }
+
+    #[test]
+    fn binary_scoped_rules_cache_distinguishes_fact_store_updates_and_bitness() {
+        let build_bin = |is_64bit: bool| {
+            LoadedBinaryBuilder::new("same_hash.exe".to_string(), DataBuffer::Heap(vec![0u8; 64]))
+                .format("PE")
+                .is_64bit(is_64bit)
+                .build()
+                .expect("build test PE")
+        };
+
+        let mut bin64 = build_bin(true);
+        bin64.hash = "shared_cache_test_hash".to_string();
+        let ctx_empty = super::build_nir_type_context(&bin64, &FactStore::default(), 0x1000);
+        assert!(!ctx_empty.call_param_rules.iter().any(|r| {
+            r.callee_address == Some(0x2000) && r.callee_name == "AccessCheckAndAuditAlarmA"
+        }));
+
+        let mut facts = FactStore::default();
+        facts.ingest_name_fact(
+            0x2000,
+            "AccessCheckAndAuditAlarmA".to_string(),
+            fission_static::analysis::decomp::facts::FactProvenance::StrongFid,
+        );
+        let ctx_enriched = super::build_nir_type_context(&bin64, &facts, 0x1000);
+        assert!(
+            ctx_enriched.call_param_rules.iter().any(|r| {
+                r.callee_address == Some(0x2000)
+                    && r.callee_name == "AccessCheckAndAuditAlarmA"
+                    && r.pointer_size == 8
+            }),
+            "expected enriched FactStore to invalidate cached rules for same binary.hash"
+        );
+
+        let mut bin32 = build_bin(false);
+        bin32.hash = "shared_cache_test_hash".to_string();
+        let ctx32 = super::build_nir_type_context(&bin32, &facts, 0x1000);
+        assert!(
+            ctx32.call_param_rules.iter().any(|r| {
+                r.callee_address == Some(0x2000)
+                    && r.callee_name == "AccessCheckAndAuditAlarmA"
+                    && r.pointer_size == 4
+            }),
+            "expected 32-bit binary with matching hash to receive pointer_size=4 rules"
+        );
+    }
+
+    #[test]
+    fn unique_call_target_addrs_resolves_sanitized_and_skips_duplicates() {
+        let mut call_targets = HashMap::new();
+        call_targets.insert(0x1000, super::sanitize_nir_symbol_name("worker.isra.0"));
+        call_targets.insert(0x2000, "dup_sym".to_string());
+        call_targets.insert(0x3000, "dup_sym".to_string());
+
+        let map = super::unique_call_target_addrs_by_name(&call_targets);
+        assert_eq!(map.get("worker.isra.0").copied(), Some(0x1000));
+        assert!(!map.contains_key("dup_sym"));
+
+        let mut idx = super::CallTargetIndex::default();
+        idx.add(
+            0x4000,
+            "int __cdecl helper_x(int)",
+            super::CandidateClass::Direct,
+        );
+        let resolved = idx.finish();
+        assert_eq!(
+            resolved
+                .call_target_refs
+                .get(&0x4000)
+                .map(|r| r.symbol.as_str()),
+            Some("helper_x")
+        );
+    }
+
+    #[test]
+    fn name_keyed_call_param_rules_use_32bit_sizes_on_32bit_targets() {
+        let rules32 = super::name_keyed_call_param_rules_for_bitness(false);
+        let rules64 = super::name_keyed_call_param_rules_for_bitness(true);
+        assert!(!rules32.is_empty());
+        assert!(rules32.iter().all(|r| r.pointer_size == 4));
+        assert!(rules64.iter().all(|r| r.pointer_size == 8));
+        let differs = rules32.iter().any(|r32| {
+            rules64.iter().any(|r64| {
+                r32.callee_name == r64.callee_name
+                    && r32.arg_index == r64.arg_index
+                    && r32.pointee_sizes != r64.pointee_sizes
+            })
+        });
+        assert!(
+            differs,
+            "expected at least one Win32 call_param_rule struct size to differ between 32-bit and 64-bit"
+        );
+    }
+
+    #[test]
+    fn build_nir_call_prototype_summaries_sanitizes_user_and_dwarf_keys() {
+        let mut binary =
+            LoadedBinaryBuilder::new("proto.elf".to_string(), DataBuffer::Heap(vec![0u8; 0x3000]))
+                .format("ELF")
+                .is_64bit(true)
+                .add_section(fission_loader::loader::SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x1000,
+                    virtual_size: 0x2000,
+                    file_offset: 0,
+                    file_size: 0x2000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_function(fission_loader::loader::types::FunctionInfo {
+                    name: "int __cdecl user_sig_fn(int)".to_string(),
+                    address: 0x1000,
+                    size: 16,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build proto fixture");
+        binary.user_signatures.insert(
+            0x1000,
+            fission_loader::loader::types::UserSignature {
+                return_type: Some("void".to_string()),
+                param_types: vec!["int".to_string(), "const char *".to_string()],
+                ..Default::default()
+            },
+        );
+        let debug = DwarfFunctionInfo {
+            address: 0x2000,
+            name: "__imp_dwarf_helper".to_string(),
+            return_type: Some("void".to_string()),
+            params: vec![DwarfParamInfo {
+                name: "x".to_string(),
+                type_name: "int".to_string(),
+                location: DwarfLocation::Unknown,
+            }],
+            variadic: false,
+            local_vars: Vec::new(),
+            frame_base: DwarfFrameBase::Unknown,
+            size: 0,
+        };
+        binary.dwarf_functions = std::sync::Arc::new(HashMap::from([(0x2000, debug)]));
+
+        let summaries = super::build_nir_call_prototype_summaries(&HashMap::new(), &binary);
+        assert_eq!(summaries.get("user_sig_fn").map(|s| s.min_arity), Some(2));
+        assert_eq!(summaries.get("dwarf_helper").map(|s| s.min_arity), Some(1));
+    }
+
+    #[test]
+    fn summarize_modified_argument_register_slots_accepts_intra_instruction_relative_branch() {
+        let mut register_namer = register_namer_for_abi(CallingConvention::WindowsX64);
+        register_namer.int_param_offsets = vec![0x08];
+        let rel_cbranch = PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::CBranch,
+            address: 0x401000,
+            output: None,
+            inputs: vec![
+                Varnode {
+                    space_id: 0,
+                    offset: 2,
+                    size: 4,
+                    is_constant: true,
+                    constant_val: 2,
+                },
+                Varnode {
+                    space_id: 2,
+                    offset: 0x100,
+                    size: 1,
+                    is_constant: false,
+                    constant_val: 0,
+                },
+            ],
+            asm_mnemonic: Some("CMOVNZ".to_string()),
+        };
+        let rcx_write = PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Copy,
+            address: 0x401000,
+            output: Some(Varnode {
+                space_id: 1,
+                offset: 0x08,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            }),
+            inputs: Vec::new(),
+            asm_mnemonic: Some("CMOVNZ".to_string()),
+        };
+        let target_nop = PcodeOp {
+            seq_num: 2,
+            opcode: PcodeOpcode::Copy,
+            address: 0x401000,
+            output: None,
+            inputs: Vec::new(),
+            asm_mnemonic: Some("CMOVNZ".to_string()),
+        };
+        let ret = PcodeOp {
+            seq_num: 3,
+            opcode: PcodeOpcode::Return,
+            address: 0x401004,
+            output: None,
+            inputs: Vec::new(),
+            asm_mnemonic: None,
+        };
+        let pcode = test_pcode(vec![rel_cbranch, rcx_write, target_nop, ret]);
+        assert_eq!(
+            summarize_modified_argument_register_slots(&pcode, &register_namer, true),
+            Some(vec![0]),
+            "intra-instruction space-0 constant relative branch must not fail slot summary"
+        );
     }
 }
