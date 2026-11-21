@@ -518,6 +518,57 @@ fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
     }
 }
 
+#[test]
+fn dropping_an_active_worker_step_releases_the_target() {
+    use std::os::unix::process::ExitStatusExt;
+    use std::time::{Duration, Instant};
+
+    if !enabled() {
+        return;
+    }
+    let (target, report) = build_c_target("drop-worker-step", WORKER_THREAD_TARGET);
+    let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report);
+    debugger.set_sw_breakpoint(marker).unwrap();
+    debugger.continue_execution().unwrap();
+    assert!(matches!(
+        next_event(&mut debugger),
+        DebugEvent::BreakpointHit { thread_id, .. } if thread_id != pid
+    ));
+    debugger.single_step().unwrap();
+    assert!(matches!(
+        next_event(&mut debugger),
+        DebugEvent::SingleStep { .. }
+    ));
+
+    // This step has no breakpoint to lift, so single_step returns before
+    // collecting the stop and the debugger still owns the peer suspensions.
+    debugger.single_step().unwrap();
+    drop(debugger);
+
+    unsafe extern "C" {
+        fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
+        fn kill(pid: i32, signal: i32) -> i32;
+    }
+    let pid = i32::try_from(pid).unwrap();
+    let start = Instant::now();
+    loop {
+        let mut status = 0;
+        // SAFETY: waitpid receives our child's PID and an initialized status slot.
+        let waited = unsafe { waitpid(pid, &mut status, 1) }; // WNOHANG
+        if waited == pid {
+            assert_eq!(std::process::ExitStatus::from_raw(status).code(), Some(7));
+            return;
+        }
+        assert_eq!(waited, 0, "waitpid: {}", std::io::Error::last_os_error());
+        if start.elapsed() >= Duration::from_secs(5) {
+            // SAFETY: waitpid has confirmed this child is still ours.
+            unsafe { kill(pid, 9) }; // SIGKILL
+            panic!("target was still running with a peer held after dropping the debugger");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
 /// `load` is one instruction that reads through its argument. Called first
 /// with a null pointer it faults; the handler jumps back and it is called
 /// again with a valid one.

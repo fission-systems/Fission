@@ -633,9 +633,23 @@ impl Drop for MacOSDebugger {
     fn drop(&mut self) {
         // A traced child that is simply abandoned stays stopped for ever.
         if let Some(pid) = self.target_pid {
+            // PT_DETACH requires a ptrace stop. An asynchronous step may
+            // still be on its way to one when the backend is dropped.
+            if self.step_in_flight.is_some()
+                && matches!(
+                    self.wait_blocking(Duration::from_secs(1)),
+                    Ok(WaitOutcome::Exited(_) | WaitOutcome::Signaled(_))
+                )
+            {
+                self.mark_gone(DebugStatus::Terminated);
+                return;
+            }
             for address in self.inserted.keys().copied().collect::<Vec<_>>() {
                 let _ = self.write_original(address);
             }
+            // Release the Mach suspensions while the thread ports still
+            // refer to the threads that were held for this step.
+            self.finish_step();
             let _ = mach::ptrace_request(mach::PT_DETACH, pid, 1, 0);
         }
         self.release_ports();
