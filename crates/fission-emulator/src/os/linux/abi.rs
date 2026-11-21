@@ -29,8 +29,7 @@ pub struct TargetStat {
 /// scrambles what the guest reads and writes past the end of its buffer.
 /// Every guest used to get x86-64's 144 bytes.
 ///
-/// Offsets below are from the kernel's UAPI headers (`asm/stat.h` for each
-/// target), not from memory of them.
+/// Offsets are from the target's kernel UAPI or glibc `bits/struct_stat.h`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatLayout {
     /// x86-64 `struct stat`: 144 bytes, `st_nlink` (64-bit) before `st_mode`.
@@ -46,6 +45,14 @@ pub enum StatLayout {
     /// The original 32-bit `struct stat` of i386 and ARM (`stat`, `lstat`,
     /// `fstat` without the `64`): 64 bytes, 16-bit mode and link count.
     Old32,
+    /// glibc i386 and ARM EABI non-LFS `struct stat`, with 32-bit time.
+    Glibc32,
+}
+
+pub(super) enum LibcStatCall {
+    Stat { glibc: bool },
+    Xstat { version: u64 },
+    Xstat64,
 }
 
 impl StatLayout {
@@ -75,11 +82,22 @@ impl StatLayout {
         }
     }
 
-    /// The layout of libc's own `struct stat` -- what a guest calling the
-    /// `stat` *function* passes. On 32-bit targets that is the large-file
-    /// structure (musl has no other, and glibc's `__xstat64` is the same).
-    pub fn for_libc(arch: &crate::arch::ArchInfo) -> Self {
-        Self::for_syscall(arch, 0)
+    pub(super) fn for_libc(arch: &crate::arch::ArchInfo, call: LibcStatCall) -> Option<Self> {
+        if arch.pointer_size != 4 {
+            return Some(Self::for_syscall(arch, 0));
+        }
+        if !arch.name.starts_with("x86:LE:32:") && !arch.name.starts_with("ARM:LE:32:") {
+            return None;
+        }
+        match call {
+            LibcStatCall::Stat { glibc: true } | LibcStatCall::Xstat { version: 3 } => {
+                Some(Self::Glibc32)
+            }
+            LibcStatCall::Xstat { version: 1 } => Some(Self::Old32),
+            LibcStatCall::Xstat64 => Some(Self::for_syscall(arch, 0)),
+            // Bare stat can use a different libc or time_t ABI.
+            _ => None,
+        }
     }
 
     pub fn size(self) -> usize {
@@ -89,6 +107,7 @@ impl StatLayout {
             Self::I386Stat64 => 96,
             Self::ArmStat64 => 104,
             Self::Old32 => 64,
+            Self::Glibc32 => 88,
         }
     }
 }
@@ -189,6 +208,24 @@ impl TargetStat {
                 put(48, 4, self.st_ctime);
                 put(52, 4, self.st_ctime_nsec);
             }
+            StatLayout::Glibc32 => {
+                put(0, 8, self.st_dev);
+                put(12, 4, self.st_ino);
+                put(16, 4, mode);
+                put(20, 4, self.st_nlink);
+                put(24, 4, uid);
+                put(28, 4, gid);
+                put(32, 8, self.st_rdev);
+                put(44, 4, size);
+                put(48, 4, blksize);
+                put(52, 4, blocks);
+                put(56, 4, self.st_atime);
+                put(60, 4, self.st_atime_nsec);
+                put(64, 4, self.st_mtime);
+                put(68, 4, self.st_mtime_nsec);
+                put(72, 4, self.st_ctime);
+                put(76, 4, self.st_ctime_nsec);
+            }
         }
         buf
     }
@@ -261,6 +298,7 @@ mod tests {
             (StatLayout::I386Stat64,  96, (16, 4), (20, 4), (44, 8), (56, 8), (72, 4)),
             (StatLayout::ArmStat64,  104, (16, 4), (20, 4), (48, 8), (64, 8), (80, 4)),
             (StatLayout::Old32,       64, ( 8, 2), (10, 2), (20, 4), (28, 4), (40, 4)),
+            (StatLayout::Glibc32,     88, (16, 4), (20, 4), (44, 4), (52, 4), (64, 4)),
         ];
         let stat = sample();
         for (layout, size, mode, nlink, st_size, blocks, mtime) in table {
@@ -309,7 +347,31 @@ mod tests {
         assert_eq!(StatLayout::for_syscall(&arm, 197), StatLayout::ArmStat64);
         assert_eq!(StatLayout::for_syscall(&arm, 327), StatLayout::ArmStat64);
         assert_eq!(StatLayout::for_syscall(&arm, 108), StatLayout::Old32);
-        assert_eq!(StatLayout::for_libc(&x86), StatLayout::I386Stat64);
-        assert_eq!(StatLayout::for_libc(&a64), StatLayout::Generic64);
+        for (arch, lfs) in [(x86, StatLayout::I386Stat64), (arm, StatLayout::ArmStat64)] {
+            assert_eq!(
+                StatLayout::for_libc(&arch, LibcStatCall::Xstat64),
+                Some(lfs)
+            );
+            assert_eq!(
+                StatLayout::for_libc(&arch, LibcStatCall::Xstat { version: 1 }),
+                Some(StatLayout::Old32)
+            );
+            assert_eq!(
+                StatLayout::for_libc(&arch, LibcStatCall::Xstat { version: 3 }),
+                Some(StatLayout::Glibc32)
+            );
+            assert_eq!(
+                StatLayout::for_libc(&arch, LibcStatCall::Stat { glibc: true }),
+                Some(StatLayout::Glibc32)
+            );
+            assert_eq!(
+                StatLayout::for_libc(&arch, LibcStatCall::Stat { glibc: false }),
+                None
+            );
+        }
+        assert_eq!(
+            StatLayout::for_libc(&a64, LibcStatCall::Stat { glibc: false }),
+            Some(StatLayout::Generic64)
+        );
     }
 }

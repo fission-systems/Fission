@@ -78,6 +78,40 @@ fn auxv(emu: &mut Emulator, key: u64) -> Option<u64> {
     })
 }
 
+#[test]
+fn glibc_i386_stat_calls_write_their_declared_layouts() {
+    let mut emu = guest("linux_x86_32_abi.elf");
+    let env = LinuxEnv::new();
+    let sp = emu.read_register_u64("ESP").unwrap() - 0x40;
+    emu.write_register_u64("ESP", sp).unwrap();
+    let ram = emu.state.ram_space();
+    let path = emu.heap_alloc(32).unwrap();
+    let output = emu.heap_alloc(128).unwrap();
+    emu.state.write_space(ram, path, b"/sample\0").unwrap();
+    emu.vfs.seed_path("/sample", b"hello".to_vec());
+    emu.binary
+        .inner_mut()
+        .symbol_version_names
+        .insert("stat".into(), "GLIBC_2.33".into());
+
+    for (symbol, args, len, size_offset) in [
+        ("stat", vec![path, output], 88, 44),
+        ("__xstat", vec![3, path, output], 88, 44),
+        ("__xstat64", vec![3, path, output], 96, 44),
+    ] {
+        emu.state.write_space(ram, output, &[0xaa; 128]).unwrap();
+        emu.set_call_frame(&args, 0).unwrap();
+        env.simos.procedures[symbol].run(&mut emu).unwrap();
+        assert_eq!(emu.read_register_u64("EAX").unwrap(), 0, "{symbol}");
+        assert_eq!(read_u32(&mut emu, output + size_offset), 5, "{symbol}");
+        assert_eq!(
+            emu.state.read_space(ram, output + len, 4).unwrap(),
+            [0xaa; 4],
+            "{symbol}",
+        );
+    }
+}
+
 /// An i386 guest's `writev` reads 8-byte `struct iovec`s and its `fstat64`
 /// fills a 96-byte `struct stat64`.
 ///

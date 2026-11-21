@@ -59,10 +59,10 @@ impl LinuxEnv {
         simos.register_procedure("printf", Box::new(libc::Printf));
         simos.register_procedure("snprintf", Box::new(libc::Snprintf));
         simos.register_procedure("__snprintf_chk", Box::new(libc::Snprintf));
-        simos.register_procedure("stat", Box::new(libc::Stat { path_arg: 0 }));
+        simos.register_procedure("stat", Box::new(libc::Stat::Plain));
         // glibc: __xstat(ver, path, buf).
-        simos.register_procedure("__xstat", Box::new(libc::Stat { path_arg: 1 }));
-        simos.register_procedure("__xstat64", Box::new(libc::Stat { path_arg: 1 }));
+        simos.register_procedure("__xstat", Box::new(libc::Stat::Versioned));
+        simos.register_procedure("__xstat64", Box::new(libc::Stat::Versioned64));
         simos.register_procedure("read", Box::new(libc::Read));
         simos.register_procedure("getline", Box::new(libc::Getline));
         simos.register_procedure("write", Box::new(libc::Write));

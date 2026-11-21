@@ -257,15 +257,38 @@ impl SimProcedure for Snprintf {
 /// leading version argument. One handler served both as `(path, buf)`, so
 /// for `__xstat` the version was read as the path and **the structure was
 /// written over the path string**.
-pub struct Stat {
-    /// Index of the `path` argument; the buffer follows it.
-    pub path_arg: usize,
+pub(super) enum Stat {
+    Plain,
+    Versioned,
+    Versioned64,
 }
 impl SimProcedure for Stat {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
-        use crate::os::linux::abi::{StatLayout, TargetStat};
-        let path = emu.read_arg(self.path_arg).unwrap_or(0);
-        let statbuf = emu.read_arg(self.path_arg + 1).unwrap_or(0);
+        use crate::os::linux::abi::{LibcStatCall, StatLayout, TargetStat};
+        let (path_arg, call) = match self {
+            Self::Plain => {
+                let glibc = emu
+                    .binary
+                    .inner()
+                    .symbol_version_names
+                    .get("stat")
+                    .is_some_and(|version| version.starts_with("GLIBC_"));
+                (0, LibcStatCall::Stat { glibc })
+            }
+            Self::Versioned => (
+                1,
+                LibcStatCall::Xstat {
+                    version: emu.read_arg(0)?,
+                },
+            ),
+            Self::Versioned64 => (1, LibcStatCall::Xstat64),
+        };
+        let Some(layout) = StatLayout::for_libc(&emu.arch, call) else {
+            emu.write_return_val(u64::MAX)?;
+            return Ok(HleResult::Continue);
+        };
+        let path = emu.read_arg(path_arg).unwrap_or(0);
+        let statbuf = emu.read_arg(path_arg + 1).unwrap_or(0);
         let name = read_string(emu, path).unwrap_or_default();
         let mut st = TargetStat::default();
         if let Some(content) = emu.vfs.path_seeds.get(&name).cloned().or_else(|| {
@@ -287,7 +310,6 @@ impl SimProcedure for Stat {
             st.st_nlink = 1;
             st.st_blksize = 4096;
         }
-        let layout = StatLayout::for_libc(&emu.arch);
         let _ = emu
             .state
             .write_space(emu.state.ram_space(), statbuf, &st.to_bytes(layout));
