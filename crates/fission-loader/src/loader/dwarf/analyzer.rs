@@ -222,6 +222,13 @@ impl<'a> DwarfAnalyzer<'a> {
             debug_str: gimli::DebugStr::new(sections.get(".debug_str", data), endian),
             debug_line: gimli::DebugLine::new(sections.get(".debug_line", data), endian),
             debug_line_str: gimli::DebugLineStr::new(sections.get(".debug_line_str", data), endian),
+            // DWARF 5 names (`DW_FORM_strx*`) are indices into this table.
+            // It was mapped but left out here, so every such lookup failed
+            // and a DWARF 5 unit lost all of its names.
+            debug_str_offsets: gimli::DebugStrOffsets::from(EndianSlice::new(
+                sections.get(".debug_str_offsets", data),
+                endian,
+            )),
             debug_types: gimli::DebugTypes::new(sections.get(".debug_types", data), endian),
             debug_addr,
             ranges,
@@ -271,6 +278,27 @@ impl<'a> DwarfAnalyzer<'a> {
             Some(AttributeValue::Data4(v)) => Ok(Some(v as u64)),
             Some(AttributeValue::Data8(v)) => Ok(Some(v)),
             Some(AttributeValue::Addr(v)) => Ok(Some(v)),
+            _ => Ok(None),
+        }
+    }
+
+    /// An address attribute (`DW_AT_low_pc`, `DW_AT_high_pc` in its address
+    /// form): either the address itself (`DW_FORM_addr`) or, from DWARF 5 on,
+    /// an index into `.debug_addr` (`DW_FORM_addrx*`), which is what clang
+    /// emits by default. `get_attr_u64` knows only the first form, so every
+    /// function of a clang DWARF 5 unit had no address and was dropped.
+    pub(super) fn get_attr_address(
+        &self,
+        entry: &DebuggingInformationEntry<EndianSlice<'a, RunTimeEndian>, usize>,
+        attr_name: DwAt,
+        unit: &gimli::Unit<EndianSlice<'a, RunTimeEndian>, usize>,
+        dwarf: &gimli::Dwarf<EndianSlice<'a, RunTimeEndian>>,
+    ) -> Result<Option<u64>, gimli::Error> {
+        match entry.attr_value(attr_name)? {
+            Some(AttributeValue::Addr(address)) => Ok(Some(address)),
+            // A missing address table entry leaves this DIE's address unknown.
+            // The DIE and the other compilation units can still be read.
+            Some(AttributeValue::DebugAddrIndex(index)) => Ok(dwarf.address(unit, index).ok()),
             _ => Ok(None),
         }
     }
@@ -581,5 +609,75 @@ mod tests {
         // Inner (if-body) block's `total` (line 7) -- the innermost
         // enclosing block wins, not the outer one it's also nested in.
         assert_eq!(by_offset(-28).scope, Some((0x401125, 0x401138)));
+    }
+}
+
+#[cfg(test)]
+mod dwarf5_string_offsets_tests {
+    use super::DwarfAnalyzer;
+    use crate::loader::LoadedBinary;
+
+    fn fixture() -> LoadedBinary {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata/x64_dwarf5_strx.elf");
+        LoadedBinary::from_file(&path).expect("load DWARF 5 fixture")
+    }
+
+    #[test]
+    fn unavailable_dwarf5_address_keeps_other_functions() {
+        let mut binary = fixture();
+        let address_section = binary
+            .inner_mut()
+            .sections
+            .iter_mut()
+            .find(|section| section.name == ".debug_addr")
+            .unwrap();
+        // Expose the header and the first indexed address to the analyzer.
+        address_section.file_size = 16;
+
+        let functions = DwarfAnalyzer::new(&binary).analyze_functions();
+        assert!(
+            functions
+                .iter()
+                .any(|function| function.name == "manhattan")
+        );
+        assert!(!functions.iter().any(|function| function.name == "entry"));
+    }
+
+    /// `testdata/dwarf5_strx.c` built with `-gdwarf-5`: every name is a
+    /// `DW_FORM_strx1` index into `.debug_str_offsets`. That section was
+    /// found but never handed to gimli, so each lookup failed and every
+    /// function, parameter, type and member came out unnamed.
+    #[test]
+    fn dwarf5_names_are_read_through_the_string_offsets_table() {
+        let binary = fixture();
+        assert!(
+            binary
+                .sections
+                .iter()
+                .any(|section| section.name == ".debug_str_offsets"),
+            "the fixture must use the string offsets table"
+        );
+        let analyzer = DwarfAnalyzer::new(&binary);
+
+        let functions = analyzer.analyze_functions();
+        let manhattan = functions
+            .iter()
+            .find(|function| function.name == "manhattan")
+            .unwrap_or_else(|| {
+                let names: Vec<&str> = functions.iter().map(|f| f.name.as_str()).collect();
+                panic!("no `manhattan` among {names:?}")
+            });
+        let params: Vec<&str> = manhattan.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(params, ["where", "scale"]);
+        assert_eq!(manhattan.return_type.as_deref(), Some("long"));
+
+        let types = analyzer.analyze_types();
+        let point = types
+            .iter()
+            .find(|ty| ty.name == "point")
+            .unwrap_or_else(|| panic!("no `point` among {types:?}"));
+        let members: Vec<&str> = point.members.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(members, ["horizontal", "vertical"]);
     }
 }
