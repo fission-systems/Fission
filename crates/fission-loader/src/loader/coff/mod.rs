@@ -395,8 +395,14 @@ fn parse_coff_name(raw: &[u8], string_table: &[u8]) -> String {
     String::from_utf8_lossy(&raw[..end]).to_string()
 }
 
+/// The name at `offset` in a COFF string table.
+///
+/// The table starts with its own four-byte size; names begin after it. An
+/// offset inside the size -- 0 is what an all-zero name field gives -- names
+/// nothing, and used to return the size's bytes as a name.
 fn extract_string_table_name(string_table: &[u8], offset: usize) -> String {
-    if offset >= string_table.len() {
+    const STRING_TABLE_SIZE_FIELD: usize = 4;
+    if offset < STRING_TABLE_SIZE_FIELD || offset >= string_table.len() {
         return String::new();
     }
     let end = string_table[offset..]
@@ -433,6 +439,35 @@ fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A string table is its own size (four bytes) and then the names; an
+    /// offset into the size is not a name. An all-zero name field -- offset
+    /// 0 -- used to come back as the size's bytes, here `"\u{c}"`.
+    #[test]
+    fn a_string_table_offset_inside_the_size_field_is_no_name() {
+        let mut table = 12u32.to_le_bytes().to_vec();
+        table.extend_from_slice(b"foo\0bar\0");
+        let long = |offset: u32| {
+            let mut raw = [0u8; 8];
+            raw[4..].copy_from_slice(&offset.to_le_bytes());
+            raw
+        };
+        for offset in 0..4 {
+            assert_eq!(
+                parse_coff_name(&long(offset), &table),
+                "",
+                "offset {offset}"
+            );
+        }
+        for slash in [*b"/0\0\0\0\0\0\0", *b"/3\0\0\0\0\0\0"] {
+            assert_eq!(parse_coff_name(&slash, &table), "");
+        }
+        // The control: real offsets, and an inline name, still resolve.
+        assert_eq!(parse_coff_name(&long(4), &table), "foo");
+        assert_eq!(parse_coff_name(&long(8), &table), "bar");
+        assert_eq!(parse_coff_name(b"/8\0\0\0\0\0\0", &table), "bar");
+        assert_eq!(parse_coff_name(b".text\0\0\0", &table), ".text");
+    }
 
     #[test]
     fn coff_loader_preserves_zero_file_size_for_bss_honors_alignment_and_skips_common_symbols() {
