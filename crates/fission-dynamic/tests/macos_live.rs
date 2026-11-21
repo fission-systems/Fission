@@ -563,9 +563,22 @@ fn check_drop_during_worker_step(keep_running: bool) {
     // collecting the stop and the debugger still owns the peer suspensions.
     debugger.single_step().unwrap();
     drop(debugger);
-    if let Some(exit_gate) = exit_gate {
+    let trace_state = exit_gate.map(|exit_gate| {
+        // SAFETY: proc_pidinfo writes into a valid record for our live child.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let size = std::mem::size_of_val(&info) as i32;
+        let read = unsafe {
+            libc::proc_pidinfo(
+                pid as i32,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdinfo).cast(),
+                size,
+            )
+        };
         std::fs::write(exit_gate, []).expect("allow the detached target to exit");
-    }
+        (read, size, info.pbi_flags)
+    });
 
     unsafe extern "C" {
         fn waitpid(pid: i32, status: *mut i32, options: i32) -> i32;
@@ -580,6 +593,11 @@ fn check_drop_during_worker_step(keep_running: bool) {
         if waited == pid {
             let status = std::process::ExitStatus::from_raw(status);
             assert_eq!(status.code(), Some(7), "target exited with {status}");
+            if let Some((read, size, flags)) = trace_state {
+                const PROC_FLAG_TRACED: u32 = 2;
+                assert_eq!(read, size, "read the debugger target's BSD process info");
+                assert_eq!(flags & PROC_FLAG_TRACED, 0, "target is still traced");
+            }
             return;
         }
         assert_eq!(waited, 0, "waitpid: {}", std::io::Error::last_os_error());
