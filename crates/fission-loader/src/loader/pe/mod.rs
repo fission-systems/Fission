@@ -843,7 +843,13 @@ impl<'a> PeLoaderImpl<'a> {
     fn read_coff_symbol(&self, offset: u64) -> Result<CoffSymbol> {
         let name_bytes = self.reader().slice(offset as usize, 8)?;
         let name = if name_bytes[0..4] == [0, 0, 0, 0] {
-            SymbolName::LongName(u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()))
+            // An offset into the string table, whose first four bytes are its
+            // size. One inside the size names nothing, and the symbol is left
+            // unnamed rather than named after the size's bytes.
+            match u32::from_le_bytes(name_bytes[4..8].try_into().unwrap()) {
+                0..4 => SymbolName::ShortName(String::new()),
+                offset => SymbolName::LongName(offset),
+            }
         } else {
             let len = name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
             SymbolName::ShortName(String::from_utf8_lossy(&name_bytes[..len]).to_string())
@@ -974,6 +980,17 @@ impl<'a> PeLoaderImpl<'a> {
                     if name_rva == 0 || func_idx >= function_count {
                         continue;
                     }
+                    // A name RVA that maps nowhere used to fall back to file
+                    // offset 0 and name the export after the DOS header
+                    // (`MZ\u{90}`). Such an entry has no name: leave it to the
+                    // ordinal pass below, as an export with no name entry is.
+                    let Some(name) = self
+                        .rva_to_file_offset(name_rva, image_base)
+                        .map(|name_offset| self.read_string_at(name_offset))
+                        .filter(|name| !name.is_empty())
+                    else {
+                        continue;
+                    };
                     named.insert(func_idx);
                     let func_rva = self
                         .read_u32(funcs_offset + u64::from(func_idx) * 4)
@@ -981,8 +998,6 @@ impl<'a> PeLoaderImpl<'a> {
                     if func_rva == 0 || is_forwarder(func_rva) {
                         continue;
                     }
-                    let name_offset = self.rva_to_file_offset(name_rva, image_base).unwrap_or(0);
-                    let name = self.read_string_at(name_offset);
                     push_export(self, name, func_rva);
                 }
             }
@@ -1825,6 +1840,35 @@ mod tests {
         );
     }
 
+    /// A COFF symbol whose name field is zero in its first four bytes names
+    /// its string at that offset in the string table, whose first four bytes
+    /// are the table's size. An offset below 4 points into the size: the
+    /// symbol has no name, and it used to be named after those bytes.
+    #[test]
+    fn a_coff_symbol_name_inside_the_string_table_size_is_no_name() {
+        let symbol = |offset: u32| {
+            let mut data = vec![0u8; 18];
+            data[4..8].copy_from_slice(&offset.to_le_bytes());
+            data
+        };
+        let name_of = |data: &[u8]| {
+            let loader = PeLoaderImpl {
+                data,
+                sections: &[],
+                is_64bit: true,
+                language_id: "x86:LE:64:default".to_string(),
+            };
+            loader.read_coff_symbol(0).expect("symbol").name
+        };
+        for offset in 0..4 {
+            assert!(
+                matches!(name_of(&symbol(offset)), SymbolName::ShortName(ref n) if n.is_empty()),
+                "offset {offset}"
+            );
+        }
+        assert!(matches!(name_of(&symbol(4)), SymbolName::LongName(4)));
+    }
+
     /// An image with one section mapping RVA 0x1000.. to file offset 0x200..
     /// and an export directory at RVA 0x1000 (size 0x100).
     fn export_fixture(
@@ -1894,6 +1938,24 @@ mod tests {
                 ("Named".to_string(), 0x1_4000_2000),
                 // ordinal base 5 + index 2
                 ("Ordinal_7".to_string(), 0x1_4000_2100),
+            ]
+        );
+    }
+
+    /// A name RVA outside every section: the lookup fell back to file offset
+    /// 0, so the export was named after the DOS header's `MZ` signature.
+    #[test]
+    fn an_export_whose_name_is_not_in_the_image_is_known_by_its_ordinal() {
+        let (mut data, sections) =
+            export_fixture(1, &[0x2000, 0x2010], &[("Good", 0), ("Lost", 1)]);
+        data[0..3].copy_from_slice(b"MZ\x90");
+        // Second entry of the name-pointer table (RVA 0x1060 -> file 0x260).
+        data[0x264..0x268].copy_from_slice(&0x0009_0000u32.to_le_bytes());
+        assert_eq!(
+            exports_of(&data, &sections),
+            vec![
+                ("Good".to_string(), 0x1_4000_2000),
+                ("Ordinal_2".to_string(), 0x1_4000_2010),
             ]
         );
     }

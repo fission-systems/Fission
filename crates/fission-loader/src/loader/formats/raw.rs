@@ -75,13 +75,15 @@ fn build_raw_binary(
         is_writable: false,
     };
 
+    // `architecture` sets the word size from the hint's bitness. It used to be
+    // overridden with `is_64bit(false)`, so an x86-64 or AArch64 raw image was
+    // loaded as a 32-bit one.
     LoadedBinaryBuilder::new(path, data)
         .format("Raw Binary")
         .architecture(architecture)
         .load_spec(load_spec)
         .entry_point(entry_point)
         .image_base(image_base)
-        .is_64bit(false)
         .add_section(section)
         .add_function(function)
         .build()
@@ -128,5 +130,44 @@ mod tests {
         assert_eq!(binary.format, "Raw Binary");
         assert_eq!(binary.sections[0].virtual_address, 0x1000);
         assert_eq!(binary.entry_point, 0x1000);
+    }
+
+    fn hint(processor: &str, bitness: u8, language: &str) -> RawLoadHint {
+        RawLoadHint {
+            image_base: 0x1000,
+            entry_point: 0x1000,
+            architecture: ArchitectureDescriptor::new(
+                processor,
+                "little",
+                bitness,
+                "default",
+                Some("raw".to_string()),
+                "explicit raw test hint",
+            ),
+            load_spec: BinaryLoadSpec::new(
+                "Raw Binary",
+                0x1000,
+                language,
+                "default",
+                "explicit raw test hint",
+            ),
+        }
+    }
+
+    fn load_with(hint: RawLoadHint) -> LoadedBinary {
+        BinaryLoader::parse_with_hint(DataBuffer::Heap(vec![0x90, 0xc3]), "raw.bin".into(), hint)
+            .expect("load raw")
+    }
+
+    /// The word size follows the hinted architecture. It was hardcoded to
+    /// 32-bit, so a 64-bit raw image read its pointers four bytes wide.
+    #[test]
+    fn raw_binary_word_size_follows_the_hinted_architecture() {
+        let wide = load_with(hint("x86", 64, "x86:LE:64:default"));
+        assert!(wide.is_64bit);
+        let arm = load_with(hint("AARCH64", 64, "AARCH64:LE:64:v8A"));
+        assert!(arm.is_64bit);
+        let narrow = load_with(hint("x86", 32, "x86:LE:32:default"));
+        assert!(!narrow.is_64bit);
     }
 }

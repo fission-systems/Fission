@@ -73,7 +73,6 @@ ignore = [
 # Temporary baseline for no-fix ecosystem advisories in Tauri Linux GTK3/WebKit stack,
 # Servo/CSS/HTML transitive crates, glib Iterator advisory, and rand/logger transitive chain.
 # See docs/build/SECURITY_ADVISORIES.md for rationale and migration plan (when added).
-    "RUSTSEC-2024-0370",
     "RUSTSEC-2024-0411",
     "RUSTSEC-2024-0412",
     "RUSTSEC-2024-0413",
@@ -86,11 +85,6 @@ ignore = [
     "RUSTSEC-2024-0420",
     # unmaintained packages baseline
     "RUSTSEC-2025-0141", # bincode unmaintained
-    "RUSTSEC-2024-0436", # paste unmaintained
-    "RUSTSEC-2025-0057", # fxhash unmaintained (transitive via Dioxus/wry)
-    "RUSTSEC-2024-0384", # instant unmaintained (transitive via Dioxus/tao)
-    "RUSTSEC-2024-0429", # glib unsound VariantStrIter advisory (transitive via Dioxus/wry GTK stack)
-    "RUSTSEC-2026-0097", # rand unsound custom logger advisory (transitive via Dioxus/wry CSS stack)
     # `im` cluster. `im` is a *direct* dependency of fission-emulator (persistent
     # maps for snapshot/fork state); `bitmaps` and `sized-chunks` are its own deps.
     # The whole family was marked unmaintained upstream in 2026-08 with no fixed
