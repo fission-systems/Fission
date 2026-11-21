@@ -17,7 +17,7 @@ Scope: `crates/fission-solver`
 | `Solver` | `src/solver.rs` | Node registry, assertions, `check_sat` with a memory-oracle CEGAR loop, `is_true`/`is_false`/`min`/`max` |
 | `AigManager` | `src/aig.rs` | Bit-blasting to an and-inverter graph: adders, comparisons, multiply, unsigned and signed divide/remainder/modulus, if-then-else, and shifts by constant or symbolic amounts (a barrel shifter) |
 | `CnfBuilder` | `src/cnf.rs` | Tseitin encoding of the AIG |
-| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored collection of learned clauses, an optional conflict budget |
+| `SatSolver` | `src/sat.rs` | CDCL: watched literals, VSIDS heap, phase saving, LBD-scored collection of learned clauses, Luby restarts (unit 100 conflicts), an optional conflict budget |
 | `smtlib` | `src/smtlib.rs` | SMT-LIB 2 printer (QF_BV, and QF_ABV once an array is read), so answers can be compared with another solver |
 | theories | `src/theory/` | Bitvector (eager bit-blasting) and array (select/store) |
 
@@ -90,7 +90,7 @@ FISSION_Z3=/opt/homebrew/bin/z3 FISSION_DIFF_CASES=2000 \
 | `formulas_built_through_the_constructors_agree_with_z3` | z3 gets the formula as written; this solver gets it rebuilt through `SymExpr::new_*` |
 | `a_solver_asked_many_questions_agrees_with_z3`, `..._many_wide_questions_...` | One solver, several queries: assertions between them, extra conditions, `is_true`, `is_false`, `eval`, `min`, `max` |
 
-Every `Sat` is also checked as a model: the values read back for each variable and each array read are pinned in z3's copy, which must stay satisfiable. A failure is shrunk before it is printed. `FISSION_DIFF_SEED` picks the stream, `FISSION_DIFF_ONLY=<case>` reruns one case, `FISSION_DIFF_CONFLICTS` sets the conflict budget (0 for none) and `FISSION_DIFF_JOBS` the worker count.
+Every `Sat` is also checked as a model: the values read back for each variable and each array read are pinned in z3's copy, which must stay satisfiable. A failure is shrunk before it is printed. `FISSION_DIFF_SEED` picks the stream, `FISSION_DIFF_ONLY=<case>` reruns one case, `FISSION_DIFF_CONFLICTS` sets the conflict budget (0 for none), `FISSION_DIFF_JOBS` the worker count, `FISSION_DIFF_RESTARTS=0` turns restarts off (for measuring the search) and `FISSION_DIFF_DUMP=<dir>` writes each formula this solver gave up on as `.smt2` -- the corpus for capability work.
 
 Three outcomes are not failures and are counted apart: `gave up: conflict budget` (this solver ran out, shown with what z3 answered; a cost, tracked as capability), `declined: oracle refinement rounds`, and `unknown in z3`. Any other `declined` fails the run: every operation these generators use has a circuit.
 

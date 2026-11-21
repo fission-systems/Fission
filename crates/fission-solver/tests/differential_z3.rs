@@ -290,6 +290,15 @@ fn conflict_budget() -> Option<u64> {
     }
 }
 
+/// The budget, and -- for measuring the search itself --
+/// `FISSION_DIFF_RESTARTS=0` to turn restarts off.
+fn configure(solver: &mut Solver) {
+    solver.set_conflict_budget(conflict_budget());
+    if env_u64("FISSION_DIFF_RESTARTS", 1) == 0 {
+        solver.sat.set_restart_unit(None);
+    }
+}
+
 const GAVE_UP: &str = "conflict budget";
 const REFINED_OUT: &str = "oracle refinement rounds";
 
@@ -1023,7 +1032,7 @@ fn check_formula_timed(
 
     let started = Instant::now();
     let mut solver = Solver::new();
-    solver.set_conflict_budget(conflict_budget());
+    configure(&mut solver);
     let vars = bitvector_vars_of(ours);
     let ids: Vec<_> = vars
         .iter()
@@ -1195,6 +1204,13 @@ fn run_batch(name: &str, shape: Shape, default_cases: u64, constructors: bool) {
                     };
                     if matches!(&outcome, Outcome::GaveUp(_)) {
                         gave_up.lock().unwrap().push(case);
+                        // Kept for whoever works on what this solver gives
+                        // up on: the formulas themselves are the corpus.
+                        if let Ok(dir) = std::env::var("FISSION_DIFF_DUMP") {
+                            let path = format!("{dir}/{name}-{case}.smt2");
+                            let _ = std::fs::create_dir_all(&dir);
+                            let _ = std::fs::write(path, &script);
+                        }
                     }
                     *tally.lock().unwrap().entry(key).or_default() += 1;
                     {
@@ -1370,7 +1386,7 @@ fn incremental_case(
         asserted.iter().chain(extra).cloned().collect()
     };
     let mut solver = Solver::new();
-    solver.set_conflict_budget(conflict_budget());
+    configure(&mut solver);
     let gave_up = |solver: &Solver| {
         let gave_up = solver.last_unknown() == Some(&UnknownReason::ConflictBudget);
         if gave_up {

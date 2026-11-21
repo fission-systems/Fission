@@ -295,3 +295,68 @@ fn incremental_clause_additions_agree_with_enumeration() {
         }
     }
 }
+
+/// A restart gives up the search's decisions, never the query's
+/// assumptions: those sit at decision levels `1..=assumptions.len()` and a
+/// restart unwinds to just above them. Restarting after every conflict on
+/// random 3-CNFs near the satisfiability threshold -- where conflicts are
+/// many -- with random assumptions, every verdict must match enumeration
+/// under those assumptions, and every model must honour them.
+#[test]
+fn restarting_after_every_conflict_keeps_the_assumptions() {
+    let mut rng = Rng(0x2E57_A27F);
+    let (mut sat_cases, mut unsat_cases) = (0, 0);
+    for case in 0..3_000 {
+        let vars = 8 + rng.below(5) as u32;
+        let count = (vars as usize * 43) / 10;
+        let clauses: Vec<Vec<Lit>> = (0..count)
+            .map(|_| {
+                (0..3)
+                    .map(|_| Lit::new(1 + rng.below(vars as u64) as u32, rng.below(2) == 0))
+                    .collect()
+            })
+            .collect();
+        let assumptions: Vec<Lit> = (0..1 + rng.below(3))
+            .map(|_| Lit::new(1 + rng.below(vars as u64) as u32, rng.below(2) == 0))
+            .collect();
+
+        let mut with_assumptions = clauses.clone();
+        with_assumptions.extend(assumptions.iter().map(|&lit| vec![lit]));
+        let want = satisfiable_by_enumeration(vars, &with_assumptions);
+
+        let mut sat = SatSolver::new();
+        sat.set_restart_unit(Some(1));
+        let accepted = clauses.iter().all(|clause| sat.add_clause(clause.clone()));
+        let got = accepted && sat.solve_with_assumptions(None, &assumptions);
+        assert_eq!(
+            got, want,
+            "case {case}: assumptions {assumptions:?} over {clauses:?}"
+        );
+        if got {
+            sat_cases += 1;
+            for lit in &assumptions {
+                let value = matches!(sat.get_var_value(lit.var()), LBool::True);
+                assert_eq!(
+                    value,
+                    lit.0 > 0,
+                    "case {case}: the model drops assumption {lit:?}"
+                );
+            }
+            for clause in &clauses {
+                assert!(
+                    clause.iter().any(|lit| {
+                        matches!(sat.get_var_value(lit.var()), LBool::True) == (lit.0 > 0)
+                    }),
+                    "case {case}: the model violates {clause:?}"
+                );
+            }
+        } else {
+            unsat_cases += 1;
+        }
+    }
+    // Both answers are reached, or the test above checks only one of them.
+    assert!(
+        sat_cases > 300 && unsat_cases > 300,
+        "{sat_cases} sat, {unsat_cases} unsat"
+    );
+}

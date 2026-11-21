@@ -196,6 +196,28 @@ pub struct SatSolver {
     gc_threshold: u32,
     /// Conflicts one search may spend before it gives up without a verdict.
     conflict_budget: Option<u64>,
+    /// Conflicts between restarts are `RESTART_UNIT` times the Luby
+    /// sequence; `None` turns restarts off.
+    restart_unit: Option<u64>,
+}
+
+/// Conflicts per Luby unit. MiniSat's default.
+const RESTART_UNIT: u64 = 100;
+
+/// The `i`-th term (from 0) of the Luby sequence 1, 1, 2, 1, 1, 2, 4, 1, ...
+fn luby(mut i: u64) -> u64 {
+    // Find the finite subsequence that contains index `i`, and its size.
+    let (mut size, mut seq) = (1u64, 0u32);
+    while size < i + 1 {
+        seq += 1;
+        size = 2 * size + 1;
+    }
+    while size - 1 != i {
+        size = (size - 1) >> 1;
+        seq -= 1;
+        i %= size;
+    }
+    1u64 << seq
 }
 
 impl Default for SatSolver {
@@ -226,6 +248,7 @@ impl SatSolver {
             conflicts_since_gc: 0,
             gc_threshold: 100,
             conflict_budget: None,
+            restart_unit: Some(RESTART_UNIT),
         }
     }
 
@@ -751,6 +774,12 @@ impl SatSolver {
         self.conflict_budget
     }
 
+    /// Restart every `unit` times the Luby sequence in conflicts; `None`
+    /// never restarts. On by default, at [`RESTART_UNIT`].
+    pub fn set_restart_unit(&mut self, unit: Option<u64>) {
+        self.restart_unit = unit.filter(|&unit| unit > 0);
+    }
+
     /// Solve under `assumptions`: `Some(true)` with a model, `Some(false)`
     /// when there is none, and `None` when the conflict budget ran out first.
     ///
@@ -778,6 +807,19 @@ impl SatSolver {
         if !self.restore_assumptions(assumptions) {
             return Some(false);
         }
+        // Conflicts in this search, for the restart schedule; the budget
+        // is charged separately, against `remaining`.
+        let mut conflicts: u64 = 0;
+        // Restarts: give up the current decisions -- never the assumptions,
+        // which sit at levels `1..=assumptions.len()` -- every so many
+        // conflicts. Learned clauses, activities and saved phases stay, so
+        // the search resumes near where it was, minus the early decisions
+        // that conflict analysis has since learned were bad. There were none
+        // before, and a satisfiable problem whose first decisions went wrong
+        // could spend its whole budget below them.
+        let mut restarts: u64 = 0;
+        let mut next_restart = self.restart_unit.map(|unit| unit * luby(0));
+
         loop {
             let confl_opt = self.propagate();
 
@@ -811,6 +853,7 @@ impl SatSolver {
                 if self.decision_level() <= assumptions.len() as u32 {
                     return Some(false); // Root or assumption level conflict -> UNSAT
                 }
+                conflicts += 1;
                 if let Some(remaining) = remaining {
                     if *remaining == 0 {
                         self.cancel_until(0);
@@ -892,6 +935,14 @@ impl SatSolver {
                     self.gc_learned();
                 }
             } else {
+                if next_restart.is_some_and(|at| conflicts >= at) {
+                    restarts += 1;
+                    next_restart = self
+                        .restart_unit
+                        .map(|unit| conflicts + unit * luby(restarts));
+                    self.cancel_until(assumptions.len() as u32);
+                    continue;
+                }
                 // No conflict, make a decision
                 if let Some(next_lit) = self.pick_branch_lit() {
                     self.trail_lim.push(self.trail.len());
@@ -908,6 +959,12 @@ impl SatSolver {
 #[cfg(test)]
 mod retention_regressions {
     use super::*;
+
+    #[test]
+    fn the_luby_sequence_is_the_luby_sequence() {
+        let first: Vec<u64> = (0..15).map(luby).collect();
+        assert_eq!(first, [1, 1, 2, 1, 1, 2, 4, 1, 1, 2, 1, 1, 2, 4, 8]);
+    }
 
     #[test]
     fn garbage_collection_keeps_every_glue_clause() {
