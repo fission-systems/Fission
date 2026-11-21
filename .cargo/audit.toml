@@ -4,9 +4,6 @@
 ignore = [
   # Temporary baseline for no-fix ecosystem advisories in the desktop UI stack and
   # unmaintained transitive crates. Keep aligned with deny.toml.
-  "RUSTSEC-2024-0370",
-  "RUSTSEC-2024-0384",
-  "RUSTSEC-2024-0429",
   "RUSTSEC-2024-0411",
   "RUSTSEC-2024-0412",
   "RUSTSEC-2024-0413",
@@ -17,10 +14,7 @@ ignore = [
   "RUSTSEC-2024-0418",
   "RUSTSEC-2024-0419",
   "RUSTSEC-2024-0420",
-  "RUSTSEC-2024-0436",
-  "RUSTSEC-2025-0057",
   "RUSTSEC-2025-0141",
-  "RUSTSEC-2026-0097",
   # `im` family + smartstring, all marked unmaintained upstream 2026-08 with no
   # fixed version. See deny.toml for the full rationale; `im` is a direct
   # fission-emulator dependency and migrating off it is the real fix.
