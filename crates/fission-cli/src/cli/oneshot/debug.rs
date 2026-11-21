@@ -379,10 +379,6 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
     // was never attached to it -- which six of them did, and answered "Not
     // attached" to a session that was there.
     let attach_saved = |state: &DebugStateFile| -> Result<fission_dynamic::debug::DebugSession> {
-        anyhow::ensure!(
-            !emulator,
-            "Emulated debug sessions exist only in the process that launched them"
-        );
         state.verify_process()?;
         let mut session = build_session();
         session.attach(state.pid)?;
@@ -390,6 +386,10 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         Ok(session)
     };
     let attach_active = || -> Result<(DebugStateFile, fission_dynamic::debug::DebugSession)> {
+        anyhow::ensure!(
+            !emulator,
+            "Emulated debug sessions exist only in the process that launched them"
+        );
         let state = find_active_state()?;
         let session = attach_saved(&state)?;
         Ok((state, session))
