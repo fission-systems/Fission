@@ -69,6 +69,7 @@ cost and what it catches are known rather than assumed.
 | Engine differential with real fixtures | Three JIT-vs-interpreter tests (PE32, AArch64, DC ZVA) skipped wherever a local dev corpus was absent, which was everywhere; they now use checked-in fixtures built from `testdata/src/control_flow.c` and fail without them | Every emulator change (Fast Gate) |
 | Mutation testing | 5,448 mutants in one week of main; at one to two minutes each this is sampled: four of 48 rotating slices a week | Weekly `mutants.yml`, report-only |
 | CLI JSON contracts | (assigned to the CLI exposure work, which changes those outputs) | Fast Gate, with the CLI |
+| Decompile speed | Wall time on shared runners moves 10-20%, so cost is counted as instructions executed (valgrind cachegrind, one thread). Eight identical runs: first ~3% high, the rest within 1.3%. Under valgrind 40 functions take 25-76 s per binary and CLI start-up alone is ~3.7e9 instructions (kept: every call pays it). Sample: six hash-ordered binaries, 15 functions each, warm-up plus minimum of two | PR (every Rust change): base vs head on one runner, flagged at +3%, report-only. Nightly `speed.yml`: main vs the last good night's CLI, fails at +3%; `accept_baseline` dispatch accepts a deliberate slowdown |
 
 ## Phases
 
@@ -76,7 +77,7 @@ cost and what it catches are known rather than assumed.
 |---|---|---|
 | 1 | Advisories off the PR path and into Heavy; sccache fails open; every main push lints the workspace; `ci-red` issues for Heavy, fuzz and DecBench; fuzz on a schedule with a persistent corpus; doctests enforced; removal-only midend changes exempt from the targeted-test rule; auto-merge workflow removed | This change |
 | 2 | Require the merge queue on `main` (`Detect changes` and `CI Summary` already report on `merge_group`) | Repository setting; the owner's decision |
-| 3 | A PR that can change decompiler output gets an output diff against its base on a fixed DecBench slice: functions whose text changed, then GED and type deltas. Output hashes first, scores second | Implemented, report-only (`reusable-output-diff.yml`, `scripts/ci/output_diff.py`); about 3,000 sample functions |
+| 3 | A PR that can change decompiler output gets an output diff against its base on a fixed DecBench slice: functions whose text changed, then GED and type deltas. Output hashes first, scores second | Implemented, report-only (`reusable-base-head.yml`, `scripts/ci/output_diff.py`); about 3,000 sample functions |
 | 4 | One release CLI per main SHA, built by the push run and reused by the nightly sweep and release E2E, so what is measured is what ships | Proposed |
 
 ## Consequences

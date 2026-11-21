@@ -396,14 +396,15 @@ jobs:
     with:
       only: binaries/O0/base-passwd/update-passwd
 
-  # Report-only: what a decompiler change does to output on a fixed DecBench
-  # sample, text first and scores second. Not part of CI Summary.
-  output-diff:
+  # Report-only, not part of CI Summary: what a Rust change does to decompile
+  # cost (instructions executed) and, for decompiler changes, to output.
+  base-vs-head:
     needs: [changes]
-    if: needs.changes.outputs.run_decomp_corpus == 'true' && github.event_name == 'pull_request'
-    uses: ./.github/workflows/reusable-output-diff.yml
+    if: needs.changes.outputs.run_tests == 'true' && github.event_name == 'pull_request'
+    uses: ./.github/workflows/reusable-base-head.yml
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
+      output_diff: ${{ needs.changes.outputs.run_decomp_corpus == 'true' }}
 
   # Final summary — lane-aware required jobs
   ci-summary:

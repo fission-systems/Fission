@@ -1,9 +1,12 @@
-name: Reusable decompiler output diff
+name: Reusable base-vs-head decompiler comparison
 
-# Fast Gate calls this for changes that can move decompiler output. It builds
-# the base and head CLIs, decompiles a fixed DecBench sample with each, and
-# writes the output diff and score deltas to the job summary
-# (scripts/ci/output_diff.py). Report-only: it does not gate the merge.
+# Fast Gate calls this on Rust changes. It builds the base and head CLIs once
+# and, on a fixed DecBench sample, reports to the job summary:
+# - speed: instructions executed by each (scripts/ci/speed_compare.py),
+#   flagged at +3%;
+# - output (decompiler changes only): functions whose text changed, then GED
+#   and type deltas (scripts/ci/output_diff.py).
+# Report-only: neither gates the merge yet.
 
 on:
   workflow_call:
@@ -12,6 +15,11 @@ on:
         description: "Commit to compare against (the PR or merge group base)"
         required: true
         type: string
+      output_diff:
+        description: "Also diff decompiler output and scores"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -23,9 +31,9 @@ env:
 
 jobs:
   diff:
-    name: Decompiler output diff
+    name: Base vs head (speed${{ inputs.output_diff && ', output' || '' }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       BASE_SHA: ${{ inputs.base_sha }}
     steps:
@@ -70,8 +78,14 @@ jobs:
           set -euo pipefail
           python -m pip install -r scripts/quality/decbench-ci-requirements.txt
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends llvm binutils-mingw-w64
-      - name: Decompile the sample with both and compare
+          sudo apt-get install -y --no-install-recommends llvm binutils-mingw-w64 valgrind
+      - name: Compare decompile cost (instructions executed)
+        run: |
+          python scripts/ci/speed_compare.py --data "$RUNNER_TEMP/decbench" \
+            --base-cli "$RUNNER_TEMP/base_cli" --head-cli "$RUNNER_TEMP/head_cli" \
+            --base-resources "$RUNNER_TEMP/base/utils" --out output-diff
+      - name: Decompile the sample with both and compare output
+        if: inputs.output_diff
         run: |
           python scripts/ci/output_diff.py --data "$RUNNER_TEMP/decbench" \
             --base-cli "$RUNNER_TEMP/base_cli" --head-cli "$RUNNER_TEMP/head_cli" \
@@ -79,7 +93,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
-          name: decompiler-output-diff
+          name: base-vs-head
           path: output-diff
           if-no-files-found: ignore
           retention-days: 14

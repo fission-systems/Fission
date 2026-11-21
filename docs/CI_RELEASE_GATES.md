@@ -56,6 +56,11 @@ runs workspace fmt and clippy, whatever it changed.
 
 ## Checks on the checks
 
+- Speed: every Rust PR counts instructions executed by its base and head CLIs
+  on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
+  runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
+  compares main with the last good night and fails at +3%. Dispatch it with
+  `accept_baseline` to accept a slowdown that is worth it.
 - Decompiler changes: a PR that can move output gets an output diff on a
   fixed DecBench sample (about 3,000 functions) in its job summary: the
   functions whose text changed first, then GED and type_match before and after.
