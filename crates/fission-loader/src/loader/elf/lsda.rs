@@ -8,24 +8,10 @@
 //! half: walking `.eh_frame`'s FDEs to find each function's LSDA pointer,
 //! then handing the bytes it points to off to the shared parser.
 
-use crate::loader::gcc_lsda::{LsdaInfo, parse_lsda};
+use crate::loader::gcc_lsda::{LsdaInfo, PointerFormat, parse_lsda};
 use crate::loader::types::LoadedBinary;
 use gimli::{BaseAddresses, EhFrame, RunTimeEndian, UnwindSection};
 use std::collections::HashMap;
-
-fn read_native(bytes: &[u8], is_64bit: bool) -> u64 {
-    if is_64bit {
-        let mut buf = [0u8; 8];
-        let n = bytes.len().min(8);
-        buf[..n].copy_from_slice(&bytes[..n]);
-        u64::from_le_bytes(buf)
-    } else {
-        let mut buf = [0u8; 4];
-        let n = bytes.len().min(4);
-        buf[..n].copy_from_slice(&bytes[..n]);
-        u32::from_le_bytes(buf) as u64
-    }
-}
 
 /// Walks `.eh_frame`'s FDEs to find each function's LSDA pointer (via
 /// `gimli::Fde::lsda()`, resolving one more indirection if the pointer
@@ -67,6 +53,7 @@ pub fn analyze_eh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
         bases = bases.set_text(text_sec.virtual_address);
     }
 
+    let format = PointerFormat::of(binary);
     let read_at = |addr: u64, len: usize| binary.get_bytes(addr, len);
     let symbol_at = |addr: u64| binary.relocation_symbols.get(&addr).cloned();
     let table_start_vma = except_table_sec.virtual_address;
@@ -92,11 +79,12 @@ pub fn analyze_eh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
 
         let mut lsda_vma = lsda_ptr.pointer();
         if matches!(lsda_ptr, gimli::Pointer::Indirect(_)) {
-            let ptr_size = if binary.is_64bit { 8 } else { 4 };
-            let Some(bytes) = read_at(lsda_vma, ptr_size) else {
+            // The slot holds a pointer in the target's byte order; it was
+            // read little-endian whatever the ELF said.
+            let Some(bytes) = read_at(lsda_vma, format.pointer_size()) else {
                 continue;
             };
-            lsda_vma = read_native(&bytes, binary.is_64bit);
+            lsda_vma = format.pointer(&bytes);
         }
 
         if lsda_vma < table_start_vma || lsda_vma >= table_end_vma {
@@ -112,7 +100,7 @@ pub fn analyze_eh_lsda(binary: &LoadedBinary) -> HashMap<u64, LsdaInfo> {
             &lsda_bytes,
             lsda_vma,
             region_start,
-            binary.is_64bit,
+            format,
             &read_at,
             &symbol_at,
         ) {
