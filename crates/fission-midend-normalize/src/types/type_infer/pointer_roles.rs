@@ -218,13 +218,27 @@ fn default_address_pointee_type() -> NirType {
     }
 }
 
+fn binding_can_hold_pointer(binding: &PreHirBinding, pointer_bits: u32) -> bool {
+    if binding.surface_type_name.is_some() {
+        return false;
+    }
+    let is_stack_slot = matches!(binding.origin, Some(NirBindingOrigin::StackOffset(_)));
+    match binding.ty {
+        NirType::Unknown | NirType::Ptr(_) => true,
+        NirType::Int { bits, .. } => !is_stack_slot || bits == pointer_bits,
+        _ => false,
+    }
+}
+
 pub(super) fn apply_address_role_pointer_override_for_locals(func: &mut PreHirFunction) -> bool {
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let mut roles: HashMap<String, BindingUseRole> = HashMap::default();
     collect_binding_use_roles_stmts(&func.body, &mut roles);
     let mut changed = false;
 
     for binding in &mut func.locals {
-        if binding.surface_type_name.is_some() || matches!(binding.ty, NirType::Ptr(_)) {
+        if !binding_can_hold_pointer(binding, pointer_bits) || matches!(binding.ty, NirType::Ptr(_))
+        {
             continue;
         }
         let Some(role) = roles.get(&binding.name) else {
@@ -301,9 +315,10 @@ pub(super) fn apply_transitive_address_pointer_override_for_locals(
     if contributors.is_empty() {
         return false;
     }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let mut changed = false;
     for binding in &mut func.locals {
-        if binding.surface_type_name.is_some() {
+        if !binding_can_hold_pointer(binding, pointer_bits) {
             continue;
         }
         if let Some(pointer_ty) = contributors.get(&binding.name)
@@ -330,9 +345,11 @@ pub(super) fn apply_pointer_compare_peer_override_for_locals(
     if promote.is_empty() {
         return false;
     }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let mut changed = false;
     for binding in &mut func.locals {
-        if binding.surface_type_name.is_some() || matches!(binding.ty, NirType::Ptr(_)) {
+        if !binding_can_hold_pointer(binding, pointer_bits) || matches!(binding.ty, NirType::Ptr(_))
+        {
             continue;
         }
         if let Some(ptr_ty) = promote.get(&binding.name) {
@@ -1273,6 +1290,7 @@ struct ParamPointerCandidateContext<'a> {
     dependencies: &'a DefinitionDependencyMap,
     binding_types: &'a HashMap<String, NirType>,
     params: &'a HashSet<String>,
+    pointer_bits: u32,
     /// Address-provenance closure over `params`, built the first time a query
     /// needs it and shared by every later one in the walk (`params` is fixed
     /// for the whole walk; the closure used to be rebuilt per dereference).
@@ -1387,10 +1405,26 @@ fn record_param_pointer_from_address_expr(
             let lhs_int = expr_looks_integer_offset(lhs, context.binding_types);
             let rhs_int = expr_looks_integer_offset(rhs, context.binding_types);
             if rhs_int && !lhs_ptr {
-                record_param_pointer_from_address_expr(lhs, pointee, context, out);
+                let mut offset_vars = HashSet::default();
+                collect_expr_vars(rhs, &mut offset_vars);
+                let mut base_out = HashMap::default();
+                record_param_pointer_from_address_expr(lhs, pointee, context, &mut base_out);
+                for (param, ty) in base_out {
+                    if !offset_vars.contains(&param) {
+                        out.entry(param).or_insert(ty);
+                    }
+                }
             }
             if lhs_int && !rhs_ptr {
-                record_param_pointer_from_address_expr(rhs, pointee, context, out);
+                let mut offset_vars = HashSet::default();
+                collect_expr_vars(lhs, &mut offset_vars);
+                let mut base_out = HashMap::default();
+                record_param_pointer_from_address_expr(rhs, pointee, context, &mut base_out);
+                for (param, ty) in base_out {
+                    if !offset_vars.contains(&param) {
+                        out.entry(param).or_insert(ty);
+                    }
+                }
             }
             // Neither side known: prefer Var that aliases a param when the other
             // is a non-param local (common: buf + i).
@@ -1405,7 +1439,12 @@ fn record_param_pointer_from_address_expr(
                 }
             }
         }
-        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+        PreHirExpr::Cast { ty, expr } => {
+            if matches!(ty, NirType::Bool | NirType::Float { .. })
+                || matches!(ty, NirType::Int { bits, .. } if *bits < context.pointer_bits)
+            {
+                return;
+            }
             record_param_pointer_from_address_expr(expr, pointee, context, out);
         }
         _ => {}
@@ -1549,12 +1588,14 @@ pub(super) fn apply_address_contributor_param_pointer_types(
     if params.is_empty() {
         return false;
     }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let mut candidates = HashMap::default();
     let candidate_context = ParamPointerCandidateContext {
         defs,
         dependencies,
         binding_types,
         params: &params,
+        pointer_bits,
         address_reachability: Default::default(),
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);
@@ -1606,7 +1647,7 @@ pub(super) fn apply_address_contributor_param_pointer_types(
         let Some(ptr_ty) = candidates.get(&param.name) else {
             continue;
         };
-        if param.surface_type_name.is_none() && !matches!(param.ty, NirType::Ptr(_)) {
+        if binding_can_hold_pointer(param, pointer_bits) && !matches!(param.ty, NirType::Ptr(_)) {
             param.ty = ptr_ty.clone();
             changed = true;
         }
@@ -1624,6 +1665,7 @@ fn demote_pointer_offset_params(func: &mut PreHirFunction) -> bool {
     if params.is_empty() {
         return false;
     }
+    let pointer_bits = if func.is_64bit { 64 } else { 32 };
     let binding_types = collect_known_binding_types(func);
     let mut defs: HashMap<String, DefEntry> = HashMap::default();
     scan_def_types(&func.body, &mut defs);
@@ -1634,6 +1676,7 @@ fn demote_pointer_offset_params(func: &mut PreHirFunction) -> bool {
         dependencies: &dependencies,
         binding_types: &binding_types,
         params: &params,
+        pointer_bits,
         address_reachability: Default::default(),
     };
     collect_param_pointer_candidates_stmts(&func.body, &candidate_context, &mut candidates);

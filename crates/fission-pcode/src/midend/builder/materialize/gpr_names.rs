@@ -18,9 +18,16 @@ impl<'a> PreviewBuilder<'a> {
         &self,
         value: &Varnode,
     ) -> Option<(&'static str, usize)> {
-        let raw_name = self.sla_hw_name(value.offset, value.size).or_else(|| {
+        if value.is_constant {
+            return None;
+        }
+        let raw_name = if is_register_varnode(value) {
+            self.sla_hw_name(value.offset, value.size)
+        } else if value.space_id == UNIQUE_SPACE_ID {
             crate::arch::x86::unique_x86_register_name(value.offset, value.size).map(str::to_string)
-        })?;
+        } else {
+            None
+        }?;
         Self::canonical_x86_gpr64_name_for_raw_name(raw_name.as_str())
     }
 

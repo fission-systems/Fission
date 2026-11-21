@@ -795,16 +795,17 @@ impl<'a> PreviewBuilder<'a> {
         };
         // If a Call/CallInd occurs after the last register write, that call is the
         // true producer of the return value (p-code does not model ABI out regs).
+        if (def_idx + 1..term_idx.min(pred_block.ops.len()))
+            .any(|idx| self.op_clobbers_return_register_definition(&pred_block, idx, vn))
+        {
+            return Ok(self
+                .live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
+                .map(PreHirExpr::Var));
+        }
         if self.register_namer().is_primary_return_register(vn)
             && pred_block.ops[def_idx + 1..term_idx.min(pred_block.ops.len())]
                 .iter()
-                .any(|op| {
-                    op.output.is_none()
-                        && matches!(
-                            op.opcode,
-                            PcodeOpcode::Call | PcodeOpcode::CallInd | PcodeOpcode::CallOther
-                        )
-                })
+                .any(|op| op.output.is_none() && op.opcode == PcodeOpcode::CallOther)
             && let Some(name) =
                 self.live_call_result_binding_in_block_for_return_register(vn, pred_idx, term_idx)
         {

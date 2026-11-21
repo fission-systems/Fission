@@ -1166,12 +1166,21 @@ fn update_ast_types(stmts: &mut [PreHirStmt], var_types: &HashMap<String, NirTyp
     }
 }
 
+fn pointee_may_retype_access(pointee: &NirType, access_ty: &NirType) -> bool {
+    !matches!(pointee, NirType::Unknown)
+        && (matches!(pointee, NirType::Ptr(_))
+            || matches!(access_ty, NirType::Ptr(_) | NirType::Unknown)
+            || type_byte_size(pointee) == type_byte_size(access_ty))
+}
+
 fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType>) {
     match lhs {
         PreHirLValue::Deref { ptr, ty } => {
             update_ast_expr(ptr, var_types);
             let ptr_ty = get_expr_type(ptr, var_types);
-            if let NirType::Ptr(inner) = ptr_ty {
+            if let NirType::Ptr(inner) = ptr_ty
+                && pointee_may_retype_access(&inner, ty)
+            {
                 *ty = *inner;
             }
         }
@@ -1183,7 +1192,9 @@ fn update_ast_lvalue(lhs: &mut PreHirLValue, var_types: &HashMap<String, NirType
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
@@ -1203,10 +1214,7 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             // (A pointer's width is the target's, which this table does
             // not know, so a pointer on either side is not compared.)
             if let NirType::Ptr(inner) = ptr_ty
-                && !matches!(*inner, NirType::Unknown)
-                && (matches!(*inner, NirType::Ptr(_))
-                    || matches!(ty, NirType::Ptr(_) | NirType::Unknown)
-                    || type_byte_size(&inner) == type_byte_size(ty))
+                && pointee_may_retype_access(&inner, ty)
             {
                 *ty = *inner;
             }
@@ -1244,7 +1252,9 @@ fn update_ast_expr(expr: &mut PreHirExpr, var_types: &HashMap<String, NirType>) 
             update_ast_expr(base, var_types);
             update_ast_expr(index, var_types);
             let base_ty = get_expr_type(base, var_types);
-            if let NirType::Ptr(inner) = base_ty {
+            if let NirType::Ptr(inner) = base_ty
+                && pointee_may_retype_access(&inner, elem_ty)
+            {
                 *elem_ty = *inner;
             }
         }
@@ -1604,5 +1614,62 @@ mod tests {
                 local.name
             );
         }
+    }
+
+    #[test]
+    fn pointee_width_mismatch_does_not_resize_load_or_deref_access() {
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![
+                binding("p", NirType::Ptr(Box::new(u64_ty))),
+                binding("q", NirType::Ptr(Box::new(u8_ty.clone()))),
+                binding("out", NirType::Unknown),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("out".to_owned()),
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(PreHirExpr::Var("p".to_owned())),
+                        ty: u8_ty.clone(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Var("q".to_owned())),
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::Const(1, u32_ty.clone()),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_type_constraint_propagation(&mut func);
+
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Load { ty, .. },
+                ..
+            } if *ty == u8_ty
+        ));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref { ty, .. },
+                ..
+            } if *ty == u32_ty
+        ));
     }
 }

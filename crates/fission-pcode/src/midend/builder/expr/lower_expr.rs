@@ -133,7 +133,10 @@ impl<'a> PreviewBuilder<'a> {
                 site.block_idx,
                 &mut memo,
             )?;
-        let def_site = self.lookup_def_site(vn).map(|(site, _)| site);
+        let def_site = self
+            .lookup_def_site(vn)
+            .or_else(|| self.lookup_dominating_def_site(vn))
+            .map(|(site, _)| site);
         self.call_result_site_outranks_def_site(call_site, def_site)
             .then_some(name)
     }
@@ -861,6 +864,9 @@ impl<'a> PreviewBuilder<'a> {
         // Its expression is the value on one path only.
         let naming_def_site = def_site.or_else(|| self.lookup_dominating_def_site(vn));
         let merged_read = def_site.is_none() && naming_def_site.is_some();
+        if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
+            return Ok(PreHirExpr::Var(name));
+        }
         // The definition reaching this use was settled as explicit before any
         // lowering began, so it ships as its own statement and this use is a
         // reference to it. Returning here is the point of the whole exercise:
@@ -879,9 +885,6 @@ impl<'a> PreviewBuilder<'a> {
                 self.lower_covering_passthrough_register_lane(vn, site, &def, visiting)?
         {
             return Ok(expr);
-        }
-        if let Some(name) = self.live_call_result_binding_for_return_register(vn) {
-            return Ok(PreHirExpr::Var(name));
         }
         // Loop body: LOAD/use of a loop-carried register must share the binding
         // that the loop's self-update (e.g. INT_ADD stride) will use — not a

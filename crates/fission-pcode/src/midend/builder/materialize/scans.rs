@@ -184,6 +184,22 @@ impl<'a> PreviewBuilder<'a> {
         !preserves_value
     }
 
+    pub(in crate::midend::builder) fn op_clobbers_return_register_definition(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+        op_idx: usize,
+        output: &Varnode,
+    ) -> bool {
+        let Some(op) = block.ops.get(op_idx) else {
+            return false;
+        };
+        op.output.is_none()
+            && matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+            && self.register_namer().is_primary_return_register(output)
+            && !self.call_is_return_target_artifact(block, op_idx)
+            && !self.call_is_terminal_branchind_artifact(block, op_idx)
+    }
+
     /// Find the first use reached after leaving the definition's block.
     ///
     /// The search follows CFG edges from the exact definition site and stops a
@@ -200,12 +216,10 @@ impl<'a> PreviewBuilder<'a> {
         let key = VarnodeKey::from(output);
         let definition_block = self.pcode.blocks.get(definition_block_idx)?;
 
-        if definition_block
-            .ops
-            .iter()
-            .skip(definition_op_idx + 1)
-            .any(|op| Self::op_kills_varnode_definition(op, &key))
-        {
+        if ((definition_op_idx + 1)..definition_block.ops.len()).any(|idx| {
+            Self::op_kills_varnode_definition(&definition_block.ops[idx], &key)
+                || self.op_clobbers_return_register_definition(definition_block, idx, output)
+        }) {
             return None;
         }
 
@@ -233,7 +247,9 @@ impl<'a> PreviewBuilder<'a> {
                 {
                     return Some((block_idx, block.start_address, op_idx, op.seq_num));
                 }
-                if Self::op_kills_varnode_definition(op, &key) {
+                if Self::op_kills_varnode_definition(op, &key)
+                    || self.op_clobbers_return_register_definition(block, op_idx, output)
+                {
                     killed = true;
                     break;
                 }
@@ -260,12 +276,10 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<DefinitionReachesBlockProof> {
         let key = VarnodeKey::from(output);
         let definition_block = self.pcode.blocks.get(definition_block_idx)?;
-        if definition_block
-            .ops
-            .iter()
-            .skip(definition_op_idx + 1)
-            .any(|op| Self::op_kills_varnode_definition(op, &key))
-        {
+        if ((definition_op_idx + 1)..definition_block.ops.len()).any(|idx| {
+            Self::op_kills_varnode_definition(&definition_block.ops[idx], &key)
+                || self.op_clobbers_return_register_definition(definition_block, idx, output)
+        }) {
             return None;
         }
 
@@ -290,11 +304,10 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             let block = self.pcode.blocks.get(block_idx)?;
-            if block
-                .ops
-                .iter()
-                .any(|op| Self::op_kills_varnode_definition(op, &key))
-            {
+            if (0..block.ops.len()).any(|op_idx| {
+                Self::op_kills_varnode_definition(&block.ops[op_idx], &key)
+                    || self.op_clobbers_return_register_definition(block, op_idx, output)
+            }) {
                 continue;
             }
             queue.extend(
