@@ -1614,6 +1614,7 @@ fn build_preview_callee_summaries_uncached(
     let stable_prefix_limit = direct_callee_stable_prefix_instruction_limit(max_bytes);
     if stable_prefix_limit < instruction_limit
         && let Some(complete) = prototype.as_mut()
+        && complete.param_pointer_pointees.iter().any(Option::is_none)
         && let Ok(stable_prefix_pcode) = decode_rust_sleigh_pcode(
             binary,
             target_name,

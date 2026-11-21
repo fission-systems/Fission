@@ -1197,7 +1197,11 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             None
         };
-        let primary_return_live_out_name = block_idx_for_rhs
+        let primary_return_live_out_name = self
+            .register_namer()
+            .is_primary_return_register(output)
+            .then_some(block_idx_for_rhs)
+            .flatten()
             .and_then(|block_idx| {
                 self.prove_definition_reaches_return(block_idx, op_idx, output)
                     .map(|proof| (block_idx, proof))
