@@ -80,6 +80,51 @@ pub struct StubbedRun {
     /// Every byte the function stored outside its own stack frame, with the
     /// value it held when the run ended.
     pub writes: BTreeMap<u64, u8>,
+    /// The first byte of the function's own frame, below its entry stack
+    /// pointer, that it read before anything in this run wrote it.
+    pub undefined_frame_read: Option<u64>,
+}
+
+/// Which bytes of the frame below the entry stack pointer this run has
+/// written, and the first one it read before writing.
+#[derive(Default)]
+struct FrameState {
+    written: BTreeSet<u64>,
+    first_undefined_read: Option<u64>,
+}
+
+/// Watches the frame below the entry stack pointer for reads of bytes
+/// nothing in the run wrote: the stack garbage C leaves undefined.
+struct FrameReads {
+    region: std::ops::Range<u64>,
+    state: Arc<Mutex<FrameState>>,
+}
+
+impl fission_emulator::observe::Observer for FrameReads {
+    fn interest(&self) -> fission_emulator::observe::ObserveMask {
+        fission_emulator::observe::ObserveMask {
+            mem: true,
+            ..fission_emulator::observe::ObserveMask::NONE
+        }
+    }
+
+    fn on_mem(&mut self, addr: u64, size: u32, write: bool, _value: u64) {
+        let mut state = self.state.lock().expect("frame state");
+        for at in (0..u64::from(size)).map(|i| addr.wrapping_add(i)) {
+            if !self.region.contains(&at) {
+                continue;
+            }
+            if write {
+                state.written.insert(at);
+            } else if !state.written.contains(&at) && state.first_undefined_read.is_none() {
+                state.first_undefined_read = Some(at);
+            }
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
 }
 
 /// Records the address range of every RAM write.
@@ -485,6 +530,14 @@ impl EmulatorHarness {
         })
     }
 
+    /// The part of the frame below the entry stack pointer in the run
+    /// [`Self::begin_run`] set up: what the function's own locals occupy, and
+    /// what C leaves undefined until the function writes it.
+    pub fn frame_below_entry(&mut self) -> Result<std::ops::Range<u64>> {
+        let entry_sp = self.emu.read_register_u64(self.emu.arch.sp_reg)?;
+        Ok(entry_sp.saturating_sub(FRAME_BELOW)..entry_sp)
+    }
+
     /// The addresses the function's own frame covers in the run
     /// [`Self::begin_run`] set up. Stores there are the function's own
     /// business; only stores outside it are compared.
@@ -526,6 +579,12 @@ impl EmulatorHarness {
         let entry_sp = self.emu.read_register_u64(sp_reg)?;
         let log = Arc::new(Mutex::new(Vec::new()));
         self.emu.add_observer(Box::new(WriteLog(Arc::clone(&log))));
+        let below_entry = entry_sp.saturating_sub(FRAME_BELOW)..entry_sp;
+        let frame_state = Arc::new(Mutex::new(FrameState::default()));
+        self.emu.add_observer(Box::new(FrameReads {
+            region: below_entry.clone(),
+            state: Arc::clone(&frame_state),
+        }));
         let stray = Arc::new(Mutex::new(None));
         self.emu.add_observer(Box::new(CoverageLog {
             instructions: Arc::new(flow.instructions.clone()),
@@ -565,7 +624,16 @@ impl EmulatorHarness {
                 // function made.
                 let ram = self.emu.state.ram_space();
                 for (addr, byte) in writes {
-                    let _ = self.emu.state.write_space(ram, addr, &[byte]);
+                    if self.emu.state.write_space(ram, addr, &[byte]).is_ok()
+                        && below_entry.contains(&addr)
+                    {
+                        // The callee wrote it: defined from here on.
+                        frame_state
+                            .lock()
+                            .expect("frame state")
+                            .written
+                            .insert(addr);
+                    }
                 }
                 if let Some(clobber) = stub.clobber {
                     for (index, reg) in killed.iter().enumerate() {
@@ -617,7 +685,16 @@ impl EmulatorHarness {
                 writes.insert(at, bytes[0]);
             }
         }
-        Ok(StubbedRun { end, calls, writes })
+        let undefined_frame_read = frame_state
+            .lock()
+            .expect("frame state")
+            .first_undefined_read;
+        Ok(StubbedRun {
+            end,
+            calls,
+            writes,
+            undefined_frame_read,
+        })
     }
 
     /// Undo what [`Self::call_stubbed`] armed for one run.
