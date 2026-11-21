@@ -431,11 +431,8 @@ when you open a pull request. If your change can alter decompiler output, its
 - Provide constructive feedback
 - Approve changes that meet the project requirements
 
-For non-draft pull requests targeting `main`, GitHub Actions requests native
-squash auto-merge after approval or when an approved draft becomes ready for
-review. A 15-minute scheduled check catches missed events. GitHub completes the
-merge only after all branch protection rules pass. Manual workflow runs default
-to a dry run.
+A maintainer merges a pull request explicitly once `CI Summary` is green; there
+is no auto-merge. See [CI and release gates](docs/CI_RELEASE_GATES.md).
 
 ---
 

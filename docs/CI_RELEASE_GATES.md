@@ -3,7 +3,7 @@
 | Gate | Trigger | Required evidence |
 |---|---|---|
 | Fast Gate | All PR targets, GitHub merge candidates and pushes to main | Change plan from event SHAs, affected Linux tests and CLI smoke, plus the selected pre-merge lanes |
-| Heavy | Nightly or workflow dispatch | Linux workspace tests, Windows and macOS coverage, MSRV and compile surface |
+| Heavy | Nightly or workflow dispatch | Linux workspace tests, Windows and macOS coverage, MSRV, compile surface and the RustSec advisory check |
 | DecBench full sweep | Nightly or workflow dispatch | 24 shards with exact row coverage, per-function results, and comparison with a compatible passing main sweep |
 | Release E2E and packages | Intentional release dispatch or SemVer tag push | L0 and L1 on the exact candidate SHA, release CLI E2E and five unpacked platform packages |
 | Publish | Successful release candidate run | SHA256 manifest and artifact provenance, complete draft release verified before publication |
@@ -40,9 +40,28 @@ Operator rollout:
 3. Configure GitHub's merge queue for `main` with the existing required check
    names. Begin with one candidate at a time. Verify the queue reports both
    checks on its synthetic SHA before requiring it for all merges.
-4. Update or disable `auto-merge-approved-prs.yml` once the queue is active so
-   merge strategy is controlled by the queue. Set an approval requirement for
-   CI and release policy changes when an independent reviewer is available.
+4. Set an approval requirement for CI and release policy changes when an
+   independent reviewer is available. (The auto-merge workflow is gone; merges
+   are explicit.)
+
+## What a required check may depend on
+
+[ADR 0016](adr/0016-ci-signal-integrity.md) holds the reasoning and the
+measurements. In short: a required check depends only on the change. The
+RustSec advisory database moves on its own schedule, so a PR checks advisories
+only when it changes `Cargo.lock`, `deny.toml` or `.cargo/audit.toml`; bans,
+licenses and sources are checked on every Rust or metadata change, and Heavy
+checks advisories every night. The sccache setup fails open. Every push to main
+runs workspace fmt and clippy, whatever it changed.
+
+## Scheduled runs report into issues
+
+Heavy, fuzz and the DecBench sweep end with `reusable-report-red.yml`. While a
+workflow is red on main there is one open issue titled `CI red: <workflow>`
+with the `ci-red` label; each further red run comments with its SHA and run,
+and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
+only on its schedule, restores its corpus from earlier runs, and attaches crash
+inputs to the run for 30 days.
 
 ## Nightly DecBench
 

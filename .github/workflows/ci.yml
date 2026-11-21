@@ -35,6 +35,7 @@ jobs:
       lane: ${{ steps.filter.outputs.lane }}
       run_security: ${{ steps.filter.outputs.run_security }}
       run_lint: ${{ steps.filter.outputs.run_lint }}
+      run_advisories: ${{ steps.filter.outputs.run_advisories }}
       run_pass_gate: ${{ steps.filter.outputs.run_pass_gate }}
       run_script_checks: ${{ steps.filter.outputs.run_script_checks }}
       run_tests: ${{ steps.filter.outputs.run_tests }}
@@ -82,6 +83,8 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.run_security == 'true'
     uses: ./.github/workflows/reusable-security-check.yml
+    with:
+      advisories: ${{ needs.changes.outputs.run_advisories == 'true' }}
 
   lint-format:
     name: Lint & Format
@@ -221,7 +224,18 @@ jobs:
               -e "^crates/fission-midend-normalize/" \
               -e "^crates/fission-midend-core/" >/dev/null; then
             NIR_RENDER_MIDEND_CHANGED=true
-            if printf '%s\n' "$CHANGED" | grep -e "tests/" -e ".*test" -e ".*_tests\.rs" >/dev/null; then
+            # Lines of code the change adds there, blank lines and comments
+            # aside. A change that only removes code (a duplicate definition,
+            # dead code) has nothing new for a test to target.
+            ADDED_CODE=$(git diff --unified=0 "$BASE_SHA" HEAD -- \
+                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
+                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
+                crates/fission-midend-core/ \
+                | grep '^+[^+]' | grep -cvE '^\+[[:space:]]*(//.*)?$' || true)
+            if [ "$ADDED_CODE" -eq 0 ]; then
+              echo "INFO: NIR/render/midend change adds no code; no targeted test required."
+              HAS_TARGETED_TEST=true
+            elif printf '%s\n' "$CHANGED" | grep -e "tests/" -e ".*test" -e ".*_tests\.rs" >/dev/null; then
               HAS_TARGETED_TEST=true
             elif git diff "$BASE_SHA" HEAD -- \
                 crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
@@ -367,7 +381,7 @@ jobs:
     name: DecBench sweep smoke
     needs: [changes]
     if: needs.changes.outputs.run_sweep_smoke == 'true'
-    uses: ./.github/workflows/decbench-sweep.yml
+    uses: ./.github/workflows/reusable-decbench-sweep.yml
     with:
       only: binaries/O0/base-passwd/update-passwd
 
@@ -432,11 +446,6 @@ jobs:
             fi
             echo "OK: ${name}"
           }
-
-          if [ "$LANE" = "docs" ]; then
-            echo "OK: docs lane — short-circuit green"
-            exit 0
-          fi
 
           FAILED=0
           require_if "${{ needs.changes.outputs.run_security }}" "Security" "${{ needs.security-check.result }}" || FAILED=1

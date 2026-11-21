@@ -26,6 +26,9 @@ RELEASE = (
     "scripts/release/", "install.sh", ".github/scripts/check_decomp_output.py", ".github/actions/setup-utils/",
 )
 METADATA = {"deny.toml", "licenserc.yaml", ".github/dependabot.yml", ".github/licenserc.yaml"}
+# Files that change which advisories apply. Anything else leaves the advisory
+# answer to the advisory database, which Heavy checks nightly.
+DEPENDENCY_SET = {"Cargo.lock", "deny.toml", ".cargo/audit.toml"}
 # The pre-merge lanes' own definitions. A change here is tested by running every
 # lane it defines, not only by linting it: a lane nobody has seen run is unproven.
 PREMERGE = (
@@ -35,7 +38,8 @@ PREMERGE = (
 # The nightly full-dataset sweep cannot run on a PR; one binary through the same
 # script proves the download, strip, decompile and scoring path still works.
 SWEEP = (
-    ".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
+    ".github/workflows/decbench-sweep.yml", ".github/workflows/reusable-decbench-sweep.yml",
+    "scripts/quality/decbench_full_sweep.py",
     "scripts/quality/decbench_scoring.py", "scripts/quality/decbench_sample_set_gate.py",
     "scripts/quality/decbench-ci-requirements.txt",
 )
@@ -113,7 +117,11 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     native = full or lanes or any(path.startswith(DEBUGGER) for path in paths)
     return lane, {
         "run_security": rust or security,
-        "run_lint": rust,
+        # A push to main always compiles the whole workspace: two PRs that are
+        # each green can still fail to build together, and a docs-only push is
+        # the next chance to notice.
+        "run_lint": rust or event == "push",
+        "run_advisories": event == "workflow_dispatch" or any(path in DEPENDENCY_SET for path in paths),
         "run_pass_gate": lane != "docs",
         "run_script_checks": workflows or scripts or security or event == "workflow_dispatch",
         "run_actionlint": workflows or event == "workflow_dispatch",

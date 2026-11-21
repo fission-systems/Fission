@@ -1,0 +1,74 @@
+name: Reusable scheduled-run reporter
+
+# A scheduled run that fails tells no one: GitHub mails only whoever last edited
+# the cron. Heavy failed 17 nights in a row and the ELF fuzz target crashed on
+# the same input for four weeks before anyone looked. This keeps one open issue
+# per workflow while it is red, comments on each further red run, and closes
+# the issue on the first green one.
+
+on:
+  workflow_call:
+    inputs:
+      result:
+        description: "Result of the run being reported: success, failure, cancelled or skipped"
+        required: true
+        type: string
+      detail:
+        description: "One line on what failed, shown in the issue"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  issues: write
+
+jobs:
+  report:
+    name: Report scheduled result
+    # Only main's own scheduled and dispatched runs speak for main.
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Open, update or close the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULT: ${{ inputs.result }}
+          DETAIL: ${{ inputs.detail }}
+          WORKFLOW: ${{ github.workflow }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="CI red: ${WORKFLOW}"
+          # Idempotent, and listing by a label that does not exist yet fails.
+          gh label create ci-red --color B60205 \
+            --description "A scheduled CI workflow is failing on main" --force >/dev/null
+          existing="$(gh issue list --state open --label ci-red --limit 100 --json number,title \
+            | TITLE="$title" python3 -c 'import json, os, sys; print(next((str(i["number"]) for i in json.load(sys.stdin) if i["title"] == os.environ["TITLE"]), ""))')"
+          line="${RESULT} at \`${SHA:0:9}\`: ${RUN_URL}${DETAIL:+ - ${DETAIL}}"
+          case "$RESULT" in
+            success)
+              if [[ -n "$existing" ]]; then
+                gh issue comment "$existing" --body "Green again: ${line}"
+                gh issue close "$existing" --reason completed
+              fi
+              ;;
+            skipped|cancelled)
+              # Cancelled is a person or a newer run stopping it, not a result;
+              # a timeout reports as failure.
+              echo "No result to report (${RESULT})."
+              ;;
+            *)
+              if [[ -n "$existing" ]]; then
+                gh issue comment "$existing" --body "Still red: ${line}"
+              else
+                gh issue create --label ci-red --title "$title" --body "$(printf '%s\n\n%s\n\n%s' \
+                  "The scheduled \`${WORKFLOW}\` workflow is failing on main. This issue stays open while it is red and closes on the first green run." \
+                  "First red run: ${line}" \
+                  "Each further red run adds a comment, so the gap between the last green and this SHA is the range to bisect.")"
+              fi
+              ;;
+          esac
