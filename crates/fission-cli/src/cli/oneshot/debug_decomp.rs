@@ -14,14 +14,21 @@ use std::path::Path;
 
 use super::debug_bundle_extra;
 
+fn ensure_parent_dir(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
 /// Serialize bundle JSON with `{ "schema_version": 1, "functions": [...] }`.
 pub(crate) fn write_debug_decomp_bundle_file(
     path: &Path,
     bundles: &[serde_json::Value],
 ) -> io::Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    ensure_parent_dir(path)?;
     let envelope = serde_json::json!({
         "schema_version": 1u32,
         "functions": bundles,
@@ -390,5 +397,10 @@ mod tests {
         let mut s = NirBuildStats::default();
         s.forced_linear_structuring_count = 1;
         assert!(structuring_is_partial(&s));
+    }
+
+    #[test]
+    fn ensure_parent_dir_accepts_bare_filename() {
+        assert!(super::ensure_parent_dir(Path::new("bundle.json")).is_ok());
     }
 }

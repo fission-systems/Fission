@@ -62,6 +62,9 @@ pub struct SchemaArgs {
     /// Print the registry of stable error codes and their exit-code kinds
     #[arg(long = "error-codes", conflicts_with = "command")]
     pub error_codes: bool,
+    /// Output in JSON format (accepted for consistency; `schema` always emits JSON)
+    #[arg(short, long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
