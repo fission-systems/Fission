@@ -14,8 +14,10 @@ fn run(args: &[&str]) -> Output {
 }
 
 /// `push rbp; mov rbp,rsp; xor eax,eax; pop rbp; ret` with nothing around it.
-fn raw_blob() -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("fission-raw-{}", std::process::id()));
+/// One file per test, so tests running in one process (`cargo test`) never
+/// write the file another is reading.
+fn raw_blob(test: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("fission-raw-{}-{test}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("blob.bin");
     std::fs::write(&path, [0x55, 0x48, 0x89, 0xe5, 0x31, 0xc0, 0x5d, 0xc3]).unwrap();
@@ -24,7 +26,7 @@ fn raw_blob() -> PathBuf {
 
 #[test]
 fn a_raw_image_disassembles_at_the_given_base() {
-    let blob = raw_blob();
+    let blob = raw_blob("a_raw_image_disassembles_at_the_given_base");
     let out = run(&[
         "--language",
         "x86:LE:64:default",
@@ -48,7 +50,7 @@ fn a_raw_image_disassembles_at_the_given_base() {
 
 #[test]
 fn without_base_a_raw_image_is_refused_with_the_way_out() {
-    let blob = raw_blob();
+    let blob = raw_blob("without_base_a_raw_image_is_refused_with_the_way_out");
     let out = run(&[
         "--language",
         "x86:LE:64:default",
@@ -66,7 +68,7 @@ fn without_base_a_raw_image_is_refused_with_the_way_out() {
 
 #[test]
 fn base_needs_a_language_and_entry_must_be_inside() {
-    let blob = raw_blob();
+    let blob = raw_blob("base_needs_a_language_and_entry_must_be_inside");
     let no_language = run(&["--base", "0x400000", "list", blob.to_str().unwrap()]);
     assert!(!no_language.status.success());
     assert!(String::from_utf8_lossy(&no_language.stderr).contains("--language"));

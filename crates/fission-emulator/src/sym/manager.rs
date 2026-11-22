@@ -252,7 +252,16 @@ impl SimulationManager {
                 }
             });
         }
-        if !self.path_sat(&state.history.constraints, &state.machine_state) {
+        // Not `path_sat`: it reads a solver panic as "satisfiable" so that a
+        // fork is kept, and the model would then be the previous query's --
+        // another path's inputs reported as this one's. Only a model this
+        // query produced is an answer.
+        let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.emu
+                .solver
+                .check_sat_with_oracle(Some(&state.machine_state), &state.history.constraints)
+        }));
+        if !matches!(solved, Ok(Ok(fission_solver::SatResult::Sat))) {
             return None;
         }
         let mut inputs: Vec<SolvedInput> = vars
