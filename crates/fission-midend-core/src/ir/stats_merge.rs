@@ -71,6 +71,32 @@ impl NirBuildStats {
     }
 }
 
+/// Peaks combine by maximum (merging two attempts does not add their work);
+/// trip counts add.
+fn merge_resource_usage_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
+    macro_rules! merge_peaks {
+        ($($field:ident),+ $(,)?) => {
+            $(target.$field = target.$field.max(other.$field);)+
+        };
+    }
+    merge_peaks!(
+        resource_structuring_total_work_peak,
+        resource_condition_recovery_subcalls_peak,
+        resource_sese_region_proof_calls_peak,
+        resource_varnode_lowering_work_peak,
+    );
+    merge_additive_fields!(
+        target,
+        other,
+        [
+            resource_structuring_total_work_trip_count,
+            resource_condition_recovery_subcalls_trip_count,
+            resource_sese_region_proof_calls_trip_count,
+            resource_varnode_lowering_work_trip_count,
+        ]
+    );
+}
+
 fn merge_core_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
     merge_additive_fields!(
         target,
@@ -89,6 +115,7 @@ fn merge_core_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
     target.max_structuring_scc_component_size = target
         .max_structuring_scc_component_size
         .max(other.max_structuring_scc_component_size);
+    merge_resource_usage_stats(target, other);
 }
 
 fn merge_action_pipeline_stats(target: &mut NirBuildStats, other: &NirBuildStats) {
@@ -566,5 +593,30 @@ mod tests {
         assert_eq!(target.canonicalized_guarded_tail_shape_count, 2);
         assert_eq!(target.region_emit_ready_failed_count, 0);
         assert_eq!(target.blockgraph_region_complete_count, 0);
+    }
+
+    #[test]
+    fn merge_assign_takes_the_peak_of_resource_peaks_and_sums_trips() {
+        let source = NirBuildStats {
+            resource_structuring_total_work_peak: 9,
+            resource_structuring_total_work_trip_count: 1,
+            resource_sese_region_proof_calls_peak: 4,
+            resource_sese_region_proof_calls_trip_count: 2,
+            ..NirBuildStats::default()
+        };
+        let mut target = NirBuildStats {
+            resource_structuring_total_work_peak: 5,
+            resource_structuring_total_work_trip_count: 3,
+            resource_sese_region_proof_calls_peak: 40,
+            resource_sese_region_proof_calls_trip_count: 5,
+            ..NirBuildStats::default()
+        };
+
+        target.merge_assign(&source);
+
+        assert_eq!(target.resource_structuring_total_work_peak, 9);
+        assert_eq!(target.resource_structuring_total_work_trip_count, 4);
+        assert_eq!(target.resource_sese_region_proof_calls_peak, 40);
+        assert_eq!(target.resource_sese_region_proof_calls_trip_count, 7);
     }
 }

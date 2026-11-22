@@ -19,6 +19,7 @@ mod hir;
 pub mod inference;
 mod options;
 mod procedure;
+mod resource_usage;
 mod ssa;
 mod stats_merge;
 
@@ -27,4 +28,5 @@ pub use decomp_facts::*;
 pub use hir::*;
 pub use options::*;
 pub use procedure::*;
+pub use resource_usage::*;
 pub use ssa::*;

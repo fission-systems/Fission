@@ -403,7 +403,11 @@ fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
     let counter = host.structuring_total_work_counter();
     let total = counter.get() + 1;
     counter.set(total);
-    total > host.options().resource_limits.structuring_total_work
+    let limit = host.options().resource_limits.structuring_total_work;
+    host.resource_usage()
+        .structuring_total_work
+        .observe(total, limit);
+    total > limit
 }
 
 // ---------------------------------------------------------------------------
@@ -725,6 +729,7 @@ fn try_lower_while_impl(
         block_addr,
         "try_lower_while",
         host.structuring_total_work_counter(),
+        host.resource_usage(),
     );
     if diag {
         eprintln!(

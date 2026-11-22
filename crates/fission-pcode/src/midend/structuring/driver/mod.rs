@@ -103,7 +103,11 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn sese_region_proof_budget_exceeded(&self) -> bool {
         let calls = self.sese_region_proof_calls.get() + 1;
         self.sese_region_proof_calls.set(calls);
-        calls > self.options.resource_limits.sese_region_proof_calls
+        let limit = self.options.resource_limits.sese_region_proof_calls;
+        self.resource_usage
+            .sese_region_proof_calls
+            .observe(calls, limit);
+        calls > limit
     }
 
     pub(crate) fn reset_sese_region_proof_budget(&mut self) {
@@ -321,6 +325,27 @@ mod tests {
         );
         builder.reset_sese_region_proof_budget();
         assert!(!builder.sese_region_proof_budget_exceeded());
+    }
+
+    #[test]
+    fn work_limit_usage_reaches_the_public_stats_from_every_clone() {
+        let pcode = Box::leak(Box::new(PcodeFunction { blocks: Vec::new() }));
+        let mut options = MlilPreviewOptions::default();
+        options.resource_limits.sese_region_proof_calls = 2;
+        let options = Box::leak(Box::new(options));
+        let mut builder = PreviewBuilder::new(pcode, options, None);
+        assert!(!builder.sese_region_proof_budget_exceeded());
+
+        // a trial clone's work is observed too, even though the clone is dropped
+        let mut trial = builder.clone();
+        assert!(!trial.sese_region_proof_budget_exceeded());
+        assert!(trial.sese_region_proof_budget_exceeded());
+        drop(trial);
+
+        let stats = builder.preview_build_stats();
+        assert_eq!(stats.resource_sese_region_proof_calls_peak, 3);
+        assert_eq!(stats.resource_sese_region_proof_calls_trip_count, 1);
+        assert_eq!(stats.resource_structuring_total_work_trip_count, 0);
     }
 
     fn test_builder_with_engine(engine: StructuringEngineKind) -> PreviewBuilder<'static> {

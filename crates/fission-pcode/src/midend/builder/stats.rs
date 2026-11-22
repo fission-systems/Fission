@@ -4,12 +4,14 @@ use super::*;
 struct BuilderStatsProjection<'a> {
     telemetry: &'a super::telemetry::BuilderTelemetry,
     validated_pcode_op_count: usize,
+    resource_usage: &'a fission_midend_core::ir::ResourceUsage,
 }
 
 impl<'a> BuilderStatsProjection<'a> {
     fn from_builder<'builder>(builder: &'a PreviewBuilder<'builder>) -> Self {
         Self {
             telemetry: &builder.telemetry,
+            resource_usage: &builder.resource_usage,
             validated_pcode_op_count: builder
                 .pcode
                 .blocks
@@ -25,6 +27,7 @@ impl<'a> BuilderStatsProjection<'a> {
             ..PreviewBuildStats::default()
         };
         self.telemetry.apply_to_public_stats(&mut stats);
+        self.resource_usage.apply_to_stats(&mut stats);
         stats
     }
 }
@@ -47,6 +50,7 @@ mod tests {
             &BuilderStatsProjection {
                 telemetry: &telemetry,
                 validated_pcode_op_count: 17,
+                resource_usage: &fission_midend_core::ir::ResourceUsage::default(),
             }
             .into_public_stats(),
         );
@@ -71,6 +75,7 @@ mod tests {
         let stats = BuilderStatsProjection {
             telemetry: &telemetry,
             validated_pcode_op_count: 17,
+            resource_usage: &fission_midend_core::ir::ResourceUsage::default(),
         }
         .into_public_stats();
 

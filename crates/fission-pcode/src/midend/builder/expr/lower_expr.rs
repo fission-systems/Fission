@@ -1032,8 +1032,11 @@ impl<'a> PreviewBuilder<'a> {
         }
         const VARNODE_REDIRECT_DEPTH_CAP: u32 = 64;
         self.varnode_lowering_work += 1;
-        let over_budget =
-            self.varnode_lowering_work > self.options.resource_limits.varnode_lowering_work;
+        let work_limit = self.options.resource_limits.varnode_lowering_work;
+        self.resource_usage
+            .varnode_lowering_work
+            .observe(self.varnode_lowering_work, work_limit);
+        let over_budget = self.varnode_lowering_work > work_limit;
         if over_budget || !visiting.insert(key.clone()) {
             if !over_budget
                 && let Some((site, op)) = def_site
