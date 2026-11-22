@@ -1666,6 +1666,11 @@ Packaging changes rehearse all five targets on PRs and merge candidates.</p>
    independent reviewer is available. (The auto-merge workflow is gone; merges
    are explicit.)</li>
 </ol>
+<p>Documentation and CLI changes run the marked <a href="../EVALUATION/">evaluation commands</a>
+against the built CLI and validate real JSON responses against the published
+schemas. MkDocs diagnostics are compared with the event base. A newly broken local link
+fails the required check, including on a merge candidate. See the
+<a href="../VERIFY_REPLAY/">fixture replay guide</a> for the separate native comparison job.</p>
 <h2 id="what-a-required-check-may-depend-on">What a required check may depend on<a class="headerlink" href="#what-a-required-check-may-depend-on" title="Permanent link">&para;</a></h2>
 <p><a href="../adr/0016-ci-signal-integrity/">ADR 0016</a> holds the reasoning and the
 measurements. In short: a required check depends only on the change. The

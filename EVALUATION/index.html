@@ -2072,11 +2072,15 @@ These commands inspect the file from any supported host.</p>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>-p<span class="w"> </span>fission-cli<span class="w"> </span>--release
 </span></code></pre></div>
 <p>From the repository root, set these paths in your shell:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">cli</span><span class="o">=</span>./target/release/fission_cli
+<!-- cli-smoke: setup -->
+
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">cli</span><span class="o">=</span><span class="si">${</span><span class="nv">FISSION_DOC_CLI</span><span class="k">:-</span><span class="p">./target/release/fission_cli</span><span class="si">}</span>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">sample</span><span class="o">=</span>crates/fission-loader/testdata/x64_pdb_struct_test.exe
 </span></code></pre></div>
 <p>On Windows, use the <code>fission_cli.exe</code> suffix.</p>
 <h3 id="2-inspect-binary-metadata">2. Inspect binary metadata<a class="headerlink" href="#2-inspect-binary-metadata" title="Permanent link">&para;</a></h3>
+<!-- cli-smoke: info -->
+
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="s2">"</span><span class="nv">$cli</span><span class="s2">"</span><span class="w"> </span>info<span class="w"> </span><span class="s2">"</span><span class="nv">$sample</span><span class="s2">"</span>
 </span></code></pre></div>
 <p>What to inspect:</p>
@@ -2087,6 +2091,8 @@ These commands inspect the file from any supported host.</p>
 <li>whether the binary loads cleanly without special setup</li>
 </ul>
 <h3 id="3-list-discovered-functions-in-json">3. List discovered functions in JSON<a class="headerlink" href="#3-list-discovered-functions-in-json" title="Permanent link">&para;</a></h3>
+<!-- cli-smoke: list -->
+
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="s2">"</span><span class="nv">$cli</span><span class="s2">"</span><span class="w"> </span>list<span class="w"> </span><span class="s2">"</span><span class="nv">$sample</span><span class="s2">"</span><span class="w"> </span>--json
 </span></code></pre></div>
 <p>What to inspect:</p>
@@ -2100,6 +2106,8 @@ These commands inspect the file from any supported host.</p>
 <li><code>0x140001040</code> (<code>_start</code>)</li>
 </ul>
 <h3 id="4-disassemble-one-function">4. Disassemble one function<a class="headerlink" href="#4-disassemble-one-function" title="Permanent link">&para;</a></h3>
+<!-- cli-smoke: disasm -->
+
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="s2">"</span><span class="nv">$cli</span><span class="s2">"</span><span class="w"> </span>disasm<span class="w"> </span><span class="s2">"</span><span class="nv">$sample</span><span class="s2">"</span><span class="w"> </span>--addr<span class="w"> </span>0x140001040<span class="w"> </span>--function
 </span></code></pre></div>
 <p>What to inspect:</p>
@@ -2108,6 +2116,8 @@ These commands inspect the file from any supported host.</p>
 <li>whether instruction output is usable for manual validation before decompilation</li>
 </ul>
 <h3 id="5-decompile-one-function-in-text-form">5. Decompile one function in text form<a class="headerlink" href="#5-decompile-one-function-in-text-form" title="Permanent link">&para;</a></h3>
+<!-- cli-smoke: decomp -->
+
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="s2">"</span><span class="nv">$cli</span><span class="s2">"</span><span class="w"> </span>decomp<span class="w"> </span><span class="s2">"</span><span class="nv">$sample</span><span class="s2">"</span><span class="w"> </span>--addr<span class="w"> </span>0x140001040
 </span></code></pre></div>
 <p>What to inspect:</p>
@@ -2118,6 +2128,8 @@ These commands inspect the file from any supported host.</p>
 <li>whether this is close enough to your downstream processing needs</li>
 </ul>
 <h3 id="6-decompile-the-same-function-in-json-form">6. Decompile the same function in JSON form<a class="headerlink" href="#6-decompile-the-same-function-in-json-form" title="Permanent link">&para;</a></h3>
+<!-- cli-smoke: decomp-json -->
+
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="s2">"</span><span class="nv">$cli</span><span class="s2">"</span><span class="w"> </span>decomp<span class="w"> </span><span class="s2">"</span><span class="nv">$sample</span><span class="s2">"</span><span class="w"> </span>--addr<span class="w"> </span>0x140001040<span class="w"> </span>--json
 </span></code></pre></div>
 <p>What to inspect:</p>
