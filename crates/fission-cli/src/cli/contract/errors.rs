@@ -196,13 +196,19 @@ pub fn classify_error(error: &anyhow::Error) -> &'static str {
             return "input_not_found";
         }
     }
-    if let Some(selector) = error.downcast_ref::<FunctionSelectorError>() {
+    if let Some(selector) = error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<FunctionSelectorError>())
+    {
         return match selector.0 {
             crate::cli::oneshot::NameLookupError::NotFound(_) => "function_not_found",
             crate::cli::oneshot::NameLookupError::Ambiguous(..) => "function_ambiguous",
         };
     }
-    if error.downcast_ref::<QualityBudgetExceeded>().is_some() {
+    if error
+        .chain()
+        .any(|cause| cause.downcast_ref::<QualityBudgetExceeded>().is_some())
+    {
         return "quality_budget_exceeded";
     }
     let by_text = classify_message(&format!("{error:#}"));
@@ -334,5 +340,25 @@ mod tests {
         let error = anyhow::Error::new(std::io::Error::from(std::io::ErrorKind::NotFound))
             .context("opening binary");
         assert_eq!(classify_error(&error), "input_not_found");
+    }
+
+    #[test]
+    fn wrapped_selector_and_budget_errors_keep_their_codes() {
+        let not_found = anyhow::Error::new(FunctionSelectorError(
+            crate::cli::oneshot::NameLookupError::NotFound("missing".into()),
+        ))
+        .context("span trace:\n  0: run");
+        assert_eq!(classify_error(&not_found), "function_not_found");
+
+        let ambiguous = anyhow::Error::new(FunctionSelectorError(
+            crate::cli::oneshot::NameLookupError::Ambiguous("dup".into(), vec![0x1000, 0x2000]),
+        ))
+        .context("span trace:\n  0: run");
+        assert_eq!(classify_error(&ambiguous), "function_ambiguous");
+
+        let budget =
+            anyhow::Error::new(QualityBudgetExceeded("HLE quality budget exceeded".into()))
+                .context("span trace:\n  0: run");
+        assert_eq!(classify_error(&budget), "quality_budget_exceeded");
     }
 }

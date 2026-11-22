@@ -46,8 +46,22 @@ pub(super) fn print_hex(
     };
 
     let offset_in_section = address - section.virtual_address;
-    let file_offset = (section.file_offset + offset_in_section) as usize;
-    let mapped_end = (section.file_offset + stored_size(section)) as usize;
+    let Some(file_offset) = section
+        .file_offset
+        .checked_add(offset_in_section)
+        .and_then(|offset| usize::try_from(offset).ok())
+    else {
+        let message = format!("0x{address:x} maps outside file bounds");
+        if json {
+            writeln!(stdout, "{}", serde_json::json!({ "error": message }))?;
+        }
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
+    };
+    let mapped_end = section
+        .file_offset
+        .checked_add(stored_size(section))
+        .and_then(|end| usize::try_from(end).ok())
+        .unwrap_or(usize::MAX);
     let data = binary.data.as_slice();
     let end = file_offset
         .saturating_add(count)
@@ -84,7 +98,11 @@ pub(super) fn print_hex(
         )?;
     }
     for (row, chunk) in bytes.chunks(16).enumerate() {
-        writeln!(stdout, "  {}", hex_row(address + (row * 16) as u64, chunk))?;
+        writeln!(
+            stdout,
+            "  {}",
+            hex_row(address.saturating_add((row * 16) as u64), chunk)
+        )?;
     }
     Ok(())
 }
@@ -164,5 +182,50 @@ mod tests {
             .expect("build fixture");
 
         assert!(super::print_hex(&binary, 0x1000, 16, true).is_ok());
+    }
+
+    #[test]
+    fn hex_rejects_overflowing_section_file_offset_without_panicking() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0x42; 64]))
+            .format("TEST")
+            .image_base(0x1000)
+            .add_section(SectionInfo {
+                name: ".data".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x20,
+                file_offset: u64::MAX - 4,
+                file_size: 0x20,
+                is_readable: true,
+                is_writable: true,
+                is_executable: false,
+            })
+            .build()
+            .expect("build fixture");
+
+        let err = super::print_hex(&binary, 0x1008, 16, true).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn hex_clamps_when_section_end_overflows_u64() {
+        use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0x42; 64]))
+            .format("TEST")
+            .image_base(0)
+            .add_section(SectionInfo {
+                name: ".data".into(),
+                virtual_address: 0,
+                virtual_size: u64::MAX,
+                file_offset: 8,
+                file_size: u64::MAX,
+                is_readable: true,
+                is_writable: true,
+                is_executable: false,
+            })
+            .build()
+            .expect("build fixture");
+
+        assert!(super::print_hex(&binary, 0, 16, true).is_ok());
     }
 }
