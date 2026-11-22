@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -57,6 +58,10 @@ def revision(value: str) -> str:
     return git("rev-parse", "--verify", f"{value}^{{commit}}").decode().strip()
 
 
+def is_ancestor(commit: str, descendant: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", commit, descendant]).returncode == 0
+
+
 def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
     checkout = revision(checkout)
     if git("rev-parse", "HEAD").decode().strip() != checkout:
@@ -69,8 +74,17 @@ def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
         head = revision(pr["head"]["sha"])
         # Actions runs the PR merge result. Classify branch changes against
         # the event's base, including when that base is another PR.
-        for parent in (base, head):
-            git("merge-base", "--is-ancestor", parent, checkout)
+        git("merge-base", "--is-ancestor", head, checkout)
+        if not is_ancestor(base, checkout):
+            # Retargeting a PR fires `edited` before GitHub recomputes the
+            # merge ref, so the checkout can still be the merge with the old
+            # base. The changed paths below come from base and head alone, so
+            # the plan is still right; the merge queue tests the new base.
+            print(
+                f"::warning title=Stale merge ref::checkout {checkout[:12]} does not contain "
+                f"base {base[:12]} yet; classifying {base[:12]}...{head[:12]}",
+                file=sys.stderr,  # stdout is the step's $GITHUB_OUTPUT
+            )
         base = git("merge-base", base, head).decode().strip()
     elif event == "merge_group":
         group = payload["merge_group"]
