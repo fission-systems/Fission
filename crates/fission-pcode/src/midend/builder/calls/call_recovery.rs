@@ -382,7 +382,16 @@ impl<'a> PreviewBuilder<'a> {
             // caller never received: the lowering found no definition at the
             // call even though every path has one. Neither is the join, so
             // the slot stays empty -- and a parameter binding the rejected
-            // read created is withdrawn with it.
+            // read created is withdrawn with it. A read of the bare register
+            // (`rdx`) is the same entry value before parameter naming.
+            let live_in_name = if is_register_varnode(vn) {
+                self.sla_hw_name(vn.offset, vn.size)
+            } else {
+                None
+            };
+            let had_live_in = live_in_name
+                .as_ref()
+                .is_some_and(|name| self.temps.contains_key(name));
             let entry_param = {
                 let abi = self.abi_state();
                 abi.param_slot_for_varnode(vn)
@@ -399,10 +408,23 @@ impl<'a> PreviewBuilder<'a> {
             while let PreHirExpr::Cast { expr: inner, .. } = bare {
                 bare = inner;
             }
-            let reads_entry_value = entry_param
-                .as_ref()
-                .is_some_and(|(_, name)| matches!(bare, PreHirExpr::Var(var) if var == name));
+            let reads_entry_value = matches!(bare, PreHirExpr::Var(var)
+                if entry_param.as_ref().is_some_and(|(_, name)| var == name)
+                    || live_in_name.as_ref().is_some_and(|name| var.eq_ignore_ascii_case(name)));
+            self.debug_call_recovery(&format!(
+                "join_arg vn=0x{:x}/{} merged={} entry={:?} rejected={}",
+                vn.offset,
+                vn.size,
+                print_prehir_expr(&expr),
+                entry_param,
+                reads_entry_value || path_values.contains(&expr)
+            ));
             if reads_entry_value || path_values.contains(&expr) {
+                if let Some(name) = live_in_name
+                    && !had_live_in
+                {
+                    self.temps.remove(&name);
+                }
                 if let Some((slot, name)) = entry_param {
                     if !had_binding {
                         self.params.remove(&slot);
