@@ -38,7 +38,7 @@ python3 scripts/quality/local_decomp_observe.py after --session my-case
 python3 scripts/quality/local_decomp_observe.py show --session my-case
 ```
 
-Details: [`scripts/quality/README.md`](../scripts/quality/README.md).  
+Details: [`scripts/quality/README.md`](https://github.com/fission-systems/Fission/blob/main/scripts/quality/README.md).
 This is **local observation only** (gitignored under
 `benchmark/artifacts/local_observe/`). It does **not** replace the docker
 semantic oracle / ranking below.
