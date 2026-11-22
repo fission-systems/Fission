@@ -66,45 +66,6 @@ impl DecompileResult {
             hint_stats,
         }
     }
-
-    pub fn to_protocol_response(&self) -> fission_analysis_protocol::DecompileResponse {
-        let fell_back = self.code.is_none() || self.routing.fell_back;
-        let reason = if fell_back {
-            self.routing
-                .fallback_reason
-                .clone()
-                .or_else(|| Some("decompilation produced no output".to_string()))
-        } else {
-            None
-        };
-        let pseudocode = self.code.clone().unwrap_or_default();
-        let mut warnings = Vec::new();
-        let mut duration_ms = 0;
-        if let Some(stats) = &self.build_stats {
-            duration_ms = stats.build_duration_ms as u64;
-            if stats.fas_virtual_goto_count > 0 {
-                warnings.push(format!(
-                    "Output contains {} FAS virtualized goto statements",
-                    stats.fas_virtual_goto_count
-                ));
-            }
-        }
-        fission_analysis_protocol::DecompileResponse {
-            pseudocode,
-            nir: None,
-            fell_back,
-            reason,
-            warnings,
-            duration_ms,
-            line_map: Vec::new(),
-        }
-    }
-}
-
-impl From<&DecompileResult> for fission_analysis_protocol::DecompileResponse {
-    fn from(result: &DecompileResult) -> Self {
-        result.to_protocol_response()
-    }
 }
 
 pub fn decompile_prebuilt_pcode(
@@ -135,28 +96,4 @@ pub fn decompile_prebuilt_pcode(
     };
 
     Ok(DecompileResult::from_selection(selection))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::DecompileResult;
-    use crate::types::NirRoutingResolver;
-
-    #[test]
-    fn to_protocol_response_honors_routing_fallback_when_code_is_present() {
-        let selection = NirRoutingResolver::nir_success(
-            "int rescued(void) { return 0; }".to_string(),
-            None,
-            None,
-            true,
-            Some("legacy_fallback: rescued after NIR error".to_string()),
-        );
-        let result = DecompileResult::from_selection(selection);
-        let response = result.to_protocol_response();
-        assert!(response.fell_back);
-        assert_eq!(
-            response.reason.as_deref(),
-            Some("legacy_fallback: rescued after NIR error")
-        );
-    }
 }

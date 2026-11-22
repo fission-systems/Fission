@@ -3,7 +3,7 @@ name = "fission-analysis-protocol"
 version = "0.3.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
-description = "Portable wire contracts for Fission analysis backends"
+description = "JSON result shapes shared by the Fission CLI"
 repository = "https://github.com/fission-systems/Fission"
 license = "Apache-2.0"
 
