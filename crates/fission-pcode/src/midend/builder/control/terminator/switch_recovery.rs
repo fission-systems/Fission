@@ -19,6 +19,9 @@ impl<'a> PreviewBuilder<'a> {
     /// unused entries fold into it instead of printing as cases of their own,
     /// and every other in-range value keeps its own case.
     ///
+    /// A table whose only known target is the guard's exit has no case left
+    /// to list (its entries were not decoded), so it keeps the old choice.
+    ///
     /// Without that evidence the block laid out after the dispatch is used,
     /// as before. Either choice is sound, because the cases list every
     /// in-range value whose target is not the default; this only decides
@@ -30,6 +33,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<u64> {
         if let Some(exit) = self.switch_guard_exit_target(idx)
             && targets.contains(&exit)
+            && targets.iter().any(|&target| target != exit)
         {
             return Some(exit);
         }
