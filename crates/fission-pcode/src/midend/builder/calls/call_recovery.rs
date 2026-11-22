@@ -577,7 +577,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(call_idx).map(|op| op.opcode),
             Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
         ) {
-            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+            if let Some(block_idx) = self.block_position(block)
                 && let Some(preds) = self.predecessors.get(block_idx)
                 && let [pred_idx] = preds.as_slice()
                 && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)
@@ -1000,7 +1000,7 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
         vn: &Varnode,
     ) -> bool {
-        let Some(call_block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(call_block_idx) = self.block_position(block) else {
             return false;
         };
         let clobbers = |op: &PcodeOp| {
@@ -1166,7 +1166,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(call_idx).map(|op| op.opcode),
             Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
         ) {
-            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+            if let Some(block_idx) = self.block_position(block)
                 && let Some(preds) = self.predecessors.get(block_idx)
                 && let [pred_idx] = preds.as_slice()
                 && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)

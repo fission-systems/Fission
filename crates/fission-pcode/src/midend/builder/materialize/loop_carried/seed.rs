@@ -15,7 +15,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return;
         }
-        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(block_idx) = self.block_position(block) else {
             return;
         };
         let Some(merge_idx) = self.loop_carried_initializer_merge_predecessor(block_idx) else {
