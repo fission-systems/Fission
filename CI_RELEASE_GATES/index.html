@@ -1677,10 +1677,28 @@ bans, licenses and sources on Rust or security metadata changes. The sccache
 setup fails open. Every push to main runs workspace fmt and clippy.</p>
 <h2 id="checks-on-the-checks">Checks on the checks<a class="headerlink" href="#checks-on-the-checks" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Workflows: every third-party action is pinned to a commit SHA (Dependabot
+<li>Speed: every Rust PR counts instructions executed by its base and head CLIs
+  on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
+  runners is too noisy) and flags +3% in its summary; nightly <code>speed.yml</code>
+  compares main with the last good night and fails at +3%. Dispatch it with
+  <code>accept_baseline</code> to accept a slowdown that is worth it.</li>
+<li>Decompiler changes: a PR that can move output gets an output diff on a
+  fixed DecBench sample (about 3,000 functions) in its job summary: the
+  functions whose text changed first, then GED and type_match before and after.
+  Report-only; open the changed functions before trusting a score.</li>
+<li>
+<p>Nightly: fuzzing of six targets (ELF, PE, Mach-O, COFF, any format, SLEIGH
+  decode) seeded from the loader fixtures; an 8 GiB memory ceiling on the
+  eight largest DecBench binaries; decompiler determinism. Weekly: mutation
+  testing of lines changed on main, four of 48 rotating slices, report-only.
+  Each reports into a <code>ci-red</code> issue when it fails.</p>
+</li>
+<li>
+<p>Workflows: every third-party action is pinned to a commit SHA (Dependabot
   updates the pins monthly), inputs reach shell code through <code>env</code>, and no
   workflow grants <code>actions: write</code>. Any workflow change runs actionlint and
-  zizmor; a high-severity zizmor finding fails Script Checks.</li>
+  zizmor; a high-severity zizmor finding fails Script Checks.</p>
+</li>
 <li>The PR fixture lane compares decompiled text across requests for 1, 4 and 4
   workers. The nightly <code>determinism.yml</code> requests 1, 4, 4 and 4 workers and
   checks whole DecBench binaries in SHA-256 order until their manifest rows
