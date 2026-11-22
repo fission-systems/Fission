@@ -391,7 +391,7 @@ fn recurring_prologue_in_padding_gap_is_not_guessed() {
 
 #[test]
 fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
-    use super::discover::validate_after_condition;
+    use super::ghidra_patterns::matches_pattern_after_condition;
 
     let mut bytes = vec![0x00; 0x100];
     bytes[0x10] = 0x90; // NOP padding before 0x401011
@@ -420,7 +420,7 @@ fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
     refs.insert(0x401050);
 
     // `after="defined"` must accept the start of an executable section
-    assert!(validate_after_condition(
+    assert!(matches_pattern_after_condition(
         &binary,
         0x401000,
         "defined",
@@ -428,14 +428,14 @@ fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
         Some(&refs)
     ));
     // `after="ptr"` requires a pointer/reference targeting `addr`
-    assert!(validate_after_condition(
+    assert!(matches_pattern_after_condition(
         &binary,
         0x401050,
         "ptr",
         &exec_ranges,
         Some(&refs)
     ));
-    assert!(!validate_after_condition(
+    assert!(!matches_pattern_after_condition(
         &binary,
         0x401054,
         "ptr",
@@ -443,21 +443,21 @@ fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
         Some(&refs)
     ));
     // `after="data"` accepts 0x00, 0x90, and 0xcc alignment padding
-    assert!(validate_after_condition(
+    assert!(matches_pattern_after_condition(
         &binary,
         0x401011,
         "data",
         &exec_ranges,
         Some(&refs)
     ));
-    assert!(validate_after_condition(
+    assert!(matches_pattern_after_condition(
         &binary,
         0x401021,
         "data",
         &exec_ranges,
         Some(&refs)
     ));
-    assert!(!validate_after_condition(
+    assert!(!matches_pattern_after_condition(
         &binary,
         0x401031,
         "data",
@@ -467,8 +467,8 @@ fn validate_after_condition_handles_section_start_defined_ptr_and_padding() {
 }
 
 #[test]
-fn tracker_merges_overlapping_intervals_and_maintains_monotonic_offcut_queries() {
-    use super::discover::InstructionBoundaryTracker;
+fn instruction_coverage_merges_overlapping_and_adjacent_intervals() {
+    use super::instruction_boundaries::InstructionCoverage;
     use std::collections::HashSet;
 
     // Simulate overlapping instruction disassemblies:
@@ -483,56 +483,29 @@ fn tracker_merges_overlapping_intervals_and_maintains_monotonic_offcut_queries()
         (0x1014, 0x1018),
     ];
     let known = HashSet::from([0x1000]);
-    let tracker = InstructionBoundaryTracker::from_raw_boundaries(raw, known);
+    let coverage = InstructionCoverage::from_raw_boundaries(raw, known);
 
     // Verify merged intervals:
     // [0x1000, 0x1006) and [0x1010, 0x1018)
-    assert_eq!(tracker.intervals(), &[(0x1000, 0x1006), (0x1010, 0x1018)]);
-    // Instruction starts: 0x1000, 0x1002, 0x1010, 0x1014
-    assert_eq!(
-        tracker.instruction_starts(),
-        &[0x1000, 0x1002, 0x1010, 0x1014]
-    );
+    assert_eq!(coverage.intervals(), &[(0x1000, 0x1006), (0x1010, 0x1018)]);
 
-    // Test in_body:
-    assert!(tracker.is_in_body(0x1000));
-    assert!(tracker.is_in_body(0x1002));
-    assert!(!tracker.is_in_body(0x1001));
-    assert!(!tracker.is_in_body(0x1005));
-    assert!(tracker.is_in_body(0x1010));
-    assert!(tracker.is_in_body(0x1014));
-
-    // Test offcut:
-    assert!(!tracker.is_offcut(0x1000)); // instruction start, not offcut
-    assert!(tracker.is_offcut(0x1001)); // interior of [0x1000, 0x1005)
-    assert!(!tracker.is_offcut(0x1002)); // instruction start, not offcut
-    assert!(tracker.is_offcut(0x1003)); // interior
-    assert!(tracker.is_offcut(0x1005)); // interior of merged interval
-    assert!(!tracker.is_offcut(0x1006)); // outside
-    assert!(!tracker.is_offcut(0x1007)); // gap between intervals
-    assert!(!tracker.is_offcut(0x1010)); // start
-    assert!(tracker.is_offcut(0x1011)); // interior
-    assert!(!tracker.is_offcut(0x1014)); // start of adjacent inst
-    assert!(tracker.is_offcut(0x1017)); // interior
-    assert!(!tracker.is_offcut(0x1018)); // end
-
-    // Test overlap:
-    assert!(tracker.is_overlap(0x1000));
-    assert!(tracker.is_overlap(0x1001));
-    assert!(tracker.is_overlap(0x1002));
-    assert!(tracker.is_overlap(0x1005));
-    assert!(!tracker.is_overlap(0x1006));
-    assert!(!tracker.is_overlap(0x1009));
-    assert!(tracker.is_overlap(0x1010));
-    assert!(tracker.is_overlap(0x1014));
-    assert!(tracker.is_overlap(0x1017));
-    assert!(!tracker.is_overlap(0x1018));
+    // Instruction starts and interior bytes are covered.
+    assert!(coverage.covers(0x1000));
+    assert!(coverage.covers(0x1001));
+    assert!(coverage.covers(0x1002));
+    assert!(coverage.covers(0x1005));
+    assert!(!coverage.covers(0x1006));
+    assert!(!coverage.covers(0x1009));
+    assert!(coverage.covers(0x1010));
+    assert!(coverage.covers(0x1014));
+    assert!(coverage.covers(0x1017));
+    assert!(!coverage.covers(0x1018));
 }
 
 #[test]
 fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
     let _guard = sleigh_runtime_discovery_lock();
-    use super::discover::walk_function_boundaries;
+    use super::instruction_boundaries::walk_function_boundaries;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
     use fission_sleigh::runtime::RuntimeSleighFrontend;
     use std::collections::HashSet;
@@ -588,7 +561,7 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
 #[test]
 fn walk_function_boundaries_terminates_on_noreturn_call() {
     let _guard = sleigh_runtime_discovery_lock();
-    use super::discover::walk_function_boundaries;
+    use super::instruction_boundaries::walk_function_boundaries;
     use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
     use fission_sleigh::runtime::RuntimeSleighFrontend;
     use std::collections::HashSet;
@@ -744,13 +717,11 @@ fn a_code_pointer_with_the_mode_bit_set_is_a_thumb_function_start() {
     // The functions thumb_d calls are already known, as they would be from
     // earlier scans.
     let known: std::collections::HashSet<u64> = [0x20140, 0x20188, 0x201b0].into();
-    let mut cache = std::collections::HashMap::new();
-    let found = super::discover::scan_data_references(
+    let found = super::data_references::scan_data_code_pointers(
         &binary,
         &frontend,
         &executable_ranges,
         &known,
-        &mut cache,
         None,
     );
     let thumb_d = found
@@ -770,7 +741,7 @@ fn a_code_pointer_with_the_mode_bit_set_is_a_thumb_function_start() {
 /// The probe must read it as "no indirect jump here", not index past it.
 #[test]
 fn strict_boundary_probe_survives_a_window_cut_by_the_section_start() {
-    use super::discover::is_strict_boundary;
+    use super::instruction_boundaries::is_plausible_function_boundary;
 
     let mut bytes = vec![0xcc_u8; 0x20];
     bytes[0x0f] = 0xff; // last byte of the first section: an `FF` opcode with no ModRM in reach
@@ -803,7 +774,7 @@ fn strict_boundary_probe_survives_a_window_cut_by_the_section_start() {
         .build()
         .expect("synthetic binary");
 
-    assert!(!is_strict_boundary(&binary, None, 0x401011));
+    assert!(!is_plausible_function_boundary(&binary, None, 0x401011));
 }
 
 #[test]
@@ -860,13 +831,11 @@ fn scan_data_references_decodes_big_endian_pointers() {
     .expect("PowerPC runtime");
     let executable_ranges = super::ranges::executable_ranges(&binary);
     let known: std::collections::HashSet<u64> = [0x1000].into();
-    let mut cache = std::collections::HashMap::new();
-    let found = super::discover::scan_data_references(
+    let found = super::data_references::scan_data_code_pointers(
         &binary,
         &frontend,
         &executable_ranges,
         &known,
-        &mut cache,
         None,
     );
     assert!(
