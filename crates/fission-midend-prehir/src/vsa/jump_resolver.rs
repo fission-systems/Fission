@@ -902,70 +902,13 @@ mod pr_review_regressions {
     }
 
     #[test]
-    fn jump_resolver_prunes_cases_via_solver_and_abstains_on_div_float_and_calls() {
+    fn jump_resolver_abstains_on_signed_div_float_and_side_effecting_calls() {
         let i32_ty = NirType::Int {
             bits: 32,
             signed: true,
         };
         let f32_ty = NirType::Float { bits: 32 };
         let ret = |v: i64| PreHirStmt::Return(Some(PreHirExpr::Const(v, i32_ty.clone())));
-
-        // Solver infers `x` in [1, 3) from `if (c) x = 1; else x = 2;`, pruning cases 0 and 3.
-        let mut func = PreHirFunction {
-            name: "range_prune".to_string(),
-            locals: vec![PreHirBinding {
-                name: "x".to_string(),
-                ty: i32_ty.clone(),
-                surface_type_name: None,
-                origin: None,
-                initializer: None,
-            }],
-            body: vec![
-                PreHirStmt::If {
-                    cond: PreHirExpr::Var("c".to_string()),
-                    then_body: Rc::new(vec![PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("x".to_string()),
-                        rhs: PreHirExpr::Const(1, i32_ty.clone()),
-                    }]),
-                    else_body: Rc::new(vec![PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("x".to_string()),
-                        rhs: PreHirExpr::Const(2, i32_ty.clone()),
-                    }]),
-                },
-                PreHirStmt::Switch {
-                    expr: PreHirExpr::Var("x".to_string()),
-                    cases: vec![
-                        PreHirSwitchCase {
-                            values: vec![0],
-                            body: Rc::new(vec![ret(10)]),
-                        },
-                        PreHirSwitchCase {
-                            values: vec![1],
-                            body: Rc::new(vec![ret(11)]),
-                        },
-                        PreHirSwitchCase {
-                            values: vec![2],
-                            body: Rc::new(vec![ret(12)]),
-                        },
-                        PreHirSwitchCase {
-                            values: vec![3],
-                            body: Rc::new(vec![ret(13)]),
-                        },
-                    ],
-                    default: Rc::new(vec![ret(-1)]),
-                },
-            ],
-            ..Default::default()
-        };
-        assert!(apply_jump_resolver_pass(&mut func));
-        let PreHirStmt::Switch { cases, .. } = &func.body[1] else {
-            panic!("expected switch");
-        };
-        let kept: Vec<i64> = cases
-            .iter()
-            .flat_map(|c| c.values.iter().copied())
-            .collect();
-        assert_eq!(kept, vec![1, 2]);
 
         // Signed Div `-4 / 2` must NOT fold to unsigned `0x7fff_fffe`.
         let mut div_func = PreHirFunction {

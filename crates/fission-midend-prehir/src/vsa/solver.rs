@@ -15,7 +15,7 @@
 /// imprecise for programs with complex aliasing.
 use super::circle_range::CircleRange;
 use super::transfer::{RangeEnv, eval_expr, nir_bits};
-use crate::ir::{NirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
+use crate::ir::{NirBinding, PreHirFunction, PreHirLValue, PreHirStmt};
 use std::collections::{HashMap, HashSet};
 
 const MAX_ITERATIONS: usize = 8;
@@ -25,36 +25,16 @@ const MAX_ITERATIONS: usize = 8;
 pub fn solve(func: &PreHirFunction) -> RangeEnv {
     let mut env: RangeEnv = HashMap::new();
 
-    // Parameters start at Top (can receive arbitrary caller arguments).
-    for binding in &func.params {
+    // Every parameter and local starts at Top. The environment is
+    // flow-insensitive: a name has one range for the whole function, the join
+    // of every assignment this function makes to it. That join says nothing
+    // about a read that precedes the assignments (a live-in register, an
+    // unrecovered parameter, an undefined local) or about a store this
+    // function cannot see (a callee or an alias writing a global), so the
+    // only sound starting point for a name is Top.
+    for binding in func.params.iter().chain(func.locals.iter()) {
         let bits = nir_bits(&binding.ty).unwrap_or(64);
         env.insert(binding.name.clone(), CircleRange::top(bits));
-    }
-
-    // Locals start at Bottom (unassigned / unvisited), or their initializer
-    // range if present. Locals/globals whose address escapes (`&x`) can be
-    // mutated through a pointer, and non-integer bindings (`Float`, `Aggregate`,
-    // `Unknown`, >64-bit ints) stay at Top.
-    let address_taken = address_taken_vars(func);
-    for binding in &func.locals {
-        let initial_range = match nir_bits(&binding.ty) {
-            Some(bits) if CircleRange::supports_intervals(bits) => {
-                if address_taken.contains(binding.name.as_str()) {
-                    CircleRange::top(bits)
-                } else if let Some(init_expr) = &binding.initializer {
-                    eval_expr(init_expr, &env).cast_unsigned(bits)
-                } else {
-                    CircleRange::bottom(bits)
-                }
-            }
-            Some(bits) => CircleRange::top(bits),
-            None => CircleRange::top(64),
-        };
-        env.insert(binding.name.clone(), initial_range);
-    }
-    for name in &address_taken {
-        env.entry((*name).to_string())
-            .or_insert_with(|| CircleRange::top(64));
     }
 
     // Iterative forward propagation with widening.
@@ -67,137 +47,6 @@ pub fn solve(func: &PreHirFunction) -> RangeEnv {
     }
 
     env
-}
-
-/// Names of locals/globals whose address is taken anywhere in the function.
-///
-/// Bodies are shared `Rc` DAGs, so each statement list is visited once.
-fn address_taken_vars(func: &PreHirFunction) -> HashSet<&str> {
-    fn expr<'a>(e: &'a PreHirExpr, out: &mut HashSet<&'a str>) {
-        match e {
-            PreHirExpr::AddressOfLocal(name) | PreHirExpr::AddressOfGlobal(name) => {
-                out.insert(name.as_str());
-            }
-            PreHirExpr::Var(_) | PreHirExpr::Const(..) => {}
-            PreHirExpr::Cast { expr: inner, .. }
-            | PreHirExpr::Unary { expr: inner, .. }
-            | PreHirExpr::Load { ptr: inner, .. }
-            | PreHirExpr::PtrOffset { base: inner, .. }
-            | PreHirExpr::FieldAccess { base: inner, .. }
-            | PreHirExpr::AggregateCopy { src: inner, .. } => expr(inner, out),
-            PreHirExpr::Binary { lhs, rhs, .. }
-            | PreHirExpr::Index {
-                base: lhs,
-                index: rhs,
-                ..
-            } => {
-                expr(lhs, out);
-                expr(rhs, out);
-            }
-            PreHirExpr::Select {
-                cond,
-                then_expr,
-                else_expr,
-                ..
-            } => {
-                expr(cond, out);
-                expr(then_expr, out);
-                expr(else_expr, out);
-            }
-            PreHirExpr::Call { args, .. } => args.iter().for_each(|a| expr(a, out)),
-        }
-    }
-    fn lvalue<'a>(lv: &'a PreHirLValue, out: &mut HashSet<&'a str>) {
-        match lv {
-            PreHirLValue::Var(_) => {}
-            PreHirLValue::Deref { ptr, .. } => expr(ptr, out),
-            PreHirLValue::FieldAccess { base, .. } => expr(base, out),
-            PreHirLValue::Index { base, index, .. } => {
-                expr(base, out);
-                expr(index, out);
-            }
-        }
-    }
-    fn stmts<'a>(
-        list: &'a std::rc::Rc<Vec<PreHirStmt>>,
-        seen: &mut HashSet<*const Vec<PreHirStmt>>,
-        out: &mut HashSet<&'a str>,
-    ) {
-        if seen.insert(std::rc::Rc::as_ptr(list)) {
-            list.iter().for_each(|s| stmt(s, seen, out));
-        }
-    }
-    fn stmt<'a>(
-        s: &'a PreHirStmt,
-        seen: &mut HashSet<*const Vec<PreHirStmt>>,
-        out: &mut HashSet<&'a str>,
-    ) {
-        match s {
-            PreHirStmt::Assign { lhs, rhs } => {
-                lvalue(lhs, out);
-                expr(rhs, out);
-            }
-            PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => expr(e, out),
-            PreHirStmt::VaStart { va_list, .. } => expr(va_list, out),
-            PreHirStmt::Block(body) => stmts(body, seen, out),
-            PreHirStmt::Switch {
-                expr: scrutinee,
-                cases,
-                default,
-            } => {
-                expr(scrutinee, out);
-                cases.iter().for_each(|c| stmts(&c.body, seen, out));
-                stmts(default, seen, out);
-            }
-            PreHirStmt::If {
-                cond,
-                then_body,
-                else_body,
-            } => {
-                expr(cond, out);
-                stmts(then_body, seen, out);
-                stmts(else_body, seen, out);
-            }
-            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
-                expr(cond, out);
-                stmts(body, seen, out);
-            }
-            PreHirStmt::For {
-                init,
-                cond,
-                update,
-                body,
-            } => {
-                if let Some(init) = init {
-                    stmt(init, seen, out);
-                }
-                if let Some(cond) = cond {
-                    expr(cond, out);
-                }
-                if let Some(update) = update {
-                    stmt(update, seen, out);
-                }
-                stmts(body, seen, out);
-            }
-            PreHirStmt::Label(_)
-            | PreHirStmt::Goto(_)
-            | PreHirStmt::Return(None)
-            | PreHirStmt::Break
-            | PreHirStmt::Continue => {}
-        }
-    }
-
-    let mut out = HashSet::new();
-    let mut seen = HashSet::new();
-    for s in &func.body {
-        stmt(s, &mut seen, &mut out);
-    }
-    for binding in func.params.iter().chain(func.locals.iter()) {
-        if let Some(init) = &binding.initializer {
-            expr(init, &mut out);
-        }
-    }
-    out
 }
 
 /// Propagate ranges through a statement list.
@@ -222,10 +71,12 @@ fn update_env(
     widen: bool,
     changed: &mut bool,
 ) {
+    // A name the seed did not cover (a global, a register the builder did not
+    // declare) starts at Top for the same reason a local does: this
+    // function's assignments are not the only writes to it.
     let (old, aligned_new) = match env.get(name).copied() {
         Some(old) => (old, new_range.cast_unsigned(old.bits())),
-        None if name.starts_with("DAT_") => (CircleRange::top(new_range.bits()), new_range),
-        None => (CircleRange::bottom(new_range.bits()), new_range),
+        None => (CircleRange::top(new_range.bits()), new_range),
     };
     let next = if widen && !old.is_bottom() {
         aligned_new.widen(&old)
@@ -328,200 +179,103 @@ pub fn range_of<'a>(env: &'a RangeEnv, binding: &NirBinding) -> CircleRange {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{NirType, PreHirBinding, PreHirExpr, PreHirFunction, PreHirLValue, PreHirStmt};
+    use crate::ir::{PreHirBinding, PreHirExpr, PreHirSwitchCase};
+    use crate::vsa::apply_jump_resolver_pass;
     use std::rc::Rc;
 
-    fn u32_ty() -> NirType {
-        NirType::Int {
+    fn u32_ty() -> crate::ir::NirType {
+        crate::ir::NirType::Int {
             bits: 32,
             signed: false,
         }
     }
 
-    fn binding(name: &str, ty: NirType, initializer: Option<PreHirExpr>) -> PreHirBinding {
-        PreHirBinding {
-            name: name.to_string(),
-            ty,
-            surface_type_name: None,
-            origin: None,
-            initializer,
+    fn assign(name: &str, value: i64) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(name.to_string()),
+            rhs: PreHirExpr::Const(value, u32_ty()),
         }
     }
 
-    fn make_func(
-        params: Vec<PreHirBinding>,
-        locals: Vec<PreHirBinding>,
-        body: Vec<PreHirStmt>,
-    ) -> PreHirFunction {
-        PreHirFunction {
-            name: "test_fn".to_string(),
-            params,
-            locals,
-            body,
+    /// `switch (<name>) { case 0: y = 10; break; case 1: y = 11; break; }`
+    fn switch_on(name: &str) -> PreHirStmt {
+        PreHirStmt::Switch {
+            expr: PreHirExpr::Var(name.to_string()),
+            cases: vec![
+                PreHirSwitchCase {
+                    values: vec![0],
+                    body: Rc::new(vec![assign("y", 10), PreHirStmt::Break]),
+                },
+                PreHirSwitchCase {
+                    values: vec![1],
+                    body: Rc::new(vec![assign("y", 11), PreHirStmt::Break]),
+                },
+            ],
+            default: Rc::new(vec![]),
+        }
+    }
+
+    fn assert_switch_kept(func: &PreHirFunction, index: usize) {
+        match &func.body[index] {
+            PreHirStmt::Switch { cases, .. } => assert_eq!(
+                cases
+                    .iter()
+                    .flat_map(|c| c.values.iter().copied())
+                    .collect::<Vec<_>>(),
+                vec![0, 1],
+                "both arms are reachable"
+            ),
+            other => panic!("switch was folded into one arm: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_global_written_by_a_callee_keeps_every_switch_arm() {
+        // counter = 0; reset(); switch (counter) { case 0: ...; case 1: ...; }
+        //
+        // `reset` may store 1 to `counter`. The only assignment this function
+        // makes is `= 0`, so a solver that starts the name at Bottom proves
+        // `counter == 0` and replaces the switch with the case-0 arm.
+        let mut func = PreHirFunction {
+            name: "calls_reset".to_string(),
+            body: vec![
+                assign("counter", 0),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "reset".to_string(),
+                    args: vec![],
+                    ty: u32_ty(),
+                }),
+                switch_on("counter"),
+            ],
             ..Default::default()
-        }
+        };
+        apply_jump_resolver_pass(&mut func);
+        assert_switch_kept(&func, 2);
+        assert!(eval_expr(&PreHirExpr::Var("counter".to_string()), &solve(&func)).is_top());
     }
 
     #[test]
-    fn solve_refines_locals_from_bottom_while_keeping_params_top() {
-        let func = make_func(
-            vec![binding("p", u32_ty(), None)],
-            vec![binding("x", u32_ty(), None)],
-            vec![PreHirStmt::Assign {
-                lhs: PreHirLValue::Var("x".to_string()),
-                rhs: PreHirExpr::Const(5, u32_ty()),
+    fn a_local_read_before_its_assignment_keeps_every_switch_arm() {
+        // switch (x) { ... } x = 1;
+        //
+        // The switch reads `x` before this function assigns it: a live-in
+        // register or an unrecovered parameter. The later `x = 1` says nothing
+        // about that read.
+        let mut func = PreHirFunction {
+            name: "reads_live_in".to_string(),
+            locals: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: u32_ty(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
             }],
-        );
-        let env = solve(&func);
-        assert_eq!(env.get("x").and_then(|r| r.singleton_value()), Some(5));
-        assert!(env.get("p").copied().expect("p in env").is_top());
-    }
-
-    #[test]
-    fn solve_keeps_address_taken_locals_and_globals_at_top() {
-        let func = make_func(
-            vec![],
-            vec![binding("x", u32_ty(), None)],
-            vec![
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("x".to_string()),
-                    rhs: PreHirExpr::Const(5, u32_ty()),
-                },
-                PreHirStmt::Expr(PreHirExpr::Call {
-                    origin: None,
-                    target: "init".to_string(),
-                    args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
-                    ty: u32_ty(),
-                }),
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("DAT_140008000".to_string()),
-                    rhs: PreHirExpr::Const(1, u32_ty()),
-                },
-                PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("g_escaped".to_string()),
-                    rhs: PreHirExpr::Const(2, u32_ty()),
-                },
-                PreHirStmt::Expr(PreHirExpr::Call {
-                    origin: None,
-                    target: "take_global".to_string(),
-                    args: vec![PreHirExpr::AddressOfGlobal("g_escaped".to_string())],
-                    ty: u32_ty(),
-                }),
-            ],
-        );
-        let env = solve(&func);
-        assert!(env.get("x").copied().expect("x in env").is_top());
-        assert!(eval_expr(&PreHirExpr::Var("DAT_140008000".to_string()), &env).is_top());
-        assert!(
-            env.get("g_escaped")
-                .copied()
-                .expect("escaped global in env")
-                .is_top()
-        );
-    }
-
-    #[test]
-    fn solve_tracks_unseeded_vars_and_else_only_if_vars() {
-        let func = make_func(
-            vec![],
-            vec![],
-            vec![PreHirStmt::If {
-                cond: PreHirExpr::Var("c".to_string()),
-                then_body: Rc::new(vec![]),
-                else_body: Rc::new(vec![PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("else_only".to_string()),
-                    rhs: PreHirExpr::Const(7, u32_ty()),
-                }]),
-            }],
-        );
-        let env = solve(&func);
-        assert_eq!(
-            env.get("else_only").and_then(|r| r.singleton_value()),
-            Some(7),
-            "else-only var must not be dropped or forced to Top: {env:?}"
-        );
-    }
-
-    #[test]
-    fn solve_joins_if_branches_for_initialized_and_then_only_vars() {
-        let func = make_func(
-            vec![],
-            vec![binding(
-                "x",
-                u32_ty(),
-                Some(PreHirExpr::Const(10, u32_ty())),
-            )],
-            vec![PreHirStmt::If {
-                cond: PreHirExpr::Var("c".to_string()),
-                then_body: Rc::new(vec![
-                    PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("x".to_string()),
-                        rhs: PreHirExpr::Const(20, u32_ty()),
-                    },
-                    PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("then_only".to_string()),
-                        rhs: PreHirExpr::Const(3, u32_ty()),
-                    },
-                ]),
-                else_body: Rc::new(vec![PreHirStmt::Assign {
-                    lhs: PreHirLValue::Var("x".to_string()),
-                    rhs: PreHirExpr::Const(21, u32_ty()),
-                }]),
-            }],
-        );
-        let env = solve(&func);
-        let x = env.get("x").copied().expect("x in env");
-        assert_eq!(x, CircleRange::interval(10, 22, 32));
-        assert_eq!(
-            env.get("then_only").and_then(|r| r.singleton_value()),
-            Some(3)
-        );
-    }
-
-    #[test]
-    fn solve_widens_changing_loop_vars_but_preserves_loop_invariant_assigns() {
-        let func = make_func(
-            vec![],
-            vec![
-                binding("i", u32_ty(), Some(PreHirExpr::Const(0, u32_ty()))),
-                binding("inv", u32_ty(), None),
-            ],
-            vec![PreHirStmt::While {
-                cond: PreHirExpr::Var("c".to_string()),
-                body: Rc::new(vec![
-                    PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("inv".to_string()),
-                        rhs: PreHirExpr::Const(42, u32_ty()),
-                    },
-                    PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var("i".to_string()),
-                        rhs: PreHirExpr::Binary {
-                            op: crate::ir::PreHirBinaryOp::Add,
-                            lhs: Box::new(PreHirExpr::Var("i".to_string())),
-                            rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
-                            ty: u32_ty(),
-                        },
-                    },
-                ]),
-            }],
-        );
-        let env = solve(&func);
-        assert!(env.get("i").copied().expect("i in env").is_top());
-        assert_eq!(env.get("inv").and_then(|r| r.singleton_value()), Some(42));
-    }
-
-    #[test]
-    fn solve_keeps_float_locals_at_top_even_if_assigned_int_zero() {
-        let f32_ty = NirType::Float { bits: 32 };
-        let func = make_func(
-            vec![],
-            vec![binding("f", f32_ty, None)],
-            vec![PreHirStmt::Assign {
-                lhs: PreHirLValue::Var("f".to_string()),
-                rhs: PreHirExpr::Const(0, u32_ty()),
-            }],
-        );
-        let env = solve(&func);
-        assert!(env.get("f").copied().expect("f in env").is_top());
+            body: vec![switch_on("x"), assign("x", 1)],
+            ..Default::default()
+        };
+        apply_jump_resolver_pass(&mut func);
+        assert_switch_kept(&func, 0);
+        assert!(eval_expr(&PreHirExpr::Var("x".to_string()), &solve(&func)).is_top());
     }
 }
