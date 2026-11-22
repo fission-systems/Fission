@@ -11,11 +11,11 @@ Multiple crates consume lifted IR and structuring results. Duplicating normaliza
 
 **`crates/fission-pcode`** owns canonical pcode → NIR/HIR normalization, structuring, and rendering contracts surfaced externally.
 
-Fix incorrect behavior **here**, not in downstream UI layers ([`AGENTS.md`](../../AGENTS.md) core rules).
+Fix incorrect behavior **here**, not in downstream UI layers ([`AGENTS.md`](https://github.com/fission-systems/Fission/blob/main/AGENTS.md) core rules).
 
 ## Consequences
 
-- Telemetry keyed by [`NirBuildStats`](../../crates/fission-pcode/src/nir/ir/build_stats.rs) is authoritative; automation rolls it up ([`crates/fission-automation/AGENTS.md`](../../crates/fission-automation/AGENTS.md)).
+- Telemetry keyed by [`NirBuildStats`](https://github.com/fission-systems/Fission/blob/main/crates/fission-midend-core/src/ir/build_stats.rs) is authoritative. See [Quality metrics](../QUALITY_METRICS.md) for the CLI projections.
 - Printer tweaks that mask semantic bugs are rejected unless accompanied by pcode fixes.
 
 ## Rename note (2026-05)
