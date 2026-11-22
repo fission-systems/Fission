@@ -277,6 +277,8 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         similar_index: None,
         similar_update_index: None,
         language_override: None,
+        raw_base: None,
+        raw_entry: None,
     };
 
     ParsedOneShotArgs {
