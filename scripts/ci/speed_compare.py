@@ -35,8 +35,12 @@ LIMIT = 15
 THRESHOLD = 0.03
 
 
-def instructions(cli: Path, binary: Path, resources: Path) -> int:
+def instructions(cli: Path, binary: Path, resources: Path, cache: Path | None = None) -> int:
     env = dict(os.environ, RAYON_NUM_THREADS="1", FISSION_BENCHMARK_NO_CACHE="1")
+    if cache is not None:
+        # Each CLI compiles its own SLEIGH frontends: a shared cache would hand
+        # head the frontends base compiled and hide a SLEIGH compiler change.
+        env["FISSION_SLEIGH_CACHE_DIR"] = str(cache)
     with tempfile.TemporaryDirectory() as temp:
         out = Path(temp) / "cachegrind.out"
         subprocess.run(
@@ -51,9 +55,9 @@ def instructions(cli: Path, binary: Path, resources: Path) -> int:
     raise RuntimeError(f"no cachegrind summary for {binary}")
 
 
-def cost(cli: Path, binary: Path, resources: Path, runs: int = RUNS) -> int:
-    instructions(cli, binary, resources)  # warm-up, discarded
-    return min(instructions(cli, binary, resources) for _ in range(runs))
+def cost(cli: Path, binary: Path, resources: Path, runs: int = RUNS, cache: Path | None = None) -> int:
+    instructions(cli, binary, resources, cache)  # warm-up, discarded
+    return min(instructions(cli, binary, resources, cache) for _ in range(runs))
 
 
 def compare(rows: list[dict], threshold: float = THRESHOLD) -> dict:
@@ -93,6 +97,7 @@ def main() -> int:
 
     head_resources = args.head_resources or sweep.REPO / "utils"
     base_resources = args.base_resources or head_resources
+    caches = Path(tempfile.mkdtemp(prefix="speed-sleigh-cache-"))
     rows = []
     entries = sorted(sweep.manifest(args.data), key=lambda e: e["sha256"])[: args.binaries]
     for entry in entries:
@@ -100,8 +105,8 @@ def main() -> int:
         if binary.stat().st_size != entry["size"] or sweep.digest(binary) != entry["sha256"]:
             raise SystemExit(f"dataset binary hash or size differs for {entry['binary_path']}")
         row = {"binary": entry["binary_path"], "functions": LIMIT,
-               "base": cost(args.base_cli, binary, base_resources),
-               "head": cost(args.head_cli, binary, head_resources)}
+               "base": cost(args.base_cli, binary, base_resources, cache=caches / "base"),
+               "head": cost(args.head_cli, binary, head_resources, cache=caches / "head")}
         rows.append(row)
         print(f"{row['binary']}: {row['base']:,} -> {row['head']:,}", flush=True)
     report = compare(rows)
