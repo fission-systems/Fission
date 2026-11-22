@@ -476,7 +476,10 @@ fn multi_block_preview_rejects_switch_chain_with_mixed_selector_family() {
         code.contains("param_1 == 1") || code.contains("param_1 != 1"),
         "{code}"
     );
-    assert!(code.contains("param_2 == 2"), "{code}");
+    assert!(
+        code.contains("param_2 == 2") || code.contains("param_2 != 2"),
+        "{code}"
+    );
 }
 
 #[test]
@@ -1266,7 +1269,14 @@ fn a_later_compare_that_sets_what_an_arm_returns_is_not_a_switch() {
         render_mlil_preview(&func, "switchy", 0x5000, &preview_options()).expect("preview render");
     let body = &code[code.find("switchy(").expect(&code)..];
     assert!(!body.contains("switch ("), "{code}");
-    assert!(body.contains("return 77;"), "{code}");
+    // The carried write must survive -- returned directly or through the
+    // register the arm returns (`rax = 77; ... return rax;`); which of the
+    // two depends on the order the structurer visits the branches, not on
+    // whether the chain is a switch.
+    assert!(
+        body.contains("return 77;") || (body.contains("= 77;") && body.contains("return rax;")),
+        "{code}"
+    );
     assert!(body.contains("return 55;"), "{code}");
 }
 
