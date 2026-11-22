@@ -482,10 +482,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                 if let Some(harness) = harness.as_mut() {
                     match harness {
                         Ok(harness) => {
-                            let plan = fission_dir::RunPlan {
-                                runs: args.runs,
-                                seed: args.seed,
-                            };
+                            let plan = ground_truth_plan(&args);
                             let grounding =
                                 fission_dir::Grounding::for_function(&binary, func.address, &pair);
                             let outcome = fission_dir::check_ground_truth_with(
@@ -528,7 +525,8 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                             "solver counterexample".to_string(),
                             serde_json::json!({
                                 "counterexamples": [{
-                                    "args": cx.args.iter().map(|a| format!("0x{a:x}")).collect::<Vec<_>>(),
+                                    // Numbers, as the ground-truth tier's are.
+                                    "args": cx.args,
                                 }],
                             }),
                         ),
@@ -594,6 +592,15 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// The ground-truth tier's runs: how many, and the seed their initial
+/// states are drawn from.
+fn ground_truth_plan(args: &crate::cli::args::VerifyArgs) -> fission_dir::RunPlan {
+    fission_dir::RunPlan {
+        runs: args.runs,
+        seed: args.seed,
+    }
 }
 
 /// A tier's outcome as fields, so a caller does not have to parse the
@@ -1046,7 +1053,13 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
         })?,
     };
 
-    if let Some(language_id) = cli.language_override.as_deref() {
+    // A raw image already carries the language, with its own provenance
+    // (`cli-raw-load`); relabelling it would overwrite that.
+    if let Some(language_id) = cli
+        .language_override
+        .as_deref()
+        .filter(|_| cli.raw_base.is_none())
+    {
         apply_language_override(&mut binary, language_id)?;
         if cli.verbose {
             eprintln!("[*] Forced SLEIGH language: {language_id}");
@@ -1418,6 +1431,28 @@ mod verify_fields_tests {
 
     /// A divergence reaches the JSON as fields, every side's result included,
     /// instead of only inside the `Debug` text of `detail`.
+    /// `--seed` and `--runs` reach the plan the ground-truth tier runs, not
+    /// only the echo in the output.
+    #[test]
+    fn the_seed_and_run_count_reach_the_run_plan() {
+        use clap::Parser;
+        #[derive(Parser)]
+        struct Wrapper {
+            #[command(flatten)]
+            verify: crate::cli::args::VerifyArgs,
+        }
+        let parsed =
+            Wrapper::parse_from(["x", "bin", "--addr", "0x10", "--seed", "42", "--runs", "3"]);
+        let plan = super::ground_truth_plan(&parsed.verify);
+        assert_eq!(plan.seed, 42);
+        assert_eq!(plan.runs, 3);
+        let default = Wrapper::parse_from(["x", "bin", "--addr", "0x10"]);
+        assert_eq!(
+            super::ground_truth_plan(&default.verify).seed,
+            fission_dir::DEFAULT_SEED
+        );
+    }
+
     #[test]
     fn a_divergence_is_reported_field_by_field() {
         let found = fission_dir::Divergence {
