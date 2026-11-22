@@ -1,4 +1,7 @@
-use super::{apply_temp_rewrites, is_safe_intra_block_path, is_temp_varnode, trivial_source};
+use super::{
+    apply_temp_rewrites, function_unique_space_id, is_safe_intra_block_path, is_temp_varnode,
+    trivial_source,
+};
 use crate::pcode::optimizer::DefUseTracker;
 use crate::pcode::{PcodeFunction, PcodeOpcode, Varnode};
 
@@ -10,6 +13,9 @@ impl CopyPropagator {
     }
 
     pub fn eliminate(&self, func: &mut PcodeFunction, tracker: &DefUseTracker) -> bool {
+        let Some(unique_space_id) = function_unique_space_id(func) else {
+            return false;
+        };
         let mut rewrites = Vec::new();
         let mut queued_targets: Vec<Varnode> = Vec::new();
 
@@ -18,7 +24,7 @@ impl CopyPropagator {
                 let Some(out) = &op.output else {
                     continue;
                 };
-                if !is_temp_varnode(out) {
+                if !is_temp_varnode(out, unique_space_id) {
                     continue;
                 }
                 if tracker.def_count(out) != 1 || tracker.has_overlapping_storage(out) {

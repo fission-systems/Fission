@@ -2619,3 +2619,64 @@ fn cse_clears_available_exprs_across_intra_block_cbranch() {
     );
     assert_eq!(func.blocks[0].ops[2].opcode, PcodeOpcode::IntAdd);
 }
+
+// ---- RAM is not a temporary space ------------------------------------------
+//
+// The Rust-Sleigh runtime numbers registers 4/5, temporaries 2 and RAM 3; the
+// legacy numbering puts temporaries in 3. Treating every space-3 varnode as a
+// temporary forwards a global's stored value into its reload, after which
+// nothing reads the global and DCE deletes the store.
+
+fn ram_vn(offset: u64) -> Varnode {
+    Varnode {
+        space_id: 3,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+fn assert_copy_kept(ops: &[PcodeOp], output: &Varnode, input: &Varnode) {
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.output.as_ref() == Some(output)
+            && op.inputs.as_slice() == std::slice::from_ref(input)),
+        "`{output:?} = COPY {input:?}` must survive: {ops:?}"
+    );
+}
+
+/// `mov [g], eax; mov ecx, [g]` lifted with the runtime numbering: the store
+/// to `ram:g` and the reload from it are memory, not a temporary and its use.
+#[test]
+fn a_ram_store_and_its_reload_survive_copy_propagation_and_dce() {
+    let reg = |offset| Varnode {
+        space_id: crate::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let (eax, ecx, global) = (reg(0x0), reg(0x8), ram_vn(0x404000));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::Copy, global.clone(), vec![eax.clone()]),
+        cse_op(1, PcodeOpcode::Copy, ecx.clone(), vec![global.clone()]),
+        ret(2, ecx.clone()),
+    ]);
+    assert_copy_kept(&ops, &global, &eax);
+    assert_copy_kept(&ops, &ecx, &global);
+}
+
+/// With no register in either numbering, nothing says whether space 3 is RAM
+/// or unique, so no varnode is a temporary.
+#[test]
+fn space_three_is_not_a_temporary_without_numbering_evidence() {
+    let (source, global, sink) = (ram_vn(0x404000), ram_vn(0x404010), ram_vn(0x404020));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::Copy, global.clone(), vec![source.clone()]),
+        cse_op(1, PcodeOpcode::Copy, sink.clone(), vec![global.clone()]),
+        ret(2, sink.clone()),
+    ]);
+    assert_copy_kept(&ops, &global, &source);
+    assert_copy_kept(&ops, &sink, &global);
+}

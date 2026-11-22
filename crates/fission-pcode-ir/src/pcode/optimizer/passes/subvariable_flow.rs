@@ -1,31 +1,8 @@
 use super::def_use::DefUseTracker;
+use super::function_unique_space_id;
 use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode, truncate_to_varnode_width};
-use crate::space::{
-    RUST_SLEIGH_ALT_REGISTER_SPACE_ID, RUST_SLEIGH_REGISTER_SPACE_ID, RUST_SLEIGH_UNIQUE_SPACE_ID,
-    UNIQUE_SPACE_ID,
-};
 
 pub struct SubvariableFlowOptimizer;
-
-fn infer_unique_space_id(func: &PcodeFunction) -> u64 {
-    for block in &func.blocks {
-        for op in &block.ops {
-            for vn in op.output.iter().chain(op.inputs.iter()) {
-                if !vn.is_constant
-                    && matches!(
-                        vn.space_id,
-                        RUST_SLEIGH_UNIQUE_SPACE_ID
-                            | RUST_SLEIGH_REGISTER_SPACE_ID
-                            | RUST_SLEIGH_ALT_REGISTER_SPACE_ID
-                    )
-                {
-                    return RUST_SLEIGH_UNIQUE_SPACE_ID;
-                }
-            }
-        }
-    }
-    UNIQUE_SPACE_ID
-}
 
 fn initial_next_temp_offset(func: &PcodeFunction, unique_space_id: u64) -> u64 {
     let mut max_end: u64 = 0x10000;
@@ -105,7 +82,11 @@ impl SubvariableFlowOptimizer {
             return false;
         }
 
-        let unique_space_id = infer_unique_space_id(func);
+        // Fresh temporaries go in the function's own unique space; with no
+        // evidence of which space that is, allocating one could land in RAM.
+        let Some(unique_space_id) = function_unique_space_id(func) else {
+            return false;
+        };
         let mut next_temp_offset = initial_next_temp_offset(func, unique_space_id);
 
         // Apply narrowed operations from back to front to avoid shifting earlier op_idx values.
