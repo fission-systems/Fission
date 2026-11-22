@@ -144,3 +144,48 @@ fn back_step_needs_a_recording() {
     let one_shot = run(&["debug", "--emulator", "back-step"]);
     assert!(!one_shot.status.success());
 }
+
+/// A hand-made change after going back makes the recorded future stale.
+/// `continue` records the whole run; going back to step 3 and changing RSP
+/// there, a seek forward to step 8 has to execute the changed machine --
+/// `mov rsi, rsp` at step 4 copies the new RSP -- where replaying the
+/// recording lands on the old RSP and RSI.
+#[test]
+fn seeking_forward_after_set_reg_executes_the_changed_machine() {
+    let body = session(&[
+        "--record",
+        "--record-interval",
+        "1",
+        "-c",
+        "continue",
+        "-c",
+        "seek 3",
+        "-c",
+        "set-reg rsp 0x7ffffffe0000",
+        "-c",
+        "seek 8",
+        "-c",
+        "regs",
+    ]);
+    let results = body["results"].as_array().expect("results");
+    assert_eq!(results[3]["step"], 8, "{body}");
+    let regs = &results[4]["registers"];
+    assert_eq!(regs["rsp"], "0x7ffffffe0000", "{body}");
+    assert_eq!(regs["rsi"], "0x7ffffffe0000", "{body}");
+}
+
+#[test]
+fn a_zero_record_interval_is_refused() {
+    let out = run(&[
+        "debug",
+        "--emulator",
+        "session",
+        CONCOLIC,
+        "--record",
+        "--record-interval",
+        "0",
+        "-c",
+        "step",
+    ]);
+    assert!(!out.status.success());
+}

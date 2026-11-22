@@ -383,6 +383,13 @@ fn start_session(
         if args.record {
             builder = builder.with_emulator_recording(args.record_interval);
         }
+    } else if args.record {
+        // Native backends do not record; say so rather than run a session
+        // whose `back-step` will fail for a reason the caller never saw.
+        eprintln!(
+            "warning: `--record` is accepted but ignored by native debugging; \
+             it records only with `debug --emulator session`"
+        );
     }
     let mut session = builder.build();
     let pid = if let Some(pid) = args.attach {

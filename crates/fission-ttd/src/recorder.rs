@@ -273,6 +273,24 @@ impl TTDRecorder {
         }
     }
 
+    /// Drop every snapshot after `step`: the timeline past it is one the
+    /// machine has left (it was sought back to `step`, and may be changed
+    /// before it runs on). Returns how many were dropped.
+    pub fn truncate_after(&mut self, step: u64) -> usize {
+        let mut dropped = 0usize;
+        while let Some(back) = self.snapshots.back() {
+            if back.step_index <= step {
+                break;
+            }
+            let stale = back.step_index;
+            self.snapshots.pop_back();
+            self.snapshot_steps.remove(&stale);
+            dropped += 1;
+        }
+        self.current_step = self.current_step.saturating_sub(dropped as u64);
+        dropped
+    }
+
     pub fn clear(&mut self) {
         self.snapshots.clear();
         self.snapshot_steps.clear();

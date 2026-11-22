@@ -20,6 +20,21 @@ pub enum LookupQuery {
     },
 }
 
+/// Every value `InferredTypeInfo::source` takes.
+const TYPE_SOURCES: &[&str] = &[
+    "cpp_rtti",
+    "dwarf",
+    "pdb",
+    "go",
+    "rust_vtable",
+    "objc",
+    "swift",
+    "pe_header",
+    "elf_header",
+    "te_header",
+    "user_sidecar",
+];
+
 /// Type recovery with no test behind it yet; reported, but marked.
 const UNVERIFIED_TYPE_SOURCES: &[&str] = &["objc", "swift", "rust_vtable"];
 
@@ -28,6 +43,18 @@ fn hex(value: u64) -> String {
 }
 
 pub(crate) fn run(cli: &OneShotArgs, binary: &LoadedBinary, query: &LookupQuery) -> Result<()> {
+    if let LookupQuery::Types {
+        source: Some(source),
+        ..
+    } = query
+    {
+        // A misspelt source would list nothing and look like "no such types".
+        anyhow::ensure!(
+            TYPE_SOURCES.contains(&source.as_str()),
+            "unknown --source `{source}`; one of: {}",
+            TYPE_SOURCES.join(", ")
+        );
+    }
     let value = match query {
         LookupQuery::Types { source, name } => {
             types_json(binary, source.as_deref(), name.as_deref())
