@@ -334,10 +334,11 @@ fn inner_conditional_exit_ops(
 /// The piece before the split exits to the fall-through block or continues
 /// into the next piece; the last piece keeps the original block's successors
 /// except the fall-through, which only the split branch reached, when it ends
-/// in an unconditional exit of its own. Pieces share the original start
-/// address, so an address-keyed branch to the instruction (the repeat
-/// prefix's back edge) still lands on the first piece -- the exit test --
-/// and the pieces stay adjacent so layout order is preserved.
+/// in an unconditional exit of its own. A later piece starts at its split
+/// instruction's address; when that instruction opens the block (a repeat
+/// prefix, whose back edge targets it) the pieces share the address, and an
+/// address-keyed branch still lands on the first piece -- the exit test.
+/// Pieces stay adjacent so layout order is preserved.
 fn split_blocks_at_inner_conditional_exits(
     blocks: Vec<PcodeBasicBlock>,
     inner_exits: &BTreeMap<(u64, u32), u64>,
@@ -423,9 +424,19 @@ fn split_blocks_at_inner_conditional_exits(
             }
             successors.sort_unstable();
             successors.dedup();
+            // A piece starts where its first op's instruction starts: the
+            // original block's start for the first piece, the split
+            // instruction's address for the rest (the same address when the
+            // split instruction opens the block, as a repeat prefix's
+            // back-edge target does).
+            let start_address = if offset == 0 {
+                block.start_address
+            } else {
+                ops.first().map_or(block.start_address, |op| op.address)
+            };
             out.push(PcodeBasicBlock {
                 index,
-                start_address: block.start_address,
+                start_address,
                 successors,
                 ops,
             });
