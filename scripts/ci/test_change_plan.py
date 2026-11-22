@@ -67,9 +67,15 @@ class ChangePlanTests(unittest.TestCase):
         self.assertFalse(plan(["docs/CLI.md"], "pull_request")[1]["run_lint"])
 
     def test_docs_do_not_select_runtime_jobs(self):
-        self.assertEqual(plan(["docs/CLI.md"], "pull_request"), ("docs", {
-            name: False for name in plan(["docs/CLI.md"], "pull_request")[1]
-        }))
+        for path in ("docs/CLI.md", "mkdocs.yml"):
+            lane, jobs = plan([path], "pull_request")
+            self.assertEqual(lane, "docs")
+            self.assertEqual({name for name, enabled in jobs.items() if enabled}, {"run_doc_checks"})
+
+    def test_cli_contract_and_replay_gates_are_selected_for_their_owners(self):
+        self.assertTrue(plan(["crates/fission-cli/src/cli/contract/schema.rs"], "merge_group")[1]["run_doc_checks"])
+        self.assertTrue(plan(["crates/fission-dir/src/eval.rs"], "pull_request")[1]["run_replay_checks"])
+        self.assertFalse(plan(["docs/CLI.md"], "merge_group")[1]["run_replay_checks"])
 
     def test_stacked_pr_merge_group_and_rename_use_event_shas(self):
         with tempfile.TemporaryDirectory() as temp:

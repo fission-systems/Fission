@@ -50,6 +50,19 @@ SWEEP = (
 )
 
 
+DOC_CHECKS = (
+    "docs/", "scripts/ci/check_docs.py", "scripts/ci/check_contract_schemas.py",
+    "scripts/ci/doc-check-requirements.txt", "crates/fission-cli/", ".github/workflows/ci.yml",
+)
+DOC_ROOT = {"README.md", "CONTRIBUTING.md", "mkdocs.yml"}
+REPLAY_CHECKS = (
+    "crates/fission-dir/", "crates/fission-emulator/", "scripts/test/replay_fixture.py",
+    ".github/workflows/ci.yml",
+    "crates/fission-pcode", "crates/fission-midend-", "crates/fission-sleigh/",
+    "crates/fission-decompiler/", "crates/fission-cspec/", "utils/sleigh-specs/",
+)
+
+
 def git(*args: str) -> bytes:
     return subprocess.check_output(["git", *args])
 
@@ -122,6 +135,8 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     workflows = False
     security = False
     for path in paths:
+        if path in DOC_ROOT:
+            continue
         if path in METADATA:
             security = True
         elif path.startswith((".github/workflows/", ".github/actions/", ".github/scripts/", ".github/actionlint.", "scripts/ci/")):
@@ -138,6 +153,12 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     lanes = before_merge and any(path.startswith(PREMERGE) for path in paths)
     native = full or lanes or any(path.startswith(DEBUGGER) for path in paths)
     return lane, {
+        "run_doc_checks": event == "workflow_dispatch" or any(
+            path in DOC_ROOT or path.startswith(DOC_CHECKS) for path in paths
+        ),
+        "run_replay_checks": event == "workflow_dispatch" or any(
+            path.startswith(REPLAY_CHECKS) for path in paths
+        ),
         "run_security": rust or security or dependency_change or event == "workflow_dispatch",
         # A push to main always compiles the whole workspace: two PRs that are
         # each green can still fail to build together, and a docs-only push is
