@@ -633,6 +633,7 @@ pub(crate) struct FidHashes {
 /// (`Scalar`, `Register`, `Address`) and ignores everything else, so an
 /// object Ghidra cannot classify simply contributes nothing rather than
 /// invalidating the operand.
+#[cfg_attr(test, derive(Debug, PartialEq, Eq))]
 enum OpObject {
     Register(u64),
     Scalar(i64),
@@ -680,7 +681,10 @@ fn classify_handle(compiled: &CompiledFrontend, handle: &RuntimeFixedHandle) -> 
             handle.offset_size
         } else {
             // Ghidra falls back to the default space's pointer size.
-            space.addr_size.max(1)
+            compiled
+                .sla_default_cur_space_pointer_size()
+                .ok()
+                .or_else(|| (space.addr_size != 0).then_some(space.addr_size))?
         };
         let bits = u32::from(u8::try_from(bytes).unwrap_or(8)).saturating_mul(8);
         let value = if bits == 0 || bits >= 64 {
@@ -1304,5 +1308,52 @@ mod tests {
             assert_eq!(via_immediate.specific, via_address.specific);
             assert_eq!(via_immediate.specific_count, via_address.specific_count);
         }
+    }
+
+    #[test]
+    fn const_handle_with_zero_sizes_falls_back_to_default_space_pointer_size() {
+        let mut compiled = crate::compiler::compile_x86_64_frontend().expect("compile x86-64");
+        let const_space = compiled
+            .sla_spaces
+            .get(&0)
+            .cloned()
+            .expect("sla const space");
+        assert_eq!(const_space.addr_size, 0);
+
+        let unsized_const = |offset: u64| RuntimeFixedHandle {
+            space: Some(const_space.clone()),
+            size: 0,
+            offset_space: None,
+            offset_offset: offset,
+            offset_size: 0,
+            temp_space: None,
+            temp_offset: 0,
+            fixable: true,
+        };
+
+        // 0x80 and 0x100 must not be sign-extended/truncated from 8 bits on 64-bit x86-64.
+        assert_eq!(
+            classify_handle(&compiled, &unsized_const(0x80)),
+            Some(OpObject::Scalar(0x80))
+        );
+        assert_eq!(
+            classify_handle(&compiled, &unsized_const(0x100)),
+            Some(OpObject::Scalar(0x100))
+        );
+
+        // Simulate a 32-bit default space (addr_size = 4): 0xFFFF_FE00 sign-extends from 32 bits
+        // to -512 (neither 8-bit 0 nor 64-bit +4294966784).
+        let default_idx = compiled
+            .sla_default_cur_space_index()
+            .expect("default space index");
+        compiled
+            .sla_spaces
+            .get_mut(&default_idx)
+            .expect("default space ref")
+            .addr_size = 4;
+        assert_eq!(
+            classify_handle(&compiled, &unsized_const(0xffff_fe00)),
+            Some(OpObject::Scalar(-512))
+        );
     }
 }
