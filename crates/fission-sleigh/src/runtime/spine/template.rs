@@ -34,7 +34,7 @@ mod tests {
     fn empty_trace() -> RuntimeMatchTrace {
         RuntimeMatchTrace {
             root_bucket: "test".into(),
-            probes: crate::runtime::spine::ProbeChain::default(),
+            probes: crate::runtime::spine::RuntimeMatchProbes::default(),
             leaf_constructor_indexes: Vec::new(),
             matched_leaf_pattern: None,
         }
