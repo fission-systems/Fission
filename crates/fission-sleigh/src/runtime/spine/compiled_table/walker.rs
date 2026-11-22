@@ -237,7 +237,9 @@ impl<'a, 'b> std::ops::DerefMut for CompiledParserWalker<'a, 'b> {
 
 pub(super) struct OperandBinding {
     debug_value: Option<BoundOperand>,
-    subtable_state: Option<RuntimeConstructState>,
+    // The final handle already owns a Box. Allocate it when binding the
+    // subtable so other operands do not carry space for an inline state.
+    subtable_state: Option<Box<RuntimeConstructState>>,
     fixed: Option<RuntimeFixedHandle>,
     requires_fixed: bool,
 }
@@ -264,7 +266,7 @@ impl OperandBinding {
     fn guard_only(subtable_state: RuntimeConstructState) -> Self {
         Self {
             debug_value: None,
-            subtable_state: Some(subtable_state),
+            subtable_state: Some(Box::new(subtable_state)),
             fixed: None,
             requires_fixed: false,
         }
@@ -1044,7 +1046,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             spec: template.spec,
             fixed,
             debug_value: binding.debug_value,
-            subtable_state: binding.subtable_state.map(Box::new),
+            subtable_state: binding.subtable_state,
         });
         Ok(())
     }
@@ -1450,7 +1452,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding {
                     debug_value: value,
                     fixed: Some(exported.fixed.clone()),
-                    subtable_state: Some(sub_state),
+                    subtable_state: Some(Box::new(sub_state)),
                     requires_fixed: true,
                 })
             }
