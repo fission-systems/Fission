@@ -44,6 +44,12 @@ Operator rollout:
    independent reviewer is available. (The auto-merge workflow is gone; merges
    are explicit.)
 
+Documentation and CLI changes run the marked [evaluation commands](EVALUATION.md)
+against the built CLI and validate real JSON responses against the published
+schemas. MkDocs diagnostics are compared with the event base. A newly broken local link
+fails the required check, including on a merge candidate. See the
+[fixture replay guide](VERIFY_REPLAY.md) for the separate native comparison job.
+
 ## What a required check may depend on
 
 [ADR 0016](adr/0016-ci-signal-integrity.md) holds the reasoning and the
@@ -56,6 +62,21 @@ bans, licenses and sources on Rust or security metadata changes. The sccache
 setup fails open. Every push to main runs workspace fmt and clippy.
 
 ## Checks on the checks
+
+- Speed: every Rust PR counts instructions executed by its base and head CLIs
+  on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
+  runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
+  compares main with the last good night and fails at +3%. Dispatch it with
+  `accept_baseline` to accept a slowdown that is worth it.
+- Decompiler changes: a PR that can move output gets an output diff on a
+  fixed DecBench sample (about 3,000 functions) in its job summary: the
+  functions whose text changed first, then GED and type_match before and after.
+  Report-only; open the changed functions before trusting a score.
+- Nightly: fuzzing of six targets (ELF, PE, Mach-O, COFF, any format, SLEIGH
+  decode) seeded from the loader fixtures; an 8 GiB memory ceiling on the
+  eight largest DecBench binaries; decompiler determinism. Weekly: mutation
+  testing of lines changed on main, four of 48 rotating slices, report-only.
+  Each reports into a `ci-red` issue when it fails.
 
 - Workflows: every third-party action is pinned to a commit SHA (Dependabot
   updates the pins monthly), inputs reach shell code through `env`, and no

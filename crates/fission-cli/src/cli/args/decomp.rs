@@ -47,7 +47,9 @@ pub struct DecompArgs {
     #[arg(long)]
     pub include_nonuser_functions: bool,
 
-    /// Decompilation profile (balanced|quality|speed|nir; mlil-preview is a deprecated alias)
+    /// Accepted for compatibility and ignored, with a warning: every decompile
+    /// runs the CLI's one configuration. The value is only echoed into the
+    /// output's metadata.
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 

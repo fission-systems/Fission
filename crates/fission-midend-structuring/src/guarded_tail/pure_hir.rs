@@ -1606,58 +1606,93 @@ pub fn rewrite_guarded_tail_sequence(
                         )
                     })
                 {
+                    // `if (c) goto L; SKIPPED; L: REST`. Every path through
+                    // SKIPPED that does not leave by its own jump falls into
+                    // `L`, so REST is the continuation of *both* outcomes of
+                    // `c`, exactly as it is in the input: one copy.
+                    //
+                    // This used to emit `if (c) { REST } else { SKIPPED; REST }`.
+                    // REST holds every later rung of the same ladder, so each
+                    // rung doubled it: a 16-rung `if (a && b && c) return k;`
+                    // chain printed to 240,000 lines. The second copy was also
+                    // rewritten under the assumption `c == branch_when_true`,
+                    // which is false on the path that reaches it.
+                    let skipped = &stmts[idx + 1..label_pos];
+                    let rest = &stmts[label_pos + 1..];
+                    let mut skipped_assumptions = assumptions.to_vec();
+                    skipped_assumptions.push(ConditionAssumption {
+                        expr: cond.clone(),
+                        value: !branch_when_true,
+                    });
+                    let skipped_reaches_join = skipped
+                        .iter()
+                        .any(|stmt| stmt_contains_goto_label(stmt, join_label) > 0);
+                    if !skipped_reaches_join {
+                        let skipped_rewritten = rewrite_guarded_tail_sequence(
+                            skipped,
+                            join_label,
+                            &skipped_assumptions,
+                        );
+                        let guard = if branch_when_true {
+                            negate_expr(cond.clone())
+                        } else {
+                            cond.clone()
+                        };
+                        if !skipped_rewritten.stmts.is_empty() {
+                            out.push(PreHirStmt::If {
+                                cond: guard,
+                                then_body: std::rc::Rc::new(skipped_rewritten.stmts),
+                                else_body: std::rc::Rc::new(Vec::new()),
+                            });
+                        } else if !expr_is_pure_value(cond) {
+                            out.push(PreHirStmt::Expr(cond.clone()));
+                        }
+                        // A jump to `L` from inside SKIPPED was not this
+                        // branch's to resolve; it still needs its label.
+                        if out
+                            .iter()
+                            .chain(rest.iter())
+                            .any(|stmt| stmt_contains_goto_label(stmt, &branch_label) > 0)
+                        {
+                            out.push(PreHirStmt::Label(branch_label));
+                        }
+                        idx = label_pos + 1;
+                        continue;
+                    }
+
+                    // SKIPPED can leave for the join. REST must then run only
+                    // on SKIPPED's paths that fall into `L`, which only a
+                    // rewrite of SKIPPED and REST as one sequence places
+                    // correctly: appending REST after a rewritten SKIPPED ran
+                    // it on the paths that had already left.
                     let mut target_assumptions = assumptions.to_vec();
                     target_assumptions.push(ConditionAssumption {
                         expr: cond.clone(),
                         value: branch_when_true,
                     });
-                    let target_rewritten = rewrite_guarded_tail_sequence(
-                        &stmts[label_pos + 1..],
-                        join_label,
-                        &target_assumptions,
-                    );
-
-                    let mut fallthrough_assumptions = assumptions.to_vec();
-                    fallthrough_assumptions.push(ConditionAssumption {
-                        expr: cond.clone(),
-                        value: !branch_when_true,
-                    });
+                    let target_rewritten =
+                        rewrite_guarded_tail_sequence(rest, join_label, &target_assumptions);
+                    let mut fallthrough_seq = skipped.to_vec();
+                    fallthrough_seq.push(PreHirStmt::Label(branch_label));
+                    fallthrough_seq.extend_from_slice(rest);
                     let fallthrough_rewritten = rewrite_guarded_tail_sequence(
-                        &stmts[idx + 1..label_pos],
+                        &fallthrough_seq,
                         join_label,
-                        &fallthrough_assumptions,
+                        &skipped_assumptions,
                     );
-
-                    let target_body = target_rewritten.stmts.clone();
-                    let target_exits = target_rewritten.exits_to_join;
-
                     let (then_result, then_exits, else_result, else_exits) = if branch_when_true {
-                        let mut fallthrough_body = fallthrough_rewritten.stmts;
-                        let fallthrough_exits = if fallthrough_rewritten.exits_to_join {
-                            true
-                        } else {
-                            fallthrough_body.extend(target_rewritten.stmts);
-                            target_exits
-                        };
                         (
-                            target_body,
-                            target_exits,
-                            fallthrough_body,
-                            fallthrough_exits,
+                            target_rewritten.stmts,
+                            target_rewritten.exits_to_join,
+                            fallthrough_rewritten.stmts,
+                            fallthrough_rewritten.exits_to_join,
                         )
                     } else {
-                        let mut fallthrough_body = fallthrough_rewritten.stmts;
-                        let fallthrough_exits = if fallthrough_rewritten.exits_to_join {
-                            true
-                        } else {
-                            fallthrough_body.extend(target_rewritten.stmts);
-                            target_exits
-                        };
                         (
-                            fallthrough_body,
-                            fallthrough_exits,
-                            target_body,
-                            target_exits,
+                            fallthrough_rewritten.stmts,
+                            fallthrough_rewritten.exits_to_join,
+                            target_rewritten.stmts,
+                            target_rewritten.exits_to_join,
                         )
                     };
 
@@ -3805,5 +3840,212 @@ mod read_kind_index_tests {
     fn nothing_read_reports_nothing() {
         let stmt = PreHirStmt::Goto("L".to_string());
         agrees(&stmt, &["a", "L"]);
+    }
+}
+
+#[cfg(test)]
+mod rewrite_sequence_tests {
+    use super::*;
+    use fission_midend_core::ir::NirType;
+
+    fn call(name: &str) -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: name.to_string(),
+            args: Vec::new(),
+            ty: NirType::Unknown,
+        })
+    }
+
+    fn if_goto(cond: &str, label: &str) -> PreHirStmt {
+        PreHirStmt::If {
+            cond: PreHirExpr::Var(cond.to_string()),
+            then_body: std::rc::Rc::new(vec![PreHirStmt::Goto(label.to_string())]),
+            else_body: std::rc::Rc::new(Vec::new()),
+        }
+    }
+
+    fn label(name: &str) -> PreHirStmt {
+        PreHirStmt::Label(name.to_string())
+    }
+
+    fn goto(name: &str) -> PreHirStmt {
+        PreHirStmt::Goto(name.to_string())
+    }
+
+    const JOIN: &str = "join";
+
+    /// Calls made by a flat goto program run from its first statement until it
+    /// reaches `JOIN` (or its end), with every condition variable in `truthy`
+    /// true and every other one false.
+    fn run_flat(stmts: &[PreHirStmt], truthy: &HashSet<String>) -> Vec<String> {
+        let mut calls = Vec::new();
+        let mut pc = 0usize;
+        let mut steps = 0usize;
+        while pc < stmts.len() {
+            steps += 1;
+            assert!(steps < 10_000, "flat program does not terminate");
+            let jump = match &stmts[pc] {
+                PreHirStmt::Expr(PreHirExpr::Call { target, .. }) => {
+                    calls.push(target.clone());
+                    None
+                }
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var(c),
+                    then_body,
+                    ..
+                } if truthy.contains(c) => match then_body.as_slice() {
+                    [PreHirStmt::Goto(target)] => Some(target.clone()),
+                    _ => unreachable!("flat programs here only branch by goto"),
+                },
+                PreHirStmt::Goto(target) => Some(target.clone()),
+                _ => None,
+            };
+            match jump {
+                Some(target) if target == JOIN => break,
+                Some(target) => {
+                    pc = stmts
+                        .iter()
+                        .position(|s| matches!(s, PreHirStmt::Label(l) if *l == target))
+                        .expect("jump target exists");
+                }
+                None => pc += 1,
+            }
+        }
+        calls
+    }
+
+    /// Same, for a rewritten sequence: falling off its end is reaching the
+    /// join, and it must not jump anywhere else.
+    fn run_structured(stmts: &[PreHirStmt], truthy: &HashSet<String>, calls: &mut Vec<String>) {
+        for stmt in stmts {
+            match stmt {
+                PreHirStmt::Expr(PreHirExpr::Call { target, .. }) => calls.push(target.clone()),
+                PreHirStmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                } => {
+                    let value = match cond {
+                        PreHirExpr::Var(c) => truthy.contains(c),
+                        PreHirExpr::Unary {
+                            op: PreHirUnaryOp::Not,
+                            expr,
+                            ..
+                        } => match expr.as_ref() {
+                            PreHirExpr::Var(c) => !truthy.contains(c),
+                            other => panic!("unexpected condition {other:?}"),
+                        },
+                        other => panic!("unexpected condition {other:?}"),
+                    };
+                    let arm = if value { then_body } else { else_body };
+                    run_structured(arm, truthy, calls);
+                }
+                PreHirStmt::Label(_) => {}
+                other => panic!("rewritten sequence still jumps: {other:?}"),
+            }
+        }
+    }
+
+    fn assert_same_program(stmts: &[PreHirStmt], conds: &[&str]) -> GuardedTailRewriteResult {
+        let rewritten = rewrite_guarded_tail_sequence(stmts, JOIN, &[]);
+        for mask in 0u32..(1 << conds.len()) {
+            let truthy: HashSet<String> = conds
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| mask & (1 << bit) != 0)
+                .map(|(_, c)| c.to_string())
+                .collect();
+            let mut got = Vec::new();
+            run_structured(&rewritten.stmts, &truthy, &mut got);
+            assert_eq!(
+                got,
+                run_flat(stmts, &truthy),
+                "different calls with {truthy:?} true"
+            );
+        }
+        rewritten
+    }
+
+    /// `if (cK) goto LK; aK(); LK:` repeated: each rung's skipped call runs
+    /// only when its own test fails, and every later rung runs either way.
+    fn skip_ladder(rungs: usize) -> (Vec<PreHirStmt>, Vec<String>) {
+        let mut stmts = Vec::new();
+        let mut conds = Vec::new();
+        for k in 0..rungs {
+            conds.push(format!("c{k}"));
+            stmts.push(if_goto(&format!("c{k}"), &format!("L{k}")));
+            stmts.push(call(&format!("a{k}")));
+            stmts.push(label(&format!("L{k}")));
+        }
+        stmts.push(call("tail"));
+        stmts.push(goto(JOIN));
+        (stmts, conds)
+    }
+
+    #[test]
+    fn skip_ladder_keeps_every_path() {
+        let (stmts, conds) = skip_ladder(5);
+        let conds: Vec<&str> = conds.iter().map(String::as_str).collect();
+        let rewritten = assert_same_program(&stmts, &conds);
+        assert!(rewritten.exits_to_join);
+    }
+
+    #[test]
+    fn skip_ladder_prints_each_rung_once() {
+        // A rung used to be rewritten as `if (c) { REST } else { a(); REST }`,
+        // which doubles REST at every rung: 2^16 copies of `tail()` here.
+        let (stmts, _) = skip_ladder(16);
+        let rewritten = rewrite_guarded_tail_sequence(&stmts, JOIN, &[]);
+        let expanded = crate::stmt_dag::expanded_stmt_count(&rewritten.stmts);
+        assert!(
+            expanded <= stmts.len(),
+            "{} input statements printed as {expanded}",
+            stmts.len()
+        );
+    }
+
+    #[test]
+    fn rest_does_not_run_on_a_skipped_path_that_left_for_the_join() {
+        // if (c) goto L; if (d) goto join; x(); L: y(); goto join;
+        // With c false and d true the program leaves before `y()`.
+        let stmts = vec![
+            if_goto("c", "L"),
+            if_goto("d", JOIN),
+            call("x"),
+            label("L"),
+            call("y"),
+            goto(JOIN),
+        ];
+        assert_same_program(&stmts, &["c", "d"]);
+    }
+
+    #[test]
+    fn a_jump_to_the_label_from_inside_the_skipped_span_keeps_its_label() {
+        // if (c) goto L; if (d) goto L; x(); L: y(); goto join;
+        let stmts = vec![
+            if_goto("c", "L"),
+            if_goto("d", "L"),
+            call("x"),
+            label("L"),
+            call("y"),
+            goto(JOIN),
+        ];
+        let rewritten = rewrite_guarded_tail_sequence(&stmts, JOIN, &[]);
+        let gotos_to_l: usize = rewritten
+            .stmts
+            .iter()
+            .map(|s| stmt_contains_goto_label(s, "L"))
+            .sum();
+        // `if (d) goto L` is not this rewrite's to resolve: it stays a jump.
+        assert_eq!(gotos_to_l, 1, "{:?}", rewritten.stmts);
+        assert!(
+            rewritten
+                .stmts
+                .iter()
+                .any(|s| matches!(s, PreHirStmt::Label(l) if l == "L")),
+            "a surviving `goto L` needs its label: {:?}",
+            rewritten.stmts
+        );
     }
 }

@@ -1,0 +1,100 @@
+name: Decompile speed (nightly)
+
+# Speed regressions that no PR comparison saw (several PRs each under the
+# threshold, or a change outside the Rust lane) still add up. Each night this
+# builds main's CLI and compares its instructions executed with the CLI the
+# previous successful night built, on the same runner (scripts/ci/speed_compare.py).
+# A rise of 3% or more fails the run and opens a `ci-red` issue; the CLI is kept
+# as the next night's baseline only when the run passes. A slowdown that is
+# worth its cost is accepted by dispatching with accept_baseline, which stores
+# main's CLI as the new baseline without comparing.
+
+on:
+  schedule:
+    - cron: "5 3 * * *"
+  workflow_dispatch:
+    inputs:
+      accept_baseline:
+        description: "Store main's CLI as the new baseline without comparing"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: speed-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  speed:
+    name: Instructions executed vs the last good night
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-speed-${{ runner.os }}
+      - name: Build release CLI
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p fission-cli
+          mkdir -p speed-cli
+          cp target/release/fission_cli speed-cli/fission_cli
+          git rev-parse HEAD > speed-cli/commit
+      - name: Fetch the last good night's CLI
+        id: baseline
+        if: ${{ !inputs.accept_baseline }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_ids="$(gh api "repos/$REPOSITORY/actions/workflows/speed.yml/runs?branch=main&status=success&per_page=10" \
+            --jq '.workflow_runs[] | .id')"
+          for run_id in $run_ids; do
+            if gh run download "$run_id" --repo "$REPOSITORY" --name speed-cli --dir baseline 2>/dev/null; then
+              chmod +x baseline/fission_cli
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              echo "commit=$(cat baseline/commit)" >> "$GITHUB_OUTPUT"
+              break
+            fi
+          done
+      - name: Install valgrind
+        if: steps.baseline.outputs.found == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends valgrind
+      - name: Compare with the last good night
+        if: steps.baseline.outputs.found == 'true'
+        env:
+          BASE_COMMIT: ${{ steps.baseline.outputs.commit }}
+        run: |
+          python3 scripts/ci/speed_compare.py --data "$RUNNER_TEMP/decbench" \
+            --base-cli baseline/fission_cli --head-cli speed-cli/fission_cli \
+            --title "Decompile cost, ${BASE_COMMIT:0:9} -> $(git rev-parse --short HEAD)" \
+            --out speed-report --fail-on-regression
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: speed-cli
+          path: speed-cli
+          retention-days: 30
+
+  report:
+    needs: speed
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.speed.result }}
+      detail: "the job summary has instructions executed per binary, last good night vs this one"

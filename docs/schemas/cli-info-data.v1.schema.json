@@ -1,0 +1,265 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fission info data v1",
+  "description": "Binary metadata, or rows selected by --sections, --imports, or --exports.",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "path",
+        "format",
+        "arch",
+        "bits",
+        "entry",
+        "image_base",
+        "sections",
+        "functions",
+        "imports",
+        "exports"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "arch": {
+          "type": "string"
+        },
+        "bits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "entry": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]+$"
+        },
+        "image_base": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]+$"
+        },
+        "sections": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "functions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "imports": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "exports": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detections": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "identity": {
+          "type": "object"
+        },
+        "xrefs": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "virtual_address",
+          "virtual_size",
+          "file_offset",
+          "file_size",
+          "readable",
+          "writable",
+          "executable"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "virtual_address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "virtual_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "file_offset": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "file_size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "readable": {
+            "type": "boolean"
+          },
+          "writable": {
+            "type": "boolean"
+          },
+          "executable": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "address",
+          "name",
+          "origin",
+          "kind",
+          "source_section",
+          "external_library",
+          "is_thunk_like",
+          "thunk_target",
+          "used_by"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source_section": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_library": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_thunk_like": {
+            "type": "boolean"
+          },
+          "thunk_target": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "used_by": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "address",
+                    "name"
+                  ],
+                  "properties": {
+                    "address": {
+                      "type": "string",
+                      "pattern": "^0x[0-9a-f]+$"
+                    },
+                    "name": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "address",
+          "name",
+          "origin",
+          "kind",
+          "source_section",
+          "external_library",
+          "is_thunk_like",
+          "thunk_target",
+          "size"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "source_section": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "external_library": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_thunk_like": {
+            "type": "boolean"
+          },
+          "thunk_target": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  ]
+}

@@ -10,12 +10,12 @@ on:
     inputs:
       fuzz_duration:
         description: "Fuzz duration per target (seconds)"
-        default: "120"
+        default: "300"
         required: false
 
 env:
   CARGO_TERM_COLOR: always
-  FUZZ_DURATION: ${{ github.event.inputs.fuzz_duration || '60' }}
+  FUZZ_DURATION: ${{ github.event.inputs.fuzz_duration || '300' }}
 
 permissions:
   contents: read
@@ -33,13 +33,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Loader targets seed from the checked-in fixtures (DWARF 2/5, LSDA,
+          # RTTI, Mach-O, PE+PDB, SEH, COFF objects).
           - target: fuzz_pe_parser
             crate_dir: crates/fission-loader
           - target: fuzz_elf_parser
             crate_dir: crates/fission-loader
-          # fuzz_structuring: added once crates/fission-pcode/fuzz is scaffolded
-          # - target: fuzz_structuring
-          #   crate_dir: crates/fission-pcode
+          - target: fuzz_macho_parser
+            crate_dir: crates/fission-loader
+          - target: fuzz_coff_object
+            crate_dir: crates/fission-loader
+          - target: fuzz_any_format
+            crate_dir: crates/fission-loader
+          # Decoder and lifter on arbitrary bytes, four ISAs.
+          - target: fuzz_sleigh_decode
+            crate_dir: crates/fission-sleigh
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -69,16 +77,21 @@ jobs:
             cargo install cargo-fuzz --locked
           fi
 
-      - name: Generate seed corpus (best effort)
+      # Real inputs reach the deep parser paths a random start never does.
+      # The seed helper this step used to look for was never checked in.
+      - name: Seed corpus from checked-in fixtures
+        env:
+          CRATE_DIR: ${{ matrix.crate_dir }}
+          TARGET: ${{ matrix.target }}
         run: |
-          mkdir -p ${{ matrix.crate_dir }}/fuzz/corpus/fuzz_pe_parser
-          mkdir -p ${{ matrix.crate_dir }}/fuzz/corpus/fuzz_elf_parser
-          if [ -f scripts/test/gen_fuzz_corpus.sh ]; then
-            chmod +x scripts/test/gen_fuzz_corpus.sh
-            ./scripts/test/gen_fuzz_corpus.sh
-          else
-            echo "Seed helper script not found in repository; continuing with current corpus"
+          set -euo pipefail
+          corpus="${CRATE_DIR}/fuzz/corpus/${TARGET}"
+          mkdir -p "$corpus"
+          if [ -d "${CRATE_DIR}/testdata" ]; then
+            find "${CRATE_DIR}/testdata" -type f ! -name '*.c' ! -name '*.cpp' -size -2M \
+              -exec cp {} "$corpus"/ \;
           fi
+          echo "seeds: $(find "$corpus" -type f | wc -l)"
 
       # Each run starts from what earlier runs found. The corpus used to be
       # uploaded and never read back, so every run began from the seeds.
@@ -91,6 +104,9 @@ jobs:
 
       - name: Run fuzzer — ${{ matrix.target }}
         working-directory: ${{ matrix.crate_dir }}
+        env:
+          # SLEIGH specs for fuzz_sleigh_decode; the loader targets ignore it.
+          FISSION_RESOURCE_ROOT: ${{ github.workspace }}/utils
         run: |
           cargo fuzz run ${{ matrix.target }} -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \

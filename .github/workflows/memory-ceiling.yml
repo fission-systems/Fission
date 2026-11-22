@@ -1,0 +1,51 @@
+name: Decompiler memory ceiling
+
+# Memory blow-ups have reached main (switch recovery re-pushing one node until
+# OOM; a DAG printed as a tree to 61M statements) and nothing noticed: a test
+# timeout catches a hang, not growth. This decompiles the eight largest
+# DecBench binaries (one per project) under an 8 GiB ceiling on the process
+# tree's resident memory. Measured on main 9dd3bb658: peaks 0.90-2.25 GiB,
+# about four minutes in all (scripts/ci/memory_ceiling.py).
+
+on:
+  schedule:
+    - cron: "55 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memory-ceiling-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  memory:
+    name: Peak memory on the largest binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-memory-ceiling-${{ runner.os }}
+      - name: Build release CLI
+        run: cargo build --locked --release -p fission-cli
+      - name: Decompile under the ceiling
+        run: python3 scripts/ci/memory_ceiling.py --data "$RUNNER_TEMP/decbench" --cli target/release/fission_cli --ceiling-gib 8
+
+  report:
+    needs: memory
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.memory.result }}
+      detail: "the job summary lists each binary's peak resident memory"

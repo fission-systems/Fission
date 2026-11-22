@@ -921,6 +921,7 @@ dependencies = [
  "fission-solver",
  "fission-static",
  "rustc-hash",
+ "serde_json",
  "thiserror",
  "tracing",
 ]
