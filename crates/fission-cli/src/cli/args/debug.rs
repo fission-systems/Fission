@@ -179,6 +179,15 @@ pub struct DebugSessionArgs {
     #[arg(long)]
     pub keep_going: bool,
 
+    /// The global `--db`: where the saved breakpoints and watchpoints are
+    /// read from (default: beside the binary).
+    #[arg(skip)]
+    pub analysis_db: Option<std::path::PathBuf>,
+
+    /// The global `--no-db`: restore nothing.
+    #[arg(skip)]
+    pub no_analysis_db: bool,
+
     /// Record the emulated execution so `back-step` and `seek <STEP>` can
     /// move backwards (emulator only)
     ///

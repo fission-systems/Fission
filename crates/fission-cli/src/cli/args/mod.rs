@@ -1377,6 +1377,15 @@ where
                 db.project_path = analysis_db.clone();
                 ParsedInvocation::Db(db)
             }
+            // A session restores the breakpoints saved for its binary; the
+            // global `--db` / `--no-db` say from where, or not at all.
+            ParsedInvocation::Debug(mut debug) => {
+                if let crate::cli::args::DebugCommand::Session(session) = &mut debug.command {
+                    session.analysis_db = analysis_db.clone();
+                    session.no_analysis_db = no_analysis_db;
+                }
+                ParsedInvocation::Debug(debug)
+            }
             other => other,
         };
         for warning in ignored_option_warnings(
@@ -1445,6 +1454,16 @@ fn ignored_option_warnings(
             }
             if parsed.args.engine.is_some() {
                 ignored("--engine", command);
+            }
+        }
+        ParsedInvocation::Debug(debug)
+            if !matches!(debug.command, crate::cli::args::DebugCommand::Session(_)) =>
+        {
+            if no_analysis_db {
+                ignored("--no-db", "debug");
+            }
+            if analysis_db.is_some() {
+                ignored("--db", "debug");
             }
         }
         ParsedInvocation::Script(_)

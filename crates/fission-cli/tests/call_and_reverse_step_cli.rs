@@ -189,3 +189,38 @@ fn a_zero_record_interval_is_refused() {
     ]);
     assert!(!out.status.success());
 }
+
+/// A session restores the breakpoints saved in the database `--db` names, and
+/// none under `--no-db`. It used to read only the file beside the binary and
+/// drop both flags without a word.
+#[test]
+fn a_session_restores_from_the_database_db_names() {
+    let dir = std::env::temp_dir().join(format!("fission-session-db-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let db = dir.join("saved.fission.json");
+    let db = db.to_str().unwrap();
+    let saved = run(&["--db", db, "db", CONCOLIC, "bp", "0x4000b2", "--json"]);
+    assert!(saved.status.success(), "{saved:?}");
+
+    let restored = |extra: &[&str]| {
+        let mut argv = extra.to_vec();
+        argv.extend([
+            "debug",
+            "--emulator",
+            "session",
+            CONCOLIC,
+            "-c",
+            "regs",
+            "--json",
+        ]);
+        let out = run(&argv);
+        let body: Value =
+            serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {out:?}"));
+        body["restored"].clone()
+    };
+    let with_db = restored(&["--db", db]);
+    let without = restored(&["--db", db, "--no-db"]);
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(with_db, serde_json::json!([{ "breakpoint": "0x4000b2" }]));
+    assert_eq!(without, serde_json::json!([]));
+}
