@@ -1071,15 +1071,8 @@ fn collect_called_externs_from_stmts(stmts: &[HirStmt], out: &mut BTreeMap<Strin
 }
 
 fn collect_called_externs_from_lvalue(lvalue: &HirLValue, out: &mut BTreeMap<String, NirType>) {
-    match lvalue {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } | HirLValue::FieldAccess { base: ptr, .. } => {
-            collect_called_externs_from_expr(ptr, out);
-        }
-        HirLValue::Index { base, index, .. } => {
-            collect_called_externs_from_expr(base, out);
-            collect_called_externs_from_expr(index, out);
-        }
+    if let HirLValue::Deref { ptr, .. } = lvalue {
+        collect_called_externs_from_expr(ptr, out);
     }
 }
 
@@ -1107,8 +1100,6 @@ fn collect_called_externs_from_expr(expr: &HirExpr, out: &mut BTreeMap<String, N
         HirExpr::Unary { expr: inner, .. }
         | HirExpr::Cast { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::PtrOffset { base: inner, .. }
-        | HirExpr::AggregateCopy { src: inner, .. }
         | HirExpr::FieldAccess { base: inner, .. } => collect_called_externs_from_expr(inner, out),
         HirExpr::Select {
             cond,
@@ -3144,65 +3135,5 @@ mod global_decl_tests {
                 ..
             }
         ));
-    }
-
-    #[test]
-    fn render_hir_declares_externs_in_lvalue_index_field_and_ptroffset_aggr() {
-        let i64_ty = NirType::Int {
-            bits: 64,
-            signed: false,
-        };
-        let call = |name: &str| HirExpr::Call {
-            origin: None,
-            target: name.to_string(),
-            args: Vec::new(),
-            ty: i64_ty.clone(),
-        };
-        let hir = HirFunction {
-            name: "caller".to_string(),
-            params: vec![NirBinding {
-                name: "base".into(),
-                ty: i64_ty.clone(),
-                surface_type_name: None,
-                origin: Some(NirBindingOrigin::ParamIndex(0)),
-                initializer: None,
-            }],
-            body: vec![
-                HirStmt::Assign {
-                    lhs: HirLValue::Index {
-                        base: Box::new(HirExpr::Var("base".into())),
-                        index: Box::new(call("fn_idx")),
-                        elem_ty: i64_ty.clone(),
-                    },
-                    rhs: HirExpr::Const(1, i64_ty.clone()),
-                },
-                HirStmt::Assign {
-                    lhs: HirLValue::FieldAccess {
-                        base: Box::new(call("fn_fld")),
-                        offset: 8,
-                        field_name: "field_8".into(),
-                        ty: i64_ty.clone(),
-                    },
-                    rhs: HirExpr::Const(2, i64_ty.clone()),
-                },
-                HirStmt::Expr(HirExpr::PtrOffset {
-                    base: Box::new(call("fn_ptr")),
-                    offset: 16,
-                }),
-                HirStmt::Expr(HirExpr::AggregateCopy {
-                    src: Box::new(call("fn_agg")),
-                    size: 16,
-                }),
-            ],
-            ..HirFunction::default()
-        };
-        let rendered =
-            render_hir_function_with_global_decls(&hir, &preview_options_with_global("unused"));
-        for sym in ["fn_idx", "fn_fld", "fn_ptr", "fn_agg"] {
-            assert!(
-                rendered.contains(&format!("{sym}();")),
-                "missing extern declaration for {sym}:\n{rendered}"
-            );
-        }
     }
 }
