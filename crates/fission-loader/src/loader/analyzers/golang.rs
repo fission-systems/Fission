@@ -802,7 +802,7 @@ mod tests {
     use super::*;
     use crate::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
-    /// Load the committed Go fixture (`testdata/go_hello/`, go1.25.5) and
+    /// Load the committed Go fixture (`testdata/go_hello.go`, go1.25.5) and
     /// verify that detect_go_version() reads its version. This read a binary
     /// from `/tmp/go_test_bin` that only one machine ever had, and skipped
     /// everywhere else.
