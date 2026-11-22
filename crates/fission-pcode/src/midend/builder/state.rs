@@ -8,6 +8,8 @@ pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
 #[derive(Debug, Clone)]
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
+    /// Ops touching each address space, derived once from `pcode`.
+    pub(in crate::midend::builder) space_op_index: std::rc::Rc<super::materialize::SpaceOpIndex>,
     pub(crate) options: &'a MlilPreviewOptions,
     pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,

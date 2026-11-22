@@ -330,6 +330,9 @@ impl<'a> PreviewBuilder<'a> {
             lower_varnode_cache: Default::default(),
             structured_body: None,
             register_namer_cache: std::cell::OnceCell::new(),
+            space_op_index: std::rc::Rc::new(super::materialize::SpaceOpIndex::build(
+                &pcode.blocks,
+            )),
             sese_region_proof_calls: std::cell::Cell::new(0),
             loop_carried_proof_cache: std::cell::RefCell::new(BuilderCacheMap::default()),
             structuring_total_work_units: std::rc::Rc::new(std::cell::Cell::new(0)),

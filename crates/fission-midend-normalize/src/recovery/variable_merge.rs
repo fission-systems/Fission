@@ -1069,6 +1069,17 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
         .iter()
         .map(|binding| [binding.name.clone()].into_iter().collect::<HashSet<_>>())
         .collect::<Vec<_>>();
+    // Binding names never change inside the pair loop (only `ty` / `origin`
+    // do), so name-derived predicates are computed once per local.
+    let name_facts = current_locals
+        .iter()
+        .map(|binding| LocalNameFacts {
+            eligible: is_eligible_for_speculative_merge(binding),
+            hardware_register: is_hardware_register_variable(&binding.name),
+            sp_or_bp: is_sp_or_bp_name(&binding.name),
+            priority: name_priority(&binding.name),
+        })
+        .collect::<Vec<_>>();
 
     for i in 0..current_locals.len() {
         if disjoint_merged[i] {
@@ -1087,7 +1098,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             continue;
         }
 
-        if !is_eligible_for_speculative_merge(&current_locals[i]) {
+        if !name_facts[i].eligible {
             continue;
         }
         let span1 = get_stack_span_from_parts(current_locals[i].origin, &b1_ty);
@@ -1096,19 +1107,19 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             if disjoint_merged[j] {
                 continue;
             }
-            if !is_eligible_for_speculative_merge(&current_locals[j]) {
+            if !name_facts[j].eligible {
                 continue;
             }
-            let b2_name = current_locals[j].name.clone();
-            let b2_ty = current_locals[j].ty.clone();
+            let b2_name = &current_locals[j].name;
+            let b2_ty = &current_locals[j].ty;
             let b2_init = current_locals[j].initializer.is_some();
-            if param_names.contains(&b2_name) || b2_init {
+            if param_names.contains(b2_name) || b2_init {
                 continue;
             }
-            if copy_merge_barriers.contains(&b2_name) {
+            if copy_merge_barriers.contains(b2_name) {
                 continue;
             }
-            let Some(&(start2, end2)) = live_ranges.ranges.get(&b2_name) else {
+            let Some(&(start2, end2)) = live_ranges.ranges.get(b2_name) else {
                 continue;
             };
             let Some(&(start1, end1)) = live_ranges.ranges.get(&b1_name) else {
@@ -1119,10 +1130,8 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             // synthetic temporary. Architectural register bindings are never
             // candidates here; their identity may only be shared by an
             // explicit materialize/def-use join proof.
-            let is_temp1 =
-                current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
-            let is_temp2 =
-                current_locals[j].is_temp_like() || name_priority(&current_locals[j].name) <= 1;
+            let is_temp1 = current_locals[i].is_temp_like() || name_facts[i].priority <= 1;
+            let is_temp2 = current_locals[j].is_temp_like() || name_facts[j].priority <= 1;
             if !is_temp1 && !is_temp2 {
                 continue;
             }
@@ -1142,7 +1151,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
                 continue;
             }
 
-            let span2 = get_stack_span_from_parts(current_locals[j].origin, &b2_ty);
+            let span2 = get_stack_span_from_parts(current_locals[j].origin, b2_ty);
             if let (Some((off1, _, _)), Some((off2, _, _))) = (span1, span2) {
                 if off1 != off2 {
                     continue;
@@ -1161,10 +1170,10 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             // Distinct architectural GPRs are storage identities, not free
             // temps. Coalescing ecx→eax via imprecise live ranges collapses
             // multi-register sequences into `eax + eax`.
-            if is_hardware_register_variable(&b1_name)
-                && is_hardware_register_variable(&b2_name)
-                && !is_sp_or_bp_name(&b1_name)
-                && !is_sp_or_bp_name(&b2_name)
+            if name_facts[i].hardware_register
+                && name_facts[j].hardware_register
+                && !name_facts[i].sp_or_bp
+                && !name_facts[j].sp_or_bp
             {
                 continue;
             }
@@ -1174,9 +1183,9 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
                 continue;
             }
 
-            if let Some(unified_ty) = unify_types_for_merge(&b1_ty, &b2_ty) {
-                let p1 = name_priority(&b1_name);
-                let p2 = name_priority(&b2_name);
+            if let Some(unified_ty) = unify_types_for_merge(&b1_ty, b2_ty) {
+                let p1 = name_facts[i].priority;
+                let p2 = name_facts[j].priority;
 
                 let is_stack1 = current_locals[i]
                     .origin
@@ -1256,6 +1265,13 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     }
 
     changed
+}
+
+struct LocalNameFacts {
+    eligible: bool,
+    hardware_register: bool,
+    sp_or_bp: bool,
+    priority: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1507,16 +1523,18 @@ fn name_priority(name: &str) -> usize {
     3 // highest priority: meaningful recovered symbols
 }
 
+// Both predicates below compare ASCII-case-insensitively instead of lowering
+// into a fresh `String`. Every token they test is pure ASCII and no non-ASCII
+// character lowercases to an ASCII letter these tokens contain, so the result
+// is identical to the former `to_lowercase()` comparison.
 fn is_sp_or_bp_name(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
-    )
+    ["rsp", "rbp", "esp", "ebp", "sp", "bp"]
+        .iter()
+        .any(|token| name.eq_ignore_ascii_case(token))
 }
 
 fn is_hardware_register_variable(name: &str) -> bool {
-    let name_lower = name.to_lowercase();
-    let gprs = [
+    const GPRS: &[&str] = &[
         "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp", "rax", "rbx", "rcx", "rdx", "rsi",
         "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "ax", "bx",
         "cx", "dx", "sp", "bp", "si", "di", "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh", "r8d",
@@ -1524,23 +1542,23 @@ fn is_hardware_register_variable(name: &str) -> bool {
         "r12w", "r13w", "r14w", "r15w", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b",
         "r15b",
     ];
-    if gprs.contains(&name_lower.as_str()) {
+    let bytes = name.as_bytes();
+    let starts_with_ignore_case = |prefix: &str| {
+        bytes.len() >= prefix.len() && bytes[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    };
+    if GPRS.iter().any(|gpr| name.eq_ignore_ascii_case(gpr)) {
         return true;
     }
-    if name_lower == "reg" || name_lower.starts_with("reg_") {
+    if name.eq_ignore_ascii_case("reg") || starts_with_ignore_case("reg_") {
         return true;
     }
-    if name_lower.starts_with("reg") && name_lower[3..].chars().all(|c| c.is_ascii_digit()) {
+    if starts_with_ignore_case("reg") && bytes[3..].iter().all(u8::is_ascii_digit) {
         return true;
     }
-    if name_lower.starts_with("xmm")
-        || name_lower.starts_with("ymm")
-        || name_lower.starts_with("zmm")
-        || name_lower.starts_with("fvar")
-    {
-        return true;
-    }
-    false
+    starts_with_ignore_case("xmm")
+        || starts_with_ignore_case("ymm")
+        || starts_with_ignore_case("zmm")
+        || starts_with_ignore_case("fvar")
 }
 
 fn is_eligible_for_speculative_merge(binding: &PreHirBinding) -> bool {
@@ -3045,5 +3063,113 @@ mod tests {
         var_types.insert("uVar1".to_string(), int_ty);
         let merges = collect_dominant_copy_join_merges(&stmts, &var_types);
         assert_eq!(merges.len(), 1, "homogeneous types should be merged");
+    }
+
+    fn reference_is_sp_or_bp_name(name: &str) -> bool {
+        matches!(
+            name.to_lowercase().as_str(),
+            "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
+        )
+    }
+
+    fn reference_is_hardware_register_variable(name: &str) -> bool {
+        let name_lower = name.to_lowercase();
+        let gprs = [
+            "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp", "rax", "rbx", "rcx", "rdx",
+            "rsi", "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "ax",
+            "bx", "cx", "dx", "sp", "bp", "si", "di", "al", "bl", "cl", "dl", "ah", "bh", "ch",
+            "dh", "r8d", "r9d", "r10d", "r11d", "r12d", "r13d", "r14d", "r15d", "r8w", "r9w",
+            "r10w", "r11w", "r12w", "r13w", "r14w", "r15w", "r8b", "r9b", "r10b", "r11b", "r12b",
+            "r13b", "r14b", "r15b",
+        ];
+        if gprs.contains(&name_lower.as_str()) {
+            return true;
+        }
+        if name_lower == "reg" || name_lower.starts_with("reg_") {
+            return true;
+        }
+        if name_lower.starts_with("reg") && name_lower[3..].chars().all(|c| c.is_ascii_digit()) {
+            return true;
+        }
+        name_lower.starts_with("xmm")
+            || name_lower.starts_with("ymm")
+            || name_lower.starts_with("zmm")
+            || name_lower.starts_with("fvar")
+    }
+
+    #[test]
+    fn register_name_predicates_match_lowercasing_reference() {
+        let mut names: Vec<String> = [
+            "",
+            "r",
+            "re",
+            "reg",
+            "Reg",
+            "REG",
+            "reg_",
+            "reg_x",
+            "reg0",
+            "reg12",
+            "reg1a",
+            "regx",
+            "REG7",
+            "xmm",
+            "XMM0",
+            "Ymm3",
+            "zmm",
+            "ZMM31",
+            "fvar",
+            "fVar1",
+            "fvar_",
+            "uVar1",
+            "iVar2",
+            "slot_8",
+            "result",
+            "retval",
+            "temp_1",
+            "RAX",
+            "Eax",
+            "r8D",
+            "R15b",
+            "r16",
+            "r8e",
+            "esp",
+            "EBP",
+            "Sp",
+            "bP",
+            "rsp0",
+            "raxx",
+            "ax_",
+            "i\u{307}",
+            "\u{130}ax",
+            "\u{212a}",
+            "reg\u{661}",
+            "reg\u{e9}",
+            "xmm\u{e9}",
+            "\u{e9}",
+            "r8\u{e9}",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        for gpr in [
+            "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp", "rax", "r8", "r15", "ax", "al",
+            "dh", "r8d", "r15w", "r15b",
+        ] {
+            names.push(gpr.to_string());
+            names.push(gpr.to_uppercase());
+        }
+        for name in &names {
+            assert_eq!(
+                is_hardware_register_variable(name),
+                reference_is_hardware_register_variable(name),
+                "hardware register predicate diverged for {name:?}"
+            );
+            assert_eq!(
+                is_sp_or_bp_name(name),
+                reference_is_sp_or_bp_name(name),
+                "sp/bp predicate diverged for {name:?}"
+            );
+        }
     }
 }
