@@ -824,13 +824,22 @@ mod thumb_only_image_tests {
         );
     }
 
+    /// A jump table whose second entry lands on bytes that do not decode.
+    ///
+    /// `.text` (0x1000):  `jmp [rdi*8 + 0x2000]`, `nop`, `ret` at 0x1008, and
+    /// an invalid-in-64-bit opcode (`06`) at 0x1009.
+    /// `.rodata` (0x2000): the table `{0x1008, 0x1009}`.
+    ///
+    /// The table lives in a read-only data section, so the in-lift reader
+    /// (function bytes only) does not see it and round 0 lifts cleanly up to
+    /// the dispatch. The post-decode resolver then finds both entries, round 1
+    /// seeds them, and decoding 0x1009 fails. That is the error path after a
+    /// good fixpoint round: the decode must not throw away what the fixed
+    /// point learned by re-lifting under the strict contract with the base
+    /// memory context (which knows neither the entries nor the edges), but
+    /// keep the seeded case at 0x1008 wired as the dispatch's successor.
     #[test]
-    fn round_zero_last_good_skips_strict_indirect_retry_and_preserves_discovered_edges() {
-        // Test the indirect-branch fixpoint & fallback contract (#892-1):
-        // When Round 0 lifts cleanly and a subsequent jump-table round introduces
-        // an invalid entry at an offset past safe bytes, extract_safe_bytes /
-        // last_good preserves the discovered indirect edges rather than letting
-        // strict_function(&base_memory_context) wipe them out.
+    fn decode_error_after_good_fixpoint_round_keeps_discovered_edges() {
         let load_spec = fission_core::architecture::BinaryLoadSpec {
             format: "ELF".to_string(),
             image_base: 0x1000,
@@ -838,16 +847,21 @@ mod thumb_only_image_tests {
                 language_id: fission_core::architecture::GhidraLanguageId(
                     "x86:LE:64:default".to_string(),
                 ),
-                compiler_spec_id: fission_core::architecture::CompilerSpecId("default".to_string()),
+                compiler_spec_id: fission_core::architecture::CompilerSpecId("gcc".to_string()),
             },
             preferred: true,
             source: "test".to_string(),
         };
-        // ret at 0x1000 (Round 0) followed by invalid opcode `06` at 0x1005.
-        let bytes = vec![0xc3, 0x90, 0x90, 0x90, 0x90, 0x06];
+        let mut data = vec![0x90u8; 0x30];
+        // jmp qword ptr [rdi*8 + 0x2000]
+        data[..7].copy_from_slice(&[0xff, 0x24, 0xfd, 0x00, 0x20, 0x00, 0x00]);
+        data[8] = 0xc3; // 0x1008: ret
+        data[9] = 0x06; // 0x1009: invalid in 64-bit mode
+        data[0x20..0x28].copy_from_slice(&0x1008u64.to_le_bytes());
+        data[0x28..0x30].copy_from_slice(&0x1009u64.to_le_bytes());
         let binary = fission_loader::loader::LoadedBinaryBuilder::new(
-            "jt_fallback.elf".to_string(),
-            fission_loader::loader::DataBuffer::Heap(bytes),
+            "jt_decode_error_after_good_round.elf".to_string(),
+            fission_loader::loader::DataBuffer::Heap(data),
         )
         .format("ELF")
         .is_64bit(true)
@@ -855,40 +869,95 @@ mod thumb_only_image_tests {
         .add_section(fission_loader::loader::SectionInfo {
             name: ".text".to_string(),
             virtual_address: 0x1000,
-            virtual_size: 6,
+            virtual_size: 0x10,
             file_offset: 0,
-            file_size: 6,
+            file_size: 0x10,
             is_executable: true,
             is_readable: true,
             is_writable: false,
         })
+        .add_section(fission_loader::loader::SectionInfo {
+            name: ".rodata".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 0x10,
+            file_offset: 0x20,
+            file_size: 0x10,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        })
         .build()
-        .expect("build fixture");
+        .expect("build jump-table fixture");
+
+        // Preconditions, so the test cannot pass by never reaching the path:
+        // round 0 lifts, and the resolver finds both table entries in it.
         let lifter = RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().expect("spec"))
             .expect("lifter");
-        let mut memory_context = decode_memory_context(&binary, 0x1000, 6);
-        let initial = lifter
+        let bytes = binary.view_bytes(0x1000, 0x10).expect("bytes");
+        let memory_context = decode_memory_context(&binary, 0x1000, 0x10);
+        let round_zero = lifter
             .lift_raw_pcode_function_with_context_and_memory_context(
-                binary.view_bytes(0x1000, 6).expect("bytes"),
+                bytes,
                 0x1000,
                 DecodeContract::decomp_function(64),
                 &memory_context,
                 None,
             )
-            .map_err(|e| format!("{e:#}"))
-            .expect("Round 0 succeeds");
-        let (result, last_good, _) = run_indirect_branch_fixpoint(
-            &lifter,
-            true,
-            binary.view_bytes(0x1000, 6).expect("bytes"),
+            .expect("round 0 lifts up to the dispatch");
+        let discovered = fission_sleigh::runtime::resolve_indirect_branch_targets(
+            &round_zero.function,
             0x1000,
-            DecodeContract::decomp_function(64),
+            bytes,
+            &memory_context,
             true,
-            None,
-            &mut memory_context,
-            Some(initial),
         );
-        assert!(result.is_ok());
-        assert!(last_good.is_some());
+        assert_eq!(
+            discovered,
+            std::collections::BTreeMap::from([(0x1000, vec![0x1008, 0x1009])])
+        );
+        let mut seeded = memory_context.clone();
+        seeded.additional_decode_entries.extend([0x1008, 0x1009]);
+        assert!(
+            lifter
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    0x1000,
+                    DecodeContract::decomp_function(64),
+                    &seeded,
+                    None,
+                )
+                .is_err(),
+            "round 1 must fail on the invalid table entry"
+        );
+
+        let (pcode, diag, _) =
+            decode_rust_sleigh_pcode(&binary, "dispatch", 0x1000, 0x10, 64, true, true, None)
+                .expect("a decode error after a good round still yields a function");
+
+        assert_ne!(
+            diag.stop_reason, "success_after_strict_indirect_retry",
+            "the strict re-lift discards the fixed point's entries and edges"
+        );
+        let dispatch = pcode
+            .blocks
+            .iter()
+            .find(|block| {
+                block
+                    .ops
+                    .last()
+                    .is_some_and(|op| op.opcode == fission_pcode::PcodeOpcode::BranchInd)
+            })
+            .expect("dispatch block");
+        let successor_starts = dispatch
+            .successors
+            .iter()
+            .filter_map(|index| pcode.blocks.iter().find(|block| block.index == *index))
+            .map(|block| block.start_address)
+            .collect::<Vec<_>>();
+        assert!(
+            successor_starts.contains(&0x1008),
+            "the resolved case must stay wired to the dispatch (stop={}, successors={successor_starts:x?})",
+            diag.stop_reason
+        );
     }
 }
