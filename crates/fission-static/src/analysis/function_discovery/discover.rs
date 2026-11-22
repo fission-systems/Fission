@@ -437,14 +437,10 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
         &mut validation_cache,
         Some(&all_references),
     );
-    // A start found by a pattern that sets the alternate mode (Thumb) is
-    // recorded as such before it is registered, so the sizing decode below
-    // and every later decode of this function use that mode.
+    // The pattern scan has already excluded starts covered by the tracker.
+    // Record any alternate mode (Thumb) before registering the new starts.
     let mut xml_hits: Vec<u64> = Vec::with_capacity(pattern_starts.len());
     for start in pattern_starts {
-        if tracker.is_overlap(start.address) {
-            continue;
-        }
         if start.low_bit_mode {
             binary.mark_low_bit_mode_start(start.address);
         }
@@ -1385,10 +1381,15 @@ fn scan_ghidra_patterns(
         }
     }
 
+    // The tracker is unchanged until the validated batch is registered.
+    // Reject covered instruction starts and offcuts before walking their CFGs.
+    let raw_hit_count = raw_hits.len();
+    raw_hits.retain(|(addr, _), _| !tracker.is_overlap(*addr));
     if discovery_diag_enabled() {
+        eprintln!("[ghidra-patterns] {arch_tag}: raw hits = {}", raw_hit_count);
         eprintln!(
-            "[ghidra-patterns] {arch_tag}: raw hits = {}",
-            raw_hits.len()
+            "DISCOVERY_DIAG: xml_covered_hits={}",
+            raw_hit_count - raw_hits.len()
         );
     }
 
@@ -1397,9 +1398,6 @@ fn scan_ghidra_patterns(
     let mut hits: Vec<ModedFunctionStart> = raw_hits
         .into_par_iter()
         .filter_map(|((addr, low_bit), (valid_code_min, contiguous))| {
-            if tracker.is_offcut(addr) {
-                return None;
-            }
             // A pattern that sets the alternate mode (Thumb `TMode`) is a
             // function start only in that mode, so validate it there.
             let decode_context = if low_bit {
