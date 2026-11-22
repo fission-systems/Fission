@@ -2519,6 +2519,10 @@ impl Emulator {
             if let Some(deadline) = self.deadline {
                 if std::time::Instant::now() >= deadline {
                     tracing::warn!("Execution deadline exceeded. Halting safely.");
+                    // `Interrupted` is also Ctrl+C; the report says which.
+                    if self.metrics.exit_reason.is_none() {
+                        self.metrics.exit_reason = Some("deadline".into());
+                    }
                     break RunOutcome::Interrupted;
                 }
             }

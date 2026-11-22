@@ -724,6 +724,22 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         anyhow::anyhow!("sandbox requires BINARY (or use --srd-diff LEFT RIGHT for offline SRD)")
     })?;
 
+    // A loader or library directory that is not there would quietly fall back
+    // to emulated imports, and the run would not be the one asked for.
+    if let Some(path) = &args.ld_so {
+        anyhow::ensure!(
+            path.is_file(),
+            "--ld-so {} is not a file on this host",
+            path.display()
+        );
+    }
+    for dir in &args.lib_path {
+        anyhow::ensure!(
+            dir.is_dir(),
+            "--lib-path {} is not a directory",
+            dir.display()
+        );
+    }
     // Dynamic linking is decided once for the process, before any image is
     // mapped. Options left unset keep reading their environment variables.
     if args.dynlink || args.ld_so.is_some() || !args.lib_path.is_empty() || args.lazy_bind {
