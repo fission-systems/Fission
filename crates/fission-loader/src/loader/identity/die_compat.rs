@@ -1,8 +1,11 @@
 //! Phase 2 DIE JSON subset — raw matches recorded separately from promoted [`IdentityDetection`].
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
 
-use crate::detector::die_engine::{DieMatcher, Signature, SignatureDatabase, SignatureRule};
+use crate::detector::die_engine::{
+    DieMatcher, PreparedSignatures, Signature, SignatureDatabase, SignatureRule,
+};
 use crate::loader::LoadedBinary;
 
 use super::model::{DieCompatSummary, DieRawMatch, IdentityScanLimits};
@@ -145,40 +148,82 @@ fn collect_die_raw_matches(
     raw
 }
 
+/// The binary-independent half of the DIE identity lane: the coverage
+/// summary, the filtered database prepared for matching, and the unfiltered
+/// signatures their raw matches are reported against.
+struct PreparedDieIdentity {
+    summary: DieCompatSummary,
+    /// `None` when no signature has a supported rule.
+    filtered: Option<Arc<PreparedSignatures>>,
+    originals: Vec<Signature>,
+}
+
+impl PreparedDieIdentity {
+    fn new(db: SignatureDatabase) -> Self {
+        let originals = db.signatures.clone();
+        let summary = index_die_compat(&db);
+        let filtered = filter_die_database(db);
+        let filtered =
+            (!filtered.signatures.is_empty()).then(|| Arc::new(PreparedSignatures::new(filtered)));
+        Self {
+            summary,
+            filtered,
+            originals,
+        }
+    }
+
+    /// [`SignatureDatabase::pe_json_only`], prepared once per process. The
+    /// initialiser does no rayon work (see [`PreparedSignatures::default_shared`]).
+    fn pe_json_shared() -> Option<&'static Self> {
+        static PE_JSON: OnceLock<Option<PreparedDieIdentity>> = OnceLock::new();
+        PE_JSON
+            .get_or_init(|| SignatureDatabase::pe_json_only().map(|db| Self::new(db.clone())))
+            .as_ref()
+    }
+
+    fn analyze(
+        &self,
+        binary: &LoadedBinary,
+        limits: &IdentityScanLimits,
+    ) -> (DieCompatSummary, Vec<DieRawMatch>) {
+        let mut summary = self.summary.clone();
+        let Some(filtered) = &self.filtered else {
+            return (summary, Vec::new());
+        };
+
+        let mut matcher = DieMatcher::from_prepared(Arc::clone(filtered)).with_scan_budgets(
+            Some(limits.max_string_scan_bytes),
+            Some(limits.max_scan_bytes),
+        );
+        matcher.prepare_direct_signature_strings(binary);
+
+        let raw = collect_die_raw_matches(binary, &matcher, filtered.database(), &self.originals);
+        summary.signatures_matched = raw.len();
+        (summary, raw)
+    }
+}
+
 /// Raw DIE subset hits (`pe_signatures.json` only). Promotion happens in [`super::policy`].
 pub(super) fn die_compat_identity(
     binary: &LoadedBinary,
     limits: &IdentityScanLimits,
 ) -> (Option<DieCompatSummary>, Vec<DieRawMatch>) {
-    let Some(db) = SignatureDatabase::load_pe_json_only() else {
+    let Some(prepared) = PreparedDieIdentity::pe_json_shared() else {
         return (None, Vec::new());
     };
 
-    let (summary, raw) = die_compat_identity_with_db(binary, limits, db);
+    let (summary, raw) = prepared.analyze(binary, limits);
     (Some(summary), raw)
 }
 
+/// [`die_compat_identity`] over `db`, prepared from scratch.
+#[cfg(test)]
 pub(super) fn die_compat_identity_with_db(
     binary: &LoadedBinary,
     limits: &IdentityScanLimits,
     db: SignatureDatabase,
 ) -> (DieCompatSummary, Vec<DieRawMatch>) {
-    let originals = db.signatures.clone();
-    let mut summary = index_die_compat(&db);
-    let filtered = filter_die_database(db);
-    if filtered.signatures.is_empty() {
-        return (summary, Vec::new());
-    }
-
-    let mut matcher = DieMatcher::new(filtered.clone()).with_scan_budgets(
-        Some(limits.max_string_scan_bytes),
-        Some(limits.max_scan_bytes),
-    );
-    matcher.prepare_direct_signature_strings(binary);
-
-    let raw = collect_die_raw_matches(binary, &matcher, &filtered, &originals);
-    summary.signatures_matched = raw.len();
-    (summary, raw)
+    PreparedDieIdentity::new(db).analyze(binary, limits)
 }
 
 #[cfg(test)]
@@ -284,5 +329,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The identity lane prepared once per process reports, for every loader
+    /// fixture, what preparing `pe_signatures.json` from scratch reports.
+    #[test]
+    fn the_shared_identity_lane_reports_what_a_fresh_one_does() {
+        let db = SignatureDatabase::pe_json_only().expect("pe_signatures.json");
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .expect("testdata")
+            .map(|entry| entry.expect("testdata entry").path())
+            .collect();
+        paths.sort();
+        let (mut loaded, mut matched) = (0, 0);
+        for path in paths {
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let Ok(binary) = LoadedBinary::from_bytes(std::fs::read(&path).unwrap(), name.clone())
+            else {
+                continue;
+            };
+            for limits in [
+                IdentityScanLimits::default(),
+                IdentityScanLimits {
+                    max_string_scan_bytes: 64,
+                    max_scan_bytes: 64,
+                    ..Default::default()
+                },
+            ] {
+                let (summary, raw) = die_compat_identity(&binary, &limits);
+                let fresh = die_compat_identity_with_db(&binary, &limits, db.clone());
+                assert_eq!(
+                    serde_json::to_value((summary.expect("summary"), &raw)).unwrap(),
+                    serde_json::to_value(fresh).unwrap(),
+                    "{name}"
+                );
+                matched += raw.len();
+            }
+            loaded += 1;
+        }
+        assert!(loaded >= 20, "only {loaded} fixtures loaded");
+        assert!(
+            matched > 0,
+            "the fixtures exercise no DiE identity signature"
+        );
     }
 }

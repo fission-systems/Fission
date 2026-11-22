@@ -30,13 +30,28 @@ pub(crate) fn recover_global_symbol_accesses(hir: &mut HirFunction, options: &Ml
     if names.is_empty() {
         return;
     }
-    let sizes = names
-        .iter()
-        .filter_map(|(addr, name)| Some((name.clone(), *options.global_sizes.get(addr)?)))
+    // Several globals can share a name (file-scope statics of different
+    // translation units), and a name-keyed map keeps one of them. Visiting in
+    // address order makes the kept one the same on every run, and the same one
+    // `global_decl_types` declares; iterating the `HashMap` let the size check
+    // below see 8 bytes on one run and 45 on the next.
+    let sizes = globals_in_address_order(&names)
+        .filter_map(|(addr, name)| Some((name.clone(), *options.global_sizes.get(&addr)?)))
         .collect();
     let globals = Globals { names, sizes };
     let mut aliases = HashMap::new();
     recover_global_symbol_accesses_in_stmts(&mut hir.body, &globals, &mut aliases);
+}
+
+/// `globals` sorted by address. A name-keyed map built from this keeps the
+/// highest-addressed global of each name, deterministically.
+pub(crate) fn globals_in_address_order(
+    globals: &HashMap<u64, String>,
+) -> impl Iterator<Item = (u64, &String)> {
+    let mut by_address: Vec<(u64, &String)> =
+        globals.iter().map(|(addr, name)| (*addr, name)).collect();
+    by_address.sort_unstable_by_key(|(addr, _)| *addr);
+    by_address.into_iter()
 }
 
 fn global_symbol_name_map(hir: &HirFunction, options: &MlilPreviewOptions) -> HashMap<u64, String> {

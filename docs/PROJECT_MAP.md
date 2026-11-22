@@ -10,7 +10,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 |------------|----------------|
 | [`crates/fission-core`](https://github.com/fission-systems/Fission/tree/main/crates/fission-core) | Shared core types/utilities |
 | [`crates/fission-loader`](https://github.com/fission-systems/Fission/tree/main/crates/fission-loader) | Binary loading, sections, symbols, relocations, virtual types; structured **`loader::identity`** report (entropy/overlay/PE hints + evidence) |
-| [`crates/fission-analysis-protocol`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-protocol) | Shared analysis and resource capability types, including HTTP and worker wire types |
+| [`crates/fission-analysis-protocol`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-protocol) | Result shapes `fission_cli` prints as JSON (`list`, `callgraph`, `disasm`) |
 | [`crates/fission-analysis-db`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-db) | Immutable typed program metadata snapshots |
 | [`crates/fission-project`](https://github.com/fission-systems/Fission/tree/main/crates/fission-project) | Persistent analyst decisions, binary identity binding, and edit history for `db` |
 | [`crates/fission-pcode-ir`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode-ir) | p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies) |
