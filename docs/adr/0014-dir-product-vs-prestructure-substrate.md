@@ -7,7 +7,7 @@
 
 The token **DIR** is overloaded in Fission.
 
-### A. Code substrate (shipped today)
+### A. Static code substrate
 
 `fission-midend-prehir` owns **pre-structuring** midend types (`PreHirStmt` /
 `PreHirExpr` / `PreHirFunction`), the PreHIR action pipeline, VSA, and pure
@@ -18,7 +18,7 @@ p-code → builder raise → PreHir* (flat goto/label AST)
        → normalize
        → structure (CFG-to-AST on PreHir*)
        → HirFunction
-       → dual-layer print (NIR / HIR profiles; ADR 0011)
+       → C presentation (HIR only)
 ```
 
 This static intermediate is consumed by normalize/structuring, then converted to
@@ -54,8 +54,9 @@ Using one name for both A and B causes design and review failures:
 - Emulator / solver work could be mis-owned under a static midend
   substrate instead of the validated product crate.
 
-A second overload is **NIR**: dual-layer **print profile** (ADR 0011), historical
-midend module name, and informal “low-level IR” in product writing. Both of the
+Older discussions also used **NIR** for a print profile or as shorthand for a
+low-level IR. [ADR 0015](0015-single-output-surface.md) retired the NIR print
+profile. NIR now denotes the static pipeline's internal IR. Both of the
 emulator's engines today step **`PcodeOp` / `PcodeOpcode`**, not `PreHir*` / `HirFunction` /
 print-NIR text. Hybrid decompile+emu+solver designs must not treat those as
 interchangeable.
@@ -68,8 +69,7 @@ interchangeable.
 |------|------|--------|--------|
 | **Semantic foundation** | Executable, fidelity-first ops after lift — **p-code**, or a view **isomorphic** to p-code (same op meaning, sizes, spaces, control) | Foundation | Shipped as `PcodeOp` / `PcodeFunction` |
 | **Pre-structure IR** | Flat raised AST used by static normalize + structure (`PreHir*`) | Static pipeline intermediate | Shipped in `fission-midend-prehir` |
-| **HIR product** | Fast static high-level reconstruction + dual-layer print (ADR 0011) | Default decompile product | Shipped |
-| **NIR print profile** | Mechanical C **text** from the structured tree (`PrintProfile::Nir`) | Presentation / oracle **string** | Shipped; **not** the foundation |
+| **HIR product** | Fast static high-level reconstruction and C presentation | Default decompile product | Shipped |
 | **Validated reconstruction product** (**DIR**) | Optional path: candidate high-level form + behavioral checks + assurance metadata | Sibling of HIR product, not a post-HIR polish stage | Experimental public Rust contract in `fission-dir` |
 
 Rules:
@@ -84,7 +84,7 @@ Rules:
    belong to `fission-dir`.
 4. Bare “NIR” in new dual-path / hybrid docs is forbidden unless qualified:
    **foundation** (only if p-code-isomorphic — prefer saying **p-code**),
-   **print profile**, or **legacy midend name**. Default: say **p-code** for the
+   **historical print profile**, or **static pipeline NIR**. Default: say **p-code** for the
    shared executable IR.
 
 ### 2. Semantic foundation: p-code-isomorphic IR (not NIR print)

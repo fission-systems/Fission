@@ -39,12 +39,9 @@ pub(super) fn select_constructor<'a>(
         .get(table_name)
         .ok_or_else(|| anyhow!("missing subtable {table_name} for constructor selection"))?;
     spine::select_constructor(
-        compiled,
-        [(
-            table_name.to_string(),
-            subtable.decision_tree.root_node_index,
-        )],
-        || CompiledDecisionProbeEvaluator::new(ctx),
+        subtable,
+        table_name,
+        CompiledDecisionProbeEvaluator::new(ctx),
         |constructor| constructor_matches(ctx, constructor),
     )
 }
