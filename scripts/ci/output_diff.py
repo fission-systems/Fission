@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quality"))
@@ -115,11 +116,17 @@ def main() -> int:
     api = load(sweep.REPO)
     entries = determinism_check.sample(sweep.manifest(args.data), args.budget)
     head_resources = sweep.RESOURCES
+    # Separate SLEIGH frontend caches, so head never decodes with frontends
+    # the base CLI compiled (the cache is keyed by spec, not by code version).
+    caches = Path(tempfile.mkdtemp(prefix="output-diff-sleigh-cache-"))
     base_rows, head_rows = [], []
     for entry in entries:
-        for cli, rows, resources in ((args.base_cli, base_rows, args.base_resources or head_resources),
-                                     (args.head_cli, head_rows, head_resources)):
+        for side, cli, rows, resources in (
+            ("base", args.base_cli, base_rows, args.base_resources or head_resources),
+            ("head", args.head_cli, head_rows, head_resources),
+        ):
             sweep.RESOURCES = resources
+            os.environ["FISSION_SLEIGH_CACHE_DIR"] = str(caches / side)
             scored, _ = sweep.score(entry, args.data, cli.resolve(), api)
             rows.extend(scored)
         print(f"{entry['binary_path']}: scored", flush=True)

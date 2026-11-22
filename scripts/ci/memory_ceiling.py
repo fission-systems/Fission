@@ -109,14 +109,18 @@ def main() -> int:
         print(f"{entry['binary_path']}: {outcome}, peak {peak / 1048576:.2f} GiB, {seconds:.0f} s", flush=True)
 
     over = [row for row in rows if row[2] == "ceiling"]
+    # A CLI that errors or hangs on a binary never reached its peak, so that
+    # binary says nothing about memory: it fails the check too.
+    unmeasured = [row for row in rows if row[2] in ("error", "timeout")]
     lines = [f"| binary | functions | outcome | peak RSS (GiB) | seconds |", "|---|---|---|---|---|"]
     lines += [f"| `{b}` | {n} | {o} | {p / 1048576:.2f} | {s:.0f} |" for b, n, o, p, s in rows]
-    summary = f"Memory ceiling {args.ceiling_gib:g} GiB: {len(over)} of {len(rows)} binaries reached it."
+    summary = (f"Memory ceiling {args.ceiling_gib:g} GiB: {len(over)} of {len(rows)} binaries reached it; "
+               f"{len(unmeasured)} did not finish (error or timeout).")
     print(summary)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
             out.write(summary + "\n\n" + "\n".join(lines) + "\n")
-    return 1 if over else 0
+    return 1 if over or unmeasured else 0
 
 
 if __name__ == "__main__":

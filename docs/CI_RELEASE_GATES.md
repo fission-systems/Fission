@@ -2,7 +2,7 @@
 
 | Gate | Trigger | Required evidence |
 |---|---|---|
-| Fast Gate | All PR targets, GitHub merge candidates and pushes to main | Change plan from event SHAs, affected Linux tests and CLI smoke, plus the selected pre-merge lanes |
+| Fast Gate | All PR targets, GitHub merge candidates and pushes to main | Change plan from event SHAs, with affected Linux tests, CLI smoke and pre-merge lanes when selected |
 | Heavy | Nightly or workflow dispatch | Linux workspace tests, Windows and macOS coverage, MSRV, compile surface and the RustSec advisory check |
 | DecBench full sweep | Nightly or workflow dispatch | 24 shards with exact row coverage, per-function results, and comparison with a compatible passing main sweep |
 | Release E2E and packages | Intentional release dispatch or SemVer tag push | L0 and L1 on the exact candidate SHA, release CLI E2E and five unpacked platform packages |
@@ -49,10 +49,11 @@ Operator rollout:
 [ADR 0016](adr/0016-ci-signal-integrity.md) holds the reasoning and the
 measurements. In short: a required check depends only on the change. The
 RustSec advisory database moves on its own schedule, so a PR checks advisories
-only when it changes `Cargo.lock`, `deny.toml` or `.cargo/audit.toml`; bans,
-licenses and sources are checked on every Rust or metadata change, and Heavy
-checks advisories every night. The sccache setup fails open. Every push to main
-runs workspace fmt and clippy, whatever it changed.
+when it changes any `Cargo.toml`, `Cargo.lock`, `deny.toml`,
+`.cargo/audit.toml`, or `.cargo/config` / `.cargo/config.toml`. Manual Fast Gate
+dispatches and nightly Heavy also check advisories. The security lane checks
+bans, licenses and sources on Rust or security metadata changes. The sccache
+setup fails open. Every push to main runs workspace fmt and clippy.
 
 ## Checks on the checks
 
@@ -75,13 +76,12 @@ runs workspace fmt and clippy, whatever it changed.
   updates the pins monthly), inputs reach shell code through `env`, and no
   workflow grants `actions: write`. Any workflow change runs actionlint and
   zizmor; a high-severity zizmor finding fails Script Checks.
-- Determinism: the PR fixture lane decompiles each fixture three times (1 and
-  4 threads) and fails if any function's text differs. The nightly
-  `determinism.yml` does the same four times over a fixed DecBench sample of
-  37 binaries and 12,505 functions (`scripts/ci/determinism_check.py`, static
-  decompilation only). On main today 26 of those functions differ, so it
-  reports into a `ci-red` issue and does not gate releases; add it to Heavy's
-  summary once it is green.
+- The PR fixture lane compares decompiled text across requests for 1, 4 and 4
+  workers. The nightly `determinism.yml` requests 1, 4, 4 and 4 workers and
+  checks whole DecBench binaries in SHA-256 order until their manifest rows
+  reach 5,000. Both set `FISSION_RUST_DECOMP_WORKERS` and verify the CLI's
+  reported worker count, capped by the number of functions. Nightly differences
+  are reported in a `ci-red` issue and are outside the release gate.
 - The PR fixture lane builds the release CLI with overflow checks and debug
   assertions on.
 
@@ -91,8 +91,8 @@ Heavy, fuzz, determinism and the DecBench sweep end with `reusable-report-red.ym
 workflow is red on main there is one open issue titled `CI red: <workflow>`
 with the `ci-red` label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
-only on its schedule, restores its corpus from earlier runs, and attaches crash
-inputs to the run for 30 days.
+on its schedule or by manual dispatch, restores its corpus from earlier runs,
+and attaches crash inputs to the run for 30 days.
 
 ## Nightly DecBench
 
@@ -124,8 +124,9 @@ Byte match is not run. See [the benchmark guide](BENCHMARK_DECBENCH.md).
 
 ## Promote a release
 
-1. Wait for a successful Fast Gate **main push run** and successful Heavy on
-   the same candidate SHA. Heavy can be dispatched on a named ref at that SHA.
+1. Select a candidate in main's history. Check for a successful Fast Gate
+   **main push run** and a successful Heavy **scheduled or manually dispatched
+   run** on the same SHA.
 2. Dispatch on main with the version and exact candidate SHA.
 
    ```bash
@@ -135,10 +136,10 @@ Byte match is not run. See [the benchmark guide](BENCHMARK_DECBENCH.md).
 3. The workflow runs release E2E and stages all five packages before creating
    any tag itself. A manually pushed SemVer tag enters the same verification
    path and must already resolve to that verified SHA.
-4. The publish job downloads those exact artifacts, verifies their digests,
-   generates provenance attestations and populates a draft. It downloads the
-   draft attachments and verifies them before publishing. For a failed run,
-   rerun with the same tag and SHA. Published releases are not overwritten.
+4. The publish job verifies the staged digests and generates build provenance.
+   It creates the tag if needed, populates a draft, then downloads and verifies
+   the draft attachments before publishing. Retry with the same tag and SHA
+   after a failed publication.
 
 After validating the workflow, configure tag protection and the `release`
 environment approval policy in GitHub. Enable immutable releases when the
@@ -147,7 +148,7 @@ repository settings.
 
 ## Resource bundle (`utils/`) assets
 
-Runtime data lives under [`utils/`](../utils/) (Sleigh specs, signatures, ghidra-data).
+Runtime data lives under [`utils/`](https://github.com/fission-systems/Fission/tree/main/utils) (Sleigh specs, signatures, ghidra-data).
 It **is** checked into git as of 2026-08-19. Only `utils/source/` (the inputs the
 packed artifacts are built from) stays ignored. Packing the databases into `.fpk`
 brought the tree down to a size git can carry, which removed the `assets-v*` bundle
@@ -159,19 +160,19 @@ without anyone being able to see it.
 |-------|---------------------|-------------|
 | **Inside platform archives** (`fission-<target>.tar.gz` / `.zip`) | `cd.yml` copies a verified `utils/` into each archive as `share/fission/`, beside `bin/fission_cli` | Homebrew, `install.sh`, anyone unpacking a release |
 | **`fission-resources.tar.gz`** | The same `share/fission/` contents on their own | `cargo install` users, who unpack it into `~/.cargo/share/fission` |
-| **The `utils/` tree itself** | Committed; changed like any other source | CI — [`.github/actions/setup-utils`](../.github/actions/setup-utils) verifies the checkout rather than downloading anything |
+| **The `utils/` tree itself** | Committed; changed like any other source | CI — [`.github/actions/setup-utils`](https://github.com/fission-systems/Fission/tree/main/.github/actions/setup-utils) verifies the checkout rather than downloading anything |
 
 Rules:
 
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
 2. `utils/` reaches consumers through the clone, the platform archive, or `fission-resources.tar.gz`; all three are cut from the same tagged checkout.
-3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](../scripts) and commit them; there is no separate publish step for CI to pick them up.
-4. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](../scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
+3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](https://github.com/fission-systems/Fission/tree/main/scripts) and commit them; there is no separate publish step for CI to pick them up.
+4. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](https://github.com/fission-systems/Fission/blob/main/scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
 
 ## Related files
 
-- [`.github/CI_CD_GUIDE.md`](../.github/CI_CD_GUIDE.md) — operator overview
-- [`.github/workflows/release-tag.yml`](../.github/workflows/release-tag.yml)
-- [`.github/workflows/release-e2e.yml`](../.github/workflows/release-e2e.yml)
-- [`.github/workflows/cd.yml`](../.github/workflows/cd.yml)
-- [`utils/MANIFEST.md`](../utils/MANIFEST.md)
+- [`.github/CI_CD_GUIDE.md`](https://github.com/fission-systems/Fission/blob/main/.github/CI_CD_GUIDE.md) — operator overview
+- [`.github/workflows/release-tag.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-tag.yml)
+- [`.github/workflows/release-e2e.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-e2e.yml)
+- [`.github/workflows/cd.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/cd.yml)
+- [`utils/MANIFEST.md`](https://github.com/fission-systems/Fission/blob/main/utils/MANIFEST.md)

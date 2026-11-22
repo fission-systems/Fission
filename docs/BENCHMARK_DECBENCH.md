@@ -28,9 +28,9 @@ The data and harness live outside this repository, under
 
 ## CI full sweep
 
-[DecBench full dataset sweep](../.github/workflows/decbench-sweep.yml) measures
-the published Hugging Face `full` manifest on Nightly. The pinned dataset
-revision contains 96,103 rows. The workflow shards the manifest, verifies binary
+[DecBench full dataset sweep](https://github.com/fission-systems/Fission/blob/main/.github/workflows/decbench-sweep.yml) measures
+the pinned Hugging Face `full` manifest on a nightly schedule or by manual dispatch. The pinned dataset
+revision contains 96,103 rows. The workflow partitions the manifest into 24 shards, verifies binary
 hashes, scores statically on stripped inputs, and preserves its row-level report.
 The 250-row sample-set gate below remains a local development tool. See
 [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.

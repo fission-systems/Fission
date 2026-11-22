@@ -54,48 +54,10 @@ The most mature product surface today is the CLI. Rust crate integration is poss
 
 ## Evaluation Sample Set
 
-The recommended first-run sample surface in this checkout is:
-
-- [benchmark/binary/x86-64/window/small/](../benchmark/binary/x86-64/window/small/)
-
-This directory is checked into the repository and is the preferred external evaluation set for this guide.
-
-Recommended starter binaries:
-
-- `binary/c/test_functions.exe`
-  - basic control flow
-  - simple arithmetic
-  - clean first `info/list/decomp` run
-- `binary/c/structs_and_pointers.exe`
-  - struct and pointer surfacing
-- `binary/c/bitops_and_control_flow.exe`
-  - bit operations and branch-heavy logic
-- `binary/c/function_pointers_and_strings.exe`
-  - function pointers, strings, and indirect-style patterns
-- `binary/c/math_operations.exe`
-  - arithmetic-heavy patterns
-- `binary/c/array_operations.exe`
-  - array indexing, loops, and sorting-style logic
-
-If the compiled binaries are not present in your checkout, build them first:
-
-```bash
-cd benchmark/binary/x86-64/window/small
-./build.sh c
-```
-
-If you want the full multi-language set:
-
-```bash
-cd benchmark/binary/x86-64/window/small
-./build.sh all
-```
-
-The example commands below assume this binary exists:
-
-```text
-benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
-```
+Use the checked-in Windows x64 PE fixture
+[`x64_pdb_struct_test.exe`](https://github.com/fission-systems/Fission/blob/main/crates/fission-loader/testdata/x64_pdb_struct_test.exe).
+Use the entry at `0x140001040` for the first disassembly and decompilation.
+These commands inspect the file from any supported host.
 
 ## 30-Minute Evaluation Path
 
@@ -107,16 +69,19 @@ This is the recommended first pass.
 cargo build -p fission-cli --release
 ```
 
-Canonical binary:
+From the repository root, set these paths in your shell:
 
-```text
-target/release/fission_cli
+```bash
+cli=./target/release/fission_cli
+sample=crates/fission-loader/testdata/x64_pdb_struct_test.exe
 ```
+
+On Windows, use the `fission_cli.exe` suffix.
 
 ### 2. Inspect binary metadata
 
 ```bash
-./target/release/fission_cli info benchmark/binary/x86-64/window/small/binary/c/test_functions.exe
+"$cli" info "$sample"
 ```
 
 What to inspect:
@@ -126,12 +91,10 @@ What to inspect:
 - discovered function count
 - whether the binary loads cleanly without special setup
 
-Example payload: [info-test_functions.txt](./examples/cli/info-test_functions.txt)
-
 ### 3. List discovered functions in JSON
 
 ```bash
-./target/release/fission_cli list benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --json
+"$cli" list "$sample" --json
 ```
 
 What to inspect:
@@ -142,14 +105,12 @@ What to inspect:
 
 Recommended first function:
 
-- `0x140001450` (`add`)
-
-Example payload: [list-test_functions.json](./examples/cli/list-test_functions.json)
+- `0x140001040` (`_start`)
 
 ### 4. Disassemble one function
 
 ```bash
-./target/release/fission_cli disasm benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001450 --function
+"$cli" disasm "$sample" --addr 0x140001040 --function
 ```
 
 What to inspect:
@@ -160,7 +121,7 @@ What to inspect:
 ### 5. Decompile one function in text form
 
 ```bash
-./target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001450
+"$cli" decomp "$sample" --addr 0x140001040
 ```
 
 What to inspect:
@@ -170,22 +131,17 @@ What to inspect:
 - readability of the generated pseudocode
 - whether this is close enough to your downstream processing needs
 
-Example payload: [decomp-add.txt](./examples/cli/decomp-add.txt)
-
 ### 6. Decompile the same function in JSON form
 
 ```bash
-./target/release/fission_cli decomp benchmark/binary/x86-64/window/small/binary/c/test_functions.exe --addr 0x140001450 --json
+"$cli" decomp "$sample" --addr 0x140001040 --json
 ```
 
 What to inspect:
 
-- machine-readable code payload
-- engine identity
-- fallback flags
-- preview statistics shape
-
-Example payload: [decomp-add.json](./examples/cli/decomp-add.json)
+- one JSON array entry with a `code` field for the selected function
+- engine identity in `engine_used`
+- optional build statistics and line mappings
 
 ### 7. Stop here or continue
 
@@ -207,8 +163,8 @@ If the first pass looks promising, continue with a slightly deeper headless work
 Use the operator path when you want whole-binary machine-readable artifacts rather than one-function text output:
 
 ```bash
-./target/release/fission_cli inventory function-facts \
-  benchmark/binary/x86-64/window/small/binary/c/test_functions.exe \
+"$cli" inventory function-facts \
+  "$sample" \
   --functions-limit 1 \
   --output-jsonl /tmp/fission_rows.jsonl \
   --summary-json /tmp/fission_summary.json
@@ -220,8 +176,6 @@ What this demonstrates:
 - JSONL row output
 - summary JSON output
 - preview/build statistics for automation and corpus work
-
-Example summary payload: [inventory-function-facts-summary.json](./examples/cli/inventory-function-facts-summary.json)
 
 Use `inventory` when you want structured artifacts for automation, not when you want a quick human-facing one-function decompilation result.
 
@@ -235,7 +189,7 @@ Run it only after:
 - `info`, `list`, and `decomp` work on at least one sample binary
 - you have inspected one or two live outputs manually
 
-Quality is measured with DecBench: a local sample-set gate for quick signal and a full-dataset sweep for any ranking or release claim. Commands, environment variables and rules are in [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
+Quality is measured with DecBench: a local sample-set gate for quick signal and a full-dataset sweep for quality comparisons and release claims. Commands, environment variables and rules are in [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
 
 ## Text Output vs JSON Output
 

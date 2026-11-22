@@ -732,7 +732,7 @@ fn decoded_instruction_from_state(
     };
     let flow_kind = flow_kind_for_state(decoded);
     let references = decoded_references(address, length, flow_kind, &decoded.handles);
-    let direct_target = first_flow_target(decoded, address, length).or_else(|| {
+    let direct_target = first_flow_target(decoded, address, length, flow_kind).or_else(|| {
         references
             .iter()
             .find_map(|reference| match reference.kind {
