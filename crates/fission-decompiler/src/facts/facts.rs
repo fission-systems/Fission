@@ -2847,6 +2847,74 @@ mod tests {
         assert_eq!(arities, BTreeSet::from([Some(4)]));
     }
 
+    /// Summaries are keyed by the *sanitized* name, so two spellings that differ
+    /// in the loader (`primary(token, val, op, noeval)` from a demangled or
+    /// prototype-bearing symbol, `primary` from a plain one) collide on one
+    /// key. The winner must be chosen by address, not by `HashMap` order: the
+    /// lowest-addressed DWARF function (first insert wins) and the
+    /// highest-addressed user signature (later `insert` overwrites).
+    #[test]
+    fn sanitized_name_collisions_summarise_in_address_order() {
+        let debug = |address: u64, name: &str, arity: usize| DwarfFunctionInfo {
+            address,
+            name: name.to_string(),
+            return_type: Some("int".to_string()),
+            params: (0..arity)
+                .map(|index| DwarfParamInfo {
+                    name: format!("p{index}"),
+                    type_name: "int".to_string(),
+                    location: DwarfLocation::Unknown,
+                })
+                .collect(),
+            variadic: false,
+            local_vars: Vec::new(),
+            frame_base: DwarfFrameBase::Unknown,
+            size: 0,
+        };
+        let signature = |arity: usize| fission_loader::loader::types::UserSignature {
+            return_type: Some("int".to_string()),
+            param_types: vec!["int".to_string(); arity],
+            param_names: Vec::new(),
+        };
+        let outcomes = (0..64)
+            .map(|_| {
+                let mut binary = LoadedBinaryBuilder::new(
+                    "sanitized-collision.elf".to_string(),
+                    DataBuffer::Heap(Vec::new()),
+                )
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .entry_point(0x535a)
+                .is_64bit(true)
+                .add_function(fission_loader::loader::types::FunctionInfo {
+                    name: "helper(int, int)".to_string(),
+                    address: 0x7000,
+                    ..Default::default()
+                })
+                .add_function(fission_loader::loader::types::FunctionInfo {
+                    name: "helper".to_string(),
+                    address: 0x9000,
+                    ..Default::default()
+                })
+                .build()
+                .expect("build sanitized-collision fixture");
+                binary.dwarf_functions = std::sync::Arc::new(HashMap::from([
+                    (0x535a, debug(0x535a, "primary(token, val, op, noeval)", 4)),
+                    (0x18a83, debug(0x18a83, "primary", 1)),
+                ]));
+                binary.user_signatures =
+                    HashMap::from([(0x7000, signature(2)), (0x9000, signature(3))]);
+                let summaries = super::build_nir_call_prototype_summaries(&HashMap::new(), &binary);
+                (
+                    summaries["primary"].locked_exact_arity,
+                    summaries["helper"].locked_exact_arity,
+                )
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(outcomes, BTreeSet::from([(Some(4), Some(3))]));
+    }
+
     #[test]
     fn direct_callee_budget_covers_each_bounded_byte() {
         assert_eq!(direct_callee_instruction_limit(1), 32);
