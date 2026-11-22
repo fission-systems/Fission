@@ -1,8 +1,7 @@
 site_name: Fission
 site_description: A cross-platform, Rust-powered reverse engineering and decompilation framework.
-site_url: https://sjkim1127.github.io/Fission/
 repo_url: https://github.com/fission-systems/Fission
-repo_name: sjkim1127/Fission
+repo_name: fission-systems/Fission
 
 theme:
   name: material
@@ -64,12 +63,15 @@ nav:
   - Project Map: PROJECT_MAP.md
   - CLI Guide: CLI.md
   - Architecture: architecture/ARCHITECTURE.md
-  - Quality Metrics: QUALITY_METRICS.md
+  - Benchmarks:
+    - DecBench: BENCHMARK_DECBENCH.md
+    - Quality metrics: QUALITY_METRICS.md
   - Evaluation: EVALUATION.md
   - Contributing: contributing.md
   - Developer Policies:
     - Malware Sample Policy: MALWARE_SAMPLE_POLICY.md
     - Versioning: VERSIONING.md
+    - CI and release gates: CI_RELEASE_GATES.md
     - Release: RELEASE.md
   - Release Notes:
     - Fission 0.3.0: changelog/v0.3.0.md

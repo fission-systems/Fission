@@ -103,55 +103,48 @@ fn display_value_from_handle(handle: &RuntimeHandle, role: &str) -> Result<Bound
 /// constructor classified *every* ARM instruction as `None`, and function
 /// discovery's sweep found no call or jump targets in any ARM binary.
 pub(super) fn flow_kind_for_state(state: &RuntimeConstructState) -> DecodedFlowKind {
-    // Same precedence as before, applied across the tree: a constructor that
-    // both returns and branches is a return.
-    for (kind, matches_opcode) in FLOW_KIND_PRECEDENCE {
-        if state_has_op(state, *matches_opcode) {
-            return *kind;
-        }
+    match template_flow(state) {
+        TemplateFlow::None => DecodedFlowKind::None,
+        TemplateFlow::Jump => DecodedFlowKind::Jump,
+        TemplateFlow::ConditionalJump => DecodedFlowKind::ConditionalJump,
+        TemplateFlow::Call => DecodedFlowKind::Call,
+        TemplateFlow::Return => DecodedFlowKind::Return,
     }
-    DecodedFlowKind::None
 }
 
-type OpcodePredicate = fn(CompiledOpTplOpcode) -> bool;
+// The declaration order gives the precedence across the entire bound tree.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TemplateFlow {
+    None,
+    Jump,
+    ConditionalJump,
+    Call,
+    Return,
+}
 
-static FLOW_KIND_PRECEDENCE: &[(DecodedFlowKind, OpcodePredicate)] = &[
-    (DecodedFlowKind::Return, |opcode| {
-        matches!(opcode, CompiledOpTplOpcode::Return)
-    }),
-    (DecodedFlowKind::Call, |opcode| {
-        matches!(
-            opcode,
-            CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd
-        )
-    }),
-    (DecodedFlowKind::ConditionalJump, |opcode| {
-        matches!(opcode, CompiledOpTplOpcode::CBranch)
-    }),
-    (DecodedFlowKind::Jump, |opcode| {
-        matches!(
-            opcode,
-            CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd
-        )
-    }),
-];
-
-/// Whether this constructor or any it delegates to emits a matching op.
-fn state_has_op(state: &RuntimeConstructState, matches_opcode: OpcodePredicate) -> bool {
-    if state
-        .constructor_template
-        .ops
-        .iter()
-        .any(|op| matches_opcode(op.opcode))
-    {
-        return true;
+fn template_flow(state: &RuntimeConstructState) -> TemplateFlow {
+    let mut flow = TemplateFlow::None;
+    for op in &state.constructor_template.ops {
+        let candidate = match op.opcode {
+            CompiledOpTplOpcode::Return => return TemplateFlow::Return,
+            CompiledOpTplOpcode::Call | CompiledOpTplOpcode::CallInd => TemplateFlow::Call,
+            CompiledOpTplOpcode::CBranch => TemplateFlow::ConditionalJump,
+            CompiledOpTplOpcode::Branch | CompiledOpTplOpcode::BranchInd => TemplateFlow::Jump,
+            _ => continue,
+        };
+        flow = flow.max(candidate);
     }
-    state.handles.iter().any(|handle| {
-        handle
-            .subtable_state
-            .as_deref()
-            .is_some_and(|sub| state_has_op(sub, matches_opcode))
-    })
+    for child in state
+        .handles
+        .iter()
+        .filter_map(|handle| handle.subtable_state.as_deref())
+    {
+        flow = flow.max(template_flow(child));
+        if flow == TemplateFlow::Return {
+            break;
+        }
+    }
+    flow
 }
 
 fn flow_reference_kind(flow_kind: DecodedFlowKind) -> Option<DecodedReferenceKind> {
@@ -187,8 +180,9 @@ pub(super) fn first_flow_target(
     state: &RuntimeConstructState,
     address: u64,
     length: usize,
+    flow_kind: DecodedFlowKind,
 ) -> Option<u64> {
-    if flow_reference_kind(flow_kind_for_state(state)).is_none() {
+    if flow_reference_kind(flow_kind).is_none() {
         return None;
     }
     first_relative_target(state).or_else(|| first_rip_relative_flow_target(state, address, length))
@@ -880,6 +874,39 @@ mod tests {
     use crate::compiler::{CompiledConstructorTemplate, CompiledDisplayTemplate};
 
     #[test]
+    fn nested_template_flow_uses_global_precedence() {
+        use std::sync::Arc;
+
+        let mut root = state_with_display(Vec::new(), Vec::new());
+        assert_eq!(flow_kind_for_state(&root), DecodedFlowKind::None);
+
+        for (opcode, expected) in [
+            (CompiledOpTplOpcode::BranchInd, DecodedFlowKind::Jump),
+            (
+                CompiledOpTplOpcode::CBranch,
+                DecodedFlowKind::ConditionalJump,
+            ),
+            (CompiledOpTplOpcode::CallInd, DecodedFlowKind::Call),
+            (CompiledOpTplOpcode::Return, DecodedFlowKind::Return),
+        ] {
+            let mut child = state_with_display(Vec::new(), Vec::new());
+            Arc::make_mut(&mut Arc::make_mut(&mut child.constructor).constructor_template)
+                .ops
+                .push(CompiledOpTpl {
+                    sla_raw_pcode_opcode: 0,
+                    opcode,
+                    output: None,
+                    inputs: Vec::new(),
+                    label: None,
+                });
+            let mut operand = handle(BoundOperand::Relative { target: 0x1234 });
+            operand.subtable_state = Some(Box::new(child));
+            root.handles.push(operand);
+            assert_eq!(flow_kind_for_state(&root), expected);
+        }
+    }
+
+    #[test]
     fn display_renderer_has_no_zero_bound_operand_fallback() {
         let source = include_str!("display.rs");
         let dummy_immediate_fallback = ["unwrap_or", "(BoundOperand::Immediate"].concat();
@@ -1293,7 +1320,7 @@ mod tests {
             length: 0,
             match_trace: spine::RuntimeMatchTrace {
                 root_bucket: "test".into(),
-                probes: spine::ProbeChain::default(),
+                probes: spine::RuntimeMatchProbes::default(),
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },

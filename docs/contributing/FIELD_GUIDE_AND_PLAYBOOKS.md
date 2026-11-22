@@ -5,7 +5,7 @@ document for people arriving at the repository. Nothing here changed; this is
 the long-form contributor material — field guide, per-area playbooks, the
 review question bank, and the maintainer handoff template.
 
-Start with [`AGENTS.md`](../../AGENTS.md) for the working rules and the
+Start with [`AGENTS.md`](https://github.com/fission-systems/Fission/blob/main/AGENTS.md) for the working rules and the
 decompiler quality loop. This document is the depth behind them.
 
 ## Field Guide: Practical Rules by Area
@@ -249,7 +249,7 @@ Start from correct NIR; prefer cleanup passes over printer substitutions.
 
 ### 04. Changing structuring logic
 
-Start in `fission-pcode/src/nir/structuring`; require CFG evidence and proof completeness.
+Start in `crates/fission-pcode/src/midend/structuring`; require CFG evidence and proof completeness.
 
 - Owner: identify the crate and module that owns the behavior before editing.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
