@@ -4044,3 +4044,114 @@ fn systemv_join_call_keeps_an_argument_each_path_restages_differently() {
         "the second argument is the joined value, not one path's or the entry value: {call}\n{code}"
     );
 }
+
+#[test]
+fn systemv_conditional_overwrite_argument_is_the_select_not_one_path() {
+    // mov esi, 0x11; test rdx, rdx; je join; mov esi, 0x22; join: mov edi, 7;
+    // call target_fn(int, int) -- a conditional move into an argument
+    // register. The dominating write is the value on one path only; the
+    // argument is `cond ? 17 : 34`, never just `17`.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 2],
+            ops: vec![
+                op(
+                    base,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x30, 8)),
+                    vec![cst(0x11, 8)],
+                ),
+                op(
+                    base + 5,
+                    PcodeOpcode::IntEqual,
+                    Some(uniq(0x100, 1)),
+                    vec![reg(0x10, 8), cst(0, 8)],
+                ),
+                op(
+                    base + 8,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![cst(0x401020, 8), uniq(0x100, 1)],
+                ),
+            ],
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x401010,
+            successors: vec![2],
+            ops: vec![op(
+                0x401010,
+                PcodeOpcode::Copy,
+                Some(reg(0x30, 8)),
+                vec![cst(0x22, 8)],
+            )],
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x401020,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401020,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x38, 8)),
+                    vec![cst(7, 8)],
+                ),
+                op(0x401025, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x40102a, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x401200,
+        CallTargetRef {
+            address: Some(0x401200),
+            symbol: "target_fn".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        "target_fn".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{code}"));
+    assert!(
+        !call.contains("target_fn(7, 17)"),
+        "the dominating write is one path's value only: {call}\n{code}"
+    );
+    assert!(
+        call.contains("17") && call.contains("34") && call.contains('?'),
+        "the argument is the conditional overwrite of 17 by 34: {call}\n{code}"
+    );
+}

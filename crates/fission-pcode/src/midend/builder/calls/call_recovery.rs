@@ -368,6 +368,11 @@ impl<'a> PreviewBuilder<'a> {
                 path_values.push(expr);
             }
         }
+        if path_values.len() > 1
+            && let Some(expr) = self.triangle_select_arg(&reached_defs, call_block_idx)
+        {
+            return Some(self.normalize_recovered_call_arg(expr));
+        }
         if path_values.len() > 1 {
             // Every incoming path defines the register and no call clobbers
             // it between that definition and this call (proved above), so the
@@ -440,6 +445,127 @@ impl<'a> PreviewBuilder<'a> {
         path_values
             .pop()
             .map(|expr| self.normalize_recovered_call_arg(expr))
+    }
+
+    /// Whether more than one write reaches the call with `vn` intact: the
+    /// argument is then a merge, and any single write's value is the value on
+    /// its own paths only.
+    fn argument_register_merges(
+        &self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> bool {
+        self.collect_unclobbered_reaching_defs(vn, call_block_idx, call_idx)
+            .is_some_and(|defs| defs.len() > 1)
+    }
+
+    /// The merged argument of a conditional overwrite -- `x = a; if (c)
+    /// x = b; call(x)`, the shape of a predicated or conditional move -- as
+    /// `c ? b : a`.
+    ///
+    /// Exactly two writes reach the call: one in the branch block before its
+    /// conditional branch, one in the arm that branch enters. The arm is
+    /// entered only from the branch and leaves only to the call's block, which
+    /// the branch's other edge also reaches directly, so the branch condition
+    /// decides which write the call sees.
+    fn triangle_select_arg(
+        &mut self,
+        reached_defs: &[LoweringSite],
+        call_block_idx: usize,
+    ) -> Option<PreHirExpr> {
+        let [first, second] = reached_defs else {
+            return None;
+        };
+        let original_count = self.pcode.blocks.len();
+        if first.block_idx >= original_count
+            || second.block_idx >= original_count
+            || call_block_idx >= original_count
+            || !self.virtual_block_map.is_empty()
+        {
+            return None;
+        }
+        for (branch_def, arm_def) in [(*first, *second), (*second, *first)] {
+            let branch_idx = branch_def.block_idx;
+            let arm_idx = arm_def.block_idx;
+            let branch_succs = self.successors.get(branch_idx)?;
+            if branch_succs.len() != 2
+                || !branch_succs.contains(&arm_idx)
+                || !branch_succs.contains(&call_block_idx)
+                || self.predecessors.get(arm_idx).map(Vec::as_slice) != Some(&[branch_idx])
+                || self.successors.get(arm_idx).map(Vec::as_slice) != Some(&[call_block_idx])
+            {
+                continue;
+            }
+            let branch_block = self.pcode.blocks.get(branch_idx)?.clone();
+            let term_idx = self.block_terminator_index(&branch_block)?;
+            let term_op = branch_block.ops.get(term_idx)?.clone();
+            if term_op.opcode != PcodeOpcode::CBranch
+                || term_op.inputs.len() < 2
+                || branch_def.op_idx >= term_idx
+            {
+                continue;
+            }
+            let true_idx = fission_pcode_ir::block_cfg::resolve_branch_target_index(
+                self.pcode,
+                &self.address_to_index,
+                branch_idx,
+                &term_op,
+                &term_op.inputs[0],
+            )?;
+            let arm_on_true = if true_idx == arm_idx {
+                true
+            } else if true_idx == call_block_idx {
+                false
+            } else {
+                continue;
+            };
+            let lower_def = |this: &mut Self, site: LoweringSite| -> Option<PreHirExpr> {
+                let def_op = this
+                    .pcode
+                    .blocks
+                    .get(site.block_idx)?
+                    .ops
+                    .get(site.op_idx)?
+                    .clone();
+                this.with_lowering_site(site, |this| {
+                    this.lower_def_op(&def_op, &mut HashSet::default())
+                })
+                .ok()
+            };
+            let branch_value = lower_def(self, branch_def)?;
+            let arm_value = lower_def(self, arm_def)?;
+            let cond_vn = term_op.inputs[1].clone();
+            let cond = self
+                .with_lowering_site(
+                    LoweringSite {
+                        block_idx: branch_idx,
+                        op_idx: term_idx,
+                    },
+                    |this| this.lower_varnode(&cond_vn, &mut HashSet::default()),
+                )
+                .ok()?;
+            let (then_expr, else_expr) = if arm_on_true {
+                (arm_value, branch_value)
+            } else {
+                (branch_value, arm_value)
+            };
+            let def_out = self
+                .pcode
+                .blocks
+                .get(arm_def.block_idx)?
+                .ops
+                .get(arm_def.op_idx)?
+                .output
+                .clone()?;
+            return Some(PreHirExpr::Select {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+                ty: type_from_size(def_out.size, false),
+            });
+        }
+        None
     }
 
     fn resolve_call_store_stack_address(
@@ -1573,6 +1699,7 @@ impl<'a> PreviewBuilder<'a> {
                         _marker: std::marker::PhantomData,
                     };
                     if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx)
+                        && !self.argument_register_merges(&vn, block.index as usize, call_idx)
                     {
                         let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
                         recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
@@ -1620,7 +1747,9 @@ impl<'a> PreviewBuilder<'a> {
                     op_idx: site.op_idx,
                     _marker: std::marker::PhantomData,
                 };
-                if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
+                if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx)
+                    && !self.argument_register_merges(&vn, block.index as usize, call_idx)
+                {
                     let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
                     recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
                     continue;
