@@ -2591,7 +2591,7 @@ mod operand_expression_borrow_tests {
             constructor_slot: 0,
             trace: RuntimeMatchTrace {
                 root_bucket: "instruction".into(),
-                probes: crate::runtime::spine::ProbeChain::default(),
+                probes: crate::runtime::spine::RuntimeMatchProbes::default(),
                 leaf_constructor_indexes: vec![0],
                 matched_leaf_pattern: Some(std::sync::Arc::new(
                     crate::compiler::CompiledDisjointPattern::Instruction(
@@ -2615,6 +2615,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection.clone(),
             None,
+            0,
         )
         .unwrap();
         // OperandValue evaluation must also read operand 0 at reloffset=2 (0x07), not ctx.cursor=0 (0xaa).
