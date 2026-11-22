@@ -44,6 +44,12 @@ Operator rollout:
    independent reviewer is available. (The auto-merge workflow is gone; merges
    are explicit.)
 
+Documentation and CLI changes run the marked [evaluation commands](EVALUATION.md)
+against the built CLI and validate real JSON responses against the published
+schemas. MkDocs diagnostics are compared with the event base. A newly broken local link
+fails the required check, including on a merge candidate. See the
+[fixture replay guide](VERIFY_REPLAY.md) for the separate native comparison job.
+
 ## What a required check may depend on
 
 [ADR 0016](adr/0016-ci-signal-integrity.md) holds the reasoning and the

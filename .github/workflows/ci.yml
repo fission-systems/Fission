@@ -24,7 +24,7 @@ env:
 
 jobs:
   # Path-filter tiers (see docs/CI_RELEASE_GATES.md):
-  #   docs     — docs/wiki/markdown only → short-circuit
+  #   docs     — docs/wiki/markdown only → documentation checks when selected
   #   scripts  — scripts/** only → pass-gate + script syntax
   #   ci       — .github/**, CI meta, or mixed CI/script edits → pass-gate + sanity
   #   rust     — crates/utils/Cargo/* → affected-package Linux checks (and macOS on main)
@@ -33,6 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       lane: ${{ steps.filter.outputs.lane }}
+      run_doc_checks: ${{ steps.filter.outputs.run_doc_checks }}
+      run_replay_checks: ${{ steps.filter.outputs.run_replay_checks }}
       run_security: ${{ steps.filter.outputs.run_security }}
       run_lint: ${{ steps.filter.outputs.run_lint }}
       run_advisories: ${{ steps.filter.outputs.run_advisories }}
@@ -78,6 +80,70 @@ jobs:
         if: steps.filter.outputs.run_tests == 'true'
         shell: bash
         run: python3 scripts/ci/select_affected_crates.py < "$RUNNER_TEMP/fission-changed-paths.txt" >> "$GITHUB_OUTPUT"
+
+  doc-checks:
+    name: Documentation examples and schemas
+    needs: [changes]
+    if: needs.changes.outputs.run_doc_checks == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Reject new documentation warnings
+        run: |
+          set -euo pipefail
+          python -m pip install -r scripts/ci/doc-check-requirements.txt
+          base="$BASE_SHA"
+          if [[ "$base" =~ ^0+$ ]]; then
+            base="$(git rev-parse HEAD)"
+          fi
+          python scripts/ci/check_docs.py --base "$base"
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Run documentation examples and validate JSON schemas
+        run: |
+          set -euo pipefail
+          cargo build --locked -p fission-cli
+          python scripts/ci/check_docs.py --cli target/debug/fission_cli
+          python scripts/ci/check_contract_schemas.py target/debug/fission_cli
+
+  replay-checks:
+    name: Native fixture replay and Python port
+    needs: [changes]
+    if: needs.changes.outputs.run_replay_checks == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Run native, emulated, HIR and Python comparisons
+        run: |
+          set -euo pipefail
+          cargo build --locked -p fission-dir --example concrete_replay
+          python3 scripts/test/replay_fixture.py --runner target/debug/examples/concrete_replay
+      - name: Preserve a replayable mismatch
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fixture-replay-witness
+          path: replay-witness.json
 
   # Step 1: Security & Lint
   security-check:
@@ -402,6 +468,8 @@ jobs:
     needs:
       [
         changes,
+        doc-checks,
+        replay-checks,
         security-check,
         lint-format,
         script-checks,
@@ -459,6 +527,8 @@ jobs:
           }
 
           FAILED=0
+          require_if "${{ needs.changes.outputs.run_doc_checks }}" "Documentation examples and schemas" "${{ needs.doc-checks.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_replay_checks }}" "Native fixture replay and Python port" "${{ needs.replay-checks.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_security }}" "Security" "${{ needs.security-check.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_lint }}" "Lint/format" "${{ needs.lint-format.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_script_checks }}" "Script checks" "${{ needs.script-checks.result }}" || FAILED=1
