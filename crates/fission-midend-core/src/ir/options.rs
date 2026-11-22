@@ -89,6 +89,27 @@ impl Default for ResourceLimits {
     }
 }
 
+impl ResourceLimits {
+    /// These limits with every override the user set applied; limits the
+    /// overrides leave unset keep their current value.
+    pub fn with_overrides(self, overrides: &fission_core::WorkLimitOverrides) -> Self {
+        Self {
+            structuring_total_work: overrides
+                .structuring_total_work
+                .unwrap_or(self.structuring_total_work),
+            condition_recovery_subcalls: overrides
+                .condition_recovery_subcalls
+                .unwrap_or(self.condition_recovery_subcalls),
+            sese_region_proof_calls: overrides
+                .sese_region_proof_calls
+                .unwrap_or(self.sese_region_proof_calls),
+            varnode_lowering_work: overrides
+                .varnode_lowering_work
+                .unwrap_or(self.varnode_lowering_work),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct NirRenderOptions {
     pub pe_x64_only: bool,
@@ -1322,6 +1343,24 @@ mod resource_limits_tests {
         assert_eq!(limits.sese_region_proof_calls, 20_000);
         assert_eq!(limits.varnode_lowering_work, 20_000);
         assert_eq!(NirRenderOptions::default().resource_limits, limits);
+    }
+
+    #[test]
+    fn overrides_replace_only_the_limits_they_name() {
+        let overrides = fission_core::WorkLimitOverrides {
+            structuring_total_work: Some(9),
+            sese_region_proof_calls: Some(3),
+            ..Default::default()
+        };
+        let limits = ResourceLimits::DEFAULT.with_overrides(&overrides);
+        assert_eq!(limits.structuring_total_work, 9);
+        assert_eq!(limits.sese_region_proof_calls, 3);
+        assert_eq!(limits.condition_recovery_subcalls, 512);
+        assert_eq!(limits.varnode_lowering_work, 20_000);
+        assert_eq!(
+            ResourceLimits::DEFAULT.with_overrides(&fission_core::WorkLimitOverrides::default()),
+            ResourceLimits::DEFAULT
+        );
     }
 
     #[test]

@@ -4,11 +4,13 @@ mod decomp;
 mod inventory;
 mod legacy;
 mod oneshot;
+mod work_limit;
 
 pub use decomp::DecompArgs;
 pub use inventory::{InventoryArgs, InventoryCommand};
 pub use legacy::{LegacyCliArgs, LegacyInvocationKind, ParsedOneShotArgs, normalize_legacy};
 pub use oneshot::OneShotArgs;
+pub use work_limit::{WorkLimitFlag, overrides_with_flags};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
@@ -1398,6 +1400,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;
+                    args.work_limits = decomp.work_limit;
                     args.json = decomp.json;
                     args.output = decomp.output;
                     args.verbose = decomp.verbose;
@@ -1612,6 +1615,55 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
+        }
+    }
+
+    #[test]
+    fn decomp_work_limit_flags_reach_the_normalized_args_in_order() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x401000",
+            "--work-limit",
+            "structuring_total_work=10",
+            "--work-limit",
+            "sese_region_proof_calls=5",
+        ]);
+        let overrides = overrides_with_flags(
+            fission_core::WorkLimitOverrides::default(),
+            &parsed.args.work_limits,
+        );
+        assert_eq!(parsed.args.work_limits.len(), 2);
+        assert_eq!(overrides.structuring_total_work, Some(10));
+        assert_eq!(overrides.sese_region_proof_calls, Some(5));
+    }
+
+    #[test]
+    fn decomp_without_work_limit_flags_carries_none() {
+        let parsed = parse_canonical(&["fission_cli", "decomp", "bin.exe", "--addr", "0x401000"]);
+        assert!(parsed.args.work_limits.is_empty());
+    }
+
+    #[test]
+    fn a_malformed_work_limit_is_rejected_at_parse_time() {
+        for bad in [
+            "structuring_total_work",
+            "nope=3",
+            "structuring_total_work=-4",
+        ] {
+            let err = CliArgs::try_parse_from([
+                "fission_cli",
+                "decomp",
+                "bin.exe",
+                "--addr",
+                "0x401000",
+                "--work-limit",
+                bad,
+            ])
+            .expect_err(bad);
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{bad}");
         }
     }
 

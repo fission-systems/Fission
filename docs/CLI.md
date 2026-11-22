@@ -517,6 +517,45 @@ fission_cli decomp app.exe --addr 0x140001000 --timeout-ms 1500
 
 Use `0` to mean no timeout where supported by the current execution path.
 
+#### `--work-limit <NAME=VALUE>`
+
+Override one deterministic work limit. May be repeated; for the same name the
+last flag wins.
+
+```bash
+fission_cli decomp app.exe --addr 0x140001000 \
+  --work-limit structuring_total_work=50000 --work-limit sese_region_proof_calls=2000
+```
+
+A work limit counts a unit of work, not time, so a given value trips at the same
+point on any machine and under any load. `--timeout-ms` is the wall-clock
+watchdog and stays separate. When a limit trips, that stage takes its existing
+fail-closed or degraded path, so lowering a limit can change a function's output.
+
+| Name | Counts | Default |
+|---|---|---:|
+| `structuring_total_work` | Structuring checkpoints across one whole structuring attempt | 200000 |
+| `condition_recovery_subcalls` | Checkpoints inside one condition-recovery attempt | 512 |
+| `sese_region_proof_calls` | SESE region-proof attempts before the region is given up | 20000 |
+| `varnode_lowering_work` | Varnode-lowering steps within one call trace | 20000 |
+
+The same names are the keys of the `[decompiler.work_limits]` table in
+`fission.toml`; a flag overrides the file, and a key left out keeps the default.
+An unknown name, a missing `=`, or a value that is not a non-negative integer is
+rejected when the command line is parsed. The deprecated flat syntax does not
+accept this flag.
+
+```toml
+[decompiler.work_limits]
+structuring_total_work = 50000
+```
+
+With `--json`, each result's `preview_build_stats` reports how close the
+function came to each limit: `resource_<name>_peak` is the highest value the
+limit's counter reached anywhere in the function's attempts (including discarded
+trials), and `resource_<name>_trip_count` is how many times it crossed the limit.
+A non-zero trip count means the limit changed that function's output.
+
 #### Function discovery
 
 There is one function discovery, and it runs for every command, so `list`,
