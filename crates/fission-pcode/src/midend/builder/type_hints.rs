@@ -78,7 +78,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
         let Some(type_name) = type_name else {
             continue;
         };
-        let Some(array) = parse_surface_array_type(type_name) else {
+        let Some(array) = parse_surface_array_type(type_name, pointer_size) else {
             continue;
         };
         let Some(size) = array.element_size.checked_mul(array.count) else {
@@ -209,7 +209,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
     applied
 }
 
-fn parse_surface_array_type(surface: &str) -> Option<SurfaceArrayType> {
+fn parse_surface_array_type(surface: &str, pointer_size: u32) -> Option<SurfaceArrayType> {
     let surface = surface.trim();
     let open = surface.rfind('[')?;
     let count = surface[open + 1..].strip_suffix(']')?.trim().parse().ok()?;
@@ -217,7 +217,7 @@ fn parse_surface_array_type(surface: &str) -> Option<SurfaceArrayType> {
         return None;
     }
     let base = surface_scalar_type(surface[..open].trim())?;
-    let element_size = binding_byte_size(&base, 8)?;
+    let element_size = binding_byte_size(&base, pointer_size)?;
     Some(SurfaceArrayType {
         element: base,
         element_size,
@@ -514,7 +514,7 @@ fn decay_array_addresses_at_typed_calls(
         .iter()
         .chain(func.locals.iter())
         .filter_map(|binding| {
-            parse_surface_array_type(binding.surface_type_name.as_deref()?)
+            parse_surface_array_type(binding.surface_type_name.as_deref()?, pointer_size)
                 .map(|array| (binding.name.clone(), array.element_size))
         })
         .collect::<HashMap<_, _>>();
