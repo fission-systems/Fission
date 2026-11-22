@@ -350,8 +350,7 @@ impl<'a> PreviewBuilder<'a> {
             return Some(PreHirExpr::Var(name));
         }
 
-        let mut consensus: Option<PreHirExpr> = None;
-        let mut paths_disagree = false;
+        let mut path_values: Vec<PreHirExpr> = Vec::with_capacity(reached_defs.len());
         for &site in &reached_defs {
             let def_op = self
                 .pcode
@@ -365,26 +364,60 @@ impl<'a> PreviewBuilder<'a> {
                     this.lower_def_op(&def_op, &mut HashSet::default())
                 })
                 .ok()?;
-            match &consensus {
-                None => consensus = Some(expr),
-                Some(first) if *first == expr => {}
-                Some(_) => {
-                    paths_disagree = true;
-                    break;
-                }
+            if !path_values.contains(&expr) {
+                path_values.push(expr);
             }
         }
-        if paths_disagree {
+        if path_values.len() > 1 {
             // Every incoming path defines the register and no call clobbers
             // it between that definition and this call (proved above), so the
             // argument is the register's merged value at the call site: one
             // value per path, joined. `lea rsi, msg_k; jmp join` on each edge
             // into `join: call dcgettext` is the ordinary shape; dropping the
-            // slot here printed `dcgettext(0)` and lost every message.
+            // slot printed `dcgettext(0)` and lost every message.
+            //
+            // The merged read must come from those definitions. A read equal
+            // to one path's value is that path alone, and a read of the
+            // register's entry value (its parameter) is a parameter the
+            // caller never received: the lowering found no definition at the
+            // call even though every path has one. Neither is the join, so
+            // the slot stays empty -- and a parameter binding the rejected
+            // read created is withdrawn with it.
+            let entry_param = {
+                let abi = self.abi_state();
+                abi.param_slot_for_varnode(vn)
+                    .map(|slot| (slot, abi.param_name(slot)))
+            };
+            let had_binding = entry_param
+                .as_ref()
+                .is_some_and(|(slot, _)| self.params.contains_key(slot));
+            let had_name = entry_param
+                .as_ref()
+                .is_some_and(|(_, name)| self.used_param_local_names.contains(name));
             let expr = self.lower_varnode(vn, &mut HashSet::default()).ok()?;
+            let mut bare = &expr;
+            while let PreHirExpr::Cast { expr: inner, .. } = bare {
+                bare = inner;
+            }
+            let reads_entry_value = entry_param
+                .as_ref()
+                .is_some_and(|(_, name)| matches!(bare, PreHirExpr::Var(var) if var == name));
+            if reads_entry_value || path_values.contains(&expr) {
+                if let Some((slot, name)) = entry_param {
+                    if !had_binding {
+                        self.params.remove(&slot);
+                    }
+                    if !had_name {
+                        self.used_param_local_names.remove(&name);
+                    }
+                }
+                return None;
+            }
             return Some(self.normalize_recovered_call_arg(expr));
         }
-        consensus.map(|expr| self.normalize_recovered_call_arg(expr))
+        path_values
+            .pop()
+            .map(|expr| self.normalize_recovered_call_arg(expr))
     }
 
     fn resolve_call_store_stack_address(

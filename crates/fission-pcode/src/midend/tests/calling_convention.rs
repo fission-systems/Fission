@@ -3921,3 +3921,126 @@ fn mips32_guarded_trap_callother_does_not_surface_as_pcodeop() {
     assert!(!code.contains("__pcodeop_1"), "{code}");
     assert!(code.contains("return param_1;"), "{code}");
 }
+
+#[test]
+fn systemv_join_call_keeps_an_argument_each_path_restages_differently() {
+    // call leaf; jcc; {mov esi, 0x11 | mov esi, 0x22}; join: mov edi, 7;
+    // call target_fn(int, int). Both arms restage rsi after the call that
+    // clobbered it, with different values: the second argument is the value
+    // merged at the join. Dropping it printed `target_fn(7)`.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let arm = |address: u64, value: i64| PcodeBasicBlock {
+        index: 0,
+        start_address: address,
+        successors: vec![3],
+        ops: vec![
+            op(
+                address,
+                PcodeOpcode::Copy,
+                Some(reg(0x30, 8)),
+                vec![cst(value, 8)],
+            ),
+            op(
+                address + 4,
+                PcodeOpcode::Branch,
+                None,
+                vec![cst(0x401030, 8)],
+            ),
+        ],
+    };
+    let mut blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 2],
+            ops: vec![
+                op(base, PcodeOpcode::Call, None, vec![cst(0x401100, 8)]),
+                op(
+                    base + 5,
+                    PcodeOpcode::IntEqual,
+                    Some(uniq(0x100, 1)),
+                    vec![reg(0x10, 8), cst(0, 8)],
+                ),
+                op(
+                    base + 8,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![cst(0x401020, 8), uniq(0x100, 1)],
+                ),
+            ],
+        },
+        arm(0x401010, 0x11),
+        arm(0x401020, 0x22),
+        PcodeBasicBlock {
+            index: 3,
+            start_address: 0x401030,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401030,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x38, 8)),
+                    vec![cst(7, 8)],
+                ),
+                op(0x401035, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x40103a, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    for (index, block) in blocks.iter_mut().enumerate() {
+        block.index = index as u32;
+    }
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    for (address, symbol) in [(0x401100, "leaf"), (0x401200, "target_fn")] {
+        context.call_target_refs.insert(
+            address,
+            CallTargetRef {
+                address: Some(address),
+                symbol: symbol.to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        );
+    }
+    context.call_prototype_summaries.insert(
+        "target_fn".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{code}"));
+    assert!(
+        call.contains("target_fn(7, "),
+        "the call at the join must keep its second argument: {call}\n{code}"
+    );
+    assert!(
+        !call.contains("target_fn(7, 17)")
+            && !call.contains("target_fn(7, 34)")
+            && !call.contains("target_fn(7, param_"),
+        "the second argument is the joined value, not one path's or the entry value: {call}\n{code}"
+    );
+}
