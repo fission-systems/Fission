@@ -224,6 +224,8 @@ pub fn build_cfg_blocks_with_hints(
         false,
     );
 
+    let inner_exits =
+        inner_conditional_exit_ops(&ops, reachable_instruction_addresses, instruction_lengths);
     let leaders = snapshot.block_starts;
     let leader_to_index: HashMap<u64, u32> = leaders
         .iter()
@@ -267,7 +269,169 @@ pub fn build_cfg_blocks_with_hints(
         block.successors.dedup();
     }
 
-    blocks
+    split_blocks_at_inner_conditional_exits(blocks, &inner_exits)
+}
+
+/// `CBranch` ops that leave their instruction for its fall-through while the
+/// rest of the instruction goes on to another control exit.
+///
+/// x86's repeat prefix is the common case: `rep stosq` lowers to
+/// `if (rcx == 0) goto inst_next; rcx--; store; goto inst_start`. The
+/// conditional branch to `inst_next` is the loop's exit and the trailing
+/// branch is its back edge, so the instruction has two control exits in one
+/// block. A block can have only one terminator: downstream, the conditional
+/// one was read as a guarded skip to the end of the block (the cmov shape),
+/// which leaves the back edge as the only successor and turns the loop into
+/// `while (1)` with no way out -- every statement after it unreachable.
+///
+/// Keyed by `(address, seq_num)`, the identity a lifted op keeps, and mapped
+/// to the fall-through address the branch exits to.
+fn inner_conditional_exit_ops(
+    ops: &[PcodeOp],
+    reachable_instruction_addresses: &[u64],
+    instruction_lengths: &BTreeMap<u64, u64>,
+) -> BTreeMap<(u64, u32), u64> {
+    let mut ops_by_addr: HashMap<u64, Vec<&PcodeOp>> = HashMap::new();
+    for op in ops {
+        ops_by_addr.entry(op.address).or_default().push(op);
+    }
+    let op_seq_to_idx = build_op_index_maps(ops);
+    let mut exits = BTreeMap::new();
+    for &addr in reachable_instruction_addresses {
+        let Some(ops_at) = ops_by_addr.get(&addr) else {
+            continue;
+        };
+        let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) else {
+            continue;
+        };
+        for (pos, op) in ops_at.iter().enumerate() {
+            if op.opcode != PcodeOpcode::CBranch
+                || pos + 1 >= ops_at.len()
+                || targets_own_instruction_internally(op, ops, &op_seq_to_idx)
+                || control_op_branch_target_address(op, ops, &op_seq_to_idx) != Some(fallthrough)
+            {
+                continue;
+            }
+            if cbranch_equal_target_is_cfg_split(
+                op,
+                fallthrough,
+                ops_at,
+                ops,
+                &op_seq_to_idx,
+                instruction_lengths,
+            ) {
+                exits.insert((op.address, op.seq_num), fallthrough);
+            }
+        }
+    }
+    exits
+}
+
+/// End a block at each op in `inner_exits`, the way Ghidra ends a p-code
+/// basic block at every branch whether or not it is the last op of its
+/// instruction.
+///
+/// The piece before the split exits to the fall-through block or continues
+/// into the next piece; the last piece keeps the original block's successors
+/// except the fall-through, which only the split branch reached, when it ends
+/// in an unconditional exit of its own. Pieces share the original start
+/// address, so an address-keyed branch to the instruction (the repeat
+/// prefix's back edge) still lands on the first piece -- the exit test --
+/// and the pieces stay adjacent so layout order is preserved.
+fn split_blocks_at_inner_conditional_exits(
+    blocks: Vec<PcodeBasicBlock>,
+    inner_exits: &BTreeMap<(u64, u32), u64>,
+) -> Vec<PcodeBasicBlock> {
+    if inner_exits.is_empty() {
+        return blocks;
+    }
+    let mut first_by_start: HashMap<u64, u32> = HashMap::new();
+    for block in &blocks {
+        first_by_start
+            .entry(block.start_address)
+            .or_insert(block.index);
+    }
+
+    // Split each block's ops into pieces, remembering for each non-final
+    // piece the address its trailing CBranch exits to.
+    let mut pieces_per_block: Vec<Vec<(Vec<PcodeOp>, Option<u64>)>> = Vec::new();
+    for block in &blocks {
+        let mut pieces = Vec::new();
+        let mut current = Vec::new();
+        let last = block.ops.len().saturating_sub(1);
+        for (idx, op) in block.ops.iter().enumerate() {
+            let exit_target = (idx < last)
+                .then(|| inner_exits.get(&(op.address, op.seq_num)).copied())
+                .flatten();
+            current.push(op.clone());
+            if exit_target.is_some() {
+                pieces.push((std::mem::take(&mut current), exit_target));
+            }
+        }
+        pieces.push((current, None));
+        pieces_per_block.push(pieces);
+    }
+    if pieces_per_block.iter().all(|pieces| pieces.len() == 1) {
+        return blocks;
+    }
+
+    let mut new_first = Vec::with_capacity(blocks.len());
+    let mut next_index = 0u32;
+    for pieces in &pieces_per_block {
+        new_first.push(next_index);
+        next_index += pieces.len() as u32;
+    }
+    let remap = |old: u32| new_first.get(old as usize).copied();
+    let new_index_for_start = |address: u64| {
+        first_by_start
+            .get(&address)
+            .and_then(|&old| new_first.get(old as usize).copied())
+    };
+
+    let mut out = Vec::with_capacity(next_index as usize);
+    for (block, pieces) in blocks.into_iter().zip(pieces_per_block) {
+        let base = new_first[block.index as usize];
+        let piece_count = pieces.len();
+        let mapped_successors: Vec<u32> = block
+            .successors
+            .iter()
+            .filter_map(|&succ| remap(succ))
+            .collect();
+        let mut exit_targets = Vec::new();
+        for (offset, (ops, exit_target)) in pieces.into_iter().enumerate() {
+            let index = base + offset as u32;
+            let mut successors = Vec::new();
+            if offset + 1 < piece_count {
+                if let Some(target) = exit_target.and_then(new_index_for_start) {
+                    exit_targets.push(target);
+                    push_successor(&mut successors, target);
+                }
+                push_successor(&mut successors, index + 1);
+            } else {
+                let ends_in_exit = ops.last().is_some_and(|op| {
+                    matches!(
+                        op.opcode,
+                        PcodeOpcode::Branch | PcodeOpcode::BranchInd | PcodeOpcode::Return
+                    )
+                });
+                for &succ in &mapped_successors {
+                    if ends_in_exit && exit_targets.contains(&succ) {
+                        continue;
+                    }
+                    push_successor(&mut successors, succ);
+                }
+            }
+            successors.sort_unstable();
+            successors.dedup();
+            out.push(PcodeBasicBlock {
+                index,
+                start_address: block.start_address,
+                successors,
+                ops,
+            });
+        }
+    }
+    out
 }
 
 /// Convenience wrapper for unit tests that only provide flattened pcode ops.

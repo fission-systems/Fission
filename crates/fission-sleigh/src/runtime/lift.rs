@@ -1052,11 +1052,15 @@ pub fn attach_inferred_indirect_edges(
         return;
     }
 
-    let block_start_to_index = function
-        .blocks
-        .iter()
-        .map(|block| (block.start_address, block.index))
-        .collect::<BTreeMap<_, _>>();
+    // First block per start address: a block split inside one instruction
+    // (see `split_blocks_at_inner_conditional_exits`) shares its start with
+    // the piece before it, and a branch to the address enters the first.
+    let mut block_start_to_index = BTreeMap::new();
+    for block in &function.blocks {
+        block_start_to_index
+            .entry(block.start_address)
+            .or_insert(block.index);
+    }
     let source_to_block_index = function
         .blocks
         .iter()
@@ -2478,6 +2482,61 @@ mod raw_seed_lift_tests {
         let a64_bytes = [0xe0u8, 0x43, 0x88, 0x1a, 0xc0, 0x03, 0x5f, 0xd6];
         let a64_lifted = aarch64.lift_raw_pcode_function(&a64_bytes, 0x0).unwrap();
         assert_eq!(lifted_addresses(&a64_lifted), vec![0x0, 0x4]);
+    }
+
+    /// `rep stosq` is a loop inside one instruction: `if (rcx == 0) goto
+    /// inst_next; rcx--; *rdi = rax; rdi += 8; goto inst_start`. Its exit test
+    /// and its back edge are both control exits, so the block must end at the
+    /// exit test: one piece exits to the next instruction or continues into
+    /// the body, the body branches back to the test. Left as one block, the
+    /// exit test read as a skip to the end of the block and the loop had no
+    /// way out.
+    #[test]
+    fn repeat_prefix_ends_the_block_at_its_exit_test() {
+        let x86 = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        // rep stosq ; ret
+        let bytes = [0xf3u8, 0x48, 0xab, 0xc3];
+        let lifted = x86.lift_raw_pcode_function(&bytes, 0x1000).unwrap();
+        let blocks = &lifted.blocks;
+        let shape: Vec<(u64, Option<PcodeOpcode>, Vec<u32>)> = blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.start_address,
+                    block.ops.last().map(|op| op.opcode),
+                    block.successors.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (0x1000, Some(PcodeOpcode::CBranch), vec![1, 2]),
+                (0x1000, Some(PcodeOpcode::Branch), vec![0]),
+                (0x1003, Some(PcodeOpcode::Return), vec![]),
+            ],
+            "{blocks:#?}"
+        );
+        assert!(
+            blocks
+                .iter()
+                .enumerate()
+                .all(|(idx, block)| block.index as usize == idx),
+            "block ids must stay positional"
+        );
+        // The exit test holds no part of the body; the body holds the store.
+        assert!(!blocks[0]
+            .ops
+            .iter()
+            .any(|op| op.opcode == PcodeOpcode::Store));
+        assert_eq!(
+            blocks[1]
+                .ops
+                .iter()
+                .filter(|op| op.opcode == PcodeOpcode::Store)
+                .count(),
+            1
+        );
     }
 
     #[test]
