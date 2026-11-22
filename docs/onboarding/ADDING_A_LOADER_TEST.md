@@ -2,7 +2,7 @@
 
 **Last verified:** 2026-05-02
 
-Loader tests usually live next to the module they protect as `#[cfg(test)] mod tests { ... }` under [`crates/fission-loader/src/`](../../crates/fission-loader/src/).
+Loader tests usually live next to the module they protect as `#[cfg(test)] mod tests { ... }` under [`crates/fission-loader/src/`](https://github.com/fission-systems/Fission/tree/main/crates/fission-loader/src).
 
 ## Pick the right seam
 
@@ -15,18 +15,18 @@ Loader tests usually live next to the module they protect as `#[cfg(test)] mod t
 ## Write a focused unit test
 
 1. Create or extend a `tests` module in the touched file (see existing examples: `loader/mod.rs`, `detector/mod.rs`).
-2. Prefer **inline byte fixtures** or tiny files from `benchmark/binary/` already redistributable.
+2. Prefer **inline byte fixtures** or tiny redistributable fixtures under `crates/fission-loader/testdata/`.
 3. Assert **public error types / invariants**, not incidental log text.
 
 Run:
 
 ```bash
-cargo test -p fission-loader
+cargo nextest run -p fission-loader
 ```
 
 ## Integration expectations
 
-If your change affects CLI-visible `info`/`list`, mention it in the PR description and upcoming **version-scoped** release notes (GitHub Release / `CHANGELOG.md` when present); archived dated logs live under [`docs/changelog/Legacy/`](../changelog/Legacy/).
+If your change affects CLI-visible `info`/`list`, mention it in the PR description and upcoming **version-scoped** release notes (GitHub Release / `CHANGELOG.md` when present); archived dated logs live under [`docs/changelog/Legacy/`](https://github.com/fission-systems/Fission/tree/main/docs/changelog/Legacy).
 
 ## Security reminder
 

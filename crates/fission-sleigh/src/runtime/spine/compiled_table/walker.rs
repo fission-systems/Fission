@@ -2,10 +2,15 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+#[derive(Clone, Copy, Debug)]
+struct OperandExtent {
+    absolute_offset: usize,
+    relative_length: usize,
+}
+
 struct DecodePool {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
@@ -79,9 +84,21 @@ impl std::fmt::Display for WalkFrame {
     }
 }
 
+/// Deepest constructor nesting one instruction may resolve to, root at 0.
+///
+/// A table can refer to itself -- x86's `instruction` takes a prefix byte and
+/// descends into `instruction` again -- so without a bound the nesting, and
+/// this walker's recursion, grows with the input: a run of prefix bytes
+/// overflowed the stack. The value is Ghidra's disassembler bound
+/// (`ParserWalker.MAX_PARSE_DEPTH`, which raises `UnknownInstructionException`
+/// at the same point). It bounds the parse, not any ISA: a legal x86
+/// instruction has at most 14 prefix bytes, so a run long enough to reach it
+/// is not one instruction, and a failed parse is a decode error like any other.
+pub(super) const MAX_PARSE_DEPTH: usize = 64;
+
 thread_local! {
-    static DECODE_POOL: RefCell<Vec<DecodePool>> = RefCell::new(Vec::new());
-    static WALK_STACK: RefCell<Vec<WalkFrame>> = RefCell::new(Vec::new());
+    static DECODE_POOL: RefCell<Vec<DecodePool>> = const { RefCell::new(Vec::new()) };
+    static WALK_STACK: RefCell<Vec<WalkFrame>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) struct WalkStackGuard;
@@ -109,7 +126,7 @@ pub(super) fn bind_instruction<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
-    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None)
+    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None, 0)
 }
 
 fn bind_instruction_with_inst_next<'a>(
@@ -118,6 +135,7 @@ fn bind_instruction_with_inst_next<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
     parent_inst_next: Option<Rc<InstNextShared>>,
+    depth: usize,
 ) -> Result<RuntimeConstructState> {
     let result = (|| {
         constructor_matches(ctx, selection.constructor)?;
@@ -126,7 +144,7 @@ fn bind_instruction_with_inst_next<'a>(
         // fallthrough from the second pass.
         if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
             let probe_walker =
-                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?;
+                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None, depth)?;
             let estimate = Rc::clone(&probe_walker.inst_next_shared);
             let probe = probe_walker.walk()?;
             // Only the estimate differs between the two walks. If no binding
@@ -149,10 +167,18 @@ fn bind_instruction_with_inst_next<'a>(
                 observed: Cell::new(false),
             });
             // owns=false: root_min_length already set to full probe length.
-            return CompiledParserWalker::new(compiled, strategy, ctx, selection, Some(shared))?
-                .walk();
+            return CompiledParserWalker::new(
+                compiled,
+                strategy,
+                ctx,
+                selection,
+                Some(shared),
+                depth,
+            )?
+            .walk();
         }
-        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next)?.walk()
+        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next, depth)?
+            .walk()
     })();
 
     match result {
@@ -182,23 +208,20 @@ fn bind_instruction_with_inst_next<'a>(
 
 pub(super) struct PoolGuard {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
 impl Drop for PoolGuard {
     fn drop(&mut self) {
         let handles = std::mem::take(&mut self.handles);
-        let operand_absolute_offsets = std::mem::take(&mut self.operand_absolute_offsets);
-        let operand_relative_lengths = std::mem::take(&mut self.operand_relative_lengths);
+        let operand_extents = std::mem::take(&mut self.operand_extents);
         let handle_reference_bitmap = std::mem::take(&mut self.handle_reference_bitmap);
 
         DECODE_POOL.with(|pool| {
             pool.borrow_mut().push(DecodePool {
                 handles,
-                operand_absolute_offsets,
-                operand_relative_lengths,
+                operand_extents,
                 handle_reference_bitmap,
             });
         });
@@ -220,6 +243,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     inst_next_shared: Rc<InstNextShared>,
     /// True when this walker owns/updates the shared fallthrough (root only).
     owns_inst_next: bool,
+    /// Constructor nesting depth of this walker; the root instruction is 0.
+    depth: usize,
 }
 
 impl<'a, 'b> std::ops::Deref for CompiledParserWalker<'a, 'b> {
@@ -237,7 +262,9 @@ impl<'a, 'b> std::ops::DerefMut for CompiledParserWalker<'a, 'b> {
 
 pub(super) struct OperandBinding {
     debug_value: Option<BoundOperand>,
-    subtable_state: Option<RuntimeConstructState>,
+    // The final handle already owns a Box. Allocate it when binding the
+    // subtable so other operands do not carry space for an inline state.
+    subtable_state: Option<Box<RuntimeConstructState>>,
     fixed: Option<RuntimeFixedHandle>,
     requires_fixed: bool,
 }
@@ -264,7 +291,7 @@ impl OperandBinding {
     fn guard_only(subtable_state: RuntimeConstructState) -> Self {
         Self {
             debug_value: None,
-            subtable_state: Some(subtable_state),
+            subtable_state: Some(Box::new(subtable_state)),
             fixed: None,
             requires_fixed: false,
         }
@@ -505,6 +532,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
         parent_inst_next: Option<Rc<InstNextShared>>,
+        depth: usize,
     ) -> Result<Self> {
         let replace_current_wrapper = constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
@@ -543,21 +571,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .with(|pool| pool.borrow_mut().pop())
             .unwrap_or_else(|| DecodePool {
                 handles: Vec::new(),
-                operand_absolute_offsets: Vec::new(),
-                operand_relative_lengths: Vec::new(),
+                operand_extents: Vec::new(),
                 handle_reference_bitmap: Vec::new(),
             });
 
         let target_len = selection.constructor.constructor_template.handles.len();
 
         pool_item.handles.clear();
-        pool_item.handles.resize(target_len, None);
+        pool_item.handles.resize_with(target_len, || None);
 
-        pool_item.operand_absolute_offsets.clear();
-        pool_item.operand_absolute_offsets.resize(target_len, None);
-
-        pool_item.operand_relative_lengths.clear();
-        pool_item.operand_relative_lengths.resize(target_len, None);
+        pool_item.operand_extents.clear();
+        pool_item.operand_extents.resize(target_len, None);
 
         constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
@@ -598,13 +622,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             cursor,
             pool_guard: PoolGuard {
                 handles: pool_item.handles,
-                operand_absolute_offsets: pool_item.operand_absolute_offsets,
-                operand_relative_lengths: pool_item.operand_relative_lengths,
+                operand_extents: pool_item.operand_extents,
                 handle_reference_bitmap: pool_item.handle_reference_bitmap,
             },
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             inst_next_shared,
             owns_inst_next,
+            depth,
         })
     }
 
@@ -1030,8 +1054,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_relative_length,
             handle_index,
         );
-        self.operand_absolute_offsets[operand_index] = Some(operand_absolute_offset);
-        self.operand_relative_lengths[operand_index] = Some(operand_relative_length);
+        self.operand_extents[operand_index] = Some(OperandExtent {
+            absolute_offset: operand_absolute_offset,
+            relative_length: operand_relative_length,
+        });
         let fixed = match binding.fixed {
             Some(fixed) => fixed,
             None if !binding.requires_fixed => RuntimeFixedHandle::default(),
@@ -1044,7 +1070,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             spec: template.spec,
             fixed,
             debug_value: binding.debug_value,
-            subtable_state: binding.subtable_state.map(Box::new),
+            subtable_state: binding.subtable_state,
         });
         Ok(())
     }
@@ -1071,33 +1097,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
         let index = usize::try_from(offsetbase)
             .map_err(|_| anyhow!("{role} base {offsetbase} does not fit usize"))?;
-        let offset = (*self
-            .operand_absolute_offsets
+        let extent = self
+            .operand_extents
             .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
-        let length = (*self
-            .operand_relative_lengths
-            .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved length"))?;
-        offset
-            .checked_add(length)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?
+            .as_ref()
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
+        extent
+            .absolute_offset
+            .checked_add(extent.relative_length)
             .ok_or_else(|| anyhow!("{role} base {offsetbase} end offset overflowed"))
     }
 
     fn max_operand_end(&self) -> Result<usize> {
         let mut max_end = self.ctx.cursor;
-        for (offset, length) in self
-            .operand_absolute_offsets
-            .iter()
-            .zip(self.operand_relative_lengths.iter())
-        {
-            let (Some(offset), Some(length)) = (*offset, *length) else {
-                continue;
-            };
-            let end = offset
-                .checked_add(length)
+        for extent in self.operand_extents.iter().flatten() {
+            let end = extent
+                .absolute_offset
+                .checked_add(extent.relative_length)
                 .ok_or_else(|| anyhow!("operand end offset overflowed"))?;
             max_end = max_end.max(end);
         }
@@ -1433,7 +1450,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding {
                     debug_value: value,
                     fixed: Some(exported.fixed.clone()),
-                    subtable_state: Some(sub_state),
+                    subtable_state: Some(Box::new(sub_state)),
                     requires_fixed: true,
                 })
             }
@@ -1796,6 +1813,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let _guard = WalkStackGuard::new(WalkFrame::Subtable(table_name.into()));
+        let depth = self.depth + 1;
+        if depth > MAX_PARSE_DEPTH {
+            bail!(
+                "SLEIGH exceeded maximum parse depth ({MAX_PARSE_DEPTH}) descending into subtable {table_name}"
+            );
+        }
         let mut sub_ctx = (*self.ctx).clone();
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
@@ -1859,6 +1882,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             &sub_ctx,
             selection,
             Some(Rc::clone(&self.inst_next_shared)),
+            depth,
         )
     }
 }
@@ -2073,7 +2097,8 @@ mod sleigh_parity_gaps_tests {
             .expect("selected instruction");
         let strategy = RuntimeDecodeStrategy::for_table();
         let probe_walker =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None).unwrap();
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None, 0)
+                .unwrap();
         let estimate = Rc::clone(&probe_walker.inst_next_shared);
         let probe = probe_walker.walk().expect("original probe");
         let observed = estimate.observed.get();
@@ -2089,7 +2114,7 @@ mod sleigh_parity_gaps_tests {
             observed: Cell::new(false),
         });
         let expected =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared))
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared), 0)
                 .unwrap()
                 .walk()
                 .expect("original second walk");
@@ -2229,6 +2254,7 @@ mod binding_address_witness_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let (value, witness) = super::super::binding_address_use::capture(|| {
@@ -2375,10 +2401,9 @@ mod operand_expression_borrow_tests {
 
     fn snapshot(walker: &CompiledParserWalker<'_, '_>) -> String {
         format!(
-            "{:?} {:?} {:?} {} {:x} {:x} {:?}",
+            "{:?} {:?} {} {:x} {:x} {:?}",
             walker.handles,
-            walker.operand_absolute_offsets,
-            walker.operand_relative_lengths,
+            walker.operand_extents,
             walker.cursor,
             walker.context_register,
             walker.context_known_mask,
@@ -2400,6 +2425,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection.clone(),
             None,
+            0,
         )
         .unwrap();
         let mut owned = CompiledParserWalker::new(
@@ -2408,6 +2434,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         for index in 0..=count {
@@ -2444,6 +2471,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let spec = walker.operand_spec_for_expression(0).unwrap();

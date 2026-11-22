@@ -1,5 +1,9 @@
 use fission_loader::LoadedBinary;
-use fission_sleigh::runtime::{DecodedFlowKind, DecodedInstruction, DecodedReferenceKind};
+use fission_sleigh::runtime::{
+    DecodedFlowKind, DecodedInstruction, DecodedReferenceKind, RuntimeSleighFrontend,
+};
+
+use super::thumb::decode_context_for_address;
 
 pub(crate) fn normalize_target(binary: &LoadedBinary, target: u64) -> u64 {
     if binary.is_64bit {
@@ -181,4 +185,56 @@ pub(crate) fn discovery_candidate_targets(
     call_targets.sort_unstable();
     call_targets.dedup();
     call_targets
+}
+
+pub(super) fn terminal_import_thunk_target(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    address: u64,
+) -> Option<u64> {
+    let Some(bytes) = binary.view_bytes(address, 15) else {
+        return None;
+    };
+    let context = decode_context_for_address(binary, frontend, address, None);
+    let Ok(decoded) = frontend.decode_window_no_pcode_in_context(bytes, address, 1, context) else {
+        return None;
+    };
+    let Some(instruction) = decoded.first() else {
+        return None;
+    };
+    if instruction.flow_kind != DecodedFlowKind::Jump
+        && !instruction.mnemonic.eq_ignore_ascii_case("jmp")
+    {
+        return None;
+    }
+
+    instruction
+        .direct_target
+        .into_iter()
+        .chain(
+            instruction
+                .references
+                .iter()
+                .map(|reference| reference.target),
+        )
+        .map(|target| normalize_target(binary, target))
+        .find(|target| binary.iat_symbols.contains_key(target))
+}
+
+pub(super) fn is_target_no_return(binary: &LoadedBinary, target: u64) -> bool {
+    let fmt = fission_core::core::ghidra_no_return::binary_format_to_ghidra_format(&binary.format);
+    let Some(fmt) = fmt else {
+        return false;
+    };
+    let comp = binary.get_ghidra_compiler_id();
+    let idx = fission_core::core::ghidra_no_return::ghidra_no_return_index();
+
+    if let Some((name, lib)) =
+        crate::analysis::control_flow_facts::resolve_call_target_name(binary, target)
+    {
+        if idx.is_no_return(fmt, comp.as_deref(), lib, &name) {
+            return true;
+        }
+    }
+    false
 }
