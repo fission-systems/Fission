@@ -448,7 +448,15 @@ fission_cli debug --emulator session ./guest.elf --record \
 
 `back-step` returns to the previous instruction and `seek <STEP>` to any
 instruction count, backwards or forwards; registers and memory are exact,
-because a seek restores the nearest snapshot and re-executes from there. Every
+because a seek restores the nearest snapshot and re-executes from there.
+Changing the machine by hand (`set-reg`, `write`) discards what was recorded
+after the current step, so a later `seek` forward executes the changed machine
+instead of replaying the old run. `--record-interval` must be at least 1.
+
+A session restores the breakpoints and watchpoints saved with `db bp` /
+`db watch` from the database the global `--db` names (default: beside the
+binary); `--no-db` restores none. The session's JSON lists them under
+`restored`. Every
 `step`, `continue`, `back-step` and `seek` result carries `step`, the
 instruction count `seek` takes. Without `--record`, and outside a session,
 both commands fail and say so; native backends do not implement them.
@@ -516,7 +524,7 @@ instruction; use `--coverage` for which code ran.
 | Flag | Effect |
 |---|---|
 | `--interp` | Run on the p-code interpreter instead of the JIT (`FISSION_EMU_INTERP`); the report's `tbs_compiled` is 0 |
-| `--timeout-ms N` | Stop after N ms of wall-clock time |
+| `--timeout-ms N` | Stop after N ms of wall-clock time; the report's `metrics.exit_reason` is then `deadline` |
 | `--dynlink` | Linux ELF: map the guest's own `PT_INTERP` loader from the host (`FISSION_ENABLE_DYNLINK`) |
 | `--ld-so PATH` | The host loader for `--dynlink` (`FISSION_LD_SO`) |
 | `--lib-path DIR` | Searched first for `DT_NEEDED` libraries, repeatable (`FISSION_LIB_PATH`) |
