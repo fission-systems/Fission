@@ -2331,3 +2331,47 @@ fn structuring_candidate_discovery_counts_ambiguous_follow_witness_rejection() {
     );
     assert_eq!(stats.promoted_region_count, 0);
 }
+
+/// `if (cK) goto LK; armK(); goto shared; LK: ...` -- a ladder whose matched
+/// arms all jump over the later rungs to one shared tail. Deleting
+/// `goto shared` as a fallthrough alias runs every arm into the next test and
+/// never reaches the tail, so the label must not canonicalize away.
+#[test]
+fn structuring_candidate_discovery_rejects_alias_whose_gotos_jump_over_calls() {
+    let call = |name: &str| {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: name.to_string(),
+            args: Vec::new(),
+            ty: NirType::Unknown,
+        })
+    };
+    let if_goto = |cond: &str, label: &str| PreHirStmt::If {
+        cond: PreHirExpr::Var(cond.to_string()),
+        then_body: vec![PreHirStmt::Goto(label.to_string())].into(),
+        else_body: Vec::new().into(),
+    };
+    let body = vec![
+        if_goto("missing", "block_tail"),
+        if_goto("c1", "block_next1"),
+        call("arm1"),
+        PreHirStmt::Goto("block_shared".to_string()),
+        PreHirStmt::Label("block_next1".to_string()),
+        if_goto("c2", "block_next2"),
+        call("arm2"),
+        PreHirStmt::Goto("block_shared".to_string()),
+        PreHirStmt::Label("block_next2".to_string()),
+        call("arm3"),
+        PreHirStmt::Label("block_shared".to_string()),
+        call("shared"),
+        PreHirStmt::Label("block_tail".to_string()),
+        PreHirStmt::Return(Some(PreHirExpr::Var("ret".to_string()))),
+    ];
+
+    let stats = discover_guarded_tail_candidates_for_test(&body);
+
+    // Every `if (c) goto` here looks like a guarded tail; none may promote.
+    assert_eq!(stats.discovery_seen_guarded_tail_like_shape_count, 3);
+    assert_eq!(stats.promotion_candidate_count, 0);
+    assert!(stats.canonicalization_failed_alias_not_fallthrough_count >= 1);
+}

@@ -16,9 +16,9 @@
 
 Fission loads ELF, PE and Mach-O binaries, lifts machine code through Sleigh
 processor specifications, and owns everything after that in Rust: its own IR,
-control-flow structuring, type recovery and C output. One headless binary does
-the work; there is no GUI, by design. Every command answers in text for people
-and in a versioned JSON envelope for programs.
+control-flow structuring, type recovery and C output. The CLI provides
+text for inspection and structured output for automation. Commands with
+`--json` can use the versioned machine contract.
 
 ```text
 $ fission_cli decomp app --name sum_to --no-header
@@ -36,10 +36,10 @@ The source was a loop (`for (i = 0; i <= n; i++) s += i;`). The compiler
 replaced it with a closed form, and the output says what the binary does, not
 what the source said.
 
-Correctness is checked by running code, not by eye. `fission_cli verify`
-evaluates a decompiled function, executes the same machine code in Fission's
-emulator, and compares. Anything it cannot prove is reported as an assumption
-rather than hidden.
+`fission_cli verify --tier ground-truth` compares decompiled behavior
+against emulated machine code on bounded samples. Use the symbolic tier
+for solver-backed comparison of eligible loop-free trees. Verification reports
+divergences, unsupported functions, and harness failures.
 
 ## Install
 
@@ -119,8 +119,8 @@ The full reference is [`docs/CLI.md`](docs/CLI.md).
 
 Fission is meant to be driven by programs, including language-model agents.
 
-- `--contract v1` turns any command into one JSON envelope on stdout with typed
-  exit codes (0 ok, 1 failed, 2 usage, 3 input, 4 partial, 5 timeout,
+- Combine `--contract v1` with the command's `--json` flag for one envelope
+  on stdout and typed exit codes (0 ok, 1 failed, 2 usage, 3 input, 4 partial, 5 timeout,
   6 environment, 70 internal).
 - `fission_cli schema` prints the envelope's JSON Schema; `--error-codes` lists
   the stable error codes.
@@ -128,7 +128,7 @@ Fission is meant to be driven by programs, including language-model agents.
   binary, so an agent can learn the tool from the tool.
 
 ```bash
-fission_cli --contract v1 decomp app --addr 0x401130
+fission_cli --contract v1 decomp app --addr 0x401130 --json
 ```
 
 ## What it reads
@@ -185,6 +185,8 @@ emulator. Numbers for each release and how they were reached are in
 | [`docs/architecture/`](docs/architecture/) | Pipeline, dynamic analysis, Ghidra parity audit |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 | [`docs/changelog/`](docs/changelog/) | Release notes |
+| [DecBench](docs/BENCHMARK_DECBENCH.md) | Quality measurements and corpus sweeps |
+| [CI and release gates](docs/CI_RELEASE_GATES.md) | PR, nightly and release validation |
 | [`docs/roadmap/1.0-criteria.md`](docs/roadmap/1.0-criteria.md) | What 1.0 will promise, and what is still open |
 | [`AGENTS.md`](AGENTS.md) | Working rules for changing the decompiler; read before contributing |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to contribute |
@@ -204,10 +206,10 @@ the loop.
 ## Security
 
 Fission is built to read untrusted binaries. Handling rules for samples are in
-[`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md). Report
-vulnerabilities through GitHub Security Advisories, not a public issue.
+[`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md). Contact
+the maintainer privately to report vulnerabilities. See [the security policy](SECURITY.md).
 
 ## License
 
-Apache-2.0. See [`LICENSE`](LICENSE) and, for third-party attributions,
-[`NOTICE`](NOTICE).
+Apache-2.0. See [`LICENSE`](LICENSE), [`NOTICE`](NOTICE), and
+[`THIRD_PARTY.md`](THIRD_PARTY.md).

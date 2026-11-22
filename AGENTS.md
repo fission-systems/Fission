@@ -49,7 +49,7 @@ Read the nearest child file before editing those areas.
 | Task | Location | Notes |
 |---|---|---|
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
-| NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
+| NIR telemetry contract | `crates/fission-midend-core/src/ir/build_stats.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
 | DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`; full-dataset sweep `~/fission-benchmark/decbench-full/sweep.py`; quick gate `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`) | The measurement surface for quality claims is the **whole** dataset (96,103 functions); published source CFGs are the answer key, Ghidra is not the oracle |
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
@@ -129,7 +129,7 @@ submodules and rewrites files you never touched.
 - If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and the full-dataset sweep; sweep results live under `~/fission-benchmark/decbench-full/runs/`, not in the repository.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
-- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): tags a commit only after **ci.yml push** + **ci-heavy** success on that SHA and **release-e2e** green; then `cd.yml` builds assets. Do not auto-tag every `main` push.
+- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`). It requires successful **ci.yml main push** and **ci-heavy scheduled or dispatched** runs on the exact candidate SHA, then runs **release-e2e** and builds and smoke-tests the archives through **cd.yml**. It publishes those verified artifacts after creating the tag. Do not auto-tag every `main` push.
 
 ## Decompiler Quality Loop
 
@@ -360,7 +360,7 @@ Regression-prevention workflow:
 
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/adr/` — architectural decisions (ADR index lives alongside numbered entries)
-- `docs/build/BUILD.md`
+- [Build and locate the CLI](docs/CLI.md#build-and-locate)
 - `README.md`
 - `.github/workflows/ci.yml`
 - `.github/workflows/ci-heavy.yml`

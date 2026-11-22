@@ -60,13 +60,24 @@ cost and what it catches are known rather than assumed.
 | Retry masking | 0 tests passed only on retry in 59 recent green test jobs | Not changed |
 | Hangs | nextest already terminates a test after 120 s | Not changed |
 
+## Further tests, and what each found or measured first
+
+| Test | Measured before adding | Where |
+|---|---|---|
+| Fuzz: any format, Mach-O, COFF objects, SLEIGH decode (four ISAs), with the loader fixtures as seeds | The seed script the workflow looked for was never checked in, so every run started from nothing. Locally, 60 s each: loader targets clean; the SLEIGH target hit a stack overflow at once (947 bytes of `0x65` prefixes under ASan; without ASan from about 5,000 prefixes): the x86 decoder recursed per prefix with no instruction-length bound (fixed by #1009, which bounds constructor depth at 64) | Nightly `fuzz.yml`, 5 minutes per target, `ci-red` issue on a crash |
+| Memory ceiling | Eight largest DecBench binaries (one per project) peak at 0.90-2.25 GiB, four minutes in all | Nightly `memory-ceiling.yml`, 8 GiB on the process tree |
+| Engine differential with real fixtures | Three JIT-vs-interpreter tests (PE32, AArch64, DC ZVA) skipped wherever a local dev corpus was absent, which was everywhere; they now use checked-in fixtures built from `testdata/src/control_flow.c` and fail without them | Every emulator change (Fast Gate) |
+| Mutation testing | 5,448 mutants in one week of main; at one to two minutes each this is sampled: four of 48 rotating slices a week | Weekly `mutants.yml`, report-only |
+| CLI JSON contracts | (assigned to the CLI exposure work, which changes those outputs) | Fast Gate, with the CLI |
+| Decompile speed | Wall time on shared runners moves 10-20%, so cost is counted as instructions executed (valgrind cachegrind, one thread). Eight identical runs: first ~3% high, the rest within 1.3%. Under valgrind 40 functions take 25-76 s per binary and CLI start-up alone is ~3.7e9 instructions (kept: every call pays it). Sample: six hash-ordered binaries, 15 functions each, warm-up plus minimum of two | PR (every Rust change): base vs head on one runner, flagged at +3%, report-only. Nightly `speed.yml`: main vs the last good night's CLI, fails at +3%; `accept_baseline` dispatch accepts a deliberate slowdown |
+
 ## Phases
 
 | Phase | Content | State |
 |---|---|---|
 | 1 | Advisories off the PR path and into Heavy; sccache fails open; every main push lints the workspace; `ci-red` issues for Heavy, fuzz and DecBench; fuzz on a schedule with a persistent corpus; doctests enforced; removal-only midend changes exempt from the targeted-test rule; auto-merge workflow removed | This change |
 | 2 | Require the merge queue on `main` (`Detect changes` and `CI Summary` already report on `merge_group`) | Repository setting; the owner's decision |
-| 3 | A PR that can change decompiler output gets an output diff against its base on a fixed DecBench slice: functions whose text changed, then GED and type deltas. Output hashes first, scores second | Proposed |
+| 3 | A PR that can change decompiler output gets an output diff against its base on a fixed DecBench slice: functions whose text changed, then GED and type deltas. Output hashes first, scores second | Implemented, report-only (`reusable-base-head.yml`, `scripts/ci/output_diff.py`); about 3,000 sample functions |
 | 4 | One release CLI per main SHA, built by the push run and reused by the nightly sweep and release E2E, so what is measured is what ships | Proposed |
 
 ## Consequences
