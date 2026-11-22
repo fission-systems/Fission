@@ -391,6 +391,13 @@ pub struct VerifyArgs {
     #[arg(long, default_value_t = fission_dir::DEFAULT_RUNS)]
     pub runs: usize,
 
+    /// Seed for the ground-truth tier's initial states. Run `n` of a seed is
+    /// always the same state, so a divergence reported with its seed and run
+    /// can be replayed; a different seed draws different arguments, registers
+    /// and memory.
+    #[arg(long, default_value_t = fission_dir::DEFAULT_SEED)]
+    pub seed: u64,
+
     /// Emit the result as JSON instead of human-readable text
     #[arg(long)]
     pub json: bool,
@@ -1133,8 +1140,8 @@ where
 ///
 /// `--language`, `--arch`, `--db` and `--no-db` are global, so clap takes them
 /// on every subcommand, but only the one-shot analysis commands (and `db`, for
-/// `--db`) act on them; `--compiler-id`, `--format` and `--engine` are parsed
-/// for `decomp` and read by nothing. Dropping them without a word makes a
+/// `--db`) act on them; `--compiler-id`, `--profile`, `--format` and
+/// `--engine` are parsed for `decomp` and `inventory` and read by nothing. Dropping them without a word makes a
 /// command appear to have run with the setting the caller asked for.
 fn ignored_option_warnings(
     invocation: &ParsedInvocation,
@@ -1151,14 +1158,27 @@ fn ignored_option_warnings(
     };
     match invocation {
         ParsedInvocation::OneShot(parsed) => {
+            let command = if parsed.args.emit_function_facts_inventory
+                || parsed.args.preview_candidate_inventory
+                || parsed.args.preview_candidate_scan_batch
+            {
+                "inventory"
+            } else {
+                "decomp"
+            };
             if parsed.args.compiler_id.is_some() {
-                ignored("--compiler-id", "decomp");
+                ignored("--compiler-id", command);
+            }
+            // Every decompile runs the one configuration the CLI has; the
+            // value is only echoed back into the output's metadata.
+            if parsed.args.profile.is_some() {
+                ignored("--profile", command);
             }
             if parsed.args.format.is_some() {
-                ignored("--format", "decomp");
+                ignored("--format", command);
             }
             if parsed.args.engine.is_some() {
-                ignored("--engine", "decomp");
+                ignored("--engine", command);
             }
         }
         ParsedInvocation::Script(_)

@@ -397,7 +397,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
             out.insert("address".into(), format!("0x{:x}", func.address).into());
             out.insert("name".into(), func.name.clone().into());
         }
-        let mut tiers: Vec<(&str, String, String, String)> = Vec::new();
+        let mut tiers: Vec<(&str, String, String, String, serde_json::Value)> = Vec::new();
         match fission_dir::decompile_one(&binary, &facts, func) {
             Err(err) => {
                 if !batch {
@@ -410,6 +410,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                     "error".into(),
                     err.to_string(),
                     err.to_string(),
+                    serde_json::json!({}),
                 ));
             }
             Ok(pair) => {
@@ -421,6 +422,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                         outcome.category().into(),
                         format!("{outcome:?}"),
                         verify_outcome_reason(&outcome),
+                        verify_outcome_fields(&outcome),
                     ));
                 }
                 if let Some(harness) = harness.as_mut() {
@@ -428,7 +430,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                         Ok(harness) => {
                             let plan = fission_dir::RunPlan {
                                 runs: args.runs,
-                                ..fission_dir::RunPlan::default()
+                                seed: args.seed,
                             };
                             let grounding =
                                 fission_dir::Grounding::for_function(&binary, func.address, &pair);
@@ -445,6 +447,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 outcome.category().into(),
                                 format!("{outcome:?}"),
                                 verify_outcome_reason(&outcome),
+                                verify_outcome_fields(&outcome),
                             ));
                         }
                         Err(err) => tiers.push((
@@ -452,33 +455,49 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                             "harness".into(),
                             format!("EmulatorSetupFailed({err})"),
                             format!("emulator setup failed: {err}"),
+                            serde_json::json!({}),
                         )),
                     }
                 }
                 if run_symbolic {
                     let outcome = fission_dir::check_symbolic_equivalence(&pair.prehir, &pair.hir);
-                    let (category, desc, reason) = match outcome {
+                    let (category, desc, reason, fields) = match outcome {
                         fission_dir::symbolic::SymbolicOutcome::Equivalent => (
                             "equivalent",
                             "Equivalent (proved, Unsat)".to_string(),
                             String::new(),
+                            serde_json::json!({ "proved": true }),
                         ),
                         fission_dir::symbolic::SymbolicOutcome::Diverged(cx) => (
                             "diverged",
                             format!("Diverged (solver counterexample args={:?})", cx.args),
                             "solver counterexample".to_string(),
+                            serde_json::json!({
+                                "counterexamples": [{
+                                    "args": cx.args.iter().map(|a| format!("0x{a:x}")).collect::<Vec<_>>(),
+                                }],
+                            }),
                         ),
                         fission_dir::symbolic::SymbolicOutcome::Unsupported(reason) => (
                             "unsupported",
                             format!("Unsupported({reason})"),
                             reason.to_string(),
+                            serde_json::json!({}),
                         ),
                     };
-                    tiers.push(("symbolic", category.into(), desc, reason));
+                    tiers.push(("symbolic", category.into(), desc, reason, fields));
                 }
             }
         }
-        for (tier, category, desc, reason) in tiers {
+        let mut structured = serde_json::Map::new();
+        for (tier, category, desc, reason, fields) in tiers {
+            let mut tier_obj = serde_json::Map::new();
+            tier_obj.insert("category".into(), category.clone().into());
+            tier_obj.insert("detail".into(), desc.clone().into());
+            tier_obj.insert("reason".into(), reason.clone().into());
+            if let serde_json::Value::Object(fields) = fields {
+                tier_obj.extend(fields);
+            }
             *counts
                 .entry((tier.to_string(), category.clone()))
                 .or_default() += 1;
@@ -488,13 +507,20 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                         .entry((tier.to_string(), verify_reason_key(&reason)))
                         .or_default() += 1;
                 }
-                out.insert(
-                    tier.to_string(),
-                    serde_json::json!({ "category": category, "detail": desc }),
-                );
+                out.insert(tier.to_string(), serde_json::Value::Object(tier_obj));
             } else {
                 report_tier(tier, &desc, args.json, &mut out);
+                structured.insert(tier.to_string(), serde_json::Value::Object(tier_obj));
             }
+        }
+        if !batch && args.json {
+            // The per-tier strings above are the original single-function
+            // shape and stay as they are; the same results as fields live
+            // under `tiers`.
+            out.insert("tiers".into(), serde_json::Value::Object(structured));
+        }
+        if args.json || batch {
+            out.insert("seed".into(), args.seed.into());
         }
         if batch || args.json {
             println!("{}", serde_json::Value::Object(out));
@@ -514,6 +540,33 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A tier's outcome as fields, so a caller does not have to parse the
+/// `Debug` text in `detail`: how many inputs agreed, and each input that did
+/// not, with every side's result.
+fn verify_outcome_fields(outcome: &fission_dir::VerifyOutcome) -> serde_json::Value {
+    fn divergence(d: &fission_dir::Divergence) -> serde_json::Value {
+        serde_json::json!({
+            "run": d.run,
+            "args": d.args,
+            "prehir_result": d.prehir_result,
+            "hir_result": d.hir_result,
+            "emulator_result": d.emulator_result,
+            "detail": d.detail,
+        })
+    }
+    match outcome {
+        fission_dir::VerifyOutcome::Equivalent { checked } => {
+            serde_json::json!({ "checked": checked })
+        }
+        fission_dir::VerifyOutcome::Diverged(found)
+        | fission_dir::VerifyOutcome::Suspect(found) => {
+            serde_json::json!({ "counterexamples": found.iter().map(divergence).collect::<Vec<_>>() })
+        }
+        fission_dir::VerifyOutcome::Unsupported(_)
+        | fission_dir::VerifyOutcome::Inconclusive { .. } => serde_json::json!({}),
+    }
 }
 
 /// What made a tier say something other than "equivalent", in words.
@@ -1281,4 +1334,34 @@ fn print_help() {
     println!(
         "Legacy flat invocations still work during the transition, but now emit deprecation warnings and normalize into the canonical subcommand path."
     );
+}
+
+#[cfg(test)]
+mod verify_fields_tests {
+    use super::verify_outcome_fields;
+
+    /// A divergence reaches the JSON as fields, every side's result included,
+    /// instead of only inside the `Debug` text of `detail`.
+    #[test]
+    fn a_divergence_is_reported_field_by_field() {
+        let found = fission_dir::Divergence {
+            run: Some(3),
+            args: vec![1, -2],
+            prehir_result: Some(5),
+            hir_result: Some(6),
+            emulator_result: Some(5),
+            detail: Some("return value".to_string()),
+        };
+        let fields = verify_outcome_fields(&fission_dir::VerifyOutcome::Diverged(vec![found]));
+        let cx = &fields["counterexamples"][0];
+        assert_eq!(cx["run"], 3);
+        assert_eq!(cx["args"], serde_json::json!([1, -2]));
+        assert_eq!(cx["hir_result"], 6);
+        assert_eq!(cx["emulator_result"], 5);
+        assert_eq!(cx["detail"], "return value");
+
+        let fields = verify_outcome_fields(&fission_dir::VerifyOutcome::Equivalent { checked: 9 });
+        assert_eq!(fields["checked"], 9);
+        assert!(fields.get("counterexamples").is_none());
+    }
 }

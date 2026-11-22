@@ -64,7 +64,7 @@ Before creating bug reports, please check existing issues to avoid duplicates.
 
 **Environment:**
 - OS: Ubuntu 22.04
-- Rust: 1.85+
+- Rust: [toolchain version from `rustc --version`]
 - Fission: 0.1.0
 
 **Steps:**
@@ -135,13 +135,11 @@ Do not add mixed or ad-hoc custom headers without a clear reason. If a contribut
 ### Prerequisites
 
 ```bash
-# Install Rust 1.85+
+# Install the stable Rust toolchain used in CI
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Install development tools
-cargo install cargo-watch  # Auto-rebuild
-cargo install cargo-edit   # Manage dependencies
-cargo install cargo-audit  # Security audits
+cargo install cargo-nextest --locked
 ```
 
 ### Clone and Build

@@ -1,7 +1,5 @@
 # Debugging a decompilation failure
 
-**Last verified:** 2026-05-02
-
 Use this linear checklist before guessing at printer bugs.
 
 ## 1. Loader / facts (`fission-loader`)
@@ -22,32 +20,29 @@ Symptoms: wrong opcode stream at entry.
 
 Symptoms: absurd pcode volume or decode aborts.
 
-- Compare against sleigh references under [`vendor/ghidra/`](../../vendor/ghidra/) conceptually—do **not** patch vendor copies for production fixes ([`docs/adr/0005-ghidra-reference-boundary.md`](../adr/0005-ghidra-reference-boundary.md)).
+- Inspect the function with `fission_cli raw-pcode <binary> --addr <address>`. Consult the [Ghidra reference policy](../adr/0005-ghidra-reference-boundary.md) when comparing lift behavior.
 
 ## 4. NIR build (`fission-pcode`)
 
 Symptoms: empty bodies, chaotic control flow, telemetry explosions.
 
-- Inspect embedded counters via automation summaries (`nir_build_stats_totals`, [`docs/QUALITY_METRICS.md`](../QUALITY_METRICS.md)).
-- Canonical counters live in [`crates/fission-midend-core/src/ir/build_stats.rs`](../../crates/fission-midend-core/src/ir/build_stats.rs).
+- Inspect counters with `fission_cli nir-stats <binary> --addr <address> --json`. See [quality metrics](../QUALITY_METRICS.md) for batch telemetry.
+- Canonical counters live in [`crates/fission-midend-core/src/ir/build_stats.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-midend-core/src/ir/build_stats.rs).
 
 ## 5. Structuring / normalization
 
 Symptoms: duplicated labels, collapsed loops, odd regions.
 
-- Fix in [`crates/fission-pcode/src/midend/structuring/`](../../crates/fission-pcode/src/midend/structuring/) per child `AGENTS.md`.
+- Fix in [`crates/fission-pcode/src/midend/structuring/`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode/src/midend/structuring) per child `AGENTS.md`.
 
 ## 6. Rendering
 
 Symptoms: types look fine internally but pseudocode unreadable.
 
-- Only after NIR/HIR matches intent should you tune [`printer.rs`](../../crates/fission-pcode/src/render/printer.rs) paths.
+- Only after NIR/HIR matches intent should you tune [`printer.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-pcode/src/render/printer.rs) paths.
 
 ## 7. Regression scale-up
 
-When the single function is understood:
-
-```bash
-```
-
-Attach `benchmark/artifacts/automation/` excerpts to the PR if quality logic changed ([`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
+Run the relevant crate suite with `cargo nextest run -p <crate>`. For a quality
+claim, attach cache-disabled before/after evidence following the
+[DecBench guide](../BENCHMARK_DECBENCH.md).
