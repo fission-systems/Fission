@@ -1537,9 +1537,10 @@ parity across every architecture and file format.</p>
    and cost on one very large function (that is per-function work, not reload). At
    ~0.1 s a call, a resident session or analysis cache buys little for an agent
    that makes dozens of calls, so it is not built; revisit if a PE or Mach-O
-   measurement or a larger image says otherwise. <code>fission-analysis-protocol</code>
-   already defines local-HTTP backend contracts that nothing in the CLI uses
-   (verified).</li>
+   measurement or a larger image says otherwise. The local-HTTP and cloud
+   backend contracts that <code>fission-analysis-protocol</code> once carried had no
+   server behind them and were removed on 2026-11-22; the crate now holds only
+   the JSON shapes the CLI prints.</li>
 <li><strong>Provenance in results.</strong> Issue #660 reports evidence-traceability gaps in a
    PE64 workflow (unverified; not read). An agent can only trust a result that
    says where it came from.</li>
