@@ -5782,3 +5782,71 @@ fn systemv_join_restaged_rdi_recovers_after_dominating_call_and_rejects_unrestag
         "an unrestaged arm falling back to a clobbering call must reject rdi"
     );
 }
+
+#[test]
+fn systemv_join_with_disagreeing_restaged_rsi_recovers_the_merged_value() {
+    // `call f; jcc; {lea rsi, a | lea rsi, b}; join: call g`: both arms
+    // restage rsi after the call that clobbered it, with different values.
+    // The argument is the value merged at the join, not "no argument".
+    let rsi = register(0x30, 8);
+    let cond = varnode(0x500);
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+
+    let arm = |value: i64| {
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(rsi.clone()),
+                vec![constant(value)],
+            ),
+            op(1, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+        ]
+    };
+    let mut blocks = vec![
+        block_at(
+            0x1000,
+            0,
+            vec![
+                op(0, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                op(
+                    1,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![constant(0x1020), cond.clone()],
+                ),
+            ],
+        ),
+        block_at(0x1010, 1, arm(0x11)),
+        block_at(0x1020, 2, arm(0x22)),
+        block_at(
+            0x1030,
+            3,
+            vec![op(0, PcodeOpcode::Call, None, vec![constant(0x3000)])],
+        ),
+    ];
+    blocks[0].successors = vec![1, 2];
+    blocks[1].successors = vec![3];
+    blocks[2].successors = vec![3];
+    let pcode = pcode_function(blocks);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+    let recovered = builder.recover_unclobbered_predecessor_arg(&rsi, 3, 0);
+    assert!(
+        recovered.is_some(),
+        "two arms restaging rsi with different values must still give the call an argument"
+    );
+    assert!(
+        !matches!(
+            recovered,
+            Some(PreHirExpr::Const(0x11, _) | PreHirExpr::Const(0x22, _))
+        ),
+        "the merged value must not be one arm's constant: {recovered:?}"
+    );
+}

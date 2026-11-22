@@ -351,6 +351,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let mut consensus: Option<PreHirExpr> = None;
+        let mut paths_disagree = false;
         for &site in &reached_defs {
             let def_op = self
                 .pcode
@@ -367,8 +368,21 @@ impl<'a> PreviewBuilder<'a> {
             match &consensus {
                 None => consensus = Some(expr),
                 Some(first) if *first == expr => {}
-                Some(_) => return None,
+                Some(_) => {
+                    paths_disagree = true;
+                    break;
+                }
             }
+        }
+        if paths_disagree {
+            // Every incoming path defines the register and no call clobbers
+            // it between that definition and this call (proved above), so the
+            // argument is the register's merged value at the call site: one
+            // value per path, joined. `lea rsi, msg_k; jmp join` on each edge
+            // into `join: call dcgettext` is the ordinary shape; dropping the
+            // slot here printed `dcgettext(0)` and lost every message.
+            let expr = self.lower_varnode(vn, &mut HashSet::default()).ok()?;
+            return Some(self.normalize_recovered_call_arg(expr));
         }
         consensus.map(|expr| self.normalize_recovered_call_arg(expr))
     }
