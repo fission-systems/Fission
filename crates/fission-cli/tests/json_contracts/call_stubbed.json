@@ -12,7 +12,7 @@
     "object": {
       "address": "string",
       "args": {
-        "array": "any"
+        "array": "empty"
       },
       "calls": {
         "array": {
@@ -28,7 +28,7 @@
       "return_value": "string",
       "stub_return": "string",
       "writes": {
-        "array": "any"
+        "array": "empty"
       }
     }
   }

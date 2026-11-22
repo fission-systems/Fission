@@ -33,10 +33,10 @@
       "guest_output": {
         "object": {
           "stderr": {
-            "array": "any"
+            "array": "empty"
           },
           "stdout": {
-            "array": "any"
+            "array": "empty"
           }
         }
       },
@@ -83,7 +83,7 @@
       "symbolic": {
         "object": {
           "deadended": {
-            "array": "any"
+            "array": "empty"
           },
           "found": {
             "array": {

@@ -1,5 +1,7 @@
 {
   "command": [
+    "--signature-path",
+    "crates/fission-cli/tests/json_contracts",
     "resources",
     "status",
     "--json"
@@ -42,7 +44,13 @@
         }
       },
       "signature_paths": {
-        "array": "any"
+        "array": {
+          "object": {
+            "exists": "bool",
+            "fid_databases": "number",
+            "path": "string"
+          }
+        }
       }
     }
   }

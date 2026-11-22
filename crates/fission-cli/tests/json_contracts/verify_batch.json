@@ -3,7 +3,7 @@
     "verify",
     "crates/fission-dir/testdata/ground_truth_fixture.elf",
     "--addresses-file",
-    "/var/folders/65/l9m02xg91b11jdfch2cycz9m0000gn/T/fission-contract-58832-verify-batch/addrs.txt",
+    "$TMP/fission-contract-57403-verify-batch/addrs.txt",
     "--tier",
     "concrete"
   ],

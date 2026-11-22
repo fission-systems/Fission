@@ -8,10 +8,14 @@
   "shape": {
     "array": {
       "object": {
+        "address": "string",
         "file_offset": "string",
         "section": "string",
         "string": "string"
-      }
+      },
+      "optional": [
+        "address"
+      ]
     }
   }
 }

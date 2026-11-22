@@ -14,8 +14,17 @@
       "object": {
         "address": "string",
         "bytes": "string",
-        "instruction": "string"
-      }
+        "instruction": "string",
+        "source": {
+          "object": {
+            "file": "string",
+            "line": "number"
+          }
+        }
+      },
+      "optional": [
+        "source"
+      ]
     }
   }
 }

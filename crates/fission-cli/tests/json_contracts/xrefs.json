@@ -32,8 +32,12 @@
             "evidence": {
               "object": {
                 "layer": "string",
-                "note": "string"
-              }
+                "note": "string",
+                "symbol_name": "string"
+              },
+              "optional": [
+                "symbol_name"
+              ]
             },
             "id": "number",
             "kind": "string",
@@ -41,14 +45,39 @@
               "object": {
                 "address": "number",
                 "category": {
-                  "object": {}
+                  "object": {
+                    "data": {
+                      "object": {
+                        "section": "string"
+                      }
+                    },
+                    "instruction": {
+                      "object": {
+                        "enclosing_function": "number"
+                      }
+                    },
+                    "loader_metadata": {
+                      "object": {
+                        "label": "string"
+                      }
+                    }
+                  },
+                  "optional": [
+                    "data",
+                    "instruction",
+                    "loader_metadata"
+                  ]
                 }
               }
             },
             "target": {
               "object": {
-                "address": "number"
-              }
+                "address": "number",
+                "symbol": "string"
+              },
+              "optional": [
+                "symbol"
+              ]
             }
           }
         }

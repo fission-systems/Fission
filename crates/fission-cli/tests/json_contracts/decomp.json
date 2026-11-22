@@ -14,20 +14,20 @@
         "call_mapping_source": "string",
         "code": "string",
         "declared_callees": {
-          "array": "any"
+          "array": "empty"
         },
         "engine_used": "string",
         "fallback_reason": "null",
         "fell_back": "bool",
         "frame": {
-          "array": "any"
+          "array": "empty"
         },
         "globals": {
-          "array": "any"
+          "array": "empty"
         },
         "line_mapping_source": "string",
         "line_mappings": {
-          "array": "any"
+          "array": "empty"
         },
         "name": "string",
         "preview_build_stats": {
@@ -40,6 +40,9 @@
         "variables": {
           "array": {
             "object": {
+              "addresses": {
+                "array": "number"
+              },
               "arg_index": "number",
               "kind": "string",
               "name": "string",
@@ -48,10 +51,27 @@
               "type": "string",
               "type_shape": {
                 "object": {
-                  "kind": "string"
-                }
+                  "bits": "number",
+                  "kind": "string",
+                  "pointee": {
+                    "object": {
+                      "bits": "number",
+                      "kind": "string",
+                      "signed": "bool"
+                    }
+                  },
+                  "signed": "bool"
+                },
+                "optional": [
+                  "bits",
+                  "pointee",
+                  "signed"
+                ]
               }
-            }
+            },
+            "optional": [
+              "addresses"
+            ]
           }
         }
       }

@@ -1,10 +1,14 @@
 {
   "command": [
+    "--db",
+    "$TMP/fission-contract-57299-debug-session/concolic.fission.json",
     "debug",
     "--emulator",
     "session",
     "crates/fission-emulator/testdata/x64_concolic_branch_sys.elf",
     "--record",
+    "--record-interval",
+    "1",
     "-c",
     "step",
     "-c",
@@ -13,6 +17,10 @@
     "back-step",
     "-c",
     "read 0x400078 --size 4",
+    "-c",
+    "continue",
+    "-c",
+    "seek 3",
     "--json"
   ],
   "shape": {
@@ -28,15 +36,74 @@
       },
       "pid": "number",
       "restored": {
-        "array": "any"
+        "array": {
+          "object": {
+            "breakpoint": "string"
+          }
+        }
       },
       "results": {
         "array": {
           "object": {
             "action": "string",
+            "address": "string",
+            "bytes": "string",
             "command": "string",
-            "status": "string"
-          }
+            "events": {
+              "array": {
+                "object": {
+                  "address": "string",
+                  "event": "string",
+                  "main_thread_id": "number",
+                  "pid": "number",
+                  "thread_id": "number"
+                },
+                "optional": [
+                  "address",
+                  "main_thread_id",
+                  "pid",
+                  "thread_id"
+                ]
+              }
+            },
+            "pc": "string",
+            "registers": {
+              "object": {
+                "pc": "string",
+                "r10": "string",
+                "r11": "string",
+                "r12": "string",
+                "r13": "string",
+                "r14": "string",
+                "r15": "string",
+                "r8": "string",
+                "r9": "string",
+                "rax": "string",
+                "rbp": "string",
+                "rbx": "string",
+                "rcx": "string",
+                "rdi": "string",
+                "rdx": "string",
+                "rip": "string",
+                "rsi": "string",
+                "rsp": "string"
+              }
+            },
+            "size": "number",
+            "status": "string",
+            "step": "number",
+            "stop": "string"
+          },
+          "optional": [
+            "address",
+            "bytes",
+            "events",
+            "pc",
+            "registers",
+            "size",
+            "step",
+            "stop"
+          ]
         }
       }
     }

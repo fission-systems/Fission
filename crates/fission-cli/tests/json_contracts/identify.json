@@ -10,7 +10,7 @@
       "functions_considered": "number",
       "functions_matched": "number",
       "matches": {
-        "array": "any"
+        "array": "empty"
       }
     }
   }

@@ -26,7 +26,7 @@
         }
       },
       "edges": {
-        "array": "any"
+        "array": "empty"
       },
       "function_count": "number",
       "node_count": "number",
@@ -35,10 +35,10 @@
           "object": {
             "address": "string",
             "callees": {
-              "array": "any"
+              "array": "empty"
             },
             "callers": {
-              "array": "any"
+              "array": "empty"
             },
             "name": "string"
           }

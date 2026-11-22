@@ -9,13 +9,18 @@
 //!
 //! How shapes are read:
 //! - A value is `null`, `bool`, `number`, `string`, `{"array": shape}`,
-//!   `{"object": {key: shape}}`, or `{"map": shape}`.
+//!   `{"object": {key: shape}, "optional": [key, ...]}`, or `{"map": shape}`.
 //! - An object whose keys are all numbers or hex addresses (`syscalls` by
 //!   number, `names` by address) is data, not schema: it becomes a `map`, and
 //!   only its values' shape is pinned.
-//! - The elements of an array are merged: an object element's pinned keys are
-//!   the keys *every* element has. An empty array pins nothing about its
-//!   elements.
+//! - The elements of an array are merged into one shape holding every key any
+//!   element has. A key only some elements carry is listed in `optional`
+//!   (a `step` result has `pc` and `step`, a `regs` result has `registers`):
+//!   it must still appear in some element, and a key every element had must
+//!   stay in every element. An empty array is `{"array": "empty"}` and pins
+//!   nothing about elements, so fixtures are chosen to fill arrays.
+//! - Values of different types in one place merge to `any`, which matches
+//!   anything; `empty` (no element seen) yields to whatever is seen.
 //! - `null` in either the pinned shape or the new output matches anything:
 //!   an optional value that happens to be absent is not a type change.
 //! - Decompiler telemetry (`TELEMETRY_KEYS`: `NirBuildStats` and its
@@ -56,10 +61,26 @@ fn contracts_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/json_contracts"))
 }
 
-fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("fission-contract-{}-{name}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A temporary directory removed when the test ends.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn new(name: &str) -> Self {
+        let dir =
+            std::env::temp_dir().join(format!("fission-contract-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    fn path(&self, file: &str) -> String {
+        self.0.join(file).to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn run_json(args: &[String]) -> Value {
@@ -127,41 +148,73 @@ fn shape(value: &Value) -> Value {
     }
 }
 
-/// One shape for several values: an object keeps the keys all of them have.
+/// One shape for several values (array elements, map values).
 fn merged(shapes: impl Iterator<Item = Value>) -> Value {
-    shapes.reduce(merge).unwrap_or_else(|| json!("any"))
+    shapes.reduce(merge).unwrap_or_else(|| json!("empty"))
+}
+
+fn optional_keys(shape: &Map<String, Value>) -> Vec<String> {
+    shape
+        .get("optional")
+        .and_then(Value::as_array)
+        .map(|keys| {
+            keys.iter()
+                .filter_map(|k| k.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn merge(a: Value, b: Value) -> Value {
     match (a, b) {
         (a, b) if a == b => a,
-        (Value::String(s), other) | (other, Value::String(s)) if s == "null" || s == "any" => other,
+        // Nothing seen yet, or a value that happened to be absent: the other side says more.
+        (Value::String(s), other) | (other, Value::String(s)) if s == "empty" || s == "null" => {
+            other
+        }
         (Value::Object(a), Value::Object(b)) => {
             if let (Some(Value::Object(x)), Some(Value::Object(y))) =
                 (a.get("object"), b.get("object"))
             {
-                let keys: Map<String, Value> = x
-                    .iter()
-                    .filter_map(|(k, v)| y.get(k).map(|w| (k.clone(), merge(v.clone(), w.clone()))))
-                    .collect();
-                return json!({ "object": keys });
+                let mut keys = x.clone();
+                let mut optional: Vec<String> = optional_keys(&a);
+                optional.extend(optional_keys(&b));
+                for (k, v) in y {
+                    match keys.get(k).cloned() {
+                        Some(w) => {
+                            keys.insert(k.clone(), merge(w, v.clone()));
+                        }
+                        None => {
+                            keys.insert(k.clone(), v.clone());
+                            optional.push(k.clone());
+                        }
+                    }
+                }
+                optional.extend(x.keys().filter(|k| !y.contains_key(*k)).cloned());
+                optional.sort();
+                optional.dedup();
+                let mut out = Map::new();
+                out.insert("object".into(), Value::Object(keys));
+                if !optional.is_empty() {
+                    out.insert("optional".into(), json!(optional));
+                }
+                return Value::Object(out);
             }
             for kind in ["array", "map"] {
                 if let (Some(x), Some(y)) = (a.get(kind), b.get(kind)) {
                     return json!({ kind: merge(x.clone(), y.clone()) });
                 }
             }
-            // An object in one element and a map in another: the values are data.
             json!("any")
         }
+        // Different types in one place: anything goes there, and it stays so.
         _ => json!("any"),
     }
 }
 
-/// Where `actual` breaks the contract `pinned` describes: every pinned key
-/// still present, with a compatible type.
+/// Where `actual` breaks the contract `pinned` describes.
 fn violations(pinned: &Value, actual: &Value, path: &str, out: &mut Vec<String>) {
-    let lenient = |s: &Value| matches!(s.as_str(), Some("null" | "any"));
+    let lenient = |s: &Value| matches!(s.as_str(), Some("null" | "any" | "empty"));
     if lenient(pinned) || lenient(actual) {
         return;
     }
@@ -177,9 +230,16 @@ fn violations(pinned: &Value, actual: &Value, path: &str, out: &mut Vec<String>)
                     out.push(format!("{path}: was an object, now {}", kind_of(actual)));
                     return;
                 };
+                let pinned_optional = optional_keys(p);
+                let actual_optional = optional_keys(a);
                 for (key, sub) in keys {
                     match actual_keys.get(key) {
-                        Some(next) => violations(sub, next, &format!("{path}/{key}"), out),
+                        Some(next) => {
+                            if !pinned_optional.contains(key) && actual_optional.contains(key) {
+                                out.push(format!("{path}/{key}: no longer in every element"));
+                            }
+                            violations(sub, next, &format!("{path}/{key}"), out)
+                        }
                         None => out.push(format!("{path}/{key}: removed")),
                     }
                 }
@@ -254,7 +314,10 @@ fn check_contract(name: &str, args: &[String]) {
 
     if std::env::var_os("FISSION_UPDATE_JSON_CONTRACTS").is_some() {
         std::fs::create_dir_all(contracts_dir()).unwrap();
-        let pinned = json!({ "command": args, "shape": actual });
+        // Scratch paths change with every run; the command is for readers.
+        let tmp = std::env::temp_dir().to_string_lossy().into_owned();
+        let command: Vec<String> = args.iter().map(|a| a.replace(&tmp, "$TMP/")).collect();
+        let pinned = json!({ "command": command, "shape": actual });
         std::fs::write(&file, serde_json::to_string_pretty(&pinned).unwrap() + "\n").unwrap();
         return;
     }
@@ -454,7 +517,20 @@ contract!(
 contract!(similar, ["similar", A64, "--json", "--no-db"]);
 contract!(api, ["api", "memcpy", "--json"]);
 contract!(languages, ["languages", "--json"]);
-contract!(resources_status, ["resources", "status", "--json"]);
+/// With a signature path, so `signature_paths` is not empty.
+#[test]
+fn resources_status() {
+    check_contract(
+        "resources_status",
+        &args(&[
+            "--signature-path",
+            "crates/fission-cli/tests/json_contracts",
+            "resources",
+            "status",
+            "--json",
+        ]),
+    );
+}
 contract!(schema_envelope, ["schema"]);
 contract!(schema_error_codes, ["schema", "--error-codes"]);
 contract!(schema_list, ["schema", "--list"]);
@@ -538,31 +614,49 @@ contract!(
         "--json",
     ]
 );
-contract!(
-    debug_session,
-    [
-        "debug",
-        "--emulator",
-        "session",
-        CONCOLIC,
-        "--record",
-        "-c",
-        "step",
-        "-c",
-        "regs",
-        "-c",
-        "back-step",
-        "-c",
-        "read 0x400078 --size 4",
-        "--json",
-    ]
-);
+/// A recording session with a remembered breakpoint (so `restored` is not
+/// empty) and one result of each kind the stepping commands produce.
+#[test]
+fn debug_session() {
+    let dir = Scratch::new("debug-session");
+    let db = dir.path("concolic.fission.json");
+    run_json(&args(&[
+        "--db", &db, "db", CONCOLIC, "bp", "0x4000b2", "--json",
+    ]));
+    check_contract(
+        "debug_session",
+        &args(&[
+            "--db",
+            &db,
+            "debug",
+            "--emulator",
+            "session",
+            CONCOLIC,
+            "--record",
+            "--record-interval",
+            "1",
+            "-c",
+            "step",
+            "-c",
+            "regs",
+            "-c",
+            "back-step",
+            "-c",
+            "read 0x400078 --size 4",
+            "-c",
+            "continue",
+            "-c",
+            "seek 3",
+            "--json",
+        ]),
+    );
+}
 
 /// A batch prints one JSON line per function; its shape is the line's.
 #[test]
 fn verify_batch() {
-    let dir = scratch("verify-batch");
-    let list = dir.join("addrs.txt");
+    let dir = Scratch::new("verify-batch");
+    let list = dir.path("addrs.txt");
     std::fs::write(&list, "0x2014e0\n").unwrap();
     check_contract(
         "verify_batch",
@@ -570,7 +664,7 @@ fn verify_batch() {
             "verify",
             GROUND_TRUTH,
             "--addresses-file",
-            list.to_str().unwrap(),
+            &list,
             "--tier",
             "concrete",
         ]),
@@ -580,9 +674,9 @@ fn verify_batch() {
 /// `db show` with one decision of every kind, so its maps are not empty.
 #[test]
 fn db_show() {
-    let dir = scratch("db-show");
-    let db = dir.join("fixture.fission.json");
-    let db = db.to_str().unwrap();
+    let dir = Scratch::new("db-show");
+    let db = dir.path("fixture.fission.json");
+    let db = db.as_str();
     for edit in [
         vec!["name", "0x2014e0", "pick_value"],
         vec!["sig", "0x2014e0", "int (bool b, int x)"],
@@ -639,4 +733,51 @@ fn the_checker_allows_additions_and_rejects_removal_rename_and_retyping() {
         &mut out,
     );
     assert!(!out.is_empty());
+}
+
+/// Elements of different kinds (a session's `step` and `regs` results) pin
+/// every key: one only some elements carry still has to appear, and a key
+/// every element had has to stay in every element.
+#[test]
+fn the_checker_pins_keys_only_some_elements_have() {
+    let results = |items: Value| shape(&json!({ "results": items }));
+    let pinned = results(json!([
+        { "action": "step", "pc": "0x1", "step": 1 },
+        { "action": "regs", "registers": { "rax": "0x0" } },
+    ]));
+    let check = |items: Value| {
+        let mut out = Vec::new();
+        violations(&pinned, &results(items), "", &mut out);
+        out
+    };
+    assert!(
+        check(json!([
+            { "action": "step", "pc": "0x2", "step": 2, "stop": "stepped" },
+            { "action": "regs", "registers": { "rax": "0x1" } },
+        ]))
+        .is_empty()
+    );
+    // Renaming a key only `step` results carry is caught.
+    let renamed = check(json!([
+        { "action": "step", "program_counter": "0x2", "step": 2 },
+        { "action": "regs", "registers": { "rax": "0x1" } },
+    ]));
+    assert!(
+        renamed.iter().any(|v| v.contains("/results/*/pc: removed")),
+        "{renamed:?}"
+    );
+    // A key every element had, now missing from one, is caught.
+    let partial = check(json!([
+        { "pc": "0x2", "step": 2 },
+        { "action": "regs", "registers": { "rax": "0x1" } },
+    ]));
+    assert!(
+        partial
+            .iter()
+            .any(|v| v.contains("no longer in every element")),
+        "{partial:?}"
+    );
+    // Mixed types stay `any`; nothing seen stays `empty`.
+    assert_eq!(merge(json!("any"), json!("number")), json!("any"));
+    assert_eq!(merge(json!("empty"), json!("number")), json!("number"));
 }

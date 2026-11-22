@@ -1,7 +1,7 @@
 {
   "command": [
     "--db",
-    "/var/folders/65/l9m02xg91b11jdfch2cycz9m0000gn/T/fission-contract-58714-db-show/fixture.fission.json",
+    "$TMP/fission-contract-57215-db-show/fixture.fission.json",
     "db",
     "crates/fission-dir/testdata/ground_truth_fixture.elf",
     "show",
@@ -31,21 +31,16 @@
                 "changes": {
                   "array": {
                     "object": {
-                      "after": {
-                        "array": {
-                          "object": {
-                            "address": "string",
-                            "on_read": "bool",
-                            "on_write": "bool",
-                            "size": "number"
-                          }
-                        }
-                      },
+                      "address": "string",
+                      "after": "any",
                       "before": {
-                        "array": "any"
+                        "array": "empty"
                       },
                       "kind": "string"
-                    }
+                    },
+                    "optional": [
+                      "address"
+                    ]
                   }
                 },
                 "id": "number"

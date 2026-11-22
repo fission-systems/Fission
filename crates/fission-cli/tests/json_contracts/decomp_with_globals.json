@@ -14,7 +14,7 @@
         "call_mapping_source": "string",
         "code": "string",
         "declared_callees": {
-          "array": "any"
+          "array": "empty"
         },
         "engine_used": "string",
         "fallback_reason": "null",
@@ -38,7 +38,7 @@
         },
         "line_mapping_source": "string",
         "line_mappings": {
-          "array": "any"
+          "array": "empty"
         },
         "name": "string",
         "preview_build_stats": {
@@ -49,7 +49,7 @@
         },
         "size": "number",
         "variables": {
-          "array": "any"
+          "array": "empty"
         }
       }
     }

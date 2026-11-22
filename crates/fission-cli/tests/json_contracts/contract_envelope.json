@@ -39,7 +39,7 @@
         }
       },
       "warnings": {
-        "array": "any"
+        "array": "empty"
       }
     }
   }

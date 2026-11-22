@@ -69,10 +69,10 @@
       "guest_output": {
         "object": {
           "stderr": {
-            "array": "any"
+            "array": "empty"
           },
           "stdout": {
-            "array": "any"
+            "array": "empty"
           }
         }
       },
