@@ -155,3 +155,13 @@ fn info_identity_carries_the_codeview_record() {
         "{identity}"
     );
 }
+
+#[test]
+fn types_refuses_an_unknown_source() {
+    let out = run(&["types", DWARF5, "--source", "dwraf", "--json", "--no-db"]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("dwarf"),
+        "{out:?}"
+    );
+}

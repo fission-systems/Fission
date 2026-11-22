@@ -166,6 +166,15 @@ fn solve_inputs_names_the_byte_that_takes_each_branch() {
     assert!(inputs[0].name.starts_with("stdin_"));
     assert_eq!(inputs[0].value, u64::from(b'A'));
 
+    // A path the solver cannot satisfy has no inputs -- not the last
+    // query's model under this path's name.
+    let mut impossible = found[0].clone();
+    impossible
+        .history
+        .constraints
+        .push(fission_solver::SymExpr::Const { val: 0, size: 1 });
+    assert_eq!(mgr.solve_inputs(&impossible), None);
+
     let report = mgr.report(8);
     assert_eq!(report.found.len(), 1);
     assert_eq!(report.stashes.get("found"), Some(&1));

@@ -1139,7 +1139,7 @@ struct TypesArgs {
 
 #[derive(Args, Debug)]
 #[command(
-    long_about = "Say what is at an address in one call: the function containing it, the section or memory block, the symbols and relocations there, the DWARF source line, and any note recorded in the analysis database.",
+    long_about = "Say what is at an address in one call: the function containing it, the section or memory block, the symbols and relocations there, and the DWARF source line. (Names and notes recorded with `db` are shown by `db show`.)",
     after_help = "Examples:\n  fission_cli whatis app.elf --addr 0x401130 --json"
 )]
 struct WhatisArgs {

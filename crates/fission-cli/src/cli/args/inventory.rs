@@ -87,7 +87,7 @@ pub struct InventoryFunctionFactsArgs {
     #[arg(long, value_name = "ID")]
     pub compiler_id: Option<String>,
 
-    /// Decompilation profile
+    /// Accepted for compatibility and ignored, with a warning
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
@@ -162,7 +162,7 @@ pub struct InventoryPreviewCandidatesArgs {
     #[arg(long, value_name = "ID")]
     pub compiler_id: Option<String>,
 
-    /// Decompilation profile
+    /// Accepted for compatibility and ignored, with a warning
     #[arg(long, value_name = "PROFILE")]
     pub profile: Option<String>,
 
