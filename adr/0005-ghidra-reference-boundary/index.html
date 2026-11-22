@@ -1399,10 +1399,10 @@
 
 
 <h1 id="adr-0005-ghidra-stays-reference-rust-owns-shipped-semantics">ADR 0005: Ghidra stays reference — Rust owns shipped semantics<a class="headerlink" href="#adr-0005-ghidra-stays-reference-rust-owns-shipped-semantics" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Accepted<br />
-<strong>Last verified:</strong> 2026-05-02</p>
+<p><strong>Status:</strong> Accepted (context amended by <a href="../0017-ghidra-is-not-an-oracle/">ADR 0017</a>)<br />
+<strong>Last verified:</strong> 2026-11-23</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
-<p>Ghidra is an indispensable oracle for sleigh semantics and regression comparison, but importing its architecture wholesale would obscure licensing boundaries and ownership of the Rust implementation.</p>
+<p>Ghidra is an indispensable reference for sleigh semantics and regression comparison, but importing its architecture wholesale would obscure licensing boundaries and ownership of the Rust implementation. It is not a correctness oracle: its SLEIGH specs have been wrong, and Fission, lifting from them, agreed with the errors (<a href="../0017-ghidra-is-not-an-oracle/">ADR 0017</a>).</p>
 <h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
 <p>Local Ghidra checkouts are <strong>reference-only</strong>. Packaged Ghidra-derived <strong>data</strong> lives under <a href="https://github.com/fission-systems/Fission/tree/main/utils/ghidra-data"><code>utils/ghidra-data/</code></a> with explicit notices (<a href="https://github.com/fission-systems/Fission/blob/main/THIRD_PARTY.md"><code>THIRD_PARTY.md</code></a>).</p>
 <p>Production semantics ship from <strong><code>fission-sleigh</code> + <code>fission-pcode</code></strong> contracts, validated—not duplicated—from Ghidra behavior.</p>

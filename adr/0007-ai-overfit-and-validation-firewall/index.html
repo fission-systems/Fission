@@ -1436,8 +1436,8 @@ truth. The source of truth is the architecture contract in
 <a href="../../architecture/ARCHITECTURE/"><code>docs/architecture/ARCHITECTURE.md</code></a>: an
 AI-suggested or benchmark-motivated change must be restated as an invariant at
 the canonical semantic owner before production code is added.</p>
-<p>Ghidra remains a cleanroom reference for correctness, algorithms, and
-invariants. Fission must not optimize to mimic Ghidra-specific presentation
+<p>Ghidra remains a cleanroom reference for algorithms and invariants, not for
+correctness (<a href="../0017-ghidra-is-not-an-oracle/">ADR 0017</a>). Fission must not optimize to mimic Ghidra-specific presentation
 quirks when correctness can be preserved with clearer pseudocode.</p>
 <h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
 <ul>
