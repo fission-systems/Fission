@@ -103,7 +103,7 @@ impl<'a> PreviewBuilder<'a> {
     pub(crate) fn sese_region_proof_budget_exceeded(&self) -> bool {
         let calls = self.sese_region_proof_calls.get() + 1;
         self.sese_region_proof_calls.set(calls);
-        calls > SESE_REGION_PROOF_BUDGET_CALLS
+        calls > self.options.resource_limits.sese_region_proof_calls
     }
 
     pub(crate) fn reset_sese_region_proof_budget(&mut self) {
@@ -174,6 +174,7 @@ pub(crate) fn promote_single_entry_guarded_tail_regions_for_test(
         is_data_ref_origin: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
         selection_axis: Default::default(),
+        resource_limits: Default::default(),
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),
@@ -223,6 +224,7 @@ pub(crate) fn discover_guarded_tail_candidates_for_stats(body: &[PreHirStmt]) ->
         is_data_ref_origin: false,
         structuring_engine: StructuringEngineKind::GraphCollapseV1,
         selection_axis: Default::default(),
+        resource_limits: Default::default(),
         global_names: Default::default(),
         global_sizes: Default::default(),
         relocation_names: Default::default(),
@@ -304,6 +306,23 @@ mod tests {
         assert!(!PreviewBuilder::switch_stmt_has_scaffold_only_arms(&stmt));
     }
 
+    #[test]
+    fn sese_region_proof_budget_comes_from_the_options() {
+        let pcode = Box::leak(Box::new(PcodeFunction { blocks: Vec::new() }));
+        let mut options = MlilPreviewOptions::default();
+        options.resource_limits.sese_region_proof_calls = 2;
+        let options = Box::leak(Box::new(options));
+        let mut builder = PreviewBuilder::new(pcode, options, None);
+        assert!(!builder.sese_region_proof_budget_exceeded());
+        assert!(!builder.sese_region_proof_budget_exceeded());
+        assert!(
+            builder.sese_region_proof_budget_exceeded(),
+            "the third attempt exceeds a limit of 2"
+        );
+        builder.reset_sese_region_proof_budget();
+        assert!(!builder.sese_region_proof_budget_exceeded());
+    }
+
     fn test_builder_with_engine(engine: StructuringEngineKind) -> PreviewBuilder<'static> {
         let dummy = Box::leak(Box::new(PcodeFunction { blocks: Vec::new() }));
         let options = Box::leak(Box::new(MlilPreviewOptions {
@@ -320,6 +339,7 @@ mod tests {
             is_data_ref_origin: false,
             structuring_engine: engine,
             selection_axis: Default::default(),
+            resource_limits: Default::default(),
             global_names: Default::default(),
             global_sizes: Default::default(),
             relocation_names: Default::default(),

@@ -51,6 +51,44 @@ impl SelectionAxis {
     }
 }
 
+/// Deterministic work limits for the decompilation pipeline.
+///
+/// Each limit counts a unit of work, never elapsed time, so how far an attempt
+/// gets -- and therefore the decompiled output -- does not depend on machine
+/// speed or load. They bound super-linear searches; a function that reaches
+/// one takes the pipeline's existing fail-closed or degraded path for that
+/// stage. The defaults are the values these limits had as module constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ResourceLimits {
+    /// Checkpoint calls across one whole structuring attempt, counted from the
+    /// start of `CollapseDriver::run` by every `IfLoweringBudget` and the
+    /// direct loop-lowering checkpoints together.
+    pub structuring_total_work: u64,
+    /// Checkpoint calls inside one `try_lower_*` condition-recovery attempt.
+    pub condition_recovery_subcalls: usize,
+    /// SESE region-proof attempts before structuring gives up the region.
+    pub sese_region_proof_calls: u64,
+    /// Varnode-lowering steps within one call trace before lowering stops
+    /// following definitions.
+    pub varnode_lowering_work: u64,
+}
+
+impl ResourceLimits {
+    pub const DEFAULT: Self = Self {
+        structuring_total_work: 200_000,
+        condition_recovery_subcalls: 512,
+        sese_region_proof_calls: 20_000,
+        varnode_lowering_work: 20_000,
+    };
+}
+
+impl Default for ResourceLimits {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct NirRenderOptions {
     pub pe_x64_only: bool,
@@ -68,6 +106,9 @@ pub struct NirRenderOptions {
     /// Which objective alternative structurings are judged against.
     #[serde(default)]
     pub selection_axis: SelectionAxis,
+    /// Deterministic work limits; see [`ResourceLimits`].
+    #[serde(default)]
+    pub resource_limits: ResourceLimits,
     #[serde(default)]
     pub conservative_irreducible_fallback: bool,
     #[serde(default)]
@@ -706,6 +747,7 @@ impl NirRenderOptions {
             // passes, which is what makes the split per-layer rather than
             // per-process.
             selection_axis: SelectionAxis::from_env(),
+            resource_limits: ResourceLimits::default(),
         };
         // SLA register map seeding lives in `fission-pcode` (cspec / register model)
         // so this crate does not depend on SLEIGH language resources. Callers that
@@ -1265,5 +1307,47 @@ mod loader_symbol_option_tests {
             defaults.effective_structuring_engine_with_override(None),
             defaults.structuring_engine
         );
+    }
+}
+
+#[cfg(test)]
+mod resource_limits_tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_the_former_module_constants() {
+        let limits = ResourceLimits::default();
+        assert_eq!(limits.structuring_total_work, 200_000);
+        assert_eq!(limits.condition_recovery_subcalls, 512);
+        assert_eq!(limits.sese_region_proof_calls, 20_000);
+        assert_eq!(limits.varnode_lowering_work, 20_000);
+        assert_eq!(NirRenderOptions::default().resource_limits, limits);
+    }
+
+    #[test]
+    fn options_without_limits_deserialize_to_the_defaults() {
+        let mut value = serde_json::to_value(NirRenderOptions::default()).unwrap();
+        value.as_object_mut().unwrap().remove("resource_limits");
+        let options: NirRenderOptions = serde_json::from_value(value).unwrap();
+        assert_eq!(options.resource_limits, ResourceLimits::DEFAULT);
+    }
+
+    #[test]
+    fn a_partial_limits_object_keeps_the_other_defaults() {
+        let limits: ResourceLimits =
+            serde_json::from_str(r#"{"sese_region_proof_calls": 7}"#).unwrap();
+        assert_eq!(limits.sese_region_proof_calls, 7);
+        assert_eq!(limits.structuring_total_work, 200_000);
+        assert_eq!(limits.condition_recovery_subcalls, 512);
+        assert_eq!(limits.varnode_lowering_work, 20_000);
+    }
+
+    #[test]
+    fn limits_round_trip_through_the_options() {
+        let mut options = NirRenderOptions::default();
+        options.resource_limits.structuring_total_work = 11;
+        let json = serde_json::to_string(&options).unwrap();
+        let back: NirRenderOptions = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.resource_limits.structuring_total_work, 11);
     }
 }

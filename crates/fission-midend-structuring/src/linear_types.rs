@@ -5,7 +5,7 @@
 //! [`crate::host::StructuringHost`] without depending on PreviewBuilder.
 
 use fission_midend_core::ir::{
-    DispatcherProofUnit, MlilPreviewOptions, UnsupportedControlEvidence,
+    DispatcherProofUnit, MlilPreviewOptions, ResourceLimits, UnsupportedControlEvidence,
 };
 use fission_midend_prehir::PreHirExpr;
 use std::cell::Cell;
@@ -17,13 +17,14 @@ use std::time::Instant;
 /// proxy: a wall-clock trip point made how far a single `try_lower_if`/
 /// `try_lower_while` attempt got -- and therefore decompiled output --
 /// depend on machine speed / load (see PROJECT.md).
-pub const CONDITION_RECOVERY_SUBCALL_LIMIT: usize = 512;
+pub const CONDITION_RECOVERY_SUBCALL_LIMIT: usize =
+    ResourceLimits::DEFAULT.condition_recovery_subcalls;
 /// Soft budget for the whole structuring attempt (all `IfLoweringBudget`
 /// instances and the direct loop-lowering checkpoints in `loops.rs`
 /// combined), in checkpoint calls since `CollapseDriver::run` began.
 /// Deterministic replacement for the same 5000ms wall-clock ceiling this
 /// budget used to share with the per-instance one above.
-pub const STRUCTURING_TOTAL_WORK_BUDGET: u64 = 200_000;
+pub const STRUCTURING_TOTAL_WORK_BUDGET: u64 = ResourceLimits::DEFAULT.structuring_total_work;
 
 /// How a linear region is expected to leave its body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -87,11 +88,12 @@ pub struct IfLoweringBudget {
     pub block_addr: u64,
     pub label: &'static str,
     pub structuring_total_work: Rc<Cell<u64>>,
+    pub limits: ResourceLimits,
 }
 
 impl IfLoweringBudget {
     pub fn new(
-        _options: &MlilPreviewOptions,
+        options: &MlilPreviewOptions,
         idx: usize,
         block_addr: u64,
         label: &'static str,
@@ -106,6 +108,7 @@ impl IfLoweringBudget {
             block_addr,
             label,
             structuring_total_work,
+            limits: options.resource_limits,
         }
     }
 
@@ -118,7 +121,7 @@ impl IfLoweringBudget {
 
         let total_work = self.structuring_total_work.get() + 1;
         self.structuring_total_work.set(total_work);
-        if total_work > STRUCTURING_TOTAL_WORK_BUDGET {
+        if total_work > self.limits.structuring_total_work {
             self.tripped = true;
             if structuring_diag_enabled() {
                 eprintln!(
@@ -129,7 +132,7 @@ impl IfLoweringBudget {
             return true;
         }
 
-        if self.subcalls > CONDITION_RECOVERY_SUBCALL_LIMIT {
+        if self.subcalls > self.limits.condition_recovery_subcalls {
             self.tripped = true;
             if structuring_diag_enabled() {
                 eprintln!(
@@ -217,4 +220,61 @@ pub struct NormalizedConditionalTailArm {
     pub canonical_idx: usize,
     pub effective_start_idx: usize,
     pub reaches_join_trivially: bool,
+}
+
+#[cfg(test)]
+mod resource_limit_tests {
+    use super::*;
+
+    fn budget_with(limits: ResourceLimits, total: Rc<Cell<u64>>) -> IfLoweringBudget {
+        let mut options = MlilPreviewOptions::default();
+        options.resource_limits = limits;
+        IfLoweringBudget::new(&options, 0, 0x1000, "test", total)
+    }
+
+    #[test]
+    fn subcall_limit_comes_from_the_options() {
+        let limits = ResourceLimits {
+            condition_recovery_subcalls: 3,
+            ..ResourceLimits::DEFAULT
+        };
+        let mut budget = budget_with(limits, Rc::new(Cell::new(0)));
+        assert!(!budget.checkpoint("a"));
+        assert!(!budget.checkpoint("b"));
+        assert!(!budget.checkpoint("c"));
+        assert!(
+            budget.checkpoint("d"),
+            "the fourth call exceeds a limit of 3"
+        );
+        assert!(budget.checkpoint("e"), "a tripped budget stays tripped");
+    }
+
+    #[test]
+    fn total_work_limit_is_shared_through_the_counter() {
+        let limits = ResourceLimits {
+            structuring_total_work: 4,
+            ..ResourceLimits::DEFAULT
+        };
+        let total = Rc::new(Cell::new(0));
+        let mut first = budget_with(limits, total.clone());
+        let mut second = budget_with(limits, total.clone());
+        assert!(!first.checkpoint("a"));
+        assert!(!second.checkpoint("b"));
+        assert!(!first.checkpoint("c"));
+        assert!(!second.checkpoint("d"));
+        assert!(
+            first.checkpoint("e"),
+            "the fifth shared call exceeds a total of 4"
+        );
+        assert_eq!(total.get(), 5);
+    }
+
+    #[test]
+    fn default_limits_do_not_trip_on_small_work() {
+        let mut budget = budget_with(ResourceLimits::DEFAULT, Rc::new(Cell::new(0)));
+        for _ in 0..CONDITION_RECOVERY_SUBCALL_LIMIT {
+            assert!(!budget.checkpoint("work"));
+        }
+        assert!(budget.checkpoint("over"));
+    }
 }
