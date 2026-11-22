@@ -189,7 +189,13 @@ pub struct DebugSessionArgs {
     pub record: bool,
 
     /// Instructions between recorded snapshots (with `--record`)
-    #[arg(long, value_name = "N", default_value_t = 64, requires = "record")]
+    #[arg(
+        long,
+        value_name = "N",
+        default_value_t = 64,
+        requires = "record",
+        value_parser = clap::value_parser!(u64).range(1..)
+    )]
     pub record_interval: u64,
     /// Output in JSON format
     #[arg(short, long)]
