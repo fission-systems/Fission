@@ -234,8 +234,9 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     report.call_target_count = call_targets.len();
     report.jump_target_count = jump_targets.len();
 
-    let mut tracker_seeds: std::collections::HashSet<u64> =
+    let known_function_addresses: std::collections::HashSet<u64> =
         binary.functions.iter().map(|f| f.address).collect();
+    let mut tracker_seeds = known_function_addresses.clone();
     tracker_seeds.extend(call_targets.iter().copied());
 
     let mut all_references = std::collections::HashSet::new();
@@ -243,10 +244,19 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     all_references.extend(jump_targets.iter().copied());
 
     let mut candidates = discovery_candidate_targets(call_targets, &jump_targets);
+    let call_candidate_count = candidates.len();
+    // These addresses already seed the downstream known set and will be
+    // rejected at insertion. Keep their references and tracker seeds, but
+    // avoid decoding their bodies again solely to validate a new start.
+    candidates.retain(|address| {
+        !known_function_addresses.contains(address)
+            || !binary.function_addr_index.contains_key(address)
+    });
     if discovery_diag_enabled() {
         eprintln!(
-            "DISCOVERY_DIAG: candidates={} validate_stage_start",
-            candidates.len()
+            "DISCOVERY_DIAG: candidates={} already_known={} validate_stage_start",
+            candidates.len(),
+            call_candidate_count - candidates.len(),
         );
     }
     let validate_start = std::time::Instant::now();
@@ -288,14 +298,9 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
             candidates.len()
         );
     }
-    candidates = valid_call_targets.clone();
+    let mut candidates = valid_call_targets;
     let tail_start = std::time::Instant::now();
 
-    let known_function_addresses: std::collections::HashSet<u64> = binary
-        .functions
-        .iter()
-        .map(|function| function.address)
-        .collect();
     let valid_symbol_seeds: Vec<FunctionCandidateInfo> = binary
         .function_candidates
         .par_iter()
@@ -326,8 +331,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     let mut tracker = InstructionBoundaryTracker::build(binary, &frontend, &tracker_seeds);
     let mut validation_cache = std::collections::HashMap::new();
 
-    let mut all_known: std::collections::HashSet<u64> =
-        binary.functions.iter().map(|f| f.address).collect();
+    let mut all_known = known_function_addresses;
     all_known.extend(candidates.iter().copied());
 
     let data_starts = scan_data_references(

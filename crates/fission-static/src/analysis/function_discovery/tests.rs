@@ -292,6 +292,38 @@ fn function_discovery_promotes_only_sleigh_validated_symbol_seeds() {
     assert_eq!(thunk.external_library.as_deref(), Some("example.dll"));
 }
 
+#[test]
+fn discovery_keeps_known_call_targets_and_still_promotes_unknown_targets() {
+    let _guard = sleigh_runtime_discovery_lock();
+    let mut binary = pe64_executable_shell();
+    // Two direct calls, to 0x401020 and 0x401040, followed by a return.
+    binary
+        .patch_bytes(0, &[0xe8, 0x1b, 0, 0, 0, 0xe8, 0x36, 0, 0, 0, 0xc3])
+        .unwrap();
+    for offset in [0x20, 0x40] {
+        // push rbp; mov rbp, rsp; pop rbp; ret
+        binary
+            .patch_bytes(offset, &[0x55, 0x48, 0x89, 0xe5, 0x5d, 0xc3])
+            .unwrap();
+    }
+    binary.functions.push(fission_loader::FunctionInfo {
+        address: 0x401020,
+        size: 6,
+        name: "known_callee".into(),
+        ..Default::default()
+    });
+    binary.rebuild_function_indices();
+
+    let report = discover_functions_with_runtime(&mut binary);
+
+    assert_eq!(report.call_target_count, 2);
+    assert_eq!(report.accepted_function_count, 1);
+    let known = binary.function_at(0x401020).unwrap();
+    assert_eq!(known.name, "known_callee");
+    assert_eq!(known.size, 6);
+    assert!(binary.function_at(0x401040).is_some());
+}
+
 /// Twenty "known" (symbol-seeded) functions share an identical two-instruction
 /// prologue (`push r15; push r14`), separated by `0xcc` padding, plus one more
 /// identically shaped function in the same padding pattern that nothing
