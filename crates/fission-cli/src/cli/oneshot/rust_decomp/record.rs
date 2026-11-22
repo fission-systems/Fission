@@ -34,6 +34,12 @@ pub(crate) enum CliRustOutcome {
         /// back out of the printed declarations.
         variables: Vec<fission_decompiler::RecoveredVariable>,
         line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+        /// The file-scope objects the code declares.
+        globals: Vec<DecompiledGlobal>,
+        /// Stack slots whose offset from the canonical frame address is proven.
+        frame: Vec<FrameSlot>,
+        /// Callees the code calls through a declared, not recovered, prototype.
+        declared_callees: Vec<String>,
     },
     AssemblyFallback {
         fallback_code: String,
@@ -48,4 +54,24 @@ pub(crate) enum CliRustOutcome {
         message: String,
         assembly_fallback_code: Option<String>,
     },
+}
+
+/// A global the decompiled code declares, as data.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct DecompiledGlobal {
+    pub name: String,
+    /// The C type of its declaration.
+    #[serde(rename = "type")]
+    pub type_name: String,
+    /// `None` when several symbols share the name, so the text does not say
+    /// which one is meant.
+    pub address: Option<String>,
+}
+
+/// A stack slot and its offset from the canonical frame address (the stack
+/// pointer before the call that entered the function).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub(crate) struct FrameSlot {
+    pub name: String,
+    pub cfa_offset: i64,
 }
