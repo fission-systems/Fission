@@ -29,6 +29,18 @@ fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> S
     format!("nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}")
 }
 
+fn optimize_pcode_with_backup(
+    pcode: &mut PcodeFunction,
+    run_optimize: impl FnOnce(&mut PcodeFunction),
+) -> Result<(), ()> {
+    let raw_pcode_backup = pcode.clone();
+    if catch_unwind(AssertUnwindSafe(|| run_optimize(pcode))).is_err() {
+        *pcode = raw_pcode_backup;
+        return Err(());
+    }
+    Ok(())
+}
+
 pub(crate) fn nir_diag_stage(address: u64, stage: &str, start: Instant) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
         eprintln!(
@@ -263,7 +275,9 @@ pub(crate) fn render_nir_request(
     }
     let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
     let optimize_start = Instant::now();
-    let optimize_result = catch_unwind(AssertUnwindSafe(|| optimizer.optimize(&mut pcode)));
+    let optimize_result = optimize_pcode_with_backup(&mut pcode, |fn_ir| {
+        optimizer.optimize(fn_ir);
+    });
     nir_diag_stage(request.address, "optimize_pcode_done", optimize_start);
     if optimize_result.is_err() && std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::OpenOptions::new()
@@ -480,5 +494,39 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("nir_timeout"), "{err}");
+    }
+
+    #[test]
+    fn optimize_pcode_with_backup_restores_raw_pcode_on_panic() {
+        let orig_op = fission_pcode::PcodeOp {
+            seq_num: 0,
+            opcode: fission_pcode::PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(fission_pcode::Varnode {
+                space_id: 4,
+                offset: 0,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            }),
+            inputs: vec![fission_pcode::Varnode::constant(42, 8)],
+            asm_mnemonic: None,
+        };
+        let mut pcode = PcodeFunction {
+            blocks: vec![fission_pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![orig_op.clone()],
+            }],
+        };
+
+        let result = optimize_pcode_with_backup(&mut pcode, |fn_ir| {
+            fn_ir.blocks[0].ops.clear();
+            panic!("simulated optimizer panic");
+        });
+
+        assert!(result.is_err());
+        assert_eq!(pcode.blocks[0].ops, vec![orig_op]);
     }
 }

@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fission decomp data v1",
+  "description": "Function rows, optionally wrapped with benchmark metadata.",
+  "anyOf": [
+    {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "address",
+          "name",
+          "size",
+          "engine_used",
+          "fell_back",
+          "fallback_reason"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "name": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "engine_used": {
+            "type": "string"
+          },
+          "fell_back": {
+            "type": "boolean"
+          },
+          "fallback_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "fallback": {
+            "type": "string"
+          },
+          "code_prehir": {
+            "type": "string"
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "line_mappings": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "line_mapping_source": {
+            "type": "string"
+          },
+          "call_mapping_source": {
+            "type": "string"
+          },
+          "decomp_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "postprocess_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "preview_build_stats": {
+            "type": "object"
+          },
+          "preview_hint_stats": {
+            "type": "object"
+          }
+        },
+        "anyOf": [
+          {
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "required": [
+              "error"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "_meta",
+        "functions"
+      ],
+      "properties": {
+        "_meta": {
+          "type": "object"
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "name",
+              "size",
+              "engine_used",
+              "fell_back",
+              "fallback_reason"
+            ],
+            "properties": {
+              "address": {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]+$"
+              },
+              "name": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "engine_used": {
+                "type": "string"
+              },
+              "fell_back": {
+                "type": "boolean"
+              },
+              "fallback_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "code": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "fallback": {
+                "type": "string"
+              },
+              "code_prehir": {
+                "type": "string"
+              },
+              "variables": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "line_mappings": {
+                "type": "array",
+                "items": {
+                  "type": "object"
+                }
+              },
+              "line_mapping_source": {
+                "type": "string"
+              },
+              "call_mapping_source": {
+                "type": "string"
+              },
+              "decomp_sec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "postprocess_sec": {
+                "type": "number",
+                "minimum": 0
+              },
+              "preview_build_stats": {
+                "type": "object"
+              },
+              "preview_hint_stats": {
+                "type": "object"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "code"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

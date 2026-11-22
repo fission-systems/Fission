@@ -27,7 +27,7 @@ pub struct CircleRange {
     /// Exclusive upper bound (mod 2^bits).  When `lo == hi` AND `is_top`,
     /// the range covers all 2^bits values.
     hi: u64,
-    /// Number of bits in the integer domain (8, 16, 32, or 64).
+    /// Domain width. Only widths from 1 to 64 can hold a concrete interval.
     bits: u32,
     /// True iff this represents the universal set (top).
     is_top: bool,
@@ -35,6 +35,10 @@ pub struct CircleRange {
 
 impl CircleRange {
     // ── Constructors ───────────────────────────────────────────────────────
+
+    pub(super) fn supports_intervals(bits: u32) -> bool {
+        (1..=u64::BITS).contains(&bits)
+    }
 
     /// The "no information" element — all values possible.
     #[inline]
@@ -58,9 +62,12 @@ impl CircleRange {
         }
     }
 
-    /// Exactly one value.
+    /// Exactly one value when the domain can represent it.
     #[inline]
     pub fn singleton(value: u64, bits: u32) -> Self {
+        if !Self::supports_intervals(bits) {
+            return Self::top(bits);
+        }
         let mask = Self::mask(bits);
         let lo = value & mask;
         let hi = lo.wrapping_add(1) & mask;
@@ -74,6 +81,9 @@ impl CircleRange {
 
     /// An unsigned interval `[lo, hi)` (mod 2^bits).
     pub fn interval(lo: u64, hi: u64, bits: u32) -> Self {
+        if !Self::supports_intervals(bits) {
+            return Self::top(bits);
+        }
         let mask = Self::mask(bits);
         let lo = lo & mask;
         let hi = hi & mask;
@@ -104,7 +114,7 @@ impl CircleRange {
     /// True if this range contains exactly one value.
     #[inline]
     pub fn is_singleton(&self) -> bool {
-        if self.is_top || self.is_bottom() {
+        if self.is_top || self.is_bottom() || !Self::supports_intervals(self.bits) {
             return false;
         }
         // [lo, lo+1 mod 2^n) is a singleton.
@@ -121,10 +131,10 @@ impl CircleRange {
         }
     }
 
-    /// Number of elements in the range (0 = bottom, 2^n = top).
+    /// Number of elements in the range, saturated at `u128::MAX`.
     pub fn count(&self) -> u128 {
         if self.is_top {
-            return 1u128 << self.bits;
+            return 1u128.checked_shl(self.bits).unwrap_or(u128::MAX);
         }
         if self.is_bottom() {
             return 0;
@@ -283,8 +293,9 @@ impl CircleRange {
     /// covers the whole circle, which the wrapped endpoints alone cannot say (they
     /// would describe a smaller, unsound interval).
     fn minkowski_span(&self, other: &Self) -> Option<u128> {
-        let span = self.count() + other.count() - 1;
-        (span < (1u128 << self.bits)).then_some(span)
+        let domain = 1u128.checked_shl(self.bits)?;
+        let span = self.count().checked_add(other.count())?.checked_sub(1)?;
+        (span < domain).then_some(span)
     }
 
     /// `a - b` (unsigned, wrapping).
@@ -331,6 +342,9 @@ impl CircleRange {
         if self.is_bottom() {
             return Self::bottom(self.bits);
         }
+        if !Self::supports_intervals(self.bits) {
+            return Self::top(self.bits);
+        }
         let mask = Self::mask(self.bits);
         let m = mask_val & mask;
         if m == mask {
@@ -348,6 +362,9 @@ impl CircleRange {
         }
         if self.is_bottom() {
             return Self::bottom(new_bits);
+        }
+        if !Self::supports_intervals(new_bits) {
+            return Self::top(new_bits);
         }
         let new_mask = Self::mask(new_bits);
         // If this range fits in the new width without wrapping, preserve it.
@@ -381,20 +398,7 @@ impl CircleRange {
         if bits == self.bits {
             return *self;
         }
-        if self.is_top {
-            return Self::top(bits);
-        }
-        if self.is_bottom() {
-            return Self::bottom(bits);
-        }
-        // Reinterpret lo/hi in the new width.
-        let mask = Self::mask(bits);
-        Self {
-            lo: self.lo & mask,
-            hi: self.hi & mask,
-            bits,
-            is_top: false,
-        }
+        self.cast_unsigned(bits)
     }
 
     /// True if `v` is in the arc `[lo, hi)` mod 2^n.
@@ -432,18 +436,19 @@ impl CircleRange {
 
     /// Smallest arc covering both `[a_lo, a_hi)` and `[b_lo, b_hi)` starting at `a_lo`.
     fn arc_cover(a_lo: u64, a_hi: u64, b_lo: u64, b_hi: u64, mask: u64, bits: u32) -> Self {
-        // If b_hi is "further" from a_lo than a_hi, extend to b_hi.
         let a_span = a_hi.wrapping_sub(a_lo) & mask;
-        let b_end_from_a = b_hi.wrapping_sub(a_lo) & mask;
-        let new_hi = if b_end_from_a > a_span { b_hi } else { a_hi };
-        let new_span = new_hi.wrapping_sub(a_lo) & mask;
-        // Also check b_lo is inside.
-        let b_start_from_a = b_lo.wrapping_sub(a_lo) & mask;
-        let final_span = new_span.max(b_start_from_a.wrapping_add(1) & mask);
-        let final_hi = a_lo.wrapping_add(final_span) & mask;
+        let b_start = b_lo.wrapping_sub(a_lo) & mask;
+        let b_end = b_hi.wrapping_sub(a_lo) & mask;
+        // If `b` wraps past `a_lo` (including ending at `a_lo`), any single arc
+        // starting at `a_lo` that contains all of `b` covers the full circle.
+        if b_start > b_end {
+            return Self::top(bits);
+        }
+        let final_span = a_span.max(b_end);
         if final_span == 0 {
             return Self::top(bits);
         }
+        let final_hi = a_lo.wrapping_add(final_span) & mask;
         Self::interval(a_lo, final_hi, bits)
     }
 }
@@ -605,6 +610,88 @@ mod tests {
         assert_eq!(previous.widen(&CircleRange::bottom(8)), CircleRange::top(8));
         assert_eq!(CircleRange::bottom(8).widen(&previous), previous);
         assert_eq!(previous.widen(&CircleRange::top(8)), CircleRange::top(8));
+    }
+
+    #[test]
+    fn wide_and_zero_bit_domains_never_panic_on_shift_counts() {
+        for bits in [0, 65, 128, 256] {
+            let top = CircleRange::top(bits);
+            let bottom = CircleRange::bottom(bits);
+            assert_eq!(
+                top.count(),
+                1u128.checked_shl(bits).unwrap_or(u128::MAX),
+                "bits={bits}"
+            );
+            assert_eq!(bottom.count(), 0, "bits={bits}");
+
+            let s = CircleRange::singleton(5, bits);
+            let iv = CircleRange::interval(1, 9, bits);
+            assert!(s.is_top());
+            assert!(iv.is_top());
+            assert_eq!(s.singleton_value(), None);
+            assert!(s.add(&iv).is_top());
+            assert!(s.sub(&iv).is_top());
+            assert!(top.and_const(0xFF).is_top());
+            assert!(CircleRange::singleton(5, 32).cast_unsigned(bits).is_top());
+            assert!(top.join(&CircleRange::singleton(5, 32)).is_top());
+            let expected_meet = if bits == 0 {
+                CircleRange::singleton(5, 32)
+            } else {
+                CircleRange::top(bits)
+            };
+            assert_eq!(top.meet(&CircleRange::singleton(5, 32)), expected_meet);
+        }
+    }
+
+    #[test]
+    fn join_of_wrapping_arc_and_non_wrapping_arc_contains_all_members() {
+        let a = CircleRange::interval(0, 10, 8);
+        let b = CircleRange::interval(255, 5, 8);
+        let joined = a.join(&b);
+        assert_eq!(joined, CircleRange::interval(255, 10, 8));
+        for v in members(&a).into_iter().chain(members(&b)) {
+            assert!(
+                joined.contains_mod(v, CircleRange::mask(8)),
+                "missing member {v} in {joined:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn join_at_4_bits_is_sound_and_minimal_for_all_arc_pairs() {
+        let n = 16u64;
+        let all_members = |r: &CircleRange| -> Vec<u64> {
+            (0..n)
+                .filter(|v| r.is_top() || r.contains_mod(*v, 0xF))
+                .collect()
+        };
+        let mut ranges = vec![CircleRange::bottom(4), CircleRange::top(4)];
+        for lo in 0..n {
+            for len in 1..n {
+                ranges.push(CircleRange::interval(lo, (lo + len) & 0xF, 4));
+            }
+        }
+        for a in &ranges {
+            for b in &ranges {
+                let joined = a.join(b);
+                let jm = all_members(&joined);
+                for v in all_members(a).into_iter().chain(all_members(b)) {
+                    assert!(
+                        jm.contains(&v),
+                        "join({a:?}, {b:?}) = {joined:?} dropped {v}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn join_across_widths_preserves_boundary_singleton() {
+        let r8 = CircleRange::singleton(255, 8);
+        let r32 = CircleRange::singleton(255, 32);
+        let joined = r8.join(&r32);
+        assert_eq!(joined, r32);
+        assert_eq!(joined.singleton_value(), Some(255));
     }
 }
 

@@ -47,6 +47,9 @@ struct RustSleighRender {
     /// them as data rather than as printed declarations.
     variables: Vec<fission_decompiler::RecoveredVariable>,
     line_mappings: Vec<fission_decompiler::RecoveredLineMapping>,
+    globals: Vec<record::DecompiledGlobal>,
+    frame: Vec<record::FrameSlot>,
+    declared_callees: Vec<String>,
 }
 
 fn render_with_rust_sleigh(
@@ -95,7 +98,15 @@ fn render_with_rust_sleigh(
         .as_ref()
         .map(|output| output.line_mappings.clone())
         .unwrap_or_default();
+    let (globals, frame, declared_callees) = result
+        .render_output
+        .as_ref()
+        .map(recovered_layout)
+        .unwrap_or_default();
     Ok(RustSleighRender {
+        globals,
+        frame,
+        declared_callees,
         code: result.code,
         code_prehir,
         fell_back: result.fell_back,
@@ -106,6 +117,44 @@ fn render_with_rust_sleigh(
         variables,
         line_mappings,
     })
+}
+
+/// What the decompiled code declares and where its locals live, as data:
+/// the globals it names (with their types and addresses), the stack slots
+/// whose frame offset is proven, and the callees it calls through a declared
+/// prototype. All three are computed by every render; this only carries them
+/// out.
+fn recovered_layout(
+    output: &fission_decompiler::NirDecompileOutput,
+) -> (
+    Vec<record::DecompiledGlobal>,
+    Vec<record::FrameSlot>,
+    Vec<String>,
+) {
+    let globals = output
+        .printed_globals
+        .iter()
+        .map(|global| record::DecompiledGlobal {
+            name: global.name.clone(),
+            type_name: global.type_name(),
+            address: global.address.map(|address| format!("0x{address:x}")),
+        })
+        .collect();
+    let mut frame: Vec<record::FrameSlot> = output
+        .stack_slot_cfa_offsets
+        .iter()
+        .map(|(name, offset)| record::FrameSlot {
+            name: name.clone(),
+            cfa_offset: *offset,
+        })
+        .collect();
+    frame.sort_by(|a, b| {
+        a.cfa_offset
+            .cmp(&b.cfa_offset)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    let declared_callees = output.declared_callees.iter().cloned().collect();
+    (globals, frame, declared_callees)
 }
 
 fn apply_output_filters(code: &str, config: RenderConfig) -> String {
@@ -304,6 +353,9 @@ pub(crate) fn render_one_function_inner(
                     decomp_sec,
                     variables: rendered.variables,
                     line_mappings,
+                    globals: rendered.globals,
+                    frame: rendered.frame,
+                    declared_callees: rendered.declared_callees,
                 },
             };
 
@@ -371,7 +423,7 @@ pub(crate) fn run_decompilation_rust_sleigh(
     }
 
     let init_start = std::time::Instant::now();
-    let selected_functions = collect_target_functions(cli, binary);
+    let selected_functions = collect_target_functions(cli, binary)?;
     let selection_accounting = selected_functions.accounting;
     let functions = selected_functions.functions;
     // Selection above reads the whole inventory; decompilation reads only the

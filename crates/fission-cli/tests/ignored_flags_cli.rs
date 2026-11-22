@@ -66,3 +66,55 @@ fn a_flag_that_is_honored_produces_no_warning() {
     ]);
     assert!(!stderr.contains("ignored"), "{stderr}");
 }
+
+#[test]
+fn decomp_profile_is_reported_as_ignored() {
+    let binary = fixture();
+    let (_, stderr) = run(&[
+        "decomp",
+        binary.to_str().unwrap(),
+        "--addr",
+        "0x1002030",
+        "--no-db",
+        "--profile",
+        "quality",
+    ]);
+    assert!(
+        stderr.contains("--profile") && stderr.contains("ignored by `decomp`"),
+        "expected a warning naming --profile:\n{stderr}"
+    );
+}
+
+#[test]
+fn an_inventory_flag_names_inventory_not_decomp() {
+    let binary = fixture();
+    let (_, stderr) = run(&[
+        "inventory",
+        "function-facts",
+        binary.to_str().unwrap(),
+        "--functions-limit",
+        "1",
+        "--output-jsonl",
+        "/dev/null",
+        "--summary-json",
+        "/dev/null",
+        "--compiler-id",
+        "gcc",
+    ]);
+    assert!(
+        stderr.contains("`--compiler-id` is accepted but ignored by `inventory`"),
+        "{stderr}"
+    );
+}
+
+/// A hardware breakpoint is not set on any host, so the command must not
+/// exit 0 as if it had been.
+#[test]
+fn hw_bp_fails_instead_of_reporting_success() {
+    let output = Command::new(env!("CARGO_BIN_EXE_fission_cli"))
+        .args(["debug", "--emulator", "hw-bp", "0x1000"])
+        .output()
+        .expect("run the CLI");
+    assert!(!output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("hardware breakpoints"));
+}

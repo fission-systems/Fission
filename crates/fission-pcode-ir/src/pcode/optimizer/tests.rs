@@ -1001,21 +1001,21 @@ fn test_copy_propagation_single_use_same_block() {
     });
 
     let src = Varnode {
-        space_id: 2,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x10,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let tmp = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x100,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let out = Varnode {
-        space_id: 1,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x104,
         size: 4,
         is_constant: false,
@@ -1074,28 +1074,28 @@ fn test_cast_copy_chain_propagation_same_size() {
     });
 
     let src = Varnode {
-        space_id: 2,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x20,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let cast_tmp = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x200,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let copy_tmp = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x204,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let out = Varnode {
-        space_id: 1,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x208,
         size: 4,
         is_constant: false,
@@ -1162,21 +1162,21 @@ fn test_copy_propagation_does_not_cross_store_boundary() {
     });
 
     let src = Varnode {
-        space_id: 2,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x10,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let tmp = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x100,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let out = Varnode {
-        space_id: 1,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x104,
         size: 4,
         is_constant: false,
@@ -1233,35 +1233,35 @@ fn test_loop_header_temp_coalescing_preserves_multiequal() {
     });
 
     let in_a = Varnode {
-        space_id: 2,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x10,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let in_b = Varnode {
-        space_id: 2,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x14,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let phi = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x100,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let tmp = Varnode {
-        space_id: 1,
+        space_id: crate::space::UNIQUE_SPACE_ID,
         offset: 0x104,
         size: 4,
         is_constant: false,
         constant_val: 0,
     };
     let out = Varnode {
-        space_id: 1,
+        space_id: crate::space::REGISTER_SPACE_ID,
         offset: 0x108,
         size: 4,
         is_constant: false,
@@ -1910,4 +1910,773 @@ fn equal_compares_constants_at_their_width() {
         .0,
         0
     );
+}
+
+#[test]
+fn overflowed_const_divisor_does_not_panic_in_div_or_rem() {
+    let wrapped_zero = Varnode::constant(0x1_0000_0000u64 as i64, 4);
+    let tmp = Varnode {
+        space_id: crate::space::UNIQUE_SPACE_ID,
+        offset: 0x100,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let res = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+
+    for opcode in [
+        PcodeOpcode::IntDiv,
+        PcodeOpcode::IntSDiv,
+        PcodeOpcode::IntRem,
+        PcodeOpcode::IntSRem,
+    ] {
+        let mut func = PcodeFunction {
+            blocks: vec![crate::pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntAdd,
+                        address: 0x1000,
+                        output: Some(tmp.clone()),
+                        inputs: vec![
+                            Varnode::constant(0xFFFF_FFFFu64 as i64, 4),
+                            Varnode::constant(1, 4),
+                        ],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode,
+                        address: 0x1004,
+                        output: Some(res.clone()),
+                        inputs: vec![Varnode::constant(100, 4), tmp.clone()],
+                        asm_mnemonic: None,
+                    },
+                    ret(2, res.clone()),
+                ],
+            }],
+        };
+        let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
+        optimizer.optimize(&mut func);
+
+        // Also check direct rule fold with an untruncated constant_val representing 0 mod 2^32.
+        let direct_div = PcodeOp {
+            seq_num: 0,
+            opcode,
+            address: 0x1000,
+            output: Some(res.clone()),
+            inputs: vec![Varnode::constant(100, 4), wrapped_zero.clone()],
+            asm_mnemonic: None,
+        };
+        assert!(optimizer.rules.try_optimize(&direct_div).is_none());
+    }
+}
+
+#[test]
+fn dce_preserves_super_register_on_subregister_read_and_preserves_callother() {
+    let rax = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let al = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let unused_out = Varnode {
+        space_id: crate::space::UNIQUE_SPACE_ID,
+        offset: 0x80,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(rax.clone()),
+                    inputs: vec![Varnode::constant(0x1234, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CallOther,
+                    address: 0x1004,
+                    output: Some(unused_out),
+                    inputs: vec![Varnode::constant(5, 4)],
+                    asm_mnemonic: None,
+                },
+                ret(2, al),
+            ],
+        }],
+    };
+
+    let dce = DeadCodeEliminator::new();
+    let mut modified = false;
+    dce.eliminate(&mut func, &mut modified);
+    assert!(!modified);
+    assert_eq!(func.blocks[0].ops.len(), 3);
+}
+
+#[test]
+fn def_use_algebraic_rules_do_not_fold_across_clobbers_or_blocks() {
+    let rules = crate::pcode::optimizer::rules::OptimizationRules::new();
+    let reg = |offset: u64, size: u32| Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let base = reg(0x10, 4);
+    let x = reg(0x20, 4);
+    let y = reg(0x30, 4);
+
+    // 1. Intervening clobber of `base` prevents `try_ptr_arith`.
+    let clobbered_ptr_arith = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                add_op(0, &x, &base, &Varnode::constant(10, 4)),
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1004,
+                    output: Some(reg(0x10, 1)),
+                    inputs: vec![Varnode::constant(0, 1)],
+                    asm_mnemonic: None,
+                },
+                add_op(2, &y, &x, &Varnode::constant(20, 4)),
+            ],
+        }],
+    };
+    let mut tracker = DefUseTracker::new();
+    tracker.build(&clobbered_ptr_arith);
+    assert!(
+        rules
+            .try_optimize_with_tracker_at(
+                &clobbered_ptr_arith.blocks[0].ops[2],
+                crate::pcode::optimizer::passes::def_use::OpRef {
+                    block_idx: 0,
+                    op_idx: 2,
+                },
+                &tracker,
+                &clobbered_ptr_arith,
+            )
+            .is_none()
+    );
+
+    // 2. Self-overwrite `x = x + 10; y = x + 20` cannot fold to `y = x + 30`.
+    let self_overwrite = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                add_op(0, &x, &x, &Varnode::constant(10, 4)),
+                add_op(1, &y, &x, &Varnode::constant(20, 4)),
+            ],
+        }],
+    };
+    tracker.build(&self_overwrite);
+    assert!(
+        rules
+            .try_optimize_with_tracker_at(
+                &self_overwrite.blocks[0].ops[1],
+                crate::pcode::optimizer::passes::def_use::OpRef {
+                    block_idx: 0,
+                    op_idx: 1,
+                },
+                &tracker,
+                &self_overwrite,
+            )
+            .is_none()
+    );
+
+    // 3. Inter-block def cannot fold across blocks.
+    let cross_block = PcodeFunction {
+        blocks: vec![
+            crate::pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![1],
+                ops: vec![add_op(0, &x, &base, &Varnode::constant(10, 4))],
+            },
+            crate::pcode::PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![],
+                ops: vec![add_op(1, &y, &x, &Varnode::constant(20, 4))],
+            },
+        ],
+    };
+    tracker.build(&cross_block);
+    assert!(
+        rules
+            .try_optimize_with_tracker_at(
+                &cross_block.blocks[1].ops[0],
+                crate::pcode::optimizer::passes::def_use::OpRef {
+                    block_idx: 1,
+                    op_idx: 0,
+                },
+                &tracker,
+                &cross_block,
+            )
+            .is_none()
+    );
+
+    // 4. `try_pull_sub_indirect` must not fold after `ptr` is overwritten.
+    let clobbered_pull_sub = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                add_op(0, &x, &base, &Varnode::constant(10, 4)),
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1004,
+                    output: Some(base.clone()),
+                    inputs: vec![Varnode::constant(99, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::IntSub,
+                    address: 0x1008,
+                    output: Some(y.clone()),
+                    inputs: vec![x.clone(), base.clone()],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    tracker.build(&clobbered_pull_sub);
+    assert!(
+        rules
+            .try_optimize_with_tracker_at(
+                &clobbered_pull_sub.blocks[0].ops[2],
+                crate::pcode::optimizer::passes::def_use::OpRef {
+                    block_idx: 0,
+                    op_idx: 2,
+                },
+                &tracker,
+                &clobbered_pull_sub,
+            )
+            .is_none()
+    );
+
+    // 5. `try_indirect_collapse` must not fold across an intervening `Call` boundary.
+    let call_boundary_ptrsub = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::PtrSub,
+                    address: 0x1000,
+                    output: Some(x.clone()),
+                    inputs: vec![base.clone(), Varnode::constant(10, 4)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x1004,
+                    output: None,
+                    inputs: vec![Varnode::constant(0x2000, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::PtrSub,
+                    address: 0x1008,
+                    output: Some(y),
+                    inputs: vec![x, Varnode::constant(20, 4)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    tracker.build(&call_boundary_ptrsub);
+    assert!(
+        rules
+            .try_optimize_with_tracker_at(
+                &call_boundary_ptrsub.blocks[0].ops[2],
+                crate::pcode::optimizer::passes::def_use::OpRef {
+                    block_idx: 0,
+                    op_idx: 2,
+                },
+                &tracker,
+                &call_boundary_ptrsub,
+            )
+            .is_none()
+    );
+}
+
+#[test]
+fn copy_propagation_and_loop_header_respect_unique_spaces_and_subregister_clobbers() {
+    let copy_prop = CopyPropagator::new();
+    let loop_coal = LoopHeaderTempCoalescer::new();
+    let mut tracker = DefUseTracker::new();
+
+    // Rust-Sleigh `unique` temp (space 2) propagates, while `REGISTER_SPACE_ID` (space 1) does not.
+    let rs_src = Varnode {
+        space_id: crate::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let rs_tmp = Varnode {
+        space_id: crate::space::RUST_SLEIGH_UNIQUE_SPACE_ID,
+        offset: 0x100,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let leg_reg = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut rs_func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(rs_tmp.clone()),
+                    inputs: vec![rs_src.clone()],
+                    asm_mnemonic: None,
+                },
+                ret(1, rs_tmp.clone()),
+            ],
+        }],
+    };
+    tracker.build(&rs_func);
+    assert!(copy_prop.eliminate(&mut rs_func, &tracker));
+    assert_eq!(rs_func.blocks[0].ops[1].inputs[0], rs_src);
+
+    let mut reg_func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(leg_reg.clone()),
+                    inputs: vec![rs_src.clone()],
+                    asm_mnemonic: None,
+                },
+                ret(1, leg_reg.clone()),
+            ],
+        }],
+    };
+    tracker.build(&reg_func);
+    assert!(!copy_prop.eliminate(&mut reg_func, &tracker));
+
+    // Sub-register overwrite (`AL` clobbering `RAX`) blocks propagation.
+    let rs_al = Varnode {
+        space_id: crate::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut clobber_copy = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1000,
+                    output: Some(rs_tmp.clone()),
+                    inputs: vec![rs_src.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1002,
+                    output: Some(rs_al.clone()),
+                    inputs: vec![Varnode::constant(7, 1)],
+                    asm_mnemonic: None,
+                },
+                ret(2, rs_tmp.clone()),
+            ],
+        }],
+    };
+    tracker.build(&clobber_copy);
+    assert!(!copy_prop.eliminate(&mut clobber_copy, &tracker));
+
+    // LoopHeaderTempCoalescer: propagates Rust-Sleigh unique, blocks on sub-register clobber.
+    let phi = Varnode {
+        space_id: crate::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset: 0,
+        size: 8,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut clobber_loop = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::MultiEqual,
+                    address: 0x1000,
+                    output: Some(phi.clone()),
+                    inputs: vec![leg_reg.clone(), rs_src.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1001,
+                    output: Some(rs_tmp.clone()),
+                    inputs: vec![phi.clone()],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x1002,
+                    output: Some(rs_al),
+                    inputs: vec![Varnode::constant(9, 1)],
+                    asm_mnemonic: None,
+                },
+                ret(3, rs_tmp),
+            ],
+        }],
+    };
+    tracker.build(&clobber_loop);
+    assert!(!loop_coal.eliminate(&mut clobber_loop, &tracker));
+}
+
+#[test]
+fn consume_mask_tracks_int_sext_sign_bit_callother_and_overlapping_aliases() {
+    let b_sext = cse_vn(0x10, 1);
+    let b_zext = cse_vn(0x14, 1);
+    let sext_wide = cse_vn(0x20, 4);
+    let zext_wide = cse_vn(0x24, 4);
+    let hi_sext = cse_vn(0x30, 4);
+    let hi_zext = cse_vn(0x34, 4);
+    let co_in = cse_vn(0x40, 4);
+    let co_out = cse_vn(0x50, 4);
+
+    let rax = cse_vn(0, 8);
+    let al = cse_vn(0, 1);
+    let masked_rax = cse_vn(0x60, 8);
+
+    let func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                cse_op(
+                    0,
+                    PcodeOpcode::IntSExt,
+                    sext_wide.clone(),
+                    vec![b_sext.clone()],
+                ),
+                cse_op(
+                    1,
+                    PcodeOpcode::IntRight,
+                    hi_sext.clone(),
+                    vec![sext_wide, Varnode::constant(8, 4)],
+                ),
+                ret(2, hi_sext),
+                cse_op(
+                    3,
+                    PcodeOpcode::IntZExt,
+                    zext_wide.clone(),
+                    vec![b_zext.clone()],
+                ),
+                cse_op(
+                    4,
+                    PcodeOpcode::IntRight,
+                    hi_zext.clone(),
+                    vec![zext_wide, Varnode::constant(8, 4)],
+                ),
+                ret(5, hi_zext),
+                PcodeOp {
+                    seq_num: 6,
+                    opcode: PcodeOpcode::CallOther,
+                    address: 0x1010,
+                    output: Some(co_out),
+                    inputs: vec![co_in.clone()],
+                    asm_mnemonic: None,
+                },
+                cse_op(
+                    7,
+                    PcodeOpcode::IntAnd,
+                    rax.clone(),
+                    vec![masked_rax, Varnode::constant(0xFF, 8)],
+                ),
+                ret(8, al),
+            ],
+        }],
+    };
+    let mut tracker = DefUseTracker::new();
+    tracker.build(&func);
+
+    // IntSExt sign bit (bit 7 = 0x80) is consumed when upper byte of wide output is read.
+    assert_eq!(tracker.get_consume_mask(&b_sext) & 0x80, 0x80);
+    // IntZExt does NOT consume input sign bit when only bits >= 8 of output are read.
+    assert_eq!(tracker.get_consume_mask(&b_zext) & 0x80, 0);
+    // CallOther consumes its inputs even when its own output is unused.
+    assert_eq!(tracker.get_consume_mask(&co_in), u64::MAX);
+    // Sub-register read `al` forces overlapping `rax` write to stay consumed (not folded to 0).
+    assert_ne!(tracker.get_consume_mask(&rax), 0);
+}
+
+#[test]
+fn try_and_mask_skips_zero_fold_when_consume_mask_is_zero() {
+    let rules = crate::pcode::optimizer::rules::OptimizationRules::new();
+    let input = cse_vn(0x10, 4);
+    let unused_out = cse_vn(0x100, 4);
+    let func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![cse_op(
+                0,
+                PcodeOpcode::IntAnd,
+                unused_out.clone(),
+                vec![input, Varnode::constant(0x0F, 4)],
+            )],
+        }],
+    };
+    let mut tracker = DefUseTracker::new();
+    tracker.build(&func);
+    assert_eq!(tracker.get_consume_mask(&unused_out), 0);
+    assert!(
+        rules
+            .try_optimize_with_tracker(&func.blocks[0].ops[0], &tracker, &func)
+            .is_none(),
+        "try_and_mask must not rewrite a dead IntAnd to #0 when consume == 0"
+    );
+}
+
+#[test]
+fn subvariable_flow_masks_narrowed_const_and_allocates_disjoint_unique_temps() {
+    let mut pass = SubvariableFlowOptimizer::new();
+    let a = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0x10,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let out = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0x20,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let low = Varnode {
+        space_id: crate::space::UNIQUE_SPACE_ID,
+        offset: 0x30,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    // Narrow `out = (a + a) + 0x1234_5678` where only low byte is consumed via SubPiece.
+    let sum_reg = Varnode {
+        space_id: crate::space::REGISTER_SPACE_ID,
+        offset: 0x24,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                add_op(0, &sum_reg, &a, &a),
+                cse_op(
+                    1,
+                    PcodeOpcode::IntOr,
+                    out.clone(),
+                    vec![sum_reg, Varnode::constant(0x1234_5678, 4)],
+                ),
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::SubPiece,
+                    address: 0x1008,
+                    output: Some(low.clone()),
+                    inputs: vec![out.clone(), Varnode::constant(0, 4)],
+                    asm_mnemonic: None,
+                },
+                ret(3, low),
+            ],
+        }],
+    };
+    let mut tracker = DefUseTracker::new();
+    tracker.build(&func);
+    assert!(pass.eliminate(&mut func, &tracker));
+
+    // Check narrowed constant had both `offset` and `constant_val` truncated to 1 byte (0x78).
+    let const_in = func.blocks[0]
+        .ops
+        .iter()
+        .flat_map(|op| op.inputs.iter())
+        .find(|vn| vn.is_constant && vn.size == 1)
+        .expect("narrowed 1-byte constant");
+    assert_eq!(const_in.offset, 0x78);
+    assert_eq!(const_in.constant_val, 0x78);
+
+    // Check the two `SubPiece(a, 0)` ops received disjoint unique-space outputs, never `REGISTER_SPACE_ID`.
+    let sp_outs: Vec<&Varnode> = func.blocks[0]
+        .ops
+        .iter()
+        .filter(|op| op.opcode == PcodeOpcode::SubPiece && op.inputs[0] == a)
+        .filter_map(|op| op.output.as_ref())
+        .collect();
+    assert_eq!(sp_outs.len(), 2);
+    assert_ne!(sp_outs[0].offset, sp_outs[1].offset);
+    assert!(crate::space::is_unique_space_id(sp_outs[0].space_id));
+    assert!(crate::space::is_unique_space_id(sp_outs[1].space_id));
+}
+
+#[test]
+fn cse_clears_available_exprs_across_intra_block_cbranch() {
+    let mut cse = CommonSubexpressionEliminator::new();
+    let a = cse_vn(0x10, 4);
+    let b = cse_vn(0x14, 4);
+    let out1 = cse_vn(0x100, 4);
+    let out2 = cse_vn(0x104, 4);
+    let cond = cse_vn(0x200, 1);
+
+    let mut func = PcodeFunction {
+        blocks: vec![crate::pcode::PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                cse_op(0, PcodeOpcode::IntAdd, out1, vec![a.clone(), b.clone()]),
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1004,
+                    output: None,
+                    inputs: vec![Varnode::constant(0x1010, 8), cond],
+                    asm_mnemonic: None,
+                },
+                cse_op(2, PcodeOpcode::IntAdd, out2, vec![a, b]),
+            ],
+        }],
+    };
+
+    assert!(
+        !cse.eliminate(&mut func),
+        "intra-block CBranch must clear CSE availability"
+    );
+    assert_eq!(func.blocks[0].ops[2].opcode, PcodeOpcode::IntAdd);
+}
+
+// ---- RAM is not a temporary space ------------------------------------------
+//
+// The Rust-Sleigh runtime numbers registers 4/5, temporaries 2 and RAM 3; the
+// legacy numbering puts temporaries in 3. Treating every space-3 varnode as a
+// temporary forwards a global's stored value into its reload, after which
+// nothing reads the global and DCE deletes the store.
+
+fn ram_vn(offset: u64) -> Varnode {
+    Varnode {
+        space_id: 3,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
+
+fn assert_copy_kept(ops: &[PcodeOp], output: &Varnode, input: &Varnode) {
+    assert!(
+        ops.iter().any(|op| op.opcode == PcodeOpcode::Copy
+            && op.output.as_ref() == Some(output)
+            && op.inputs.as_slice() == std::slice::from_ref(input)),
+        "`{output:?} = COPY {input:?}` must survive: {ops:?}"
+    );
+}
+
+/// `mov [g], eax; mov ecx, [g]` lifted with the runtime numbering: the store
+/// to `ram:g` and the reload from it are memory, not a temporary and its use.
+#[test]
+fn a_ram_store_and_its_reload_survive_copy_propagation_and_dce() {
+    let reg = |offset| Varnode {
+        space_id: crate::space::RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let (eax, ecx, global) = (reg(0x0), reg(0x8), ram_vn(0x404000));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::Copy, global.clone(), vec![eax.clone()]),
+        cse_op(1, PcodeOpcode::Copy, ecx.clone(), vec![global.clone()]),
+        ret(2, ecx.clone()),
+    ]);
+    assert_copy_kept(&ops, &global, &eax);
+    assert_copy_kept(&ops, &ecx, &global);
+}
+
+/// With no register in either numbering, nothing says whether space 3 is RAM
+/// or unique, so no varnode is a temporary.
+#[test]
+fn space_three_is_not_a_temporary_without_numbering_evidence() {
+    let (source, global, sink) = (ram_vn(0x404000), ram_vn(0x404010), ram_vn(0x404020));
+    let ops = optimize_ops(vec![
+        cse_op(0, PcodeOpcode::Copy, global.clone(), vec![source.clone()]),
+        cse_op(1, PcodeOpcode::Copy, sink.clone(), vec![global.clone()]),
+        ret(2, sink.clone()),
+    ]);
+    assert_copy_kept(&ops, &global, &source);
+    assert_copy_kept(&ops, &sink, &global);
 }

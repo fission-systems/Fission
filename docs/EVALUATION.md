@@ -71,14 +71,18 @@ cargo build -p fission-cli --release
 
 From the repository root, set these paths in your shell:
 
+<!-- cli-smoke: setup -->
+
 ```bash
-cli=./target/release/fission_cli
+cli=${FISSION_DOC_CLI:-./target/release/fission_cli}
 sample=crates/fission-loader/testdata/x64_pdb_struct_test.exe
 ```
 
 On Windows, use the `fission_cli.exe` suffix.
 
 ### 2. Inspect binary metadata
+
+<!-- cli-smoke: info -->
 
 ```bash
 "$cli" info "$sample"
@@ -92,6 +96,8 @@ What to inspect:
 - whether the binary loads cleanly without special setup
 
 ### 3. List discovered functions in JSON
+
+<!-- cli-smoke: list -->
 
 ```bash
 "$cli" list "$sample" --json
@@ -109,6 +115,8 @@ Recommended first function:
 
 ### 4. Disassemble one function
 
+<!-- cli-smoke: disasm -->
+
 ```bash
 "$cli" disasm "$sample" --addr 0x140001040 --function
 ```
@@ -119,6 +127,8 @@ What to inspect:
 - whether instruction output is usable for manual validation before decompilation
 
 ### 5. Decompile one function in text form
+
+<!-- cli-smoke: decomp -->
 
 ```bash
 "$cli" decomp "$sample" --addr 0x140001040
@@ -132,6 +142,8 @@ What to inspect:
 - whether this is close enough to your downstream processing needs
 
 ### 6. Decompile the same function in JSON form
+
+<!-- cli-smoke: decomp-json -->
 
 ```bash
 "$cli" decomp "$sample" --addr 0x140001040 --json

@@ -1,0 +1,112 @@
+name: Mutation testing (weekly)
+
+# Which lines that changed on main this week can be broken without any test
+# failing? cargo-mutants rewrites each changed function body (returns a
+# constant, flips a comparison, deletes a statement) and runs the tests; a
+# mutant that survives marks code no test checks.
+#
+# A week of main produced 5,448 mutants (to 2026-11-22). At one to two minutes
+# each, four jobs would need over 20 hours apiece. So the week's mutants are
+# cut into 48 slices of about 113 and each run takes four, rotating with the
+# ISO week: a twelfth of the mutants each week, every slice within 12 weeks.
+# Report-only: a missed mutant is a lead, not a defect. The job fails only when the tool itself does (for
+# example the unmutated tree failing its tests).
+
+on:
+  schedule:
+    - cron: "15 3 * * 0"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Mutate lines changed on main in the last N days"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  DAYS: ${{ inputs.days || '7' }}
+
+jobs:
+  mutants:
+    name: Mutants (slice ${{ matrix.shard }} of this week's four)
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    env:
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-mutants-${{ runner.os }}
+      - uses: taiki-e/install-action@25f51f6b1bf4c37e2e1cd51ed1e4163e8f69e4f9 # v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+      - name: Collect this week's Rust changes on main
+        id: diff
+        run: |
+          set -euo pipefail
+          base="$(git rev-list -1 --before="${DAYS} days ago" HEAD)"
+          git diff "$base" HEAD -- 'crates/**/*.rs' ':!crates/**/tests/**' > "$RUNNER_TEMP/week.diff"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "lines=$(wc -l < "$RUNNER_TEMP/week.diff")" >> "$GITHUB_OUTPUT"
+          week="$(date -u +%V)"
+          echo "slice=$(( (10#$week * 4 + SHARD) % 48 ))" >> "$GITHUB_OUTPUT"
+      - name: Mutate the changed lines
+        if: steps.diff.outputs.lines != '0'
+        run: |
+          set -uo pipefail
+          cargo mutants --in-diff "$RUNNER_TEMP/week.diff" --test-tool nextest \
+            --shard "${{ steps.diff.outputs.slice }}/48" --timeout-multiplier 3 --jobs 2 --output "$RUNNER_TEMP" || status=$?
+          status="${status:-0}"
+          # 0 all caught, 2 some missed, 3 some timed out: results, not failures.
+          case "$status" in 0|2|3) ;; *) echo "cargo-mutants failed (exit $status)"; exit "$status";; esac
+      - name: Summarise
+        if: always() && steps.diff.outputs.lines != '0'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/mutants.out"
+          count() { if [ -f "$out/$1" ]; then wc -l < "$out/$1"; else echo 0; fi; }
+          {
+            echo "Slice ${{ steps.diff.outputs.slice }}/48 since \`${{ steps.diff.outputs.base }}\`: caught $(count caught.txt), missed $(count missed.txt), timeout $(count timeout.txt), unviable $(count unviable.txt)"
+            if [ -s "$out/missed.txt" ]; then
+              echo
+              echo '```text'
+              head -100 "$out/missed.txt"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always() && steps.diff.outputs.lines != '0'
+        with:
+          name: mutants-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/mutants.out
+          if-no-files-found: ignore
+          retention-days: 30
+
+  report:
+    needs: mutants
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.mutants.result }}
+      detail: "the tool failed, not a missed mutant (those are report-only, in each shard's summary and artifact)"
