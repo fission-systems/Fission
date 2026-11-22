@@ -60,4 +60,45 @@ impl CallingConvention {
             CallingConvention::X86_32 => Some(0x10),
         }
     }
+
+    /// Registers a callee must preserve under this convention, as lower-case
+    /// SLEIGH register names with every sub-register spelling listed, so a
+    /// narrow read of a preserved register (`ebx`, `bl`) is recognised too.
+    ///
+    /// This is the fallback for when no cspec `<unaffected>` list was loaded
+    /// for the function; a loaded cspec is the authority and takes precedence
+    /// in the decompiler. Conventions without a table here return an empty
+    /// slice, which treats every register as caller-saved (the conservative
+    /// answer for argument recovery across a call).
+    pub fn callee_saved_register_names(self) -> &'static [&'static str] {
+        match self {
+            CallingConvention::WindowsX64 => &[
+                "rbx", "ebx", "bx", "bl", "bh", "rbp", "ebp", "bp", "bpl", "rsp", "esp", "sp",
+                "spl", "rsi", "esi", "si", "sil", "rdi", "edi", "di", "dil", "r12", "r12d", "r12w",
+                "r12b", "r13", "r13d", "r13w", "r13b", "r14", "r14d", "r14w", "r14b", "r15",
+                "r15d", "r15w", "r15b",
+            ],
+            CallingConvention::SystemVAmd64 => &[
+                "rbx", "ebx", "bx", "bl", "bh", "rbp", "ebp", "bp", "bpl", "rsp", "esp", "sp",
+                "spl", "r12", "r12d", "r12w", "r12b", "r13", "r13d", "r13w", "r13b", "r14", "r14d",
+                "r14w", "r14b", "r15", "r15d", "r15w", "r15b",
+            ],
+            CallingConvention::X86_32 => &[
+                "ebx", "bx", "bl", "bh", "ebp", "bp", "esp", "sp", "esi", "si", "edi", "di",
+            ],
+            CallingConvention::AArch64 => &[
+                "x19", "w19", "x20", "w20", "x21", "w21", "x22", "w22", "x23", "w23", "x24", "w24",
+                "x25", "w25", "x26", "w26", "x27", "w27", "x28", "w28", "x29", "w29", "fp", "sp",
+            ],
+            CallingConvention::Arm32 => {
+                &["r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "fp", "sp"]
+            }
+            CallingConvention::PowerPc32
+            | CallingConvention::PowerPc64
+            | CallingConvention::LoongArch32
+            | CallingConvention::LoongArch64
+            | CallingConvention::Mips32
+            | CallingConvention::Mips64 => &[],
+        }
+    }
 }

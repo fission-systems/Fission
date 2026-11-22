@@ -1103,9 +1103,22 @@ impl<'a> PreviewBuilder<'a> {
         result
     }
 
+    /// Branch-target key of CFG node `idx`'s fall-through edge: the p-code
+    /// body's layout successor, resolved to the CFG successor that carries
+    /// that body. Without node splitting the two are the same block. After
+    /// splitting they can differ: a clone's edge, or an original's, may have
+    /// been redirected to a clone of the layout successor, whose key is not
+    /// the raw block's address.
     pub(super) fn pcode_fallthrough_address(&self, idx: usize) -> Option<u64> {
         let layout_idx = self.pcode_block_idx(idx);
-        self.layout_fallthrough[layout_idx].map(|next_idx| self.block_target_key(next_idx))
+        let raw_next = self.layout_fallthrough[layout_idx]?;
+        let cfg_next = self.successors.get(idx).and_then(|succs| {
+            succs
+                .iter()
+                .copied()
+                .find(|&succ| self.pcode_block_idx(succ) == raw_next)
+        });
+        Some(self.block_target_key(cfg_next.unwrap_or(raw_next)))
     }
 
     pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {

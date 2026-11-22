@@ -622,22 +622,27 @@ mod tests {
         };
         let options = test_options();
         let mut builder = PreviewBuilder::new(&func, &options, None);
-        // Simulate a node-split virtual clone of block 0 at index 3.
-        builder.virtual_block_map.push(0);
-        builder.extend_virtual_block_target_keys(&[0]);
-        let clone_idx = 3;
-        builder.successors.push(vec![2]);
-        builder.predecessors.push(vec![1]);
+        // Node splitting as `split_irreducible_nodes` does it: clone 3 of
+        // block 0 starts with block 0's successors, clone 4 is a clone of
+        // block 1, and a later split redirected clone 3's edge to clone 4.
+        builder.virtual_block_map.extend([0, 1]);
+        builder.extend_virtual_block_target_keys(&[0, 1]);
+        let (clone_idx, succ_clone_idx) = (3, 4);
+        let succ_clone_key = builder.block_target_key(succ_clone_idx);
+        assert_ne!(succ_clone_key, 0x1100);
+        builder.successors.push(vec![1]);
+        builder.successors.push(vec![]);
+        builder.predecessors[1].push(clone_idx);
+        builder.predecessors.push(vec![]);
+        builder.predecessors.push(vec![]);
 
+        // A clone has no layout position of its own, so nothing falls
+        // through into it or out of it; its fall-through edge is the CFG
+        // successor carrying the layout successor's body.
         assert_eq!(builder.next_block_address(0), Some(0x1100));
         assert_eq!(builder.next_block_address(clone_idx), None);
         assert_eq!(builder.fallthrough_index(clone_idx), None);
-
-        let targets = builder.collect_jump_targets().expect("targets");
-        assert!(
-            targets.contains(&0x1200),
-            "virtual clone successor must contribute jump target: {targets:?}"
-        );
+        assert_eq!(builder.pcode_fallthrough_address(clone_idx), Some(0x1100));
 
         let linear_body =
             fission_midend_structuring::build_linear_multiblock_body(&mut builder, false)
@@ -646,7 +651,23 @@ mod tests {
             linear_body
                 .iter()
                 .any(|stmt| matches!(stmt, PreHirStmt::Goto(lbl) if lbl == "block_1100")),
-            "virtual clone with Fallthrough(Some(0x1100)) must emit explicit Goto: {linear_body:?}"
+            "a clone keeping block 0's successor must jump to block 1: {linear_body:?}"
+        );
+
+        builder.successors[clone_idx] = vec![succ_clone_idx];
+        builder.predecessors[1].retain(|&pred| pred != clone_idx);
+        builder.predecessors[succ_clone_idx].push(clone_idx);
+        builder.invalidate_materialization_dependent_caches();
+        builder.jump_targets_cache = None;
+        assert_eq!(
+            builder.pcode_fallthrough_address(clone_idx),
+            Some(succ_clone_key),
+            "a redirected fall-through edge must target the successor clone"
+        );
+        let targets = builder.collect_jump_targets().expect("targets");
+        assert!(
+            targets.contains(&succ_clone_key),
+            "virtual clone successor must contribute jump target: {targets:?}"
         );
     }
 }

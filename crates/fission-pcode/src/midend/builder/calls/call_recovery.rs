@@ -119,128 +119,13 @@ impl<'a> PreviewBuilder<'a> {
         } else {
             return false;
         };
-        let lower = reg_name.to_ascii_lowercase();
-        match self.options.calling_convention {
-            CallingConvention::WindowsX64 => matches!(
-                lower.as_str(),
-                "rbx"
-                    | "ebx"
-                    | "bx"
-                    | "bl"
-                    | "bh"
-                    | "rbp"
-                    | "ebp"
-                    | "bp"
-                    | "bpl"
-                    | "rsp"
-                    | "esp"
-                    | "sp"
-                    | "spl"
-                    | "rsi"
-                    | "esi"
-                    | "si"
-                    | "sil"
-                    | "rdi"
-                    | "edi"
-                    | "di"
-                    | "dil"
-                    | "r12"
-                    | "r12d"
-                    | "r12w"
-                    | "r12b"
-                    | "r13"
-                    | "r13d"
-                    | "r13w"
-                    | "r13b"
-                    | "r14"
-                    | "r14d"
-                    | "r14w"
-                    | "r14b"
-                    | "r15"
-                    | "r15d"
-                    | "r15w"
-                    | "r15b"
-            ),
-            CallingConvention::SystemVAmd64 => matches!(
-                lower.as_str(),
-                "rbx"
-                    | "ebx"
-                    | "bx"
-                    | "bl"
-                    | "bh"
-                    | "rbp"
-                    | "ebp"
-                    | "bp"
-                    | "bpl"
-                    | "rsp"
-                    | "esp"
-                    | "sp"
-                    | "spl"
-                    | "r12"
-                    | "r12d"
-                    | "r12w"
-                    | "r12b"
-                    | "r13"
-                    | "r13d"
-                    | "r13w"
-                    | "r13b"
-                    | "r14"
-                    | "r14d"
-                    | "r14w"
-                    | "r14b"
-                    | "r15"
-                    | "r15d"
-                    | "r15w"
-                    | "r15b"
-            ),
-            CallingConvention::X86_32 => matches!(
-                lower.as_str(),
-                "ebx"
-                    | "bx"
-                    | "bl"
-                    | "bh"
-                    | "ebp"
-                    | "bp"
-                    | "esp"
-                    | "sp"
-                    | "esi"
-                    | "si"
-                    | "edi"
-                    | "di"
-            ),
-            CallingConvention::AArch64 => matches!(
-                lower.as_str(),
-                "x19"
-                    | "w19"
-                    | "x20"
-                    | "w20"
-                    | "x21"
-                    | "w21"
-                    | "x22"
-                    | "w22"
-                    | "x23"
-                    | "w23"
-                    | "x24"
-                    | "w24"
-                    | "x25"
-                    | "w25"
-                    | "x26"
-                    | "w26"
-                    | "x27"
-                    | "w27"
-                    | "x28"
-                    | "w28"
-                    | "x29"
-                    | "w29"
-                    | "fp"
-                    | "sp"
-            ),
-            CallingConvention::Arm32 => matches!(
-                lower.as_str(),
-                "r4" | "r5" | "r6" | "r7" | "r8" | "r9" | "r10" | "r11" | "fp" | "sp"
-            ),
-            _ => false,
-        }
+        // No cspec `<unaffected>` list was loaded: fall back to the
+        // convention's own table (ISA data lives with the convention, not in
+        // this builder).
+        self.options
+            .calling_convention
+            .callee_saved_register_names()
+            .contains(&reg_name.to_ascii_lowercase().as_str())
     }
 
     fn call_preserves_argument_register(&self, vn: &Varnode, call: &PcodeOp) -> bool {
@@ -1660,7 +1545,6 @@ impl<'a> PreviewBuilder<'a> {
                 constant_val: 0,
             };
 
-            let _key = VarnodeKey::from(&vn);
             if let Some((site, _)) = self.lookup_def_site(&vn) {
                 let def_site = crate::midend::support::DefSite {
                     block_idx: site.block_idx,
