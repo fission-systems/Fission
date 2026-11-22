@@ -2,10 +2,15 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+#[derive(Clone, Copy, Debug)]
+struct OperandExtent {
+    absolute_offset: usize,
+    relative_length: usize,
+}
+
 struct DecodePool {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
@@ -80,8 +85,8 @@ impl std::fmt::Display for WalkFrame {
 }
 
 thread_local! {
-    static DECODE_POOL: RefCell<Vec<DecodePool>> = RefCell::new(Vec::new());
-    static WALK_STACK: RefCell<Vec<WalkFrame>> = RefCell::new(Vec::new());
+    static DECODE_POOL: RefCell<Vec<DecodePool>> = const { RefCell::new(Vec::new()) };
+    static WALK_STACK: RefCell<Vec<WalkFrame>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) struct WalkStackGuard;
@@ -182,23 +187,20 @@ fn bind_instruction_with_inst_next<'a>(
 
 pub(super) struct PoolGuard {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
 impl Drop for PoolGuard {
     fn drop(&mut self) {
         let handles = std::mem::take(&mut self.handles);
-        let operand_absolute_offsets = std::mem::take(&mut self.operand_absolute_offsets);
-        let operand_relative_lengths = std::mem::take(&mut self.operand_relative_lengths);
+        let operand_extents = std::mem::take(&mut self.operand_extents);
         let handle_reference_bitmap = std::mem::take(&mut self.handle_reference_bitmap);
 
         DECODE_POOL.with(|pool| {
             pool.borrow_mut().push(DecodePool {
                 handles,
-                operand_absolute_offsets,
-                operand_relative_lengths,
+                operand_extents,
                 handle_reference_bitmap,
             });
         });
@@ -545,21 +547,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .with(|pool| pool.borrow_mut().pop())
             .unwrap_or_else(|| DecodePool {
                 handles: Vec::new(),
-                operand_absolute_offsets: Vec::new(),
-                operand_relative_lengths: Vec::new(),
+                operand_extents: Vec::new(),
                 handle_reference_bitmap: Vec::new(),
             });
 
         let target_len = selection.constructor.constructor_template.handles.len();
 
         pool_item.handles.clear();
-        pool_item.handles.resize(target_len, None);
+        pool_item.handles.resize_with(target_len, || None);
 
-        pool_item.operand_absolute_offsets.clear();
-        pool_item.operand_absolute_offsets.resize(target_len, None);
-
-        pool_item.operand_relative_lengths.clear();
-        pool_item.operand_relative_lengths.resize(target_len, None);
+        pool_item.operand_extents.clear();
+        pool_item.operand_extents.resize(target_len, None);
 
         constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
@@ -600,8 +598,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             cursor,
             pool_guard: PoolGuard {
                 handles: pool_item.handles,
-                operand_absolute_offsets: pool_item.operand_absolute_offsets,
-                operand_relative_lengths: pool_item.operand_relative_lengths,
+                operand_extents: pool_item.operand_extents,
                 handle_reference_bitmap: pool_item.handle_reference_bitmap,
             },
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
@@ -1032,8 +1029,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_relative_length,
             handle_index,
         );
-        self.operand_absolute_offsets[operand_index] = Some(operand_absolute_offset);
-        self.operand_relative_lengths[operand_index] = Some(operand_relative_length);
+        self.operand_extents[operand_index] = Some(OperandExtent {
+            absolute_offset: operand_absolute_offset,
+            relative_length: operand_relative_length,
+        });
         let fixed = match binding.fixed {
             Some(fixed) => fixed,
             None if !binding.requires_fixed => RuntimeFixedHandle::default(),
@@ -1073,33 +1072,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
         let index = usize::try_from(offsetbase)
             .map_err(|_| anyhow!("{role} base {offsetbase} does not fit usize"))?;
-        let offset = (*self
-            .operand_absolute_offsets
+        let extent = self
+            .operand_extents
             .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
-        let length = (*self
-            .operand_relative_lengths
-            .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved length"))?;
-        offset
-            .checked_add(length)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?
+            .as_ref()
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
+        extent
+            .absolute_offset
+            .checked_add(extent.relative_length)
             .ok_or_else(|| anyhow!("{role} base {offsetbase} end offset overflowed"))
     }
 
     fn max_operand_end(&self) -> Result<usize> {
         let mut max_end = self.ctx.cursor;
-        for (offset, length) in self
-            .operand_absolute_offsets
-            .iter()
-            .zip(self.operand_relative_lengths.iter())
-        {
-            let (Some(offset), Some(length)) = (*offset, *length) else {
-                continue;
-            };
-            let end = offset
-                .checked_add(length)
+        for extent in self.operand_extents.iter().flatten() {
+            let end = extent
+                .absolute_offset
+                .checked_add(extent.relative_length)
                 .ok_or_else(|| anyhow!("operand end offset overflowed"))?;
             max_end = max_end.max(end);
         }
@@ -2386,10 +2376,9 @@ mod operand_expression_borrow_tests {
 
     fn snapshot(walker: &CompiledParserWalker<'_, '_>) -> String {
         format!(
-            "{:?} {:?} {:?} {} {:x} {:x} {:?}",
+            "{:?} {:?} {} {:x} {:x} {:?}",
             walker.handles,
-            walker.operand_absolute_offsets,
-            walker.operand_relative_lengths,
+            walker.operand_extents,
             walker.cursor,
             walker.context_register,
             walker.context_known_mask,
