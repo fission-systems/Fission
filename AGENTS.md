@@ -201,7 +201,8 @@ strictly local and will not be used for implementation advice.
 Use [`docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md`](docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md)
 for external or cross-model review prompts. The template exists to keep prompts
 about invariants, not benchmark rows. Ghidra may be cited as a cleanroom
-correctness/reference oracle, but do not ask models to reproduce Ghidra-specific
+reference for algorithms and edge cases, never as proof of correctness
+([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)), and do not ask models to reproduce Ghidra-specific
 output style or known readability artifacts such as side effects hidden inside
 conditions.
 
@@ -310,6 +311,8 @@ Current priority order:
 4. Maintain SLEIGH lift correctness and prevent regressions.
    Do not add manual mappings in the SLEIGH engine. Keep `.sla` ConstructTpl execution as the success source, and do not grow legacy token cursor, BoundOperand fallback, or compatibility-classifier debt.
    When SLEIGH changes are necessary, validate row-level raw p-code parity first, then the canonical gate, then benchmarks.
+   Parity means against Fission's previous output; each intended difference needs native-execution or architecture-manual evidence.
+   Upstream Ghidra specs can be wrong (AArch64 FCVT/FRINT, #834/#838); fix them as `utils/sleigh-specs/README.md` records ([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)).
 
 5. FID/name recovery.
    Gradually improve packed `.fidb`, exact hash inputs, and program seeker coverage relative to Ghidra Function ID / signature / symbol ecosystems.
@@ -320,7 +323,7 @@ Current priority order:
 Required principles:
 
 1. Improve sample binary quality before real-world binary breadth.
-2. Treat Ghidra as a cleanroom reference for algorithms, invariants, and edge cases.
+2. Treat Ghidra as a cleanroom reference for algorithms, invariants, and edge cases, not as a correctness oracle: Fission lifts from Ghidra's SLEIGH specs, so their errors make both tools agree on the wrong answer. Correctness comes from native execution, architecture manuals, and source-level ground truth ([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)).
 3. Default to zero new production dependencies.
 4. Prefer CFG, dominance, dataflow, fixed-point, and constraint-based reasoning over brittle pattern matching or temporary heuristics.
 5. Avoid overfitting to one ISA/compiler, while keeping x86/x86-64 as the current optimization target.
