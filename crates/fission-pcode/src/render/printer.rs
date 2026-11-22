@@ -695,7 +695,7 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         print_stmt_with_indent_ctx(stmt, 1, 0, &ctx, &mut out);
     }
     out.push_str("}\n");
-    cast_pointer_vars_in_bitop_text(out, &ctx)
+    out
 }
 
 fn print_binding_type(binding: &NirBinding) -> String {
@@ -1201,7 +1201,7 @@ fn print_expr_prec(expr: &HirExpr, parent_prec: u8, depth: usize) -> String {
                 }
                 if *op == HirBinaryOp::Shr {
                     if let Some(count) = width_minus_shift_count(rhs) {
-                        let count_str = print_expr_prec(count, 0, depth + 1);
+                        let count_str = print_expr_prec(count, 60, depth + 1);
                         (
                             format!(
                                 "{count_str} == 0 ? 0 : {lhs_str} {} {rhs_str}",
@@ -1842,10 +1842,7 @@ fn print_expr_prec_ctx(
                 // without going through a pointer-sized integer is UB/error in strict C11).
                 let expr_is_ptr = ctx.expr_is_pointer(expr);
                 let target_is_int = !matches!(ty, NirType::Ptr(_));
-                let mut inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
-                if matches!(ty, NirType::Ptr(_)) {
-                    inner = cast_pointer_vars_in_bitop_text(inner, ctx);
-                }
+                let inner = print_expr_prec_ctx(expr, 110, depth + 1, ctx);
                 if expr_is_ptr && target_is_int {
                     (
                         format!("({})(unsigned long long){}", print_type(ty), inner),
@@ -1917,7 +1914,7 @@ fn print_expr_prec_ctx(
 
             if *op == HirBinaryOp::Shr {
                 if let Some(count) = width_minus_shift_count(rhs) {
-                    let count_str = print_expr_prec_ctx(count, 0, depth + 1, ctx);
+                    let count_str = print_expr_prec_ctx(count, 60, depth + 1, ctx);
                     (
                         format!(
                             "{count_str} == 0 ? 0 : {lhs_str} {} {rhs_str}",
@@ -2193,28 +2190,6 @@ fn printed_operand_is_pointer_var(operand: &str, ctx: &PrintCtx<'_>) -> bool {
         .is_some_and(|ty| matches!(ty, NirType::Ptr(_)))
 }
 
-fn cast_pointer_vars_in_bitop_text(mut text: String, ctx: &PrintCtx<'_>) -> String {
-    if !(text.contains(" ^ ") || text.contains(" & ") || text.contains(" | ")) {
-        return text;
-    }
-    for (name, ty) in &ctx.var_types {
-        if !matches!(ty, NirType::Ptr(_)) || !text.contains(*name) {
-            continue;
-        }
-        for op in ["^", "&", "|"] {
-            let rhs_pat = format!(" {op} {name}");
-            if text.contains(&rhs_pat) {
-                text = text.replace(&rhs_pat, &format!(" {op} (unsigned long long){name}"));
-            }
-            let lhs_pat = format!("({name} {op} ");
-            if text.contains(&lhs_pat) {
-                text = text.replace(&lhs_pat, &format!("((unsigned long long){name} {op} "));
-            }
-        }
-    }
-    text
-}
-
 fn pointer_scalar_compound_op(op: HirBinaryOp) -> Option<&'static str> {
     match op {
         HirBinaryOp::Mul => Some("*"),
@@ -2259,7 +2234,11 @@ fn try_compound_assignment(lhs: &HirLValue, rhs: &HirExpr, ctx: &PrintCtx<'_>) -
             .get(var_name.as_str())
             .cloned()
             .unwrap_or_else(|| "void *".to_string());
-        let rhs_str = print_expr_with_ctx(rhs_expr, ctx);
+        let mut rhs_str = print_expr_with_ctx(rhs_expr, ctx);
+        if ctx.operand_prints_as_pointer(rhs_expr) || printed_operand_is_pointer_var(&rhs_str, ctx)
+        {
+            rhs_str = format!("(unsigned long long){rhs_str}");
+        }
         return Some(format!(
             "{var_name} = ({ptr_ty})((unsigned long long){var_name} {op_str} {rhs_str});"
         ));
@@ -3584,6 +3563,125 @@ mod tests {
         assert!(
             rendered.contains("local_10 = (uchar *)-(unsigned long long)local_10;"),
             "{rendered}"
+        );
+    }
+
+    #[test]
+    fn width_minus_shift_count_zero_guard_parenthesizes_low_precedence_count() {
+        let count = HirExpr::Binary {
+            op: HirBinaryOp::And,
+            lhs: Box::new(HirExpr::Var("x".to_string())),
+            rhs: Box::new(HirExpr::Const(31, u64_ty())),
+            ty: u64_ty(),
+        };
+        let shift_expr = HirExpr::Binary {
+            op: HirBinaryOp::Shr,
+            lhs: Box::new(HirExpr::Var("val".to_string())),
+            rhs: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Sub,
+                lhs: Box::new(HirExpr::Const(32, u64_ty())),
+                rhs: Box::new(count),
+                ty: u64_ty(),
+            }),
+            ty: u64_ty(),
+        };
+        let printed_no_ctx = print_expr_prec(&shift_expr, 0, 0);
+        assert!(
+            printed_no_ctx.starts_with("(x & 31) == 0 ? 0 :"),
+            "expected parenthesized zero-shift guard: {printed_no_ctx}"
+        );
+        let dummy = HirFunction::default();
+        let ctx = PrintCtx::build(&dummy);
+        let printed_with_ctx = print_expr_prec_ctx(&shift_expr, 0, 0, &ctx);
+        assert!(
+            printed_with_ctx.starts_with("(x & 31) == 0 ? 0 :"),
+            "expected parenthesized zero-shift guard with ctx: {printed_with_ctx}"
+        );
+    }
+
+    #[test]
+    fn bitop_with_pointer_var_does_not_corrupt_member_or_prefixed_identifiers() {
+        let field_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "bitop_ptr_names".to_string(),
+            locals: vec![
+                NirBinding {
+                    name: "p".to_string(),
+                    ty: u8_ptr(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "p_low".to_string(),
+                    ty: field_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "flags".to_string(),
+                    ty: field_ty.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("flags".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(HirExpr::Var("flags".to_string())),
+                        rhs: Box::new(HirExpr::FieldAccess {
+                            base: Box::new(HirExpr::Var("p".to_string())),
+                            offset: 4,
+                            field_name: "mask".to_string(),
+                            ty: field_ty.clone(),
+                        }),
+                        ty: field_ty.clone(),
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("flags".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(HirExpr::Var("flags".to_string())),
+                        rhs: Box::new(HirExpr::Var("p_low".to_string())),
+                        ty: field_ty,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::Var("p".to_string()),
+                    rhs: HirExpr::Binary {
+                        op: HirBinaryOp::And,
+                        lhs: Box::new(HirExpr::Var("p".to_string())),
+                        rhs: Box::new(HirExpr::Var("flags".to_string())),
+                        ty: u8_ptr(),
+                    },
+                },
+            ],
+            ..HirFunction::default()
+        };
+        let rendered = print_hir_function(&hir);
+        assert!(
+            rendered.contains("flags & p->mask") || rendered.contains("flags &= p->mask"),
+            "must not cast pointer field base as scalar:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("(unsigned long long)p->mask"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("(unsigned long long)p_low"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("(unsigned long long)p & flags"),
+            "compound pointer bitop must cast p at AST print time:\n{rendered}"
         );
     }
 }

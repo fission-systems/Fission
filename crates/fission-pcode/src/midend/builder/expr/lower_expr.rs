@@ -543,7 +543,7 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn is_identity_copy_def(op: &PcodeOp) -> bool {
+    pub(in crate::midend::builder) fn is_identity_copy_def(op: &PcodeOp) -> bool {
         op.opcode == PcodeOpcode::Copy
             && op.output.as_ref().is_some_and(|output| {
                 op.inputs

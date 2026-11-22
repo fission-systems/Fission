@@ -40,9 +40,13 @@ const SIZE_PARAM_FUNCTIONS: &[(&str, &[(usize, &str)])] = &[
 ];
 
 fn normalize(name: &str) -> String {
-    name.to_ascii_lowercase()
-        .trim_matches('_')
-        .replace("__", "_")
+    let sym = name.rsplit_once('!').map_or(name, |(_, s)| s);
+    let mut s = sym.to_ascii_lowercase();
+    s = s.trim_start_matches('_').to_string();
+    while let Some(rest) = s.strip_prefix("imp_") {
+        s = rest.trim_start_matches('_').to_string();
+    }
+    s.trim_matches('_').replace("__", "_")
 }
 
 pub(super) fn candidates(func: &HirFunction) -> Vec<Candidate> {

@@ -96,20 +96,151 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
+        if is_register_varnode(vn) && !self.options.cspec_unaffected_offsets.is_empty() {
+            if self.options.cspec_unaffected_offsets.contains(&vn.offset) {
+                return true;
+            }
+            let namer = self.register_namer();
+            let Some(vn_family) = namer.gpr_family_index_at(vn.offset, vn.size) else {
+                return false;
+            };
+            return self.options.cspec_unaffected_offsets.iter().any(|&offset| {
+                namer
+                    .gpr_family_index_at(offset, self.options.pointer_size)
+                    .is_some_and(|fam| fam == vn_family)
+            });
+        }
         let reg_name = if is_register_varnode(vn) {
-            self.sla_hw_name(vn.offset, vn.size)
-                .unwrap_or_else(|| "reg".to_string())
+            self.sla_hw_name(vn.offset, vn.size).unwrap_or_default()
         } else if vn.space_id == UNIQUE_SPACE_ID {
             crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
                 .map(str::to_string)
                 .unwrap_or_default()
         } else {
-            String::new()
+            return false;
         };
-        matches!(
-            reg_name.as_str(),
-            "rbx" | "rbp" | "rsi" | "rdi" | "r12" | "r13" | "r14" | "r15"
-        )
+        let lower = reg_name.to_ascii_lowercase();
+        match self.options.calling_convention {
+            CallingConvention::WindowsX64 => matches!(
+                lower.as_str(),
+                "rbx"
+                    | "ebx"
+                    | "bx"
+                    | "bl"
+                    | "bh"
+                    | "rbp"
+                    | "ebp"
+                    | "bp"
+                    | "bpl"
+                    | "rsp"
+                    | "esp"
+                    | "sp"
+                    | "spl"
+                    | "rsi"
+                    | "esi"
+                    | "si"
+                    | "sil"
+                    | "rdi"
+                    | "edi"
+                    | "di"
+                    | "dil"
+                    | "r12"
+                    | "r12d"
+                    | "r12w"
+                    | "r12b"
+                    | "r13"
+                    | "r13d"
+                    | "r13w"
+                    | "r13b"
+                    | "r14"
+                    | "r14d"
+                    | "r14w"
+                    | "r14b"
+                    | "r15"
+                    | "r15d"
+                    | "r15w"
+                    | "r15b"
+            ),
+            CallingConvention::SystemVAmd64 => matches!(
+                lower.as_str(),
+                "rbx"
+                    | "ebx"
+                    | "bx"
+                    | "bl"
+                    | "bh"
+                    | "rbp"
+                    | "ebp"
+                    | "bp"
+                    | "bpl"
+                    | "rsp"
+                    | "esp"
+                    | "sp"
+                    | "spl"
+                    | "r12"
+                    | "r12d"
+                    | "r12w"
+                    | "r12b"
+                    | "r13"
+                    | "r13d"
+                    | "r13w"
+                    | "r13b"
+                    | "r14"
+                    | "r14d"
+                    | "r14w"
+                    | "r14b"
+                    | "r15"
+                    | "r15d"
+                    | "r15w"
+                    | "r15b"
+            ),
+            CallingConvention::X86_32 => matches!(
+                lower.as_str(),
+                "ebx"
+                    | "bx"
+                    | "bl"
+                    | "bh"
+                    | "ebp"
+                    | "bp"
+                    | "esp"
+                    | "sp"
+                    | "esi"
+                    | "si"
+                    | "edi"
+                    | "di"
+            ),
+            CallingConvention::AArch64 => matches!(
+                lower.as_str(),
+                "x19"
+                    | "w19"
+                    | "x20"
+                    | "w20"
+                    | "x21"
+                    | "w21"
+                    | "x22"
+                    | "w22"
+                    | "x23"
+                    | "w23"
+                    | "x24"
+                    | "w24"
+                    | "x25"
+                    | "w25"
+                    | "x26"
+                    | "w26"
+                    | "x27"
+                    | "w27"
+                    | "x28"
+                    | "w28"
+                    | "x29"
+                    | "w29"
+                    | "fp"
+                    | "sp"
+            ),
+            CallingConvention::Arm32 => matches!(
+                lower.as_str(),
+                "r4" | "r5" | "r6" | "r7" | "r8" | "r9" | "r10" | "r11" | "fp" | "sp"
+            ),
+            _ => false,
+        }
     }
 
     fn call_preserves_argument_register(&self, vn: &Varnode, call: &PcodeOp) -> bool {
@@ -131,7 +262,11 @@ impl<'a> PreviewBuilder<'a> {
         !written_slots.contains(&param_slot)
     }
 
-    fn call_clobbers_register_varnode(&self, vn: &Varnode, op: &PcodeOp) -> bool {
+    pub(in crate::midend) fn call_clobbers_register_varnode(
+        &self,
+        vn: &Varnode,
+        op: &PcodeOp,
+    ) -> bool {
         op.opcode.is_call()
             && !self.is_callee_saved_register_varnode(vn)
             && !self.call_preserves_argument_register(vn, op)
@@ -202,6 +337,155 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         true
+    }
+
+    fn collect_unclobbered_reaching_defs(
+        &self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> Option<Vec<LoweringSite>> {
+        const MAX_PREDECESSOR_BLOCKS: usize = 64;
+        let call_block = self.pcode.blocks.get(call_block_idx)?;
+        for (op_idx, op) in call_block
+            .ops
+            .iter()
+            .enumerate()
+            .take(call_idx.min(call_block.ops.len()))
+            .rev()
+        {
+            if Self::is_identity_copy_def(op) {
+                continue;
+            }
+            if op
+                .output
+                .as_ref()
+                .is_some_and(|out| Self::varnode_covers_or_aliases_register(out, vn))
+            {
+                return Some(vec![LoweringSite {
+                    block_idx: call_block_idx,
+                    op_idx,
+                }]);
+            }
+            if self.call_clobbers_register_varnode(vn, op) {
+                return None;
+            }
+        }
+
+        let initial_preds = self.predecessors.get(call_block_idx)?;
+        if initial_preds.is_empty() {
+            return None;
+        }
+        let mut queue: std::collections::VecDeque<usize> = initial_preds.iter().copied().collect();
+        let mut visited = HashSet::default();
+        let mut reached_defs: Vec<LoweringSite> = Vec::new();
+
+        while let Some(pred_idx) = queue.pop_front() {
+            if !visited.insert(pred_idx) {
+                continue;
+            }
+            if visited.len() > MAX_PREDECESSOR_BLOCKS {
+                return None;
+            }
+            let pred_pcode_idx = self.pcode_block_idx(pred_idx);
+            let pred_block = self.pcode.blocks.get(pred_pcode_idx)?;
+            let mut defined = false;
+            for (op_idx, op) in pred_block.ops.iter().enumerate().rev() {
+                if Self::is_identity_copy_def(op) {
+                    continue;
+                }
+                if self.call_clobbers_register_varnode(vn, op) {
+                    return None;
+                }
+                if op
+                    .output
+                    .as_ref()
+                    .is_some_and(|out| Self::varnode_covers_or_aliases_register(out, vn))
+                {
+                    reached_defs.push(LoweringSite {
+                        block_idx: pred_pcode_idx,
+                        op_idx,
+                    });
+                    defined = true;
+                    break;
+                }
+            }
+            if !defined {
+                let preds = self.predecessors.get(pred_idx)?;
+                if preds.is_empty() {
+                    return None;
+                }
+                queue.extend(preds.iter().copied());
+            }
+        }
+
+        if reached_defs.is_empty() {
+            return None;
+        }
+        reached_defs.sort_by_key(|site| (site.block_idx, site.op_idx));
+        reached_defs.dedup_by_key(|site| (site.block_idx, site.op_idx));
+        Some(reached_defs)
+    }
+
+    pub(in crate::midend::builder) fn recover_unclobbered_predecessor_arg(
+        &mut self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> Option<PreHirExpr> {
+        let reached_defs = self.collect_unclobbered_reaching_defs(vn, call_block_idx, call_idx)?;
+        if let Some(expr) = self.ssa_emitted_read(vn) {
+            return Some(self.normalize_recovered_call_arg(expr));
+        }
+
+        let mut shared_name: Option<String> = None;
+        for &site in &reached_defs {
+            let def_op = self
+                .pcode
+                .blocks
+                .get(site.block_idx)?
+                .ops
+                .get(site.op_idx)?;
+            let out = def_op.output.as_ref()?;
+            let key = MaterializedVarnodeKey::new(out, def_op);
+            let Some(name) = self.materialized_vns.get(&key) else {
+                shared_name = None;
+                break;
+            };
+            match &shared_name {
+                None => shared_name = Some(name.clone()),
+                Some(existing) if existing == name => {}
+                Some(_) => {
+                    shared_name = None;
+                    break;
+                }
+            }
+        }
+        if let Some(name) = shared_name {
+            return Some(PreHirExpr::Var(name));
+        }
+
+        let mut consensus: Option<PreHirExpr> = None;
+        for &site in &reached_defs {
+            let def_op = self
+                .pcode
+                .blocks
+                .get(site.block_idx)?
+                .ops
+                .get(site.op_idx)?
+                .clone();
+            let expr = self
+                .with_lowering_site(site, |this| {
+                    this.lower_def_op(&def_op, &mut HashSet::default())
+                })
+                .ok()?;
+            match &consensus {
+                None => consensus = Some(expr),
+                Some(first) if *first == expr => {}
+                Some(_) => return None,
+            }
+        }
+        consensus.map(|expr| self.normalize_recovered_call_arg(expr))
     }
 
     fn resolve_call_store_stack_address(
@@ -478,7 +762,7 @@ impl<'a> PreviewBuilder<'a> {
 
     /// Recover cdecl args staged as `mov [esp+k], val` (k ≥ 0) before CallInd.
     /// Distinct from push-below-ESP (`offset < 0`) and from frame restage (`[ebp+8]`).
-    fn recover_x86_32_esp_staged_args_from_block(
+    pub(in crate::midend::builder) fn recover_x86_32_esp_staged_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
@@ -531,10 +815,6 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             let rhs = prev.inputs.last().expect("store rhs");
-            // Retaddr-style absolute constants are not call arguments.
-            if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
-                continue;
-            }
             let stack_index = (offset / ptr_size) as usize;
             if recovered.contains_key(&stack_index) {
                 continue;
@@ -742,7 +1022,7 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    fn x86_32_store_is_esp_staged_call_arg(
+    pub(in crate::midend::builder) fn x86_32_store_is_esp_staged_call_arg(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -778,16 +1058,16 @@ impl<'a> PreviewBuilder<'a> {
         if ptr_size <= 0 || offset < 0 || offset % ptr_size != 0 {
             return false;
         }
-        let rhs = op.inputs.last().expect("store rhs");
-        if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
-            return false;
-        }
-        block.ops.iter().skip(op_idx + 1).any(|candidate| {
-            matches!(
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if matches!(
                 candidate.opcode,
                 PcodeOpcode::CallInd | PcodeOpcode::Call | PcodeOpcode::BranchInd
-            )
-        })
+            ) {
+                // Skip only the call instruction's own return-address push.
+                return candidate.address != op.address;
+            }
+        }
+        false
     }
 
     fn x86_32_store_is_frame_param_restage(
@@ -1314,9 +1594,9 @@ impl<'a> PreviewBuilder<'a> {
 
         // A locked declaration proves that every slot below its arity is a
         // real argument. Fill holes from the existing site-sensitive def-use
-        // lookup, but keep the same dominance/realism guard used by ordinary
-        // carrier recovery. This does not guess values at joins: when no
-        // single realistic reaching definition exists, the slot stays empty.
+        // lookup, falling back to CFG-sound unclobbered predecessor reaching
+        // definitions when every incoming path re-stages a caller-saved register
+        // after an earlier dominating call.
         if let Some(exact_register_arity) =
             self.exact_call_register_arity(block, call_idx, param_count)
         {
@@ -1332,24 +1612,32 @@ impl<'a> PreviewBuilder<'a> {
                     is_constant: false,
                     constant_val: 0,
                 };
-                let Some((site, _)) = self.lookup_def_site(&vn) else {
-                    if let Some(expr) =
-                        self.entry_register_arg_at_exact_call(block, call_idx, &vn, param_index)
+                if let Some((site, _)) = self.lookup_def_site(&vn) {
+                    let def_site = crate::midend::support::DefSite {
+                        block_idx: site.block_idx,
+                        op_idx: site.op_idx,
+                        _marker: std::marker::PhantomData,
+                    };
+                    if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx)
                     {
+                        let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
+                        recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
+                    } else if let Some(expr) = self.recover_unclobbered_predecessor_arg(
+                        &vn,
+                        block.index as usize,
+                        call_idx,
+                    ) {
                         recovered[param_index] = Some(expr);
                     }
-                    continue;
-                };
-                let def_site = crate::midend::support::DefSite {
-                    block_idx: site.block_idx,
-                    op_idx: site.op_idx,
-                    _marker: std::marker::PhantomData,
-                };
-                if !self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
-                    continue;
+                } else if let Some(expr) =
+                    self.recover_unclobbered_predecessor_arg(&vn, block.index as usize, call_idx)
+                {
+                    recovered[param_index] = Some(expr);
+                } else if let Some(expr) =
+                    self.entry_register_arg_at_exact_call(block, call_idx, &vn, param_index)
+                {
+                    recovered[param_index] = Some(expr);
                 }
-                let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
-                recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
             }
         }
 
@@ -1372,7 +1660,7 @@ impl<'a> PreviewBuilder<'a> {
                 constant_val: 0,
             };
 
-            let key = VarnodeKey::from(&vn);
+            let _key = VarnodeKey::from(&vn);
             if let Some((site, _)) = self.lookup_def_site(&vn) {
                 let def_site = crate::midend::support::DefSite {
                     block_idx: site.block_idx,
@@ -1384,6 +1672,11 @@ impl<'a> PreviewBuilder<'a> {
                     recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
                     continue;
                 }
+            }
+            if let Some(expr) =
+                self.recover_unclobbered_predecessor_arg(&vn, block.index as usize, call_idx)
+            {
+                recovered[param_index] = Some(expr);
             }
         }
 

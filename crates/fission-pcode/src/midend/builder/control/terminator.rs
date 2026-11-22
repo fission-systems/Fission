@@ -1955,7 +1955,7 @@ impl<'a> PreviewBuilder<'a> {
                                     err
                                 })?;
                             let false_target = {
-                                let mut f_target = this.next_block_address(idx);
+                                let mut f_target = this.pcode_fallthrough_address(idx);
                                 if let Some(succs) = this.successors.get(idx) {
                                     for succ_idx in succs {
                                         let succ_addr = this.block_target_key(*succ_idx);
@@ -2439,12 +2439,12 @@ impl<'a> PreviewBuilder<'a> {
                                 })
                             }
                         }
-                        _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
+                        _ => Ok(LoweredTerminator::Fallthrough(this.pcode_fallthrough_address(idx))),
                     }
                 },
             )?
         } else {
-            LoweredTerminator::Fallthrough(self.next_block_address(idx))
+            LoweredTerminator::Fallthrough(self.pcode_fallthrough_address(idx))
         };
 
         // Cache invalidation does not revoke an emitted edge decision. The

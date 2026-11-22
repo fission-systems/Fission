@@ -1103,9 +1103,16 @@ impl<'a> PreviewBuilder<'a> {
         result
     }
 
-    pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
+    pub(super) fn pcode_fallthrough_address(&self, idx: usize) -> Option<u64> {
         let layout_idx = self.pcode_block_idx(idx);
         self.layout_fallthrough[layout_idx].map(|next_idx| self.block_target_key(next_idx))
+    }
+
+    pub(super) fn next_block_address(&self, idx: usize) -> Option<u64> {
+        if idx >= self.pcode.blocks.len() {
+            return None;
+        }
+        self.layout_fallthrough[idx].map(|next_idx| self.block_target_key(next_idx))
     }
 
     pub(super) fn block_target_key(&self, idx: usize) -> u64 {

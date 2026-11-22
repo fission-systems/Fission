@@ -173,10 +173,11 @@ pub(super) fn extract_selector_upper_bound_from_cond(
                     (None, None) => None,
                 }
             } else {
+                // `!(A && B) == !A || !B`: an upper bound holds only if BOTH
+                // negated arms establish one.
                 match (lhs_bound, rhs_bound) {
                     (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
-                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
-                    (None, None) => None,
+                    (Some(_), None) | (None, Some(_)) | (None, None) => None,
                 }
             };
         }
@@ -186,10 +187,10 @@ pub(super) fn extract_selector_upper_bound_from_cond(
             let rhs_bound =
                 extract_selector_upper_bound_from_cond(&rhs, selector_match, current_on_true);
             return if current_on_true {
+                // `A || B` true edge requires BOTH arms bounded.
                 match (lhs_bound, rhs_bound) {
                     (Some(lhs), Some(rhs)) => Some(lhs.max(rhs)),
-                    (Some(bound), None) | (None, Some(bound)) => Some(bound),
-                    (None, None) => None,
+                    (Some(_), None) | (None, Some(_)) | (None, None) => None,
                 }
             } else {
                 match (lhs_bound, rhs_bound) {

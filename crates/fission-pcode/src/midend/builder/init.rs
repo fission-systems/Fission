@@ -30,14 +30,6 @@ fn call_result_definition_varnodes(
     options: &crate::midend::MlilPreviewOptions,
 ) -> Vec<Varnode> {
     let namer = crate::midend::cspec::RegisterNamer::from_options(options);
-    let mut candidates = Vec::new();
-    for vn in namer.return_registers() {
-        candidates.push(Varnode {
-            space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
-            ..vn.clone()
-        });
-        candidates.push(vn);
-    }
     let mut seen: HashSet<(u64, u64, u32)> = HashSet::default();
     for block in &pcode.blocks {
         for op in &block.ops {
@@ -48,16 +40,68 @@ fn call_result_definition_varnodes(
             }
         }
     }
-    // Exactly one spelling. Registering every candidate that happens to
-    // appear was measured to break ARM32 return recovery: at that
-    // architecture's return offset `REGISTER_SPACE_ID` names the link
-    // register rather than r0, so claiming it as the call's result made a
-    // read of the link register resolve to the call.
-    candidates
-        .into_iter()
-        .find(|vn| seen.contains(&(vn.space_id, vn.offset, vn.size)))
-        .into_iter()
-        .collect()
+    let mut out = Vec::new();
+    let mut added: HashSet<(u64, u64, u32)> = HashSet::default();
+
+    // Primary integer return slot: keep at most ONE space spelling so ARM32
+    // does not claim `REGISTER_SPACE_ID` LR when `RUST_SLEIGH_REGISTER_SPACE_ID` r0 is used.
+    'primary: for vn in namer.primary_return_registers() {
+        for candidate in [
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                ..vn.clone()
+            },
+            vn,
+        ] {
+            let key = (candidate.space_id, candidate.offset, candidate.size);
+            if seen.contains(&key) {
+                if added.insert(key) {
+                    out.push(candidate);
+                }
+                break 'primary;
+            }
+        }
+    }
+
+    // Float return slot: independently record at most ONE register/space
+    // spelling, collecting all seen sub-widths (e.g. f32/f64 views in XMM0) in
+    // deterministic size order.
+    'float: for vn in namer.float_return_registers() {
+        for candidate in [
+            Varnode {
+                space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+                ..vn.clone()
+            },
+            vn,
+        ] {
+            let mut matched_sizes: Vec<u32> = seen
+                .iter()
+                .filter_map(|&(space_id, offset, size)| {
+                    (space_id == candidate.space_id
+                        && offset == candidate.offset
+                        && size > 0
+                        && size <= candidate.size)
+                        .then_some(size)
+                })
+                .collect();
+            if !matched_sizes.is_empty() {
+                matched_sizes.sort_unstable();
+                matched_sizes.dedup();
+                for size in matched_sizes {
+                    let key = (candidate.space_id, candidate.offset, size);
+                    if added.insert(key) {
+                        out.push(Varnode {
+                            size,
+                            ..candidate.clone()
+                        });
+                    }
+                }
+                break 'float;
+            }
+        }
+    }
+
+    out
 }
 
 impl<'a> PreviewBuilder<'a> {
