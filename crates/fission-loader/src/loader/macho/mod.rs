@@ -813,10 +813,11 @@ fn infer_macho_function_sizes(functions: &mut [FunctionInfo], sections: &[Sectio
             continue;
         };
         let section_end = section.virtual_address.saturating_add(section.virtual_size);
+        let next_index = code_starts.partition_point(|&start| start <= function.address);
         let next_start = code_starts
-            .iter()
+            .get(next_index)
             .copied()
-            .find(|start| *start > function.address && *start < section_end)
+            .filter(|&start| start < section_end)
             .unwrap_or(section_end);
         function.size = next_start.saturating_sub(function.address);
     }
@@ -1453,6 +1454,29 @@ mod tests {
         assert_eq!(functions[0].size, 0x44);
         assert_eq!(functions[1].size, 0x58);
         assert_eq!(functions[2].size, 0);
+    }
+
+    #[test]
+    fn macho_function_sizes_ignore_aliases_and_starts_in_later_sections() {
+        let mut known = function("known", 0x1020);
+        known.size = 4;
+        let mut functions = [
+            function("other_section", 0x2000),
+            function("alias", 0x1000),
+            known,
+            function("first", 0x1000),
+        ];
+        let sections = vec![
+            section("__text", 0x1000, 0x40, true),
+            section("__text_other", 0x2000, 0x20, true),
+        ];
+
+        infer_macho_function_sizes(&mut functions, &sections);
+
+        assert_eq!(
+            functions.map(|function| function.size),
+            [0x20, 0x20, 4, 0x20]
+        );
     }
 
     #[test]
