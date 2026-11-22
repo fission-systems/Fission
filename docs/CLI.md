@@ -6,31 +6,19 @@
 
 If you are evaluating Fission from the outside and want the shortest first-run path, start with [EVALUATION.md](./EVALUATION.md). This document remains the detailed command reference.
 
-Use it when you want to:
+Run `fission_cli --help` for the installed command list and
+`fission_cli <command> --help` for its options.
 
-- inspect a binary from the terminal
-- list discovered functions
-- disassemble by address
-- decompile one function or a bounded batch of functions
-- extract strings
-- emit operator-grade inventories for automation and corpus work
+| Task | Commands |
+|---|---|
+| Inspect binaries | `info`, `list`, `disasm`, `strings`, `hex`, `search` |
+| Decompile and examine IR | `decomp`, `raw-pcode`, `pcode-stages`, `pcode-topology`, `nir-stats` |
+| Follow references and recognize functions | `xrefs`, `callgraph`, `identify`, `similar` |
+| Run and verify behavior | `debug`, `sandbox`, `verify` |
+| Save decisions and write a patched copy | `db`, `patch` |
+| Automate and inspect the installation | `inventory`, `script`, `resources`, `schema`, `skill` |
 
-The CLI is intentionally split into explicit subcommands:
-
-- `info`
-- `list`
-- `disasm`
-- `decomp`
-- `strings`
-- `xrefs`
-- `inventory`
-- `resources` (resolved signature / detector bundle diagnostics)
-- `script` (Rhai)
-- `debug` (headless emulation and platform-native debugger commands)
-- `db` (saved analyst decisions, history, undo/redo, and comparison)
-- `skill` (the agent usage guide, compiled into the binary)
-
-Legacy flat invocations still work for one transition period, but they are deprecated compatibility shims. New usage should always use the subcommand form.
+Legacy flat invocations remain available as deprecated compatibility shims. Use subcommands for new integrations.
 
 ---
 
@@ -87,7 +75,7 @@ fission_cli inventory <SUBCOMMAND> ...
 
 ## Runtime resource bundle
 
-FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through **`fission_core::PATHS`** (`PathConfig::detect` in [`crates/fission-core/src/core/path_config.rs`](../crates/fission-core/src/core/path_config.rs), with bundle-root probing in [`resource_roots.rs`](../crates/fission-core/src/core/resource_roots.rs)). In this repository the canonical checked-in tree remains **`utils/signatures`**; installs may ship the same layout under a bundle root such as **`{bundle}/signatures/`**.
+FID databases, Detect It Easy corpora, Win32 typeinfo JSON, pattern signatures, and related assets resolve through **`fission_core::PATHS`** (`PathConfig::detect` in [`crates/fission-core/src/core/path_config.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-core/src/core/path_config.rs), with bundle-root probing in [`resource_roots.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-core/src/core/resource_roots.rs)). In this repository the canonical checked-in tree remains **`utils/signatures`**; installs may ship the same layout under a bundle root such as **`{bundle}/signatures/`**.
 
 Every install channel uses one layout, `<prefix>/bin/fission_cli` beside `<prefix>/share/fission/{sleigh-specs,signatures,ghidra-data}`, which the binary finds as `exe_parent/../share/fission` with no configuration: Homebrew (`<cellar>/share/fission`), `install.sh` (`~/.local`), an unpacked release archive, and `cargo install` plus `fission-resources.tar.gz` unpacked into `~/.cargo/share/fission`.
 
@@ -300,7 +288,12 @@ whether the backend is available in this build, and lists every debugger
 operation as supported, conditional, or unsupported with structured reasons.
 The text form is intended for inspection; Agents should use `--json`.
 
-Native debugging currently uses Linux `ptrace` on Linux. Linux launch starts
+The default native backend uses `ptrace` on Linux and Mach process-control APIs
+on macOS. macOS launch and attach depend on task-port access and debugger policy.
+Windows native operations require the `windows_native_debugger` build feature. Check
+`debug capabilities` on the installed build for operation-level availability.
+
+Linux launch starts
 the child with `PTRACE_TRACEME` and returns at the exec stop, before the target
 executes its first user-space instruction. Use `debug session` to consume the
 initial process event and inspect that startup state in the same debugger
@@ -352,9 +345,7 @@ Other backends may return event-observed modules without Linux file-offset
 details, and label those reports partial.
 
 Launch and attach can still fail when host security policy, permissions, or a
-container's syscall filter denies ptrace. Windows live debugging requires a
-build with `--features windows_native_debugger`, and access to an individual
-process can still be denied. On macOS, native debugging
+container's syscall filter denies ptrace. On macOS, native debugging
 launches the target under `PT_TRACE_ME` (stopping it at `exec`, as on Linux)
 and reads registers, memory and loaded images through the target's Mach task
 port. macOS grants that port only when **both** hold, so launch and attach are
@@ -1167,8 +1158,9 @@ so a renamed flag fails CI instead of an agent's session.
 ## Machine contract (`--contract v1`)
 
 For AI agents and scripts that must branch on the result without parsing human
-text. Opt-in: without `--contract v1` (or `FISSION_CONTRACT=v1`) every command
-behaves as documented above. Design: [`proposals/2026-10-26-agent-first-cli-contract.md`](proposals/2026-10-26-agent-first-cli-contract.md).
+text. Combine `--contract v1` (or `FISSION_CONTRACT=v1`) with the
+command's `--json` flag. `debug session --interactive` has a separate JSON
+Lines protocol, and `schema` and `skill` return their own documents. Design: [`proposals/2026-10-26-agent-first-cli-contract.md`](proposals/2026-10-26-agent-first-cli-contract.md).
 
 ```bash
 fission_cli --contract v1 list app.exe --json
@@ -1199,4 +1191,4 @@ fission_cli schema --error-codes   # stable error codes, kinds, exit codes
 
 `data` is the command's existing JSON output, unchanged (arrays stay arrays).
 Per-command `data` schemas are not typed yet; the envelope schema marks them
-`x-data-schema: untyped`. Committed schemas live in [`schemas/`](schemas/).
+`x-data-schema: untyped`. Committed schemas live in [`schemas/`](https://github.com/fission-systems/Fission/tree/main/docs/schemas).

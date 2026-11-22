@@ -35,7 +35,7 @@ midend/
 | Normalize group registry | `normalize/pipeline/groups.rs` | Ghidra-ordered ActionGroups; production driver via `run_normalize_pipeline` |
 | Canonical stage functions | `normalize/pipeline/stages.rs` | Shared pass sequence for each ActionGroup (1:1 parity) |
 | Pipeline helpers | `normalize/pipeline/run.rs` | `run_pass_logged`, cleanup families, admission summaries |
-| Telemetry fields | `ir/build_stats.rs` (`NirBuildStats`) | Canonical; prefer `crate::midend::ir::…` () |
+| Telemetry fields | `crates/fission-midend-core/src/ir/build_stats.rs` (`NirBuildStats`) | Canonical type, re-exported through `crate::midend::ir` |
 | Structured IR types | `ir/` (`hir.rs`, `procedure.rs`, …) | Shared midend tree — not the HIR print layer |
 | PreviewBuilder state | `builder/mod.rs` | Keep builder state/projection aligned |
 | Structuring rules | `structuring/` | Read child AGENT there first |
@@ -51,7 +51,7 @@ midend/
 
 ## Conventions
 
-- Add new quality counters in `ir/build_stats.rs` first, then wire through builder snapshot/projection.
+- Add new quality counters in the canonical `NirBuildStats` type first, then wire through builder snapshot/projection.
 - Prefer typed helpers and deterministic ordering; many tests depend on stable output.
 - Keep semantics in NIR/structuring layers, not static postprocess or UI surfaces.
 - Treat AI suggestions, benchmark rows, Ghidra diffs, and validation-pool signals as evidence only. Production changes must enter this tree as owner-native invariants over p-code semantics, CFG facts, def-use, types, calling convention, or alias facts.

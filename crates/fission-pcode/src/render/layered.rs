@@ -1940,14 +1940,11 @@ fn collect_referenced_global_decls(
     //
     // Visiting in address order makes the choice stable. It is still a
     // choice between two real globals, but it is the same one every time.
-    let mut by_address: Vec<(&u64, &String)> = options.global_names.iter().collect();
-    by_address.sort_unstable_by_key(|(addr, _)| **addr);
-    let global_decl_types = by_address
-        .into_iter()
+    let global_decl_types = super::globals::globals_in_address_order(&options.global_names)
         .filter_map(|(addr, name)| {
             options
                 .global_sizes
-                .get(addr)
+                .get(&addr)
                 .and_then(|size| global_decl_type_from_size(*size))
                 .map(|ty| (name.clone(), ty))
         })
@@ -2669,6 +2666,61 @@ mod global_decl_tests {
         assert!(rendered.starts_with("uint math_sink;\n\n"), "{rendered}");
         assert!(rendered.contains("math_sink = param_1;"), "{rendered}");
         assert!(!rendered.contains("*uVar1 = param_1;"), "{rendered}");
+    }
+
+    /// Two globals share a name: a 45-byte one at 0x2000 and an 8-byte one at
+    /// 0x2800, and the function stores 8 bytes to the second. Which size the
+    /// name stands for used to follow `HashMap` iteration order, so the store
+    /// printed as `shared = param_1;` on some runs and through a cast on
+    /// others. Every `HashMap` gets fresh random keys, so rebuilding the
+    /// options many times exposes an order dependence within one process.
+    #[test]
+    fn recover_global_symbol_accesses_picks_one_global_per_shared_name() {
+        let renders = (0..64)
+            .map(|_| {
+                let mut options = preview_options_with_global("shared");
+                options.global_names.insert(0x2800, "shared".to_string());
+                options.global_sizes.insert(0x2000, 45);
+                options.global_sizes.insert(0x2800, 8);
+                let mut hir = HirFunction {
+                    name: "store_shared".to_string(),
+                    params: vec![NirBinding {
+                        name: "param_1".to_string(),
+                        ty: NirType::Int {
+                            bits: 64,
+                            signed: false,
+                        },
+                        surface_type_name: None,
+                        origin: None,
+                        initializer: None,
+                    }],
+                    return_type: NirType::Unknown,
+                    body: vec![HirStmt::Assign {
+                        lhs: HirLValue::Deref {
+                            ptr: Box::new(HirExpr::Const(
+                                0x2800,
+                                NirType::Ptr(Box::new(NirType::Int {
+                                    bits: 64,
+                                    signed: false,
+                                })),
+                            )),
+                            ty: NirType::Int {
+                                bits: 64,
+                                signed: false,
+                            },
+                        },
+                        rhs: HirExpr::Var("param_1".to_string()),
+                    }],
+                    ..HirFunction::default()
+                };
+                crate::render::recover_global_symbol_accesses(&mut hir, &options);
+                render_hir_function_with_global_decls(&hir, &options)
+            })
+            .collect::<BTreeSet<_>>();
+
+        assert_eq!(renders.len(), 1, "{renders:#?}");
+        let rendered = renders.first().unwrap();
+        assert!(rendered.contains("shared = param_1;"), "{rendered}");
     }
 
     #[test]

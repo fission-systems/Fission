@@ -9,7 +9,7 @@ Packers and toolchain fingerprints evolve continuously; bespoke string matching 
 
 ## Decision
 
-Treat bundled Detect It Easy assets under [`utils/signatures/die/detect-it-easy/`](../../utils/signatures/die/detect-it-easy/) as **versioned corpus data** synchronized from upstream ([`THIRD_PARTY.md`](../../THIRD_PARTY.md)).
+Treat bundled Detect It Easy assets under [`utils/signatures/die/detect-it-easy/`](https://github.com/fission-systems/Fission/tree/main/utils/signatures/die/detect-it-easy) as **versioned corpus data** synchronized from upstream ([`THIRD_PARTY.md`](https://github.com/fission-systems/Fission/blob/main/THIRD_PARTY.md)).
 
 Rust integrations **consume** outputs/rules rather than forking unrelated logic inline.
 
