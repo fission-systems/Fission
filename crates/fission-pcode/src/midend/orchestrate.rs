@@ -452,6 +452,11 @@ fn render_mlil_preview_with_binary_and_context_output(
         body,
         &proven_no_return,
     );
+    // Layout cleanup copies a join's tail into each arm of the branch above
+    // it; a value the join merged per path is a select on that branch, which
+    // every copy now sits under. Fold it to the arm's own value.
+    let mut body = body;
+    fission_midend_normalize::fold_branch_decided_selects(&mut body);
     hir.body = body;
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
