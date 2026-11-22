@@ -8,9 +8,80 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn infer_switch_default_target(&self, idx: usize, targets: &[u64]) -> Option<u64> {
+    /// The switch's `default`: where the selector goes when no listed case
+    /// takes it.
+    ///
+    /// A compiled `switch` guards the table with a range check whose
+    /// out-of-range edge is the `default` label, and the compiler fills every
+    /// unused in-range entry with that same label. So when every predecessor
+    /// of the dispatch block is a conditional whose other edge leaves to one
+    /// block, and the table also targets that block, it is the default: the
+    /// unused entries fold into it instead of printing as cases of their own,
+    /// and every other in-range value keeps its own case.
+    ///
+    /// Without that evidence the block laid out after the dispatch is used,
+    /// as before. Either choice is sound, because the cases list every
+    /// in-range value whose target is not the default; this only decides
+    /// which target is spelled `default`.
+    pub(super) fn infer_switch_default_target(
+        &mut self,
+        idx: usize,
+        targets: &[u64],
+    ) -> Option<u64> {
+        if let Some(exit) = self.switch_guard_exit_target(idx)
+            && targets.contains(&exit)
+        {
+            return Some(exit);
+        }
         let fallthrough = self.pcode_fallthrough_address(idx)?;
         targets.contains(&fallthrough).then_some(fallthrough)
+    }
+
+    /// The one block every guarding conditional sends the selector to
+    /// instead of the dispatch block `idx`, if there is exactly one.
+    ///
+    /// Lowering a predecessor's terminator can come back to `idx` (a
+    /// dispatcher that loops to itself, or two dispatchers guarding each
+    /// other), so the probe shares the re-entry guard of the bound probes.
+    fn switch_guard_exit_target(&mut self, idx: usize) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let exit = self.switch_guard_exit_target_unguarded(idx);
+        self.branchind_bound_probes.remove(&idx);
+        exit
+    }
+
+    fn switch_guard_exit_target_unguarded(&mut self, idx: usize) -> Option<u64> {
+        let predecessors = self.predecessors.get(idx)?.clone();
+        if predecessors.is_empty() {
+            return None;
+        }
+        let current = self.block_target_key(idx);
+        let mut exit: Option<u64> = None;
+        for pred_idx in predecessors {
+            if pred_idx == idx {
+                return None;
+            }
+            let LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } = self.lower_block_terminator(pred_idx).ok()?
+            else {
+                return None;
+            };
+            let other = match (true_target == current, false_target == Some(current)) {
+                (true, false) => false_target?,
+                (false, true) => true_target,
+                _ => return None,
+            };
+            if other == current || exit.is_some_and(|known| known != other) {
+                return None;
+            }
+            exit = Some(other);
+        }
+        exit
     }
 
     pub(super) fn infer_unconditional_branch_successor_target(&self, idx: usize) -> Option<u64> {
