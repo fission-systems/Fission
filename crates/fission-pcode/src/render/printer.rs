@@ -636,7 +636,30 @@ pub(super) fn has_unknown_arity_declaration(func: &HirFunction) -> bool {
     func.params.is_empty() && (func.has_unknown_arity_prototype || variadic_fixed_arity == Some(0))
 }
 
-pub(super) fn print_unknown_arity_extern(return_type: &str, name: &str) -> String {
+/// The comment that marks a callee prototype whose parameter list was read off
+/// this function's call sites rather than declared anywhere.
+///
+/// It is part of the output contract: a consumer that merges several
+/// functions' declarations (the CLI's `--project` unit) has to know that two
+/// different inferred lists for one callee are two partial views, not a
+/// declaration to keep and a mistake to drop.
+pub const INFERRED_PROTOTYPE_MARKER: &str = "/* inferred from calls */";
+
+/// `extern T name(params);` for a parameter list inferred from call sites.
+/// An empty list is a prototype with no parameters, `(void)`.
+pub fn print_inferred_extern(return_type: &str, name: &str, params: &[String]) -> String {
+    let params = if params.is_empty() {
+        "void".to_string()
+    } else {
+        params.join(", ")
+    };
+    format!("extern {return_type} {name}({params}); {INFERRED_PROTOTYPE_MARKER}\n")
+}
+
+/// The declaration of a callable whose parameters are unknown, valid in both
+/// C17 and C23. It is a preprocessor group, not one line: a consumer that
+/// takes declarations apart has to keep `#if` .. `#endif` together.
+pub fn print_unknown_arity_extern(return_type: &str, name: &str) -> String {
     // C23 gives an empty parameter list the meaning of (void) and allows
     // ellipsis without a fixed parameter. GCC 14 implements both rules in
     // its C23 mode, which still uses the draft __STDC_VERSION__ of 202000L.

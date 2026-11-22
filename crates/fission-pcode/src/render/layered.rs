@@ -10,7 +10,8 @@ use super::layer::{PrintProfile, RecoveredLineMapping};
 use super::presentation::apply_hir_presentation_with_globals;
 use super::printer::has_unknown_arity_declaration;
 use super::printer::{
-    call_argument_type, print_unknown_arity_extern, surface_type_definition_source,
+    call_argument_type, print_inferred_extern, print_unknown_arity_extern,
+    surface_type_definition_source,
 };
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
@@ -1478,12 +1479,7 @@ fn render_called_extern(
     let Some(params) = inferred_params.filter(|_| !is_known_variadic_runtime_symbol(target)) else {
         return print_unknown_arity_extern(&return_type, target);
     };
-    let params = if params.is_empty() {
-        "void".to_string()
-    } else {
-        params.join(", ")
-    };
-    format!("extern {return_type} {target}({params}); /* inferred from calls */\n")
+    print_inferred_extern(&return_type, target, &params)
 }
 
 /// size → (offset → (field_name, field_ty)). Fields are merged across all

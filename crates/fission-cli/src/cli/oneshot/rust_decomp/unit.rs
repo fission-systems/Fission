@@ -21,7 +21,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 ///
 /// These spellings come from Ghidra's type model and are what the printer
 /// emits for a value of known width and unknown meaning. A unit that uses
-/// them has to define them, and nothing else in the pipeline does.
+/// them has to define them, and nothing else in the pipeline does. `bool` is
+/// the exception that C does define, from C23 on, as a keyword a typedef may
+/// not redeclare.
 const PRELUDE: &str = "\
 #include <stdint.h>
 #include <stddef.h>
@@ -37,7 +39,9 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 typedef __int128 int128;
+#if !defined(__STDC_VERSION__) || __STDC_VERSION__ <= 201710L
 typedef _Bool bool;
+#endif
 ";
 
 /// One function's render, split where its declarations end and its body begins.
@@ -96,13 +100,14 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
     let mut typedefs: Vec<&str> = Vec::new();
     let mut aggregates: Vec<&str> = Vec::new();
     let mut globals: Vec<&str> = Vec::new();
-    let mut externs: Vec<&str> = Vec::new();
     // Non-aggregate typedefs with conflicting spellings keep the first
     // declaration. Aggregate variants were assigned distinct names before
     // splitting so each function body retains the layout it was rendered
     // against.
     let mut typedef_names: HashMap<&str, &str> = HashMap::new();
-    let mut extern_names: HashSet<&str> = HashSet::new();
+    // Every render's declaration of each callee, by name, in first-seen order.
+    let mut extern_variants: Vec<(&str, Vec<&str>)> = Vec::new();
+    let mut extern_index: HashMap<&str, usize> = HashMap::new();
     let mut seen: HashSet<&str> = HashSet::new();
     let mut global_declarations: HashMap<&str, SeenGlobalDeclaration<'_>> = HashMap::new();
     let mut diagnostics: Vec<ProjectAssemblyDiagnostic> = Vec::new();
@@ -122,10 +127,13 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
                 // both `extern uchar __popcount();` and `extern unsigned long
                 // long __popcount();` -- and keeping both is a conflicting
                 // declaration, which is a compile error rather than extra
-                // information. Same rule the typedefs follow: first wins.
-                if extern_names.insert(name) {
-                    externs.push(decl);
-                }
+                // information. They can disagree about its parameters too;
+                // `merge_extern_declarations` settles both once all are seen.
+                let index = *extern_index.entry(name).or_insert_with(|| {
+                    extern_variants.push((name, Vec::new()));
+                    extern_variants.len() - 1
+                });
+                extern_variants[index].1.push(decl);
                 continue;
             }
             if let Some(name) = typedef_name(decl) {
@@ -215,6 +223,11 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
         }
     }
 
+    let externs: Vec<String> = extern_variants
+        .iter()
+        .map(|(name, variants)| merge_extern_declarations(name, variants))
+        .collect();
+
     let prototypes: BTreeSet<String> = split
         .iter()
         .filter_map(|render| definition_line(render.body))
@@ -227,7 +240,11 @@ pub(crate) fn assemble(renders: &[String]) -> ProjectAssembly {
     push_section(&mut out, "aggregates", &aggregates);
     push_section(&mut out, "types", &typedefs);
     push_section(&mut out, "globals", &globals);
-    push_section(&mut out, "external functions", &externs);
+    push_section(
+        &mut out,
+        "external functions",
+        &externs.iter().map(String::as_str).collect::<Vec<_>>(),
+    );
     push_section(
         &mut out,
         "functions defined in this unit",
@@ -445,61 +462,237 @@ fn push_section(out: &mut String, title: &str, lines: &[&str]) {
 /// body it opened on an earlier line (`typedef struct ... {`). A function
 /// definition is the first line that takes a parameter list without ending in
 /// one -- that is what separates `void f(void)` from `extern void f();`.
+///
+/// Two things are not code and must not decide that: a comment, which can
+/// trail a declaration (`extern int f(int); /* inferred from calls */`) or
+/// stand on its own line ahead of one, and a preprocessor directive, which
+/// the printer uses to declare an unknown-arity callee once per C dialect. A
+/// conditional group is one record from `#if` to its `#endif`, and a comment
+/// line belongs to the record that follows it -- or, ahead of the definition,
+/// to the body.
 fn split_render(text: &str) -> SplitRender<'_> {
     let mut depth = 0usize;
+    let mut conditional_depth = 0usize;
+    let mut in_block_comment = false;
     let mut offset = 0usize;
+    let mut record_start = 0usize;
     let mut declarations: Vec<String> = Vec::new();
     let mut record = String::new();
-    for line in text.lines() {
+    for line in text.split_inclusive('\n') {
+        let line_start = offset;
+        offset += line.len();
+        let line = line.trim_end_matches(['\n', '\r']);
         let trimmed = line.trim();
-        if depth == 0 && trimmed.contains('(') && !trimmed.ends_with(';') {
+        let comment_only = in_block_comment || is_comment_line(trimmed);
+        if in_block_comment {
+            in_block_comment = !trimmed.contains("*/");
+        } else if trimmed.starts_with("/*") && !trimmed.contains("*/") {
+            in_block_comment = true;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if record.is_empty() {
+            record_start = line_start;
+        }
+        let code = strip_trailing_comment(trimmed);
+        if !comment_only
+            && depth == 0
+            && conditional_depth == 0
+            && !code.starts_with('#')
+            && code.contains('(')
+            && !code.ends_with(';')
+        {
+            // Comment lines already gathered lead into the definition.
             return SplitRender {
                 declarations,
-                body: &text[offset..],
+                body: &text[record_start..],
             };
         }
-        depth += trimmed.matches('{').count();
-        depth = depth.saturating_sub(trimmed.matches('}').count());
-        if !trimmed.is_empty() {
-            if !record.is_empty() {
-                record.push('\n');
-            }
-            record.push_str(line);
-            if depth == 0 {
-                declarations.push(std::mem::take(&mut record));
+        if !comment_only {
+            if let Some(directive) = code.strip_prefix('#') {
+                match directive.trim_start().split_whitespace().next() {
+                    Some("if" | "ifdef" | "ifndef") => conditional_depth += 1,
+                    Some("endif") => conditional_depth = conditional_depth.saturating_sub(1),
+                    _ => {}
+                }
+            } else {
+                depth += code.matches('{').count();
+                depth = depth.saturating_sub(code.matches('}').count());
             }
         }
-        offset += line.len() + 1;
+        if !record.is_empty() {
+            record.push('\n');
+        }
+        record.push_str(line);
+        if !comment_only && depth == 0 && conditional_depth == 0 {
+            declarations.push(std::mem::take(&mut record));
+        }
     }
     SplitRender {
         declarations,
-        body: "",
+        // Comments with no declaration after them (an error render is only
+        // one) stay where the function would have been.
+        body: if record.is_empty() {
+            ""
+        } else {
+            &text[record_start..]
+        },
     }
+}
+
+/// A line that is a comment and nothing else, or opens one that runs on.
+fn is_comment_line(trimmed: &str) -> bool {
+    trimmed.starts_with("//")
+        || trimmed
+            .strip_prefix("/*")
+            .is_some_and(|rest| rest.find("*/").is_none_or(|close| close + 2 == rest.len()))
+}
+
+/// `text` without a comment that closes its last line: `extern int f(int);
+/// /* ... */` reads as `extern int f(int);`. Declarations carry no string
+/// literals, so a comment opener is never inside one.
+fn strip_trailing_comment(text: &str) -> &str {
+    let text = text.trim_end();
+    let last_line = text.rfind('\n').map_or(0, |newline| newline + 1);
+    let text = match text.strip_suffix("*/").and_then(|head| head.rfind("/*")) {
+        Some(open) if open >= last_line => &text[..open],
+        _ => text,
+    };
+    let text = match text[last_line..].find("//") {
+        Some(open) => &text[..last_line + open],
+        None => text,
+    };
+    text.trim_end()
+}
+
+/// The lines of a declaration record that are C declarations: comments and
+/// preprocessor directives dropped, trailing comments stripped.
+fn declaration_code_lines(decl: &str) -> impl Iterator<Item = &str> {
+    decl.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_comment_line(line) && !line.starts_with('#'))
+        .map(strip_trailing_comment)
+}
+
+/// The declaration a record makes, without the comment lines ahead of it.
+fn declaration_code(decl: &str) -> &str {
+    let mut rest = decl.trim_start();
+    while let Some(first) = rest.lines().next() {
+        let line = first.trim();
+        if !is_comment_line(line) || line.starts_with("/*") && !line.ends_with("*/") {
+            break;
+        }
+        rest = rest[first.len()..].trim_start();
+    }
+    strip_trailing_comment(rest)
 }
 
 /// The definition line of the function a body opens, comments skipped.
 fn definition_line(body: &str) -> Option<&str> {
     body.lines()
-        .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("//"))
+        .find(|line| !line.trim().is_empty() && !is_comment_line(line.trim()))
 }
 
 /// The name a function-style `extern` declaration declares, whether its
 /// parameter list is typed or has unspecified arity. Function-pointer
 /// declarations are excluded because their first parenthesis opens the
 /// pointer declarator rather than the function's parameter list.
+///
+/// A conditional group declares one function when every branch declares the
+/// same one: that is how an unknown-arity callee is spelled for C17 and C23.
 fn extern_function_name(decl: &str) -> Option<&str> {
-    let rest = decl.trim().strip_prefix("extern ")?;
+    let mut name = None;
+    for line in declaration_code_lines(decl) {
+        let (_, this, _) = parse_extern_function(line)?;
+        if name.is_some_and(|name| name != this) {
+            return None;
+        }
+        name = Some(this);
+    }
+    name
+}
+
+/// `extern <return type> <name>(<params>);` taken apart.
+fn parse_extern_function(line: &str) -> Option<(&str, &str, &str)> {
+    let rest = line.trim().strip_prefix("extern ")?;
     let open = rest.find('(')?;
     if rest[open..].starts_with("(*") {
         return None;
     }
-    identifier_before(&rest[..open])
+    let name = identifier_before(&rest[..open])?;
+    let return_type = rest[..open].trim_end().strip_suffix(name)?.trim();
+    // Up to the last `)`, so a parameter that is itself a function pointer
+    // stays whole; trailing attributes, if any, only make the list differ.
+    let close = rest.rfind(')').filter(|close| *close > open)?;
+    Some((return_type, name, rest[open + 1..close].trim()))
+}
+
+/// How much one render's declaration of a callee says about its parameters.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExternEvidence {
+    /// A declared signature or a modeled runtime prototype.
+    Declared,
+    /// A parameter list read off that render's call sites.
+    Inferred,
+    /// No parameter list: `()` / `(...)`.
+    UnknownArity,
+}
+
+fn extern_evidence(decl: &str) -> ExternEvidence {
+    let unknown = declaration_code_lines(decl).all(|line| {
+        parse_extern_function(line).is_some_and(|(_, _, params)| matches!(params, "" | "..."))
+    });
+    if unknown {
+        ExternEvidence::UnknownArity
+    } else if decl.contains(fission_decompiler::INFERRED_PROTOTYPE_MARKER) {
+        ExternEvidence::Inferred
+    } else {
+        ExternEvidence::Declared
+    }
+}
+
+/// One declaration for a callee the unit does not define, from every render's.
+///
+/// Each render infers a callee's parameters from its own call sites, so two
+/// renders can disagree -- `f(int)` here, `f(int, int)` there -- and keeping
+/// either one turns the other's call into a compile error, in C17 as much as
+/// C23. Where the inferred lists do not agree, the unit declares what all of
+/// them do agree on: the callee takes some arguments. A declared signature is
+/// evidence rather than a view of call sites, and is kept over both. Return
+/// types disagree for the same reason and, as before, the first is kept.
+fn merge_extern_declarations(name: &str, variants: &[&str]) -> String {
+    let first = variants[0];
+    if let Some(declared) = variants
+        .iter()
+        .find(|decl| extern_evidence(decl) == ExternEvidence::Declared)
+    {
+        return (*declared).to_owned();
+    }
+    let parameter_lists: HashSet<&str> = variants
+        .iter()
+        .flat_map(|decl| declaration_code_lines(decl))
+        .filter_map(|line| parse_extern_function(line).map(|(_, _, params)| params))
+        .collect();
+    let agree = variants
+        .iter()
+        .all(|decl| extern_evidence(decl) == extern_evidence(first))
+        && (extern_evidence(first) == ExternEvidence::UnknownArity || parameter_lists.len() == 1);
+    if agree {
+        return first.to_owned();
+    }
+    let return_type = declaration_code_lines(first)
+        .find_map(parse_extern_function)
+        .map_or("unsigned long long", |(return_type, _, _)| return_type);
+    fission_decompiler::print_unknown_arity_extern(return_type, name)
+        .trim_end()
+        .to_owned()
 }
 
 /// The name a `typedef ... <name>;` record defines, however many lines it took.
 /// Trailing GNU attributes are not part of the typedef name.
 fn typedef_name(decl: &str) -> Option<&str> {
-    let rest = decl.trim_start().strip_prefix("typedef ")?;
+    let rest = declaration_code(decl).strip_prefix("typedef ")?;
     let definition = rest.trim_end().strip_suffix(';')?;
     let definition = definition
         .split_once(" __attribute__")
@@ -509,7 +702,7 @@ fn typedef_name(decl: &str) -> Option<&str> {
 
 /// The name a `<type> <name>;` data declaration declares.
 fn global_name(decl: &str) -> Option<&str> {
-    identifier_before(decl.trim_end().strip_suffix(';')?)
+    identifier_before(declaration_code(decl).strip_suffix(';')?)
 }
 
 /// The name a function definition line declares.
@@ -909,5 +1102,201 @@ mod tests {
 
         assert_eq!(assembly.code.matches("uint tmp_140007020;").count(), 1);
         assert!(assembly.diagnostics.is_empty());
+    }
+
+    /// The lines of one `// -- title --` section of an assembled unit.
+    fn unit_section<'a>(code: &'a str, title: &str) -> Vec<&'a str> {
+        let header = format!("// -- {title} --");
+        code.lines()
+            .skip_while(|line| *line != header)
+            .skip(1)
+            .take_while(|line| !line.starts_with("// -- ") && !line.is_empty())
+            .collect()
+    }
+
+    fn caller(name: &str, declaration: &str, call: &str) -> String {
+        format!("{declaration}\nvoid {name}(void)\n{{\n    {call};\n}}\n")
+    }
+
+    fn unknown_arity(return_type: &str, name: &str) -> String {
+        fission_decompiler::print_unknown_arity_extern(return_type, name)
+    }
+
+    fn inferred(return_type: &str, name: &str, params: &[&str]) -> String {
+        let params: Vec<String> = params.iter().map(|param| param.to_string()).collect();
+        fission_decompiler::print_inferred_extern(return_type, name, &params)
+    }
+
+    /// The renderer declares an unknown-arity callee as an `#if` .. `#endif`
+    /// group, once per C dialect. Its first line takes a parameter list and
+    /// does not end in `;` -- the shape of a definition line -- so the unit
+    /// registered `defined` as a function it defines and put an unterminated
+    /// `#if` among the prototypes.
+    #[test]
+    fn an_unknown_arity_declaration_group_stays_one_declaration() {
+        let unit = assemble(&[
+            caller("first", &unknown_arity("int", "opaque"), "opaque(1)"),
+            caller("second", &unknown_arity("int", "opaque"), "opaque(1, 2)"),
+            // An import thunk renders as the declaration alone.
+            unknown_arity("unsigned long long", "thunk"),
+        ])
+        .code;
+
+        assert_eq!(
+            unit_section(&unit, "functions defined in this unit"),
+            ["void first(void);", "void second(void);"],
+            "{unit}"
+        );
+        assert!(
+            !unit
+                .lines()
+                .any(|line| line.starts_with('#') && line.ends_with(';')),
+            "{unit}"
+        );
+        let externs = unit_section(&unit, "external functions").join("\n");
+        assert_eq!(
+            externs,
+            format!(
+                "{}\n{}",
+                unknown_arity("int", "opaque").trim_end(),
+                unknown_arity("unsigned long long", "thunk").trim_end()
+            ),
+            "{unit}"
+        );
+        assert_eq!(
+            unit.matches("#if ").count(),
+            unit.matches("#endif").count(),
+            "{unit}"
+        );
+        // Each group's lines are contiguous and close before any body.
+        assert!(unit.find("#endif").unwrap() < unit.find("void first(void)\n{").unwrap());
+    }
+
+    /// An inferred prototype carries a trailing comment, so its line does not
+    /// end in `;`. The unit read it as the definition of the callee: it counted
+    /// the callee as defined and dropped every other render's extern for it.
+    #[test]
+    fn an_inferred_declaration_with_a_trailing_comment_is_not_a_definition() {
+        let unit = assemble(&[
+            caller("first", &inferred("int", "helper", &["int"]), "helper(1)"),
+            caller("second", &inferred("int", "helper", &["int"]), "helper(2)"),
+        ])
+        .code;
+
+        assert_eq!(
+            unit_section(&unit, "functions defined in this unit"),
+            ["void first(void);", "void second(void);"],
+            "{unit}"
+        );
+        assert_eq!(
+            unit_section(&unit, "external functions"),
+            [inferred("int", "helper", &["int"]).trim_end()],
+            "{unit}"
+        );
+    }
+
+    /// Each render infers a callee's parameters from its own calls. Keeping
+    /// the first render's `helper(int)` makes the other's `helper(1, 2)` a
+    /// compile error in C17 as well as C23, so disagreeing inferences, and an
+    /// inference that disagrees with an unknown-arity view, declare the
+    /// callee with unknown arity.
+    #[test]
+    fn disagreeing_inferred_arities_declare_the_callee_with_unknown_arity() {
+        let unit = assemble(&[
+            caller("first", &inferred("int", "helper", &["int"]), "helper(1)"),
+            caller(
+                "second",
+                &inferred("long long", "helper", &["int", "int"]),
+                "helper(1, 2)",
+            ),
+            caller("third", &inferred("int", "mixed", &["int"]), "mixed(1)"),
+            caller("fourth", &unknown_arity("int", "mixed"), "mixed()"),
+        ])
+        .code;
+
+        assert_eq!(
+            unit_section(&unit, "external functions").join("\n"),
+            format!(
+                "{}\n{}",
+                unknown_arity("int", "helper").trim_end(),
+                unknown_arity("int", "mixed").trim_end()
+            ),
+            "{unit}"
+        );
+    }
+
+    /// A declared signature is evidence, not one render's view of its calls,
+    /// so it is kept over inferred lists wherever it appears.
+    #[test]
+    fn a_declared_signature_outranks_inferred_parameter_lists() {
+        let unit = assemble(&[
+            caller(
+                "first",
+                &inferred("int", "puts_like", &["int"]),
+                "puts_like(1)",
+            ),
+            caller(
+                "second",
+                "extern int puts_like(const char *s);\n",
+                "puts_like(\"x\")",
+            ),
+        ])
+        .code;
+
+        assert_eq!(
+            unit_section(&unit, "external functions"),
+            ["extern int puts_like(const char *s);"],
+            "{unit}"
+        );
+    }
+
+    /// The assembled unit from the cases above compiles in both dialects the
+    /// declarations are written for. Skipped, loudly, without a C compiler.
+    #[test]
+    fn a_unit_with_inferred_and_unknown_arity_callees_compiles_as_c17_and_c23() {
+        let unit = assemble(&[
+            caller("first", &inferred("int", "helper", &["int"]), "helper(1)"),
+            caller(
+                "second",
+                &inferred("int", "helper", &["int", "int"]),
+                "helper(1, 2)",
+            ),
+            caller("third", &unknown_arity("int", "opaque"), "opaque(1)"),
+            caller("fourth", &inferred("int", "agreed", &["int"]), "agreed(1)"),
+            caller("fifth", &inferred("int", "agreed", &["int"]), "agreed(2)"),
+            unknown_arity("unsigned long long", "thunk"),
+            caller("sixth", "extern unsigned long long thunk();\n", "thunk(3)"),
+        ])
+        .code;
+
+        let dir = std::env::temp_dir().join(format!(
+            "fission-unit-compile-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let source = dir.join("unit.c");
+        std::fs::write(&source, &unit).expect("write unit");
+        for std in ["gnu17", "gnu23"] {
+            let output = match std::process::Command::new("cc")
+                .arg("-fsyntax-only")
+                .arg(format!("-std={std}"))
+                .arg(&source)
+                .output()
+            {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!("SKIPPED: no C compiler (`cc`): {error}");
+                    return;
+                }
+            };
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !output.status.success() && stderr.contains("std=") {
+                eprintln!("SKIPPED: `cc` does not accept -std={std}: {stderr}");
+                continue;
+            }
+            assert!(output.status.success(), "-std={std}:\n{stderr}\n{unit}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
