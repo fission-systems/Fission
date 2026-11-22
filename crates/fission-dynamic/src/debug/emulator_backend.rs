@@ -624,6 +624,9 @@ impl ExecutionBackend for EmulatorBackend {
         // same thing to the block cache: what it compiled is no longer what is
         // there.
         emu.invalidate_translations(address, data.len());
+        // The recorded future is the unchanged machine's; a seek must not
+        // replay it into this one.
+        emu.ttd_discard_future();
         Ok(())
     }
 
@@ -640,6 +643,7 @@ impl ExecutionBackend for EmulatorBackend {
                 .map_err(|e| fission_core::err!(debug, "Cannot write {}: {}", name, e))?;
         }
         emu.pc = regs.pc;
+        emu.ttd_discard_future();
         Ok(())
     }
 

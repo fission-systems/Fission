@@ -596,3 +596,210 @@ fn seeking_back_undoes_shadow_writes_too() {
         "the taint written after the target survived the rewind"
     );
 }
+
+/// Every address any snapshot ever recorded a write to, with its value now.
+/// The stack window `state_of` reads misses heap and data writes, and a seek
+/// that restores the wrong old value usually restores it somewhere there.
+fn touched_memory(emu: &mut Emulator, addresses: &[u64]) -> Vec<u8> {
+    let ram = emu.state.ram_space();
+    addresses
+        .iter()
+        .map(|&a| {
+            emu.state
+                .read_space(ram, a, 1)
+                .ok()
+                .and_then(|b| b.first().copied())
+                .unwrap_or(0)
+        })
+        .collect()
+}
+
+fn recorded_addresses(emu: &Emulator) -> Vec<u64> {
+    let mut addresses: Vec<u64> = emu
+        .ttd
+        .snapshots()
+        .iter()
+        .flat_map(|s| {
+            s.memory_deltas
+                .iter()
+                .flat_map(|d| (0..d.old_value.len() as u64).map(move |i| d.address + i))
+        })
+        .collect();
+    addresses.sort_unstable();
+    addresses.dedup();
+    addresses
+}
+
+/// Travelling twice: run far, seek back to an early step, then seek back
+/// again to an even earlier one (and, separately, step forward from the
+/// first seek before going back). Each landing has to match a fresh run to
+/// that step -- registers, stack, and every byte any snapshot recorded a
+/// write to. A seek that leaves the abandoned future's snapshots in place
+/// can undo a write with the value it had in that future instead of the one
+/// it had at the target.
+#[test]
+fn seeking_twice_still_arrives_where_the_run_was() {
+    for interval in [4u64, 64] {
+        for (first, second, steps_between) in [(300u64, 120u64, 0u64), (300, 150, 25), (500, 10, 3)]
+        {
+            let mut traveler = build(1800, interval);
+            // A step-0 snapshot, as a debug session records at launch, so
+            // every target has a snapshot at or before it.
+            traveler.record_ttd_snapshot();
+            let _ = traveler.run();
+            let addresses = recorded_addresses(&traveler);
+
+            traveler.ttd_seek(first).expect("first seek");
+            for _ in 0..steps_between {
+                traveler.step_instruction().expect("step");
+            }
+            traveler.ttd_seek(second).expect("second seek");
+            assert_eq!(traveler.inst_count, second);
+            let got = (
+                state_of(&mut traveler),
+                touched_memory(&mut traveler, &addresses),
+            );
+
+            let mut reference = build(second, 0);
+            let _ = reference.run();
+            assert_eq!(reference.inst_count, second);
+            let want = (
+                state_of(&mut reference),
+                touched_memory(&mut reference, &addresses),
+            );
+
+            assert_eq!(
+                got.0.0, want.0.0,
+                "registers: interval {interval}, seek {first} then {second}"
+            );
+            assert_eq!(
+                got.0.1, want.0.1,
+                "stack: interval {interval}, seek {first} then {second}"
+            );
+            let differing: Vec<u64> = addresses
+                .iter()
+                .zip(got.1.iter().zip(&want.1))
+                .filter(|(_, (g, w))| g != w)
+                .map(|(a, _)| *a)
+                .collect();
+            assert!(
+                differing.is_empty(),
+                "interval {interval}, seek {first} then {steps_between} steps then {second}: \
+                 {} recorded bytes differ from a fresh run, first at {:x?}",
+                differing.len(),
+                &differing[..differing.len().min(8)]
+            );
+        }
+    }
+}
+
+/// Seek back, *run* forward across several snapshot boundaries (so the
+/// recorder adds snapshots while the abandoned future's are still there),
+/// then seek back again. The landing must match a fresh run.
+#[test]
+fn seeking_back_after_running_forward_again_arrives_where_the_run_was() {
+    for interval in [4u64, 64] {
+        for (first, rerun_to, second) in
+            [(300u64, 700u64, 200u64), (100, 900, 40), (500, 1500, 450)]
+        {
+            let mut traveler = build(1800, interval);
+            traveler.record_ttd_snapshot();
+            let _ = traveler.run();
+            let addresses = recorded_addresses(&traveler);
+
+            traveler.ttd_seek(first).expect("first seek");
+            traveler.max_inst = Some(rerun_to);
+            traveler.halt_requested = false;
+            let _ = traveler.run();
+            assert_eq!(traveler.inst_count, rerun_to, "re-run stopped early");
+            traveler.ttd_seek(second).expect("second seek");
+            assert_eq!(traveler.inst_count, second);
+            let got = (
+                state_of(&mut traveler),
+                touched_memory(&mut traveler, &addresses),
+            );
+
+            let mut reference = build(second, 0);
+            let _ = reference.run();
+            let want = (
+                state_of(&mut reference),
+                touched_memory(&mut reference, &addresses),
+            );
+
+            assert_eq!(
+                got.0.0, want.0.0,
+                "registers: interval {interval}, {first} -> run {rerun_to} -> {second}"
+            );
+            assert_eq!(
+                got.0.1, want.0.1,
+                "stack: interval {interval}, {first} -> run {rerun_to} -> {second}"
+            );
+            let differing = addresses
+                .iter()
+                .zip(got.1.iter().zip(&want.1))
+                .filter(|(_, (g, w))| g != w)
+                .count();
+            assert_eq!(
+                differing, 0,
+                "interval {interval}, {first} -> run {rerun_to} -> {second}: recorded bytes differ"
+            );
+        }
+    }
+}
+
+/// After a seek back, the machine is changed by hand (as `set-reg` does in a
+/// debug session) and then sought forward. The recorded future belongs to the
+/// run before the change; replaying it -- or restoring the last snapshot and
+/// recomputing, which undoes the change -- shows a state the changed machine
+/// never reaches. The landing must match a fresh run given the same change.
+#[test]
+fn seeking_forward_after_a_change_re_executes_instead_of_replaying() {
+    let (back, forward) = (300u64, 700u64);
+    // Find a register whose change at `back` is still visible at `forward`;
+    // without one this test could not tell replay from re-execution.
+    let plain = {
+        let mut emu = build(forward, 0);
+        let _ = emu.run();
+        state_of(&mut emu)
+    };
+    let changed_run = |reg: &str| {
+        let mut emu = build(back, 0);
+        let _ = emu.run();
+        let value = emu.read_register_u64(reg).unwrap_or(0) ^ 0x40;
+        emu.write_register_u64(reg, value).expect("set register");
+        emu.max_inst = Some(forward);
+        emu.halt_requested = false;
+        let _ = emu.run();
+        (value, emu.inst_count, state_of(&mut emu))
+    };
+    let (reg, value, want) = GP
+        .iter()
+        .filter(|r| **r != "RSP")
+        .find_map(|r| {
+            let (value, steps, state) = changed_run(r);
+            (steps == forward && state != plain).then_some((*r, value, state))
+        })
+        .expect("no register change at the back step is visible at the forward step");
+
+    let mut traveler = build(1800, 64);
+    traveler.record_ttd_snapshot();
+    let _ = traveler.run();
+    traveler.ttd_seek(back).expect("seek back");
+    traveler
+        .write_register_u64(reg, value)
+        .expect("set register");
+    // What a debugger does with a hand-made change (see the emulator
+    // backend's `set_registers` and `write_memory`).
+    traveler.ttd_discard_future();
+    traveler.ttd_seek(forward).expect("seek forward");
+    assert_eq!(traveler.inst_count, forward);
+    let got = state_of(&mut traveler);
+    assert_eq!(
+        got.0, want.0,
+        "registers after changing {reg} and seeking forward"
+    );
+    assert_eq!(
+        got.1, want.1,
+        "stack after changing {reg} and seeking forward"
+    );
+}

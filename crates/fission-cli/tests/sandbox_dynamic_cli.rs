@@ -107,9 +107,13 @@ fn ttd_seek_reports_registers_and_memory_at_the_step() {
     assert!(plain.get("ttd_state").is_none());
 }
 
+/// A snapshot taken right after the program read `A` carries that byte: a
+/// run restored from it with `B` on stdin takes the `A` branch (exit 0),
+/// where a run from the start with `B` exits 1. A restore that did nothing
+/// would exit 1 here.
 #[test]
 fn a_snapshot_is_written_and_restores() {
-    let path = scratch("entry.snapshot");
+    let path = scratch("after_read.snapshot");
     let path = path.to_str().unwrap();
     let out = run(&[
         "sandbox",
@@ -117,18 +121,20 @@ fn a_snapshot_is_written_and_restores() {
         "--stdin-mock",
         "A",
         "--snapshot-at",
-        "0x400078",
+        "0x40009c",
         "--snapshot-out",
         path,
     ]);
     assert!(out.status.success(), "{out:?}");
     assert!(std::fs::metadata(path).unwrap().len() > 0);
 
+    let fresh = report(&["sandbox", CONCOLIC, "--stdin-mock", "B", "--json"]);
+    assert_eq!(fresh["exit_code"], 1, "{fresh}");
     let restored = report(&[
         "sandbox",
         CONCOLIC,
         "--stdin-mock",
-        "A",
+        "B",
         "--restore-snapshot",
         path,
         "--json",
@@ -148,6 +154,23 @@ fn a_snapshot_is_written_and_restores() {
     ]);
     assert!(!missed.status.success());
     assert!(String::from_utf8_lossy(&missed.stderr).contains("never reached"));
+}
+
+#[test]
+fn a_missing_host_loader_is_an_error_not_a_fallback() {
+    let out = run(&[
+        "sandbox",
+        CONCOLIC,
+        "--dynlink",
+        "--ld-so",
+        "/no/such/ld.so",
+        "--json",
+    ]);
+    assert!(!out.status.success());
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("--ld-so"),
+        "{out:?}"
+    );
 }
 
 /// The interpreter compiles no translation blocks; the JIT does.
@@ -184,7 +207,7 @@ fn timeout_ms_ends_a_run_that_never_would() {
             "--json",
         ])
         .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
-        .stdout(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .spawn()
         .unwrap();
@@ -200,6 +223,11 @@ fn timeout_ms_ends_a_run_that_never_would() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
+    // ...and the report says the deadline ended it, not Ctrl+C or the guest.
+    let mut stdout = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut stdout).unwrap();
+    let body: Value = serde_json::from_str(&stdout).expect("sandbox json");
+    assert_eq!(body["metrics"]["exit_reason"], "deadline", "{body}");
 }
 
 /// A minimal static x86-64 ELF: one RX segment at 0x400000, `code` at the
