@@ -84,6 +84,18 @@ impl std::fmt::Display for WalkFrame {
     }
 }
 
+/// Deepest constructor nesting one instruction may resolve to, root at 0.
+///
+/// A table can refer to itself -- x86's `instruction` takes a prefix byte and
+/// descends into `instruction` again -- so without a bound the nesting, and
+/// this walker's recursion, grows with the input: a run of prefix bytes
+/// overflowed the stack. The value is Ghidra's disassembler bound
+/// (`ParserWalker.MAX_PARSE_DEPTH`, which raises `UnknownInstructionException`
+/// at the same point). It bounds the parse, not any ISA: a legal x86
+/// instruction has at most 14 prefix bytes, so a run long enough to reach it
+/// is not one instruction, and a failed parse is a decode error like any other.
+pub(super) const MAX_PARSE_DEPTH: usize = 64;
+
 thread_local! {
     static DECODE_POOL: RefCell<Vec<DecodePool>> = const { RefCell::new(Vec::new()) };
     static WALK_STACK: RefCell<Vec<WalkFrame>> = const { RefCell::new(Vec::new()) };
@@ -114,7 +126,7 @@ pub(super) fn bind_instruction<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
-    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None)
+    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None, 0)
 }
 
 fn bind_instruction_with_inst_next<'a>(
@@ -123,6 +135,7 @@ fn bind_instruction_with_inst_next<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
     parent_inst_next: Option<Rc<InstNextShared>>,
+    depth: usize,
 ) -> Result<RuntimeConstructState> {
     let result = (|| {
         constructor_matches(ctx, selection.constructor)?;
@@ -131,7 +144,7 @@ fn bind_instruction_with_inst_next<'a>(
         // fallthrough from the second pass.
         if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
             let probe_walker =
-                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?;
+                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None, depth)?;
             let estimate = Rc::clone(&probe_walker.inst_next_shared);
             let probe = probe_walker.walk()?;
             // Only the estimate differs between the two walks. If no binding
@@ -154,10 +167,18 @@ fn bind_instruction_with_inst_next<'a>(
                 observed: Cell::new(false),
             });
             // owns=false: root_min_length already set to full probe length.
-            return CompiledParserWalker::new(compiled, strategy, ctx, selection, Some(shared))?
-                .walk();
+            return CompiledParserWalker::new(
+                compiled,
+                strategy,
+                ctx,
+                selection,
+                Some(shared),
+                depth,
+            )?
+            .walk();
         }
-        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next)?.walk()
+        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next, depth)?
+            .walk()
     })();
 
     match result {
@@ -222,6 +243,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     inst_next_shared: Rc<InstNextShared>,
     /// True when this walker owns/updates the shared fallthrough (root only).
     owns_inst_next: bool,
+    /// Constructor nesting depth of this walker; the root instruction is 0.
+    depth: usize,
 }
 
 impl<'a, 'b> std::ops::Deref for CompiledParserWalker<'a, 'b> {
@@ -509,6 +532,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
         parent_inst_next: Option<Rc<InstNextShared>>,
+        depth: usize,
     ) -> Result<Self> {
         let replace_current_wrapper = constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
@@ -604,6 +628,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             inst_next_shared,
             owns_inst_next,
+            depth,
         })
     }
 
@@ -1797,6 +1822,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let _guard = WalkStackGuard::new(WalkFrame::Subtable(table_name.into()));
+        let depth = self.depth + 1;
+        if depth > MAX_PARSE_DEPTH {
+            bail!(
+                "SLEIGH exceeded maximum parse depth ({MAX_PARSE_DEPTH}) descending into subtable {table_name}"
+            );
+        }
         let mut sub_ctx = (*self.ctx).clone();
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
@@ -1860,6 +1891,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             &sub_ctx,
             selection,
             Some(Rc::clone(&self.inst_next_shared)),
+            depth,
         )
     }
 }
@@ -2074,7 +2106,8 @@ mod sleigh_parity_gaps_tests {
             .expect("selected instruction");
         let strategy = RuntimeDecodeStrategy::for_table();
         let probe_walker =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None).unwrap();
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None, 0)
+                .unwrap();
         let estimate = Rc::clone(&probe_walker.inst_next_shared);
         let probe = probe_walker.walk().expect("original probe");
         let observed = estimate.observed.get();
@@ -2090,7 +2123,7 @@ mod sleigh_parity_gaps_tests {
             observed: Cell::new(false),
         });
         let expected =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared))
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared), 0)
                 .unwrap()
                 .walk()
                 .expect("original second walk");
@@ -2230,6 +2263,7 @@ mod binding_address_witness_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let (value, witness) = super::super::binding_address_use::capture(|| {
@@ -2400,6 +2434,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection.clone(),
             None,
+            0,
         )
         .unwrap();
         let mut owned = CompiledParserWalker::new(
@@ -2408,6 +2443,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         for index in 0..=count {
@@ -2444,6 +2480,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let spec = walker.operand_spec_for_expression(0).unwrap();
