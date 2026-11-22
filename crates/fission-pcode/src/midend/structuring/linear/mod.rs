@@ -595,15 +595,30 @@ mod tests {
                 PcodeBasicBlock {
                     index: 1,
                     start_address: 0x1100,
-                    successors: vec![],
-                    ops: vec![PcodeOp {
-                        seq_num: 0,
-                        opcode: PcodeOpcode::Return,
-                        address: 0x1100,
-                        output: None,
-                        inputs: vec![Varnode::constant(0, 8)],
-                        asm_mnemonic: None,
-                    }],
+                    successors: vec![2],
+                    // A side effect keeps block 1 from being threaded away.
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x1100,
+                            output: None,
+                            inputs: vec![
+                                Varnode::constant(0, 8),
+                                Varnode::constant(0x9000, 8),
+                                Varnode::constant(7, 8),
+                            ],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x1100,
+                            output: None,
+                            inputs: vec![Varnode::constant(0x1200, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
                 },
                 PcodeBasicBlock {
                     index: 2,
@@ -630,10 +645,13 @@ mod tests {
         let (clone_idx, succ_clone_idx) = (3, 4);
         let succ_clone_key = builder.block_target_key(succ_clone_idx);
         assert_ne!(succ_clone_key, 0x1100);
+        // Block 2 stands in for the back-edge source a split redirects to the
+        // clone, so the clone is reachable and gets laid out.
         builder.successors.push(vec![1]);
-        builder.successors.push(vec![]);
+        builder.successors.push(vec![2]);
         builder.predecessors[1].push(clone_idx);
-        builder.predecessors.push(vec![]);
+        builder.successors[2].push(clone_idx);
+        builder.predecessors.push(vec![2]);
         builder.predecessors.push(vec![]);
 
         // A clone has no layout position of its own, so nothing falls
