@@ -25,6 +25,7 @@ members = [
     "crates/fission-emulator",
     "crates/fission-solver",
     "crates/fission-dir",
+    "crates/fission-quotient",
 ]
 
 [profile.release]

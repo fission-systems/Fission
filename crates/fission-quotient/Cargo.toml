@@ -1,0 +1,27 @@
+[package]
+name = "fission-quotient"
+version = "0.4.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Experimental white-box behavioural quotients of P-code slices (WBCQ, RFC #1093)"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["reverse-engineering", "automata-learning", "bisimulation", "solver"]
+categories = ["development-tools"]
+
+[lib]
+name = "fission_quotient"
+
+[dependencies]
+fission-loader = { path = "../fission-loader" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
+fission-decompiler = { path = "../fission-decompiler" }
+fission-dir = { path = "../fission-dir" }
+fission-emulator = { path = "../fission-emulator" }
+fission-sleigh = { path = "../fission-sleigh" }
+fission-solver = { path = "../fission-solver" }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

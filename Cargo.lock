@@ -1104,6 +1104,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-quotient"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "fission-decompiler",
+ "fission-dir",
+ "fission-emulator",
+ "fission-loader",
+ "fission-pcode-ir",
+ "fission-sleigh",
+ "fission-solver",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "fission-script"
 version = "0.4.0"
 dependencies = [

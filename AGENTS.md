@@ -41,6 +41,7 @@ Fission/
 - `crates/fission-pcode/src/midend/structuring/AGENTS.md`
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
+- `crates/fission-quotient/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 

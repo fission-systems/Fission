@@ -430,6 +430,14 @@ impl EmulatorHarness {
         self.finish_outcome(outcome)
     }
 
+    /// Read `len` bytes of RAM as the last [`Self::call`] left them -- the
+    /// state a caller sees after the function returns, before the next call
+    /// restores the baseline.
+    pub fn read_memory(&mut self, addr: u64, len: usize) -> Result<Vec<u8>> {
+        let ram = self.emu.state.ram_space();
+        self.emu.state.read_space(ram, addr, len)
+    }
+
     /// Read one byte of the restored baseline: the program image as every
     /// call starts from it. `None` where nothing is mapped.
     /// Whether the loaded image maps `addr`.
