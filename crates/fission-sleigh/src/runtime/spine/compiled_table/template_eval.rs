@@ -414,14 +414,24 @@ impl<'c> CompiledTableEmitter<'c> {
     /// constant template value becomes a code-space address.
     ///
     /// A destination that names a p-code-internal label (`is_label`) is the
-    /// exception and stays in the constant space. `finish` later patches it to
+    /// exception and stays in the constant space (`space_id = 0, is_constant = true`),
+    /// even if the template named `CurSpace`/`ram`. `finish` later patches it to
     /// a signed op delta, and "constant space" is how every consumer tells that
     /// delta from a machine address. Recognising it by value is not enough:
     /// the sentinel is masked to the destination's width (4 bytes), so
     /// `decode_relative_sentinel` no longer sees it, and the label would be
     /// rewritten into a code-space address.
     fn normalize_direct_control_target(&self, target: Varnode, is_label: bool) -> Result<Varnode> {
-        if is_label || !target.is_constant || decode_relative_sentinel(target.offset).is_some() {
+        if is_label || decode_relative_sentinel(target.offset).is_some() {
+            return Ok(Varnode {
+                space_id: 0,
+                offset: target.offset,
+                size: target.size,
+                is_constant: true,
+                constant_val: target.constant_val,
+            });
+        }
+        if !target.is_constant {
             return Ok(target);
         }
         let size = if target.size == 0 {
@@ -459,10 +469,8 @@ impl<'c> CompiledTableEmitter<'c> {
         let pending = self.pending_label_refs;
         let mut ops = self.emitter.finish();
         // resolveRelatives: turn each internal-label branch destination into the
-        // signed op distance to its label. Ghidra's PcodeCacher does the same
-        // from its own `label_refs` list, and patches the destination varnode's
-        // *offset* in place, leaving space and size alone -- so a consumer that
-        // reads the destination as an address still sees the same shape.
+        // constant-space signed op distance to its label, preserving `target.size`
+        // and encoding `offset` masked to width alongside `constant_val = relative`.
         for (op_index, label_num) in pending {
             let i = usize::try_from(op_index)
                 .map_err(|_| anyhow!("branch op index {op_index} exceeds usize"))?;
@@ -492,10 +500,10 @@ impl<'c> CompiledTableEmitter<'c> {
                 .inputs
                 .first_mut()
                 .ok_or_else(|| anyhow!("branch at op {i} has no destination"))?;
+            target.space_id = 0;
+            target.is_constant = true;
+            target.constant_val = relative;
             target.offset = mask_to_varnode_width(i64_to_u64_bits(relative), target.size);
-            if target.is_constant {
-                target.constant_val = relative;
-            }
         }
         Ok(ops)
     }
@@ -1196,11 +1204,15 @@ impl<'c> CompiledTableEmitter<'c> {
             .handles
             .get(handle_index)
             .ok_or_else(|| anyhow!("handle {} is missing or unresolved", handle_index))?;
-        if !handle
-            .fixed
-            .space
-            .as_ref()
-            .is_some_and(|space| space.index == 0x1b1 || space.name == "ram")
+        let Some(target_space) = handle.fixed.space.as_ref() else {
+            return Ok(None);
+        };
+        if target_space.index == 0
+            || target_space.name == "const"
+            || target_space.name == "register"
+            || target_space.name == "unique"
+            || target_space.index == self.compiled.sla_register_space_index
+            || target_space.index == self.unique_space_index
         {
             return Ok(None);
         }
@@ -1805,7 +1817,7 @@ mod tests {
             length: 0,
             match_trace: RuntimeMatchTrace {
                 root_bucket: "test".into(),
-                probes: crate::runtime::spine::ProbeChain::default(),
+                probes: crate::runtime::spine::RuntimeMatchProbes::default(),
                 leaf_constructor_indexes: Vec::new(),
                 matched_leaf_pattern: None,
             },
@@ -2224,5 +2236,221 @@ mod tests {
                 .constant_val,
             77
         );
+    }
+
+    #[test]
+    fn dynamic_memory_target_emits_store_for_non_ram_address_spaces() {
+        let mut spaces = std::collections::BTreeMap::new();
+        spaces.insert(
+            0,
+            CompiledSpaceRef {
+                name: "const".to_string(),
+                index: 0,
+                word_size: 1,
+                addr_size: 4,
+            },
+        );
+        let data_space = CompiledSpaceRef {
+            name: "data".to_string(),
+            index: 5,
+            word_size: 1,
+            addr_size: 4,
+        };
+        spaces.insert(5, data_space.clone());
+        let mut compiled = minimal_frontend_with_spaces(spaces);
+        compiled.sla_register_space_index = 2;
+        compiled.sla_unique_space_index = 3;
+
+        let mut emitter =
+            CompiledTableEmitter::new(&compiled, 0x1000, &[], 0x1000, FlowEmitOptions::default());
+        let mut state = minimal_construct_state();
+        let mut handle = test_handle("data", 0x20);
+        handle.fixed.space = Some(data_space);
+        handle.fixed.offset_space = Some(CompiledSpaceRef {
+            name: "register".to_string(),
+            index: 2,
+            word_size: 1,
+            addr_size: 4,
+        });
+        handle.fixed.offset_offset = 0x10;
+        handle.fixed.offset_size = 4;
+        handle.fixed.temp_space = Some(CompiledSpaceRef {
+            name: "unique".to_string(),
+            index: 3,
+            word_size: 1,
+            addr_size: 4,
+        });
+        handle.fixed.temp_offset = 0x200;
+        handle.fixed.fixable = true;
+        state.handles.push(handle);
+
+        let out_tpl = CompiledVarnodeTpl::Varnode {
+            space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Handle {
+                handle_index: 0,
+                selector: CompiledHandleSelector::Space,
+                plus: None,
+            })),
+            offset: Box::new(CompiledConstTpl::Handle {
+                handle_index: 0,
+                selector: CompiledHandleSelector::Offset,
+                plus: None,
+            }),
+            size: Box::new(CompiledConstTpl::Real { value: 4 }),
+        };
+        let copy_op = CompiledOpTpl {
+            sla_raw_pcode_opcode: 0,
+            opcode: CompiledOpTplOpcode::Copy,
+            output: Some(out_tpl.clone()),
+            inputs: vec![CompiledVarnodeTpl::Varnode {
+                space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Real { value: 0 })),
+                offset: Box::new(CompiledConstTpl::Real { value: 0x42 }),
+                size: Box::new(CompiledConstTpl::Real { value: 4 }),
+            }],
+            label: None,
+        };
+
+        emitter.emit_op_template(&state, &copy_op).unwrap();
+        let ops = emitter.finish().unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].opcode, fission_pcode_ir::PcodeOpcode::Copy);
+        assert_eq!(ops[1].opcode, fission_pcode_ir::PcodeOpcode::Store);
+        assert_eq!(ops[1].inputs[0].constant_val, 5);
+        assert_eq!(ops[1].inputs[1].space_id, 2);
+        assert_eq!(ops[1].inputs[1].offset, 0x10);
+
+        // Non-memory spaces (const/register/unique) must never trigger dynamic Store.
+        for (name, index) in [("const", 0), ("register", 2), ("unique", 3)] {
+            let mut non_mem_emitter = CompiledTableEmitter::new(
+                &compiled,
+                0x1000,
+                &[],
+                0x1000,
+                FlowEmitOptions::default(),
+            );
+            let mut non_mem_state = state.clone();
+            non_mem_state.handles[0].fixed.space = Some(CompiledSpaceRef {
+                name: name.to_string(),
+                index,
+                word_size: 1,
+                addr_size: 4,
+            });
+            assert!(non_mem_emitter
+                .dynamic_memory_target(&out_tpl, &non_mem_state)
+                .unwrap()
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn finish_patches_backward_relative_label_even_when_template_used_non_const_space() {
+        let ram = CompiledSpaceRef {
+            name: "ram".to_string(),
+            index: 1,
+            word_size: 1,
+            addr_size: 4,
+        };
+        let spaces = std::collections::BTreeMap::from([
+            (
+                0,
+                CompiledSpaceRef {
+                    name: "const".to_string(),
+                    index: 0,
+                    word_size: 0,
+                    addr_size: 0,
+                },
+            ),
+            (1, ram.clone()),
+        ]);
+        let compiled = minimal_frontend_with_spaces(spaces);
+        let state = minimal_construct_state();
+
+        let const_vn_tpl = |value: u64, size: u64| CompiledVarnodeTpl::Varnode {
+            space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::Real { value: 0 })),
+            offset: Box::new(CompiledConstTpl::Real { value }),
+            size: Box::new(CompiledConstTpl::Real { value: size }),
+        };
+        let reg_vn_tpl = |offset: u64, size: u64| CompiledVarnodeTpl::Varnode {
+            space: CompiledSpaceTpl::SpaceRef(ram.clone()),
+            offset: Box::new(CompiledConstTpl::Real { value: offset }),
+            size: Box::new(CompiledConstTpl::Real { value: size }),
+        };
+        let copy_tpl = || CompiledOpTpl {
+            sla_raw_pcode_opcode: 0,
+            opcode: CompiledOpTplOpcode::Copy,
+            output: Some(reg_vn_tpl(0x10, 4)),
+            inputs: vec![const_vn_tpl(1, 4)],
+            label: None,
+        };
+        let label_tpl = CompiledOpTpl {
+            sla_raw_pcode_opcode: 0,
+            opcode: CompiledOpTplOpcode::Label,
+            output: None,
+            inputs: vec![const_vn_tpl(0, 4)],
+            label: None,
+        };
+        let rel_target_in_ram = CompiledVarnodeTpl::Varnode {
+            space: CompiledSpaceTpl::Const(Box::new(CompiledConstTpl::CurSpace)),
+            offset: Box::new(CompiledConstTpl::Relative { value: 0 }),
+            size: Box::new(CompiledConstTpl::Real { value: 4 }),
+        };
+
+        for (is_cbranch, branch_op_tpl) in [
+            (
+                false,
+                CompiledOpTpl {
+                    sla_raw_pcode_opcode: 0,
+                    opcode: CompiledOpTplOpcode::Branch,
+                    output: None,
+                    inputs: vec![rel_target_in_ram.clone()],
+                    label: None,
+                },
+            ),
+            (
+                true,
+                CompiledOpTpl {
+                    sla_raw_pcode_opcode: 0,
+                    opcode: CompiledOpTplOpcode::CBranch,
+                    output: None,
+                    inputs: vec![rel_target_in_ram, const_vn_tpl(1, 1)],
+                    label: None,
+                },
+            ),
+        ] {
+            let mut emitter = CompiledTableEmitter::new(
+                &compiled,
+                0x1000,
+                &[],
+                0x1000,
+                FlowEmitOptions::default(),
+            );
+            // op 0: Copy, op 1: Copy, <label 0> at op 2, op 2: Copy, op 3: Copy, op 4: Branch/CBranch -> relative = 2 - 4 = -2
+            for op in [
+                copy_tpl(),
+                copy_tpl(),
+                label_tpl.clone(),
+                copy_tpl(),
+                copy_tpl(),
+                branch_op_tpl,
+            ] {
+                emitter.emit_op_template(&state, &op).unwrap();
+            }
+            let ops = emitter.finish().unwrap();
+            assert_eq!(ops.len(), 5);
+            let branch = &ops[4];
+            assert_eq!(
+                branch.opcode,
+                if is_cbranch {
+                    fission_pcode_ir::PcodeOpcode::CBranch
+                } else {
+                    fission_pcode_ir::PcodeOpcode::Branch
+                }
+            );
+            let dest = &branch.inputs[0];
+            assert!(dest.is_constant, "dest={dest:?}");
+            assert_eq!(dest.space_id, 0);
+            assert_eq!(dest.size, 4);
+            assert_eq!(dest.constant_val, -2);
+            assert_eq!(dest.offset, 0xffff_fffe);
+        }
     }
 }

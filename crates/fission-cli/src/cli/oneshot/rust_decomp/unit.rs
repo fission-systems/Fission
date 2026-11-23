@@ -439,46 +439,291 @@ fn push_section(out: &mut String, title: &str, lines: &[&str]) {
     }
 }
 
+fn line_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut pos = 0usize;
+    std::iter::from_fn(move || {
+        if pos >= text.len() {
+            return None;
+        }
+        let start = pos;
+        let rest = &text[start..];
+        if let Some(nl) = rest.find('\n') {
+            pos = start + nl + 1;
+            let line = rest[..nl].strip_suffix('\r').unwrap_or(&rest[..nl]);
+            Some((start, line))
+        } else {
+            pos = text.len();
+            Some((start, rest))
+        }
+    })
+}
+
+fn starts_with_keyword(text: &str, keyword: &str) -> bool {
+    text.strip_prefix(keyword).is_some_and(|rest| {
+        rest.is_empty()
+            || (!rest.as_bytes()[0].is_ascii_alphanumeric() && rest.as_bytes()[0] != b'_')
+    })
+}
+
+fn record_starts_with_non_func_prefix(record: &str, line: &str) -> bool {
+    let first = if record.is_empty() {
+        line.trim_start()
+    } else {
+        record.trim_start()
+    };
+    starts_with_keyword(first, "typedef") || first.starts_with('#')
+}
+
+fn record_starts_as_declaration(record: &str, line: &str) -> bool {
+    let first = if record.is_empty() {
+        line.trim_start()
+    } else {
+        record.trim_start()
+    };
+    record_starts_with_non_func_prefix(record, line) || starts_with_keyword(first, "extern")
+}
+
+struct LineScanResult {
+    has_code: bool,
+    opens_function_body: bool,
+    last_code_byte: Option<u8>,
+}
+
+fn scan_declaration_line(
+    line: &str,
+    depth: &mut usize,
+    paren_depth: &mut usize,
+    saw_paren_at_depth0: &mut bool,
+    saw_top_level_equals: &mut bool,
+    in_block_comment: &mut bool,
+    skip_body_open: bool,
+) -> LineScanResult {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    let mut has_code = false;
+    let mut last_code_byte = None;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        if *in_block_comment {
+            if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                *in_block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if let Some(q) = quote {
+            has_code = true;
+            last_code_byte = Some(bytes[i]);
+            if bytes[i] == b'\\' {
+                i = (i + 2).min(bytes.len());
+            } else if bytes[i] == q {
+                quote = None;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            break;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            *in_block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(bytes[i], b'"' | b'\'') {
+            has_code = true;
+            last_code_byte = Some(bytes[i]);
+            quote = Some(bytes[i]);
+            i += 1;
+            continue;
+        }
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        has_code = true;
+        let b = bytes[i];
+        last_code_byte = Some(b);
+        match b {
+            b'(' => {
+                if *depth == 0 {
+                    *saw_paren_at_depth0 = true;
+                }
+                *paren_depth += 1;
+            }
+            b')' => {
+                *paren_depth = paren_depth.saturating_sub(1);
+            }
+            b'=' if *depth == 0 && *paren_depth == 0 => {
+                *saw_top_level_equals = true;
+            }
+            b'{' => {
+                if *depth == 0
+                    && *paren_depth == 0
+                    && *saw_paren_at_depth0
+                    && !*saw_top_level_equals
+                    && !skip_body_open
+                {
+                    return LineScanResult {
+                        has_code,
+                        opens_function_body: true,
+                        last_code_byte,
+                    };
+                }
+                *depth += 1;
+            }
+            b'}' => {
+                *depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    LineScanResult {
+        has_code,
+        opens_function_body: false,
+        last_code_byte,
+    }
+}
+
 /// Split a render at the first line that opens a function definition.
 ///
 /// Every declaration the printer emits ends in `;`, possibly after a braced
-/// body it opened on an earlier line (`typedef struct ... {`). A function
-/// definition is the first line that takes a parameter list without ending in
-/// one -- that is what separates `void f(void)` from `extern void f();`.
+/// body it opened on an earlier line (`typedef struct ... {`) or a multi-line
+/// parameter list (`extern int f(\n ...);`). A function definition is the first
+/// top-level signature that opens a braced body rather than ending in `;`.
 fn split_render(text: &str) -> SplitRender<'_> {
     let mut depth = 0usize;
-    let mut offset = 0usize;
+    let mut paren_depth = 0usize;
+    let mut saw_paren_at_depth0 = false;
+    let mut saw_top_level_equals = false;
+    let mut in_block_comment = false;
     let mut declarations: Vec<String> = Vec::new();
     let mut record = String::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if depth == 0 && trimmed.contains('(') && !trimmed.ends_with(';') {
+    let mut record_start: Option<usize> = None;
+
+    for (offset, line) in line_spans(text) {
+        let skip_body_open = record_starts_with_non_func_prefix(&record, line);
+        let scan = scan_declaration_line(
+            line,
+            &mut depth,
+            &mut paren_depth,
+            &mut saw_paren_at_depth0,
+            &mut saw_top_level_equals,
+            &mut in_block_comment,
+            skip_body_open,
+        );
+        if scan.opens_function_body {
+            let body_start = record_start.unwrap_or(offset);
             return SplitRender {
                 declarations,
-                body: &text[offset..],
+                body: &text[body_start..],
             };
         }
-        depth += trimmed.matches('{').count();
-        depth = depth.saturating_sub(trimmed.matches('}').count());
-        if !trimmed.is_empty() {
-            if !record.is_empty() {
-                record.push('\n');
-            }
-            record.push_str(line);
-            if depth == 0 {
-                declarations.push(std::mem::take(&mut record));
-            }
+
+        if record.is_empty() && !scan.has_code {
+            continue;
         }
-        offset += line.len() + 1;
+
+        if record_start.is_none() {
+            record_start = Some(offset);
+        }
+        if !record.is_empty() {
+            record.push('\n');
+        }
+        record.push_str(line);
+
+        let is_preprocessor = record.trim_start().starts_with('#');
+        if depth == 0
+            && paren_depth == 0
+            && (scan.last_code_byte == Some(b';')
+                || (is_preprocessor && !line.trim_end().ends_with('\\')))
+        {
+            declarations.push(std::mem::take(&mut record));
+            record_start = None;
+            saw_paren_at_depth0 = false;
+            saw_top_level_equals = false;
+        }
     }
+
+    if !record.is_empty() {
+        if saw_paren_at_depth0
+            && !saw_top_level_equals
+            && !record_starts_as_declaration(&record, "")
+            && let Some(body_start) = record_start
+        {
+            return SplitRender {
+                declarations,
+                body: &text[body_start..],
+            };
+        }
+        declarations.push(record);
+    }
+
     SplitRender {
         declarations,
         body: "",
     }
 }
 
-/// The definition line of the function a body opens, comments skipped.
+/// The definition header of the function a body opens, comments skipped.
 fn definition_line(body: &str) -> Option<&str> {
+    let bytes = body.as_bytes();
+    let mut i = 0usize;
+    let mut start: Option<usize> = None;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        if let Some(q) = quote {
+            if bytes[i] == b'\\' {
+                i = (i + 2).min(bytes.len());
+            } else if bytes[i] == q {
+                quote = None;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if start.is_none() {
+            start = Some(i);
+        }
+        if bytes[i] == b'{' {
+            let header = body[start.unwrap()..i].trim_end();
+            return (!header.is_empty()).then_some(header);
+        }
+        if matches!(bytes[i], b'"' | b'\'') {
+            quote = Some(bytes[i]);
+        }
+        i += 1;
+    }
+
     body.lines()
         .find(|line| !line.trim().is_empty() && !line.trim_start().starts_with("//"))
 }
@@ -909,5 +1154,78 @@ mod tests {
 
         assert_eq!(assembly.code.matches("uint tmp_140007020;").count(), 1);
         assert!(assembly.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn split_render_tracks_exact_crlf_offsets_and_skips_comments_and_wrapped_externs() {
+        let input = concat!(
+            "// Preamble comment (with parens)\r\n",
+            "/* Block comment\r\n",
+            "   also (with parens) */\r\n",
+            "typedef struct Box {\r\n",
+            "    int val;\r\n",
+            "} Box;\r\n",
+            "\r\n",
+            "extern int wrapped_callee(\r\n",
+            "    int a,\r\n",
+            "    int b);\r\n",
+            "\r\n",
+            "// Function note (before body)\r\n",
+            "void caller(Box box)\r\n",
+            "{\r\n",
+            "    wrapped_callee(box.val, 1);\r\n",
+            "}\r\n",
+        );
+
+        let split = split_render(input);
+        assert_eq!(split.declarations.len(), 2, "{:?}", split.declarations);
+        assert!(split.declarations[0].contains("} Box;"));
+        assert!(split.declarations[1].contains("extern int wrapped_callee("));
+        assert!(
+            split.body.starts_with("void caller(Box box)\r\n{"),
+            "body offset drifted on CRLF:\n{:?}",
+            split.body
+        );
+
+        let unit = assemble(&[
+            input.to_string(),
+            "int wrapped_callee(int a, int b)\r\n{\r\n    return a + b;\r\n}\r\n".to_string(),
+        ]);
+        assert!(
+            !unit.code.contains("extern int wrapped_callee("),
+            "{}",
+            unit.code
+        );
+        assert!(unit.code.contains("void caller(Box box);"), "{}", unit.code);
+        assert!(
+            unit.code.contains("int wrapped_callee(int a, int b);"),
+            "{}",
+            unit.code
+        );
+    }
+
+    #[test]
+    fn split_render_handles_multiline_function_signature() {
+        let input = concat!(
+            "extern int helper();\n\n",
+            "int compute(\n",
+            "    int first,\n",
+            "    int second)\n",
+            "{\n",
+            "    return helper();\n",
+            "}\n",
+        );
+
+        let split = split_render(input);
+        assert_eq!(split.declarations, vec!["extern int helper();"]);
+        assert!(split.body.starts_with("int compute(\n"), "{:?}", split.body);
+
+        let unit = assemble(&[input.to_string()]);
+        assert!(
+            unit.code
+                .contains("int compute(\n    int first,\n    int second);"),
+            "{}",
+            unit.code
+        );
     }
 }

@@ -4,6 +4,14 @@ DecBench is the benchmark decompiler-quality work is measured on. It replaces
 the docker multi-decompiler loop described in
 [`BENCHMARK_DOCKER.md`](BENCHMARK_DOCKER.md), which is retired.
 
+**It measures similarity to the source, not correctness.** GED compares the
+shape of the control-flow graph, and the type metric compares the variables it
+can match. A wrong value, argument or call is invisible to both, and recovering
+missing code can raise the distance. Correctness is shown with native replay,
+`fission_cli verify`, manuals and source ground truth; DecBench is the
+regression and comparison measurement reported next to that evidence
+([ADR 0018](adr/0018-decbench-is-not-a-correctness-oracle.md)).
+
 **Quality is measured on the whole dataset.** Every quality claim cites the
 full-dataset sweep: all 96,103 functions of `noelo-lab/decbench-dataset`, broken
 down by config (`unoptimized`, `optimized`, `inlined`, `large`, `sample-set`),
@@ -28,9 +36,9 @@ The data and harness live outside this repository, under
 
 ## CI full sweep
 
-[DecBench full dataset sweep](../.github/workflows/decbench-sweep.yml) measures
-the published Hugging Face `full` manifest on Nightly. The pinned dataset
-revision contains 96,103 rows. The workflow shards the manifest, verifies binary
+[DecBench full dataset sweep](https://github.com/fission-systems/Fission/blob/main/.github/workflows/decbench-sweep.yml) measures
+the pinned Hugging Face `full` manifest on a nightly schedule or by manual dispatch. The pinned dataset
+revision contains 96,103 rows. The workflow partitions the manifest into 24 shards, verifies binary
 hashes, scores statically on stripped inputs, and preserves its row-level report.
 The 250-row sample-set gate below remains a local development tool. See
 [CI and release gates](CI_RELEASE_GATES.md#nightly-decbench) for the CI policy.

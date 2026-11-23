@@ -19,11 +19,11 @@ Use **`status:good-first-issue`** for bounded tasks that:
 
 - Touch at most one area prefix,
 - Include a suggested file entrypoint (`docs/PROJECT_MAP.md`),
-- Link relevant tests (`cargo test -p …`).
+- Link relevant tests (`cargo nextest run -p …`).
 
 Examples:
 
-- Add regression fixture under `benchmark/binary/` with documented build steps.
+- Add regression fixture in the owning crate's test fixtures with documented build steps.
 - Improve CLI `--help` text or docs linkbacks only.
 
 ## Title hints
@@ -35,5 +35,5 @@ Examples:
 
 ## Related docs
 
-- Semantic ownership vs labels: [`AGENTS.md`](../../AGENTS.md), [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md)
-- Security-sensitive reports: [`SECURITY.md`](../../SECURITY.md) (do **not** drive coordinated disclosure via public issues).
+- Semantic ownership vs labels: [`AGENTS.md`](https://github.com/fission-systems/Fission/blob/main/AGENTS.md), [`docs/PROJECT_MAP.md`](../PROJECT_MAP.md)
+- Security-sensitive reports: [`SECURITY.md`](https://github.com/fission-systems/Fission/blob/main/SECURITY.md) (do **not** drive coordinated disclosure via public issues).

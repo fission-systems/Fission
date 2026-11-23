@@ -36,6 +36,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
     func: &mut PreHirFunction,
     context: &PreviewTypeContext,
     debug_cfa_stack_offset_bias: Option<i64>,
+    pointer_size: u32,
 ) -> usize {
     let Some(hints) = &context.function_hints else {
         return 0;
@@ -77,7 +78,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
         let Some(type_name) = type_name else {
             continue;
         };
-        let Some(array) = parse_surface_array_type(type_name) else {
+        let Some(array) = parse_surface_array_type(type_name, pointer_size) else {
             continue;
         };
         let Some(size) = array.element_size.checked_mul(array.count) else {
@@ -155,7 +156,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
         if is_derived {
             continue;
         }
-        let Some(scalar_size) = binding_byte_size(&binding.ty) else {
+        let Some(scalar_size) = binding_byte_size(&binding.ty, pointer_size) else {
             continue;
         };
         for region in &array_regions {
@@ -208,7 +209,7 @@ pub(super) fn apply_pre_hir_debug_array_hints(
     applied
 }
 
-fn parse_surface_array_type(surface: &str) -> Option<SurfaceArrayType> {
+fn parse_surface_array_type(surface: &str, pointer_size: u32) -> Option<SurfaceArrayType> {
     let surface = surface.trim();
     let open = surface.rfind('[')?;
     let count = surface[open + 1..].strip_suffix(']')?.trim().parse().ok()?;
@@ -216,7 +217,7 @@ fn parse_surface_array_type(surface: &str) -> Option<SurfaceArrayType> {
         return None;
     }
     let base = surface_scalar_type(surface[..open].trim())?;
-    let element_size = binding_byte_size(&base)?;
+    let element_size = binding_byte_size(&base, pointer_size)?;
     Some(SurfaceArrayType {
         element: base,
         element_size,
@@ -314,11 +315,11 @@ fn rewrite_pre_hir_array_base_scalar_stores(
 }
 
 impl StackAliasCollector {
-    pub(super) fn new(func: &HirFunction) -> Self {
+    pub(super) fn new(func: &HirFunction, pointer_size: u32) -> Self {
         let mut boundaries = Vec::new();
         for local in &func.locals {
             if let Some(slot) = AbstractStackSlot::from_binding_origin(local.origin) {
-                if let Some(size) = binding_byte_size(&local.ty) {
+                if let Some(size) = binding_byte_size(&local.ty, pointer_size) {
                     boundaries.push((slot, size as u64));
                 }
             }
@@ -342,6 +343,7 @@ pub(super) fn apply_preview_type_hints(
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
     debug_cfa_stack_offset_bias: Option<i64>,
+    pointer_size: u32,
 ) -> PreviewHintStats {
     let _hints = trace_span!("preview_type_hints", fn_name = %func.name).entered();
     let mut stats =
@@ -349,9 +351,9 @@ pub(super) fn apply_preview_type_hints(
     apply_debug_pointer_type_aliases(func, context);
     stats.local_surface_hits += propagate_pointer_surface_aliases(func);
     preserve_surface_pointer_byte_offsets(func);
-    apply_debug_struct_promotions(func, context, &mut stats);
+    apply_debug_struct_promotions(func, context, &mut stats, pointer_size);
     apply_debug_struct_field_names(func, context, &mut stats);
-    let alias_collector = StackAliasCollector::new(func);
+    let alias_collector = StackAliasCollector::new(func, pointer_size);
 
     let mut pointer_hints: HashMap<String, PreviewCallParamRule> = HashMap::default();
     collect_call_type_hints(&func.body, context, &mut pointer_hints);
@@ -380,6 +382,7 @@ pub(super) fn apply_preview_type_hints(
         &pointer_hints,
         func,
         &alias_collector,
+        pointer_size,
         &mut local_hints,
     );
 
@@ -395,7 +398,7 @@ pub(super) fn apply_preview_type_hints(
         }
     }
 
-    decay_array_addresses_at_typed_calls(func, context);
+    decay_array_addresses_at_typed_calls(func, context, pointer_size);
 
     stats
 }
@@ -501,64 +504,69 @@ fn pointer_alias_type_should_replace(existing: &NirType, recovered: &NirType) ->
     }
 }
 
-fn decay_array_addresses_at_typed_calls(func: &mut HirFunction, context: &PreviewTypeContext) {
+fn decay_array_addresses_at_typed_calls(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+    pointer_size: u32,
+) {
     let arrays = func
         .params
         .iter()
         .chain(func.locals.iter())
         .filter_map(|binding| {
-            parse_surface_array_type(binding.surface_type_name.as_deref()?)
+            parse_surface_array_type(binding.surface_type_name.as_deref()?, pointer_size)
                 .map(|array| (binding.name.clone(), array.element_size))
         })
         .collect::<HashMap<_, _>>();
     if arrays.is_empty() {
         return;
     }
-    decay_array_addresses_in_stmts(&mut func.body, context, &arrays);
+    decay_array_addresses_in_stmts(&mut func.body, context, &arrays, pointer_size);
 }
 
 fn decay_array_addresses_in_stmts(
     body: &mut [HirStmt],
     context: &PreviewTypeContext,
     arrays: &HashMap<String, u32>,
+    pointer_size: u32,
 ) {
     for stmt in body {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
-                decay_array_addresses_in_lvalue(lhs, context, arrays);
-                decay_array_addresses_in_expr(rhs, context, arrays);
+                decay_array_addresses_in_lvalue(lhs, context, arrays, pointer_size);
+                decay_array_addresses_in_expr(rhs, context, arrays, pointer_size);
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                decay_array_addresses_in_expr(expr, context, arrays)
+                decay_array_addresses_in_expr(expr, context, arrays, pointer_size)
             }
             HirStmt::VaStart { va_list, .. } => {
-                decay_array_addresses_in_expr(va_list, context, arrays)
+                decay_array_addresses_in_expr(va_list, context, arrays, pointer_size)
             }
             HirStmt::Block(stmts)
             | HirStmt::While { body: stmts, .. }
             | HirStmt::DoWhile { body: stmts, .. }
             | HirStmt::For { body: stmts, .. } => {
-                decay_array_addresses_in_stmts(stmts, context, arrays)
+                decay_array_addresses_in_stmts(stmts, context, arrays, pointer_size)
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                decay_array_addresses_in_expr(expr, context, arrays);
+                decay_array_addresses_in_expr(expr, context, arrays, pointer_size);
                 for case in cases {
-                    decay_array_addresses_in_stmts(&mut case.body, context, arrays);
+                    decay_array_addresses_in_stmts(&mut case.body, context, arrays, pointer_size);
                 }
-                decay_array_addresses_in_stmts(default, context, arrays);
+                decay_array_addresses_in_stmts(default, context, arrays, pointer_size);
             }
             HirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                decay_array_addresses_in_expr(cond, context, arrays);
-                decay_array_addresses_in_stmts(then_body, context, arrays);
-                decay_array_addresses_in_stmts(else_body, context, arrays);
+                decay_array_addresses_in_expr(cond, context, arrays, pointer_size);
+                decay_array_addresses_in_stmts(then_body, context, arrays, pointer_size);
+                decay_array_addresses_in_stmts(else_body, context, arrays, pointer_size);
             }
             HirStmt::Label(_)
             | HirStmt::Goto(_)
@@ -573,15 +581,20 @@ fn decay_array_addresses_in_lvalue(
     lvalue: &mut HirLValue,
     context: &PreviewTypeContext,
     arrays: &HashMap<String, u32>,
+    pointer_size: u32,
 ) {
     match lvalue {
         HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => decay_array_addresses_in_expr(ptr, context, arrays),
-        HirLValue::Index { base, index, .. } => {
-            decay_array_addresses_in_expr(base, context, arrays);
-            decay_array_addresses_in_expr(index, context, arrays);
+        HirLValue::Deref { ptr, .. } => {
+            decay_array_addresses_in_expr(ptr, context, arrays, pointer_size)
         }
-        HirLValue::FieldAccess { base, .. } => decay_array_addresses_in_expr(base, context, arrays),
+        HirLValue::Index { base, index, .. } => {
+            decay_array_addresses_in_expr(base, context, arrays, pointer_size);
+            decay_array_addresses_in_expr(index, context, arrays, pointer_size);
+        }
+        HirLValue::FieldAccess { base, .. } => {
+            decay_array_addresses_in_expr(base, context, arrays, pointer_size)
+        }
     }
 }
 
@@ -589,11 +602,12 @@ fn decay_array_addresses_in_expr(
     expr: &mut HirExpr,
     context: &PreviewTypeContext,
     arrays: &HashMap<String, u32>,
+    pointer_size: u32,
 ) {
     match expr {
         HirExpr::Call { target, args, .. } => {
             for (index, arg) in args.iter_mut().enumerate() {
-                decay_array_addresses_in_expr(arg, context, arrays);
+                decay_array_addresses_in_expr(arg, context, arrays, pointer_size);
                 let Some(name) = (match arg {
                     HirExpr::AddressOfLocal(name) => Some(name.clone()),
                     _ => None,
@@ -603,7 +617,8 @@ fn decay_array_addresses_in_expr(
                 let Some(array_size) = arrays.get(&name).copied() else {
                     continue;
                 };
-                if call_expects_pointer_to_element(context, target, index, array_size) {
+                if call_expects_pointer_to_element(context, target, index, array_size, pointer_size)
+                {
                     *arg = HirExpr::Var(name);
                 }
             }
@@ -614,11 +629,11 @@ fn decay_array_addresses_in_expr(
         | HirExpr::PtrOffset { base: expr, .. }
         | HirExpr::FieldAccess { base: expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => {
-            decay_array_addresses_in_expr(expr, context, arrays)
+            decay_array_addresses_in_expr(expr, context, arrays, pointer_size)
         }
         HirExpr::Binary { lhs, rhs, .. } => {
-            decay_array_addresses_in_expr(lhs, context, arrays);
-            decay_array_addresses_in_expr(rhs, context, arrays);
+            decay_array_addresses_in_expr(lhs, context, arrays, pointer_size);
+            decay_array_addresses_in_expr(rhs, context, arrays, pointer_size);
         }
         HirExpr::Select {
             cond,
@@ -626,13 +641,13 @@ fn decay_array_addresses_in_expr(
             else_expr,
             ..
         } => {
-            decay_array_addresses_in_expr(cond, context, arrays);
-            decay_array_addresses_in_expr(then_expr, context, arrays);
-            decay_array_addresses_in_expr(else_expr, context, arrays);
+            decay_array_addresses_in_expr(cond, context, arrays, pointer_size);
+            decay_array_addresses_in_expr(then_expr, context, arrays, pointer_size);
+            decay_array_addresses_in_expr(else_expr, context, arrays, pointer_size);
         }
         HirExpr::Index { base, index, .. } => {
-            decay_array_addresses_in_expr(base, context, arrays);
-            decay_array_addresses_in_expr(index, context, arrays);
+            decay_array_addresses_in_expr(base, context, arrays, pointer_size);
+            decay_array_addresses_in_expr(index, context, arrays, pointer_size);
         }
         HirExpr::Var(_)
         | HirExpr::AddressOfGlobal(_)
@@ -646,6 +661,7 @@ fn call_expects_pointer_to_element(
     target: &str,
     arg_index: usize,
     array_size: u32,
+    pointer_size: u32,
 ) -> bool {
     if let Some(summary) = context.call_prototype_summaries.get(target) {
         if let Some(surface) = summary
@@ -653,7 +669,7 @@ fn call_expects_pointer_to_element(
             .get(arg_index)
             .and_then(Option::as_deref)
             && surface.contains('*')
-            && surface_pointee_byte_size(surface) == Some(array_size)
+            && surface_pointee_byte_size(surface, pointer_size) == Some(array_size)
         {
             return true;
         }
@@ -943,6 +959,7 @@ fn apply_debug_struct_promotions(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
     stats: &mut PreviewHintStats,
+    pointer_size: u32,
 ) {
     if context.struct_types.is_empty() {
         return;
@@ -973,7 +990,7 @@ fn apply_debug_struct_promotions(
     extend_with_copy_aliases(&func.body, &mut eligible);
 
     let mut promoted_names: HashSet<String> = HashSet::default();
-    promote_field_access_in_stmts(&mut func.body, &eligible, &mut promoted_names);
+    promote_field_access_in_stmts(&mut func.body, &eligible, pointer_size, &mut promoted_names);
     if promoted_names.is_empty() {
         return;
     }
@@ -1574,7 +1591,7 @@ fn preserve_surface_pointer_byte_offsets_in_expr(
 
 fn surface_pointer_needs_byte_address(surface_type_name: Option<&str>, offset: &HirExpr) -> bool {
     surface_type_name
-        .and_then(surface_pointee_byte_size)
+        .and_then(|decl| surface_pointee_byte_size(decl, 8))
         .is_some_and(|size| size > 1)
         && contains_scaled_integer_offset(offset)
 }
@@ -1631,10 +1648,10 @@ fn byte_pointer_cast(expr: HirExpr) -> HirExpr {
     }
 }
 
-fn surface_pointee_byte_size(declaration: &str) -> Option<u32> {
+fn surface_pointee_byte_size(declaration: &str, pointer_size: u32) -> Option<u32> {
     let (base, stars) = declaration.split_once('*')?;
     if stars.contains('*') {
-        return Some(8);
+        return Some(pointer_size);
     }
     let base = base
         .split_whitespace()
@@ -1664,28 +1681,31 @@ fn surface_pointee_byte_size(declaration: &str) -> Option<u32> {
 fn promote_field_access_in_stmts(
     body: &mut [HirStmt],
     eligible: &HashMap<String, &NirStructTypeHint>,
+    pointer_size: u32,
     promoted: &mut HashSet<String>,
 ) {
     for stmt in body {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
-                promote_field_access_in_lvalue(lhs, eligible, promoted);
-                promote_field_access_in_expr(rhs, eligible, promoted);
+                promote_field_access_in_lvalue(lhs, eligible, pointer_size, promoted);
+                promote_field_access_in_expr(rhs, eligible, pointer_size, promoted);
             }
             HirStmt::VaStart { va_list, .. } => {
-                promote_field_access_in_expr(va_list, eligible, promoted)
+                promote_field_access_in_expr(va_list, eligible, pointer_size, promoted)
             }
             HirStmt::Expr(expr) | HirStmt::Return(Some(expr)) => {
-                promote_field_access_in_expr(expr, eligible, promoted)
+                promote_field_access_in_expr(expr, eligible, pointer_size, promoted)
             }
-            HirStmt::Block(stmts) => promote_field_access_in_stmts(stmts, eligible, promoted),
+            HirStmt::Block(stmts) => {
+                promote_field_access_in_stmts(stmts, eligible, pointer_size, promoted)
+            }
             HirStmt::While { cond, body } => {
-                promote_field_access_in_expr(cond, eligible, promoted);
-                promote_field_access_in_stmts(body, eligible, promoted);
+                promote_field_access_in_expr(cond, eligible, pointer_size, promoted);
+                promote_field_access_in_stmts(body, eligible, pointer_size, promoted);
             }
             HirStmt::DoWhile { body, cond } => {
-                promote_field_access_in_stmts(body, eligible, promoted);
-                promote_field_access_in_expr(cond, eligible, promoted);
+                promote_field_access_in_stmts(body, eligible, pointer_size, promoted);
+                promote_field_access_in_expr(cond, eligible, pointer_size, promoted);
             }
             HirStmt::For {
                 init,
@@ -1697,40 +1717,42 @@ fn promote_field_access_in_stmts(
                     promote_field_access_in_stmts(
                         std::slice::from_mut(init_stmt.as_mut()),
                         eligible,
+                        pointer_size,
                         promoted,
                     );
                 }
                 if let Some(cond_expr) = cond {
-                    promote_field_access_in_expr(cond_expr, eligible, promoted);
+                    promote_field_access_in_expr(cond_expr, eligible, pointer_size, promoted);
                 }
                 if let Some(update_stmt) = update {
                     promote_field_access_in_stmts(
                         std::slice::from_mut(update_stmt.as_mut()),
                         eligible,
+                        pointer_size,
                         promoted,
                     );
                 }
-                promote_field_access_in_stmts(body, eligible, promoted);
+                promote_field_access_in_stmts(body, eligible, pointer_size, promoted);
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                promote_field_access_in_expr(expr, eligible, promoted);
+                promote_field_access_in_expr(expr, eligible, pointer_size, promoted);
                 for case in cases {
-                    promote_field_access_in_stmts(&mut case.body, eligible, promoted);
+                    promote_field_access_in_stmts(&mut case.body, eligible, pointer_size, promoted);
                 }
-                promote_field_access_in_stmts(default, eligible, promoted);
+                promote_field_access_in_stmts(default, eligible, pointer_size, promoted);
             }
             HirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                promote_field_access_in_expr(cond, eligible, promoted);
-                promote_field_access_in_stmts(then_body, eligible, promoted);
-                promote_field_access_in_stmts(else_body, eligible, promoted);
+                promote_field_access_in_expr(cond, eligible, pointer_size, promoted);
+                promote_field_access_in_stmts(then_body, eligible, pointer_size, promoted);
+                promote_field_access_in_stmts(else_body, eligible, pointer_size, promoted);
             }
             HirStmt::Label(_)
             | HirStmt::Goto(_)
@@ -1744,12 +1766,15 @@ fn promote_field_access_in_stmts(
 fn promote_field_access_in_lvalue(
     lvalue: &mut HirLValue,
     eligible: &HashMap<String, &NirStructTypeHint>,
+    pointer_size: u32,
     promoted: &mut HashSet<String>,
 ) {
     match lvalue {
         HirLValue::Var(_) => {}
         HirLValue::Deref { ptr, ty } => {
-            if let Some((base, field_name, offset)) = base_field_at_offset(ptr, ty, eligible) {
+            if let Some((base, field_name, offset)) =
+                base_field_at_offset(ptr, ty, eligible, pointer_size)
+            {
                 *lvalue = HirLValue::FieldAccess {
                     base: Box::new(base),
                     field_name: field_name.clone(),
@@ -1763,7 +1788,7 @@ fn promote_field_access_in_lvalue(
                 }
                 return;
             }
-            promote_field_access_in_expr(ptr, eligible, promoted);
+            promote_field_access_in_expr(ptr, eligible, pointer_size, promoted);
         }
         HirLValue::Index {
             base,
@@ -1776,7 +1801,7 @@ fn promote_field_access_in_lvalue(
                 elem_ty: elem_ty.clone(),
             };
             if let Some((field_base, field_name, offset)) =
-                base_field_at_offset(&index_expr, elem_ty, eligible)
+                base_field_at_offset(&index_expr, elem_ty, eligible, pointer_size)
             {
                 *lvalue = HirLValue::FieldAccess {
                     base: Box::new(field_base),
@@ -1791,11 +1816,11 @@ fn promote_field_access_in_lvalue(
                 }
                 return;
             }
-            promote_field_access_in_expr(base, eligible, promoted);
-            promote_field_access_in_expr(index, eligible, promoted);
+            promote_field_access_in_expr(base, eligible, pointer_size, promoted);
+            promote_field_access_in_expr(index, eligible, pointer_size, promoted);
         }
         HirLValue::FieldAccess { base, .. } => {
-            promote_field_access_in_expr(base, eligible, promoted)
+            promote_field_access_in_expr(base, eligible, pointer_size, promoted)
         }
     }
 }
@@ -1803,11 +1828,14 @@ fn promote_field_access_in_lvalue(
 fn promote_field_access_in_expr(
     expr: &mut HirExpr,
     eligible: &HashMap<String, &NirStructTypeHint>,
+    pointer_size: u32,
     promoted: &mut HashSet<String>,
 ) {
     match expr {
         HirExpr::Load { ptr, ty } => {
-            if let Some((base, field_name, offset)) = base_field_at_offset(ptr, ty, eligible) {
+            if let Some((base, field_name, offset)) =
+                base_field_at_offset(ptr, ty, eligible, pointer_size)
+            {
                 if let HirExpr::Var(name) = &base {
                     promoted.insert(name.clone());
                 }
@@ -1819,7 +1847,7 @@ fn promote_field_access_in_expr(
                 };
                 return;
             }
-            promote_field_access_in_expr(ptr, eligible, promoted);
+            promote_field_access_in_expr(ptr, eligible, pointer_size, promoted);
         }
         HirExpr::Var(_)
         | HirExpr::AddressOfGlobal(_)
@@ -1828,11 +1856,11 @@ fn promote_field_access_in_expr(
         HirExpr::Cast { expr, .. }
         | HirExpr::Unary { expr, .. }
         | HirExpr::AggregateCopy { src: expr, .. } => {
-            promote_field_access_in_expr(expr, eligible, promoted)
+            promote_field_access_in_expr(expr, eligible, pointer_size, promoted)
         }
         HirExpr::Binary { lhs, rhs, .. } => {
-            promote_field_access_in_expr(lhs, eligible, promoted);
-            promote_field_access_in_expr(rhs, eligible, promoted);
+            promote_field_access_in_expr(lhs, eligible, pointer_size, promoted);
+            promote_field_access_in_expr(rhs, eligible, pointer_size, promoted);
         }
         HirExpr::Select {
             cond,
@@ -1840,16 +1868,18 @@ fn promote_field_access_in_expr(
             else_expr,
             ..
         } => {
-            promote_field_access_in_expr(cond, eligible, promoted);
-            promote_field_access_in_expr(then_expr, eligible, promoted);
-            promote_field_access_in_expr(else_expr, eligible, promoted);
+            promote_field_access_in_expr(cond, eligible, pointer_size, promoted);
+            promote_field_access_in_expr(then_expr, eligible, pointer_size, promoted);
+            promote_field_access_in_expr(else_expr, eligible, pointer_size, promoted);
         }
         HirExpr::Call { args, .. } => {
             for arg in args {
-                promote_field_access_in_expr(arg, eligible, promoted);
+                promote_field_access_in_expr(arg, eligible, pointer_size, promoted);
             }
         }
-        HirExpr::PtrOffset { base, .. } => promote_field_access_in_expr(base, eligible, promoted),
+        HirExpr::PtrOffset { base, .. } => {
+            promote_field_access_in_expr(base, eligible, pointer_size, promoted)
+        }
         HirExpr::Index {
             base,
             index,
@@ -1861,7 +1891,7 @@ fn promote_field_access_in_expr(
                 elem_ty: elem_ty.clone(),
             };
             if let Some((field_base, field_name, offset)) =
-                base_field_at_offset(&index_expr, elem_ty, eligible)
+                base_field_at_offset(&index_expr, elem_ty, eligible, pointer_size)
             {
                 if let HirExpr::Var(name) = &field_base {
                     promoted.insert(name.clone());
@@ -1874,10 +1904,12 @@ fn promote_field_access_in_expr(
                 };
                 return;
             }
-            promote_field_access_in_expr(base, eligible, promoted);
-            promote_field_access_in_expr(index, eligible, promoted);
+            promote_field_access_in_expr(base, eligible, pointer_size, promoted);
+            promote_field_access_in_expr(index, eligible, pointer_size, promoted);
         }
-        HirExpr::FieldAccess { base, .. } => promote_field_access_in_expr(base, eligible, promoted),
+        HirExpr::FieldAccess { base, .. } => {
+            promote_field_access_in_expr(base, eligible, pointer_size, promoted)
+        }
     }
 }
 
@@ -1895,6 +1927,7 @@ fn base_field_at_offset<'a>(
     ptr: &HirExpr,
     access_ty: &NirType,
     eligible: &'a HashMap<String, &'a NirStructTypeHint>,
+    pointer_size: u32,
 ) -> Option<(HirExpr, &'a String, u32)> {
     let (base, offset) = match ptr {
         HirExpr::Var(_) => (ptr.clone(), 0i64),
@@ -1915,7 +1948,7 @@ fn base_field_at_offset<'a>(
             let HirExpr::Const(index, _) = index.as_ref() else {
                 return None;
             };
-            let elem_size = i64::from(binding_byte_size(elem_ty)?);
+            let elem_size = i64::from(binding_byte_size(elem_ty, pointer_size)?);
             if *index < 0 {
                 return None;
             }
@@ -1936,7 +1969,7 @@ fn base_field_at_offset<'a>(
     if field.name.is_empty() {
         return None;
     }
-    let access_size = binding_byte_size(access_ty)?;
+    let access_size = binding_byte_size(access_ty, pointer_size)?;
     if field.size != 0 && access_size > field.size {
         return None;
     }
@@ -2308,6 +2341,7 @@ pub(super) fn collect_local_surface_hints(
     pointer_hints: &HashMap<String, PreviewCallParamRule>,
     func: &HirFunction,
     alias_collector: &StackAliasCollector,
+    pointer_size: u32,
     local_hints: &mut HashMap<String, String>,
 ) {
     for stmt in body {
@@ -2331,7 +2365,7 @@ pub(super) fn collect_local_surface_hints(
                             .iter()
                             .any(|&size| alias_collector.might_alias(offset, size)),
                         // Synthetic/test locals may not carry stack-origin metadata.
-                        None => binding_byte_size(&local_binding.ty)
+                        None => binding_byte_size(&local_binding.ty, pointer_size)
                             .map(|size| rule.pointee_sizes.iter().any(|&expected| expected == size))
                             .unwrap_or(false),
                     };
@@ -2351,6 +2385,7 @@ pub(super) fn collect_local_surface_hints(
                     pointer_hints,
                     func,
                     alias_collector,
+                    pointer_size,
                     local_hints,
                 );
             }
@@ -2361,6 +2396,7 @@ pub(super) fn collect_local_surface_hints(
                         pointer_hints,
                         func,
                         alias_collector,
+                        pointer_size,
                         local_hints,
                     );
                 }
@@ -2369,6 +2405,7 @@ pub(super) fn collect_local_surface_hints(
                     pointer_hints,
                     func,
                     alias_collector,
+                    pointer_size,
                     local_hints,
                 );
             }
@@ -2382,6 +2419,7 @@ pub(super) fn collect_local_surface_hints(
                     pointer_hints,
                     func,
                     alias_collector,
+                    pointer_size,
                     local_hints,
                 );
                 collect_local_surface_hints(
@@ -2389,6 +2427,7 @@ pub(super) fn collect_local_surface_hints(
                     pointer_hints,
                     func,
                     alias_collector,
+                    pointer_size,
                     local_hints,
                 );
             }
@@ -2443,11 +2482,11 @@ fn find_binding_mut<'a>(func: &'a mut HirFunction, name: &str) -> Option<&'a mut
     func.locals.iter_mut().find(|binding| binding.name == name)
 }
 
-fn binding_byte_size(ty: &NirType) -> Option<u32> {
+fn binding_byte_size(ty: &NirType, pointer_size: u32) -> Option<u32> {
     match ty {
         NirType::Bool => Some(1),
         NirType::Int { bits, .. } => Some(bits / 8),
-        NirType::Ptr(_) => Some(8),
+        NirType::Ptr(_) => Some(pointer_size),
         NirType::Aggregate { size, .. } => Some(*size),
         NirType::Float { bits } => Some(bits / 8),
         NirType::Unknown => None,

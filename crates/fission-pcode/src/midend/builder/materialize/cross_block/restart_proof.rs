@@ -215,7 +215,7 @@ impl<'a> PreviewBuilder<'a> {
         let def_op = block.ops.get(op_idx)?;
         let old_def_has_pre_redef_use =
             !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
-        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let def_block_idx = self.block_position(block)?;
         let redef_dominates_consumer = self.dom_tree.dominates(def_block_idx, consumer_block_idx)
             && self
                 .block_terminator_index(block)
@@ -266,7 +266,7 @@ impl<'a> PreviewBuilder<'a> {
                 })?;
         let old_def_has_pre_redef_use =
             !Self::collect_output_use_sites_in_block(block, op_idx, output).is_empty();
-        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let def_block_idx = self.block_position(block)?;
         let redef_dominates_predicate = self.dom_tree.dominates(def_block_idx, consumer_block_idx)
             && self
                 .block_terminator_index(block)

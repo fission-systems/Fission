@@ -96,8 +96,15 @@ pub(crate) fn apply_spec_overrides(binary: &LoadedBinary, options: &mut NirRende
 
 #[cfg(test)]
 mod tests {
-    use super::apply_spec_overrides;
-    use fission_loader::loader::LoadedBinary;
+    use super::{apply_spec_overrides, finish_rust_sleigh_render};
+    use crate::engine::NirEngineMode;
+    use crate::rust_sleigh::{RustSleighDecompileConfig, RustSleighPipelineEvidence};
+    use crate::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode};
+    use fission_core::architecture::{
+        BinaryLoadSpec, CompilerSpecId, GhidraLanguageId, LanguageCompilerSpecPair,
+    };
+    use fission_loader::loader::{DataBuffer, LoadedBinary, LoadedBinaryBuilder};
+    use fission_static::analysis::decomp::facts::FactStore;
 
     #[test]
     fn apply_spec_overrides_carries_alloca_probe_targets_into_render_options() {
@@ -118,6 +125,73 @@ mod tests {
             "Windows x64 cspec alloca_probe targets were not propagated: {:?}; load spec: {:?}",
             options.cspec_alloca_probe_targets,
             binary.load_spec().map(|spec| &spec.pair)
+        );
+    }
+
+    #[test]
+    fn finish_rust_sleigh_render_falls_back_to_pcode_dump_on_nir_architecture_unsupported() {
+        let load_spec = BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x1000,
+            pair: LanguageCompilerSpecPair {
+                language_id: GhidraLanguageId("x86:LE:32:default".to_string()),
+                compiler_spec_id: CompilerSpecId("default".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+        let binary =
+            LoadedBinaryBuilder::new("elf32.bin".to_string(), DataBuffer::Heap(vec![0xc3; 0x20]))
+                .format("ELF")
+                .is_64bit(false)
+                .load_spec(load_spec)
+                .build()
+                .expect("build 32-bit ELF fixture");
+        let pcode = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: Vec::new(),
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1000,
+                    output: None,
+                    inputs: Vec::new(),
+                    asm_mnemonic: Some("RET".to_string()),
+                }],
+            }],
+        };
+        let config = RustSleighDecompileConfig {
+            nir_mode: NirEngineMode::Nir,
+            pe_x64_only: true,
+            ..RustSleighDecompileConfig::cli_defaults()
+        };
+        let mut evidence = RustSleighPipelineEvidence::new(0x1000, 0x20, 64);
+        let result = finish_rust_sleigh_render(
+            &binary,
+            &FactStore::default(),
+            0x1000,
+            "sub_1000",
+            &config,
+            &pcode,
+            Default::default(),
+            &mut evidence,
+        )
+        .expect("unsupported architecture should fall back to pcode dump rather than failing");
+
+        assert!(result.fell_back);
+        assert_eq!(
+            result.fallback_reason.as_deref(),
+            Some("nir_unsupported_arch:pcode_dump")
+        );
+        assert_eq!(
+            result
+                .evidence
+                .pipeline_stage_status
+                .get("nir_render")
+                .map(String::as_str),
+            Some("pcode_dump_arch_unsupported")
         );
     }
 }
@@ -177,7 +251,7 @@ pub(crate) fn finish_rust_sleigh_render(
     let is_unsupported_arch = lower.contains("unsupported architecture in mlil-preview")
         || matches!(
             selection.fallback_kind_refined,
-            Some("preview_architecture_unsupported")
+            Some("nir_architecture_unsupported" | "preview_architecture_unsupported")
         );
     if is_unsupported_arch {
         evidence

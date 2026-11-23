@@ -224,6 +224,8 @@ pub fn build_cfg_blocks_with_hints(
         false,
     );
 
+    let inner_exits =
+        inner_conditional_exit_ops(&ops, reachable_instruction_addresses, instruction_lengths);
     let leaders = snapshot.block_starts;
     let leader_to_index: HashMap<u64, u32> = leaders
         .iter()
@@ -267,7 +269,180 @@ pub fn build_cfg_blocks_with_hints(
         block.successors.dedup();
     }
 
-    blocks
+    split_blocks_at_inner_conditional_exits(blocks, &inner_exits)
+}
+
+/// `CBranch` ops that leave their instruction for its fall-through while the
+/// rest of the instruction goes on to another control exit.
+///
+/// x86's repeat prefix is the common case: `rep stosq` lowers to
+/// `if (rcx == 0) goto inst_next; rcx--; store; goto inst_start`. The
+/// conditional branch to `inst_next` is the loop's exit and the trailing
+/// branch is its back edge, so the instruction has two control exits in one
+/// block. A block can have only one terminator: downstream, the conditional
+/// one was read as a guarded skip to the end of the block (the cmov shape),
+/// which leaves the back edge as the only successor and turns the loop into
+/// `while (1)` with no way out -- every statement after it unreachable.
+///
+/// Keyed by `(address, seq_num)`, the identity a lifted op keeps, and mapped
+/// to the fall-through address the branch exits to.
+fn inner_conditional_exit_ops(
+    ops: &[PcodeOp],
+    reachable_instruction_addresses: &[u64],
+    instruction_lengths: &BTreeMap<u64, u64>,
+) -> BTreeMap<(u64, u32), u64> {
+    let mut ops_by_addr: HashMap<u64, Vec<&PcodeOp>> = HashMap::new();
+    for op in ops {
+        ops_by_addr.entry(op.address).or_default().push(op);
+    }
+    let op_seq_to_idx = build_op_index_maps(ops);
+    let mut exits = BTreeMap::new();
+    for &addr in reachable_instruction_addresses {
+        let Some(ops_at) = ops_by_addr.get(&addr) else {
+            continue;
+        };
+        let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) else {
+            continue;
+        };
+        for (pos, op) in ops_at.iter().enumerate() {
+            if op.opcode != PcodeOpcode::CBranch
+                || pos + 1 >= ops_at.len()
+                || targets_own_instruction_internally(op, ops, &op_seq_to_idx)
+                || control_op_branch_target_address(op, ops, &op_seq_to_idx) != Some(fallthrough)
+            {
+                continue;
+            }
+            if cbranch_equal_target_is_cfg_split(
+                op,
+                fallthrough,
+                ops_at,
+                ops,
+                &op_seq_to_idx,
+                instruction_lengths,
+            ) {
+                exits.insert((op.address, op.seq_num), fallthrough);
+            }
+        }
+    }
+    exits
+}
+
+/// End a block at each op in `inner_exits`, the way Ghidra ends a p-code
+/// basic block at every branch whether or not it is the last op of its
+/// instruction.
+///
+/// The piece before the split exits to the fall-through block or continues
+/// into the next piece; the last piece keeps the original block's successors
+/// except the fall-through, which only the split branch reached, when it ends
+/// in an unconditional exit of its own. A later piece starts at its split
+/// instruction's address; when that instruction opens the block (a repeat
+/// prefix, whose back edge targets it) the pieces share the address, and an
+/// address-keyed branch still lands on the first piece -- the exit test.
+/// Pieces stay adjacent so layout order is preserved.
+fn split_blocks_at_inner_conditional_exits(
+    blocks: Vec<PcodeBasicBlock>,
+    inner_exits: &BTreeMap<(u64, u32), u64>,
+) -> Vec<PcodeBasicBlock> {
+    if inner_exits.is_empty() {
+        return blocks;
+    }
+    let mut first_by_start: HashMap<u64, u32> = HashMap::new();
+    for block in &blocks {
+        first_by_start
+            .entry(block.start_address)
+            .or_insert(block.index);
+    }
+
+    // Split each block's ops into pieces, remembering for each non-final
+    // piece the address its trailing CBranch exits to.
+    let mut pieces_per_block: Vec<Vec<(Vec<PcodeOp>, Option<u64>)>> = Vec::new();
+    for block in &blocks {
+        let mut pieces = Vec::new();
+        let mut current = Vec::new();
+        let last = block.ops.len().saturating_sub(1);
+        for (idx, op) in block.ops.iter().enumerate() {
+            let exit_target = (idx < last)
+                .then(|| inner_exits.get(&(op.address, op.seq_num)).copied())
+                .flatten();
+            current.push(op.clone());
+            if exit_target.is_some() {
+                pieces.push((std::mem::take(&mut current), exit_target));
+            }
+        }
+        pieces.push((current, None));
+        pieces_per_block.push(pieces);
+    }
+    if pieces_per_block.iter().all(|pieces| pieces.len() == 1) {
+        return blocks;
+    }
+
+    let mut new_first = Vec::with_capacity(blocks.len());
+    let mut next_index = 0u32;
+    for pieces in &pieces_per_block {
+        new_first.push(next_index);
+        next_index += pieces.len() as u32;
+    }
+    let remap = |old: u32| new_first.get(old as usize).copied();
+    let new_index_for_start = |address: u64| {
+        first_by_start
+            .get(&address)
+            .and_then(|&old| new_first.get(old as usize).copied())
+    };
+
+    let mut out = Vec::with_capacity(next_index as usize);
+    for (block, pieces) in blocks.into_iter().zip(pieces_per_block) {
+        let base = new_first[block.index as usize];
+        let piece_count = pieces.len();
+        let mapped_successors: Vec<u32> = block
+            .successors
+            .iter()
+            .filter_map(|&succ| remap(succ))
+            .collect();
+        let mut exit_targets = Vec::new();
+        for (offset, (ops, exit_target)) in pieces.into_iter().enumerate() {
+            let index = base + offset as u32;
+            let mut successors = Vec::new();
+            if offset + 1 < piece_count {
+                if let Some(target) = exit_target.and_then(new_index_for_start) {
+                    exit_targets.push(target);
+                    push_successor(&mut successors, target);
+                }
+                push_successor(&mut successors, index + 1);
+            } else {
+                let ends_in_exit = ops.last().is_some_and(|op| {
+                    matches!(
+                        op.opcode,
+                        PcodeOpcode::Branch | PcodeOpcode::BranchInd | PcodeOpcode::Return
+                    )
+                });
+                for &succ in &mapped_successors {
+                    if ends_in_exit && exit_targets.contains(&succ) {
+                        continue;
+                    }
+                    push_successor(&mut successors, succ);
+                }
+            }
+            successors.sort_unstable();
+            successors.dedup();
+            // A piece starts where its first op's instruction starts: the
+            // original block's start for the first piece, the split
+            // instruction's address for the rest (the same address when the
+            // split instruction opens the block, as a repeat prefix's
+            // back-edge target does).
+            let start_address = if offset == 0 {
+                block.start_address
+            } else {
+                ops.first().map_or(block.start_address, |op| op.address)
+            };
+            out.push(PcodeBasicBlock {
+                index,
+                start_address,
+                successors,
+                ops,
+            });
+        }
+    }
+    out
 }
 
 /// Convenience wrapper for unit tests that only provide flattened pcode ops.
@@ -370,9 +545,14 @@ fn control_op_splits_instruction_cfg(
                 .or_else(|| direct_control_target_with_symbolic_internal_label(op));
             match branch_target {
                 Some(target) if target != fallthrough => true,
-                Some(_) if op.opcode == PcodeOpcode::CBranch => {
-                    cbranch_equal_target_is_cfg_split(op.address, fallthrough, ops_at)
-                }
+                Some(_) if op.opcode == PcodeOpcode::CBranch => cbranch_equal_target_is_cfg_split(
+                    op,
+                    fallthrough,
+                    ops_at,
+                    ops,
+                    op_seq_to_idx,
+                    instruction_lengths,
+                ),
                 Some(_) => false,
                 None => true,
             }
@@ -381,22 +561,26 @@ fn control_op_splits_instruction_cfg(
     }
 }
 
-fn instruction_cfg_control_terminator<'a>(
+fn instruction_cfg_split_ops<'a>(
     ops_at: &[&'a PcodeOp],
     ops: &[PcodeOp],
     op_seq_to_idx: &HashMap<(u64, u32), usize>,
     instruction_lengths: &BTreeMap<u64, u64>,
-) -> Option<&'a PcodeOp> {
-    ops_at.iter().copied().find(|op| {
-        is_cfg_split_opcode(op.opcode)
-            && control_op_splits_instruction_cfg(
-                op,
-                ops,
-                ops_at,
-                op_seq_to_idx,
-                instruction_lengths,
-            )
-    })
+) -> Vec<&'a PcodeOp> {
+    ops_at
+        .iter()
+        .copied()
+        .filter(|op| {
+            is_cfg_split_opcode(op.opcode)
+                && control_op_splits_instruction_cfg(
+                    op,
+                    ops,
+                    ops_at,
+                    op_seq_to_idx,
+                    instruction_lengths,
+                )
+        })
+        .collect()
 }
 
 fn instruction_control_terminator<'a>(ops: &[&'a PcodeOp]) -> Option<&'a PcodeOp> {
@@ -408,20 +592,41 @@ fn instruction_control_terminator<'a>(ops: &[&'a PcodeOp]) -> Option<&'a PcodeOp
         .find(|op| is_cfg_split_opcode(op.opcode))
 }
 
-fn cbranch_shares_instruction_with_return(ops_at: &[&PcodeOp]) -> bool {
-    let Some(cbranch_idx) = ops_at
-        .iter()
-        .position(|op| op.opcode == PcodeOpcode::CBranch)
-    else {
+fn cbranch_shares_instruction_with_control_exit(
+    cbranch_op: &PcodeOp,
+    ops_at: &[&PcodeOp],
+    ops: &[PcodeOp],
+    op_seq_to_idx: &HashMap<(u64, u32), usize>,
+    instruction_lengths: &BTreeMap<u64, u64>,
+) -> bool {
+    let Some(cbranch_idx) = ops_at.iter().position(|op| std::ptr::eq(*op, cbranch_op)) else {
         return false;
     };
-    ops_at[cbranch_idx..]
-        .iter()
-        .any(|op| op.opcode == PcodeOpcode::Return)
+    ops_at[cbranch_idx + 1..].iter().any(|op| match op.opcode {
+        PcodeOpcode::Return | PcodeOpcode::BranchInd => true,
+        PcodeOpcode::Branch => {
+            control_op_splits_instruction_cfg(op, ops, ops_at, op_seq_to_idx, instruction_lengths)
+        }
+        _ => false,
+    })
 }
 
-fn cbranch_equal_target_is_cfg_split(addr: u64, fallthrough: u64, ops_at: &[&PcodeOp]) -> bool {
-    fallthrough != addr && cbranch_shares_instruction_with_return(ops_at)
+fn cbranch_equal_target_is_cfg_split(
+    cbranch_op: &PcodeOp,
+    fallthrough: u64,
+    ops_at: &[&PcodeOp],
+    ops: &[PcodeOp],
+    op_seq_to_idx: &HashMap<(u64, u32), usize>,
+    instruction_lengths: &BTreeMap<u64, u64>,
+) -> bool {
+    fallthrough != cbranch_op.address
+        && cbranch_shares_instruction_with_control_exit(
+            cbranch_op,
+            ops_at,
+            ops,
+            op_seq_to_idx,
+            instruction_lengths,
+        )
 }
 
 fn leader_for_target(target: u64, leaders: &[u64], reachable: &BTreeSet<u64>) -> Option<u64> {
@@ -508,55 +713,60 @@ pub fn build_instruction_cfg_snapshot(
             }
         }
 
-        let Some(term) =
-            instruction_cfg_control_terminator(ops_at, ops, &op_seq_to_idx, instruction_lengths)
-        else {
-            continue;
-        };
-
-        match term.opcode {
-            PcodeOpcode::Branch => {
-                if let Some(target) = control_op_branch_target_address(term, ops, &op_seq_to_idx) {
-                    leaders.insert(target);
-                }
-            }
-            PcodeOpcode::CBranch => {
-                let branch_target = control_op_branch_target_address(term, ops, &op_seq_to_idx);
-                if let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) {
-                    if branch_target != Some(fallthrough) {
-                        if let Some(target) = branch_target {
-                            leaders.insert(target);
-                        }
-                        if reachable.contains(&fallthrough) {
-                            leaders.insert(fallthrough);
-                        }
-                    } else if cbranch_equal_target_is_cfg_split(addr, fallthrough, ops_at) {
-                        if reachable.contains(&fallthrough) {
-                            leaders.insert(fallthrough);
-                        }
+        for term in instruction_cfg_split_ops(ops_at, ops, &op_seq_to_idx, instruction_lengths) {
+            match term.opcode {
+                PcodeOpcode::Branch => {
+                    if let Some(target) =
+                        control_op_branch_target_address(term, ops, &op_seq_to_idx)
+                    {
+                        leaders.insert(target);
                     }
-                } else if let Some(target) = branch_target {
-                    leaders.insert(target);
                 }
-            }
-            PcodeOpcode::BranchInd => {
-                if !stop_at_indirect_branch {
-                    if let Some(targets) = inferred_indirect_edges.get(&addr) {
-                        for target in targets {
+                PcodeOpcode::CBranch => {
+                    let branch_target = control_op_branch_target_address(term, ops, &op_seq_to_idx);
+                    if let Some(fallthrough) = instruction_fallthrough(addr, instruction_lengths) {
+                        if branch_target != Some(fallthrough) {
+                            if let Some(target) = branch_target {
+                                leaders.insert(target);
+                            }
+                            if reachable.contains(&fallthrough) {
+                                leaders.insert(fallthrough);
+                            }
+                        } else if cbranch_equal_target_is_cfg_split(
+                            term,
+                            fallthrough,
+                            ops_at,
+                            ops,
+                            &op_seq_to_idx,
+                            instruction_lengths,
+                        ) {
+                            if reachable.contains(&fallthrough) {
+                                leaders.insert(fallthrough);
+                            }
+                        }
+                    } else if let Some(target) = branch_target {
+                        leaders.insert(target);
+                    }
+                }
+                PcodeOpcode::BranchInd => {
+                    if !stop_at_indirect_branch {
+                        if let Some(targets) = inferred_indirect_edges.get(&addr) {
+                            for target in targets {
+                                if reachable.contains(target) {
+                                    leaders.insert(*target);
+                                }
+                            }
+                        }
+                        for target in indirect_targets {
                             if reachable.contains(target) {
                                 leaders.insert(*target);
                             }
                         }
                     }
-                    for target in indirect_targets {
-                        if reachable.contains(target) {
-                            leaders.insert(*target);
-                        }
-                    }
                 }
+                PcodeOpcode::Return => {}
+                _ => {}
             }
-            PcodeOpcode::Return => {}
-            _ => {}
         }
     }
 
@@ -597,42 +807,49 @@ pub fn build_instruction_cfg_snapshot(
                     }
                 }
             }
-            if let Some(term) =
-                instruction_cfg_control_terminator(ops_at, ops, &op_seq_to_idx, instruction_lengths)
-            {
-                match term.opcode {
-                    PcodeOpcode::Branch => {
-                        if let Some(target) =
-                            control_op_branch_target_address(term, ops, &op_seq_to_idx)
-                        {
-                            if let Some(dst) = leader_for_target(target, &block_starts, &reachable)
+            let split_ops =
+                instruction_cfg_split_ops(ops_at, ops, &op_seq_to_idx, instruction_lengths);
+            if !split_ops.is_empty() {
+                for term in split_ops {
+                    match term.opcode {
+                        PcodeOpcode::Branch => {
+                            if let Some(target) =
+                                control_op_branch_target_address(term, ops, &op_seq_to_idx)
                             {
-                                successors.push(dst);
-                            }
-                        }
-                    }
-                    PcodeOpcode::CBranch => {
-                        let branch_target =
-                            control_op_branch_target_address(term, ops, &op_seq_to_idx);
-                        if let Some(fallthrough) =
-                            instruction_fallthrough(last_addr, instruction_lengths)
-                        {
-                            if branch_target != Some(fallthrough) {
-                                if let Some(target) = branch_target {
-                                    if let Some(dst) =
-                                        leader_for_target(target, &block_starts, &reachable)
-                                    {
-                                        successors.push(dst);
-                                    }
-                                }
                                 if let Some(dst) =
-                                    leader_for_target(fallthrough, &block_starts, &reachable)
+                                    leader_for_target(target, &block_starts, &reachable)
                                 {
                                     successors.push(dst);
                                 }
-                            } else if let Some(ops_at) = ops_by_addr.get(&last_addr) {
-                                if cbranch_equal_target_is_cfg_split(last_addr, fallthrough, ops_at)
-                                {
+                            }
+                        }
+                        PcodeOpcode::CBranch => {
+                            let branch_target =
+                                control_op_branch_target_address(term, ops, &op_seq_to_idx);
+                            if let Some(fallthrough) =
+                                instruction_fallthrough(last_addr, instruction_lengths)
+                            {
+                                if branch_target != Some(fallthrough) {
+                                    if let Some(target) = branch_target {
+                                        if let Some(dst) =
+                                            leader_for_target(target, &block_starts, &reachable)
+                                        {
+                                            successors.push(dst);
+                                        }
+                                    }
+                                    if let Some(dst) =
+                                        leader_for_target(fallthrough, &block_starts, &reachable)
+                                    {
+                                        successors.push(dst);
+                                    }
+                                } else if cbranch_equal_target_is_cfg_split(
+                                    term,
+                                    fallthrough,
+                                    ops_at,
+                                    ops,
+                                    &op_seq_to_idx,
+                                    instruction_lengths,
+                                ) {
                                     if let Some(dst) =
                                         leader_for_target(fallthrough, &block_starts, &reachable)
                                     {
@@ -645,30 +862,7 @@ pub fn build_instruction_cfg_snapshot(
                                     // an instruction-level CFG split, but execution still falls through.
                                     successors.push(dst);
                                 }
-                            }
-                        } else if let Some(target) = branch_target {
-                            if let Some(dst) = leader_for_target(target, &block_starts, &reachable)
-                            {
-                                successors.push(dst);
-                            }
-                        }
-                    }
-                    PcodeOpcode::Return => {}
-                    PcodeOpcode::BranchInd => {
-                        if !stop_at_indirect_branch {
-                            let mut indirect = inferred_indirect_edges
-                                .get(&last_addr)
-                                .cloned()
-                                .unwrap_or_default();
-                            indirect.extend(
-                                indirect_targets
-                                    .iter()
-                                    .copied()
-                                    .filter(|target| reachable.contains(target)),
-                            );
-                            indirect.sort_unstable();
-                            indirect.dedup();
-                            for target in indirect {
+                            } else if let Some(target) = branch_target {
                                 if let Some(dst) =
                                     leader_for_target(target, &block_starts, &reachable)
                                 {
@@ -676,16 +870,40 @@ pub fn build_instruction_cfg_snapshot(
                                 }
                             }
                         }
-                    }
-                    _ => {
-                        if !noreturn.contains(&last_addr) {
-                            if let Some(fallthrough) =
-                                instruction_fallthrough(last_addr, instruction_lengths)
-                            {
-                                if let Some(dst) =
-                                    leader_for_target(fallthrough, &block_starts, &reachable)
+                        PcodeOpcode::Return => {}
+                        PcodeOpcode::BranchInd => {
+                            if !stop_at_indirect_branch {
+                                let mut indirect = inferred_indirect_edges
+                                    .get(&last_addr)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                indirect.extend(
+                                    indirect_targets
+                                        .iter()
+                                        .copied()
+                                        .filter(|target| reachable.contains(target)),
+                                );
+                                indirect.sort_unstable();
+                                indirect.dedup();
+                                for target in indirect {
+                                    if let Some(dst) =
+                                        leader_for_target(target, &block_starts, &reachable)
+                                    {
+                                        successors.push(dst);
+                                    }
+                                }
+                            }
+                        }
+                        _ => {
+                            if !noreturn.contains(&last_addr) {
+                                if let Some(fallthrough) =
+                                    instruction_fallthrough(last_addr, instruction_lengths)
                                 {
-                                    successors.push(dst);
+                                    if let Some(dst) =
+                                        leader_for_target(fallthrough, &block_starts, &reachable)
+                                    {
+                                        successors.push(dst);
+                                    }
                                 }
                             }
                         }
@@ -952,5 +1170,279 @@ mod instruction_cfg_tests {
             !snapshot.exit_blocks.contains(&entry),
             "entry must not be an exit block when it has a branch successor"
         );
+    }
+
+    #[test]
+    fn instruction_cfg_predicated_direct_branch_keeps_fallthrough_and_target_edges() {
+        let entry = 0x1000u64;
+        let fallthrough = 0x1004u64;
+        let target = 0x1008u64;
+        let reachable = vec![entry, fallthrough, target];
+        let lengths = BTreeMap::from([(entry, 4), (fallthrough, 4), (target, 4)]);
+        let cond = Varnode {
+            space_id: 2,
+            offset: 0x10,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let ram_target = |addr| Varnode {
+            space_id: 3,
+            offset: addr,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::CBranch,
+                address: entry,
+                output: None,
+                inputs: vec![ram_target(fallthrough), cond],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Branch,
+                address: entry,
+                output: None,
+                inputs: vec![ram_target(target)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: fallthrough,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Return,
+                address: target,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &InstructionCfgHints::default(),
+            true,
+        );
+
+        assert_eq!(snapshot.block_starts, vec![entry, fallthrough, target]);
+        assert!(
+            snapshot
+                .edges
+                .iter()
+                .any(|edge| edge.from == entry && edge.to == fallthrough),
+            "expected fallthrough edge to {fallthrough:#x}, got {:?}",
+            snapshot.edges
+        );
+        assert!(
+            snapshot
+                .edges
+                .iter()
+                .any(|edge| edge.from == entry && edge.to == target),
+            "expected taken branch edge to {target:#x}, got {:?}",
+            snapshot.edges
+        );
+    }
+
+    #[test]
+    fn instruction_cfg_predicated_indirect_branch_keeps_fallthrough_and_indirect_edges() {
+        let entry = 0x1000u64;
+        let fallthrough = 0x1004u64;
+        let case_a = 0x1008u64;
+        let case_b = 0x100cu64;
+        let reachable = vec![entry, fallthrough, case_a, case_b];
+        let lengths = BTreeMap::from([(entry, 4), (fallthrough, 4), (case_a, 4), (case_b, 4)]);
+        let reg = Varnode {
+            space_id: 2,
+            offset: 0x10,
+            size: 4,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::CBranch,
+                address: entry,
+                output: None,
+                inputs: vec![
+                    Varnode {
+                        space_id: 3,
+                        offset: fallthrough,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                    Varnode {
+                        space_id: 2,
+                        offset: 0x14,
+                        size: 1,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                ],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::BranchInd,
+                address: entry,
+                output: None,
+                inputs: vec![reg],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: fallthrough,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 3,
+                opcode: PcodeOpcode::Return,
+                address: case_a,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 4,
+                opcode: PcodeOpcode::Return,
+                address: case_b,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+        let inferred = BTreeMap::from([(entry, vec![case_a, case_b])]);
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &inferred,
+            &InstructionCfgHints::default(),
+            false,
+        );
+
+        assert_eq!(
+            snapshot.block_starts,
+            vec![entry, fallthrough, case_a, case_b]
+        );
+        for expected in [fallthrough, case_a, case_b] {
+            assert!(
+                snapshot
+                    .edges
+                    .iter()
+                    .any(|edge| edge.from == entry && edge.to == expected),
+                "expected edge from {entry:#x} to {expected:#x}, got {:?}",
+                snapshot.edges
+            );
+        }
+
+        let stopped = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &inferred,
+            &InstructionCfgHints::default(),
+            true,
+        );
+        assert!(
+            stopped
+                .edges
+                .iter()
+                .any(|edge| edge.from == entry && edge.to == fallthrough),
+            "expected fallthrough edge even when stop_at_indirect_branch=true, got {:?}",
+            stopped.edges
+        );
+    }
+
+    #[test]
+    fn instruction_cfg_predicated_non_control_instruction_still_does_not_split() {
+        let entry = 0x1000u64;
+        let fallthrough = 0x1004u64;
+        let reachable = vec![entry, fallthrough];
+        let lengths = BTreeMap::from([(entry, 4), (fallthrough, 4)]);
+        let ops = vec![
+            PcodeOp {
+                seq_num: 0,
+                opcode: PcodeOpcode::CBranch,
+                address: entry,
+                output: None,
+                inputs: vec![
+                    Varnode {
+                        space_id: 3,
+                        offset: fallthrough,
+                        size: 4,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                    Varnode {
+                        space_id: 2,
+                        offset: 0x14,
+                        size: 1,
+                        is_constant: false,
+                        constant_val: 0,
+                    },
+                ],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: entry,
+                output: Some(Varnode {
+                    space_id: 2,
+                    offset: 0,
+                    size: 4,
+                    is_constant: false,
+                    constant_val: 0,
+                }),
+                inputs: vec![const_vn(1)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: fallthrough,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+
+        let snapshot = build_instruction_cfg_snapshot(
+            entry,
+            &reachable,
+            &lengths,
+            &ops,
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+            &InstructionCfgHints::default(),
+            true,
+        );
+        assert_eq!(snapshot.block_starts, vec![entry]);
+        assert!(snapshot.edges.is_empty());
     }
 }

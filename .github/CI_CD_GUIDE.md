@@ -1,330 +1,48 @@
-# CI/CD Pipeline User Guide
+# CI and CD operator guide
 
-## Overview
+[CI and release gates](../docs/CI_RELEASE_GATES.md) defines the gate policy.
+The workflow files and the [change classifier](../scripts/ci/change_plan.py)
+define which jobs run.
 
-Fission's CI/CD pipeline is designed with **standardization**, **reusability**, and **scalability** at its core.
+| When | Workflow | What to check |
+|---|---|---|
+| Pull request, merge group, or main push | [CI](workflows/ci.yml) | Check `Detect changes` for the event's base/head and selected lanes. Check `CI Summary` for the result of every required lane. |
+| Scheduled or manual extended validation | [CI Heavy Validation](workflows/ci-heavy.yml) | Check `Heavy Validation Summary` for platform builds and tests, feature compilation, coverage, and advisories. |
+| Scheduled or manual corpus validation | [DecBench sweep](workflows/decbench-sweep.yml) | Check shard coverage and compare with a compatible main run. Use the [DecBench guide](../docs/BENCHMARK_DECBENCH.md) to interpret artifacts. |
+| Scheduled or manual diagnostic checks | [Decompiler determinism](workflows/determinism.yml) and [Fuzz](workflows/fuzz.yml) | Check the job summary and any associated `ci-red` issue on main. |
+| Intentional release | [Release Tag (CI green)](workflows/release-tag.yml) | Follow the [release checklist](../docs/RELEASE.md). |
 
----
+For a red required check, open its failed job, then inspect the first failing
+step. The last failure in the run may be `CI Summary` reporting another job's
+failure. A skipped lane is expected when its change-plan flag is disabled.
 
-## Quick Start
-
-### CI/CD Pipeline Architecture
-
-```
-┌─────────────────────────────────────────┐
-│  Reusable workflows                     │
-│  (.github/workflows/reusable-*.yml)    │
-│  GitHub requires workflow_call files    │
-│  at the workflows directory root        │
-│                                         │
-│  - reusable-setup-rust.yml             │
-│  - reusable-security-check.yml        │
-│  - reusable-lint-format.yml           │
-│  - reusable-run-tests.yml             │
-│  - reusable-cli-smoke.yml              │
-│  - reusable-build-cli.yml             │
-│  - reusable-coverage.yml              │
-│  - reusable-miri.yml                  │
-│  - reusable-msrv.yml                  │
-│  - reusable-upload-artifacts.yml       │
-└─────────────────────────────────────────┘
-         ↓ (uses)
-┌─────────────────────────────────────────┐
-│  Main Workflows                         │
-│  (.github/workflows/)                   │
-│                                         │
-│  - ci.yml (Fast Gate · L0)             │
-│  - ci-heavy.yml (Heavy · L1)           │
-│  - release-e2e.yml (Release E2E · L2)  │
-│  - release-tag.yml (verify and publish)   │
-│  - cd.yml (candidate packages)            │
-│  - ci-cd-monitor.yml (Status)          │
-│  - fuzz.yml (Fuzzing)                  │
-└─────────────────────────────────────────┘
-```
-
-**Utils assets:** `utils/` is committed, so CI gets it from the checkout, `setup-utils` only verifies it, and the platform archives embed it. No separate resource bundle is published. See [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
-
-**Release gate policy (conservative):** [`docs/CI_RELEASE_GATES.md`](../docs/CI_RELEASE_GATES.md).
-
----
-
-## Pipeline-by-Pipeline Guide
-
-### 1. Fast Gate (ci.yml)
-
-**When is it triggered?**
-- PR creation/update
-- Main branch push
-- Manual trigger
-
-**Runtime:** depends on path-filter **lane** (see below).
-
-| Lane | Typical trigger | Jobs | Runtime (order of) |
-|------|-----------------|------|--------------------|
-| `docs` | `docs/`, `wiki/`, `*.md` only | summary short-circuit | ~1 min |
-| `scripts` | `scripts/**` only | pass-gate + script syntax | ~2–4 min |
-| `ci` | `.github/**` / deny meta only | pass-gate + YAML parse (+ security if deny) | ~2–5 min |
-| `rust` (PR) | crates/utils/Cargo | Linux tests + smoke + NIR + lint | ~15–25 min |
-| `rust` (main) | same | + macOS/Windows tests | ~25–35 min |
-
-**Validation steps (rust lane):**
-```
-- Path filter (lane selection)
-- Security Check (cargo deny + audit)
-- Lint & Format (rustfmt + clippy, sccache)
-- Pass-gate / owner-boundary scripts
-- Core + midend Tests (Linux, single nextest multi -p, sccache)
-- CLI smoke + NIR regression gate
-- macOS test smoke (main push only; Windows release tests and release CLI builds run in Heavy)
-```
-
-**Success criteria:**
-- [ ] All security checks passed (code path)
-- [ ] No formatting errors
-- [ ] No lint warnings (`-D warnings`)
-- [ ] Linux core+midend tests passed
-- [ ] CLI smoke + NIR regression gate passed
-- [ ] On main: macOS Fast Gate smoke and Windows Heavy tests passed
-
-**If it fails:**
-```bash
-# Reproduce locally
-cargo fmt --all
-cargo clippy --all -- -D warnings
-cargo test -p fission-pcode
-
-# After fixing issues
-git add .
-git commit -m "fix: resolve CI failures"
-git push
-```
-
----
-
-### 2. Heavy Validation (ci-heavy.yml)
-
-**When is it triggered?**
-- Every non-documentation push to `main` (L1 release gate signal)
-- Daily at 02:30 UTC (nightly safety net)
-- Manual trigger
-
-**Runtime:** ~90 minutes
-
-**Validation steps:**
-```
-- Corpus Validation (~15 min)
-  └─ Validate benchmark binary manifests
-
-- Full Test Suite (~25 min)
-  ├─ Full workspace tests
-  └─ fission-static tests
-
-- Heavy Platform Tests (~20 min)
-  ├─ Windows release build
-  └─ macOS release build
-
-
-- Automation NIR-Check (~45 min)
-  ├─ Quality lane validation
-  ├─ Verify regression < 5%
-  └─ Generate artifacts
-```
-
-**Success criteria:**
-- [ ] All Fast Gate criteria included
-- [ ] Corpus manifest validation passed
-- [ ] Full test suite passed
-
-- [ ] NIR-Check regression < 5%
-
-**If it fails:**
-```bash
-# 1. Corpus validation failure
-cd benchmark/config/benchmark_corpus/
-python3 -c "import json; json.load(open('smoke_corpus.json'))"
-
-# 2. Test failure
-cargo test --all
-```
-
----
-
-### 3. Release candidate and publication
-
-Dispatch `Release Tag (CI green)` on main with a version and candidate SHA.
-The workflow verifies the exact main push Fast Gate and Heavy runs, then calls
-release E2E and the five-platform package builder. The publish job attests and
-publishes those package bytes through a draft. A SemVer tag push uses the same
-gate. See [CI and release gates](../docs/CI_RELEASE_GATES.md) for the runbook.
-
-
-### 4. Package rehearsal
-
-`cd.yml` is a reusable workflow. The Fast Gate calls it for packaging changes
-to rehearse all five targets with the PR merge candidate. The release workflow
-uses the same builder on the verified candidate SHA.
-
-## Customizing Workflows
-
-### Using Reusable Workflows
-
-**Example: Add a new test job**
-
-```yaml
-# .github/workflows/ci.yml
-test-new-module:
-  name: Test New Module
-  needs: [security-check, lint-format]
-  uses: ./.github/workflows/reusable-run-tests.yml
-  with:
-    os: ubuntu-latest
-    crates: "fission-newmodule"
-    profile: debug
-    coverage: false
-```
-
-**Available reusable workflows:**
-
-| Workflow | Inputs | Purpose |
-|----------|--------|---------|
-| `reusable-setup-rust.yml` | os, target, components | Initialize Rust environment |
-| `reusable-security-check.yml` | check_npm | Security validation |
-| `reusable-lint-format.yml` | os, exclude_crates | Code style checks |
-| `reusable-run-tests.yml` | os, crates, profile, coverage | Run tests |
-| `reusable-build-cli.yml` | os, target, profile | Build CLI |
-| `reusable-coverage.yml` | crates, warn_threshold_pct | Coverage (extended) |
-| `reusable-miri.yml` | (see workflow) | Miri, for crates with reachable unsafe |
-| `reusable-msrv.yml` | crates | Minimum supported Rust version |
-| `reusable-upload-artifacts.yml` | artifact_name, paths | Upload artifacts |
-
----
-
-## Monitoring & Debugging
-
-### Check workflow status
+Run the classifier and workflow-tool tests locally:
 
 ```bash
-# View recent runs
-gh run list --workflow ci.yml -L 5
-
-# View specific run logs
-gh run view RUN_ID
-
-# Download logs
-gh run download RUN_ID
+python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+actionlint -shellcheck= -pyflakes=
 ```
 
-### Common errors & solutions
-
-| Error | Cause | Solution |
-|-------|-------|----------|
-| `cargo fmt` failure | Formatting mismatch | Run `cargo fmt --all` |
-| `clippy` warning | Code style issue | Run `cargo clippy --fix` |
-| Test failure | Logic error | Run `cargo test --all -- --nocapture` locally |
-| Build timeout | Build time exceeded | Split jobs or increase timeout |
-
-| Network error | Temporary GitHub API issue | Manual retry |
-
----
-
-## Best Practices
-
-### 1. Get fast feedback
+To inspect the classifier's path rules with real Git revisions, replace the two
+SHAs in this example with the event's base and head.
 
 ```bash
-# Validate locally before PR submission
-cargo fmt --all
-cargo clippy --all -- -D warnings
-cargo test -p fission-pcode
+PYTHONPATH=scripts/ci python3 - BASE_SHA HEAD_SHA <<'PYTHON'
+import subprocess
+import sys
 
-# Takes ~5 minutes (CI takes 40 minutes)
+from change_plan import plan
+
+raw = subprocess.check_output(["git", "diff", "--name-only", "-z", sys.argv[1], sys.argv[2]])
+lane, jobs = plan(raw.decode().rstrip("\0").split("\0") if raw else [], "pull_request")
+print(lane)
+print(*(name for name, enabled in jobs.items() if enabled), sep="\n")
+PYTHON
 ```
 
-### 2. Minimize CI failures
+Use the parent branch's SHA as the base for a stacked pull request. For a merge
+candidate, pass `"merge_group"` to `plan`.
 
-Good:
-```bash
-git commit -m "fix(pcode): handle edge case in lowering"
-```
-
-Bad:
-```bash
-git commit -m "wip: various fixes"
-git commit -m "fix formatting"
-git commit -m "add test"
-```
-
-### 3. Managing large changes
-
-For big refactors:
-1. Break into small units
-2. One logical change per PR
-3. Test CI pipeline first
-4. Merge after review
-
----
-
-## Troubleshooting
-
-### CI fails frequently
-
-**Step 1: Reproduce locally**
-```bash
-# Simulate Fast Gate
-cargo fmt --all -- --check
-cargo clippy --workspace -- -D warnings
-cargo test -p fission-pcode
-```
-
-**Step 2: Check detailed logs**
-```bash
-# GitHub UI: Actions → Workflow Run → Job → Step
-# Or CLI
-gh run view RUN_ID --log
-```
-
-**Step 3: Consult documentation**
-- [ci-cd-standards.md](./ci-cd-standards.md) - Standard definitions
-- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guide
-
----
-
-## References
-
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Rust Cargo Documentation](https://doc.rust-lang.org/cargo/)
-- [Fission AGENTS.md](../AGENTS.md) - Project structure
-- [Fission CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution guide
-
----
-
-## Related Files
-
-```
-.github/
-├── ci-cd-standards.md          ← Standard definitions
-├── CI_CD_GUIDE.md              ← This file
-├── workflows/
-│   ├── ci.yml                  ← Fast Gate
-│   ├── ci-heavy.yml            ← Heavy Validation
-│   ├── cd.yml                  ← Release
-│   ├── ci-cd-monitor.yml       ← Monitoring
-│   ├── fuzz.yml                ← Fuzzing
-│   ├── reusable-*.yml        ← workflow_call reusables (repo root rule)
-│   └── ...
-```
-
----
-
-## Feedback & Improvements
-
-Suggestions for CI/CD pipeline improvements:
-1. [Create GitHub Issue](https://github.com/fission-systems/Fission/issues)
-2. Label: `infrastructure`, `ci-cd`
-3. Update this guide alongside changes
-
----
-
-**Last updated:** 2026-04-21
-**Document version:** 1.0
+GitHub repository settings control whether the merge queue, tag protection,
+release environment approvals, and immutable releases are enforced. See the
+[operator rollout steps](../docs/CI_RELEASE_GATES.md#pr-and-merge-queue).
