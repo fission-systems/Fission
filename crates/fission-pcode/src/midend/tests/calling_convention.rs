@@ -4397,3 +4397,102 @@ fn systemv_exact_call_keeps_declared_arguments_after_an_unnamed_merge() {
         "the merge is neither the entry value nor one path's value: {call}\n{code}"
     );
 }
+
+#[test]
+fn systemv_argument_survives_a_call_to_an_unnamed_callee_that_preserves_it() {
+    // mov esi, 1; call sub_401100; mov rdi, 5; call target_fn(rdi, rsi).
+    // sub_401100 is a stripped local function whose body writes no argument
+    // register (GCC's interprocedural register allocation relies on that and
+    // keeps esi staged across it). With no symbol to key its summary by, the
+    // proof is recorded by address; without it the call is assumed to
+    // clobber rsi and `target_fn(5, 1)` printed `target_fn(5)`.
+    fn render(proven: Option<Vec<usize>>) -> String {
+        let base = 0x401000;
+        let op = |address: u64, opcode, output, inputs| PcodeOp {
+            seq_num: 0,
+            opcode,
+            address,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        };
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: base,
+                successors: vec![],
+                ops: vec![
+                    op(base, PcodeOpcode::Copy, Some(reg(0x30, 8)), vec![cst(1, 8)]),
+                    op(base + 5, PcodeOpcode::Call, None, vec![cst(0x401100, 8)]),
+                    op(
+                        base + 10,
+                        PcodeOpcode::Copy,
+                        Some(reg(0x38, 8)),
+                        vec![cst(5, 8)],
+                    ),
+                    op(base + 15, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                    op(base + 20, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+                ],
+            }],
+        };
+        let mut context = PreviewTypeContext::default();
+        context.call_target_refs.insert(
+            0x401200,
+            CallTargetRef {
+                address: Some(0x401200),
+                symbol: "target_fn".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        );
+        context.call_prototype_summaries.insert(
+            "target_fn".to_string(),
+            NirCallPrototypeSummary {
+                min_arity: 2,
+                max_arity: 2,
+                locked_exact_arity: Some(2),
+                ..Default::default()
+            },
+        );
+        if let Some(written) = proven {
+            context
+                .callee_argument_register_writes
+                .insert(0x401100, written);
+        }
+        crate::midend::render_mechanical_preview_with_context(
+            &func,
+            "caller",
+            base,
+            &preview_options_for(CallingConvention::SystemVAmd64),
+            Some(&context),
+        )
+        .expect("preview render")
+    }
+    let call = |code: &str| {
+        code.lines()
+            .find(|line| line.contains("target_fn(") && !line.contains("extern"))
+            .map(str::trim)
+            .unwrap_or_default()
+            .to_string()
+    };
+
+    // The staged value may print as `1` or as the variable it was stored in.
+    let preserved = render(Some(vec![]));
+    let preserved_call = call(&preserved);
+    assert!(
+        preserved_call.starts_with("target_fn(5, ") && preserved_call.ends_with(");"),
+        "{preserved}"
+    );
+    let second = preserved_call["target_fn(5, ".len()..preserved_call.len() - 2].to_string();
+    assert!(
+        second == "1" || preserved.contains(&format!("{second} = 1;")),
+        "the second argument is the staged 1: {preserved}"
+    );
+
+    let writes_rsi = render(Some(vec![1]));
+    assert_eq!(call(&writes_rsi), "target_fn(5);", "{writes_rsi}");
+
+    let unknown = render(None);
+    assert_eq!(call(&unknown), "target_fn(5);", "{unknown}");
+}

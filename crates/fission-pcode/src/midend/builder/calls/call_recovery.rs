@@ -132,16 +132,26 @@ impl<'a> PreviewBuilder<'a> {
         let Some(param_slot) = self.param_index_for_varnode(vn, true) else {
             return false;
         };
-        let Some(symbol) =
-            super::super::resolve_lifted_direct_call_target(call, self.options, self.type_context)
-        else {
-            return false;
+        let written_slots = match super::super::resolve_lifted_direct_call_target(
+            call,
+            self.options,
+            self.type_context,
+        ) {
+            Some(symbol) => self
+                .type_context
+                .and_then(|context| context.call_effect_summaries.get(&symbol))
+                .and_then(|summary| summary.modified_argument_register_slots.as_ref()),
+            // A local callee with no symbol: its proven writes by address.
+            None => (call.opcode == PcodeOpcode::Call)
+                .then(|| call.inputs.first())
+                .flatten()
+                .and_then(|target| {
+                    self.type_context.and_then(|context| {
+                        context.callee_argument_register_writes.get(&target.offset)
+                    })
+                }),
         };
-        let Some(written_slots) = self
-            .type_context
-            .and_then(|context| context.call_effect_summaries.get(&symbol))
-            .and_then(|summary| summary.modified_argument_register_slots.as_ref())
-        else {
+        let Some(written_slots) = written_slots else {
             return false;
         };
         !written_slots.contains(&param_slot)

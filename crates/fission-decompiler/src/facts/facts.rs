@@ -290,6 +290,7 @@ pub(crate) fn build_nir_type_context(
         iat_target_refs: iat_target_refs.clone(),
         ambiguous_call_targets: resolved_index.ambiguous_call_targets,
         call_effect_summaries: build_nir_call_effect_summaries(&all_target_refs, binary),
+        callee_argument_register_writes: HashMap::new(),
         call_prototype_summaries,
         call_result_is_source_value: build_nir_call_result_facts(&all_target_refs),
         call_param_rules: call_param_rules_for_binary(binary, &all_target_refs)
@@ -1256,6 +1257,16 @@ pub(crate) fn refine_nir_type_context_with_callee_effect_summaries(
         else {
             continue;
         };
+        if !has_resolved_target_identity
+            && let Some(written) = effect_summary.modified_argument_register_slots.clone()
+        {
+            // No symbol to key a summary by, and naming one here would give
+            // the callee an identity elsewhere. Its argument-register writes
+            // are still a fact about the call: record them by address.
+            type_context
+                .callee_argument_register_writes
+                .insert(target_addr, written);
+        }
         if has_resolved_target_identity {
             let effect_summary = type_context
                 .call_effect_summaries
