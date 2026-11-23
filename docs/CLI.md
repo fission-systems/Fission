@@ -288,6 +288,8 @@ fission_cli debug --emulator session ./guest.elf \
   --command "context --stack 32 --decomp" --json
 
 # Native session: use the same binary and the module's proven slide.
+# The first exec stop may be in the dynamic loader, not in target code;
+# run/step to a stop inside the target module before requesting decompilation.
 fission_cli debug session ./target \
   --command event --command "context --decomp" --json
 
