@@ -537,8 +537,8 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
         DebugCommand::Context(args) => {
             let (state, mut session) = attach_active()?;
-            let tid = state.last_thread_id
-                .or(session.debugger.get_state().current_thread_id)
+            let tid = session.debugger.get_state().current_thread_id
+                .or(state.last_thread_id)
                 .or(session.debugger.get_state().main_thread_id)
                 .context("No thread available for a context snapshot")?;
             let context = super::debug_context::run_context(
