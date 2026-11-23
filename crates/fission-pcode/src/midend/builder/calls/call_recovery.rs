@@ -373,7 +373,8 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Some(self.normalize_recovered_call_arg(expr));
         }
-        if path_values.len() > 1 {
+        let merged = writes_merge_at_call(reached_defs.len(), &path_values);
+        if merged {
             // Every incoming path defines the register and no call clobbers
             // it between that definition and this call (proved above), so the
             // argument is the register's merged value at the call site: one
@@ -1879,4 +1880,57 @@ fn is_floating_point_surface_type(surface: &str) -> bool {
         .collect::<Vec<_>>()
         .join(" ");
     matches!(name.as_str(), "float" | "double" | "long double")
+}
+
+/// Whether the writes reaching a call carry more than one value, given how
+/// many writes reach it and their distinct printed expressions.
+///
+/// Different expressions are different values. Several writes spelled alike
+/// are one value only when the spelling reads nothing that can differ between
+/// them -- a constant or a global's address: two `lea rsi, msg` agree, but a
+/// loop's `rdi += 16` in the preheader and in the latch reads a different
+/// `rdi` each time. Passing that expression counted the increment twice
+/// (`pop_arg(p + 16)` where the call sees `p`).
+fn writes_merge_at_call(reaching_writes: usize, path_values: &[PreHirExpr]) -> bool {
+    let path_independent = |expr: &PreHirExpr| {
+        let mut bare = expr;
+        while let PreHirExpr::Cast { expr: inner, .. } = bare {
+            bare = inner;
+        }
+        matches!(bare, PreHirExpr::Const(..) | PreHirExpr::AddressOfGlobal(_))
+    };
+    path_values.len() > 1 || (reaching_writes > 1 && !path_values.iter().all(path_independent))
+}
+
+#[cfg(test)]
+mod writes_merge_tests {
+    use super::*;
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn alike_writes_that_read_a_register_are_still_a_merge() {
+        let update = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("p".into())),
+            rhs: Box::new(PreHirExpr::Const(16, u64_ty())),
+            ty: u64_ty(),
+        };
+        assert!(
+            writes_merge_at_call(2, std::slice::from_ref(&update)),
+            "two `p + 16` writes read different `p`s"
+        );
+        assert!(!writes_merge_at_call(1, std::slice::from_ref(&update)));
+        let constant = PreHirExpr::AddressOfGlobal("\"msg\"".into());
+        assert!(!writes_merge_at_call(2, std::slice::from_ref(&constant)));
+        assert!(writes_merge_at_call(
+            2,
+            &[constant, PreHirExpr::Const(7, u64_ty())]
+        ));
+    }
 }
