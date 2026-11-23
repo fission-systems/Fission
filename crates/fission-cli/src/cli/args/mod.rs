@@ -1568,10 +1568,10 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
 mod debug;
 #[allow(unused_imports)]
 pub use debug::{
-    DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs,
+    DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs, DebugBpWhenArgs,
     DebugCapabilitiesArgs, DebugCommand, DebugContextArgs, DebugDllBpArgs, DebugEventArgs, DebugExBpArgs,
     DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs,
-    DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
+    DebugLogpointArgs, DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
     DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
     DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
