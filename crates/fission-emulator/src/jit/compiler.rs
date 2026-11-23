@@ -295,6 +295,24 @@ impl JitCompiler {
         // simply emit nothing into it; Cranelift folds the empty blocks away.
         let dead_ops = dead_value_ops(&flat);
 
+        // Ops an intra-block `BRANCH`/`CBRANCH` can land on: control reaches
+        // them from somewhere other than the op before. Same target rule as
+        // the branch lowering below.
+        let mut join_ops = vec![false; flat.len()];
+        for op in &flat {
+            if matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                if let Some(dest) = op.inputs.first() {
+                    let abs = dest.constant_val;
+                    if (dest.space_id == 0 || dest.is_constant)
+                        && abs >= 0
+                        && (abs as usize) < flat.len()
+                    {
+                        join_ops[abs as usize] = true;
+                    }
+                }
+            }
+        }
+
         let fallthrough_pc = {
             let last = insns.last().unwrap();
             last.pc.wrapping_add(last.len as u64)
@@ -1162,6 +1180,28 @@ impl JitCompiler {
 
         for (idx, op) in flat.iter().enumerate() {
             builder.switch_to_block(op_blocks[idx]);
+
+            // A join inside the block: forget every cached register view.
+            //
+            // `ensure_var!` declares a register's variable where it is first
+            // read, and that is a point in *emission* order, not one that
+            // dominates later reads. When the first read sits in an arm an
+            // intra-instruction branch can skip -- AArch64 `csel` lifts to a
+            // `CBRANCH` over the copy of its second operand -- the variable
+            // has no definition on the skipping path, and Cranelift answers a
+            // read of it there with zero. `mov w8,#2; csel w10,wzr,w8,eq;
+            // mov w0,w8` returned 0 for `w0` when the condition held.
+            //
+            // Every register write already reaches `host_reg_file` (or is
+            // written through), so dropping the views is free of loss: the
+            // next read re-seeds inside this block, which dominates what
+            // follows it up to the next join. Constants are re-materialised
+            // the same way. Unique temporaries are not touched -- they have
+            // no backing store to re-seed from, and SLEIGH defines one before
+            // any path reads it.
+            if join_ops[idx] {
+                var_map.retain(|key, _| key.0 != 0 && key.0 != register_space);
+            }
 
             // Per-pcode-op fuse (breaks relative CBRANCH livelocks under max_inst).
             if needs_pcode_fuse {
