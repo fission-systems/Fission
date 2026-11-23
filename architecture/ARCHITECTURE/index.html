@@ -1840,7 +1840,7 @@ entry, export, true import, import thunk, undefined external, debug-only symbol,
 or data-derived metadata. User-facing and decompile-seed function lists must go
 through <code>loader::function_view</code>; the CLI and scripts must not reconstruct independent
 function/import/export filtering rules.</p>
-<p><strong>Loader Parity and Enrichment Features.</strong> To achieve strict parity with Ghidra's binary analysis ecosystem, <code>fission-loader</code> implements advanced metadata enrichment and validation layers:
+<p><strong>Loader Enrichment Features.</strong> <code>fission-loader</code> covers the metadata Ghidra's loaders recover, using Ghidra as a reference for formats and edge cases rather than as the definition of a correct result (<a href="../../adr/0017-ghidra-is-not-an-oracle/">ADR 0017</a>):
 - <strong>PE Delay-Load Imports</strong>: Classifies delayed import directories (<code>ImgDelayDescr</code>) and generates placeholder/import symbols to feed downstream call analysis.
 - <strong>Rich Header Decryption</strong>: Recovers and decrypts MSVC compiler telemetry headers, validating checksum matches against section/PE hashes to verify compiler/linker provenance.
 - <strong>ELF Version Symbols</strong>: Parses GNU/SVR4 dynamic version symbols (<code>.gnu.version</code>, <code>.gnu.version_r</code>) to map version-dependent dynamic symbols to their precise external libraries/libraries requirements.
@@ -1889,7 +1889,10 @@ they do not own format detection, load-spec selection, or memory mapping.</p>
 <p>Decompiler-quality changes are accepted at the architecture boundary, not at the
 CI/dashboard boundary. A benchmark row, AI review prompt, Ghidra comparison, or
 validation-pool result may motivate a change, but none of those surfaces own the
-semantic decision.</p>
+semantic decision, and none of them is a correctness oracle: Ghidra shares
+Fission's Sleigh input (<a href="../../adr/0017-ghidra-is-not-an-oracle/">ADR 0017</a>) and
+DecBench measures similarity to the source
+(<a href="../../adr/0018-decbench-is-not-a-correctness-oracle/">ADR 0018</a>).</p>
 <p>The architectural admission path is:</p>
 <ol>
 <li>Identify the canonical owner: SLEIGH/raw p-code, builder/materialize,
