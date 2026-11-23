@@ -143,28 +143,138 @@ fn formal_read_at_full_width_anywhere_keeps_its_width() {
     assert_eq!(param_2_bits(&func), Some(32));
 }
 
+fn binary(op: PreHirBinaryOp, lhs: PreHirExpr, rhs: PreHirExpr) -> PreHirExpr {
+    PreHirExpr::Binary {
+        op,
+        lhs: Box::new(lhs),
+        rhs: Box::new(rhs),
+        ty: int_ty(32, false),
+    }
+}
+
+/// `*(short *)dst = value;`
+fn short_store_of(value: PreHirExpr) -> PreHirStmt {
+    PreHirStmt::Assign {
+        lhs: PreHirLValue::Deref {
+            ptr: Box::new(var("dst")),
+            ty: int_ty(16, true),
+        },
+        rhs: value,
+    }
+}
+
 #[test]
-fn home_slot_demand_flows_through_wrapping_arithmetic_and_copies() {
-    // `r12 = param_2 + 1; local_26 = (ushort)r12;` -- a 16-bit home reached
-    // through a register copy and an add.
+fn derived_value_in_a_narrow_frame_slot_is_not_a_home() {
+    // `-O2` `ushort local_26 = (ushort)(param_2 + 1)`: a frame slot, but it
+    // holds a value computed from the formal, not the formal's spill.
     let mut func = truncating_reads_func(
         vec![home_slot("local_26", -0x26, 16)],
-        vec![
-            set(
-                "r12",
-                PreHirExpr::Binary {
-                    op: PreHirBinaryOp::Add,
-                    lhs: Box::new(var("param_2")),
-                    rhs: Box::new(PreHirExpr::Const(1, int_ty(32, false))),
-                    ty: int_ty(32, false),
-                },
+        vec![set(
+            "local_26",
+            cast(
+                16,
+                false,
+                binary(
+                    PreHirBinaryOp::Add,
+                    var("param_2"),
+                    PreHirExpr::Const(1, int_ty(32, false)),
+                ),
             ),
-            set("local_26", cast(16, false, var("r12"))),
+        )],
+    );
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(32));
+}
+
+#[test]
+fn formal_narrowed_to_int_through_addition_keeps_its_width() {
+    // A 64-bit register formal spilled as `int`, read as `(int)(param + 1)`.
+    // Declared `int`, `param + 1` is not promoted and could overflow where
+    // the machine's 64-bit addition wrapped.
+    let mut func = truncating_reads_func(vec![home_slot("local_24", -0x24, 32)], vec![]);
+    func.params[1].ty = int_ty(64, true);
+    func.body = vec![
+        set("local_24", cast(32, true, var("param_2"))),
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(var("dst")),
+                ty: int_ty(32, true),
+            },
+            rhs: cast(
+                32,
+                true,
+                binary(
+                    PreHirBinaryOp::Add,
+                    var("param_2"),
+                    PreHirExpr::Const(1, int_ty(64, true)),
+                ),
+            ),
+        },
+    ];
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(64));
+}
+
+#[test]
+fn byte_formal_read_through_addition_is_narrowed() {
+    // `local_24 = (uchar)param_2; *dst = (uchar)(param_2 + 1);` -- a `uchar`
+    // operand of `+` is promoted to `int`, where the addition cannot overflow.
+    let mut func = truncating_reads_func(
+        vec![home_slot("local_24", -0x24, 8)],
+        vec![
+            set("local_24", cast(8, false, var("param_2"))),
+            byte_store_of(cast(
+                8,
+                false,
+                binary(
+                    PreHirBinaryOp::Add,
+                    var("param_2"),
+                    PreHirExpr::Const(1, int_ty(32, false)),
+                ),
+            )),
         ],
     );
 
     assert!(apply_use_driven_type_infer_pass(&mut func));
-    assert_eq!(param_2_bits(&func), Some(16));
+    assert_eq!(param_2_bits(&func), Some(8));
+}
+
+#[test]
+fn spilled_formal_read_through_a_multiply_keeps_its_width() {
+    // `(ushort)(param_2 * param_2)`: two `ushort` operands would promote to
+    // signed `int` and overflow where the 32-bit unsigned product wrapped.
+    let mut func = truncating_reads_func(
+        vec![home_slot("local_26", -0x26, 16)],
+        vec![
+            set("local_26", cast(16, false, var("param_2"))),
+            short_store_of(cast(
+                16,
+                false,
+                binary(PreHirBinaryOp::Mul, var("param_2"), var("param_2")),
+            )),
+        ],
+    );
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(32));
+}
+
+#[test]
+fn write_to_a_global_demands_every_bit() {
+    // `local_24 = (uchar)param_2; g_count = param_2;` -- a named global is a
+    // `Var` lvalue that this function never reads, but other functions do.
+    let mut func = truncating_reads_func(
+        vec![home_slot("local_24", -0x24, 8)],
+        vec![
+            set("local_24", cast(8, false, var("param_2"))),
+            set("g_count", var("param_2")),
+        ],
+    );
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(32));
 }
 
 #[test]
