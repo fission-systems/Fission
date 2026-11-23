@@ -822,6 +822,13 @@ fn low_bits_preserving_op(op: PreHirBinaryOp) -> bool {
     )
 }
 
+/// What [`DemandedBits::solve`] proves about a function's names.
+struct SolvedDemand {
+    demand: HashMap<String, Demand>,
+    assigned: HashSet<String>,
+    sign_extended: HashSet<String>,
+}
+
 /// Demanded low bits per name: a backward walk from every consumer.
 ///
 /// A local assigned from an expression passes its own demand on to that
@@ -840,6 +847,12 @@ struct DemandedBits<'a> {
     /// global (`try_global_memory_lvalue` lowers those to `Var`) -- is
     /// observed outside the function, at full width.
     function_locals: &'a HashSet<String>,
+    /// The declared width of each formal's home slot, and each home slot's
+    /// own width: a cast of one of these names to a wider *signed* integer
+    /// reads it as a sign-extended value.
+    narrow_widths: &'a HashMap<String, u32>,
+    /// Names read through such a sign-extending cast.
+    sign_extended: HashSet<String>,
     assigned: HashSet<String>,
     visited_bodies: HashSet<*const Vec<PreHirStmt>>,
 }
@@ -887,7 +900,18 @@ impl DemandedBits<'_> {
                 self.record(name, Demand::All);
             }
             PreHirExpr::Const(_, _) => {}
-            PreHirExpr::Cast { ty, expr } => self.expr(expr, demand.through_cast(ty)),
+            PreHirExpr::Cast { ty, expr } => {
+                if let (NirType::Int { bits, signed: true }, PreHirExpr::Var(name)) =
+                    (ty, expr.as_ref())
+                    && self
+                        .narrow_widths
+                        .get(name)
+                        .is_some_and(|&width| width < *bits)
+                {
+                    self.sign_extended.insert(name.clone());
+                }
+                self.expr(expr, demand.through_cast(ty))
+            }
             PreHirExpr::Unary {
                 op: PreHirUnaryOp::Neg | PreHirUnaryOp::BitNot,
                 expr,
@@ -1037,7 +1061,8 @@ impl DemandedBits<'_> {
     fn solve(
         func: &PreHirFunction,
         home_slots: &HashMap<String, (u32, bool)>,
-    ) -> Option<(HashMap<String, Demand>, HashSet<String>)> {
+        narrow_widths: &HashMap<String, u32>,
+    ) -> Option<SolvedDemand> {
         const MAX_ROUNDS: usize = 16;
         let globals = crate::pipeline::global_storage_names();
         let function_locals: HashSet<String> = func
@@ -1054,6 +1079,8 @@ impl DemandedBits<'_> {
                 current: HashMap::default(),
                 home_slots,
                 function_locals: &function_locals,
+                narrow_widths,
+                sign_extended: HashSet::default(),
                 assigned: HashSet::default(),
                 visited_bodies: HashSet::default(),
             };
@@ -1065,7 +1092,11 @@ impl DemandedBits<'_> {
                 }
             }
             if round.current == round.previous {
-                return Some((round.current, round.assigned));
+                return Some(SolvedDemand {
+                    demand: round.current,
+                    assigned: round.assigned,
+                    sign_extended: round.sign_extended,
+                });
             }
             previous = round.current;
         }
@@ -1147,6 +1178,51 @@ fn formal_home_slot_widths(
     widths
 }
 
+/// The home slots of each formal (see [`formal_home_slot_widths`]), by name.
+fn formal_home_slot_names(
+    func: &PreHirFunction,
+    home_slots: &HashMap<String, (u32, bool)>,
+) -> HashMap<String, Vec<String>> {
+    let formals: HashSet<&str> = func
+        .params
+        .iter()
+        .map(|binding| binding.name.as_str())
+        .collect();
+    let mut slots = HashMap::<String, Vec<String>>::default();
+    let mut written = HashSet::<String>::default();
+    let mut note = |slot: &str, rhs: &PreHirExpr| {
+        if written.insert(slot.to_owned())
+            && home_slots.contains_key(slot)
+            && let Some(formal) = spilled_formal(rhs, &formals)
+        {
+            slots
+                .entry(formal.to_owned())
+                .or_default()
+                .push(slot.to_owned());
+        }
+    };
+    for binding in &func.locals {
+        if let Some(init) = &binding.initializer {
+            note(&binding.name, init);
+        }
+    }
+    let mut entry: &[PreHirStmt] = &func.body;
+    while let [PreHirStmt::Block(inner), ..] = entry {
+        entry = inner;
+    }
+    for stmt in entry {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                rhs,
+            } => note(name, rhs),
+            PreHirStmt::Assign { .. } | PreHirStmt::Expr(_) => {}
+            _ => break,
+        }
+    }
+    slots
+}
+
 /// Narrow an integer formal to the width of the frame slot it is kept in.
 ///
 /// A formal arrives in a register wider than its C type: a `char` argument
@@ -1198,12 +1274,28 @@ pub(super) fn narrow_integer_params_from_truncating_reads(func: &mut PreHirFunct
         })
         .collect();
     let homes = formal_home_slot_widths(func, &home_slots);
+    let narrow_widths: HashMap<String, u32> = homes
+        .iter()
+        .map(|(name, &bits)| (name.clone(), bits))
+        .chain(
+            home_slots
+                .iter()
+                .map(|(name, &(bits, _))| (name.clone(), bits)),
+        )
+        .collect();
     if homes.is_empty() {
         return false;
     }
-    let Some((demand, assigned)) = DemandedBits::solve(func, &home_slots) else {
+    let Some(SolvedDemand {
+        demand,
+        assigned,
+        sign_extended,
+    }) = DemandedBits::solve(func, &home_slots, &narrow_widths)
+    else {
         return false;
     };
+    // The home slots each formal is spilled to, for the sign-extension check.
+    let slots_of = formal_home_slot_names(func, &home_slots);
 
     let mut changed = false;
     for binding in &mut func.params {
@@ -1227,8 +1319,16 @@ pub(super) fn narrow_integer_params_from_truncating_reads(func: &mut PreHirFunct
         else {
             continue;
         };
+        let sign_extended_somewhere = sign_extended.contains(&binding.name)
+            || slots_of
+                .get(&binding.name)
+                .is_some_and(|slots| slots.iter().any(|slot| sign_extended.contains(slot)));
         let read_signed = match sign {
             Sign::Signed => true,
+            // A sign-extending read next to unsigned or unspecified narrow
+            // views: the value is used as both, so one declaration would
+            // silently change the other reads.
+            Sign::Unsigned | Sign::Any if sign_extended_somewhere => continue,
             Sign::Unsigned | Sign::Any => false,
             Sign::Mixed => continue,
         };
