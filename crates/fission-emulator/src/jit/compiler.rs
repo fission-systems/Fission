@@ -51,6 +51,11 @@ pub struct JitCompiler {
     /// to it; the compiler has no `Emulator` to reach, so it counts here and
     /// the caller drains it.
     pub unimplemented_ops: std::collections::BTreeMap<String, u64>,
+    /// Per compiled instruction that may fault, the registers it writes;
+    /// indexed by the constant its `jit_insn_checkpoint` call carries.
+    /// Append-only, like the emulator's `wide_ops`: a compiled block holds
+    /// indices into it.
+    pub(crate) insn_reg_writes: Vec<Vec<(u64, u32)>>,
 }
 
 impl JitCompiler {
@@ -137,6 +142,10 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_taint_output as *const u8,
             ),
             (
+                "jit_insn_checkpoint",
+                crate::jit::callbacks::jit_insn_checkpoint as *const u8,
+            ),
+            (
                 "jit_host_reg_base",
                 crate::jit::callbacks::jit_host_reg_base as *const u8,
             ),
@@ -191,6 +200,7 @@ impl JitCompiler {
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
             unimplemented_ops: std::collections::BTreeMap::new(),
+            insn_reg_writes: Vec::new(),
             shadow: crate::observe::ShadowMode::Off,
         })
     }
@@ -299,6 +309,20 @@ impl JitCompiler {
             let last = insns.last().unwrap();
             last.pc.wrapping_add(last.len as u64)
         };
+
+        // Instructions that can fault, and the registers each writes: a
+        // fault has to leave the instruction un-retired, so these are noted
+        // before it starts (`Emulator::deliver_memory_fault`).
+        let mut checkpoint_at: HashMap<u64, i64> = HashMap::new();
+        if check_memory_faults {
+            for insn in insns {
+                if insn_may_fault(&insn.ops, register_space, unique_space) {
+                    checkpoint_at.insert(insn.pc, self.insn_reg_writes.len() as i64);
+                    self.insn_reg_writes
+                        .push(insn_register_writes(&insn.ops, register_space));
+                }
+            }
+        }
 
         self.ctx.func.signature.params.clear();
         self.ctx.func.signature.returns.clear();
@@ -486,6 +510,10 @@ impl JitCompiler {
             .module
             .declare_function("jit_taint_output", Linkage::Import, &sig_taint)
             .unwrap();
+        let checkpoint_fn = self
+            .module
+            .declare_function("jit_insn_checkpoint", Linkage::Import, &sig_taint)
+            .unwrap();
 
         // jit_host_reg_base(emu) -> ptr
         let mut sig_regbase = self.module.make_signature();
@@ -607,6 +635,9 @@ impl JitCompiler {
         let taint_output_ref = self
             .module
             .declare_func_in_func(taint_output_fn, builder.func);
+        let checkpoint_ref = self
+            .module
+            .declare_func_in_func(checkpoint_fn, builder.func);
         let host_reg_base_ref = self
             .module
             .declare_func_in_func(host_reg_base_fn, builder.func);
@@ -1188,6 +1219,10 @@ impl JitCompiler {
                 builder.ins().call(count_ref, &[emu_ptr, pc, len]);
                 if observe.insn {
                     builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
+                }
+                if let Some(&index) = checkpoint_at.get(start_pc) {
+                    let index = builder.ins().iconst(types::I64, index);
+                    builder.ins().call(checkpoint_ref, &[emu_ptr, index]);
                 }
             }
 
@@ -2611,6 +2646,56 @@ impl JitCompiler {
             .map_err(|e| anyhow::anyhow!("finalize: {e}"))?;
         Ok(self.module.get_finalized_function(id))
     }
+}
+
+/// Whether an instruction's p-code can raise a guest page fault: it loads,
+/// stores, names memory directly by varnode, or calls out (a userop such as
+/// AArch64 `DC ZVA` writes memory). Shared by both engines, so they
+/// checkpoint the same instructions.
+pub(crate) fn insn_may_fault(ops: &[PcodeOp], register_space: u64, unique_space: u64) -> bool {
+    let memory = |vn: &Varnode| {
+        !vn.is_constant
+            && vn.space_id != 0
+            && vn.space_id != register_space
+            && vn.space_id != unique_space
+    };
+    ops.iter().any(|op| {
+        matches!(
+            op.opcode,
+            PcodeOpcode::Load | PcodeOpcode::Store | PcodeOpcode::CallOther
+        ) || op.output.iter().any(memory)
+            || op
+                .inputs
+                .iter()
+                // A branch or call names its target by a RAM varnode; that
+                // is an address, not an access.
+                .skip(usize::from(matches!(
+                    op.opcode,
+                    PcodeOpcode::Branch | PcodeOpcode::CBranch | PcodeOpcode::Call
+                )))
+                .any(memory)
+    })
+}
+
+/// The registers an instruction's p-code writes, as (offset, size) in
+/// eight-byte pieces, deduplicated in first-write order.
+pub(crate) fn insn_register_writes(ops: &[PcodeOp], register_space: u64) -> Vec<(u64, u32)> {
+    let mut out: Vec<(u64, u32)> = Vec::new();
+    for vn in ops.iter().filter_map(|op| op.output.as_ref()) {
+        if vn.is_constant || vn.space_id != register_space {
+            continue;
+        }
+        let mut offset = vn.offset;
+        let end = vn.offset + u64::from(vn.size);
+        while offset < end {
+            let piece = ((end - offset).min(8)) as u32;
+            if !out.contains(&(offset, piece)) {
+                out.push((offset, piece));
+            }
+            offset += u64::from(piece);
+        }
+    }
+    out
 }
 
 fn space_const(vn: &Varnode) -> u64 {
