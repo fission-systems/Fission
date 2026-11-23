@@ -16,9 +16,11 @@
 pub mod baseline;
 pub mod cfg;
 pub mod contract;
+pub mod eval;
 pub mod machine;
 pub mod runner;
 pub mod slice;
+pub mod static_slice;
 pub mod trace;
 
 pub use contract::{

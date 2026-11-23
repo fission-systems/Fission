@@ -23,12 +23,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use fission_emulator::MachineState;
 use fission_emulator::os::linux::image_info::ImageInfo;
 use fission_emulator::os::linux::signal::SignalState;
 use fission_emulator::os::vfs::SimVFS;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::contract::{
     CONTRACT_VERSION, CandidateOrigin, CandidateResult, EnvClass, EnvSource, EnvSourceStatus,
@@ -40,7 +40,7 @@ use crate::slice::{self, Candidate, Slice};
 use crate::trace::{self, Access, EndState, SinkMonitor, Trace};
 
 /// Budgets and switches for one case.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Instructions a recording or replay may retire.
     pub max_steps: u64,
@@ -80,7 +80,7 @@ pub struct Case<'p> {
 }
 
 /// Reproducibility evidence gathered before any candidate is tried.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Determinism {
     /// Two fresh JIT replays ended identically.
     pub replays_agree: bool,
@@ -91,7 +91,7 @@ pub struct Determinism {
 }
 
 /// Deterministic counts.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Counts {
     pub recorded_steps: u64,
     pub sink_step: u64,
@@ -107,17 +107,22 @@ pub struct Counts {
 }
 
 /// Machine-dependent measurements. Excluded from determinism checks.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Timing {
     pub record_us: u128,
     pub checkpoint_capture_us: u128,
+    /// Restoring a checkpoint into the pooled worker (the fork).
     pub checkpoint_restore_us_mean: f64,
-    pub fresh_position_us_mean: f64,
+    /// Replaying from the restored checkpoint to the exact step.
+    pub replay_to_step_us_mean: f64,
+    /// Building a new emulator, as fresh verification does.
+    pub fresh_emulator_us_mean: f64,
+    pub worker_construction_us: u128,
     pub oracle_us_mean: f64,
     pub total_us: u128,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaseReport {
     pub contract: String,
     pub case: String,
@@ -205,8 +210,9 @@ impl Checkpoint {
         let hooks = std::mem::take(&mut emu.state.hooks);
         emu.state = self.state.clone();
         emu.state.hooks = hooks;
+        // `host_reg_file` is the register file itself (not a cache), so it
+        // comes with the cloned state and must not be cleared.
         emu.state.normalize_host_reg_file();
-        emu.state.invalidate_reg_cache();
         emu.jit_cache.flush_all();
         emu.pc = self.pc;
         emu.inst_count = self.step;
@@ -321,16 +327,149 @@ fn engine_digest(run: &Run, end: &EndState) -> String {
     hasher.finalize().to_hex().to_string()
 }
 
+/// A pooled emulator and the checkpoints it can be restored to.
+///
+/// Building an emulator is not cheap (it re-reads the language's compiled
+/// Sleigh tables for its register and userop maps), so experiments restore
+/// one long-lived worker instead. The fork is the checkpoint: a clone of
+/// `MachineState`, whose pages are persistent maps of shared buffers, so a
+/// clone costs the register file and page-map bookkeeping and a page is
+/// copied only when written.
+pub struct Replayer<'p> {
+    pub program: &'p Program,
+    pub worker: Run,
+    checkpoints: BTreeMap<u64, Checkpoint>,
+    pub restore_us: Vec<u128>,
+    pub replay_us: Vec<u128>,
+    pub construction_us: u128,
+}
+
+impl<'p> Replayer<'p> {
+    pub fn new(program: &'p Program) -> Result<Self> {
+        let started = Instant::now();
+        let mut worker = program.fresh(Engine::Interpreter)?;
+        let construction_us = started.elapsed().as_micros();
+        let initial = Checkpoint::capture(&mut worker);
+        Ok(Self {
+            program,
+            worker,
+            checkpoints: BTreeMap::from([(0, initial)]),
+            restore_us: Vec::new(),
+            replay_us: Vec::new(),
+            construction_us,
+        })
+    }
+
+    /// Capture a checkpoint at each of `steps` (ascending) in one pass.
+    pub fn capture(&mut self, steps: &BTreeSet<u64>) -> Result<()> {
+        self.position(0)?;
+        for &step in steps {
+            if step == 0 {
+                continue;
+            }
+            if !self.worker.run_to_step(step)? {
+                break;
+            }
+            let cp = Checkpoint::capture(&mut self.worker);
+            self.checkpoints.insert(step, cp);
+        }
+        Ok(())
+    }
+
+    pub fn forget(&mut self, step: u64) {
+        if step != 0 {
+            self.checkpoints.remove(&step);
+        }
+    }
+
+    pub fn checkpoint_steps(&self) -> Vec<u64> {
+        self.checkpoints.keys().copied().collect()
+    }
+
+    /// Restore the closest checkpoint at or before `step` and replay the
+    /// rest of the way.
+    pub fn position(&mut self, step: u64) -> Result<&mut Run> {
+        let started = Instant::now();
+        let (_, cp) = self
+            .checkpoints
+            .range(..=step)
+            .next_back()
+            .ok_or_else(|| anyhow!("no checkpoint at or before {step}"))?;
+        cp.restore(&mut self.worker);
+        self.worker.emu.force_interpreter = true;
+        self.worker.emu.max_inst = None;
+        self.restore_us.push(started.elapsed().as_micros());
+        if self.worker.emu.inst_count < step {
+            let started = Instant::now();
+            let from = self.worker.emu.inst_count;
+            if !self
+                .worker
+                .run_to_step(step)
+                .with_context(|| format!("replaying from checkpoint {from} to step {step}"))?
+            {
+                anyhow::bail!("could not reach step {step}");
+            }
+            self.replay_us.push(started.elapsed().as_micros());
+        }
+        Ok(&mut self.worker)
+    }
+}
+
+impl Replayer<'_> {
+    /// Φ after applying `ivs` (one oracle execution) on the worker.
+    pub fn observe(
+        &mut self,
+        trace: &Trace,
+        sink: &SinkSpec,
+        ivs: &[Intervention],
+        max_steps: u64,
+    ) -> Result<SinkObservation> {
+        let step = ivs.iter().map(|iv| iv.step).min().unwrap_or(0);
+        let prefix = &trace.steps[..(step as usize).min(trace.steps.len())];
+        let program = self.program;
+        let run = self.position(step)?;
+        Ok(drive(program, run, prefix, sink, ivs, max_steps, false)?.observation)
+    }
+}
+
+/// Apply `ivs` (all at or after the run's step) and evaluate Φ.
+fn drive(
+    program: &Program,
+    run: &mut Run,
+    prefix: &[trace::StepRecord],
+    sink: &SinkSpec,
+    ivs: &[Intervention],
+    max_steps: u64,
+    to_end: bool,
+) -> Result<Oracle> {
+    let mut ordered: Vec<&Intervention> = ivs.iter().collect();
+    ordered.sort();
+    for iv in ordered {
+        if iv.step > run.emu.inst_count {
+            run.run_to_step(iv.step)?;
+        }
+        apply(program, run, iv)?;
+    }
+    let mut monitor = SinkMonitor::resumed(sink, prefix);
+    let (observation, end) = trace::observe_fast(program, run, &mut monitor, max_steps, to_end);
+    Ok(Oracle {
+        digest: engine_digest(run, &end),
+        observation,
+    })
+}
+
 struct Runner<'c, 'p> {
     case: &'c Case<'p>,
     config: Config,
     trace: Trace,
-    checkpoints: BTreeMap<u64, Checkpoint>,
+    replay: Replayer<'p>,
+    /// Holds only the initial checkpoint: verifications replay from step 0.
+    verifier: Replayer<'p>,
+    new_emulator_checks: u32,
     counts: Counts,
     timing: Timing,
-    restore_us: Vec<u128>,
-    position_us: Vec<u128>,
     oracle_us: Vec<u128>,
+    fresh_us: Vec<u128>,
     original_digest: String,
 }
 
@@ -341,32 +480,17 @@ struct Oracle {
 }
 
 impl Runner<'_, '_> {
-    fn program(&self) -> &Program {
-        self.case.program
-    }
-
     fn budget_left(&self) -> bool {
         self.counts.oracle_executions < self.config.max_oracles
     }
 
-    /// A run positioned at `step`: restored from a checkpoint, or replayed
-    /// from the initial state.
-    fn position(&mut self, step: u64, fresh: bool) -> Result<Run> {
-        let started = Instant::now();
-        let mut run = self.program().fresh(Engine::Interpreter)?;
-        if !fresh && let Some(cp) = self.checkpoints.get(&step) {
-            cp.restore(&mut run);
-            self.restore_us.push(started.elapsed().as_micros());
-        } else {
-            if !run.run_to_step(step)? {
-                anyhow::bail!("could not reach step {step}");
-            }
-            self.position_us.push(started.elapsed().as_micros());
-        }
-        Ok(run)
+    fn prefix_len(&self, step: u64) -> usize {
+        (step as usize).min(self.trace.steps.len())
     }
 
-    /// Replay with `ivs` (all at or after `step`) and evaluate Φ.
+    /// Replay with `ivs` from `step` and evaluate Φ. `fresh` replays from
+    /// the initial state in a newly built emulator instead of restoring a
+    /// checkpoint into the worker.
     fn oracle(
         &mut self,
         step: u64,
@@ -376,49 +500,72 @@ impl Runner<'_, '_> {
     ) -> Result<Oracle> {
         let started = Instant::now();
         self.counts.oracle_executions += 1;
-        let mut run = self.position(step, fresh)?;
-        let mut ordered: Vec<&Intervention> = ivs.iter().collect();
-        ordered.sort();
-        for iv in ordered {
-            if iv.step > run.emu.inst_count {
-                run.run_to_step(iv.step)?;
+        let program = self.case.program;
+        let prefix_len = self.prefix_len(step);
+        let result = if fresh && self.new_emulator_checks == 0 {
+            // The first verification of a case builds a brand-new emulator,
+            // so nothing pooled can stand behind it.
+            self.new_emulator_checks += 1;
+            let mut run = program.fresh(Engine::Interpreter)?;
+            self.fresh_us.push(started.elapsed().as_micros());
+            if !run.run_to_step(step)? {
+                anyhow::bail!("fresh replay could not reach step {step}");
             }
-            apply(self.case.program, &mut run, iv)?;
-        }
-        let prefix = &self.trace.steps[..(step as usize).min(self.trace.steps.len())];
-        let mut monitor = SinkMonitor::resumed(&self.case.sink, prefix);
-        let (observation, end) = trace::observe(
-            self.case.program,
-            &mut run,
-            &mut monitor,
-            self.config.max_steps,
-            to_end,
-        );
-        let digest = engine_digest(&run, &end);
+            drive(
+                program,
+                &mut run,
+                &self.trace.steps[..prefix_len],
+                &self.case.sink,
+                ivs,
+                self.config.max_steps,
+                to_end,
+            )?
+        } else if fresh {
+            // Later ones replay from the initial state on a second pooled
+            // emulator that holds no checkpoint but the initial one, so the
+            // fork checkpoints never stand behind a verification.
+            let run = self.verifier.position(step)?;
+            drive(
+                program,
+                run,
+                &self.trace.steps[..prefix_len],
+                &self.case.sink,
+                ivs,
+                self.config.max_steps,
+                to_end,
+            )?
+        } else {
+            let run = self.replay.position(step)?;
+            drive(
+                program,
+                run,
+                &self.trace.steps[..prefix_len],
+                &self.case.sink,
+                ivs,
+                self.config.max_steps,
+                to_end,
+            )?
+        };
         self.oracle_us.push(started.elapsed().as_micros());
-        Ok(Oracle {
-            observation,
-            digest,
-        })
+        Ok(result)
     }
 
-    /// The same interventions finished by the JIT from the intervention
-    /// point, for an engine-diverse end state.
+    /// The same interventions with the JIT finishing the run from the
+    /// intervention point, for an engine-diverse end state.
     fn jit_digest(&mut self, step: u64, ivs: &[Intervention]) -> Result<String> {
-        let mut run = self.program().fresh(Engine::Interpreter)?;
+        let program = self.case.program;
+        let max_steps = self.config.max_steps;
+        let run = self.replay.position(step)?;
         let mut ordered: Vec<&Intervention> = ivs.iter().collect();
         ordered.sort();
-        if !run.run_to_step(step)? {
-            anyhow::bail!("could not reach step {step}");
-        }
         for iv in ordered {
             if iv.step > run.emu.inst_count {
                 run.run_to_step(iv.step)?;
             }
-            apply(self.case.program, &mut run, iv)?;
+            apply(program, run, iv)?;
         }
         run.emu.force_interpreter = false;
-        run.emu.max_inst = Some(self.config.max_steps);
+        run.emu.max_inst = Some(max_steps);
         let end = match run.emu.resume() {
             Ok(_) if run.emu.halt_requested => EndState::Exited {
                 code: run.emu.exit_code,
@@ -429,7 +576,10 @@ impl Runner<'_, '_> {
                 message: e.to_string(),
             },
         };
-        Ok(engine_digest(&run, &end))
+        let digest = engine_digest(run, &end);
+        run.emu.force_interpreter = true;
+        run.emu.max_inst = None;
+        Ok(digest)
     }
 
     /// Confirm a flip from the initial state in a fresh emulator, then once
@@ -449,26 +599,19 @@ impl Runner<'_, '_> {
 
     fn capture_checkpoints(&mut self, steps: &BTreeSet<u64>) -> Result<()> {
         let started = Instant::now();
-        let mut run = self.program().fresh(Engine::Interpreter)?;
-        for &step in steps {
-            if !run.run_to_step(step)? {
-                break;
-            }
-            self.checkpoints.insert(step, Checkpoint::capture(&mut run));
-        }
+        self.replay.capture(steps)?;
         self.timing.checkpoint_capture_us = started.elapsed().as_micros();
-        self.counts.checkpoints = self.checkpoints.len();
         // A checkpoint is trusted only if restoring it and running on
         // unchanged reproduces the recorded run's Φ and end state.
         let original = self.trace.observation.holds();
-        let steps: Vec<u64> = self.checkpoints.keys().copied().collect();
-        for step in steps {
+        for step in self.replay.checkpoint_steps() {
             let null = self.oracle(step, &[], false, true)?;
             if null.observation.holds() != original || null.digest != self.original_digest {
-                self.checkpoints.remove(&step);
+                self.replay.forget(step);
                 self.counts.checkpoints_invalid += 1;
             }
         }
+        self.counts.checkpoints = self.replay.checkpoint_steps().len();
         Ok(())
     }
 
@@ -479,8 +622,9 @@ impl Runner<'_, '_> {
                 detail: format!("oracle budget of {} spent", self.config.max_oracles),
             });
         }
-        let mut probe = self.position(cand.step, false)?;
-        let original = match read_location(self.case.program, &mut probe, &cand.location) {
+        let program = self.case.program;
+        let probe = self.replay.position(cand.step)?;
+        let original = match read_location(program, probe, &cand.location) {
             Ok(v) => v,
             Err(e) => {
                 return Ok(Verdict::Unsupported {
@@ -489,23 +633,27 @@ impl Runner<'_, '_> {
             }
         };
         let values = slice::alternatives(&original, pool, self.config.values_per_candidate);
-        let mut tried = Vec::new();
+        let mut checked = Vec::new();
         for value in values {
             let iv = Intervention {
                 step: cand.step,
                 location: cand.location.clone(),
-                value: value.clone(),
+                value,
             };
-            if let Err(reason) = validate(self.case.program, &mut probe, &self.trace, &iv) {
+            if let Err(reason) = validate(program, probe, &self.trace, &iv) {
                 return Ok(Verdict::InvalidIntervention { reason });
             }
+            checked.push(iv);
+        }
+        let mut tried = Vec::new();
+        for iv in checked {
             if !self.budget_left() {
                 return Ok(Verdict::BudgetBounded {
                     detail: format!("oracle budget spent after {} values", tried.len()),
                 });
             }
             let result = self.oracle(cand.step, std::slice::from_ref(&iv), false, false)?;
-            tried.push(value.clone());
+            tried.push(iv.value.clone());
             match result.observation.holds() {
                 None => {
                     return Ok(Verdict::BudgetBounded {
@@ -559,7 +707,7 @@ impl Runner<'_, '_> {
             Location::Memory { addr, len: 1 } => slice::input_offset_at(&self.trace, addr, iv.step),
             _ => None,
         };
-        let verdict = if iv.step > self.trace.steps.len() as u64 {
+        let verdict = if iv.step >= self.trace.steps.len() as u64 {
             Verdict::InvalidIntervention {
                 reason: InvalidReason::NotBeforeSink {
                     step: iv.step,
@@ -567,8 +715,9 @@ impl Runner<'_, '_> {
                 },
             }
         } else {
-            let mut probe = self.position(iv.step, false)?;
-            match validate(self.case.program, &mut probe, &self.trace, iv) {
+            let program = self.case.program;
+            let probe = self.replay.position(iv.step)?;
+            match validate(program, probe, &self.trace, iv) {
                 Err(reason) => Verdict::InvalidIntervention { reason },
                 Ok(original) => {
                     let result = self.oracle(iv.step, std::slice::from_ref(iv), false, false)?;
@@ -684,6 +833,7 @@ impl Runner<'_, '_> {
             .iter()
             .filter(|c| c.origin == CandidateOrigin::InputByte)
             .collect();
+        let program = self.case.program;
         let mut pairs_tried = 0u64;
         for first in inputs {
             let Verdict::NotACause { tried } = &first.verdict else {
@@ -698,13 +848,15 @@ impl Runner<'_, '_> {
                 value: first_value,
             };
             // The counterfactual run's own slice.
-            let cf = trace::record(
-                self.case.program,
+            self.counts.oracle_executions += 1;
+            let run = self.replay.position(0)?;
+            let cf = trace::record_on(
+                program,
+                run,
                 &self.case.sink,
                 std::slice::from_ref(&first_iv),
                 self.config.max_steps,
             )?;
-            self.counts.oracle_executions += 1;
             let cf_slice = slice::backward(
                 &cf,
                 cf.sink_step,
@@ -730,8 +882,8 @@ impl Runner<'_, '_> {
                     addr: byte.addr,
                     len: 1,
                 };
-                let mut probe = self.position(step, false)?;
-                let original = read_location(self.case.program, &mut probe, &location)?;
+                let probe = self.replay.position(step)?;
+                let original = read_location(program, probe, &location)?;
                 for value in slice::alternatives(&original, &[], 2) {
                     if pairs_tried >= self.config.max_pairs || !self.budget_left() {
                         return Ok(JointStatus::NoWitnessWithinBudget { pairs_tried });
@@ -842,19 +994,22 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
     pool.dedup();
     pool.truncate(8);
 
+    let replay = Replayer::new(program)?;
+    let verifier = Replayer::new(program)?;
     let mut runner = Runner {
         case,
         config: config.clone(),
         trace: recorded,
-        checkpoints: BTreeMap::new(),
+        replay,
+        verifier,
+        new_emulator_checks: 0,
         counts,
         timing: Timing {
             record_us,
             ..Timing::default()
         },
-        restore_us: Vec::new(),
-        position_us: Vec::new(),
         oracle_us: Vec::new(),
+        fresh_us: Vec::new(),
         original_digest: recorded_digest.clone(),
     };
 
@@ -876,11 +1031,13 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         let mut steps: BTreeSet<u64> = generated.iter().map(|c| c.step).collect();
         steps.extend(case.requested.iter().map(|iv| iv.step));
         steps.retain(|s| *s < runner.trace.steps.len() as u64);
-        runner.capture_checkpoints(&steps)?;
+        runner
+            .capture_checkpoints(&steps)
+            .context("capturing checkpoints")?;
     }
 
     let (sources, env_refusal) = if refusal.is_none() {
-        runner.environment(&slice)?
+        runner.environment(&slice).context("environment sources")?
     } else {
         (Vec::new(), None)
     };
@@ -907,7 +1064,9 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         joint = JointStatus::Refused;
     } else {
         for cand in &generated {
-            let verdict = runner.test_candidate(cand, &pool)?;
+            let verdict = runner
+                .test_candidate(cand, &pool)
+                .with_context(|| format!("candidate {cand:?}"))?;
             runner.counts.candidates_tested += 1;
             candidates.push(CandidateResult {
                 step: cand.step,
@@ -919,7 +1078,11 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
             });
         }
         for iv in &case.requested {
-            requested.push(runner.judge_requested(iv)?);
+            requested.push(
+                runner
+                    .judge_requested(iv)
+                    .with_context(|| format!("requested {iv:?}"))?,
+            );
         }
         let any_witness = candidates
             .iter()
@@ -927,7 +1090,9 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         joint = if any_witness {
             JointStatus::NotNeeded
         } else {
-            runner.joint_search(&candidates, &slice)?
+            runner
+                .joint_search(&candidates, &slice)
+                .context("joint search")?
         };
     }
 
@@ -945,8 +1110,10 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
             v.iter().sum::<u128>() as f64 / v.len() as f64
         }
     };
-    runner.timing.checkpoint_restore_us_mean = mean(&runner.restore_us);
-    runner.timing.fresh_position_us_mean = mean(&runner.position_us);
+    runner.timing.checkpoint_restore_us_mean = mean(&runner.replay.restore_us);
+    runner.timing.replay_to_step_us_mean = mean(&runner.replay.replay_us);
+    runner.timing.fresh_emulator_us_mean = mean(&runner.fresh_us);
+    runner.timing.worker_construction_us = runner.replay.construction_us;
     runner.timing.oracle_us_mean = mean(&runner.oracle_us);
     runner.timing.total_us = total.elapsed().as_micros();
 

@@ -403,7 +403,33 @@ pub fn record(
     max_steps: u64,
 ) -> Result<Trace> {
     let mut run = program.fresh(Engine::Interpreter)?;
+    record_on(program, &mut run, sink, interventions, max_steps)
+}
+
+/// [`record`] on a run already at the initial state (for instance a pooled
+/// emulator restored to its initial checkpoint).
+pub fn record_on(
+    program: &Program,
+    run: &mut Run,
+    sink: &SinkSpec,
+    interventions: &[crate::contract::Intervention],
+    max_steps: u64,
+) -> Result<Trace> {
     run.emu.state.tracing_memory = true;
+    let traced = record_inner(program, run, sink, interventions, max_steps);
+    run.emu.state.tracing_memory = false;
+    run.emu.state.trace_mem_reads.clear();
+    run.emu.state.trace_mem_writes.clear();
+    traced
+}
+
+fn record_inner(
+    program: &Program,
+    run: &mut Run,
+    sink: &SinkSpec,
+    interventions: &[crate::contract::Intervention],
+    max_steps: u64,
+) -> Result<Trace> {
     let abi = SyscallAbi::for_arch(&run.emu.arch);
     let syscall_uses: Vec<Access> = std::iter::once(abi.number)
         .chain(abi.args.iter().copied())
@@ -437,12 +463,12 @@ pub fn record(
             );
         }
         for iv in interventions.iter().filter(|iv| iv.step == step) {
-            crate::runner::apply(program, &mut run, iv)?;
+            crate::runner::apply(program, run, iv)?;
         }
         let pc = run.emu.pc;
-        monitor.before(program, &mut run, pc, step);
+        monitor.before(program, run, pc, step);
 
-        let ops = decode_live(program, &run, pc);
+        let ops = decode_live(program, run, pc);
         let flow = flow_of(&ops, program.ram_space);
         let parent = control.parent(pc);
 
@@ -508,7 +534,7 @@ pub fn record(
         monitor.after(pc, step, record.next_pc, &flow, &record.uses);
         steps.push(record);
 
-        if let Some(done) = end_of(&run, pc, outcome) {
+        if let Some(done) = end_of(run, pc, outcome) {
             end = done;
             break;
         }
@@ -516,7 +542,7 @@ pub fn record(
 
     let last = steps.len() as u64;
     let last_uses = steps.last().map(|s| s.uses.clone()).unwrap_or_default();
-    monitor.finish(&mut run, &end, last, &last_uses);
+    monitor.finish(run, &end, last, &last_uses);
     let stdout = run.stdout();
     let (sink_step, criterion, observation) = monitor.decided.take().unwrap_or((
         last,
@@ -582,6 +608,102 @@ pub fn observe(
     }
     let last = run.emu.inst_count + u64::from(matches!(end, EndState::Faulted { .. }));
     monitor.finish(run, &end, last, &last_uses);
+    let obs = monitor
+        .decided
+        .as_ref()
+        .map(|(_, _, o)| o.clone())
+        .unwrap_or(SinkObservation::Undecided {
+            detail: "no decision".into(),
+        });
+    (obs, end)
+}
+
+/// [`observe`] without single-stepping: the run goes block by block and
+/// stops only at breakpoints on the sink's own addresses, where the same
+/// [`SinkMonitor`] decides Φ. A fault sink needs the exact faulting
+/// instruction, which only single-stepping reports, so it takes the slow
+/// path.
+pub fn observe_fast(
+    program: &Program,
+    run: &mut Run,
+    monitor: &mut SinkMonitor<'_>,
+    max_steps: u64,
+    to_end: bool,
+) -> (SinkObservation, EndState) {
+    let stops: Vec<u64> = match monitor.sink {
+        SinkSpec::FaultAt { .. } => return observe(program, run, monitor, max_steps, to_end),
+        SinkSpec::CallTo { target, .. } => vec![*target],
+        SinkSpec::BranchOutcome { pc, .. } => vec![*pc],
+        SinkSpec::MemoryValue {
+            at: SinkPoint::PcHit { pc, .. },
+            ..
+        } => vec![*pc],
+        SinkSpec::MemoryValue { .. } => Vec::new(),
+    };
+    for pc in &stops {
+        if !run.emu.is_breakpoint(*pc) {
+            run.emu.set_breakpoint(*pc);
+        }
+    }
+    let branch_pc = match monitor.sink {
+        SinkSpec::BranchOutcome { pc, .. } => Some(*pc),
+        _ => None,
+    };
+    let at_step = match monitor.sink {
+        SinkSpec::MemoryValue {
+            at: SinkPoint::Step { step },
+            ..
+        } => Some(*step),
+        _ => None,
+    };
+    let end = loop {
+        let budget = match at_step {
+            Some(s) if monitor.decided.is_none() && run.emu.inst_count <= s => s,
+            _ => max_steps,
+        };
+        run.emu.max_inst = Some(budget);
+        let outcome = run.emu.resume();
+        run.emu.max_inst = None;
+        match outcome {
+            Ok(RunOutcome::HitBreakpoint(pc)) => {
+                let step = run.emu.inst_count;
+                monitor.before(program, run, pc, step);
+                if branch_pc == Some(pc) && monitor.decided.is_none() {
+                    let ops = decode_live(program, run, pc);
+                    let flow = flow_of(&ops, program.ram_space);
+                    let stepped = run.emu.step_instruction();
+                    monitor.after(pc, step, run.emu.pc, &flow, &[]);
+                    if let Some(done) = end_of(run, pc, stepped) {
+                        break done;
+                    }
+                }
+                if monitor.decided.is_some() && !to_end {
+                    break EndState::StoppedAtSink;
+                }
+            }
+            Ok(RunOutcome::HitBudget) if Some(budget) == at_step && budget < max_steps => {
+                let pc = run.emu.pc;
+                monitor.before(program, run, pc, budget);
+                if !to_end {
+                    break EndState::StoppedAtSink;
+                }
+            }
+            Ok(RunOutcome::HitBudget) => break EndState::Budget,
+            Ok(_) => {
+                break EndState::Exited {
+                    code: run.emu.exit_code,
+                };
+            }
+            Err(e) => {
+                break EndState::Faulted {
+                    pc: run.emu.pc,
+                    message: e.to_string(),
+                };
+            }
+        }
+    };
+    let last = run.emu.inst_count;
+    monitor.finish(run, &end, last, &[]);
     let obs = monitor
         .decided
         .as_ref()

@@ -94,10 +94,18 @@ impl Run {
         }
         let saved = self.emu.max_inst;
         self.emu.max_inst = Some(step);
-        let outcome = self.emu.resume();
+        // A breakpoint set for a sink stops the run early; positioning
+        // goes on through it.
+        let result = loop {
+            match self.emu.resume() {
+                Ok(fission_emulator::RunOutcome::HitBreakpoint(_))
+                    if self.emu.inst_count < step => {}
+                Ok(_) => break Ok(self.emu.inst_count == step),
+                Err(e) => break Err(e),
+            }
+        };
         self.emu.max_inst = saved;
-        outcome?;
-        Ok(self.emu.inst_count == step)
+        result
     }
 
     /// Guest standard output so far.

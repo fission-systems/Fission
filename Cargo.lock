@@ -832,6 +832,7 @@ dependencies = [
  "fission-loader",
  "fission-pcode-ir",
  "fission-sleigh",
+ "libc",
  "serde",
  "serde_json",
 ]
