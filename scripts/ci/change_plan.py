@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -49,6 +50,19 @@ SWEEP = (
 )
 
 
+DOC_CHECKS = (
+    "docs/", "scripts/ci/check_docs.py", "scripts/ci/check_contract_schemas.py",
+    "scripts/ci/doc-check-requirements.txt", "crates/fission-cli/", ".github/workflows/ci.yml",
+)
+DOC_ROOT = {"README.md", "CONTRIBUTING.md", "mkdocs.yml"}
+REPLAY_CHECKS = (
+    "crates/fission-dir/", "crates/fission-emulator/", "scripts/test/replay_fixture.py",
+    ".github/workflows/ci.yml",
+    "crates/fission-pcode", "crates/fission-midend-", "crates/fission-sleigh/",
+    "crates/fission-decompiler/", "crates/fission-cspec/", "utils/sleigh-specs/",
+)
+
+
 def git(*args: str) -> bytes:
     return subprocess.check_output(["git", *args])
 
@@ -57,6 +71,10 @@ def revision(value: str) -> str:
     if not SHA.fullmatch(value) or value == "0" * 40:
         raise ValueError(f"Expected a commit SHA, got {value!r}")
     return git("rev-parse", "--verify", f"{value}^{{commit}}").decode().strip()
+
+
+def is_ancestor(commit: str, descendant: str) -> bool:
+    return subprocess.run(["git", "merge-base", "--is-ancestor", commit, descendant]).returncode == 0
 
 
 def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
@@ -71,8 +89,17 @@ def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
         head = revision(pr["head"]["sha"])
         # Actions runs the PR merge result. Classify branch changes against
         # the event's base, including when that base is another PR.
-        for parent in (base, head):
-            git("merge-base", "--is-ancestor", parent, checkout)
+        git("merge-base", "--is-ancestor", head, checkout)
+        if not is_ancestor(base, checkout):
+            # Retargeting a PR fires `edited` before GitHub recomputes the
+            # merge ref, so the checkout can still be the merge with the old
+            # base. The changed paths below come from base and head alone, so
+            # the plan is still right; the merge queue tests the new base.
+            print(
+                f"::warning title=Stale merge ref::checkout {checkout[:12]} does not contain "
+                f"base {base[:12]} yet; classifying {base[:12]}...{head[:12]}",
+                file=sys.stderr,  # stdout is the step's $GITHUB_OUTPUT
+            )
         base = git("merge-base", base, head).decode().strip()
     elif event == "merge_group":
         group = payload["merge_group"]
@@ -108,6 +135,8 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     workflows = False
     security = False
     for path in paths:
+        if path in DOC_ROOT:
+            continue
         if path in METADATA:
             security = True
         elif path.startswith((".github/workflows/", ".github/actions/", ".github/scripts/", ".github/actionlint.", "scripts/ci/")):
@@ -124,6 +153,12 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
     lanes = before_merge and any(path.startswith(PREMERGE) for path in paths)
     native = full or lanes or any(path.startswith(DEBUGGER) for path in paths)
     return lane, {
+        "run_doc_checks": event == "workflow_dispatch" or any(
+            path in DOC_ROOT or path.startswith(DOC_CHECKS) for path in paths
+        ),
+        "run_replay_checks": event == "workflow_dispatch" or any(
+            path.startswith(REPLAY_CHECKS) for path in paths
+        ),
         "run_security": rust or security or dependency_change or event == "workflow_dispatch",
         # A push to main always compiles the whole workspace: two PRs that are
         # each green can still fail to build together, and a docs-only push is

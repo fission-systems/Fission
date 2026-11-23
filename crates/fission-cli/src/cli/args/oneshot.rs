@@ -116,6 +116,10 @@ pub struct OneShotArgs {
     /// Force a specific SLEIGH language ID instead of auto-detecting one
     /// (global `--language` flag, canonical parser only).
     pub language_override: Option<String>,
+    /// `--base`: load the file as a raw image mapped here.
+    pub raw_base: Option<u64>,
+    /// `--entry`: the raw image's entry point (defaults to `raw_base`).
+    pub raw_entry: Option<u64>,
     /// Analysis database to read decisions from; `None` means the default
     /// beside the binary.
     pub analysis_db: Option<PathBuf>,
@@ -213,6 +217,8 @@ impl Default for OneShotArgs {
             similar_index: None,
             similar_update_index: None,
             language_override: None,
+            raw_base: None,
+            raw_entry: None,
             analysis_db: None,
             no_analysis_db: false,
         }

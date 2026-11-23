@@ -225,6 +225,105 @@ fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
     );
 }
 
+/// A locked declaration's arity counts every parameter, but under System V
+/// x86-64 a `double` travels in `xmm0` and consumes no integer register.
+/// `Circle::perimeter(double k) const` is `this` in `rdi` and `k` in `xmm0`;
+/// filling integer slot 1 from the declaration printed the caller's own
+/// untouched `rsi` as a second argument. Here `rdx` is staged with the
+/// double's bits on the way to `xmm0` (`-O0` does that), which must not
+/// become an argument either.
+#[test]
+fn sysv_exact_arity_does_not_spend_an_integer_slot_on_a_double() {
+    fn render(param_types: [&str; 2]) -> String {
+        let base = 0x401000;
+        let func = PcodeFunction {
+            blocks: vec![PcodeBasicBlock {
+                index: 0,
+                start_address: base,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: base,
+                        output: Some(reg(0x10, 8)),
+                        inputs: vec![cst(0x4004_0000_0000_0000, 8)],
+                        asm_mnemonic: Some("mov rdx, 2.5".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Call,
+                        address: base + 1,
+                        output: None,
+                        inputs: vec![cst(0x401200, 8)],
+                        asm_mnemonic: Some("call target_fn".to_string()),
+                    },
+                    PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::Return,
+                        address: base + 2,
+                        output: None,
+                        inputs: vec![cst(0, 8)],
+                        asm_mnemonic: Some("ret".to_string()),
+                    },
+                ],
+            }],
+        };
+        let mut context = PreviewTypeContext::default();
+        context.call_target_refs.insert(
+            0x401200,
+            CallTargetRef {
+                address: Some(0x401200),
+                symbol: "target_fn".to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        );
+        context.call_prototype_summaries.insert(
+            "target_fn".to_string(),
+            NirCallPrototypeSummary {
+                min_arity: 2,
+                max_arity: 2,
+                locked_exact_arity: Some(2),
+                param_surface_type_names: param_types
+                    .iter()
+                    .map(|name| Some(name.to_string()))
+                    .collect(),
+                ..Default::default()
+            },
+        );
+        crate::midend::render_mechanical_preview_with_context(
+            &func,
+            "caller",
+            base,
+            &preview_options_for(CallingConvention::SystemVAmd64),
+            Some(&context),
+        )
+        .expect("preview render")
+    }
+
+    let with_double = render(["const Circle *", "double"]);
+    let call = with_double
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.trim_start().starts_with("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{with_double}"));
+    assert_eq!(
+        call.matches(',').count(),
+        0,
+        "only `this` is an integer argument: {call}\n{with_double}"
+    );
+
+    // The same declaration with two integer parameters still proves both
+    // integer slots, so the double-aware count is not just a smaller count.
+    let with_long = render(["const Circle *", "long"]);
+    let call = with_long
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.trim_start().starts_with("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{with_long}"));
+    assert_eq!(call.matches(',').count(), 1, "{call}\n{with_long}");
+}
+
 #[test]
 fn register_namer_maps_only_register_varnodes_to_integer_parameter_slots() {
     let mut namer = register_namer_for_abi(CallingConvention::WindowsX64);

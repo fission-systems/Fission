@@ -2094,7 +2094,7 @@ impl<'a> PreviewBuilder<'a> {
         if unknown.reason != UnknownMissingMergeAttributionReason::SyntheticRootBlock {
             return None;
         }
-        let event_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let event_block_idx = self.block_position(block)?;
         let entry_block_idx = self
             .address_to_index
             .get(&unknown.function_entry_block)
@@ -2441,7 +2441,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<(Option<u64>, Option<u32>, CrossBlockConsumerProvenance)> {
         let (consumer_block_addr, consumer_idx, consumer_op_seq) =
             self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
-        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let def_block_idx = self.block_position(block)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;
         let consumer_op = consumer_block.ops.get(consumer_idx)?;
@@ -2506,7 +2506,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<CrossBlockReplacementProof> {
         let (_, _, provenance) =
             self.describe_cross_block_consumer_provenance(block, op_idx, output)?;
-        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let def_block_idx = self.block_position(block)?;
         let (consumer_block_addr, _, _) =
             self.first_output_use_site_outside_block(block.start_address, op_idx, output)?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
@@ -2547,7 +2547,7 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
         consumer_block_addr: Option<u64>,
     ) -> Option<CrossBlockRedefinitionDetail> {
-        let def_block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let def_block_idx = self.block_position(block)?;
         let consumer_block_addr = consumer_block_addr?;
         let consumer_block_idx = self.address_to_index.get(&consumer_block_addr).copied()?;
         let consumer_block = self.pcode.blocks.get(consumer_block_idx)?;

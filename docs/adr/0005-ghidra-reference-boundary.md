@@ -1,11 +1,11 @@
 # ADR 0005: Ghidra stays reference — Rust owns shipped semantics
 
-**Status:** Accepted  
-**Last verified:** 2026-05-02
+**Status:** Accepted (context amended by [ADR 0017](0017-ghidra-is-not-an-oracle.md))  
+**Last verified:** 2026-11-23
 
 ## Context
 
-Ghidra is an indispensable oracle for sleigh semantics and regression comparison, but importing its architecture wholesale would obscure licensing boundaries and ownership of the Rust implementation.
+Ghidra is an indispensable reference for sleigh semantics and regression comparison, but importing its architecture wholesale would obscure licensing boundaries and ownership of the Rust implementation. It is not a correctness oracle: its SLEIGH specs have been wrong, and Fission, lifting from them, agreed with the errors ([ADR 0017](0017-ghidra-is-not-an-oracle.md)).
 
 ## Decision
 

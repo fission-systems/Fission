@@ -14,8 +14,7 @@ pub(crate) type RangeEnv = HashMap<String, CircleRange>;
 pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
     match expr {
         PreHirExpr::Const(value, ty) => {
-            let bits = nir_bits(ty).unwrap_or(64);
-            CircleRange::singleton(*value as u64, bits)
+            integer_result(ty, |bits| CircleRange::singleton(*value as u64, bits))
         }
         PreHirExpr::Var(name) => env
             .get(name.as_str())
@@ -34,36 +33,27 @@ pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
             then_expr,
             else_expr,
             ty,
-        } => {
-            let bits = nir_bits(ty).unwrap_or(64);
-            match eval_expr(cond, env).singleton_value() {
-                Some(0) => eval_expr(else_expr, env),
-                Some(_) => eval_expr(then_expr, env),
-                None => {
-                    let then_range = eval_expr(then_expr, env);
-                    let else_range = eval_expr(else_expr, env);
-                    if then_range.bits() == else_range.bits() {
-                        then_range.join(&else_range)
-                    } else {
-                        CircleRange::top(bits)
-                    }
+        } => integer_result(ty, |bits| match eval_expr(cond, env).singleton_value() {
+            Some(0) => eval_expr(else_expr, env),
+            Some(_) => eval_expr(then_expr, env),
+            None => {
+                let then_range = eval_expr(then_expr, env);
+                let else_range = eval_expr(else_expr, env);
+                if then_range.bits() == else_range.bits() {
+                    then_range.join(&else_range)
+                } else {
+                    CircleRange::top(bits)
                 }
             }
-        }
+        }),
         PreHirExpr::Cast { expr: inner, ty } => {
-            let bits = nir_bits(ty).unwrap_or(64);
-            let src = eval_expr(inner, env);
-            src.cast_unsigned(bits)
+            integer_result(ty, |bits| eval_expr(inner, env).cast_unsigned(bits))
         }
         PreHirExpr::Unary {
             op,
             expr: inner,
             ty,
-        } => {
-            let bits = nir_bits(ty).unwrap_or(64);
-            let src = eval_expr(inner, env);
-            eval_unary(*op, src, bits)
-        }
+        } => integer_result(ty, |bits| eval_unary(*op, eval_expr(inner, env), bits)),
         PreHirExpr::Binary { op, lhs, rhs, ty } => {
             let a = eval_expr(lhs, env);
             let b = eval_expr(rhs, env);
@@ -71,19 +61,26 @@ pub fn eval_expr(expr: &PreHirExpr, env: &RangeEnv) -> CircleRange {
                 // The result is a Bool, but the operands live in their own domain:
                 // reading them at the 1-bit result width truncates both sides and
                 // makes `1 <s 0` come out true.
-                return if a.bits() == b.bits() {
+                return if a.bits() == b.bits() && CircleRange::supports_intervals(a.bits()) {
                     eval_binary(*op, a, b, a.bits())
                 } else {
-                    // Mixed widths would need a sign decision this domain does not carry.
+                    // Mixed or unsupported widths cannot be compared safely in this domain.
                     CircleRange::top(1)
                 };
             }
-            let bits = nir_bits(ty).unwrap_or(64);
-            eval_binary(*op, a, b, bits)
+            integer_result(ty, |bits| eval_binary(*op, a, b, bits))
         }
         // For complex expressions (loads, calls, etc.) we conservatively
         // return top.
         _ => CircleRange::top(64),
+    }
+}
+
+fn integer_result(ty: &NirType, eval: impl FnOnce(u32) -> CircleRange) -> CircleRange {
+    match nir_bits(ty) {
+        Some(bits) if CircleRange::supports_intervals(bits) => eval(bits),
+        Some(bits) => CircleRange::top(bits),
+        None => CircleRange::top(64),
     }
 }
 
@@ -129,8 +126,20 @@ fn eval_unary(op: PreHirUnaryOp, src: CircleRange, bits: u32) -> CircleRange {
 
 fn eval_binary(op: PreHirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) -> CircleRange {
     use PreHirBinaryOp::*;
+    if !CircleRange::supports_intervals(bits) {
+        return if is_comparison(op) {
+            CircleRange::top(1)
+        } else {
+            CircleRange::top(bits)
+        };
+    }
     let a = a.cast_unsigned(bits);
-    let b = b.cast_unsigned(bits);
+    // The shift count has its own operand width. Narrowing it to the result
+    // width can turn a large shift into a small one before the bounds check.
+    let b = match op {
+        Shl | Shr | Sar => b,
+        _ => b.cast_unsigned(bits),
+    };
     match op {
         Add => a.add(&b),
         Sub => a.sub(&b),
@@ -146,75 +155,28 @@ fn eval_binary(op: PreHirBinaryOp, a: CircleRange, b: CircleRange, bits: u32) ->
                 CircleRange::top(bits)
             }
         }
-        Div => {
-            if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
-                if bv == 0 {
-                    return CircleRange::top(bits);
-                }
-                CircleRange::singleton(av.wrapping_div(bv), bits)
-            } else {
-                CircleRange::top(bits)
+        // PreHIR uses the same operators for signed, unsigned, and float division/mod.
+        // Abstain conservatively so signed or float values are never folded as unsigned.
+        Div | Mod => CircleRange::top(bits),
+        Shl => match b.singleton_value() {
+            Some(shift) if shift >= u64::from(bits) => CircleRange::singleton(0, bits),
+            Some(shift) if shift < u64::from(u64::BITS) => a.singleton_value().map_or_else(
+                || CircleRange::top(bits),
+                |v| CircleRange::singleton(v << shift, bits),
+            ),
+            _ => CircleRange::top(bits),
+        },
+        Shr => match b.singleton_value() {
+            Some(shift) => a.shr_const(shift.min(u64::from(bits)) as u32),
+            None => CircleRange::top(bits),
+        },
+        Sar => match (a.singleton_value(), b.singleton_value()) {
+            (Some(value), Some(shift)) => {
+                let shift = shift.min(u64::from(bits.saturating_sub(1)));
+                CircleRange::singleton((sign_extend(value, bits) >> shift) as u64, bits)
             }
-        }
-        Mod => {
-            if let (Some(av), Some(bv)) = (a.singleton_value(), b.singleton_value()) {
-                if bv == 0 {
-                    return CircleRange::top(bits);
-                }
-                CircleRange::singleton(av.wrapping_rem(bv), bits)
-            } else {
-                CircleRange::top(bits)
-            }
-        }
-        Shl => {
-            if let Some(bv) = b.singleton_value() {
-                if bv >= bits as u64 {
-                    return CircleRange::singleton(0, bits);
-                }
-                // A singleton is a `u64`; a domain wider than that can shift a
-                // value out of it by an amount the domain still holds.
-                if bv >= 64 {
-                    return CircleRange::top(bits);
-                }
-                if let Some(av) = a.singleton_value() {
-                    let mask = if bits >= 64 {
-                        u64::MAX
-                    } else {
-                        (1u64 << bits) - 1
-                    };
-                    CircleRange::singleton((av << bv) & mask, bits)
-                } else {
-                    CircleRange::top(bits)
-                }
-            } else {
-                CircleRange::top(bits)
-            }
-        }
-        Shr => {
-            if let Some(bv) = b.singleton_value() {
-                a.shr_const(bv as u32)
-            } else {
-                CircleRange::top(bits)
-            }
-        }
-        Sar => {
-            if let Some(bv) = b.singleton_value() {
-                if let Some(av) = a.singleton_value() {
-                    let shift = (bv as u32).min(bits.saturating_sub(1));
-                    let mask = if bits >= 64 {
-                        u64::MAX
-                    } else {
-                        (1u64 << bits) - 1
-                    };
-                    let signed = sign_extend(av, bits);
-                    CircleRange::singleton((signed >> shift) as u64 & mask, bits)
-                } else {
-                    CircleRange::top(bits)
-                }
-            } else {
-                CircleRange::top(bits)
-            }
-        }
+            _ => CircleRange::top(bits),
+        },
         And => {
             if let Some(bv) = b.singleton_value() {
                 a.and_const(bv)
@@ -302,7 +264,6 @@ pub fn nir_bits(ty: &NirType) -> Option<u32> {
         NirType::Bool => Some(1),
         NirType::Int { bits, .. } => Some(*bits),
         NirType::Ptr(_) => Some(64),
-        NirType::Float { bits } => Some(*bits),
         _ => None,
     }
 }
@@ -377,6 +338,182 @@ mod tests {
         let b = CircleRange::singleton(8, 64);
         let out = eval_binary(PreHirBinaryOp::Shl, a, b, 64);
         assert_eq!(out.singleton_value(), Some(0x100));
+    }
+
+    #[test]
+    fn wide_128bit_arithmetic_and_comparisons_return_top_without_panicking() {
+        let ty128 = NirType::Int {
+            bits: 128,
+            signed: false,
+        };
+        let c1 = PreHirExpr::Const(1, ty128.clone());
+        let c_neg1 = PreHirExpr::Const(-1, ty128.clone());
+        for op in [
+            PreHirBinaryOp::Add,
+            PreHirBinaryOp::Sub,
+            PreHirBinaryOp::Mul,
+            PreHirBinaryOp::Shl,
+            PreHirBinaryOp::Shr,
+            PreHirBinaryOp::Sar,
+        ] {
+            let expr = PreHirExpr::Binary {
+                op,
+                lhs: Box::new(c1.clone()),
+                rhs: Box::new(c_neg1.clone()),
+                ty: ty128.clone(),
+            };
+            let range = eval_expr(&expr, &RangeEnv::new());
+            assert_eq!(range, CircleRange::top(128));
+            assert_eq!(range.count(), u128::MAX);
+        }
+        let cmp = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(c1),
+            rhs: Box::new(c_neg1),
+            ty: NirType::Bool,
+        };
+        assert_eq!(eval_expr(&cmp, &RangeEnv::new()), CircleRange::top(1));
+    }
+
+    #[test]
+    fn large_shift_counts_do_not_truncate_to_u32_on_shr_and_sar() {
+        let count_hi_zero_lo = CircleRange::singleton(1u64 << 32, 64);
+        let count_hi_one_lo = CircleRange::singleton((1u64 << 32) | 1, 64);
+        for count in [count_hi_zero_lo, count_hi_one_lo] {
+            for bits in [32, 64] {
+                let all_ones = CircleRange::singleton(u64::MAX, bits);
+                for op in [PreHirBinaryOp::Shl, PreHirBinaryOp::Shr] {
+                    assert_eq!(
+                        eval_binary(op, all_ones, count, bits).singleton_value(),
+                        Some(0),
+                        "op={op:?}, bits={bits}, count={count:?}"
+                    );
+                }
+                assert_eq!(
+                    eval_binary(PreHirBinaryOp::Sar, all_ones, count, bits),
+                    all_ones,
+                    "bits={bits}, count={count:?}"
+                );
+                let positive = CircleRange::singleton(8, bits);
+                assert_eq!(
+                    eval_binary(PreHirBinaryOp::Sar, positive, count, bits).singleton_value(),
+                    Some(0),
+                    "bits={bits}, count={count:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn eval_expr_shift_counts_above_u32_max_preserve_high_bits() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let shift_count = PreHirExpr::Const(1i64 << 32, u64_ty.clone());
+        let val64 = PreHirExpr::Const(-1, u64_ty.clone());
+        let shr64 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(val64.clone()),
+            rhs: Box::new(shift_count.clone()),
+            ty: u64_ty,
+        };
+        assert_eq!(
+            eval_expr(&shr64, &RangeEnv::new()).singleton_value(),
+            Some(0)
+        );
+
+        let val32 = PreHirExpr::Const(-1, u32_ty.clone());
+        let sar32 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(val32),
+            rhs: Box::new(shift_count),
+            ty: u32_ty,
+        };
+        assert_eq!(
+            eval_expr(&sar32, &RangeEnv::new()).singleton_value(),
+            Some(0xffff_ffff)
+        );
+    }
+
+    #[test]
+    fn div_and_mod_abstain_for_signed_and_unsigned_operands() {
+        for op in [PreHirBinaryOp::Div, PreHirBinaryOp::Mod] {
+            let neg4 = CircleRange::singleton(0xffff_fffc, 32);
+            let two = CircleRange::singleton(2, 32);
+            assert!(eval_binary(op, neg4, two, 32).is_top());
+
+            let pos10 = CircleRange::singleton(10, 32);
+            assert!(eval_binary(op, pos10, two, 32).is_top());
+        }
+    }
+
+    #[test]
+    fn float_values_and_operations_remain_top() {
+        for bits in [32, 64] {
+            let ty = NirType::Float { bits };
+            assert_eq!(nir_bits(&ty), None);
+
+            let one_bits = if bits == 32 {
+                i64::from(1.0_f32.to_bits())
+            } else {
+                1.0_f64.to_bits() as i64
+            };
+            let f_const = || Box::new(PreHirExpr::Const(one_bits, ty.clone()));
+            let add = PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: f_const(),
+                rhs: f_const(),
+                ty: ty.clone(),
+            };
+            let div = PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: f_const(),
+                rhs: f_const(),
+                ty: ty.clone(),
+            };
+            let cmp = PreHirExpr::Binary {
+                op: PreHirBinaryOp::Eq,
+                lhs: Box::new(add.clone()),
+                rhs: f_const(),
+                ty: NirType::Bool,
+            };
+            let cast = PreHirExpr::Cast {
+                expr: Box::new(add.clone()),
+                ty: NirType::Int {
+                    bits: 32,
+                    signed: true,
+                },
+            };
+            let neg = PreHirExpr::Unary {
+                op: PreHirUnaryOp::Neg,
+                expr: f_const(),
+                ty: ty.clone(),
+            };
+            let select = PreHirExpr::Select {
+                cond: Box::new(PreHirExpr::Const(1, NirType::Bool)),
+                then_expr: Box::new(PreHirExpr::Const(
+                    42,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                )),
+                else_expr: f_const(),
+                ty: ty.clone(),
+            };
+            let env = RangeEnv::new();
+            for expr in [add, div, cmp, cast, neg, select] {
+                assert!(
+                    eval_expr(&expr, &env).is_top(),
+                    "bits={bits}, expr={expr:?}"
+                );
+            }
+        }
     }
 }
 

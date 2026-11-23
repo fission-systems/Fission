@@ -43,18 +43,10 @@ fn direct_pcode_branch_target(op: &PcodeOp) -> Option<u64> {
     match op.opcode {
         PcodeOpcode::Branch | PcodeOpcode::CBranch => {
             let target = op.inputs.first()?;
-            if target.is_constant {
-                if target.offset != 0 {
-                    Some(target.offset)
-                } else if target.constant_val >= 0 {
-                    Some(target.constant_val as u64)
-                } else {
-                    None
-                }
-            } else if target.offset != 0 {
-                Some(target.offset)
-            } else {
+            if target.is_constant || target.space_id == 0 || target.offset == 0 {
                 None
+            } else {
+                Some(target.offset)
             }
         }
         _ => None,
@@ -1060,11 +1052,15 @@ pub fn attach_inferred_indirect_edges(
         return;
     }
 
-    let block_start_to_index = function
-        .blocks
-        .iter()
-        .map(|block| (block.start_address, block.index))
-        .collect::<BTreeMap<_, _>>();
+    // First block per start address: a block split inside one instruction
+    // (see `split_blocks_at_inner_conditional_exits`) shares its start with
+    // the piece before it, and a branch to the address enters the first.
+    let mut block_start_to_index = BTreeMap::new();
+    for block in &function.blocks {
+        block_start_to_index
+            .entry(block.start_address)
+            .or_insert(block.index);
+    }
     let source_to_block_index = function
         .blocks
         .iter()
@@ -1713,15 +1709,16 @@ impl RuntimeSleighFrontend {
                     }
                 }
                 Some(PcodeOpcode::BranchInd) => {
+                    if cbranch_exits_to_fallthrough {
+                        enqueue_internal_target(
+                            &mut queue,
+                            entry_address,
+                            bytes.len(),
+                            fallthrough,
+                        );
+                    }
                     if contract.stop_at_indirect_branch {
-                        if cbranch_exits_to_fallthrough {
-                            enqueue_internal_target(
-                                &mut queue,
-                                entry_address,
-                                bytes.len(),
-                                fallthrough,
-                            );
-                        } else {
+                        if !cbranch_exits_to_fallthrough {
                             stop_reason = DecodeStopReason::IndirectBranchHalt;
                         }
                     } else if let Some(branch_target) =
@@ -1808,20 +1805,20 @@ impl RuntimeSleighFrontend {
                         }
                     }
                     Some(PcodeOpcode::BranchInd) => {
-                        if contract.stop_at_indirect_branch {
-                            if cbranch_exits_to_fallthrough {
-                                if internal_byte_offset(entry_address, bytes.len(), fallthrough)
-                                    .is_some()
-                                {
-                                    reach_queue.push_back(fallthrough);
-                                }
-                            }
-                        } else if let Some(targets) = inferred_indirect_edges.get(&addr) {
-                            for &target in targets {
-                                if internal_byte_offset(entry_address, bytes.len(), target)
-                                    .is_some()
-                                {
-                                    reach_queue.push_back(target);
+                        if cbranch_exits_to_fallthrough
+                            && internal_byte_offset(entry_address, bytes.len(), fallthrough)
+                                .is_some()
+                        {
+                            reach_queue.push_back(fallthrough);
+                        }
+                        if !contract.stop_at_indirect_branch {
+                            if let Some(targets) = inferred_indirect_edges.get(&addr) {
+                                for &target in targets {
+                                    if internal_byte_offset(entry_address, bytes.len(), target)
+                                        .is_some()
+                                    {
+                                        reach_queue.push_back(target);
+                                    }
                                 }
                             }
                         }
@@ -2391,6 +2388,155 @@ mod raw_seed_lift_tests {
             }
             assert!(checked > 0, "{language}: no label branch was lifted");
         }
+    }
+
+    #[test]
+    fn direct_pcode_branch_target_rejects_constant_space_op_deltas() {
+        let cond = Varnode {
+            space_id: 2,
+            offset: 0x200,
+            size: 1,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let rel_forward = PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::CBranch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode::constant(2, 4), cond.clone()],
+            asm_mnemonic: None,
+        };
+        let rel_backward = PcodeOp {
+            seq_num: 4,
+            opcode: PcodeOpcode::Branch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode::constant(-2, 4)],
+            asm_mnemonic: None,
+        };
+        let ram_branch = PcodeOp {
+            seq_num: 1,
+            opcode: PcodeOpcode::Branch,
+            address: 0x0,
+            output: None,
+            inputs: vec![Varnode {
+                space_id: 3,
+                offset: 0x10,
+                size: 4,
+                is_constant: false,
+                constant_val: 0,
+            }],
+            asm_mnemonic: None,
+        };
+
+        assert_eq!(direct_pcode_branch_target(&rel_forward), None);
+        assert_eq!(direct_pcode_branch_target(&rel_backward), None);
+        assert_eq!(direct_pcode_branch_target(&ram_branch), Some(0x10));
+
+        // At address 0x0 with 2-byte instruction (fallthrough=0x2), a constant op delta of +2
+        // that resolves within the same instruction must not count as exiting to fallthrough.
+        let ops = vec![
+            rel_forward,
+            PcodeOp {
+                seq_num: 1,
+                opcode: PcodeOpcode::Copy,
+                address: 0x0,
+                output: Some(cond.clone()),
+                inputs: vec![Varnode::constant(1, 1)],
+                asm_mnemonic: None,
+            },
+            PcodeOp {
+                seq_num: 2,
+                opcode: PcodeOpcode::Return,
+                address: 0x0,
+                output: None,
+                inputs: vec![],
+                asm_mnemonic: None,
+            },
+        ];
+        assert!(!instruction_cbranch_exits_to_fallthrough(&ops, 0x2));
+    }
+
+    #[test]
+    fn lifting_at_entry_address_zero_does_not_enqueue_relative_op_deltas_as_addresses() {
+        fn lifted_addresses(pcode: &fission_pcode_ir::PcodeFunction) -> Vec<u64> {
+            let mut addrs: Vec<u64> = pcode
+                .blocks
+                .iter()
+                .flat_map(|b| b.ops.iter().map(|op| op.address))
+                .collect();
+            addrs.sort_unstable();
+            addrs.dedup();
+            addrs
+        }
+
+        let x86 = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        // tzcnt eax, eax (4 bytes, contains forward & backward label branches) ; ret (1 byte)
+        let x86_bytes = [0xf3u8, 0x0f, 0xbc, 0xc0, 0xc3];
+        let x86_lifted = x86.lift_raw_pcode_function(&x86_bytes, 0x0).unwrap();
+        assert_eq!(lifted_addresses(&x86_lifted), vec![0x0, 0x4]);
+
+        let aarch64 = RuntimeSleighFrontend::new_for_language("AARCH64").unwrap();
+        // csel w0, wzr, w8, mi (4 bytes, label branch) ; ret (4 bytes)
+        let a64_bytes = [0xe0u8, 0x43, 0x88, 0x1a, 0xc0, 0x03, 0x5f, 0xd6];
+        let a64_lifted = aarch64.lift_raw_pcode_function(&a64_bytes, 0x0).unwrap();
+        assert_eq!(lifted_addresses(&a64_lifted), vec![0x0, 0x4]);
+    }
+
+    /// `rep stosq` is a loop inside one instruction: `if (rcx == 0) goto
+    /// inst_next; rcx--; *rdi = rax; rdi += 8; goto inst_start`. Its exit test
+    /// and its back edge are both control exits, so the block must end at the
+    /// exit test: one piece exits to the next instruction or continues into
+    /// the body, the body branches back to the test. Left as one block, the
+    /// exit test read as a skip to the end of the block and the loop had no
+    /// way out.
+    #[test]
+    fn repeat_prefix_ends_the_block_at_its_exit_test() {
+        let x86 = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        // rep stosq ; ret
+        let bytes = [0xf3u8, 0x48, 0xab, 0xc3];
+        let lifted = x86.lift_raw_pcode_function(&bytes, 0x1000).unwrap();
+        let blocks = &lifted.blocks;
+        let shape: Vec<(u64, Option<PcodeOpcode>, Vec<u32>)> = blocks
+            .iter()
+            .map(|block| {
+                (
+                    block.start_address,
+                    block.ops.last().map(|op| op.opcode),
+                    block.successors.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (0x1000, Some(PcodeOpcode::CBranch), vec![1, 2]),
+                (0x1000, Some(PcodeOpcode::Branch), vec![0]),
+                (0x1003, Some(PcodeOpcode::Return), vec![]),
+            ],
+            "{blocks:#?}"
+        );
+        assert!(
+            blocks
+                .iter()
+                .enumerate()
+                .all(|(idx, block)| block.index as usize == idx),
+            "block ids must stay positional"
+        );
+        // The exit test holds no part of the body; the body holds the store.
+        assert!(!blocks[0]
+            .ops
+            .iter()
+            .any(|op| op.opcode == PcodeOpcode::Store));
+        assert_eq!(
+            blocks[1]
+                .ops
+                .iter()
+                .filter(|op| op.opcode == PcodeOpcode::Store)
+                .count(),
+            1
+        );
     }
 
     #[test]

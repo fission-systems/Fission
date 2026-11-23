@@ -28,7 +28,7 @@ impl<'a> PreviewBuilder<'a> {
         if !Self::is_loop_carried_register_update_candidate(output) {
             return None;
         }
-        let block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let block_idx = self.block_position(block)?;
         // Only a value that some real op reads through a phi needs a shared name.
         if !self.output_is_read_by_phi(Some(block_idx), op_idx) {
             return None;

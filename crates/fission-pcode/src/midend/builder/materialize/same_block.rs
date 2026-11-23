@@ -929,7 +929,7 @@ impl<'a> PreviewBuilder<'a> {
         op_idx: usize,
         output: &Varnode,
     ) -> bool {
-        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(block_idx) = self.block_position(block) else {
             return false;
         };
         self.first_reaching_output_use_after_block_exit(block_idx, op_idx, output)

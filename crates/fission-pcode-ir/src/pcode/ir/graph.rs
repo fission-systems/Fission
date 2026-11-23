@@ -85,9 +85,12 @@ impl PcodeGraph {
             if let Some(last_op) = block.ops.last() {
                 match last_op.opcode {
                     PcodeOpcode::Branch | PcodeOpcode::CBranch => {
-                        // Target is usually the first input (const address)
-                        if !last_op.inputs.is_empty() && last_op.inputs[0].is_constant {
-                            let target_addr = last_op.inputs[0].constant_val as u64;
+                        // Direct Branch/CBranch targets may live in const space or RAM/code space.
+                        if let Some(target_addr) = last_op
+                            .inputs
+                            .first()
+                            .and_then(crate::block_cfg::branch_target_address)
+                        {
                             // Find target block
                             if let Some(target_block) =
                                 func.blocks.iter().find(|b| b.start_address == target_addr)
@@ -127,6 +130,7 @@ impl PcodeGraph {
                             }
                         }
                     }
+                    PcodeOpcode::Return | PcodeOpcode::BranchInd => {}
                     _ => {
                         // Fallthrough for non-branching ops at end of block
                         if let Some(next_block) =

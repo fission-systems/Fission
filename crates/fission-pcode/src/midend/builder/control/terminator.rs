@@ -1324,7 +1324,7 @@ impl<'a> PreviewBuilder<'a> {
         else {
             return Ok(None);
         };
-        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(block_idx) = self.block_position(block) else {
             return Ok(None);
         };
         self.with_lowering_site(

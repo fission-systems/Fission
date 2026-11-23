@@ -1190,5 +1190,10 @@ fission_cli schema --error-codes   # stable error codes, kinds, exit codes
 | 70 | internal | The command crashed or panicked. |
 
 `data` is the command's existing JSON output, unchanged (arrays stay arrays).
-Per-command `data` schemas are not typed yet; the envelope schema marks them
-`x-data-schema: untyped`. Committed schemas live in [`schemas/`](https://github.com/fission-systems/Fission/tree/main/docs/schemas).
+`fission_cli schema info`, `fission_cli schema list`, and
+`fission_cli schema decomp` include the corresponding v1 `data` schemas.
+`fission_cli schema --list` lists these commands under `typed_data_commands`.
+The generic envelope and commands without a published payload schema mark
+`data` as `x-data-schema: untyped`. The
+[committed schemas](https://github.com/fission-systems/Fission/tree/main/docs/schemas)
+allow additional fields and preserve the existing payload version and format.
