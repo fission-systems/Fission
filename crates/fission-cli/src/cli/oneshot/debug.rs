@@ -489,7 +489,9 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::BpWhen(_) | DebugCommand::Logpoint(_) => {
-            anyhow::bail!("conditional breakpoints and logpoints require a persistent debug session")
+            anyhow::bail!(
+                "conditional breakpoints and logpoints require a persistent debug session"
+            )
         }
 
         DebugCommand::Bp(args) => {
@@ -527,7 +529,9 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
         }
 
         DebugCommand::HwBp(_) | DebugCommand::RmHwBp(_) => {
-            anyhow::bail!("hardware breakpoints require a persistent debug session; Windows x64 native backend only")
+            anyhow::bail!(
+                "hardware breakpoints require a persistent debug session; Windows x64 native backend only"
+            )
         }
 
         DebugCommand::TraceInspect(args) => {
@@ -558,12 +562,14 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             let available = fission_dynamic::debug::rr::RRDebugger::is_available();
             let traces = fission_dynamic::debug::rr::RRDebugger::list_traces()
                 .into_iter()
-                .map(|trace| serde_json::json!({
-                    "path": trace.path,
-                    "binary_name": trace.binary_name,
-                    "event_count": trace.event_count,
-                    "timestamp": trace.timestamp,
-                }))
+                .map(|trace| {
+                    serde_json::json!({
+                        "path": trace.path,
+                        "binary_name": trace.binary_name,
+                        "event_count": trace.event_count,
+                        "timestamp": trace.timestamp,
+                    })
+                })
                 .collect::<Vec<_>>();
             let report = serde_json::json!({
                 "schema_version": 1,
@@ -626,12 +632,19 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
 
         DebugCommand::Context(args) => {
             let (state, mut session) = attach_active()?;
-            let tid = session.debugger.get_state().current_thread_id
+            let tid = session
+                .debugger
+                .get_state()
+                .current_thread_id
                 .or(state.last_thread_id)
                 .or(session.debugger.get_state().main_thread_id)
                 .context("No thread available for a context snapshot")?;
             let context = super::debug_context::run_context(
-                session.debugger.as_mut(), tid, &args, None, false,
+                session.debugger.as_mut(),
+                tid,
+                &args,
+                None,
+                false,
             )?;
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&context)?);
