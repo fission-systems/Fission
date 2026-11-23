@@ -333,11 +333,11 @@ mod tests {
         let mut options = MlilPreviewOptions::default();
         options.resource_limits.sese_region_proof_calls = 2;
         let options = Box::leak(Box::new(options));
-        let mut builder = PreviewBuilder::new(pcode, options, None);
+        let builder = PreviewBuilder::new(pcode, options, None);
         assert!(!builder.sese_region_proof_budget_exceeded());
 
         // a trial clone's work is observed too, even though the clone is dropped
-        let mut trial = builder.clone();
+        let trial = builder.clone();
         assert!(!trial.sese_region_proof_budget_exceeded());
         assert!(trial.sese_region_proof_budget_exceeded());
         drop(trial);

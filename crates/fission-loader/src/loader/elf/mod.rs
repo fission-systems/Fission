@@ -3391,57 +3391,68 @@ mod tests {
         );
     }
 
+    /// A relocatable object built from `testdata/reloc_arches.c` (build lines
+    /// in its header). These tests read a `benchmark/binary/...` tree that no
+    /// checkout has, and returned without loading anything.
+    fn reloc_fixture(name: &str) -> LoadedBinary {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("testdata")
+            .join(name);
+        LoadedBinary::from_file(&path)
+            .unwrap_or_else(|e| panic!("load committed fixture {}: {e}", path.display()))
+    }
+
+    fn function_address(binary: &LoadedBinary, name: &str) -> u64 {
+        binary
+            .functions
+            .iter()
+            .find(|function| function.name == name)
+            .unwrap_or_else(|| panic!("{name} symbol"))
+            .address
+    }
+
     #[test]
     fn elf32_arm_relocatable_call_relocations_patch_loaded_image() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark")
-            .join("binary/ARM4t_be/baremetal/small/binary/c/function_calls.o");
-        if !fixture.exists() {
-            eprintln!("skip: ARM4t function_calls fixture missing");
-            return;
-        }
-
-        let binary = LoadedBinary::from_file(&fixture).expect("load ARM4t relocatable object");
+        let binary = reloc_fixture("armv4t_be_reloc_arches.o");
+        assert_eq!(function_address(&binary, "recursive_fib"), 0x100008);
         let call = binary
-            .view_bytes(0x100018, 4)
+            .view_bytes(0x100020, 4)
             .expect("recursive_fib call bytes");
+        // BL with imm24 = -8: 0x100020 + 8 - 32 = 0x100008.
         assert_eq!(
             call,
             [0xeb, 0xff, 0xff, 0xf8],
-            "R_ARM_CALL should retarget recursive_fib BL to 0x100000"
+            "R_ARM_CALL should retarget recursive_fib's BL to itself at 0x100008"
         );
     }
 
     #[test]
     fn elf32_arm_thumb_movw_movt_relocations_patch_loaded_image() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark")
-            .join("binary/ARM8m_le/baremetal/small/binary/c/mathematics.o");
-        if !fixture.exists() {
-            eprintln!("skip: ARM8m mathematics fixture missing");
-            return;
-        }
-
-        let binary = LoadedBinary::from_file(&fixture).expect("load ARM8m relocatable object");
-        assert_eq!(
-            binary.inner().global_symbols.get(&0x100058),
-            Some(&"math_sink".to_string())
-        );
+        let binary = reloc_fixture("armv8m_reloc_arches.o");
         let movw = binary
             .view_bytes(0x100044, 4)
             .expect("math_sink MOVW bytes");
         let movt = binary
             .view_bytes(0x100048, 4)
             .expect("math_sink MOVT bytes");
+        // T3 MOVW/MOVT: imm16 = imm4:i:imm3:imm8 across the two halfwords.
+        let imm16 = |w: &[u8]| -> u32 {
+            let hw1 = u32::from(u16::from_le_bytes([w[0], w[1]]));
+            let hw2 = u32::from(u16::from_le_bytes([w[2], w[3]]));
+            ((hw1 & 0xf) << 12)
+                | (((hw1 >> 10) & 1) << 11)
+                | (((hw2 >> 12) & 7) << 8)
+                | (hw2 & 0xff)
+        };
+        let address = u64::from(imm16(&movw) | (imm16(&movt) << 16));
         assert_eq!(
-            movw,
-            [0x40, 0xf2, 0x58, 0x01],
-            "R_ARM_THM_MOVW_ABS_NC should materialize math_sink low half"
+            binary.inner().global_symbols.get(&address),
+            Some(&"math_sink".to_string()),
+            "R_ARM_THM_MOVW_ABS_NC/MOVT_ABS should materialize math_sink, got 0x{address:x}"
         );
         assert_eq!(
-            movt,
-            [0xc0, 0xf2, 0x10, 0x01],
-            "R_ARM_THM_MOVT_ABS should materialize math_sink high half"
+            [movw, movt].concat(),
+            [0x40, 0xf2, 0xc8, 0x01, 0xc0, 0xf2, 0x10, 0x01]
         );
     }
 
@@ -3464,104 +3475,81 @@ mod tests {
 
     #[test]
     fn elf64_loongarch_relocatable_branch_relocations_patch_loaded_image() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            Path::new("../../benchmark")
-                .join("binary/loongarch64_f64/baremetal/small/binary/c/function_calls.o"),
-        );
-        if !fixture.exists() {
-            eprintln!("skip: LoongArch64 function_calls fixture missing");
-            return;
-        }
-
-        let binary =
-            LoadedBinary::from_file(&fixture).expect("load LoongArch64 relocatable object");
+        let binary = reloc_fixture("loongarch64_reloc_arches.o");
         let first_branch = binary
-            .view_bytes(0x100020, 4)
+            .view_bytes(0x100040, 4)
             .expect("recursive_fib first branch bytes");
         let loop_branch = binary
-            .view_bytes(0x100044, 4)
+            .view_bytes(0x100064, 4)
             .expect("recursive_fib loop branch bytes");
+        // B16: offs16 in bits 25:10, in words.
         assert_eq!(
             first_branch,
-            [0x85, 0x28, 0x00, 0x68],
-            "R_LARCH_B16 should retarget the base-case branch to 0x100048"
+            [0xd8, 0x2a, 0x00, 0x60],
+            "R_LARCH_B16 should retarget the base-case branch to 0x100068"
         );
         assert_eq!(
             loop_branch,
-            [0x16, 0xef, 0xff, 0x6b],
-            "R_LARCH_B16 should retarget the loop branch to 0x100030"
+            [0xd8, 0xee, 0xff, 0x67],
+            "R_LARCH_B16 should retarget the loop branch to 0x100050"
         );
     }
 
     #[test]
     fn elf32_loongarch_relocatable_branch_relocations_patch_loaded_image() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
-            Path::new("../../benchmark")
-                .join("binary/loongarch32_f64/baremetal/small/binary/c/function_calls.o"),
-        );
-        if !fixture.exists() {
-            eprintln!("skip: LoongArch32 function_calls fixture missing");
-            return;
-        }
-
-        let binary =
-            LoadedBinary::from_file(&fixture).expect("load LoongArch32 relocatable object");
+        let binary = reloc_fixture("loongarch32_reloc_arches.o");
+        assert_eq!(function_address(&binary, "recursive_fib"), 0x100020);
         let recursive_call = binary
-            .view_bytes(0x100034, 4)
+            .view_bytes(0x100054, 4)
             .expect("recursive_fib call bytes");
         assert_eq!(
             recursive_call,
             [0xff, 0xcf, 0xff, 0x57],
-            "R_LARCH_B26 should retarget recursive_fib BL to 0x100000"
+            "R_LARCH_B26 should retarget recursive_fib BL to 0x100020"
         );
     }
 
     #[test]
     fn elf64_ppc_be_relocatable_opd_symbols_resolve_to_text_addresses() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark")
-            .join("binary/ppc_64_be/baremetal/small/binary/c/function_calls.o");
-        if !fixture.exists() {
-            eprintln!("skip: PPC64 BE function_calls fixture missing");
-            return;
-        }
-
-        let binary = LoadedBinary::from_file(&fixture).expect("load PPC64 BE relocatable object");
-        let op_add = binary
-            .functions
-            .iter()
-            .find(|function| function.name == "op_add")
-            .expect("op_add symbol");
+        let binary = reloc_fixture("ppc64_be_reloc_arches.o");
+        // Each `.opd` descriptor holds 0 plus an addend into `.text`, so only
+        // an applied R_PPC64_ADDR64 puts these where their code is.
         assert_eq!(
-            op_add.address, 0x100084,
+            function_address(&binary, "recursive_fib"),
+            0x100018,
             "ELFv1 .opd function descriptor must resolve to relocated .text entry"
         );
+        assert_eq!(function_address(&binary, "dispatch"), 0x10010c);
         assert_eq!(
-            binary.view_bytes(op_add.address, 4).expect("op_add bytes"),
-            [0x7c, 0x64, 0x1a, 0x14]
+            binary.view_bytes(0x100018, 4).expect("recursive_fib bytes"),
+            [0x7c, 0x08, 0x02, 0xa6],
+            "recursive_fib starts with mflr r0"
         );
     }
 
     #[test]
     fn elf64_x86_64_relocatable_jump_table_patch_loaded_image() {
-        let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../benchmark")
-            .join("binary/x86-64/baremetal/small/binary/c/control_flow.o");
-        if !fixture.exists() {
-            eprintln!("skip: x86-64 control_flow fixture missing");
-            return;
+        let binary = reloc_fixture("x64_reloc_arches.o");
+        let rodata = binary
+            .sections
+            .iter()
+            .find(|section| section.name == ".rodata")
+            .expect(".rodata section")
+            .virtual_address;
+        let dispatch = function_address(&binary, "dispatch");
+        assert_eq!(dispatch, 0x100090);
+        // `.rela.rodata`: five R_X86_64_64 against `.text` + the case offsets.
+        for (slot, text_offset) in [0x9e_u64, 0xe8, 0xbe, 0xce, 0xae].into_iter().enumerate() {
+            let entry = binary
+                .view_bytes(rodata + 8 * slot as u64, 8)
+                .expect("jump table entry");
+            let target = u64::from_le_bytes(entry.try_into().expect("8 bytes"));
+            assert_eq!(target, 0x100000 + text_offset, "jump table slot {slot}");
+            assert!(
+                (dispatch..dispatch + 113).contains(&target),
+                "slot {slot} must land inside dispatch, got 0x{target:x}"
+            );
         }
-
-        let binary = LoadedBinary::from_file(&fixture).expect("load x86-64 relocatable object");
-        let entry0 = binary.view_bytes(0x100460, 8).expect("rodata entry 0");
-        let entry1 = binary.view_bytes(0x100468, 8).expect("rodata entry 1");
-        let entry2 = binary.view_bytes(0x100470, 8).expect("rodata entry 2");
-        let entry3 = binary.view_bytes(0x100478, 8).expect("rodata entry 3");
-
-        assert_eq!(entry0, [0x28, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        assert_eq!(entry1, [0x38, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        assert_eq!(entry2, [0x2c, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        assert_eq!(entry3, [0x33, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00]);
     }
 
     #[test]

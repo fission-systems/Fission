@@ -21,5 +21,6 @@ Short, durable decisions complement [`docs/architecture/ARCHITECTURE.md`](../arc
 | [0015](0015-single-output-surface.md) | One output surface — HIR over an accuracy-selected tree (amends 0011) |
 | [0016](0016-ci-signal-integrity.md) | CI signal integrity — required checks depend only on the change; red scheduled runs open issues |
 | [0017](0017-ghidra-is-not-an-oracle.md) | Ghidra is a reference, not an oracle — correctness comes from native execution, manuals and source ground truth (amends 0005, 0007) |
+| [0018](0018-decbench-is-not-a-correctness-oracle.md) | DecBench measures similarity, not correctness — a comparative and regression metric; correct fixes may score worse (amends 0006) |
 
 New decisions: copy [`0000-template.md`](0000-template.md), bump the next number, link from this table.

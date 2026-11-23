@@ -39,7 +39,7 @@
 /// | void / VOID | (no constraint) |
 ///
 /// Constraints are injected using the same `merge_constraint` / fixed-point
-/// loop from `use_type_infer.rs`, so existing type knowledge is never weakened.
+/// loop from `use_type_infer/mod.rs`, so existing type knowledge is never weakened.
 mod call_arity;
 mod call_target_surface;
 mod direct_callee_pointer;

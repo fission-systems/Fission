@@ -1801,15 +1801,20 @@ mod tests {
         assert!(DieMatcher::match_pattern_bytes(&data, &pattern));
     }
 
+    /// The `.sg` scripts live in the gitignored `utils/source/`; only the
+    /// packed corpus is committed. This returned early in every checkout.
     #[test]
+    #[ignore = "needs the gitignored utils/source/ DIE .sg scripts; run with --ignored"]
     fn test_parse_detect_it_easy_upx_signature() {
-        let Some(root) = fission_core::PATHS.die_mirror_root() else {
-            return;
-        };
+        let root = fission_core::PATHS
+            .die_mirror_root()
+            .expect("the DIE mirror root resolves");
         let path = root.join("db/PE/packer_UPX.2.sg");
-        if !path.exists() {
-            return;
-        }
+        assert!(
+            path.exists(),
+            "DIE source script absent: {}",
+            path.display()
+        );
         let content = fs::read_to_string(&path).expect("UPX DIE signature should be checked in");
         let sig = parse_sg_signature(&root, &path, &content)
             .expect("UPX DIE signature should produce static rules");
@@ -2071,33 +2076,51 @@ mod tests {
 mod packed_die_tests {
     use super::*;
 
-    /// The packed corpus must be the same parse the `.sg` walk produces.
-    ///
-    /// `bin/pack_die` calls the same `parse_sg_signature`, so this is checking
-    /// that packing and reading back is lossless -- not that two parsers agree.
-    #[test]
-    fn packed_and_sg_walk_agree() {
-        let Some(root) = detect_it_easy_mirror_root() else {
-            eprintln!("skipping: no DIE mirror");
-            return;
-        };
-        if !root.join("die_signatures.fpk").exists() {
-            eprintln!("skipping: no packed corpus");
-            return;
-        }
-
-        let empty = || SignatureDatabase {
+    fn empty() -> SignatureDatabase {
+        SignatureDatabase {
             format_version: String::new(),
             description: String::new(),
             source: String::new(),
             signatures: Vec::new(),
-        };
+        }
+    }
 
+    fn committed_mirror_root() -> PathBuf {
+        let root = detect_it_easy_mirror_root().expect("the DIE mirror root resolves");
+        assert!(
+            root.join("die_signatures.fpk").exists(),
+            "the packed DIE corpus is committed under utils/"
+        );
+        root
+    }
+
+    /// The committed packed corpus loads in full.
+    #[test]
+    fn packed_corpus_loads() {
         let mut packed = empty();
         assert!(
-            packed.extend_from_packed_die(&root),
+            packed.extend_from_packed_die(&committed_mirror_root()),
             "packed corpus present but yielded nothing"
         );
+        assert!(
+            packed.signatures.len() > 1000,
+            "expected the full corpus, got {}",
+            packed.signatures.len()
+        );
+    }
+
+    /// The packed corpus must be the same parse the `.sg` walk produces.
+    ///
+    /// `bin/pack_die` calls the same `parse_sg_signature`, so this is checking
+    /// that packing and reading back is lossless -- not that two parsers agree.
+    /// The `.sg` scripts live in the gitignored `utils/source/`, so this used
+    /// to skip in every checkout including CI.
+    #[test]
+    #[ignore = "needs the gitignored utils/source/ DIE .sg scripts; run with --ignored"]
+    fn packed_and_sg_walk_agree() {
+        let root = committed_mirror_root();
+        let mut packed = empty();
+        assert!(packed.extend_from_packed_die(&root));
 
         let mut walked = empty();
         let mut sg_files = Vec::new();
@@ -2114,13 +2137,6 @@ mod packed_die_tests {
             }
         }
 
-        if walked.signatures.is_empty() {
-            // The `.sg` scripts live in the gitignored `utils/source/`, so a
-            // normal checkout (and CI) has the packed corpus and nothing to
-            // compare it against. That is the shipped shape, not a failure.
-            eprintln!("skipping: no .sg sources to compare against");
-            return;
-        }
         assert!(
             walked.signatures.len() > 1000,
             "expected the full corpus from the walk, got {}",

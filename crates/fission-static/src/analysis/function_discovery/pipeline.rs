@@ -137,7 +137,8 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     // `FunctionInfo::is_scan_inferred`.
     let mut scan_inferred: HashSet<u64> = HashSet::new();
 
-    let mut coverage = InstructionCoverage::build(binary, &frontend, &coverage_seeds);
+    let mut coverage =
+        InstructionCoverage::build(binary, &frontend, &coverage_seeds, &executable_ranges);
 
     let mut all_known = known_function_addresses;
     all_known.extend(candidates.iter().copied());
@@ -163,7 +164,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     if discovery_diag_enabled() {
         eprintln!("SCANNER_STATS: data_refs={}", data_refs.len());
     }
-    coverage.add_function_starts(binary, &frontend, &data_refs);
+    coverage.add_function_starts(binary, &frontend, &data_refs, &executable_ranges);
     candidates.extend(data_refs.clone());
     scan_inferred.extend(data_refs.iter().copied());
     all_known.extend(data_refs.clone());
@@ -201,7 +202,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     if discovery_diag_enabled() {
         eprintln!("SCANNER_STATS: msvc_eh_funcinfo={}", eh_funcinfo_hits.len());
     }
-    coverage.add_function_starts(binary, &frontend, &eh_funcinfo_hits);
+    coverage.add_function_starts(binary, &frontend, &eh_funcinfo_hits, &executable_ranges);
     candidates.extend(eh_funcinfo_hits.clone());
     all_known.extend(eh_funcinfo_hits);
 
@@ -224,7 +225,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     if discovery_diag_enabled() {
         eprintln!("SCANNER_STATS: load_config={}", load_config_hits.len());
     }
-    coverage.add_function_starts(binary, &frontend, &load_config_hits);
+    coverage.add_function_starts(binary, &frontend, &load_config_hits, &executable_ranges);
     candidates.extend(load_config_hits.clone());
     all_known.extend(load_config_hits);
 
@@ -249,7 +250,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     if discovery_diag_enabled() {
         eprintln!("SCANNER_STATS: xml_hits={}", xml_hits.len());
     }
-    coverage.add_function_starts(binary, &frontend, &xml_hits);
+    coverage.add_function_starts(binary, &frontend, &xml_hits, &executable_ranges);
     candidates.extend(xml_hits.clone());
     scan_inferred.extend(xml_hits.iter().copied());
     all_known.extend(xml_hits.clone());
@@ -266,7 +267,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
         if discovery_diag_enabled() {
             eprintln!("SCANNER_STATS: tail_calls={}", tail_call_targets.len());
         }
-        coverage.add_function_starts(binary, &frontend, &tail_call_targets);
+        coverage.add_function_starts(binary, &frontend, &tail_call_targets, &executable_ranges);
         candidates.extend(tail_call_targets.iter().copied());
         scan_inferred.extend(tail_call_targets.iter().copied());
         all_known.extend(tail_call_targets);
