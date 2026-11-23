@@ -317,6 +317,30 @@ The first milestone uses the underlying driver's existing single-byte
 watch length. Write/read-write traps are therefore **one-byte** observations,
 not arbitrary ranges. Use `debug capabilities --json` to check support.
 
+### API/HLE tracing and trace-evidence decompilation
+
+`sandbox --dump-trace` already records the emulator's instruction events,
+`HleDispatch` calls and USEROP dispatches. Three new **offline** debug
+commands turn these into bounded, machine-readable observations:
+
+```bash
+fission_cli sandbox ./guest.elf --dump-trace trace.jsonl --json
+fission_cli debug trace-inspect trace.jsonl --max-events 100000 --json
+fission_cli debug trace-diff baseline.jsonl candidate.jsonl --json
+fission_cli debug trace-decomp ./guest.elf trace.jsonl --addr 0x401000 --json
+```
+
+`trace-inspect` aggregates observed PCs and API/HLE names (up to 1000
+individual call events are retained); `trace-diff` identifies the first
+different recorded JSON event, not necessarily the first semantic machine-state
+difference. `trace-decomp` shows the **ordinary** on-disk pseudocode next to
+instruction-hit evidence, with `status: observed_not_promoted`. The trace is
+not used to invent types or rewrite CFGs. **Native syscall interception and
+sound trace-guided FactStore injection are not yet implemented.**
+
+The parser enforces a maximum event budget of 1,000,000 entries and fails
+with the source line number on malformed JSON.
+
 ### Linux native record/replay (rr)
 
 Linux users can now access the repository's existing Mozilla `rr` bridge
