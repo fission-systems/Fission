@@ -17,8 +17,8 @@ use fission_solver::{SatResult, Solver, SymExpr, SymNodeId};
 use crate::boundary::QuotientBudget;
 use crate::expr::{self, Bin, as_const, bin, eval, free_vars, konst, not, or_all, subst};
 use crate::learn::{Hypothesis, Learner};
-use crate::oracle::{Exit, Symbol};
-use crate::summary::{SliceSummary, var_id};
+use crate::oracle::{CallEvent, Exit, Observation, Symbol};
+use crate::summary::{PathExit, SliceSummary, var_id};
 
 /// Slot indices by role.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +28,8 @@ pub struct SlotRoles {
 }
 
 /// Split the context into control and data slots: the least set of slots
-/// closed under "a guard or the result reads it" and "a control slot's next
-/// value reads it".
+/// closed under "a guard, the result or a call argument reads it" and "a
+/// control slot's next value reads it".
 #[must_use]
 pub fn factor(summary: &SliceSummary) -> SlotRoles {
     let slot_of = summary
@@ -48,6 +48,11 @@ pub fn factor(summary: &SliceSummary) -> SlotRoles {
     for path in &summary.paths {
         control.extend(slots_in(&path.guard));
         control.extend(slots_in(&path.output));
+        for call in &path.calls {
+            for arg in &call.args {
+                control.extend(slots_in(arg));
+            }
+        }
     }
     loop {
         let before = control.len();
@@ -84,6 +89,14 @@ pub fn slot_value(context: &[u8], offset: u32, size: u32, big_endian: bool) -> u
     value
 }
 
+/// A call a transition makes: its target and observed arguments, over the
+/// inputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallTerm {
+    pub target: u64,
+    pub args: Vec<SymExpr>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuotientTransition {
     pub from: usize,
@@ -93,6 +106,11 @@ pub struct QuotientTransition {
     pub output: SymExpr,
     /// The next value of each data slot, in `SlotRoles::data` order.
     pub updates: Vec<SymExpr>,
+    /// The calls the step makes, in order.
+    pub calls: Vec<CallTerm>,
+    /// `Returned`, `NoReturn` (the step ends in a call that does not
+    /// return), or `Halted` (the machine stopped at an earlier step).
+    pub exit: Exit,
     pub to: usize,
 }
 
@@ -107,8 +125,48 @@ pub struct Srqa {
 /// One concrete step of the automaton.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SrqaStep {
+    pub exit: Exit,
     pub output: u64,
+    pub calls: Vec<CallEvent>,
     pub data: Vec<u64>,
+}
+
+impl SrqaStep {
+    /// What the step shows the outside world.
+    #[must_use]
+    pub fn observation(&self) -> Observation {
+        Observation {
+            exit: self.exit,
+            value: self.output,
+            calls: self.calls.clone(),
+        }
+    }
+}
+
+/// Evaluate a transition's calls.
+fn eval_calls(calls: &[CallTerm], env: &BTreeMap<SymNodeId, u64>) -> Option<Vec<CallEvent>> {
+    calls
+        .iter()
+        .map(|call| {
+            Some(CallEvent {
+                target: call.target,
+                args: call
+                    .args
+                    .iter()
+                    .map(|arg| eval(arg, env))
+                    .collect::<Option<_>>()?,
+            })
+        })
+        .collect()
+}
+
+/// The exit a path summary's step ends with.
+#[must_use]
+pub fn path_exit(exit: PathExit) -> Exit {
+    match exit {
+        PathExit::Returned => Exit::Returned,
+        PathExit::NoReturn => Exit::NoReturn,
+    }
 }
 
 impl Srqa {
@@ -139,13 +197,16 @@ impl Srqa {
                 .filter(|t| t.from == state)
                 .find(|t| eval(&t.guard, &env) == Some(1))?;
             let output = eval(&transition.output, &env)?;
+            let calls = eval_calls(&transition.calls, &env)?;
             data = transition
                 .updates
                 .iter()
                 .map(|update| eval(update, &env))
                 .collect::<Option<_>>()?;
             out.push(SrqaStep {
+                exit: transition.exit,
                 output,
+                calls,
                 data: data.clone(),
             });
             state = transition.to;
@@ -207,6 +268,30 @@ pub fn build(
 
     let mut transitions = Vec::new();
     for (state, valuation) in control_valuations.iter().enumerate() {
+        // The state a call that does not return leads to: nothing runs from
+        // it again. Its only transition is the halt itself.
+        if hypothesis.transitions[state]
+            .iter()
+            .all(|(observation, target)| observation.exit == Exit::Halted && *target == state)
+        {
+            transitions.push(QuotientTransition {
+                from: state,
+                guard: konst(1, 1),
+                output: konst(
+                    0,
+                    summary.paths.first().map_or(8, |p| expr::width(&p.output)),
+                ),
+                updates: roles
+                    .data
+                    .iter()
+                    .map(|slot| summary.slots[*slot].var.clone())
+                    .collect(),
+                calls: Vec::new(),
+                exit: Exit::Halted,
+                to: state,
+            });
+            continue;
+        }
         let fix = roles
             .control
             .iter()
@@ -216,8 +301,9 @@ pub fn build(
                 (slot.id(), konst(*value, slot.size * 8))
             })
             .collect::<BTreeMap<SymNodeId, SymExpr>>();
-        // (target, output, updates) -> guards, in first-seen order.
-        type Key = (usize, SymExpr, Vec<SymExpr>);
+        // (target, output, updates, calls, exit) -> guards, in first-seen
+        // order.
+        type Key = (usize, SymExpr, Vec<SymExpr>, Vec<CallTerm>, Exit);
         let mut groups: Vec<(Key, Vec<SymExpr>)> = Vec::new();
         for path in &summary.paths {
             let guard = subst(&path.guard, &fix);
@@ -240,6 +326,22 @@ pub fn build(
                 .iter()
                 .map(|slot| subst(&path.post[*slot], &fix))
                 .collect::<Vec<_>>();
+            let calls = path
+                .calls
+                .iter()
+                .map(|call| CallTerm {
+                    target: call.target,
+                    args: call.args.iter().map(|arg| subst(arg, &fix)).collect(),
+                })
+                .collect::<Vec<_>>();
+            let exit = path_exit(path.exit);
+            // Where a step does not return, the control state it would leave
+            // is never observed: nothing runs after it.
+            let next = if exit == Exit::NoReturn {
+                Vec::new()
+            } else {
+                next
+            };
             let cells = match split_cells(&guard, &next, &summary.inputs, budget) {
                 Ok(cells) => cells,
                 Err(CellError::FanOut(symbols)) => return Built::FanOut(symbols),
@@ -265,7 +367,8 @@ pub fn build(
                         ),
                     };
                 };
-                let (observation, target) = hypothesis.transitions[state][symbol];
+                let (observation, target) = &hypothesis.transitions[state][symbol];
+                let target = *target;
                 // The summary and the machine must agree on the step the
                 // representative takes, or nothing built from the summary
                 // means anything.
@@ -281,10 +384,15 @@ pub fn build(
                     env.insert(slot.id(), value);
                 }
                 let predicted = eval(&output, &env);
-                if observation.exit != Exit::Returned || predicted != Some(observation.value) {
+                let predicted_calls = eval_calls(&calls, &env);
+                if observation.exit != exit
+                    || predicted != Some(observation.value)
+                    || predicted_calls.as_ref() != Some(&observation.calls)
+                {
                     return Built::Unsupported(format!(
-                        "the P-code summary predicts {predicted:?} where the emulator observed \
-                         {observation:?} (state {state}, input {:?})",
+                        "the P-code summary predicts {exit:?} {predicted:?} with calls \
+                         {predicted_calls:?} where the emulator observed {observation:?} \
+                         (state {state}, input {:?})",
                         learner.alphabet[symbol]
                     ));
                 }
@@ -293,7 +401,8 @@ pub fn build(
                     .into_iter()
                     .chain([symbol])
                     .collect::<Vec<_>>();
-                if let Some(node) = learner.node_of(&child)
+                if exit == Exit::Returned
+                    && let Some(node) = learner.node_of(&child)
                     && control_valuation(node) != next_values
                 {
                     return Built::Unsupported(format!(
@@ -302,19 +411,21 @@ pub fn build(
                         control_valuation(node)
                     ));
                 }
-                let key = (target, output.clone(), updates.clone());
+                let key = (target, output.clone(), updates.clone(), calls.clone(), exit);
                 match groups.iter_mut().find(|(k, _)| *k == key) {
                     Some((_, guards)) => guards.push(cell_guard),
                     None => groups.push((key, vec![cell_guard])),
                 }
             }
         }
-        for ((to, output, updates), guards) in groups {
+        for ((to, output, updates, calls, exit), guards) in groups {
             transitions.push(QuotientTransition {
                 from: state,
                 guard: or_all(guards),
                 output,
                 updates,
+                calls,
+                exit,
                 to,
             });
         }

@@ -4,7 +4,8 @@
 use serde::Serialize;
 
 use crate::boundary::{QuotientBoundary, QuotientBudget};
-use crate::oracle::{Observation, Symbol};
+use crate::calls::CallSiteModel;
+use crate::oracle::{Exit, Observation, Symbol};
 use crate::summary::PrunedBranch;
 
 pub const SCHEMA_VERSION: &str = "quotient.v1";
@@ -121,6 +122,11 @@ pub struct TransitionReport {
     pub guard: String,
     pub output: String,
     pub updates: Vec<UpdateReport>,
+    /// The calls the step makes, in order, as `callee(arguments)`.
+    pub calls: Vec<String>,
+    /// `returned`, `no_return` (the step ends in a call that does not
+    /// return) or `halted` (an earlier step did).
+    pub exit: Exit,
     pub to: usize,
 }
 
@@ -190,6 +196,8 @@ pub struct CertifiedQuotient {
     pub states: Vec<StateReport>,
     pub transitions: Vec<TransitionReport>,
     pub apartness_witnesses: Vec<ApartnessWitness>,
+    /// Every call site the slice's steps reach, and how it is observed.
+    pub calls: Vec<CallSiteModel>,
     pub assumptions: Vec<Assumption>,
     pub evidence: Evidence,
     pub metrics: Metrics,

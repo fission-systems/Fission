@@ -1,5 +1,5 @@
 {
-  "description": "WBCQ P3 evaluation corpus (RFC #1093). Each entry is a step function `unsigned step(ctx *, unsigned in)`; `context_bytes` is sizeof(ctx). `expect` is what the RFC requires of the engine: `machine` (a quotient), or for a negative case any of `fail_closed` statuses.",
+  "description": "WBCQ P3 evaluation corpus (RFC #1093). Each entry is a step function `unsigned step(ctx *, unsigned in)`; `context_bytes` is sizeof(ctx). `calls` (P4) bounds how many calls one step makes; each call's return is an input. `expect` is what the RFC requires of the engine: `machine` (a quotient), or for a negative case any of `fail_closed` statuses.",
   "functions": [
     {"name": "tcp_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "RFC 793 connection states"},
     {"name": "http_reqline_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "HTTP/1.x request line (RFC 9112 section 3)"},
@@ -12,6 +12,11 @@
     {"name": "traffic_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "traffic light with pedestrian request"},
     {"name": "base64_step", "source": "state_machines.c", "context_bytes": 12, "expect": "machine", "origin": "Base64 decoding (RFC 4648)"},
     {"name": "frame_step", "source": "state_machines.c", "context_bytes": 12, "expect": "large", "origin": "serial frame with XOR checksum"},
+    {"name": "lex_step", "source": "call_machines.c", "context_bytes": 4, "calls": 2, "expect": "machine", "origin": "lexer over the C library's isdigit/isalpha (P4: classifier calls)"},
+    {"name": "door_step", "source": "call_machines.c", "context_bytes": 8, "calls": 1, "expect": "machine", "origin": "garage door controller logging each change with putchar (P4: logging call)"},
+    {"name": "turnstile_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "coin turnstile with an application logger no library describes (P4: unknown callee)"},
+    {"name": "hs_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "greeting handshake that aborts on a protocol violation (P4: no-return callee)"},
+    {"name": "emit_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "parity reporter returning what putchar returned (P4: tail call)"},
     {"name": "sha256_round_step", "source": "negatives.c", "context_bytes": 32, "expect": "fail_closed", "origin": "SHA-256 compression round (FIPS 180-4)"},
     {"name": "list_walk_step", "source": "negatives.c", "context_bytes": 16, "expect": "fail_closed", "origin": "linked-list traversal"},
     {"name": "clock_step", "source": "negatives.c", "context_bytes": 4, "expect": "fail_closed", "origin": "time stamp counter"},

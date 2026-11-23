@@ -11,9 +11,16 @@
 //! The memory model is separated and explicit: the stack frame, the context
 //! region and the register file are distinct regions addressed by offset, so
 //! nothing aliases across them. Anything outside that model -- an absolute
-//! address, a pointer the slice computes from data, a call, a user-defined
+//! address, a pointer the slice computes from data, a user-defined
 //! operation, a floating-point value -- stops the summary with the reason
 //! instead of being approximated.
+//!
+//! A call is an observable effect (see [`crate::calls`]): the path records
+//! its target and argument registers, the return register becomes the next
+//! call-return input port, every register the convention does not preserve
+//! becomes poison, and the path goes on at the call's fall-through -- or
+//! ends there, when the callee is proven not to return. A jump out of the
+//! slice is a call whose return is the step's.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -22,6 +29,7 @@ use fission_solver::{SatResult, Solver, SymExpr, SymNodeId};
 use serde::Serialize;
 
 use crate::boundary::{AbiModel, QuotientBoundary, QuotientBudget, ReturnAddress};
+use crate::calls::{CallFact, CallFacts, CallModel, CallSiteModel, MAX_CALLS_PER_STEP};
 use crate::expr::{
     Bin, and_all, as_const, bin, concat, extract, free_vars, ite, konst, mask, not, resize, sext,
     truthy, widen_bool, width, zext,
@@ -58,18 +66,42 @@ impl Slot {
     }
 }
 
+/// How a path's step ends.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PathExit {
+    Returned,
+    /// At a call proven not to return; no later step runs.
+    NoReturn,
+}
+
+/// One call a path makes, as observed: its target and the argument
+/// registers its call site observes ([`CallSiteModel::arg_bits`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallObservation {
+    pub site: u64,
+    pub target: u64,
+    /// The observed arguments, in register order, each as wide as observed.
+    pub args: Vec<SymExpr>,
+}
+
 /// One feasible path through one step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathSummary {
     /// Conjunction of the branch conditions this path took, over the input
     /// and slot variables.
     pub guard: SymExpr,
-    /// The observed result: the low `output_bits` of the return register.
+    /// The observed result: the low `output_bits` of the return register
+    /// (zero on a path that does not return).
     pub output: SymExpr,
-    /// Each slot's value when the step returns, in slot order.
+    /// Each slot's value when the step returns, in slot order (unchanged on
+    /// a path that does not return: nothing observes it again).
     pub post: Vec<SymExpr>,
     /// P-code blocks the path ran, in order.
     pub blocks: Vec<u32>,
+    /// The calls the path makes, in order. The `n`th one's return is input
+    /// port `declared_inputs + n`.
+    pub calls: Vec<CallObservation>,
+    pub exit: PathExit,
 }
 
 /// A branch side no input and no state can take.
@@ -83,8 +115,14 @@ pub struct PrunedBranch {
 
 #[derive(Debug, Clone)]
 pub struct SliceSummary {
-    /// One variable per input port.
+    /// One variable per input port: the boundary's ports, then one per call
+    /// a step makes (in dynamic order), whose value is what that call
+    /// returns -- the environment chooses it.
     pub inputs: Vec<SymExpr>,
+    /// How many of `inputs` are the boundary's own ports.
+    pub declared_inputs: usize,
+    /// How every call site is observed, on both sides.
+    pub calls: CallModel,
     pub slots: Vec<Slot>,
     pub paths: Vec<PathSummary>,
     pub pruned: Vec<PrunedBranch>,
@@ -101,6 +139,9 @@ impl SliceSummary {
         for (port, var) in boundary.inputs.iter().zip(&self.inputs) {
             names.insert(var_id(var), port.name.clone());
         }
+        for (n, var) in self.inputs.iter().skip(self.declared_inputs).enumerate() {
+            names.insert(var_id(var), format!("ret{n}"));
+        }
         for slot in &self.slots {
             names.insert(slot.id(), slot.name());
         }
@@ -115,19 +156,28 @@ pub(crate) fn var_id(var: &SymExpr) -> SymNodeId {
     }
 }
 
-/// Summarize one step of `function` over `boundary`.
+/// Summarize one step of `function` over `boundary`; `calls` says what is
+/// known about each call it makes.
 pub fn summarize(
     function: &PcodeFunction,
     abi: &AbiModel,
     boundary: &QuotientBoundary,
     budget: &QuotientBudget,
+    calls: &CallFacts,
 ) -> Result<SliceSummary, SummaryError> {
     validate_boundary(abi, boundary)?;
-    let inputs = boundary
+    let mut inputs = boundary
         .inputs
         .iter()
         .map(|port| SymExpr::new_var(&port.name, port.bits))
         .collect::<Vec<_>>();
+    let declared_inputs = inputs.len();
+    // What each call returns, whole register wide: the environment may leave
+    // anything in it, the upper half of a 32-bit result included.
+    let returns = (0..MAX_CALLS_PER_STEP)
+        .map(|n| SymExpr::new_var(&format!("ret{n}"), abi.return_value.size * 8))
+        .collect::<Vec<_>>();
+    let with_returns = inputs.iter().chain(&returns).cloned().collect::<Vec<_>>();
 
     // First pass: byte-granular context, to learn which pieces the slice
     // reads and writes as units. Second pass: one variable per piece, so
@@ -140,7 +190,8 @@ pub fn summarize(
             var: SymExpr::new_var(&format!("ctx_byte_{offset:x}"), 8),
         })
         .collect::<Vec<_>>();
-    let probe = Executor::new(function, abi, boundary, budget, &inputs, bytes).run()?;
+    let probe = Executor::new(function, abi, boundary, budget, &with_returns, bytes, calls)
+        .run(declared_inputs)?;
     let slots = merge_ranges(&probe.context_accesses)
         .into_iter()
         .map(|(offset, size)| Slot {
@@ -149,14 +200,220 @@ pub fn summarize(
             var: SymExpr::new_var(&format!("ctx_{offset:x}"), size * 8),
         })
         .collect::<Vec<_>>();
-    let run = Executor::new(function, abi, boundary, budget, &inputs, slots.clone()).run()?;
+    let run = Executor::new(
+        function,
+        abi,
+        boundary,
+        budget,
+        &with_returns,
+        slots.clone(),
+        calls,
+    )
+    .run(declared_inputs)?;
+    let allowed = with_returns
+        .iter()
+        .map(var_id)
+        .chain(slots.iter().map(Slot::id))
+        .collect::<BTreeSet<_>>();
+    let (paths, model) = observe_calls(abi, run.paths, &allowed)?;
+    let used = paths.iter().map(|path| path.calls.len()).max().unwrap_or(0);
+    inputs.extend(returns.into_iter().take(used));
     Ok(SliceSummary {
         inputs,
+        declared_inputs,
+        calls: model,
         slots,
-        paths: run.paths,
+        paths,
         pruned: run.pruned.into_iter().collect(),
         solver_unknowns: run.solver_unknowns,
     })
+}
+
+/// A path as the executor leaves it: calls with their raw argument values,
+/// before the call sites' observation is decided.
+struct RawPath {
+    guard: SymExpr,
+    output: SymExpr,
+    post: Vec<SymExpr>,
+    blocks: Vec<u32>,
+    calls: Vec<RawCall>,
+    exit: PathExit,
+}
+
+#[derive(Debug, Clone)]
+struct RawCall {
+    site: u64,
+    target: u64,
+    tail: bool,
+    fact: CallFact,
+    /// Every argument register, in convention order.
+    args: Vec<Val>,
+}
+
+/// The widest low part of `value` -- 64, 32, 16 or 8 bits -- that only the
+/// boundary defines; 0 when not even its low byte is.
+fn defined_bits(value: &SymExpr, allowed: &BTreeSet<SymNodeId>) -> u32 {
+    let bits = width(value);
+    [64, 32, 16, 8]
+        .into_iter()
+        .filter(|w| *w <= bits)
+        .find(|w| free_vars(&extract(value.clone(), 0, *w)).is_subset(allowed))
+        .unwrap_or(0)
+}
+
+/// Decide how each call site is observed, the same way on every path that
+/// reaches it, and observe every call accordingly.
+///
+/// A site's observed width per argument register is the least, over the
+/// paths, of the widest low part the boundary defines there. A library
+/// callee observes exactly its declared parameters and each must be defined
+/// at least as wide as its type; an unknown callee observes every argument
+/// register the boundary defines. An address of the context or the frame
+/// in an observed register -- for an unknown callee, in any argument
+/// register -- stops the summary: the callee may write through it.
+fn observe_calls(
+    abi: &AbiModel,
+    raw: Vec<RawPath>,
+    allowed: &BTreeSet<SymNodeId>,
+) -> Result<(Vec<PathSummary>, CallModel), SummaryError> {
+    let registers = abi.arguments.len();
+    struct Seen<'a> {
+        call: &'a RawCall,
+        bits: Vec<u32>,
+        pointer: Vec<Option<Region>>,
+    }
+    let mut seen: BTreeMap<u64, Seen> = BTreeMap::new();
+    for path in &raw {
+        for call in &path.calls {
+            let entry = seen.entry(call.site).or_insert_with(|| Seen {
+                call,
+                bits: vec![64; registers],
+                pointer: vec![None; registers],
+            });
+            for (index, value) in call.args.iter().enumerate() {
+                let bits = match value {
+                    Val::Bits(value) => defined_bits(value, allowed),
+                    Val::Ptr { region, .. } => {
+                        entry.pointer[index].get_or_insert(*region);
+                        0
+                    }
+                    Val::Poison(_) => 0,
+                };
+                entry.bits[index] = entry.bits[index].min(bits);
+            }
+        }
+    }
+    let mut model = CallModel::default();
+    for (site, seen) in &seen {
+        let call = seen.call;
+        let callee = call
+            .fact
+            .callee
+            .clone()
+            .unwrap_or_else(|| format!("the callee at {:#x}", call.target));
+        let unsupported = |reason: String| SummaryError::Unsupported {
+            address: *site,
+            reason,
+        };
+        let region = |region: Region| match region {
+            Region::Stack => "the stack frame",
+            Region::Context => "the context",
+        };
+        let arity = call
+            .fact
+            .prototype
+            .as_ref()
+            .filter(|prototype| !prototype.variadic)
+            .map(|prototype| prototype.params.len());
+        let mut arg_bits = vec![0; registers];
+        match arity {
+            Some(count) => {
+                if count > registers {
+                    return Err(unsupported(format!(
+                        "a call to {callee}, whose {count} parameters do not all fit the                          {registers} argument registers"
+                    )));
+                }
+                let params = &call.fact.prototype.as_ref().expect("arity").params;
+                for (index, param) in params.iter().enumerate() {
+                    if let Some(at) = seen.pointer[index] {
+                        return Err(unsupported(format!(
+                            "a call passes an address of {} to {callee} (parameter {index}),                              which may write through it",
+                            region(at)
+                        )));
+                    }
+                    let bits = seen.bits[index];
+                    if bits == 0 || param.bits.is_some_and(|declared| bits < declared) {
+                        return Err(unsupported(format!(
+                            "a call to {callee}: parameter {index} ({}) is not defined by the                              boundary",
+                            param.type_name
+                        )));
+                    }
+                    arg_bits[index] = bits;
+                }
+            }
+            None => {
+                if let Some((index, at)) = seen
+                    .pointer
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, at)| at.map(|at| (index, at)))
+                {
+                    return Err(unsupported(format!(
+                        "a call passes an address of {} to {callee} (argument register {index}),                          an unknown callee that may write through it",
+                        region(at)
+                    )));
+                }
+                arg_bits.clone_from(&seen.bits);
+            }
+        }
+        model.sites.insert(
+            *site,
+            CallSiteModel {
+                site: *site,
+                target: call.target,
+                callee: call.fact.callee.clone(),
+                class: call.fact.class(),
+                tail: call.tail,
+                arg_bits,
+            },
+        );
+    }
+    let paths = raw
+        .into_iter()
+        .map(|path| {
+            let calls = path
+                .calls
+                .iter()
+                .map(|call| {
+                    let site = &model.sites[&call.site];
+                    let args = site
+                        .arg_bits
+                        .iter()
+                        .zip(&call.args)
+                        .filter(|(bits, _)| **bits > 0)
+                        .map(|(bits, value)| match value {
+                            Val::Bits(value) => extract(value.clone(), 0, *bits),
+                            _ => unreachable!("an observed argument is defined bits"),
+                        })
+                        .collect();
+                    CallObservation {
+                        site: call.site,
+                        target: call.target,
+                        args,
+                    }
+                })
+                .collect();
+            PathSummary {
+                guard: path.guard,
+                output: path.output,
+                post: path.post,
+                blocks: path.blocks,
+                calls,
+                exit: path.exit,
+            }
+        })
+        .collect();
+    Ok((paths, model))
 }
 
 fn validate_boundary(abi: &AbiModel, boundary: &QuotientBoundary) -> Result<(), SummaryError> {
@@ -389,10 +646,14 @@ struct PathState {
     conjuncts: Vec<SymExpr>,
     blocks: Vec<u32>,
     ops: usize,
+    calls: Vec<RawCall>,
+    /// A call has returned: a register byte nothing has written since holds
+    /// whatever the callee left, not the caller's value.
+    after_call: bool,
 }
 
 struct RunResult {
-    paths: Vec<PathSummary>,
+    paths: Vec<RawPath>,
     pruned: BTreeSet<PrunedBranch>,
     solver_unknowns: u32,
     context_accesses: BTreeSet<(u32, u32)>,
@@ -403,7 +664,10 @@ struct Executor<'a> {
     abi: &'a AbiModel,
     boundary: &'a QuotientBoundary,
     budget: &'a QuotientBudget,
+    /// The boundary's ports, then the call-return ports.
     inputs: &'a [SymExpr],
+    declared_inputs: usize,
+    calls: &'a CallFacts,
     slots: Vec<Slot>,
     /// Where each machine instruction's P-code starts: a branch may target
     /// an instruction inside a block (a conditional move skips to the next
@@ -427,6 +691,7 @@ impl<'a> Executor<'a> {
         budget: &'a QuotientBudget,
         inputs: &'a [SymExpr],
         slots: Vec<Slot>,
+        calls: &'a CallFacts,
     ) -> Self {
         let mut op_at = BTreeMap::new();
         for (index, block) in function.blocks.iter().enumerate() {
@@ -446,6 +711,8 @@ impl<'a> Executor<'a> {
             boundary,
             budget,
             inputs,
+            declared_inputs: inputs.len(),
+            calls,
             slots,
             op_at,
             live_ins: BTreeMap::new(),
@@ -493,7 +760,12 @@ impl<'a> Executor<'a> {
             },
             big,
         );
-        for (port, var) in self.boundary.inputs.iter().zip(self.inputs) {
+        for (port, var) in self
+            .boundary
+            .inputs
+            .iter()
+            .zip(&self.inputs[..self.declared_inputs])
+        {
             let slot = &abi.arguments[port.arg_index];
             let value = if port.bits == slot.size * 8 {
                 var.clone()
@@ -517,10 +789,13 @@ impl<'a> Executor<'a> {
             conjuncts: Vec::new(),
             blocks: Vec::new(),
             ops: 0,
+            calls: Vec::new(),
+            after_call: false,
         }
     }
 
-    fn run(mut self) -> Step<RunResult> {
+    fn run(mut self, declared_inputs: usize) -> Step<RunResult> {
+        self.declared_inputs = declared_inputs;
         if self.function.blocks.is_empty() {
             return Err(SummaryError::Unsupported {
                 address: self.boundary.entry,
@@ -574,6 +849,19 @@ impl<'a> Executor<'a> {
                 )));
             }
             match op.opcode {
+                PcodeOpcode::Branch if self.leaves_slice(op) => {
+                    // A jump out of the slice: a call whose return is the
+                    // step's return (a tail call).
+                    if self.calls.error.is_some() || self.calls.tail_jumps.contains_key(&op.address)
+                    {
+                        self.call(&mut state, op, true)?;
+                        return self.finish(state, op);
+                    }
+                    return self.unsupported(
+                        op,
+                        format!("a branch to {:#x}, outside the slice", op.inputs[0].offset),
+                    );
+                }
                 PcodeOpcode::Branch => {
                     (block, op_index) = self.branch_target(op, block, op_index)?;
                     if op_index == 0 {
@@ -635,9 +923,14 @@ impl<'a> Executor<'a> {
                     }
                 }
                 PcodeOpcode::Return => return self.finish(state, op),
-                PcodeOpcode::Call | PcodeOpcode::CallInd => {
-                    return self
-                        .unsupported(op, "a call: the callee's effects are outside the slice");
+                PcodeOpcode::Call => {
+                    if !self.call(&mut state, op, false)? {
+                        return Ok(());
+                    }
+                    op_index += 1;
+                }
+                PcodeOpcode::CallInd => {
+                    return self.unsupported(op, "an indirect call (its target is computed)");
                 }
                 PcodeOpcode::CallOther => {
                     return self.unsupported(
@@ -654,6 +947,147 @@ impl<'a> Executor<'a> {
                 }
             }
         }
+    }
+
+    /// Whether `op` (a BRANCH) jumps to code outside the slice.
+    fn leaves_slice(&self, op: &PcodeOp) -> bool {
+        let target = &op.inputs[0];
+        !(target.is_constant || target.space_id == 0)
+            && target.space_id == self.abi.ram_space
+            && !self.op_at.contains_key(&target.offset)
+    }
+
+    /// Make the call `op`: record it with every argument register, then --
+    /// unless the callee is proven not to return, which ends the path here
+    /// -- go on as the callee would leave things. Returns whether the path
+    /// continues. A `tail` call's return is left in the return register for
+    /// the caller to finish the step with.
+    fn call(&mut self, state: &mut PathState, op: &PcodeOp, tail: bool) -> Step<bool> {
+        let facts = self.calls;
+        if let Some(error) = &facts.error {
+            return self.unsupported(
+                op,
+                format!("a call, but the function's call sites could not be listed: {error}"),
+            );
+        }
+        let table = if tail {
+            &facts.tail_jumps
+        } else {
+            &facts.sites
+        };
+        let Some(fact) = table.get(&op.address) else {
+            return self.unsupported(op, "a call the machine-code decode does not list");
+        };
+        let target = &op.inputs[0];
+        if target.is_constant || target.space_id != self.abi.ram_space {
+            return self.unsupported(op, "a call to a computed target");
+        }
+        let n = state.calls.len();
+        if self.declared_inputs + n >= self.inputs.len() {
+            return Err(SummaryError::Budget(format!(
+                "more than {MAX_CALLS_PER_STEP} calls in one step"
+            )));
+        }
+        let abi = self.abi;
+        let args = abi
+            .arguments
+            .iter()
+            .map(|register| {
+                self.read_register(
+                    state,
+                    abi.register_space,
+                    register.offset as i64,
+                    register.size,
+                )
+            })
+            .collect();
+        state.calls.push(RawCall {
+            site: op.address,
+            target: target.offset,
+            tail,
+            fact: fact.clone(),
+            args,
+        });
+        if !fact.returns {
+            self.finish_no_return(state, op)?;
+            return Ok(false);
+        }
+        self.return_from_call(state, op, n, tail)?;
+        Ok(true)
+    }
+
+    /// The registers as the `n`th call leaves them: the convention's
+    /// preserved registers as they were, the return register holding call
+    /// return port `n`, everything else poison. A call that pushed its return
+    /// address has it popped again.
+    fn return_from_call(
+        &mut self,
+        state: &mut PathState,
+        op: &PcodeOp,
+        n: usize,
+        tail: bool,
+    ) -> Step<()> {
+        let abi = self.abi;
+        if abi.preserved.is_empty() {
+            return self.unsupported(
+                op,
+                "a call, but the calling convention names no caller-saved registers",
+            );
+        }
+        let big = abi.big_endian;
+        let mut kept = Cells::default();
+        for register in &abi.preserved {
+            let value = self.read_register(
+                state,
+                abi.register_space,
+                register.offset as i64,
+                register.size,
+            );
+            kept.write(register.offset as i64, register.size, value, big);
+        }
+        if !tail && matches!(abi.return_address, ReturnAddress::Stack) {
+            let sp = &abi.stack_pointer;
+            let popped = match kept.read(sp.offset as i64, sp.size, big, &mut |_| {
+                Val::Poison("unset")
+            }) {
+                Val::Ptr {
+                    region: Region::Stack,
+                    offset,
+                    bits,
+                } => Val::Ptr {
+                    region: Region::Stack,
+                    offset: offset + i64::from(abi.pointer_bits / 8),
+                    bits,
+                },
+                _ => {
+                    return self
+                        .unsupported(op, "a call made with the stack pointer off the frame");
+                }
+            };
+            kept.write(sp.offset as i64, sp.size, popped, big);
+        }
+        let ret = &abi.return_value;
+        let value = resize(self.inputs[self.declared_inputs + n].clone(), ret.size * 8);
+        kept.write(ret.offset as i64, ret.size, Val::Bits(value), big);
+        state.spaces.insert(abi.register_space, kept);
+        state.after_call = true;
+        Ok(())
+    }
+
+    /// End a path at a call that does not return.
+    fn finish_no_return(&mut self, state: &mut PathState, op: &PcodeOp) -> Step<()> {
+        for conjunct in &state.conjuncts {
+            self.check_vars(op, conjunct, "a branch condition")?;
+        }
+        self.result.paths.push(RawPath {
+            guard: and_all(std::mem::take(&mut state.conjuncts)),
+            output: konst(0, self.boundary.output_bits),
+            post: self.slots.iter().map(|slot| slot.var.clone()).collect(),
+            blocks: std::mem::take(&mut state.blocks),
+            calls: std::mem::take(&mut state.calls),
+            exit: PathExit::NoReturn,
+        });
+        Ok(())
     }
 
     /// Ask whether `conjuncts && condition` has a solution. `Unknown` counts
@@ -776,11 +1210,13 @@ impl<'a> Executor<'a> {
         for conjunct in &state.conjuncts {
             self.check_vars(op, conjunct, "a branch condition")?;
         }
-        self.result.paths.push(PathSummary {
+        self.result.paths.push(RawPath {
             guard: and_all(state.conjuncts),
             output,
             post,
             blocks: state.blocks,
+            calls: state.calls,
+            exit: PathExit::Returned,
         });
         Ok(())
     }
@@ -816,10 +1252,14 @@ impl<'a> Executor<'a> {
         let word = i64::from(self.abi.pointer_bits / 8);
         let register_space = self.abi.register_space;
         let live_ins = &mut self.live_ins;
+        let after_call = state.after_call;
         let cells = state.spaces.entry(space).or_default();
         cells.read(start, size, big, &mut |byte| {
             if space != register_space {
                 return Val::Poison("a temporary read before it is written");
+            }
+            if after_call {
+                return Val::Poison("a register a call may have overwritten");
             }
             let base = byte - byte.rem_euclid(word);
             let value = live_ins

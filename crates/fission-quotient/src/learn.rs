@@ -41,9 +41,9 @@ impl Hypothesis {
     pub fn run_from(&self, mut state: usize, word: &[usize]) -> (Vec<Observation>, usize) {
         let mut out = Vec::with_capacity(word.len());
         for symbol in word {
-            let (observation, next) = self.transitions[state][*symbol];
-            out.push(observation);
-            state = next;
+            let (observation, next) = &self.transitions[state][*symbol];
+            out.push(observation.clone());
+            state = *next;
         }
         (out, state)
     }
@@ -118,7 +118,7 @@ impl Learner {
     }
 
     fn child(&self, node: NodeId, symbol: usize) -> Option<(Observation, NodeId)> {
-        self.nodes[node].children.get(&symbol).copied()
+        self.nodes[node].children.get(&symbol).cloned()
     }
 
     /// The node `word` reaches, if the tree holds the whole word.
@@ -326,10 +326,11 @@ impl Learner {
                 if *symbol >= self.alphabet.len() {
                     continue;
                 }
-                let (predicted, next) = hypothesis.transitions[state][*symbol];
+                let (predicted, next) = &hypothesis.transitions[state][*symbol];
+                let next = *next;
                 let mut longer = word.clone();
                 longer.push(*symbol);
-                if predicted != *observation {
+                if predicted != observation {
                     return Some(longer);
                 }
                 stack.push((*child, next, longer));

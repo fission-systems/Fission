@@ -1114,6 +1114,7 @@ dependencies = [
  "fission-emulator",
  "fission-loader",
  "fission-pcode-ir",
+ "fission-signatures",
  "fission-sleigh",
  "fission-solver",
  "serde",

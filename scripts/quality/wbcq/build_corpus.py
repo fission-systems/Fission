@@ -15,8 +15,11 @@ The obfuscation passes are `obfuscator/WbcqObfuscator.cpp`, built here as an
 pipeline and lowered with `llc` only, so no IR optimization runs over the
 obfuscated code to undo it -- the order OLLVM uses.
 
-Also builds the positive state machines natively as a shared library for
-`ground_truth.py`. Outputs go under --out, outside the repository.
+Also builds the positive state machines natively as shared libraries for
+`ground_truth.py`: `state_machines.c` alone, and `call_machines.c` with
+`call_env_native.c` standing in for every callee. The corpus ELF links
+`call_env.c` for the callees' definitions; nothing ever runs them. Outputs go
+under --out, outside the repository.
 
   python3 scripts/quality/wbcq/build_corpus.py --out ~/fission-benchmark/wbcq-p3/corpus
 """
@@ -39,6 +42,8 @@ PASSES = {"O1-fla": "lower-switch,wbcq-fla", "O1-bcf-fla": "wbcq-bcf,lower-switc
 CFLAGS = ["-fno-jump-tables", "-fno-stack-protector", "-fno-pic", "-ffreestanding",
           "-fno-builtin", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables"]
 START = {"x86_64": ".globl _start\n_start: ud2\n", "aarch64": ".globl _start\n_start: brk #0\n"}
+# Linked into every ELF, never obfuscated, never run: the callees' definitions.
+LINK_ONLY = ("call_env.c",)
 
 
 def run(*args: str | Path) -> None:
@@ -91,6 +96,10 @@ def build_variant(llvm: Path, plugin: Path, isa: str, variant: str, sources: lis
                 "-o", asm)
             run(clang, f"--target={triple}", "-c", asm, "-o", obj)
         objects.append(obj)
+    for name in LINK_ONLY:
+        obj = work / f"{Path(name).stem}.o"
+        run(clang, f"--target={triple}", "-O1", *CFLAGS, "-c", CORPUS / name, "-o", obj)
+        objects.append(obj)
     start = work / "start.s"
     start.write_text(START[isa])
     run(clang, f"--target={triple}", "-c", start, "-o", work / "start.o")
@@ -118,12 +127,19 @@ def main() -> None:
             built[f"{isa}/{variant}"] = str(elf)
             print(f"{isa:8} {variant:11} {elf}")
 
-    native = out / ("corpus_native.dylib" if platform.system() == "Darwin" else "corpus_native.so")
+    suffix = ".dylib" if platform.system() == "Darwin" else ".so"
+    native = out / f"corpus_native{suffix}"
     run(tool(args.llvm_bin, "clang"), "-O1", "-shared", "-fPIC", "-o", native,
         CORPUS / "state_machines.c")
+    # The callees must bind to the stand-ins, not the C library's.
+    native_calls = out / f"corpus_calls_native{suffix}"
+    run(tool(args.llvm_bin, "clang"), "-O1", "-fno-builtin", "-shared", "-fPIC", "-o",
+        native_calls, CORPUS / "call_machines.c", CORPUS / "call_env_native.c")
     (out / "manifest.json").write_text(json.dumps(
-        {**manifest, "binaries": built, "native": str(native)}, indent=2) + "\n")
+        {**manifest, "binaries": built, "native": str(native),
+         "native_calls": str(native_calls)}, indent=2) + "\n")
     print(f"native   {native}")
+    print(f"native   {native_calls}")
 
 
 if __name__ == "__main__":

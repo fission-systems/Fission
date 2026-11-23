@@ -148,6 +148,28 @@ fn print_text(report: &CertifiedQuotient) {
             .collect::<Vec<_>>();
         println!("  context: {}", slots.join(", "));
     }
+    for call in &report.calls {
+        let class = match call.class {
+            fission_quotient::calls::CalleeClass::NoReturn => "does not return",
+            fission_quotient::calls::CalleeClass::Library => "library prototype",
+            fission_quotient::calls::CalleeClass::Unknown => "unknown callee",
+        };
+        let observed = call
+            .arg_bits
+            .iter()
+            .enumerate()
+            .filter(|(_, bits)| **bits > 0)
+            .map(|(index, bits)| format!("arg{index}:{bits}"))
+            .collect::<Vec<_>>();
+        println!(
+            "  {} at 0x{:x}: {} (0x{:x}), {class}; observes [{}]",
+            if call.tail { "tail call" } else { "call" },
+            call.site,
+            call.callee.as_deref().unwrap_or("?"),
+            call.target,
+            observed.join(", ")
+        );
+    }
     if report.states.is_empty() {
         return;
     }
@@ -178,12 +200,21 @@ fn print_text(report: &CertifiedQuotient) {
             .iter()
             .map(|update| format!("{} := {}", update.slot, update.value))
             .collect::<Vec<_>>();
+        let effect = match transition.exit {
+            fission_quotient::Exit::Returned => format!("returns {}", transition.output),
+            fission_quotient::Exit::NoReturn => "does not return".to_string(),
+            _ => "halted".to_string(),
+        };
+        let calls = if transition.calls.is_empty() {
+            String::new()
+        } else {
+            format!("calls {}; ", transition.calls.join(", "))
+        };
         println!(
-            "  {} -> {} if {} / returns {}{}",
+            "  {} -> {} if {} / {calls}{effect}{}",
             transition.from,
             transition.to,
             transition.guard,
-            transition.output,
             if updates.is_empty() {
                 String::new()
             } else {

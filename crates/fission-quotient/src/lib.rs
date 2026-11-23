@@ -26,6 +26,7 @@
 //! status says exactly how far its claim reaches.
 
 pub mod boundary;
+pub mod calls;
 pub mod certify;
 mod engine;
 mod expr;
@@ -36,6 +37,9 @@ pub mod srqa;
 pub mod summary;
 
 pub use boundary::{AbiModel, ContextRegion, InputPort, QuotientBoundary, QuotientBudget};
+pub use calls::{CallFacts, CallModel};
 pub use engine::{QuotientEngine, QuotientModel, ReplayVerdict, Wbcq};
-pub use oracle::{EmulatorOracle, Exit, MembershipOracle, Observation, StepRecord, Symbol};
+pub use oracle::{
+    CallEvent, EmulatorOracle, Exit, MembershipOracle, Observation, StepRecord, Symbol,
+};
 pub use report::{CertifiedQuotient, QuotientStatus};

@@ -4,13 +4,16 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
-use fission_dir::{CallOutcome, EmulatorHarness};
+use fission_dir::{CallOutcome, EmulatorHarness, MachineFlow, StubbedEnd};
+use fission_loader::loader::LoadedBinary;
 use serde::Serialize;
 
 use crate::boundary::QuotientBoundary;
+use crate::calls::CallModel;
 use crate::expr::mask;
 
-/// One input symbol: a value per input port.
+/// One input symbol: a value per input port -- the boundary's ports, then
+/// what each call of the step returns, in call order.
 pub type Symbol = Vec<u64>;
 
 /// How one step ended.
@@ -24,15 +27,29 @@ pub enum Exit {
     Budget,
     /// An earlier step of the word did not return; nothing ran.
     Halted,
+    /// Ended in a call proven not to return; no later step runs.
+    NoReturn,
+}
+
+/// One call a step made: where to, with which observed arguments.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+pub struct CallEvent {
+    #[serde(serialize_with = "crate::report::hex_address")]
+    pub target: u64,
+    /// The argument registers the call site observes, in convention order,
+    /// each masked to its observed width.
+    pub args: Vec<u64>,
 }
 
 /// What one step showed the outside world.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct Observation {
     pub exit: Exit,
     /// The result, masked to the boundary's width; 0 unless `exit` is
     /// `Returned`.
     pub value: u64,
+    /// The calls the step made, in order.
+    pub calls: Vec<CallEvent>,
 }
 
 impl Observation {
@@ -41,6 +58,7 @@ impl Observation {
         Self {
             exit: Exit::Returned,
             value,
+            calls: Vec::new(),
         }
     }
 
@@ -49,6 +67,15 @@ impl Observation {
         Self {
             exit: Exit::Halted,
             value: 0,
+            calls: Vec::new(),
+        }
+    }
+
+    fn ended(exit: Exit) -> Self {
+        Self {
+            exit,
+            value: 0,
+            calls: Vec::new(),
         }
     }
 }
@@ -68,17 +95,31 @@ pub trait MembershipOracle {
 
     /// Steps executed so far.
     fn steps(&self) -> u64;
+
+    /// How the slice's calls are observed, once the summary has decided it.
+    /// An oracle whose slices make no calls can ignore it.
+    fn observe_calls(&mut self, _model: &CallModel) {}
 }
 
 /// Membership through the real emulator: each step is one call of the
 /// slice's machine code, with the context in a mapped buffer that persists
 /// between the steps of a word and is reset between words.
+///
+/// Calls the slice makes are stubbed (`EmulatorHarness::call_stubbed`, as
+/// `verify --tier ground-truth` stubs them): the callee never runs, the
+/// `n`th call of a step returns the symbol's `n`th value past the
+/// boundary's ports (0 when the symbol has none), and the call is observed
+/// through the [`CallModel`] the summary decided.
 pub struct EmulatorOracle {
     harness: EmulatorHarness,
     boundary: QuotientBoundary,
     context_address: u64,
     arg_count: usize,
     steps: u64,
+    /// The function's calls and tail jumps, when it has any and they could
+    /// all be listed. `None` runs the machine code unstubbed.
+    flow: Option<MachineFlow>,
+    calls: CallModel,
 }
 
 impl EmulatorOracle {
@@ -98,13 +139,64 @@ impl EmulatorOracle {
             .chain([boundary.context.arg_index + 1])
             .max()
             .unwrap_or(0);
+        // A function whose calls cannot all be listed is run unstubbed: the
+        // summary refuses any call it makes, so a call that runs here only
+        // ever shows up as a disagreement.
+        let flow = LoadedBinary::from_file(binary_path)
+            .ok()
+            .and_then(|binary| fission_dir::call_sites(&binary, boundary.entry).ok())
+            .filter(|flow| !flow.calls.is_empty() || !flow.tail_jumps.is_empty());
         Ok(Self {
             harness,
             boundary: boundary.clone(),
             context_address,
             arg_count,
             steps: 0,
+            flow,
+            calls: CallModel::default(),
         })
+    }
+
+    /// Run one step with calls stubbed: the `n`th call returns
+    /// `returns[n]`, or 0 past its end.
+    fn stubbed_step(
+        &mut self,
+        flow: &MachineFlow,
+        args: &[u64],
+        returns: &[u64],
+    ) -> Result<Observation> {
+        let result = |n: usize| returns.get(n).copied().unwrap_or(0);
+        let run = self
+            .harness
+            .call_stubbed(self.boundary.entry, args, flow, &result)?;
+        let calls = run
+            .calls
+            .iter()
+            .map(|call| match self.calls.sites.get(&call.site) {
+                Some(site) => CallEvent {
+                    target: site.target,
+                    args: site.observe(&call.args),
+                },
+                // A site the summary never saw: observed by its address,
+                // with every argument register, so it cannot match.
+                None => CallEvent {
+                    target: call.site,
+                    args: call.args.clone(),
+                },
+            })
+            .collect();
+        let mut observation = match run.end {
+            StubbedEnd::Returned(value) => {
+                Observation::returned(value & mask(self.boundary.output_bits))
+            }
+            StubbedEnd::NoReturnCall(_) => Observation::ended(Exit::NoReturn),
+            StubbedEnd::Other(CallOutcome::HitBudget) => Observation::ended(Exit::Budget),
+            StubbedEnd::Other(_) | StubbedEnd::LeftDecodedCode(_) => {
+                Observation::ended(Exit::Fault)
+            }
+        };
+        observation.calls = calls;
+        Ok(observation)
     }
 }
 
@@ -121,7 +213,7 @@ impl MembershipOracle for EmulatorOracle {
                 });
                 continue;
             }
-            if symbol.len() != self.boundary.inputs.len() {
+            if symbol.len() < self.boundary.inputs.len() {
                 bail!(
                     "a symbol of {} values for {} ports",
                     symbol.len(),
@@ -138,17 +230,21 @@ impl MembershipOracle for EmulatorOracle {
                 args[port.arg_index] = value & mask(port.bits);
             }
             self.steps += 1;
-            let observation = match self.harness.call(self.boundary.entry, &args)? {
-                CallOutcome::Returned(value) => {
-                    Observation::returned(value & mask(self.boundary.output_bits))
+            let observation = match self.flow.take() {
+                Some(flow) => {
+                    let returns = &symbol[self.boundary.inputs.len()..];
+                    let observed = self.stubbed_step(&flow, &args, returns);
+                    self.flow = Some(flow);
+                    observed?
                 }
-                CallOutcome::HitBudget => Observation {
-                    exit: Exit::Budget,
-                    value: 0,
-                },
-                CallOutcome::ProcessExited | CallOutcome::Other(_) => Observation {
-                    exit: Exit::Fault,
-                    value: 0,
+                None => match self.harness.call(self.boundary.entry, &args)? {
+                    CallOutcome::Returned(value) => {
+                        Observation::returned(value & mask(self.boundary.output_bits))
+                    }
+                    CallOutcome::HitBudget => Observation::ended(Exit::Budget),
+                    CallOutcome::ProcessExited | CallOutcome::Other(_) => {
+                        Observation::ended(Exit::Fault)
+                    }
                 },
             };
             if observation.exit == Exit::Returned {
@@ -166,5 +262,9 @@ impl MembershipOracle for EmulatorOracle {
 
     fn steps(&self) -> u64 {
         self.steps
+    }
+
+    fn observe_calls(&mut self, model: &CallModel) {
+        self.calls = model.clone();
     }
 }

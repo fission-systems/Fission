@@ -2,8 +2,10 @@
 //!
 //! The slice's path summaries and the automaton are unrolled side by side
 //! for `H` steps from the initial context, and the solver is asked for an
-//! input word on which they differ -- in a result, in a data slot, or by the
-//! automaton having no transition. `Unsat` is a proof of bounded
+//! input word on which they differ -- in how a step ends, in a result, in a
+//! call (its target or an observed argument), in a data slot, or by the
+//! automaton having no transition. A step that ends in a call that does not
+//! return halts the slice: every later step of the word is `Halted`. `Unsat` is a proof of bounded
 //! observational equivalence *under the memory model*; `Sat` is a candidate
 //! counterexample that the emulator must confirm before anything acts on it;
 //! `Unknown` is neither and is never reported as a proof.
@@ -13,9 +15,9 @@ use std::collections::BTreeMap;
 use fission_solver::{SatResult, Solver, SymExpr, SymNodeId};
 
 use crate::boundary::QuotientBudget;
-use crate::expr::{Bin, bin, ite, konst, mask, not, or_all, subst, width};
-use crate::oracle::Symbol;
-use crate::srqa::{SlotRoles, Srqa};
+use crate::expr::{Bin, bin, ite, konst, mask, not, or_all, subst, width, zext};
+use crate::oracle::{Exit, Symbol};
+use crate::srqa::{CallTerm, SlotRoles, Srqa, path_exit};
 use crate::summary::{SliceSummary, var_id};
 
 pub enum Refutation {
@@ -27,8 +29,46 @@ pub enum Refutation {
 }
 
 const STATE_BITS: u32 = 16;
+const EXIT_BITS: u32 = 2;
 
-type SubstitutedPath = (SymExpr, SymExpr, Vec<SymExpr>);
+fn exit_code(exit: Exit) -> SymExpr {
+    konst(
+        match exit {
+            Exit::Returned => 0,
+            Exit::NoReturn => 1,
+            _ => 2,
+        },
+        EXIT_BITS,
+    )
+}
+
+/// The observed calls of a step as fixed fields: for each of `count` calls,
+/// whether it happens, its target, how many arguments it shows and each of
+/// `arity` arguments (zero past the end).
+fn call_fields(calls: &[CallTerm], count: usize, arity: usize) -> Vec<SymExpr> {
+    let mut fields = Vec::with_capacity(count * (3 + arity));
+    for n in 0..count {
+        let call = calls.get(n);
+        fields.push(konst(u64::from(call.is_some()), 1));
+        fields.push(konst(call.map_or(0, |c| c.target), 64));
+        fields.push(konst(call.map_or(0, |c| c.args.len() as u64), 8));
+        for index in 0..arity {
+            fields.push(
+                call.and_then(|c| c.args.get(index))
+                    .map_or_else(|| konst(0, 64), |arg| zext(arg.clone(), 64)),
+            );
+        }
+    }
+    fields
+}
+
+struct SubstitutedPath {
+    guard: SymExpr,
+    exit: SymExpr,
+    output: SymExpr,
+    post: Vec<SymExpr>,
+    calls: Vec<SymExpr>,
+}
 
 /// Ask for a word of length `horizon` on which the slice and the automaton
 /// differ: in a result or in the automaton having no transition, and -- with
@@ -61,6 +101,34 @@ pub fn refute(
     let mut data: Vec<SymExpr> = roles.data.iter().map(|slot| slots[*slot].clone()).collect();
     let mut inputs = Vec::new();
     let mut divergences = Vec::new();
+    // Whether an earlier step ended in a call that does not return.
+    let mut halted = konst(0, 1);
+    let path_calls = summary
+        .paths
+        .iter()
+        .map(|path| {
+            path.calls
+                .iter()
+                .map(|call| CallTerm {
+                    target: call.target,
+                    args: call.args.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let call_count = path_calls
+        .iter()
+        .map(Vec::len)
+        .chain(srqa.transitions.iter().map(|t| t.calls.len()))
+        .max()
+        .unwrap_or(0);
+    let arity = path_calls
+        .iter()
+        .flatten()
+        .chain(srqa.transitions.iter().flat_map(|t| &t.calls))
+        .map(|call| call.args.len())
+        .max()
+        .unwrap_or(0);
 
     for step in 0..horizon {
         let word_inputs = summary
@@ -83,15 +151,26 @@ pub fn refute(
         let paths = summary
             .paths
             .iter()
-            .map(|path| {
-                (
-                    subst(&path.guard, &map),
-                    subst(&path.output, &map),
-                    path.post
+            .zip(&path_calls)
+            .map(|(path, calls)| {
+                let calls = calls
+                    .iter()
+                    .map(|call| CallTerm {
+                        target: call.target,
+                        args: call.args.iter().map(|arg| subst(arg, &map)).collect(),
+                    })
+                    .collect::<Vec<_>>();
+                SubstitutedPath {
+                    guard: subst(&path.guard, &map),
+                    exit: exit_code(path_exit(path.exit)),
+                    output: subst(&path.output, &map),
+                    post: path
+                        .post
                         .iter()
                         .map(|post| subst(post, &map))
                         .collect::<Vec<_>>(),
-                )
+                    calls: call_fields(&calls, call_count, arity),
+                }
             })
             .collect::<Vec<SubstitutedPath>>();
         // The paths are disjoint and cover every input, so the last one is
@@ -99,10 +178,20 @@ pub fn refute(
         let choose = |pick: &dyn Fn(&SubstitutedPath) -> SymExpr| {
             let (last, rest) = paths.split_last().expect("a slice has a path");
             rest.iter().rev().fold(pick(last), |otherwise, path| {
-                ite(path.0.clone(), pick(path), otherwise)
+                ite(path.guard.clone(), pick(path), otherwise)
             })
         };
-        let output = choose(&|path| path.1.clone());
+        // Once halted, a step shows only that, and changes nothing.
+        let live_exit = choose(&|path| path.exit.clone());
+        let exit = ite(halted.clone(), exit_code(Exit::Halted), live_exit.clone());
+        let output = choose(&|path| path.output.clone());
+        let output = ite(halted.clone(), konst(0, width(&output)), output);
+        let calls = (0..call_count * (3 + arity))
+            .map(|field| {
+                let value = choose(&|path| path.calls[field].clone());
+                ite(halted.clone(), konst(0, width(&value)), value)
+            })
+            .collect::<Vec<_>>();
         let mut next_slots = Vec::with_capacity(slots.len());
         for slot in 0..slots.len() {
             let next = fresh(
@@ -113,10 +202,19 @@ pub fn refute(
             solver.assert(bin(
                 Bin::Eq,
                 next.clone(),
-                choose(&|path| path.2[slot].clone()),
+                ite(
+                    halted.clone(),
+                    slots[slot].clone(),
+                    choose(&|path| path.post[slot].clone()),
+                ),
             ));
             next_slots.push(next);
         }
+        let next_halted = bin(
+            Bin::Or,
+            halted.clone(),
+            bin(Bin::Eq, live_exit, exit_code(Exit::NoReturn)),
+        );
 
         // The automaton.
         let mut qmap: BTreeMap<SymNodeId, SymExpr> = summary
@@ -153,6 +251,31 @@ pub fn refute(
             &|t| subst(&srqa.transitions[t].output, &qmap),
             konst(0, output_bits),
         );
+        let q_exit = pick(
+            &|t| exit_code(srqa.transitions[t].exit),
+            exit_code(Exit::Returned),
+        );
+        let q_call_fields = srqa
+            .transitions
+            .iter()
+            .map(|t| {
+                let calls = t
+                    .calls
+                    .iter()
+                    .map(|call| CallTerm {
+                        target: call.target,
+                        args: call.args.iter().map(|arg| subst(arg, &qmap)).collect(),
+                    })
+                    .collect::<Vec<_>>();
+                call_fields(&calls, call_count, arity)
+            })
+            .collect::<Vec<_>>();
+        let q_calls = (0..call_count * (3 + arity))
+            .map(|field| {
+                let otherwise = konst(0, width(&calls[field]));
+                pick(&|t| q_call_fields[t][field].clone(), otherwise)
+            })
+            .collect::<Vec<_>>();
         let next_state = fresh(&mut solver, format!("q{}", step + 1), STATE_BITS);
         solver.assert(bin(
             Bin::Eq,
@@ -180,7 +303,11 @@ pub fn refute(
             next_data.push(next);
         }
 
+        divergences.push(bin(Bin::Neq, exit, q_exit));
         divergences.push(bin(Bin::Neq, output, q_output));
+        for (slice_field, quotient_field) in calls.into_iter().zip(q_calls) {
+            divergences.push(bin(Bin::Neq, slice_field, quotient_field));
+        }
         divergences.push(not(or_all(fires.clone())));
         if observe_data {
             for (index, slot) in roles.data.iter().enumerate() {
@@ -196,6 +323,7 @@ pub fn refute(
         slots = next_slots;
         state = next_state;
         data = next_data;
+        halted = next_halted;
     }
 
     solver.assert(or_all(divergences));

@@ -40,6 +40,26 @@ impl Words {
             _ => self.next() & 0xffff_ffff,
         }
     }
+
+    /// What a callee might return: 0, 1, all ones, or anything.
+    fn call_return(&mut self) -> u64 {
+        match self.next() % 4 {
+            0 => 0,
+            1 => 1,
+            2 => u64::MAX,
+            _ => self.next(),
+        }
+    }
+
+    /// A symbol of `ports` values: the input, then what each call returns.
+    fn symbol(&mut self, ports: usize, input_bits: u32) -> Symbol {
+        let mut symbol = vec![self.value() & mask(input_bits)];
+        while symbol.len() < ports {
+            let value = self.call_return();
+            symbol.push(value);
+        }
+        symbol
+    }
 }
 
 fn mask(bits: u32) -> u64 {
@@ -107,8 +127,16 @@ fn main() -> anyhow::Result<()> {
     let mut words = Words(0x51_7e_c0de);
     let alphabet = report.evidence.alphabet.clone();
     let mut replay = json!(null);
+    // Input ports per symbol: the boundary's one, then one per call.
+    let ports = model
+        .as_ref()
+        .map(|model| model.ports())
+        .or_else(|| alphabet.first().map(Vec::len))
+        .unwrap_or(1)
+        .max(1);
     if let Some(model) = &model {
         let mut oracle = EmulatorOracle::new(&path, &boundary, 1_000_000)?;
+        oracle.observe_calls(model.calls());
         let (mut agree, mut result_differs, mut data_differs) = (0u64, 0u64, 0u64);
         let mut first_difference = None;
         for _ in 0..replay_words {
@@ -117,7 +145,7 @@ fn main() -> anyhow::Result<()> {
                     if !alphabet.is_empty() && words.next() % 2 == 0 {
                         alphabet[(words.next() % alphabet.len() as u64) as usize].clone()
                     } else {
-                        vec![words.value() & mask(input_bits)]
+                        words.symbol(ports, input_bits)
                     }
                 })
                 .collect();
@@ -178,9 +206,13 @@ fn main() -> anyhow::Result<()> {
     // the same learner and the same membership oracle.
     let started = Instant::now();
     let mut sampler = Words(0xb1ac_b0c5);
-    let mut black_alphabet: Vec<Symbol> = vec![vec![0], vec![1]];
+    let mut black_alphabet: Vec<Symbol> = vec![vec![0; ports], {
+        let mut one = vec![0; ports];
+        one[0] = 1;
+        one
+    }];
     while black_alphabet.len() < 16 {
-        let symbol = vec![sampler.value() & mask(input_bits)];
+        let symbol = sampler.symbol(ports, input_bits);
         if !black_alphabet.contains(&symbol) {
             black_alphabet.push(symbol);
         }
@@ -251,6 +283,8 @@ fn main() -> anyhow::Result<()> {
                 "alphabet": report.evidence.alphabet.len(),
             },
             "slots": report.slots,
+            "calls": report.calls,
+            "ports": ports,
             "witnesses_verified": report.apartness_witnesses.iter().all(|w| w.verified_by_emulator),
             "witnesses": report.apartness_witnesses.len(),
             "elapsed_ms": white_ms,

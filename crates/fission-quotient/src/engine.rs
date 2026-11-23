@@ -7,10 +7,11 @@ use fission_dir::PcodeFoundation;
 use fission_loader::loader::LoadedBinary;
 
 use crate::boundary::{AbiModel, QuotientBoundary, QuotientBudget};
+use crate::calls::{CallFacts, CallModel, CalleeClass};
 use crate::certify::{Refutation, probe_words, refute};
-use crate::expr::render;
+use crate::expr::{render, width};
 use crate::learn::{Hypothesis, Learned, Learner};
-use crate::oracle::{EmulatorOracle, Exit, MembershipOracle, Symbol};
+use crate::oracle::{EmulatorOracle, MembershipOracle, Symbol};
 use crate::report::{
     ApartnessWitness, Assumption, AssumptionKind, CertifiedQuotient, Evidence, FoundationRef,
     MODEL_ID, Metrics, QuotientStatus, SCHEMA_VERSION, SlotReport, SlotRole, SlotValue,
@@ -34,6 +35,8 @@ pub struct Wbcq<O: MembershipOracle> {
     pub abi: AbiModel,
     pub boundary: QuotientBoundary,
     pub oracle: O,
+    /// What is known about each call the slice makes.
+    pub calls: CallFacts,
 }
 
 impl Wbcq<EmulatorOracle> {
@@ -50,12 +53,14 @@ impl Wbcq<EmulatorOracle> {
         let foundation = PcodeFoundation::new(boundary.entry, pcode)
             .map_err(|error| anyhow::anyhow!("invalid P-code: {error}"))?;
         let abi = AbiModel::for_binary(&binary)?;
+        let calls = CallFacts::for_function(&binary, boundary.entry, foundation.pcode().as_raw());
         let oracle = EmulatorOracle::new(path, &boundary, max_instructions)?;
         Ok((
             Self {
                 abi,
                 boundary,
                 oracle,
+                calls,
             },
             foundation,
         ))
@@ -113,8 +118,7 @@ impl QuotientModel {
         };
         let mut data_differs = false;
         for (record, step) in records.iter().zip(&predicted) {
-            if record.observation.exit != Exit::Returned || record.observation.value != step.output
-            {
+            if record.observation != step.observation() {
                 return ReplayVerdict::ResultDiffers;
             }
             for (slot, value) in self.roles.data.iter().zip(&step.data) {
@@ -129,6 +133,21 @@ impl QuotientModel {
         } else {
             ReplayVerdict::Agrees
         }
+    }
+}
+
+impl QuotientModel {
+    /// How the slice's calls are observed; an oracle replaying words against
+    /// the automaton must observe them the same way.
+    #[must_use]
+    pub fn calls(&self) -> &CallModel {
+        &self.summary.calls
+    }
+
+    /// Input ports per symbol: the boundary's, then one per call.
+    #[must_use]
+    pub fn ports(&self) -> usize {
+        self.summary.inputs.len()
     }
 }
 
@@ -169,6 +188,7 @@ impl<O: MembershipOracle> Wbcq<O> {
             states: Vec::new(),
             transitions: Vec::new(),
             apartness_witnesses: Vec::new(),
+            calls: Vec::new(),
             assumptions: assumptions(&self.boundary, &self.abi, &budget),
             evidence: Evidence::default(),
             metrics: Metrics {
@@ -178,7 +198,7 @@ impl<O: MembershipOracle> Wbcq<O> {
             },
         };
 
-        let summary = match summarize(raw, &self.abi, &self.boundary, &budget) {
+        let summary = match summarize(raw, &self.abi, &self.boundary, &budget, &self.calls) {
             Ok(summary) => summary,
             Err(error) => {
                 report.status = QuotientStatus::UnsupportedSemantics {
@@ -187,6 +207,11 @@ impl<O: MembershipOracle> Wbcq<O> {
                 return Ok((report, None));
             }
         };
+        self.oracle.observe_calls(&summary.calls);
+        report.calls = summary.calls.sites.values().cloned().collect();
+        report
+            .assumptions
+            .extend(call_assumptions(&summary.calls, &self.abi));
         let roles = factor(&summary);
         let big = self.abi.big_endian;
         let initial = self.boundary.context.initial.clone();
@@ -378,12 +403,7 @@ impl<O: MembershipOracle> Wbcq<O> {
                 Refutation::Unknown => {
                     report.evidence.solver_unknowns += 1;
                     source = Source::Probe;
-                    let ports = self
-                        .boundary
-                        .inputs
-                        .iter()
-                        .map(|p| p.bits)
-                        .collect::<Vec<_>>();
+                    let ports = summary.inputs.iter().map(width).collect::<Vec<_>>();
                     let mut found = None;
                     for word in
                         probe_words(&learner.alphabet, &ports, budget.probes, budget.horizon)
@@ -500,8 +520,7 @@ impl<O: MembershipOracle> Wbcq<O> {
         };
         let mut data_differs = false;
         for (record, step) in real.iter().zip(&predicted) {
-            if record.observation.exit != Exit::Returned || record.observation.value != step.output
-            {
+            if record.observation != step.observation() {
                 return Ok(Replay::Visible);
             }
             for (slot, value) in roles.data.iter().zip(&step.data) {
@@ -532,6 +551,15 @@ impl<O: MembershipOracle> Wbcq<O> {
     ) -> Result<()> {
         let names = summary.names(&self.boundary);
         let big = self.abi.big_endian;
+        let callee = |target: u64| {
+            summary
+                .calls
+                .sites
+                .values()
+                .find(|site| site.target == target)
+                .and_then(|site| site.callee.clone())
+                .unwrap_or_else(|| format!("0x{target:x}"))
+        };
         report.states = hypothesis
             .states
             .iter()
@@ -558,6 +586,22 @@ impl<O: MembershipOracle> Wbcq<O> {
                         value: render(value, &names),
                     })
                     .collect(),
+                calls: t
+                    .calls
+                    .iter()
+                    .map(|call| {
+                        format!(
+                            "{}({})",
+                            callee(call.target),
+                            call.args
+                                .iter()
+                                .map(|arg| render(arg, &names))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    })
+                    .collect(),
+                exit: t.exit,
                 to: t.to,
             })
             .collect();
@@ -580,7 +624,7 @@ impl<O: MembershipOracle> Wbcq<O> {
                     let records = oracle.run(&word)?;
                     Ok(records[access.len()..]
                         .iter()
-                        .map(|record| record.observation)
+                        .map(|record| record.observation.clone())
                         .collect())
                 };
                 let obs_a = observe(&mut self.oracle, node_a)?;
@@ -699,4 +743,108 @@ fn assumptions(
             ),
         },
     ]
+}
+
+/// What a quotient over a slice that makes calls assumes about its callees.
+fn call_assumptions(model: &CallModel, abi: &AbiModel) -> Vec<Assumption> {
+    if model.is_empty() {
+        return Vec::new();
+    }
+    let name = |site: &crate::calls::CallSiteModel| {
+        site.callee
+            .clone()
+            .unwrap_or_else(|| format!("0x{:x}", site.target))
+    };
+    let names_of = |class: CalleeClass| {
+        let mut names = model
+            .sites
+            .values()
+            .filter(|site| site.class == class)
+            .map(name)
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
+    };
+    let mut out = vec![
+        Assumption {
+            kind: AssumptionKind::Environment,
+            description: "what a call returns is chosen by the environment: the nth call of a \
+                          step returns input port retN, and the quotient holds for every value \
+                          of it (callees are stubbed on both sides, never run)"
+                .to_string(),
+        },
+        Assumption {
+            kind: AssumptionKind::Memory,
+            description: "a callee writes no memory the slice reads: no address of the context \
+                          or of the frame is passed to it, and it holds no alias of the context \
+                          of its own"
+                .to_string(),
+        },
+        Assumption {
+            kind: AssumptionKind::CallingConvention,
+            description: format!(
+                "a callee returns to its call's fall-through with {} and the stack pointer as \
+                 it found them, pops only the return address its call pushed, and may leave \
+                 anything in every other register",
+                abi.preserved
+                    .iter()
+                    .map(|slot| slot.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+    ];
+    let library = names_of(CalleeClass::Library);
+    if !library.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::CallingConvention,
+            description: format!(
+                "{} take the parameters their prototypes in the signature library declare; \
+                 exactly those are observed",
+                library.join(", ")
+            ),
+        });
+    }
+    let unknown = names_of(CalleeClass::Unknown);
+    if !unknown.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::CallingConvention,
+            description: format!(
+                "the arity of {} is not known: every argument register the boundary defines \
+                 at the call is observed (a register the callee ignores can only split \
+                 states, never merge them)",
+                unknown.join(", ")
+            ),
+        });
+    }
+    let no_return = names_of(CalleeClass::NoReturn);
+    if !no_return.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::Environment,
+            description: format!(
+                "{} never return (static no-return analysis): a step that calls one ends \
+                 there, and the machine halts",
+                no_return.join(", ")
+            ),
+        });
+    }
+    let mut tails = model
+        .sites
+        .values()
+        .filter(|site| site.tail)
+        .map(name)
+        .collect::<Vec<_>>();
+    tails.sort();
+    tails.dedup();
+    if !tails.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::Environment,
+            description: format!(
+                "a jump to {} leaves the slice: the callee's return is the step's return",
+                tails.join(", ")
+            ),
+        });
+    }
+    out
 }

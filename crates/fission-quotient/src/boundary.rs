@@ -106,6 +106,13 @@ pub struct AbiModel {
     pub arguments: Vec<RegisterSlot>,
     pub return_value: RegisterSlot,
     pub return_address: ReturnAddress,
+    /// The registers a callee leaves as it found them: the convention's
+    /// general-purpose registers less its caller-saved set and the link
+    /// register, plus the stack pointer. Every other register -- the
+    /// caller-saved ones, flags, vector registers -- holds nothing the slice
+    /// may rely on after a call. Empty when the convention names no
+    /// caller-saved set, and then a call cannot be modelled.
+    pub preserved: Vec<RegisterSlot>,
 }
 
 impl AbiModel {
@@ -146,6 +153,22 @@ impl AbiModel {
                 size,
             })
         };
+        let killed = arch.cc.killed_by_call();
+        let link = arch.cc.return_addr_reg();
+        let preserved = if killed.is_empty() {
+            Vec::new()
+        } else {
+            arch.gp_regs
+                .iter()
+                .copied()
+                .chain([arch.sp_reg])
+                .filter(|name| {
+                    !killed.iter().any(|k| k.eq_ignore_ascii_case(name))
+                        && !link.is_some_and(|l| l.eq_ignore_ascii_case(name))
+                })
+                .map(lookup)
+                .collect::<Result<Vec<_>>>()?
+        };
         Ok(Self {
             ram_space,
             register_space,
@@ -163,6 +186,7 @@ impl AbiModel {
                 Some(name) => ReturnAddress::Register(lookup(name)?),
                 None => ReturnAddress::Stack,
             },
+            preserved,
         })
     }
 }

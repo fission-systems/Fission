@@ -19,6 +19,7 @@ fission-pcode-ir = { path = "../fission-pcode-ir" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-dir = { path = "../fission-dir" }
 fission-emulator = { path = "../fission-emulator" }
+fission-signatures = { path = "../fission-signatures" }
 fission-sleigh = { path = "../fission-sleigh" }
 fission-solver = { path = "../fission-solver" }
 anyhow = "1.0"

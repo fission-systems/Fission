@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Fission quotient data v1",
-  "description": "The minimal observable state machine of one step function (`fission-quotient`, experimental). `status` says how far the claim reaches. `transitions` and `apartness_witnesses` are filled only when a machine was built; with `partial_frontier`, `states` lists the states found before the budget ran out.",
+  "description": "The minimal observable state machine of one step function (`fission-quotient`, experimental). `status` says how far the claim reaches. `transitions` and `apartness_witnesses` are filled only when a machine was built; with `partial_frontier`, `states` lists the states found before the budget ran out. A call the slice makes is an observed effect (`calls` lists every call site and how it is observed); what it returns is an extra input port per call (`retN`), so symbols carry one value per boundary port and then one per call.",
   "type": "object",
   "required": [
     "schema_version",
@@ -13,6 +13,7 @@
     "states",
     "transitions",
     "apartness_witnesses",
+    "calls",
     "assumptions",
     "evidence",
     "metrics"
@@ -323,7 +324,7 @@
                 "type": "integer",
                 "minimum": 0
               },
-              "description": "One value per input port, in `boundary.inputs` order."
+              "description": "One value per input port: `boundary.inputs` in order, then what each call of the step returns (`retN`)."
             }
           },
           "control_valuation": {
@@ -357,6 +358,8 @@
           "guard",
           "output",
           "updates",
+          "calls",
+          "exit",
           "to"
         ],
         "properties": {
@@ -387,6 +390,22 @@
                 }
               }
             }
+          },
+          "calls": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The calls the step makes, in order, as `callee(arguments)`."
+          },
+          "exit": {
+            "enum": [
+              "returned",
+              "fault",
+              "budget",
+              "halted",
+              "no_return"
+            ]
           },
           "to": {
             "type": "integer",
@@ -424,7 +443,7 @@
                 "type": "integer",
                 "minimum": 0
               },
-              "description": "One value per input port, in `boundary.inputs` order."
+              "description": "One value per input port: `boundary.inputs` in order, then what each call of the step returns (`retN`)."
             }
           },
           "obs_a": {
@@ -433,7 +452,8 @@
               "type": "object",
               "required": [
                 "exit",
-                "value"
+                "value",
+                "calls"
               ],
               "properties": {
                 "exit": {
@@ -441,12 +461,36 @@
                     "returned",
                     "fault",
                     "budget",
-                    "halted"
+                    "halted",
+                    "no_return"
                   ]
                 },
                 "value": {
                   "type": "integer",
                   "minimum": 0
+                },
+                "calls": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "target",
+                      "args"
+                    ],
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "pattern": "^0x[0-9a-f]+$"
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -457,7 +501,8 @@
               "type": "object",
               "required": [
                 "exit",
-                "value"
+                "value",
+                "calls"
               ],
               "properties": {
                 "exit": {
@@ -465,18 +510,92 @@
                     "returned",
                     "fault",
                     "budget",
-                    "halted"
+                    "halted",
+                    "no_return"
                   ]
                 },
                 "value": {
                   "type": "integer",
                   "minimum": 0
+                },
+                "calls": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "target",
+                      "args"
+                    ],
+                    "properties": {
+                      "target": {
+                        "type": "string",
+                        "pattern": "^0x[0-9a-f]+$"
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
           },
           "verified_by_emulator": {
             "type": "boolean"
+          }
+        }
+      }
+    },
+    "calls": {
+      "type": "array",
+      "description": "Every call site a step reaches, and how both sides observe it.",
+      "items": {
+        "type": "object",
+        "required": [
+          "site",
+          "target",
+          "callee",
+          "class",
+          "tail",
+          "arg_bits"
+        ],
+        "properties": {
+          "site": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "target": {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          "callee": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "class": {
+            "enum": [
+              "no_return",
+              "library",
+              "unknown"
+            ]
+          },
+          "tail": {
+            "type": "boolean",
+            "description": "A jump out of the slice: the callee's return is the step's return."
+          },
+          "arg_bits": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Bits observed of each argument register, in calling-convention order; 0 where not observed."
           }
         }
       }
@@ -548,7 +667,7 @@
               "type": "integer",
               "minimum": 0
             },
-            "description": "One value per input port, in `boundary.inputs` order."
+            "description": "One value per input port: `boundary.inputs` in order, then what each call of the step returns (`retN`)."
           }
         }
       }
