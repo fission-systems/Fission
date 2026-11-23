@@ -14,6 +14,24 @@ pub(super) struct ControlFlowReferences {
     pub(super) coverage_decodes: CoverageDecodes,
 }
 
+/// Bytes per parallel sweep chunk.
+///
+/// Every chunk starts its own linear sweep at its first byte, so where the
+/// chunks begin is part of what the sweep finds: an instruction straddling a
+/// boundary is decoded from both sides. The partition must therefore be a
+/// function of the image alone. It used to be `total / (4 * threads)`, which
+/// made `RAYON_NUM_THREADS` change the discovered functions, and on a Thumb
+/// image could start a chunk at an odd address: the sweep steps by the
+/// 2-byte instruction alignment, so such a chunk never decodes one real
+/// instruction. A 460 KiB Cortex-M firmware lost a third of its function
+/// candidates that way at one thread.
+///
+/// The size is a power of two, so every boundary keeps any instruction
+/// alignment its section start has. 64 KiB gives a multi-megabyte image
+/// hundreds of chunks, plenty for the pool, while a small image stays one
+/// chunk per section.
+const DISCOVERY_CHUNK_SIZE: usize = 64 * 1024;
+
 pub(super) fn scan_executable_sections(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
@@ -57,19 +75,7 @@ pub(super) fn scan_executable_sections(
         section_ranges.push((bytes, section.virtual_address));
     }
 
-    // A fixed 512KB chunk size starves this scan's own parallelism on any
-    // binary whose executable sections total a few MB or less -- a 617KB
-    // `.text` (a fairly ordinary Rust binary) yields only 2 chunks no matter
-    // how many cores are available. Instead, target roughly
-    // `4x` the current thread count worth of chunks (the 4x over-partitions
-    // so an uneven chunk -- one with more decodable code, more call/jump
-    // targets -- doesn't leave other threads idle near the end), floored at
-    // a minimum so tiny binaries don't pay per-chunk overhead for no
-    // benefit.
-    const MIN_DISCOVERY_CHUNK_SIZE: usize = 64 * 1024; // 64KB
-    let target_chunk_count = rayon::current_num_threads().max(1) * 4;
-    let discovery_chunk_size =
-        (total_executable_bytes / target_chunk_count.max(1)).max(MIN_DISCOVERY_CHUNK_SIZE);
+    let discovery_chunk_size = DISCOVERY_CHUNK_SIZE;
 
     let mut chunks = Vec::new();
     for (bytes, virtual_address) in section_ranges {
