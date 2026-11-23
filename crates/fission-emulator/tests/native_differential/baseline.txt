@@ -17,6 +17,8 @@
 # Where even the curated case hits it too rarely for the pull-request count
 # (a one-ulp fused-rounding difference), the reason says `@nightly`: smaller
 # runs then do not call the entry stale; the nightly run still does.
+# Where host CPUs themselves disagree (one runner reproduces it and another
+# does not, on the same tree), the reason says `@host`: no run calls it stale.
 
 # ── x86-64 ──────────────────────────────────────────────────────────────────
 # Spec: arithmetic never writes AF (SDM 2, ADD..CMPS "Flags Affected").
@@ -45,7 +47,7 @@ x86_64 PALIGNR panic #1054 evaluator shift overflow on the 32-byte temporary
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
 x86_64 * ~nan #1055 NaN payload / operand order
 # Decode: 0x90 ignores REX.B (f3 41 90 is xchg r8d, eax); 90 with REX is a NOP.
-x86_64 PAUSE * #1059 f3 41 90 decoded as PAUSE
+x86_64 PAUSE * #1059 f3 41 90 decoded as PAUSE; runners disagree on it @host
 x86_64 XCHG * #1059 42 90 clears RAX[63:32]; also #1060 (xchg m32, r32 no zero-extension)
 x86_64 XCHG.XACQUIRE * #1060 xchg m32, r32 no zero-extension
 # Decode: 66 66 cancels the operand-size override.

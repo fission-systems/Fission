@@ -455,6 +455,32 @@ struct BaselineEntry {
     issue: String,
     /// Reproduced only at the nightly case count (`@nightly` in the reason).
     nightly: bool,
+    /// Reproduces on some host CPUs and not others (`@host` in the reason):
+    /// the hardware itself disagrees, so a run that does not reproduce it is
+    /// not evidence it was fixed.
+    host_dependent: bool,
+}
+
+/// The host CPU model, so a host-dependent result can be traced to the
+/// machine that produced it (CI runners differ in vendor and generation).
+fn host_cpu() -> String {
+    #[cfg(target_os = "linux")]
+    if let Ok(info) = std::fs::read_to_string("/proc/cpuinfo") {
+        if let Some(model) = info.lines().find_map(|l| {
+            l.strip_prefix("model name")
+                .map(|r| r.trim_start_matches([' ', '\t', ':']))
+        }) {
+            return model.to_string();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = std::process::Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+    {
+        return String::from_utf8_lossy(&out.stdout).trim().to_string();
+    }
+    std::env::consts::ARCH.to_string()
 }
 
 /// The nightly workflow's case count (`native-differential.yml`).
@@ -484,6 +510,7 @@ fn load_baseline() -> Vec<BaselineEntry> {
             fields: parts[2].split(',').map(str::to_string).collect(),
             issue: parts[3].to_string(),
             nightly: parts[4..].contains(&"@nightly"),
+            host_dependent: parts[4..].contains(&"@host"),
         });
     }
     out
@@ -609,7 +636,10 @@ fn native_differential() {
     );
     let elapsed = start.elapsed();
 
-    println!("== native differential: {isa}, seed {seed:#x}");
+    println!(
+        "== native differential: {isa}, seed {seed:#x}, host {}",
+        host_cpu()
+    );
     println!(
         "   curated: {curated_count} instructions x {states} states; random: {random} byte strings; {:.1}s",
         elapsed.as_secs_f64()
@@ -734,7 +764,7 @@ fn native_differential() {
     }
     if only.is_none() && exact.is_none() {
         for (i, e) in baseline.iter().enumerate() {
-            if !used[i] && (nightly_size || !e.nightly) {
+            if !used[i] && !e.host_dependent && (nightly_size || !e.nightly) {
                 failures.push(format!(
                     "baseline.txt:{}: {} {} {} no longer reproduces; remove it (and close the issue if fixed)",
                     e.line, e.isa, e.mnemonic, e.issue
