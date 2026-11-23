@@ -117,6 +117,12 @@ pub enum DebugCommand {
     SwitchThread(DebugSwitchThreadArgs),
     /// Poll for the next debug event
     Event(DebugEventArgs),
+    /// Inspect rr availability and known Linux recordings
+    RrStatus(DebugRrStatusArgs),
+    /// Record a local Linux program under rr
+    RrRecord(DebugRrRecordArgs),
+    /// Open an existing rr recording using its GDB/MI replay backend
+    RrReplay(DebugRrReplayArgs),
     /// Run a list of debugger commands against one live session
     Session(DebugSessionArgs),
 }
@@ -208,6 +214,32 @@ pub struct DebugEventArgs {
     pub timeout_ms: u32,
     /// Output in JSON format
     #[arg(short, long)]
+    pub json: bool,
+}
+
+/// Inspect Linux rr availability without launching a debuggee.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugRrStatusArgs {
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Record a local binary via Mozilla rr on supported Linux hosts.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugRrRecordArgs {
+    pub binary: String,
+    #[arg(long)]
+    pub json: bool,
+    /// Arguments passed to the recorded executable
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
+}
+
+/// Start a local rr replay and report its initial session state.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugRrReplayArgs {
+    pub trace_dir: String,
+    #[arg(long)]
     pub json: bool,
 }
 
