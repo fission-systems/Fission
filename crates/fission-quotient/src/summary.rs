@@ -337,14 +337,16 @@ fn observe_calls(
                 for (index, param) in params.iter().enumerate() {
                     if let Some(at) = seen.pointer[index] {
                         return Err(unsupported(format!(
-                            "a call passes an address of {} to {callee} (parameter {index}),                              which may write through it",
+                            "a call passes an address of {} to {callee} (parameter {index}), \
+                             which may write through it",
                             region(at)
                         )));
                     }
                     let bits = seen.bits[index];
                     if bits == 0 || param.bits.is_some_and(|declared| bits < declared) {
                         return Err(unsupported(format!(
-                            "a call to {callee}: parameter {index} ({}) is not defined by the                              boundary",
+                            "a call to {callee}: parameter {index} ({}) is not defined by the \
+                             boundary",
                             param.type_name
                         )));
                     }
@@ -359,7 +361,8 @@ fn observe_calls(
                     .find_map(|(index, at)| at.map(|at| (index, at)))
                 {
                     return Err(unsupported(format!(
-                        "a call passes an address of {} to {callee} (argument register {index}),                          an unknown callee that may write through it",
+                        "a call passes an address of {} to {callee} (argument register {index}), \
+                         an unknown callee that may write through it",
                         region(at)
                     )));
                 }

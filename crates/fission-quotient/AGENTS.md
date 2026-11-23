@@ -16,13 +16,14 @@ reports is a DecBench or readability claim.
 
 | Module | Owns |
 |---|---|
-| `boundary.rs` | `QuotientBoundary` (inputs, hidden context, observed result), `QuotientBudget`, `AbiModel` read from the SLEIGH register/space tables and the emulator's calling-convention table |
-| `summary.rs` | One-step symbolic execution of the slice over a separated memory model (register file, stack frame, context region); per-path `(guard, result, context')`; solver-pruned dead branch sides |
+| `boundary.rs` | `QuotientBoundary` (inputs, hidden context, observed result), `QuotientBudget`, `AbiModel` read from the SLEIGH register/space tables and the emulator's calling-convention table (argument, return, preserved registers) |
+| `calls.rs` | Call facts per site (`fission_dir::call_sites` for no-return and tail jumps, symbol/PLT names, `fission-signatures` prototypes) and the `CallModel` both sides observe a call through |
+| `summary.rs` | One-step symbolic execution of the slice over a separated memory model (register file, stack frame, context region); per-path `(guard, result, context', calls, exit)`; solver-pruned dead branch sides; how each call site is observed |
 | `expr.rs` | Folding `SymExpr` constructors, the concrete evaluator they fold with, substitution, rendering |
 | `learn.rs` | L# apartness tree, basis/frontier rules, Rivest-Schapire counterexample processing |
 | `srqa.rs` | Control/data slot factoring; the symbolic register quotient automaton built from a hypothesis and the summaries |
 | `certify.rs` | Bounded divergence query (slice vs automaton, `H` steps); deterministic probes |
-| `oracle.rs` | `MembershipOracle`; `EmulatorOracle` over `fission_dir::EmulatorHarness` |
+| `oracle.rs` | `MembershipOracle`; `EmulatorOracle` over `fission_dir::EmulatorHarness` (calls stubbed with `call_stubbed`, returns taken from the symbol) |
 | `report.rs` | The `quotient.v1` JSON contract; its schema is `docs/schemas/cli-quotient-data.v1.schema.json` (`fission_cli schema quotient`) -- change both together |
 | `engine.rs` | `WBCQ_Synthesize`: the learn / build / refute loop and the final report |
 
@@ -39,17 +40,29 @@ reports is a DecBench or readability claim.
 3. **Solver counterexamples are confirmed on the emulator** before they
    refine anything. One the emulator does not reproduce means the P-code model
    and the machine disagree: `UnsupportedSemantics`, never a silent retry.
-4. **Fail closed at the boundary.** Calls, user-defined operations, absolute
-   or data-computed addresses, floating point, values wider than 8 bytes, and
-   results that read undeclared live-ins stop the summary with a reason.
-5. **Deterministic output.** Alphabet symbols and counterexamples are least
+4. **Fail closed at the boundary.** User-defined operations, indirect calls,
+   absolute or data-computed addresses, floating point, values wider than 8
+   bytes, and results that read undeclared live-ins stop the summary with a
+   reason.
+5. **Calls are effects, never run.** A direct call is observed as its target
+   and argument registers; its return is the next call-return input port
+   (`retN`), chosen by the environment, so the quotient holds for every
+   value. Both sides stub the callee. After a call only the convention's
+   preserved registers keep their values. A proven no-return callee ends the
+   step and halts the machine; a jump out of the slice is a call whose return
+   is the step's. A library callee (a prototype in the signature library)
+   observes exactly its parameters; an unknown callee observes every argument
+   register the boundary defines. An address of the context or the frame
+   passed where the callee may write through it is unsupported. Every such
+   choice is listed in the report's `assumptions`.
+6. **Deterministic output.** Alphabet symbols and counterexamples are least
    solutions (port by port), never whichever model the solver found first;
    every collection is ordered. Same binary and budget, same JSON bytes.
-6. **ISA-neutral (ADR 0009).** No rule names an instruction or a register.
+7. **ISA-neutral (ADR 0009).** No rule names an instruction or a register.
    Register locations, endianness, the return-address convention and the
    address spaces come from the SLEIGH tables and the calling-convention
    table; the AArch64 fixture must keep producing the x86-64 quotient.
-7. **No quality claims.** Fixture results show the mechanism works; they are
+8. **No quality claims.** Fixture results show the mechanism works; they are
    not evidence about decompiler output (root `AGENTS.md`, Core Rule 10).
 
 ## Fixtures
@@ -67,7 +80,8 @@ name. The build command is in each file's header; rebuild and commit the
 - a native ground truth;
 - a DecBench step-function sample.
 
-Results and procedure are in `docs/proposals/2026-11-23-wbcq-p3-evaluation.md`.
+Results and procedure are in `docs/proposals/2026-11-23-wbcq-p3-evaluation.md`
+(P4 steps: section 10 onwards).
 Re-run it after any change to what the engine accepts. A changed state count
 on the corpus is a regression until the ground truth says otherwise.
 

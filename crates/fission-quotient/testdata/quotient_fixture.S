@@ -232,3 +232,85 @@ select_step:
         mov     dword ptr [rdi], eax
         ret
         .size   select_step, .-select_step
+
+/*
+ * Calls as effects (RFC #1093, P4). `isdigit` and `abort` stand in for the
+ * C library's; the engine never runs them -- both sides stub every call --
+ * and their names are what the signature library looks up.
+ */
+        .globl  isdigit
+        .type   isdigit,@function
+isdigit:
+        lea     eax, [rdi - 48]
+        cmp     eax, 10
+        setb    al
+        movzx   eax, al
+        ret
+        .size   isdigit, .-isdigit
+
+        .globl  abort
+        .type   abort,@function
+abort:
+        ud2
+        .size   abort, .-abort
+
+/*
+ * A digit-run detector over a classifier call: ctx->in_run (offset 0)
+ * follows what isdigit(cmd) said; the result is 1 when a run starts. The
+ * classifier's answer is an input the environment chooses.
+ */
+        .globl  digits_step
+        .type   digits_step,@function
+digits_step:
+        push    rbx
+        mov     rbx, rdi
+        mov     edi, esi
+        call    isdigit
+        xor     ecx, ecx
+        test    eax, eax
+        setne   cl
+        mov     edx, dword ptr [rbx]
+        mov     dword ptr [rbx], ecx
+        xor     eax, eax
+        test    edx, edx
+        cmove   eax, ecx
+        pop     rbx
+        ret
+        .size   digits_step, .-digits_step
+
+/*
+ * A guard that aborts: a zero command while ctx->armed (offset 0) is set
+ * calls abort(), which does not return; any other command toggles armed.
+ * The result is the new armed bit.
+ */
+        .globl  guarded_step
+        .type   guarded_step,@function
+guarded_step:
+        push    rax
+        mov     eax, dword ptr [rdi]
+        test    eax, eax
+        je      .Lguard_toggle
+        test    esi, esi
+        je      .Lguard_abort
+.Lguard_toggle:
+        xor     eax, 1
+        mov     dword ptr [rdi], eax
+        pop     rcx
+        ret
+.Lguard_abort:
+        call    abort
+        .size   guarded_step, .-guarded_step
+
+/*
+ * A tail call: ctx->parity (offset 0) flips every step, and the step ends
+ * by jumping to isdigit(parity) -- its return is the step's.
+ */
+        .globl  tail_step
+        .type   tail_step,@function
+tail_step:
+        mov     eax, dword ptr [rdi]
+        xor     eax, 1
+        mov     dword ptr [rdi], eax
+        mov     edi, eax
+        jmp     isdigit
+        .size   tail_step, .-tail_step

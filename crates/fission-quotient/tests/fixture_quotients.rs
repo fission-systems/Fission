@@ -4,10 +4,11 @@
 use std::path::PathBuf;
 
 use fission_loader::loader::LoadedBinary;
+use fission_quotient::calls::CalleeClass;
 use fission_quotient::report::{SlotRole, TransitionReport};
 use fission_quotient::{
-    CertifiedQuotient, ContextRegion, InputPort, QuotientBoundary, QuotientBudget, QuotientEngine,
-    QuotientStatus, Wbcq,
+    CertifiedQuotient, ContextRegion, Exit, InputPort, QuotientBoundary, QuotientBudget,
+    QuotientEngine, QuotientStatus, Wbcq,
 };
 
 const X86_64: &str = "testdata/quotient_fixture.elf";
@@ -189,7 +190,12 @@ fn a_counter_exhausts_the_state_budget_and_says_so() {
 fn effects_outside_the_boundary_are_unsupported() {
     for (name, needle) in [
         ("clock_step", "user-defined operation"),
-        ("calling_step", "a call"),
+        // An unknown callee handed the context may write it: a call is
+        // modelled, but this one stays outside the model.
+        (
+            "calling_step",
+            "a call passes an address of the context to toggle_step",
+        ),
     ] {
         let report = quotient(name);
         let QuotientStatus::UnsupportedSemantics { reason } = &report.status else {
@@ -289,4 +295,95 @@ fn a_branch_into_the_middle_of_a_block_is_followed() {
     );
     assert_eq!(report.states.len(), 2);
     assert_eq!(transition(&report, 0, "(cmd == 7)").to, 1);
+}
+
+fn assert_proved(report: &CertifiedQuotient) {
+    assert!(
+        matches!(report.status, QuotientStatus::ProvedUnderModel { .. }),
+        "{:?}",
+        report.status
+    );
+    assert!(
+        report
+            .apartness_witnesses
+            .iter()
+            .all(|w| w.verified_by_emulator)
+    );
+}
+
+/// A call is an effect, not a refusal. The classifier's answer is the
+/// environment's input `ret0` -- every symbol carries the command and it --
+/// and the call with its one declared argument is part of what each step
+/// shows. Its two run states are told apart only through what it returns.
+#[test]
+fn a_classifier_call_is_an_observed_effect_with_an_environment_chosen_return() {
+    let report = quotient("digits_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 2);
+    let [call] = report.calls.as_slice() else {
+        panic!("one call site: {:?}", report.calls);
+    };
+    assert_eq!(call.callee.as_deref(), Some("isdigit"));
+    assert_eq!(call.class, CalleeClass::Library);
+    assert!(!call.tail);
+    // `int isdigit(int)`: the first argument register only.
+    assert!(call.arg_bits[0] >= 32);
+    assert!(call.arg_bits[1..].iter().all(|bits| *bits == 0));
+    assert!(
+        report
+            .evidence
+            .alphabet
+            .iter()
+            .all(|symbol| symbol.len() == 2)
+    );
+    assert!(
+        report
+            .transitions
+            .iter()
+            .all(|t| t.calls == ["isdigit(zext64(cmd))"] && t.exit == Exit::Returned)
+    );
+    assert!(report.transitions.iter().any(|t| t.guard.contains("ret0")));
+    assert!(
+        report
+            .assumptions
+            .iter()
+            .any(|a| a.description.contains("chosen by the environment"))
+    );
+    assert!(
+        report.apartness_witnesses.iter().all(|w| w
+            .obs_a
+            .iter()
+            .chain(&w.obs_b)
+            .all(|o| o.calls.len() == 1))
+    );
+}
+
+/// A callee the static no-return analysis proves never returns ends the
+/// step, and the machine halts there: a sink state that only says so.
+#[test]
+fn a_call_that_does_not_return_halts_the_machine() {
+    let report = quotient("guarded_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 3);
+    assert_eq!(report.calls.len(), 1);
+    assert_eq!(report.calls[0].class, CalleeClass::NoReturn);
+    let aborting = transition(&report, 1, "(cmd == 0)");
+    assert_eq!(aborting.exit, Exit::NoReturn);
+    assert_eq!(aborting.calls, ["abort()"]);
+    let sink = transition(&report, aborting.to, "true");
+    assert_eq!((sink.exit, sink.to), (Exit::Halted, aborting.to));
+}
+
+/// A jump out of the slice is a call whose return is the step's: the result
+/// is whatever the callee returns, and the argument it is given tells the
+/// states apart.
+#[test]
+fn a_tail_call_returns_what_the_callee_returns() {
+    let report = quotient("tail_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 2);
+    assert!(report.calls[0].tail);
+    assert!(report.transitions.iter().all(|t| t.output == "ret0[31:0]"));
+    assert_eq!(transition(&report, 0, "true").calls, ["isdigit(1)"]);
+    assert_eq!(transition(&report, 1, "true").calls, ["isdigit(0)"]);
 }

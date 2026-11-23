@@ -813,7 +813,7 @@ fn call_assumptions(model: &CallModel, abi: &AbiModel) -> Vec<Assumption> {
             description: format!(
                 "the arity of {} is not known: every argument register the boundary defines \
                  at the call is observed (a register the callee ignores can only split \
-                 states, never merge them)",
+                 states, never merge them); arguments passed on the stack are not observed",
                 unknown.join(", ")
             ),
         });
