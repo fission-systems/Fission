@@ -44,7 +44,10 @@ fn same_file(a: &str, b: &str) -> bool {
     }
 }
 
-fn mapping_at_pc(report: &ModuleListReport, pc: u64) -> Option<(&ProcessModule, &ProcessMemoryMapping)> {
+fn mapping_at_pc(
+    report: &ModuleListReport,
+    pc: u64,
+) -> Option<(&ProcessModule, &ProcessMemoryMapping)> {
     report.modules.iter().find_map(|module| {
         module
             .mappings
@@ -60,7 +63,11 @@ fn translated_address(pc: u64, load_bias: i64) -> Option<u64> {
     u64::try_from(i128::from(pc) - i128::from(load_bias)).ok()
 }
 
-fn native_location(report: &ModuleListReport, pc: u64, binary: Option<&str>) -> (Value, Value, Option<u64>) {
+fn native_location(
+    report: &ModuleListReport,
+    pc: u64,
+    binary: Option<&str>,
+) -> (Value, Value, Option<u64>) {
     let Some((module, mapping)) = mapping_at_pc(report, pc) else {
         return (
             Value::Null,
@@ -76,40 +83,63 @@ fn native_location(report: &ModuleListReport, pc: u64, binary: Option<&str>) -> 
         "permissions": mapping.permissions,
     });
     let Some(binary) = binary else {
-        return (location, json!({
-            "status": "unavailable",
-            "reason": "supply --binary or launch a session with a matching binary for static analysis"
-        }), None);
+        return (
+            location,
+            json!({
+                "status": "unavailable",
+                "reason": "supply --binary or launch a session with a matching binary for static analysis"
+            }),
+            None,
+        );
     };
     if !same_file(&module.path, binary) {
-        return (location, json!({
-            "status": "unavailable",
-            "reason": "the selected PC belongs to a different module than the supplied analysis binary",
-            "analysis_binary": binary,
-        }), None);
+        return (
+            location,
+            json!({
+                "status": "unavailable",
+                "reason": "the selected PC belongs to a different module than the supplied analysis binary",
+                "analysis_binary": binary,
+            }),
+            None,
+        );
     }
     match &module.address_transform {
-        ModuleAddressTransform::Resolved { load_bias, formula, analysis_address_domain, .. } => {
+        ModuleAddressTransform::Resolved {
+            load_bias,
+            formula,
+            analysis_address_domain,
+            ..
+        } => {
             if let Some(va) = translated_address(pc, *load_bias) {
-                (location, json!({
-                    "status": "resolved",
-                    "analysis_va": hex(va),
-                    "load_bias": load_bias,
-                    "formula": formula,
-                    "analysis_address_domain": analysis_address_domain,
-                    "source": "debugger_module_mapping",
-                }), Some(va))
+                (
+                    location,
+                    json!({
+                        "status": "resolved",
+                        "analysis_va": hex(va),
+                        "load_bias": load_bias,
+                        "formula": formula,
+                        "analysis_address_domain": analysis_address_domain,
+                        "source": "debugger_module_mapping",
+                    }),
+                    Some(va),
+                )
             } else {
-                (location, json!({
-                    "status": "unavailable",
-                    "reason": "runtime PC and reported load bias cannot produce a valid analysis address"
-                }), None)
+                (
+                    location,
+                    json!({
+                        "status": "unavailable",
+                        "reason": "runtime PC and reported load bias cannot produce a valid analysis address"
+                    }),
+                    None,
+                )
             }
         }
         ModuleAddressTransform::NotApplicable { reason }
-        | ModuleAddressTransform::Unavailable { reason } => {
-            (location, json!({ "status": "unavailable", "reason": reason }), None)
-        }
+        | ModuleAddressTransform::Unavailable { reason } => (
+            location,
+            json!({ "status": "unavailable", "reason": reason }),
+            None,
+        ),
     }
 }
 
@@ -117,7 +147,10 @@ fn stack_json(backend: &dyn ExecutionBackend, regs: &RegisterState, size: usize)
     if size == 0 {
         return json!({ "status": "not_requested" });
     }
-    let sp = regs.get("rsp").or_else(|| regs.get("esp")).or_else(|| regs.get("sp"));
+    let sp = regs
+        .get("rsp")
+        .or_else(|| regs.get("esp"))
+        .or_else(|| regs.get("sp"));
     let Some(sp) = sp else {
         return json!({ "status": "unavailable", "reason": "no scalar stack pointer in the register snapshot" });
     };
@@ -129,7 +162,9 @@ fn stack_json(backend: &dyn ExecutionBackend, regs: &RegisterState, size: usize)
             "size": bytes.len(),
             "hex": bytes.iter().map(|b| format!("{b:02x}")).collect::<String>(),
         }),
-        Err(err) => json!({ "status": "unavailable", "address": hex(sp), "reason": err.to_string() }),
+        Err(err) => {
+            json!({ "status": "unavailable", "address": hex(sp), "reason": err.to_string() })
+        }
     }
 }
 
@@ -143,16 +178,15 @@ fn frame_pointer_trace(
     if max_frames == 0 {
         return json!({"status": "not_requested"});
     }
-    let (fp, ptr_size, architecture) =
-        if let Some(fp) = regs.get("rbp") {
-            (fp, 8usize, "x86_64")
-        } else if let Some(fp) = regs.get("ebp") {
-            (fp, 4usize, "x86_32")
-        } else if let Some(fp) = regs.get("x29") {
-            (fp, 8usize, "aarch64")
-        } else {
-            return json!({"status": "unavailable", "reason": "no recognized frame pointer register"});
-        };
+    let (fp, ptr_size, architecture) = if let Some(fp) = regs.get("rbp") {
+        (fp, 8usize, "x86_64")
+    } else if let Some(fp) = regs.get("ebp") {
+        (fp, 4usize, "x86_32")
+    } else if let Some(fp) = regs.get("x29") {
+        (fp, 8usize, "aarch64")
+    } else {
+        return json!({"status": "unavailable", "reason": "no recognized frame pointer register"});
+    };
 
     let mut frames = vec![json!({
         "index": 0,
@@ -277,12 +311,13 @@ pub(super) fn run_context(
                         "reason": "guest PC is outside executable bytes in the supplied binary",
                     });
                 } else {
-                    let _discovery = fission_static::analysis::discover_functions_with_runtime(&mut binary);
+                    let _discovery =
+                        fission_static::analysis::discover_functions_with_runtime(&mut binary);
                     if let Some(frames) = callstack["frames"].as_array_mut() {
                         for frame in frames {
-                            let Some(runtime_pc) = frame["runtime_pc"].as_str()
-                                .and_then(|value| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok())
-                            else {
+                            let Some(runtime_pc) = frame["runtime_pc"].as_str().and_then(|value| {
+                                u64::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+                            }) else {
                                 continue;
                             };
                             // Only the current PC is known to share the file VA.
@@ -321,9 +356,15 @@ pub(super) fn run_context(
                             "source": "on_disk_static_analysis",
                         });
                         if args.decomp {
-                            let config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+                            let config =
+                                fission_decompiler::RustSleighDecompileConfig::cli_defaults();
                             decompilation = match fission_decompiler::decompile_with_rust_sleigh(
-                                &binary, func.address, &func.name, &config, None, None,
+                                &binary,
+                                func.address,
+                                &func.name,
+                                &config,
+                                None,
+                                None,
                             ) {
                                 Ok(result) => json!({
                                     "status": "ok",
@@ -353,7 +394,8 @@ pub(super) fn run_context(
         }
     }
 
-    if args.decomp && decompilation["status"] == "unavailable"
+    if args.decomp
+        && decompilation["status"] == "unavailable"
         && analysis["status"] == "unavailable"
     {
         decompilation["reason"] = analysis["reason"].clone();
