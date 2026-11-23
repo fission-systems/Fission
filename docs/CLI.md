@@ -274,6 +274,42 @@ See [Patch Command](#patch-command) for the flags and for what `patch` refuses.
 
 ## Debug Command
 
+### Stopped execution context
+
+`context` reads the currently stopped thread's PC, registers and optional
+stack bytes as a single observation. When the PC maps to a file-backed module
+with a trustworthy load bias, Fission can resolve the analysis VA and the
+containing static function; `--decomp` adds **on-disk static** pseudocode. It
+does not claim that patched or unpacked process memory matches that pseudocode.
+
+```bash
+# Emulated guest: the session binary supplies the analysis coordinate system.
+fission_cli debug --emulator session ./guest.elf \
+  --command "context --stack 32 --decomp" --json
+
+# Native session: use the same binary and the module's proven slide.
+fission_cli debug session ./target \
+  --command event --command "context --decomp" --json
+
+# After attaching to a running process, specify the analysis file.
+fission_cli debug attach 1234
+fission_cli debug context --binary ./target --stack 64 --json
+```
+
+Session and interactive modes use the same `context` verb (without a separate
+JSON flag). The one-shot command accepts `--json`. The context object has
+`schema_version: 1`, `pc`, `thread_id`, `stop`, `registers`, `stack`,
+`module`, `analysis`, `function`, and `decompilation`. Addresses and
+register values are hexadecimal strings. `analysis.status = "unavailable"`
+when the PC is in an unrelated module, its mapping lacks a proven transform,
+or the on-disk binary cannot be loaded; never infer an ELF VA by subtracting
+the first mapping address. `--stack` is bounded to 4096 bytes, with partial or
+unavailable reads represented explicitly. This command requires a stopped
+target; `continue` followed by `context` must await a stop event first.
+The `decompilation` field distinguishes `ok`, `failed`, `unavailable`,
+and `not_requested`.
+
+
 Query the selected backend before starting a debugger workflow:
 
 ```bash
