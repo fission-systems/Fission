@@ -313,9 +313,9 @@ pub struct CandidateResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JointStatus {
-    /// At least one single-location witness exists; no joint search ran.
+    /// At least one single input-byte witness exists; no joint search ran.
     NotNeeded,
-    /// No single-location witness; this pair of interventions together
+    /// No single input-byte witness; this pair of interventions together
     /// changed Φ (verified by a fresh replay). The cause needs a joint
     /// intervention. Not a minimality claim beyond "no single member of the
     /// tried candidates sufficed".
@@ -323,7 +323,7 @@ pub enum JointStatus {
         interventions: Vec<Intervention>,
         input_offsets: Vec<Option<usize>>,
     },
-    /// No single witness and the bounded pair search found none either.
+    /// No single input-byte witness and the bounded pair search found none.
     /// This is not "no cause": a larger set, or other values, may still
     /// change Φ.
     NoWitnessWithinBudget { pairs_tried: u64 },

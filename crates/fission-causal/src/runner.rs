@@ -1150,9 +1150,12 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
                     .with_context(|| format!("requested {iv:?}"))?,
             );
         }
-        let any_witness = candidates
-            .iter()
-            .any(|c| matches!(c.verdict, Verdict::CounterfactualWitness { .. }));
+        // Explanations are scored at input-byte granularity, so the pair
+        // search runs whenever no single input byte is a witness, even if
+        // some internal location (a read length, a saved register) is.
+        let any_witness = candidates.iter().any(|c| {
+            c.input_offset.is_some() && matches!(c.verdict, Verdict::CounterfactualWitness { .. })
+        });
         joint = if any_witness {
             JointStatus::NotNeeded
         } else {
