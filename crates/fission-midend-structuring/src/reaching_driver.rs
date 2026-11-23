@@ -759,7 +759,7 @@ fn fold_every_cycle(
 /// other shape ends with its exit expressed by the body it emitted, so there
 /// is nothing left to ask, and `None` makes the next rule decline rather than
 /// read a terminator whose decision has already been written down.
-fn governing_block_after(graph: &CollapseGraph, shape: &Shape) -> Option<usize> {
+pub(crate) fn governing_block_after(graph: &CollapseGraph, shape: &Shape) -> Option<usize> {
     if shape.kind != ShapeKind::Sequence {
         return None;
     }
@@ -928,8 +928,25 @@ fn concede_one_edge(
     let Some(entry_block) = graph.node(to).map(|n| n.entry_block) else {
         return Ok(false);
     };
-    let label = format!("dream_L{entry_block}");
+    materialize_concession(host, graph, from, to, format!("dream_L{entry_block}"))
+}
 
+/// Write the edge `from -> to` down as a `goto label` / `label:` pair and
+/// remove it from the graph.
+///
+/// Shared by every driver that concedes edges on a [`CollapseGraph`]: the
+/// source's body gains the jump (guarded by its own condition when it was a
+/// two-way branch), the target's gains the label, and the source stops
+/// governing anything because its decision is now a statement. `false` when
+/// either end cannot be lowered or the branch condition cannot be recovered;
+/// the graph is then untouched.
+pub(crate) fn materialize_concession(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+    from: NodeId,
+    to: NodeId,
+    label: String,
+) -> Result<bool, MlilPreviewError> {
     let outs: Vec<NodeId> = graph.successors(from).to_vec();
     let Some(mut source) = node_statements(host, graph, from)? else {
         return Ok(false);
@@ -1010,7 +1027,7 @@ fn pick_conceded_edge(graph: &CollapseGraph) -> Option<(NodeId, NodeId)> {
 
 /// Whether every live node is still reachable from `head` once `(from, to)`
 /// is gone.
-fn survives_without(
+pub(crate) fn survives_without(
     graph: &CollapseGraph,
     head: NodeId,
     live: &[NodeId],
@@ -1337,7 +1354,7 @@ fn dense_successors(graph: &CollapseGraph) -> Vec<Vec<NodeId>> {
 /// The live node that block 0 ended up inside. Folding a loop whose head is
 /// not the function entry retires node 0, so the region head has to be looked
 /// up rather than assumed.
-fn live_node_owning_entry(graph: &CollapseGraph) -> Option<NodeId> {
+pub(crate) fn live_node_owning_entry(graph: &CollapseGraph) -> Option<NodeId> {
     graph
         .live_nodes()
         .find(|&n| graph.node(n).is_some_and(|x| x.members.contains(0)))

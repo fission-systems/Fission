@@ -317,6 +317,50 @@ impl CollapseGraph {
         self.pred[to].retain(|x| *x != from);
         had
     }
+
+    /// Give `pred` its own copy of the exit node `id`.
+    ///
+    /// The copy stands for the same blocks, carries `body`, and replaces the
+    /// edge `pred -> id` with `pred -> copy`; `id` keeps its other
+    /// predecessors. Only a node with no successors can be split this way:
+    /// copying a node that still leads somewhere would give its successors a
+    /// second way in, which is a new join rather than one removed.
+    ///
+    /// Returns the copy, or `None` (graph untouched) when `id` is not a live
+    /// exit or `pred -> id` is not an edge.
+    pub fn split_exit_for(
+        &mut self,
+        id: NodeId,
+        pred: NodeId,
+        body: Vec<PreHirStmt>,
+    ) -> Option<NodeId> {
+        if !self.is_live(id) || !self.is_live(pred) || !self.succ[id].is_empty() {
+            return None;
+        }
+        if !self.succ[pred].contains(&id) {
+            return None;
+        }
+        let original = self.nodes[id].as_ref()?;
+        let copy = CollapseNode {
+            members: original.members.clone(),
+            entry_block: original.entry_block,
+            body: Some(body),
+            // An exit decides nothing.
+            governing_block: None,
+        };
+        let new_id = self.nodes.len();
+        self.nodes.push(Some(copy));
+        self.succ.push(Vec::new());
+        self.pred.push(vec![pred]);
+        self.live += 1;
+        for s in &mut self.succ[pred] {
+            if *s == id {
+                *s = new_id;
+            }
+        }
+        self.pred[id].retain(|p| *p != pred);
+        Some(new_id)
+    }
 }
 
 #[cfg(test)]

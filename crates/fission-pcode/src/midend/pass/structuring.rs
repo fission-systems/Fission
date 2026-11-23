@@ -329,6 +329,7 @@ fn try_alternative_structurings(
         DreamHierarchical,
         DreamHierarchicalVirtualGotos,
         RegionIdentifier,
+        Sailr,
     }
 
     let mut best_quality = baseline_quality;
@@ -572,6 +573,28 @@ fn try_alternative_structurings(
         }
     }
 
+    // SAILR runs last, so it is taken only where it strictly beats every
+    // candidate above -- including the existing path.
+    if fission_midend_structuring::sailr_driver::sailr_driver_enabled() {
+        let c =
+            fission_midend_structuring::sailr_driver::preview_sailr(ir.builder).map(|candidate| {
+                candidate.map(|body| OfferedCandidate {
+                    body,
+                    hierarchical: false,
+                })
+            });
+        consider(
+            AlternativeDriver::Sailr,
+            "SAILR",
+            c,
+            &mut best_quality,
+            &mut best_normalized,
+            &mut best_body,
+            false,
+            &mut winner,
+        );
+    }
+
     let (name, committed) = match winner {
         Some(AlternativeDriver::MatchFold) => (
             "match-fold",
@@ -611,6 +634,10 @@ fn try_alternative_structurings(
                 ir.builder,
             )
             .map(|candidate| candidate.map(|candidate| candidate.body)),
+        ),
+        Some(AlternativeDriver::Sailr) => (
+            "SAILR",
+            fission_midend_structuring::sailr_driver::structure_by_sailr(ir.builder),
         ),
         None => return baseline,
     };
