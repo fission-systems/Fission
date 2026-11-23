@@ -189,6 +189,8 @@ fn execute(
     backend: &mut dyn ExecutionBackend,
     thread_id: u32,
     command: DebugCommand,
+    session_binary: Option<&str>,
+    emulator: bool,
 ) -> Result<Value> {
     let value = match command {
         DebugCommand::Capabilities(_) => serde_json::to_value(backend.capabilities())?,
@@ -234,6 +236,9 @@ fn execute(
         DebugCommand::StepOut => {
             backend.step_out()?;
             execution_progress(backend, thread_id, "step_out")?
+        }
+        DebugCommand::Context(args) => {
+            super::debug_context::run_context(backend, thread_id, &args, session_binary, emulator)?
         }
         DebugCommand::Regs => {
             let regs = backend.fetch_registers(thread_id)?;
@@ -479,7 +484,9 @@ fn interactive_command(
     writer: &mut impl Write,
 ) -> Result<Option<InteractiveEndReason>> {
     let outcome =
-        parse_command(command_line).and_then(|command| execute(backend, thread_id, command));
+        parse_command(command_line).and_then(|command| {
+            execute(backend, thread_id, command, target["path"].as_str(), backend_name == "emulator")
+        });
     let events = drain_events(backend);
     let state = session_state_json(backend, thread_id);
     let (status, result, error) = match outcome {
@@ -694,7 +701,9 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
     let mut failed = false;
     for line in &commands {
         let outcome = parse_command(line)
-            .and_then(|command| execute(session.debugger.as_mut(), thread_id, command));
+            .and_then(|command| {
+                execute(session.debugger.as_mut(), thread_id, command, args.path.as_deref(), use_emulator)
+            });
         let events = drain_events(session.debugger.as_mut());
         let mut entry = match outcome {
             Ok(mut value) => {
