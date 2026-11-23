@@ -506,7 +506,7 @@ fn record_inner(
             });
         }
         let writes: Vec<(u64, Vec<u8>, Vec<u8>)> =
-            run.emu.state.trace_mem_writes.drain(..).collect();
+            std::mem::take(&mut run.emu.state.trace_mem_writes);
         for (addr, _, new) in &writes {
             record.defs.push(Access::Mem {
                 addr: *addr,
