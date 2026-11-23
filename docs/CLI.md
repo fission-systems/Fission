@@ -302,7 +302,11 @@ a running state until its next event, so clients must keep consuming events.
 `context` reads the currently stopped thread's PC, registers and optional
 stack bytes as a single observation. When the PC maps to a file-backed module
 with a trustworthy load bias, Fission can resolve the analysis VA and the
-containing static function; `--decomp` adds **on-disk static** pseudocode. It
+containing static function; `--decomp` adds **on-disk static** pseudocode.
+`--frames N` adds a bounded, best-effort x86/x64 or AArch64 frame-pointer
+walk with raw return addresses. It does **not** perform DWARF/SEH unwinding,
+and caller functions are not invented for native frames without a proven
+per-module address transform. It
 does not claim that patched or unpacked process memory matches that pseudocode.
 
 ```bash
@@ -324,7 +328,7 @@ fission_cli debug context --binary ./target --stack 64 --json
 Session and interactive modes use the same `context` verb (without a separate
 JSON flag). The one-shot command accepts `--json`. The context object has
 `schema_version: 1`, `pc`, `thread_id`, `stop`, `registers`, `stack`,
-`module`, `analysis`, `function`, and `decompilation`. Addresses and
+`module`, `analysis`, `function`, `callstack`, and `decompilation`. Addresses and
 register values are hexadecimal strings. `analysis.status = "unavailable"`
 when the PC is in an unrelated module, its mapping lacks a proven transform,
 or the on-disk binary cannot be loaded; never infer an ELF VA by subtracting
