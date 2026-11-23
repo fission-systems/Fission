@@ -325,6 +325,20 @@ fn rewrite_call_targets_expr(expr: &mut PreHirExpr, rewrites: &HashMap<String, S
     changed
 }
 
+/// `void *` and its Windows spellings: a parameter that accepts any object
+/// pointer, so it names no declaration for the argument.
+pub(super) fn is_generic_void_pointer_type_name(type_name: &str) -> bool {
+    let compact = type_name
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_uppercase)
+        .collect::<String>();
+    matches!(
+        compact.as_str(),
+        "VOID*" | "CONSTVOID*" | "LPVOID" | "PVOID" | "LPCVOID" | "PCVOID"
+    )
+}
+
 /// Carry an exact API parameter declaration back through stable plain-copy
 /// aliases. Generic object-pointer parameters accept existing pointer types
 /// without declaring those variables as void pointers. Propagation of specific
@@ -341,16 +355,7 @@ pub(super) fn apply_api_surface_type_transitively(
     let mut changed = false;
     let mut current = arg_var.to_string();
     let mut visited = HashSet::default();
-    let compact_surface = surface_type_name
-        .chars()
-        .filter(|c| !c.is_whitespace())
-        .flat_map(char::to_uppercase)
-        .collect::<String>();
-    let generic_void_pointer = matches!(
-        compact_surface.as_str(),
-        "VOID*" | "CONSTVOID*" | "LPVOID" | "PVOID" | "LPCVOID" | "PCVOID"
-    );
-    if generic_void_pointer {
+    if is_generic_void_pointer_type_name(surface_type_name) {
         return false;
     }
     while visited.insert(current.clone()) {
