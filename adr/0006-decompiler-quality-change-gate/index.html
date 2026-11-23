@@ -1399,8 +1399,8 @@
 
 
 <h1 id="adr-0006-decompiler-quality-change-gate">ADR 0006: Decompiler quality change gate<a class="headerlink" href="#adr-0006-decompiler-quality-change-gate" title="Permanent link">&para;</a></h1>
-<p><strong>Status:</strong> Accepted
-<strong>Last verified:</strong> 2026-07-03</p>
+<p><strong>Status:</strong> Accepted; amended by <a href="../0018-decbench-is-not-a-correctness-oracle/">ADR 0018</a>
+<strong>Last verified:</strong> 2026-11-23</p>
 <h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
 <p>Fission quality work often starts from a concrete benchmark row: a binary,
 function, address, and observed decompiler failure. That row is useful evidence,
@@ -1423,7 +1423,10 @@ and record the chain:</p>
 <ol>
 <li><strong>Row anchor (measured):</strong> the binary, function, address, current output,
    semantic case count, and failure category that motivated the work — from a
-   real decomp/benchmark run, not a hand-built IR fixture alone.</li>
+   real decomp/benchmark run, not a hand-built IR fixture alone. A <code>verify</code>
+   divergence or a native replay mismatch is an anchor too; a benchmark score
+   is evidence of similarity to the source, not of correctness
+   (<a href="../0018-decbench-is-not-a-correctness-oracle/">ADR 0018</a>).</li>
 <li><strong>Owner proof:</strong> evidence that the bug belongs to SLEIGH/raw p-code,
    builder/materialize, normalize, structuring, type/data recovery, printer, or
    benchmark/automation.</li>
