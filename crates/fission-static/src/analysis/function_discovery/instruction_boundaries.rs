@@ -5,6 +5,7 @@ use fission_sleigh::runtime::{
     DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeSleighFrontend,
 };
 
+use super::ranges::is_in_executable_ranges;
 use super::targets::{is_target_no_return, normalize_target, same_section};
 use super::thumb::{decode_context_for_address, image_decode_context};
 
@@ -39,11 +40,14 @@ impl InstructionCoverage {
         binary: &LoadedBinary,
         frontend: &RuntimeSleighFrontend,
         known_functions: &HashSet<u64>,
+        executable_ranges: &[(u64, u64)],
     ) -> Self {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known_functions))
+            .flat_map_iter(|&addr| {
+                walk_function_boundaries(binary, frontend, addr, known_functions, executable_ranges)
+            })
             .collect();
 
         let intervals = merge_intervals(boundaries);
@@ -61,6 +65,7 @@ impl InstructionCoverage {
         binary: &LoadedBinary,
         frontend: &RuntimeSleighFrontend,
         addrs: &[u64],
+        executable_ranges: &[(u64, u64)],
     ) {
         if addrs.is_empty() {
             return;
@@ -70,7 +75,9 @@ impl InstructionCoverage {
         let known = &self.known_functions;
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known))
+            .flat_map_iter(|&addr| {
+                walk_function_boundaries(binary, frontend, addr, known, executable_ranges)
+            })
             .collect();
 
         let mut all_intervals = std::mem::take(&mut self.intervals);
@@ -120,13 +127,13 @@ pub(super) fn walk_function_boundaries(
     frontend: &RuntimeSleighFrontend,
     addr: u64,
     known_functions: &HashSet<u64>,
+    executable_ranges: &[(u64, u64)],
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
     // The mode the function runs in: the image's, or its own when the loader
     // or a pattern said so.
     let mode_context = decode_context_for_address(binary, frontend, addr, None);
     {
-        let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = HashSet::new();
         let mut worklist = vec![addr];
 
@@ -142,35 +149,41 @@ pub(super) fn walk_function_boundaries(
             }
 
             let mut ip = curr;
+            let mut covered_end = curr;
             let mut count = 0;
             while count < 4000 {
                 if !visited.insert(ip) {
                     break;
                 }
-                if !super::ranges::is_in_executable_ranges(ip, &exec_ranges) {
+                if !is_in_executable_ranges(ip, executable_ranges) {
                     break;
                 }
                 let Some(bytes) = binary.view_bytes(ip, 15) else {
                     break;
                 };
-                let decoded = match mode_context {
-                    Some(context) => {
-                        frontend.decode_window_no_pcode_in_context(bytes, ip, 1, Some(context))
-                    }
-                    None => frontend.decode_window_no_pcode(bytes, ip, 1),
-                };
-                let Ok(decoded) = decoded else {
+                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, mode_context) else {
                     break;
                 };
-                if decoded.is_empty() {
+                let Some(next_ip) = ip.checked_add(inst.length as u64) else {
+                    break;
+                };
+                if inst.length == 0 || inst.length > bytes.len() {
                     break;
                 }
-                let inst = &decoded[0];
-                if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
+                // A one-instruction window also validates pending context commits.
+                // Keep that validation for instructions that supply them.
+                if !inst.pending_context_commits.is_empty()
+                    && frontend
+                        .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                        .is_err()
+                {
+                    break;
+                }
+                if inst.mnemonic.is_empty() || inst.mnemonic.eq_ignore_ascii_case("invalid") {
                     break;
                 }
 
-                boundaries.push((ip, ip + inst.length as u64));
+                covered_end = next_ip;
                 count += 1;
 
                 match inst.flow_kind {
@@ -198,7 +211,7 @@ pub(super) fn walk_function_boundaries(
                         if is_noreturn {
                             break;
                         }
-                        ip += inst.length as u64;
+                        ip = next_ip;
                     }
                     DecodedFlowKind::ConditionalJump => {
                         let jump_target = inst.direct_target.or_else(|| {
@@ -212,7 +225,7 @@ pub(super) fn walk_function_boundaries(
                             let norm_target = normalize_target(binary, target);
                             let in_same_section =
                                 binary.sections.is_empty() || same_section(binary, ip, norm_target);
-                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
+                            if is_in_executable_ranges(norm_target, executable_ranges)
                                 && !known_functions.contains(&norm_target)
                                 && !binary.function_addr_index.contains_key(&norm_target)
                                 && in_same_section
@@ -220,15 +233,20 @@ pub(super) fn walk_function_boundaries(
                                 worklist.push(norm_target);
                             }
                         }
-                        ip += inst.length as u64;
+                        ip = next_ip;
                     }
                     DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
                         break;
                     }
                     _ => {
-                        ip += inst.length as u64;
+                        ip = next_ip;
                     }
                 }
+            }
+            // The inner walk advances by each instruction's length. Record
+            // its union directly, leaving gaps between paths uncovered.
+            if covered_end > curr {
+                boundaries.push((curr, covered_end));
             }
         }
     }
