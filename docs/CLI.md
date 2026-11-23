@@ -297,6 +297,26 @@ and are removed with `rm-bp`. Event evaluation depends on the backend's
 `debug capabilities --json` to check support. A native backend may report
 a running state until its next event, so clients must keep consuming events.
 
+### Hardware breakpoints (Windows native, session-only)
+
+The Windows native backend exposes its existing x86 debug-register slots
+(`DR0`-`DR3`) through `hw-bp` and `rm-hw-bp` in a **persistent
+session**. Unsupported hosts fail explicitly; the operation is not a
+cross-platform promise. The implementation applies a slot to the current
+stopped thread (not all process threads). The debugger disarms hardware
+breakpoints before detaching so the target cannot receive an unhandled
+hardware trap after detachment.
+
+```bash
+fission_cli debug session ./app.exe \
+  --command "hw-bp 0x401000 --kind execute" \
+  --command "rm-hw-bp 0x401000" --json
+```
+
+The first milestone uses the underlying driver's existing single-byte
+watch length. Write/read-write traps are therefore **one-byte** observations,
+not arbitrary ranges. Use `debug capabilities --json` to check support.
+
 ### Stopped execution context
 
 `context` reads the currently stopped thread's PC, registers and optional
