@@ -952,12 +952,30 @@ impl<'a> Executor<'a> {
         }
     }
 
+    /// Where execution of the instruction at `address` starts in the P-code.
+    /// An instruction without P-code of its own (a `nop`) does nothing and
+    /// falls through, so a branch to it lands on the next decoded
+    /// instruction that has some.
+    fn place_of(&self, address: u64) -> Option<(usize, usize)> {
+        if let Some(place) = self.op_at.get(&address) {
+            return Some(*place);
+        }
+        if !self.calls.instructions.contains(&address) {
+            return None;
+        }
+        self.calls
+            .instructions
+            .range(address + 1..)
+            .take(16)
+            .find_map(|next| self.op_at.get(next).copied())
+    }
+
     /// Whether `op` (a BRANCH) jumps to code outside the slice.
     fn leaves_slice(&self, op: &PcodeOp) -> bool {
         let target = &op.inputs[0];
         !(target.is_constant || target.space_id == 0)
             && target.space_id == self.abi.ram_space
-            && !self.op_at.contains_key(&target.offset)
+            && self.place_of(target.offset).is_none()
     }
 
     /// Make the call `op`: record it with every argument register, then --
@@ -1127,8 +1145,8 @@ impl<'a> Executor<'a> {
         if target.space_id != self.abi.ram_space {
             return self.unsupported(op, "a branch into a non-code space");
         }
-        match self.op_at.get(&target.offset) {
-            Some(place) => Ok(*place),
+        match self.place_of(target.offset) {
+            Some(place) => Ok(place),
             None => self.unsupported(
                 op,
                 format!("a branch to {:#x}, outside the slice", target.offset),

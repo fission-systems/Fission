@@ -68,6 +68,10 @@ pub struct CallFacts {
     pub sites: BTreeMap<u64, CallFact>,
     /// Direct jumps out of the function (tail calls), with their callee.
     pub tail_jumps: BTreeMap<u64, CallFact>,
+    /// The start of every instruction the machine-code decode reached --
+    /// including those without P-code of their own (a `nop`), which a
+    /// branch may still target.
+    pub instructions: BTreeSet<u64>,
     pub error: Option<String>,
 }
 
@@ -122,6 +126,7 @@ impl CallFacts {
                 .iter()
                 .map(|site| (*site, fact(*site, true)))
                 .collect(),
+            instructions: flow.instructions.clone(),
             error: None,
         }
     }

@@ -25,6 +25,11 @@ Real binaries (`select_decbench.py` candidates):
       --candidates ~/fission-benchmark/wbcq-p3/decbench_candidates.json \\
       --out ~/fission-benchmark/wbcq-p3/decbench --eval target/release/examples/p3_eval -j 8
   python3 scripts/quality/wbcq/evaluate.py summarize-decbench --out ~/fission-benchmark/wbcq-p3/decbench
+
+Reach before and after an engine change (P4), over the same candidates:
+
+  python3 scripts/quality/wbcq/evaluate.py compare-reach \\
+      --before ~/fission-benchmark/wbcq-p4/dirverify-before --after ~/fission-benchmark/wbcq-p4/dirverify-after
 """
 
 from __future__ import annotations
@@ -159,6 +164,109 @@ def reason_bucket(reason: str) -> str:
     if "depends on values outside the boundary" in text:
         return text.split(":")[0] + ": undeclared live-in"
     return text[:80]
+
+
+# Why a function has no machine, by what the slice does -- the categories the
+# P3 report ranks P4's steps by, plus the call outcomes P4 step 1 introduces.
+CATEGORIES = (
+    ("call (refused outright, pre-P4)", ("the callee's effects are outside the slice",)),
+    ("call: unknown callee given an address of the context or frame",
+     ("an unknown callee that may write through it",)),
+    ("call: library callee given an address of the context or frame",
+     ("which may write through it",)),
+    ("call: library parameter not defined by the boundary", ("is not defined by the boundary",)),
+    ("call: indirect", ("an indirect call",)),
+    ("call: call sites could not be listed", ("call sites could not be listed",
+                                              "decode does not list")),
+    ("call: more calls per step than ports", ("calls in one step",)),
+    ("call: parameters past the argument registers", ("do not all fit the",)),
+    ("data-computed address", ("through an address computed from data",
+                               "through an address offset by data",
+                               "an address offset by data")),
+    ("globals (absolute memory)", ("absolute memory", "absolute address")),
+    ("branch on a pointer (e.g. ctx == NULL)", ("branch on arithmetic on an address",
+                                                "branch on a pointer value",
+                                                "an address the model cannot place")),
+    ("jump out of the function (not a listed tail call)", ("outside the slice",)),
+    ("floating point", ("Float",)),
+    ("wide values (> 8 bytes)", ("-byte value",)),
+    ("summary and emulator disagree", ("summary predicts", "does not reproduce",
+                                       "model and the machine disagree")),
+    ("budget (paths, ops, states)", ("budget:", "rounds")),
+)
+
+
+def category(row: dict) -> str:
+    status = row.get("eval", {}).get("white_box", {}).get("status", {})
+    kind = status.get("kind")
+    if kind is None:
+        return "harness error"
+    if kind != "unsupported_semantics":
+        return kind
+    reason = status.get("reason", "")
+    for name, needles in CATEGORIES:
+        if any(needle in reason for needle in needles):
+            return name
+    return "other: " + reason_bucket(reason)
+
+
+def compare_reach(args) -> None:
+    def load(path: Path) -> dict:
+        rows = [json.loads(line) for line in (path / "rows.jsonl").read_text().splitlines()]
+        return {(r["binary"], r["address"]): r for r in rows}
+
+    before, after = load(args.before), load(args.after)
+    keys = sorted(set(before) & set(after))
+    lines: list[str] = []
+    emit = lines.append
+    emit(f"## Reach: {len(keys)} step-shaped functions, before and after")
+    emit("")
+    names = sorted({category(before[k]) for k in keys} | {category(after[k]) for k in keys},
+                   key=lambda n: (-sum(1 for k in keys if category(before[k]) == n), n))
+    emit("| outcome | before | after |")
+    emit("|---|---|---|")
+    for name in names:
+        b = sum(1 for k in keys if category(before[k]) == name)
+        a = sum(1 for k in keys if category(after[k]) == name)
+        emit(f"| {name} | {b} ({pct(b, len(keys))}) | {a} ({pct(a, len(keys))}) |")
+    emit("")
+    moved: dict[tuple[str, str], int] = {}
+    for k in keys:
+        pair = (category(before[k]), category(after[k]))
+        if pair[0] != pair[1]:
+            moved[pair] = moved.get(pair, 0) + 1
+    emit("Moved (before -> after):")
+    emit("")
+    for (b, a), n in sorted(moved.items(), key=lambda kv: -kv[1]):
+        emit(f"- {n} x {b} -> {a}")
+    emit("")
+    machine = ("proved_under_model", "empirically_consistent")
+    fresh = [k for k in keys if category(after[k]) in machine and category(before[k]) not in machine]
+    lost = [k for k in keys if category(before[k]) in machine and category(after[k]) not in machine]
+    emit(f"Newly supported: {len(fresh)}. Lost: {len(lost)}.")
+    emit("")
+    if fresh:
+        emit("| project | opt | function | status | states | transitions | ports | calls | witnesses | replay | conformance |")
+        emit("|---|---|---|---|---|---|---|---|---|---|---|")
+        for k in fresh:
+            row = after[k]
+            w = row["eval"]["white_box"]
+            replay = row["eval"].get("replay") or {}
+            calls = ", ".join(f"{c.get('callee') or c['target']} ({c['class']}{', tail' if c['tail'] else ''})"
+                              for c in w.get("calls", []))
+            emit(f"| {row['project']} | {row['opt']} | `{row['function']}` | {w['status']['kind']} | "
+                 f"{w['states']} | {w['transitions']} | {w.get('ports', '-')} | {calls or '-'} | "
+                 f"{'verified' if w['witnesses_verified'] else 'NOT verified'} ({w['witnesses']}) | "
+                 f"{replay.get('agree', '-')}/{replay.get('words', '-')} | "
+                 f"{replay.get('conformance_agree', '-')}/{replay.get('conformance_words', '-')} |")
+        emit("")
+    for k in lost:
+        emit(f"- LOST: {before[k]['project']} {before[k]['opt']} `{before[k]['function']}` -> "
+             f"{category(after[k])}")
+    text = "\n".join(lines) + "\n"
+    if args.out:
+        args.out.write_text(text)
+    print(text)
 
 
 def summarize_decbench(args) -> None:
@@ -395,7 +503,15 @@ def main() -> None:
     d.add_argument("--timeout", type=int, default=600)
     ds = sub.add_parser("summarize-decbench")
     ds.add_argument("--out", type=Path, required=True)
+    c = sub.add_parser("compare-reach")
+    c.add_argument("--before", type=Path, required=True)
+    c.add_argument("--after", type=Path, required=True)
+    c.add_argument("--out", type=Path, help="also write the tables here")
     args = parser.parse_args()
+    if args.command == "compare-reach":
+        args.before, args.after = args.before.expanduser(), args.after.expanduser()
+        compare_reach(args)
+        return
     args.out = args.out.expanduser()
     if args.command == "run":
         args.corpus = args.corpus.expanduser()

@@ -407,8 +407,10 @@ pub fn build(
                 {
                     return Built::Unsupported(format!(
                         "the P-code summary predicts control state {next_values:?} where the \
-                         emulator left {:?}",
-                        control_valuation(node)
+                         emulator left {:?} (state {state}, reached by {:?}, input {:?})",
+                        control_valuation(node),
+                        learner.symbols(&learner.access(hypothesis.states[state])),
+                        learner.alphabet[symbol]
                     ));
                 }
                 let key = (target, output.clone(), updates.clone(), calls.clone(), exit);

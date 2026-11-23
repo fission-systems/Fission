@@ -387,3 +387,14 @@ fn a_tail_call_returns_what_the_callee_returns() {
     assert_eq!(transition(&report, 0, "true").calls, ["isdigit(1)"]);
     assert_eq!(transition(&report, 1, "true").calls, ["isdigit(0)"]);
 }
+
+/// The `cmov`'s branch lands on a `nop`, an instruction with no P-code: it
+/// does nothing and falls through, so the branch is followed to the next
+/// instruction rather than taken for a jump out of the slice.
+#[test]
+fn a_branch_to_an_instruction_without_pcode_falls_through_it() {
+    let report = quotient("padded_select_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 2);
+    assert_eq!(transition(&report, 0, "(cmd == 7)").to, 1);
+}

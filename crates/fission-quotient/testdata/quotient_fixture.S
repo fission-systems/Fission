@@ -314,3 +314,19 @@ tail_step:
         mov     edi, eax
         jmp     isdigit
         .size   tail_step, .-tail_step
+
+/*
+ * `select_step` with a `nop` after the conditional move: the branch the
+ * `cmov` lifts to targets an instruction that has no P-code of its own.
+ */
+        .globl  padded_select_step
+        .type   padded_select_step,@function
+padded_select_step:
+        mov     eax, dword ptr [rdi]
+        mov     ecx, 1
+        cmp     esi, 7
+        cmove   eax, ecx
+        nop
+        mov     dword ptr [rdi], eax
+        ret
+        .size   padded_select_step, .-padded_select_step

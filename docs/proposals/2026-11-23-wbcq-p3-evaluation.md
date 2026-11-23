@@ -257,3 +257,79 @@ fixed before the final run (see the PR):
 - a bounded H = 4 certificate merging states only a long word separates. The
   fix is Moore-bound deepening, which took TCP from 6 to 11 states and the
   HTTP request line from 10 to 22.
+
+## 10. P4 step 1: calls are effects, not refusals
+
+Date: 2026-11-23. Status: **measured**. The first P4 step widens the model
+where section 5 ranked the most rejections: calls (42% there) and tail calls
+(5%). Nothing in the decompiler changes; only `fission-quotient`, the
+`quotient` command's text output, its schema and these scripts do.
+
+### 10.1 The model change
+
+A call inside the slice is an observable effect, and its callee is never run.
+Both sides stub it, the way `verify --tier ground-truth` does:
+
+- **The P-code summary** stops at the `CALL`. It records the call's target
+  and its argument registers. Then it continues at the fall-through, with the
+  registers as the callee leaves them:
+  - the convention's preserved registers keep their values;
+  - the stack pointer has the return address popped, when the convention
+    pushed one;
+  - the return register holds the next **call-return input port** `retN`;
+  - every other register is poison.
+- **The emulator oracle** uses `EmulatorHarness::call_stubbed` with the
+  function's `fission_dir::call_sites`. It stops at each call instruction,
+  records the argument registers, and puts the symbol's `retN` value in the
+  return register.
+
+A call's return is therefore an input the environment chooses. A symbol is
+the boundary's ports followed by one value per call of the step, in dynamic
+order. Guards over `retN` come from the same summaries as guards over the
+input, and the solver's bounded-equivalence proof covers every value of it.
+So the quotient holds for every value a callee could return.
+
+What a step shows is now `(exit, result, calls)`, and each call is
+`(target, observed arguments)`. Which argument registers are observed, and
+how wide, is decided once per call site from the summary. Both sides then
+read it through the same `CallModel`.
+
+**Callees are told apart by facts, never guessed:**
+
+| Callee | Fact source | Treatment |
+|---|---|---|
+| proven no-return | `fission_dir::call_sites` (static no-return analysis) | The step ends there with exit `no_return`, and the machine halts. Every later step observes `halted`, so the quotient has a sink state. |
+| library | a prototype in the signature library (`fission-signatures`, resolved through `PathConfig`), by symbol or PLT name | Exactly its declared parameters are observed. Each must be defined by the boundary at least as wide as its type, when the type is informative. A variadic prototype counts as unknown. |
+| unknown | neither | Every argument register the boundary defines is observed, at the widest defined low part (64/32/16/8 bits). |
+
+**A jump out of the slice** that `call_sites` lists as a tail jump is a call
+whose return is the step's return.
+
+**Fail closed.** The summary stops with a reason when:
+- an unknown callee gets an address of the context or the frame in any
+  argument register, or a library callee gets one in a declared parameter
+  (the callee may write through it);
+- a call is indirect;
+- the call sites cannot all be listed;
+- a step makes more than 8 calls;
+- the convention names no caller-saved registers.
+
+A register the summary poisoned and the slice then reads also stops it, as
+before. Every assumption the quotient now depends on is in its
+`assumptions`:
+- what a call returns is chosen by the environment;
+- a callee writes no memory the slice reads, and holds no alias of the
+  context of its own;
+- which registers a callee preserves;
+- the library prototypes used;
+- that an unknown callee's arity is not known, and that stack arguments are
+  not observed;
+- which callees are no-return;
+- which jumps are tail calls.
+
+The `quotient.v1` schema gains:
+- `calls`, the call sites and how they are observed;
+- `transitions[].calls` and `transitions[].exit`;
+- `calls` on each observation, and the exit `no_return`.
+
+These are additions. Existing fields keep their meaning.
