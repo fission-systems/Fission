@@ -12,6 +12,8 @@ mod debug_bundle_extra;
 mod debug_decomp;
 #[cfg(feature = "debugger")]
 mod debug_session;
+#[cfg(feature = "debugger")]
+mod debug_context;
 mod disasm;
 mod function_select;
 mod functions;
