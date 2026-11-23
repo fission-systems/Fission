@@ -564,7 +564,7 @@ P-code, using the instruction list `call_sites` decodes. The fixture is
   are unreachable from a zeroed context). 95% are still outside the model.
 
 Calls were the *first* refusal, not the only one. Of the 56 functions they
-blocked, 52 had another blocker behind them:
+blocked, 54 had another blocker behind them:
 - 16 a data-computed address;
 - 17 a context or frame address handed to a callee (15 unknown helpers, 2
   library);
