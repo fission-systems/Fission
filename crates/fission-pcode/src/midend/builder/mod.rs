@@ -1096,11 +1096,25 @@ impl<'a> PreviewBuilder<'a> {
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
         ) && self.transfer_leaves_function(evidence.source_block);
-        let end_path = |stmt: PreHirStmt| {
-            if leaves_function {
-                PreHirStmt::Block(vec![stmt, PreHirStmt::Return(None)].into())
-            } else {
-                stmt
+        // The jump's result is the function's result, under the same contract
+        // as a recovered tail call above: return the call's value, unless the
+        // callee is proven to produce none. A bare `return;` here would
+        // make the function `void` whenever this is its last statement.
+        let end_path = |this: &Self, stmt: PreHirStmt| {
+            if !leaves_function {
+                return stmt;
+            }
+            match stmt {
+                PreHirStmt::Expr(call @ PreHirExpr::Call { .. })
+                    if !matches!(
+                        &call,
+                        PreHirExpr::Call { target, .. }
+                            if this.call_result_is_proven_non_source(target)
+                    ) =>
+                {
+                    PreHirStmt::Return(Some(call))
+                }
+                stmt => PreHirStmt::Block(vec![stmt, PreHirStmt::Return(None)].into()),
             }
         };
 
@@ -1110,12 +1124,15 @@ impl<'a> PreviewBuilder<'a> {
         ) && let Some(PreHirExpr::Var(target_name)) = target_expr.as_ref()
             && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
         {
-            return end_path(PreHirStmt::Expr(PreHirExpr::Call {
-                origin: None,
-                target: resolved_target,
-                args: Vec::new(),
-                ty: NirType::Unknown,
-            }));
+            return end_path(
+                self,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: resolved_target,
+                    args: Vec::new(),
+                    ty: NirType::Unknown,
+                }),
+            );
         }
 
         let pseudo_target = match evidence.surface {
@@ -1131,19 +1148,25 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .indirect_control
                 .indirect_surface_preserved_count += 1;
-            return end_path(PreHirStmt::Expr(PreHirExpr::Call {
-                origin: None,
-                target: pseudo_target.to_string(),
-                args: target_expr.into_iter().collect(),
-                ty: NirType::Unknown,
-            }));
+            return end_path(
+                self,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: pseudo_target.to_string(),
+                    args: target_expr.into_iter().collect(),
+                    ty: NirType::Unknown,
+                }),
+            );
         }
-        end_path(PreHirStmt::Expr(PreHirExpr::Call {
-            origin: None,
-            target: "__fission_indirect_cf_unsupported".to_string(),
-            args: Vec::new(),
-            ty: NirType::Unknown,
-        }))
+        end_path(
+            self,
+            PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "__fission_indirect_cf_unsupported".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }),
+        )
     }
 
     /// Whether the block starting at `source_block` ends in an unconditional

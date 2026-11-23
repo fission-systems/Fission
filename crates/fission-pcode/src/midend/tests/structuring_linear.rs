@@ -705,16 +705,19 @@ fn unresolved_tail_jump_does_not_fall_into_next_block() {
     let lines: Vec<&str> = code.lines().map(str::trim).collect();
     let jump_line = lines
         .iter()
-        .position(|line| line.starts_with("__fission_branchind("))
+        .position(|line| {
+            line.starts_with("__fission_branchind(")
+                || line.starts_with("return __fission_branchind(")
+        })
         .unwrap_or_else(|| panic!("the tail jump surface must be printed:\n{code}"));
-    let next = lines[jump_line + 1..]
-        .iter()
-        .find(|line| !line.is_empty())
-        .copied()
-        .unwrap_or("");
+    let ends_path = lines[jump_line].starts_with("return ")
+        || lines[jump_line + 1..]
+            .iter()
+            .find(|line| !line.is_empty())
+            .is_some_and(|line| line.starts_with("return"));
     assert!(
-        next.starts_with("return"),
-        "the tail jump has no successor, so nothing may run after it (got `{next}`):\n{code}"
+        ends_path,
+        "the tail jump has no successor, so nothing may run after it:\n{code}"
     );
     assert_eq!(
         code.matches("= 22;").count(),
