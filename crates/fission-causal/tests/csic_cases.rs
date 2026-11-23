@@ -286,3 +286,23 @@ fn every_witness_names_where_it_intervened() {
         }
     }
 }
+
+#[test]
+fn a_check_whose_failing_arm_never_ran_needs_potential_dependence() {
+    // Positive control: with potential dependence (the default) the four
+    // secret-compare bytes reach the slice and each is a witness.
+    let (with, _) = run("password_x64", &small());
+    let mut w = with.witness_inputs.clone();
+    w.sort_unstable();
+    assert_eq!(w, vec![0, 1, 2, 3]);
+    // Negative control: a plain dynamic slice never sees them, because the
+    // `ok = 0` store that would have depended on them never executed.
+    let plain = Config {
+        potential_dependence: false,
+        max_pairs: 0,
+        ..small()
+    };
+    let (without, _) = run("password_x64", &plain);
+    assert_eq!(without.counts.slice_input_bytes, 0);
+    assert!(without.witness_inputs.is_empty());
+}

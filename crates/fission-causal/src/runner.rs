@@ -52,6 +52,9 @@ pub struct Config {
     pub max_pairs: u64,
     /// Follow dynamic control dependence when slicing.
     pub control_dependence: bool,
+    /// Follow potential dependence (branches whose untaken arm could have
+    /// redefined a value) when slicing.
+    pub potential_dependence: bool,
     /// Restore checkpoints instead of replaying from the initial state.
     pub use_checkpoints: bool,
     /// Minimum distance in steps between two checkpoints.
@@ -67,6 +70,7 @@ impl Default for Config {
             max_candidates: 600,
             max_pairs: 64,
             control_dependence: true,
+            potential_dependence: true,
             use_checkpoints: true,
             checkpoint_spacing: 16,
         }
@@ -882,11 +886,16 @@ impl Runner<'_, '_> {
                 std::slice::from_ref(&first_iv),
                 self.config.max_steps,
             )?;
-            let cf_slice = slice::backward(
+            let cf_potential = self
+                .config
+                .potential_dependence
+                .then(|| slice::Potential::of(program, &cf));
+            let cf_slice = slice::backward_with(
                 &cf,
                 cf.sink_step,
                 &cf.criterion,
                 self.config.control_dependence,
+                cf_potential.as_ref(),
             );
             let mut partners: BTreeSet<usize> = cf_slice.input_offsets.clone();
             partners.extend(slice.input_offsets.iter().copied());
@@ -1015,11 +1024,15 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         replay_end: jit_digests[0].clone(),
     };
 
-    let slice = slice::backward(
+    let potential = config
+        .potential_dependence
+        .then(|| slice::Potential::of(program, &recorded));
+    let slice = slice::backward_with(
         &recorded,
         recorded.sink_step,
         &recorded.criterion,
         config.control_dependence,
+        potential.as_ref(),
     );
     let mut counts = Counts {
         recorded_steps: recorded.steps.len() as u64,
@@ -1212,11 +1225,15 @@ pub fn record_and_slice(
     config: &Config,
 ) -> Result<(Trace, Slice)> {
     let recorded = trace::record(program, sink, &[], config.max_steps)?;
-    let slice = slice::backward(
+    let potential = config
+        .potential_dependence
+        .then(|| slice::Potential::of(program, &recorded));
+    let slice = slice::backward_with(
         &recorded,
         recorded.sink_step,
         &recorded.criterion,
         config.control_dependence,
+        potential.as_ref(),
     );
     Ok((recorded, slice))
 }

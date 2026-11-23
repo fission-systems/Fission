@@ -20,12 +20,135 @@ pub struct Slice {
     pub input_offsets: BTreeSet<usize>,
     /// Syscall steps whose outputs the slice reaches.
     pub syscall_steps: BTreeSet<u64>,
+    /// Branches that entered through potential dependence.
+    pub potential: BTreeSet<u64>,
 }
 
 /// Backward dynamic slice of `trace` from `criterion` just before
 /// `from_step`. With `control`, dynamic control parents (from static
 /// postdominators) are followed as well as data.
 pub fn backward(trace: &Trace, from_step: u64, criterion: &[Access], control: bool) -> Slice {
+    backward_with(trace, from_step, criterion, control, None)
+}
+
+/// What the arm a branch did *not* take could have written, statically:
+/// whether it holds a store or a call, and which register bytes it defines.
+/// Keyed by the branch and the way it went.
+#[derive(Debug, Clone, Default)]
+pub struct Potential {
+    /// `(branch pc, whether the branch went to its target)` -> writes of
+    /// the other arm.
+    arms: BTreeMap<(u64, bool), (bool, BTreeSet<u64>)>,
+}
+
+/// Bound on the instructions explored per untaken arm.
+const MAX_ARM_INSNS: usize = 256;
+
+impl Potential {
+    /// Static writes of every untaken arm of every conditional branch the
+    /// trace executed, up to the branch's immediate postdominator.
+    pub fn of(program: &Program, trace: &Trace) -> Self {
+        let mut code = crate::cfg::CodeIndex::new(program);
+        let mut arms = BTreeMap::new();
+        for s in &trace.steps {
+            let crate::cfg::Flow::CBranch { target } = s.flow else {
+                continue;
+            };
+            let Some(cfg) = code.function(s.pc) else {
+                continue;
+            };
+            let Some(insn) = cfg.insns.get(&s.pc) else {
+                continue;
+            };
+            let untaken = if s.next_pc == target {
+                insn.fall_through()
+            } else {
+                target
+            };
+            let key = (s.pc, s.next_pc == target);
+            if arms.contains_key(&key) {
+                continue;
+            }
+            let stop = cfg.ipdom.get(&s.pc).copied().flatten();
+            let mut any_store = false;
+            let mut regs = BTreeSet::new();
+            let mut seen = BTreeSet::new();
+            let mut work = vec![untaken];
+            while let Some(pc) = work.pop() {
+                if Some(pc) == stop || seen.len() >= MAX_ARM_INSNS || !seen.insert(pc) {
+                    continue;
+                }
+                let Some(i) = cfg.insns.get(&pc) else {
+                    continue;
+                };
+                for op in &i.ops {
+                    match op.opcode {
+                        fission_pcode_ir::ir::PcodeOpcode::Store
+                        | fission_pcode_ir::ir::PcodeOpcode::Call
+                        | fission_pcode_ir::ir::PcodeOpcode::CallInd
+                        | fission_pcode_ir::ir::PcodeOpcode::CallOther => any_store = true,
+                        _ => {}
+                    }
+                    if let Some(out) = &op.output
+                        && out.space_id == program.register_space
+                    {
+                        regs.extend(out.offset..out.offset + u64::from(out.size));
+                    }
+                }
+                for succ in cfg.successors(i).into_iter().flatten() {
+                    work.push(succ);
+                }
+            }
+            arms.insert(key, (any_store, regs));
+        }
+        Self { arms }
+    }
+
+    fn untaken_writes(&self, trace: &Trace, branch: u64) -> Option<&(bool, BTreeSet<u64>)> {
+        let s = trace.step(branch)?;
+        let crate::cfg::Flow::CBranch { target } = s.flow else {
+            return None;
+        };
+        self.arms.get(&(s.pc, s.next_pc == target))
+    }
+}
+
+/// [`backward`], optionally following *potential* dependence as well: a
+/// branch executed between a value's last definition and its use, whose
+/// untaken arm could have redefined it, is a cause of the value the run
+/// saw (the relevant-slicing rule). Without it, a check whose failing arm
+/// never ran -- `ok = 0` in a compare loop -- leaves no trace in the slice.
+pub fn backward_with(
+    trace: &Trace,
+    from_step: u64,
+    criterion: &[Access],
+    control: bool,
+    potential: Option<&Potential>,
+) -> Slice {
+    // The step that last wrote each byte, so a use's window is known.
+    let mut window_start: Vec<u64> = Vec::with_capacity(trace.steps.len());
+    if potential.is_some() {
+        let mut last: BTreeMap<ByteLoc, u64> = BTreeMap::new();
+        for s in &trace.steps {
+            let start = s
+                .uses
+                .iter()
+                .flat_map(Access::bytes)
+                .map(|b| last.get(&b).copied().unwrap_or(0))
+                .min()
+                .unwrap_or(s.step);
+            window_start.push(start);
+            for b in s.defs.iter().flat_map(Access::bytes) {
+                last.insert(b, s.step);
+            }
+        }
+    }
+    let branches: Vec<u64> = trace
+        .steps
+        .iter()
+        .filter(|s| matches!(s.flow, crate::cfg::Flow::CBranch { .. }))
+        .map(|s| s.step)
+        .collect();
     let mut slice = Slice::default();
     let mut live: BTreeSet<ByteLoc> = criterion.iter().flat_map(Access::bytes).collect();
     let mut pending: BTreeSet<u64> = BTreeSet::new();
@@ -69,6 +192,30 @@ pub fn backward(trace: &Trace, from_step: u64, criterion: &[Access], control: bo
         slice.uses.insert(i, step.uses.clone());
         if control && let Some(parent) = step.cd_parent {
             pending.insert(parent);
+        }
+        if let Some(potential) = potential {
+            let start = window_start.get(i as usize).copied().unwrap_or(i);
+            let has_mem = step.uses.iter().any(|u| matches!(u, Access::Mem { .. }));
+            let reg_bytes: BTreeSet<u64> = step
+                .uses
+                .iter()
+                .flat_map(Access::bytes)
+                .filter_map(|b| match b {
+                    ByteLoc::Reg(o) => Some(o),
+                    ByteLoc::Mem(_) => None,
+                })
+                .collect();
+            let from = branches.partition_point(|&b| b <= start);
+            let to = branches.partition_point(|&b| b < i);
+            for &b in &branches[from..to] {
+                if let Some((any_store, regs)) = potential.untaken_writes(trace, b)
+                    && ((has_mem && *any_store) || regs.iter().any(|r| reg_bytes.contains(r)))
+                    && !slice.steps.contains(&b)
+                {
+                    pending.insert(b);
+                    slice.potential.insert(b);
+                }
+            }
         }
     }
     slice
