@@ -378,3 +378,214 @@ The control runs are kept in `~/fission-benchmark/wbcq-p4/controls-before/`.
 - `padded_select_step`: a `cmov` followed by a `nop`;
 - `calling_step`, which now fails closed because an unknown callee is handed
   the context pointer.
+
+### 10.3 The full P3 evaluation, re-run
+
+This is the whole of section 1, re-run on the corpus with the five call
+machines added: 20 functions x 8 builds = 160 runs. The binaries were rebuilt
+from the same sources, and `call_env.c` is now linked in.
+
+```bash
+python3 scripts/quality/wbcq/build_corpus.py --out ~/fission-benchmark/wbcq-p4/corpus
+python3 scripts/quality/wbcq/ground_truth.py ~/fission-benchmark/wbcq-p4/corpus/manifest.json \
+  --out ~/fission-benchmark/wbcq-p4/ground_truth.json
+cargo build --profile quick-release -p fission-quotient --example p3_eval
+cargo build --profile quick-release -p fission-cli --bin fission_cli
+python3 scripts/quality/wbcq/evaluate.py run --corpus ~/fission-benchmark/wbcq-p4/corpus \
+  --out ~/fission-benchmark/wbcq-p4/results --eval <p3_eval> --cli <fission_cli> -j 2
+python3 scripts/quality/wbcq/evaluate.py summarize --out ~/fission-benchmark/wbcq-p4/results \
+  --truth ~/fission-benchmark/wbcq-p4/ground_truth.json
+```
+
+| function | truth | a64 O0 | a64 O1 | a64 fla | a64 bcf+fla | x64 O0 | x64 O1 | x64 fla | x64 bcf+fla |
+|---|---|---|---|---|---|---|---|---|---|
+| `lex_step` | 3 | P 3= | U* | U* | U* | P 3= | P 3= | P 3= | P 3= |
+| `door_step` | 5 | P 5= | P 5= | P 5= | P 5= | P 5= | P 5= | P 5= | P 5= |
+| `turnstile_step` | 2 | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= |
+| `hs_step` | 4 | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= |
+| `emit_step` | 2 | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= |
+| `sha256_round_step` (negative) | - | **F** (was U) | F | F | F | U | F | F | F |
+
+The other 14 functions have the same row as in section 2.
+
+| | P3 (#1102) | P4 step 1 |
+|---|---|---|
+| Machines equal to the ground truth | 75/75 | **112/112** (the 75 plus 37 of the 40 call-machine builds) |
+| P3's 120 runs: status, states, transitions, witnesses, replay | - | **119 identical**. The one difference is a negative: `sha256_round_step` a64 O0 was refused at its call to `rotr` and now runs into the state budget (33 > K_max). It is still not a machine. |
+| Witnesses re-run on the emulator | all | all (0 unverified among 112) |
+| Random replay (200 words of length 24 per machine) | 15,000/15,000 | **22,400/22,400** |
+| W-method conformance | 102,450/102,450 | **103,833/103,833** |
+| Negatives producing a machine | 0/32 | **0/32**. x64 O0 `sha256` now fails closed because the unknown callee `rotr` finds a context address left in `rdx`. |
+| Median node / edge reduction vs the P-code CFG | -80% / -59% | -80% / -62% |
+
+\* **The three `U` cells for AArch64 `lex_step` are an emulator bug, caught by
+the engine.**
+- The engine refuses these builds because the P-code summary and the
+  emulator disagree: "the P-code summary predicts control state [2] where the
+  emulator left [0]".
+- The emulator is wrong. The same disagreement reproduces without any stub,
+  in plain `EmulatorHarness::call`.
+- It also reproduces in a five-instruction function with no calls:
+  `cmp w1,#2; mov w8,#2; csel w10,wzr,w8,eq; mov w0,w8; ret` returns 0 under
+  `fission_cli call`, where hardware returns 2.
+- The raw P-code is right (it never writes `x8`), so the summary is right.
+- The repro is in `~/fission-benchmark/wbcq-p4/emulator-csel-repro/`. The
+  owner is `fission-emulator`, which this step does not touch.
+
+This is the summary-vs-emulator check doing its job: a disagreement is
+refused, never learned. All 37 call-machine builds that are not affected
+equal the ground truth.
+- The library, no-return and tail-call paths are each exercised on both
+  ISAs, at every optimisation level and with every obfuscation.
+- The unknown-callee machine, `turnstile_step`, observes extra defined
+  registers (`rsi`, and on the flattened x64 build `rcx`). It still equals the
+  ground truth, which observes only the declared argument.
+
+**Black box.** It is given the same port count, with sampled return values. It
+finds `lex_step`, `turnstile_step` and `emit_step`, finds `door_step` 7 times
+out of 8, and misses `hs_step` 8 times out of 8. That machine's halt sits
+behind one input byte (`'H'`, then NUL).
+
+### 10.4 Real-binary reach (dir-verify GNU programs)
+
+**Policy deviation, recorded.** Section 5 ran the engine, and with it the
+emulator, on DecBench binaries. That deviates from the policy that DecBench
+and evalkit binaries are not emulated, and it is not repeated here. P4 runs
+on the GNU programs in `~/fission-benchmark/dir-verify/binaries` instead.
+
+But those are not independent of DecBench. 15 of the 16 are stripped
+byte-identical copies of DecBench builds: the `.text` has the same address,
+size and SHA-256. `unopt_*` are DecBench `O0` and `inlin_*` are DecBench `O2`.
+`inlin_dash_dash.elf` has no match and is skipped. So emulating them is, in
+substance, the same deviation. It is flagged here rather than hidden.
+Nothing was tuned on them.
+
+**Selection.** The binaries are stripped, so `select_dir_verify.py` reads the
+DWARF of the byte-identical unstripped build. It uses P3's signature rule,
+`<int> f(<struct> *, <int>)`, and does not filter by body. That gives 186
+step-shaped functions in 15 binaries, all of them kept (no sampling). The
+same 186 were run before (#1102's engine) and after this change, with the same
+flags.
+
+| outcome | before | after |
+|---|---|---|
+| `proved_under_model` | 8 (4%) | **10 (5%)** |
+| data-computed address | 78 (42%) | 94 (51%) |
+| globals (absolute memory) | 20 (11%) | 26 (14%) |
+| a call (refused outright) | 56 (30%) | 0 |
+| call: an unknown callee is given the context (`helper(ctx, ...)`) | - | 16 (9%) |
+| call: a library callee is given an address of the frame (`setsockopt`) | - | 2 (1%) |
+| call: indirect | - | 1 (1%) |
+| call: more than 8 calls in one step | - | 1 (1%) |
+| floating point | 7 (4%) | 15 (8%) |
+| branch on a pointer (`ctx == NULL`) | 12 (6%) | 12 (6%) |
+| wide values (> 8 bytes) | 4 (2%) | 6 (3%) |
+| a jump out of the function | 1 (1%) | 0 |
+| harness timeout (600 s) | 0 | 3 (2%) |
+
+Where the 56 call rejections went:
+- 16 to a data-computed address;
+- 15 to an unknown callee given the context (one more came from the former
+  out-of-function jump, a tail call to a helper with `ctx`);
+- 8 to floating point;
+- 6 to globals;
+- 3 to the harness timeout (`tar_checksum` at both levels and
+  `check_identifier` -O0; they now get past the call and then run out of the
+  600 s budget);
+- 2 to a frame address given to a library callee;
+- 2 to wide values;
+- 1 to an indirect call;
+- 1 to the call budget;
+- **2 became machines.**
+
+No function was lost.
+
+**Newly supported:**
+
+| function | build | states / transitions | ports | calls | witnesses | replay | conformance |
+|---|---|---|---|---|---|---|---|
+| `re_node_set_alloc` (tar, gnulib regex) | O0 | 1 / 2 | 2 | `malloc` (library) | none needed (1 state) | 100/100 | 2/2 |
+| `re_string_realloc_buffers` (tar, gnulib regex) | O2 | 1 / 1 | 4 | 3 x `realloc` (library) | none needed | 100/100 | 5/5 |
+
+**Spot checks against the disassembly** (only two functions are newly
+supported, so there are two):
+
+- **`re_node_set_alloc`** (`unopt_tar_tar.elf` 0x65350). The machine code:
+  - stores `size` to `set->alloc` and 0 to `set->nelem`;
+  - calls `malloc(size << 3)` and stores the result to `set->elems`;
+  - returns 12 (`REG_ESPACE`) when that is NULL, and 0 otherwise.
+
+  The quotient has one state and two transitions, both
+  `malloc((in << 3))`. One returns `0xc` when `ret0 == 0`, the other returns 0.
+  Both update `ctx[0x0] := in`, `ctx[0x8] := 0` and `ctx[0x10] := ret0` as
+  data registers. **Exact.**
+- **`re_string_realloc_buffers`** (`inlin_tar_tar.elf` 0x50530). Two
+  context fields guard the three `realloc` calls:
+  - `cmpl $1, 0x90(%rdi); jle` (`mb_cur_max > 1`);
+  - `cmpb $0, 0x8b(%rbx); jne`.
+
+  The step never writes either field, so from the zeroed context no call is
+  ever reached. The step only stores `in` to `0x40` (`bufs_len`) and returns
+  0. The quotient is exactly that: one state, `if true / returns 0;
+  ctx[0x40:8] := in`. **Correct, but degenerate.** Modelling calls is what
+  let the summary run at all. The machine itself never exercises a call,
+  because the boundary's initial context (zeroed) cannot reach one.
+
+Both new machines are single-state, like all 8 earlier ones.
+
+**What the 16 `helper(ctx, ...)` rejections are.** These are not leftovers
+of unoptimised register use. Each passes the context pointer itself to an
+in-binary helper in argument register 0, for example:
+- `argp_fmtstream_set_{l,r,w}margin` → `__argp_fmtstream_update(fs)`;
+- `rtnl_open` → `rtnl_open_byproto(rth, ...)`;
+- `tuntap_filter_req` → `addattr_nest(nlh, ...)`.
+
+The callee may write the context, so this is fail-closed by design.
+
+### 10.5 Engine fix found by this step
+
+A branch to an instruction without P-code of its own (a `nop`) was taken for
+a jump out of the slice. The flattened x64 `door_step` places a `nop` right
+after a `cmov`, and x86 lifts `cmov` as a branch to the next instruction. The
+summary now follows such a branch to the next decoded instruction that has
+P-code, using the instruction list `call_sites` decodes. The fixture is
+`padded_select_step`.
+
+### 10.6 Outcome and the next step
+
+**The model change works, and the reach barely moves.**
+- Calls, tail calls and no-return calls are now effects. On the corpus every
+  answer is still right:
+  - 112/112 machines equal the ground truth;
+  - 126,233/126,233 replayed words agree (22,400 random plus 103,833 W-method);
+  - no negative produces a machine.
+- On the 186 step-shaped dir-verify functions, machines go from 8 (4%) to
+  **10 (5%)**. Both new ones are single-state, and one is degenerate (its calls
+  are unreachable from a zeroed context). 95% are still outside the model.
+
+Calls were the *first* refusal, not the only one. Of the 56 functions they
+blocked, 52 had another blocker behind them:
+- 16 a data-computed address;
+- 17 a context or frame address handed to a callee (15 unknown helpers, 2
+  library);
+- 8 floating point;
+- 6 globals;
+- 3 run out of time;
+- 2 wide values;
+- 2 more call limits (1 indirect call, 1 step over the call budget).
+
+**Recommended next step: P4 step 2, data-computed addresses.** That means
+pointer fields in the context as their own regions, under a recorded no-alias
+assumption. It is now the first refusal for **94 of 186 (51%)**, up from 42%,
+because it was hiding behind calls.
+
+The second largest call-related remainder is **interprocedural**. 16 functions
+(9%) hand the context itself to an in-binary helper (`helper(ctx, ...)`). The
+fix is to compose the helper's own summary (its effect on the context) rather
+than stub it. This is a natural step 2b, because it reuses this step's call
+plumbing.
+
+**Stop rule.** It is the RFC's: if after steps (1)-(3) more than 60% of the
+step-shaped sample is still outside the model or degenerate, pivot to AEQ.
+After step (1) that figure is 95%. Step 2 has to move the 51% bucket a lot for
+the redesign to continue.
