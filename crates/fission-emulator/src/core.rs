@@ -1921,6 +1921,83 @@ impl Emulator {
         Ok(())
     }
 
+    /// Forget the recorded future: the snapshots taken after the current
+    /// step. Call this when the machine is changed by hand -- a register or
+    /// memory write from a debugger -- because what was recorded past this
+    /// point is the future of the machine *before* the change. Without it, a
+    /// seek forward replays that future, and a seek back undoes writes the
+    /// changed machine never made.
+    ///
+    /// A machine that was only sought (not changed) keeps its future: the
+    /// replay is then exact, which re-execution is not -- the OS layer's own
+    /// state (the allocator, open files) is not in a snapshot and has
+    /// already moved on.
+    pub fn ttd_discard_future(&mut self) {
+        self.ttd.truncate_after(self.inst_count);
+    }
+
+    /// Run from the current state until `target_step` instructions have
+    /// retired (or the program stops first), recording as the run loop
+    /// always does.
+    fn ttd_run_forward_to(&mut self, target_step: u64) -> Result<()> {
+        if target_step == self.inst_count {
+            return Ok(());
+        }
+        let saved_max = self.max_inst;
+        let saved_halt = self.halt_requested;
+        self.max_inst = Some(target_step);
+        self.halt_requested = false;
+        self.sym_stop_requested = false;
+        let _ = self.run();
+        self.max_inst = saved_max;
+        if !self.halt_requested {
+            self.halt_requested = saved_halt;
+        }
+        Ok(())
+    }
+
+    /// Record a time-travel snapshot of the machine as it is now: the
+    /// registers, and the memory writes since the previous snapshot. The run
+    /// loop calls this every recording interval; a debugger calls it once at
+    /// launch, so a session that only single-steps (and so never reaches the
+    /// loop's check) still has a step to seek back to.
+    pub fn record_ttd_snapshot(&mut self) {
+        if !self.ttd.is_recording() {
+            return;
+        }
+        self.ttd_last_snapshot_inst = self.inst_count;
+        let regs = self.register_state();
+        let deltas: Vec<fission_ttd::MemoryDelta> = self
+            .state
+            .trace_mem_writes
+            .iter()
+            .map(|(addr, old, new)| fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone()))
+            .collect();
+        let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self
+            .state
+            .trace_shadow_writes
+            .iter()
+            .map(
+                |(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
+                    space_id: *space_id,
+                    address: *addr,
+                    old_node: *old_node,
+                    new_node: *new_node,
+                },
+            )
+            .collect();
+        self.ttd
+            .record_step_with_memory(self.inst_count, regs, 0, deltas, shadow_deltas);
+        self.state.trace_mem_writes.clear();
+        self.state.trace_mem_reads.clear();
+        self.state.trace_shadow_writes.clear();
+        tracing::trace!(
+            "TTD: recorded step {} at PC=0x{:X}",
+            self.inst_count,
+            self.pc
+        );
+    }
+
     /// Seek the TTD timeline to a given instruction step index.
     ///
     /// 1. Restore the nearest snapshot at or before `target_step` (registers +
@@ -1928,6 +2005,18 @@ impl Emulator {
     /// 2. If still short of `target_step`, **recompute** by running JIT with
     ///    chaining disabled and `max_inst` set to the remaining steps.
     pub fn ttd_seek(&mut self, target_step: u64) -> Result<()> {
+        // Forward with no recorded future to replay -- none was recorded yet,
+        // or it was discarded because the machine was changed by hand
+        // (`ttd_discard_future`): run from where the machine is. Restoring
+        // the last snapshot and recomputing would undo the change.
+        let has_recorded_future = self
+            .ttd
+            .snapshots()
+            .iter()
+            .any(|s| s.step_index > self.inst_count && s.step_index <= target_step);
+        if target_step >= self.inst_count && !has_recorded_future {
+            return self.ttd_run_forward_to(target_step);
+        }
         let snapshot = self
             .ttd
             .get_snapshot(target_step)
@@ -2690,39 +2779,7 @@ impl Emulator {
                 && self.inst_count / self.ttd_snapshot_interval
                     > self.ttd_last_snapshot_inst / self.ttd_snapshot_interval
             {
-                self.ttd_last_snapshot_inst = self.inst_count;
-                let regs = self.register_state();
-                let deltas: Vec<fission_ttd::MemoryDelta> = self
-                    .state
-                    .trace_mem_writes
-                    .iter()
-                    .map(|(addr, old, new)| {
-                        fission_ttd::MemoryDelta::new(*addr, old.clone(), new.clone())
-                    })
-                    .collect();
-                let shadow_deltas: Vec<fission_ttd::ShadowDelta> = self
-                    .state
-                    .trace_shadow_writes
-                    .iter()
-                    .map(
-                        |(space_id, addr, old_node, new_node)| fission_ttd::ShadowDelta {
-                            space_id: *space_id,
-                            address: *addr,
-                            old_node: *old_node,
-                            new_node: *new_node,
-                        },
-                    )
-                    .collect();
-                self.ttd
-                    .record_step_with_memory(self.inst_count, regs, 0, deltas, shadow_deltas);
-                self.state.trace_mem_writes.clear();
-                self.state.trace_mem_reads.clear();
-                self.state.trace_shadow_writes.clear();
-                tracing::trace!(
-                    "TTD: recorded step {} at PC=0x{:X}",
-                    self.inst_count,
-                    self.pc
-                );
+                self.record_ttd_snapshot();
             }
         };
         if self.ttd.is_recording() {

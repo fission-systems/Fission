@@ -68,6 +68,61 @@ pub enum ParsedInvocation {
     Skill,
     /// The SLEIGH language IDs this build can lift
     Languages(LanguagesArgs),
+    /// Call one function in the emulator with chosen arguments
+    Call(CallArgs),
+}
+
+/// `fission_cli call`: run one function of the binary in the emulator, from
+/// the loaded image, with the arguments given, and report how it ended.
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Call one function in the emulator with chosen arguments and report how it ended.\n\nThe image is loaded as `sandbox` loads it, the function is entered with the arguments in the calling convention's integer argument slots and a return address nothing maps, and the run ends when it returns there. Every call starts from the same freshly loaded image, so one call cannot see another's writes.\n\nWith `--stub-calls VALUE` every call the function makes is stopped at the call instruction instead of run: its arguments are recorded, VALUE is put in the return register, and execution continues after the call. The report then lists those calls and every byte the function stored outside its own stack frame.\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
+    after_help = "Examples:\n  fission_cli call app.elf --name add --arg 2 --arg 3 --json\n  fission_cli call app.elf --addr 0x401130 --arg 0x10 --stub-calls 0 --json"
+)]
+pub struct CallArgs {
+    /// Path to the binary (ELF or PE)
+    pub binary: PathBuf,
+
+    /// Address of the function to call
+    #[arg(long, value_parser = parse_hex_address, required_unless_present = "name", conflicts_with = "name")]
+    pub addr: Option<u64>,
+
+    /// Name of the function to call (exact, as `list` prints it)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// An integer argument, in order: decimal, `0x` hex, or negative; repeatable
+    #[arg(long = "arg", value_name = "VALUE", value_parser = parse_call_argument, allow_hyphen_values = true)]
+    pub args: Vec<u64>,
+
+    /// Stop at every call the function makes and return this value from it
+    /// instead of running the callee
+    #[arg(long, value_name = "VALUE", value_parser = parse_call_argument, allow_hyphen_values = true)]
+    pub stub_calls: Option<u64>,
+
+    /// Instruction budget for the call
+    #[arg(long, default_value_t = 1_000_000)]
+    pub max_inst: u64,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+/// An integer argument for `call`: decimal, `0x` hex, or a negative decimal
+/// taken as its two's-complement 64-bit pattern.
+pub fn parse_call_argument(s: &str) -> Result<u64, String> {
+    let t = s.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return u64::from_str_radix(hex, 16).map_err(|e| format!("`{s}`: {e}"));
+    }
+    if t.starts_with('-') {
+        return t
+            .parse::<i64>()
+            .map(|v| v as u64)
+            .map_err(|e| format!("`{s}`: {e}"));
+    }
+    t.parse::<u64>().map_err(|e| format!("`{s}`: {e}"))
 }
 
 /// `fission_cli languages`: the lift-ready SLEIGH language IDs, i.e. the
@@ -285,6 +340,8 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
     Schema(SchemaArgs),
     /// List the SLEIGH language IDs this build can lift (values for `--language`)
     Languages(LanguagesArgs),
+    /// Call one function in the emulator with chosen arguments
+    Call(CallArgs),
     /// Print the agent usage guide (SKILL.md) built into this binary
     #[command(
         long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
@@ -1181,6 +1238,7 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "schema",
     "skill",
     "languages",
+    "call",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1236,6 +1294,15 @@ where
             ParsedInvocation::Db(mut db) => {
                 db.project_path = analysis_db.clone();
                 ParsedInvocation::Db(db)
+            }
+            // A session restores the breakpoints saved for its binary; the
+            // global `--db` / `--no-db` say from where, or not at all.
+            ParsedInvocation::Debug(mut debug) => {
+                if let crate::cli::args::DebugCommand::Session(session) = &mut debug.command {
+                    session.analysis_db = analysis_db.clone();
+                    session.no_analysis_db = no_analysis_db;
+                }
+                ParsedInvocation::Debug(debug)
             }
             other => other,
         };
@@ -1307,14 +1374,26 @@ fn ignored_option_warnings(
                 ignored("--engine", command);
             }
         }
+        ParsedInvocation::Debug(debug)
+            if !matches!(debug.command, crate::cli::args::DebugCommand::Session(_)) =>
+        {
+            if no_analysis_db {
+                ignored("--no-db", "debug");
+            }
+            if analysis_db.is_some() {
+                ignored("--db", "debug");
+            }
+        }
         ParsedInvocation::Script(_)
         | ParsedInvocation::Sandbox(_)
         | ParsedInvocation::Verify(_)
+        | ParsedInvocation::Call(_)
         | ParsedInvocation::Db(_) => {
             let command = match invocation {
                 ParsedInvocation::Script(_) => "script",
                 ParsedInvocation::Sandbox(_) => "sandbox",
                 ParsedInvocation::Verify(_) => "verify",
+                ParsedInvocation::Call(_) => "call",
                 _ => "db",
             };
             if language.is_some() {
@@ -1353,6 +1432,7 @@ fn raw_load_warnings(
         ParsedInvocation::Schema(_) => "schema",
         ParsedInvocation::Skill => "skill",
         ParsedInvocation::Languages(_) => "languages",
+        ParsedInvocation::Call(_) => "call",
     };
     [
         ("--base", raw_base.is_some()),
@@ -1638,6 +1718,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Languages(languages) => {
                     return ParsedInvocation::Languages(languages);
                 }
+                CliCommand::Call(call) => return ParsedInvocation::Call(call),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1681,6 +1762,7 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Skill => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Languages(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Call(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1698,6 +1780,7 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
+            ParsedInvocation::Call(_) => panic!("legacy parser cannot emit call"),
         }
     }
 
