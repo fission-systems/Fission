@@ -113,12 +113,18 @@ pub trait ExecutionBackend: Send {
         _address: u64,
         _kind: super::types::HwBreakpointKind,
     ) -> FissionResult<()> {
-        Err(fission_core::err!(debug, "hardware breakpoints are not supported by this backend"))
+        Err(fission_core::err!(
+            debug,
+            "hardware breakpoints are not supported by this backend"
+        ))
     }
 
     /// Remove a hardware breakpoint previously set in this session.
     fn remove_hardware_breakpoint(&mut self, _address: u64) -> FissionResult<()> {
-        Err(fission_core::err!(debug, "hardware breakpoints are not supported by this backend"))
+        Err(fission_core::err!(
+            debug,
+            "hardware breakpoints are not supported by this backend"
+        ))
     }
 
     /// Read memory from the target process
