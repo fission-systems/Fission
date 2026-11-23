@@ -580,24 +580,23 @@ mod tests {
 mod packed_structures_tests {
     use super::*;
 
-    /// Every struct the packed corpus holds must be byte-identical to what the
-    /// JSON merge produces, and the two must agree on which names exist at all.
-    ///
-    /// Skips when either side is absent: `utils/source/` (the JSON) is
-    /// gitignored, and a tree without the `.fpk` has nothing to compare.
-    #[test]
-    fn packed_and_json_agree_on_every_struct() {
-        let Some(dir) = resources()
+    /// `utils/signatures/typeinfo/win32/structures.fpk` is committed, so a
+    /// corpus that does not open is a failure. Each test here used to return
+    /// when it was absent.
+    fn committed_packed() -> PackedStructures {
+        let dir = resources()
             .win32_typeinfo_json_path("structures.fpk")
             .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
-        else {
-            eprintln!("skipping: no win32 typeinfo dir");
-            return;
-        };
-        let Some(packed) = PackedStructures::open(&dir) else {
-            eprintln!("skipping: no packed corpus at {}", dir.display());
-            return;
-        };
+            .expect("the committed win32 typeinfo directory resolves");
+        PackedStructures::open(&dir)
+            .unwrap_or_else(|| panic!("no packed corpus at {}", dir.display()))
+    }
+
+    /// Every struct the packed corpus holds must be byte-identical to what the
+    /// JSON merge produces, and the two must agree on which names exist at all.
+    #[test]
+    fn packed_and_json_agree_on_every_struct() {
+        let packed = committed_packed();
 
         // Read every record straight out of the name table.
         let all = packed.by_name.read_all().expect("read packed");
@@ -639,15 +638,7 @@ mod packed_structures_tests {
     /// depends on, and a missing name there is a silently worse inference.
     #[test]
     fn size_index_matches_a_full_scan() {
-        let Some(dir) = resources()
-            .win32_typeinfo_json_path("structures.fpk")
-            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
-        else {
-            return;
-        };
-        let Some(packed) = PackedStructures::open(&dir) else {
-            return;
-        };
+        let packed = committed_packed();
         let all = packed.by_name.read_all().expect("read packed");
 
         let mut expected_32: HashMap<u32, Vec<String>> = HashMap::new();
@@ -690,15 +681,7 @@ mod packed_structures_tests {
 
     #[test]
     fn packed_structures_negative_caching() {
-        let Some(dir) = resources()
-            .win32_typeinfo_json_path("structures.fpk")
-            .and_then(|p| p.parent().map(std::path::Path::to_path_buf))
-        else {
-            return;
-        };
-        let Some(packed) = PackedStructures::open(&dir) else {
-            return;
-        };
+        let packed = committed_packed();
 
         assert!(packed.get("NONEXISTENT_STRUCT_NAME_XYZ").is_none());
         let cache = packed.resolved.lock().unwrap();

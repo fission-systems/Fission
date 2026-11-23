@@ -6,30 +6,41 @@
 //! own -- a real, non-decompiler-derived ground truth.
 
 use fission_dir::report::VerifyOutcome;
-use fission_dir::{EmulatorHarness, RunPlan, check_ground_truth, decompile_one};
+use fission_dir::{
+    EmulatorHarness, Grounding, RunPlan, check_ground_truth, check_ground_truth_with, decompile_one,
+};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_midend_core::ir::HirStmt;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::path::PathBuf;
 
-fn corpus_binary(name: &str) -> PathBuf {
+/// A MinGW x64 PE built from `fission-emulator/testdata/src/
+/// mingw_control_flow.c`. These tests read `control_flow_gcc_O0.exe` from a
+/// local dev corpus and skipped when it was absent -- which was everywhere,
+/// CI included, so none of them had run.
+fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/c")
-        .join(name)
+        .join("../fission-emulator/testdata/x64_mingw_control_flow.exe")
+}
+
+/// A function's entry, from the fixture's COFF symbols.
+fn entry_of(binary: &LoadedBinary, name: &str) -> u64 {
+    binary
+        .functions
+        .iter()
+        .find(|f| f.name == name)
+        .unwrap_or_else(|| panic!("{name} in the fixture's symbol table"))
+        .address
 }
 
 #[test]
 fn count_bits_matches_real_machine_code() {
-    let path = corpus_binary("control_flow_gcc_O0.exe");
-    if !path.exists() {
-        eprintln!("skipping: corpus binary not found at {}", path.display());
-        return;
-    }
+    let path = fixture();
     let binary = LoadedBinary::from_file(&path).expect("load binary");
     let facts = FactStore::from_binary(&binary);
     let func = FunctionInfo {
         name: "count_bits".to_string(),
-        address: 0x140001530,
+        address: entry_of(&binary, "count_bits"),
         ..Default::default()
     };
 
@@ -37,12 +48,13 @@ fn count_bits_matches_real_machine_code() {
     let samples = RunPlan::default();
 
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
-    let outcome = check_ground_truth(
+    let outcome = check_ground_truth_with(
         &mut harness,
         func.address,
         &pair.prehir,
         &pair.hir,
         &samples,
+        &Grounding::for_function(&binary, func.address, &pair),
     );
 
     match outcome {
@@ -60,21 +72,16 @@ fn count_bits_matches_real_machine_code() {
 
 #[test]
 fn float_return_signature_reports_unsupported() {
-    let path = corpus_binary("control_flow_gcc_O0.exe");
-    if !path.exists() {
-        return;
-    }
+    let path = fixture();
+    let entry = entry_of(
+        &LoadedBinary::from_file(&path).expect("load binary"),
+        "count_bits",
+    );
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
     let mut hir = fission_midend_core::ir::HirFunction::default();
     hir.return_type = fission_midend_core::ir::NirType::Float { bits: 32 };
     let prehir = fission_midend_prehir::PreHirFunction::default();
-    let outcome = check_ground_truth(
-        &mut harness,
-        0x140001530,
-        &prehir,
-        &hir,
-        &RunPlan::default(),
-    );
+    let outcome = check_ground_truth(&mut harness, entry, &prehir, &hir, &RunPlan::default());
     match outcome {
         VerifyOutcome::Unsupported(fission_dir::report::UnsupportedReason::Construct(msg)) => {
             assert_eq!(msg, "floating-point ABI in ground-truth");
@@ -91,16 +98,12 @@ fn float_return_signature_reports_unsupported() {
 /// for any input where the real answer isn't 0.
 #[test]
 fn corrupted_hir_is_caught_against_real_machine_code() {
-    let path = corpus_binary("control_flow_gcc_O0.exe");
-    if !path.exists() {
-        eprintln!("skipping: corpus binary not found at {}", path.display());
-        return;
-    }
+    let path = fixture();
     let binary = LoadedBinary::from_file(&path).expect("load binary");
     let facts = FactStore::from_binary(&binary);
     let func = FunctionInfo {
         name: "count_bits".to_string(),
-        address: 0x140001530,
+        address: entry_of(&binary, "count_bits"),
         ..Default::default()
     };
 
@@ -112,12 +115,13 @@ fn corrupted_hir_is_caught_against_real_machine_code() {
 
     let samples = RunPlan::default();
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
-    let outcome = check_ground_truth(
+    let outcome = check_ground_truth_with(
         &mut harness,
         func.address,
         &pair.prehir,
         &corrupted_hir,
         &samples,
+        &Grounding::for_function(&binary, func.address, &pair),
     );
 
     match outcome {
@@ -150,16 +154,12 @@ fn corrupted_hir_is_caught_against_real_machine_code() {
 /// fixes land in this one real-corpus function.
 #[test]
 fn clamp_matches_real_machine_code_including_negative_args() {
-    let path = corpus_binary("control_flow_gcc_O0.exe");
-    if !path.exists() {
-        eprintln!("skipping: corpus binary not found at {}", path.display());
-        return;
-    }
+    let path = fixture();
     let binary = LoadedBinary::from_file(&path).expect("load binary");
     let facts = FactStore::from_binary(&binary);
     let func = FunctionInfo {
         name: "clamp".to_string(),
-        address: 0x14000155f,
+        address: entry_of(&binary, "clamp"),
         ..Default::default()
     };
 
@@ -168,12 +168,13 @@ fn clamp_matches_real_machine_code_including_negative_args() {
     let samples = RunPlan::default();
 
     let mut harness = EmulatorHarness::build(&path, Some(200_000)).expect("build emulator");
-    let outcome = check_ground_truth(
+    let outcome = check_ground_truth_with(
         &mut harness,
         func.address,
         &pair.prehir,
         &pair.hir,
         &samples,
+        &Grounding::for_function(&binary, func.address, &pair),
     );
 
     match outcome {

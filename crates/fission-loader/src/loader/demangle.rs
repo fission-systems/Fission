@@ -255,9 +255,16 @@ mod tests {
         assert_ne!(demangled[2], names[2]);
     }
 
+    /// `swift demangle` ships with Xcode, so on macOS it is an input the
+    /// platform provides; elsewhere there is nothing to run.
+    #[cfg_attr(
+        not(target_os = "macos"),
+        ignore = "needs the `swift demangle` tool, which ships with Xcode on macOS"
+    )]
     #[test]
     fn demangle_many_batches_swift_symbols_when_tool_is_available() {
         if !swift_available() {
+            fission_core::test_inputs::absent("the `swift demangle` tool");
             return;
         }
 

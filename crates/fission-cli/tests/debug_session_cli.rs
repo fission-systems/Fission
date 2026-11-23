@@ -599,15 +599,14 @@ fn interactive_native_attach_replies_and_detaches_on_eof() {
     // child without changing the host policy.
     unsafe {
         target_command.pre_exec(|| {
-            let result = unsafe {
-                prctl(
-                    PR_SET_PTRACER,
-                    PR_SET_PTRACER_ANY,
-                    0 as std::ffi::c_ulong,
-                    0 as std::ffi::c_ulong,
-                    0 as std::ffi::c_ulong,
-                )
-            };
+            // The enclosing `unsafe` block covers this call as well.
+            let result = prctl(
+                PR_SET_PTRACER,
+                PR_SET_PTRACER_ANY,
+                0 as std::ffi::c_ulong,
+                0 as std::ffi::c_ulong,
+                0 as std::ffi::c_ulong,
+            );
             if result == -1 {
                 Err(std::io::Error::last_os_error())
             } else {

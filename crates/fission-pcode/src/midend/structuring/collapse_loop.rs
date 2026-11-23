@@ -137,6 +137,7 @@ mod tests {
             conservative_irreducible_fallback: false,
             structuring_engine: StructuringEngineKind::GraphCollapseV1,
             selection_axis: Default::default(),
+            resource_limits: Default::default(),
             global_names: Default::default(),
             global_sizes: Default::default(),
             relocation_names: Default::default(),

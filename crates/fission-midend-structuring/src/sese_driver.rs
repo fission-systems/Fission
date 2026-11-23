@@ -15,7 +15,7 @@ use crate::driver_pure::{region_kind_for_stmt, region_selector_or_condition};
 use crate::graph::{StructureNode, capture_structuring_failure};
 use crate::guarded_tail::promote_guarded_tail_regions_until_stable;
 use crate::host::StructuringHost;
-use crate::linear_recovery::{SESE_REGION_PROOF_BUDGET_CALLS, try_recover_region_linearized_body};
+use crate::linear_recovery::try_recover_region_linearized_body;
 use crate::linear_types::structuring_diag_enabled;
 use crate::loop_analysis::LoopBody;
 use crate::loops::{
@@ -323,7 +323,7 @@ fn build_sese_region_body_impl(
         if diag {
             eprintln!(
                 "[DIAG] build_sese_region_body: aborting structuring entry due to {} proof-attempt ceiling",
-                SESE_REGION_PROOF_BUDGET_CALLS
+                host.options().resource_limits.sese_region_proof_calls
             );
         }
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);
@@ -349,7 +349,7 @@ fn build_sese_region_body_impl(
             if diag {
                 eprintln!(
                     "[DIAG] build_sese_region_body: aborting collapse loop due to {} proof-attempt ceiling",
-                    SESE_REGION_PROOF_BUDGET_CALLS
+                    host.options().resource_limits.sese_region_proof_calls
                 );
             }
             return Err(MlilPreviewError::UnsupportedCfgRegionShape);

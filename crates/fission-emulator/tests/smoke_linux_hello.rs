@@ -18,10 +18,16 @@ fn fixture_elf() -> PathBuf {
 }
 
 /// Opt-in only: never auto-pick developer `/tmp` trees (those can hang for minutes).
-fn optional_large_elf() -> Option<PathBuf> {
-    let p = std::env::var("FISSION_SMOKE_ELF").ok()?;
+fn optional_large_elf() -> PathBuf {
+    let p = std::env::var("FISSION_SMOKE_ELF")
+        .expect("set FISSION_SMOKE_ELF=/path/to/elf for this opt-in test");
     let pb = PathBuf::from(p);
-    pb.is_file().then_some(pb)
+    assert!(
+        pb.is_file(),
+        "FISSION_SMOKE_ELF is not a file: {}",
+        pb.display()
+    );
+    pb
 }
 
 struct SmokeExpect {
@@ -122,13 +128,12 @@ fn smoke_ci_fixture_hello_sys() {
     .unwrap_or_else(|e| panic!("fixture smoke failed: {e:#}"));
 }
 
-/// Large musl/CRT hello — opt-in via `FISSION_SMOKE_ELF`. Not part of default CI.
+/// Large musl/CRT hello — opt-in via `FISSION_SMOKE_ELF` and `--ignored`.
+/// Not part of default CI.
 #[test]
+#[ignore = "needs a local ELF named by FISSION_SMOKE_ELF; run with --ignored"]
 fn smoke_optional_musl_hello() {
-    let Some(path) = optional_large_elf() else {
-        eprintln!("skip optional musl hello (set FISSION_SMOKE_ELF=/path/to/elf to enable)");
-        return;
-    };
+    let path = optional_large_elf();
     run_binary(
         &path,
         SmokeExpect {

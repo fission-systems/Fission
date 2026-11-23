@@ -43,16 +43,18 @@ pub(super) fn name_priority(name: &str) -> usize {
     3 // highest priority: meaningful recovered symbols
 }
 
+// Both predicates below compare ASCII-case-insensitively instead of lowering
+// into a fresh `String`. Every token they test is pure ASCII and no non-ASCII
+// character lowercases to an ASCII letter these tokens contain, so the result
+// is identical to the former `to_lowercase()` comparison.
 pub(super) fn is_sp_or_bp_name(name: &str) -> bool {
-    matches!(
-        name.to_lowercase().as_str(),
-        "rsp" | "rbp" | "esp" | "ebp" | "sp" | "bp"
-    )
+    ["rsp", "rbp", "esp", "ebp", "sp", "bp"]
+        .iter()
+        .any(|token| name.eq_ignore_ascii_case(token))
 }
 
 pub(super) fn is_hardware_register_variable(name: &str) -> bool {
-    let name_lower = name.to_lowercase();
-    let gprs = [
+    const GPRS: &[&str] = &[
         "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp", "rax", "rbx", "rcx", "rdx", "rsi",
         "rdi", "rsp", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "ax", "bx",
         "cx", "dx", "sp", "bp", "si", "di", "al", "bl", "cl", "dl", "ah", "bh", "ch", "dh", "r8d",
@@ -60,23 +62,23 @@ pub(super) fn is_hardware_register_variable(name: &str) -> bool {
         "r12w", "r13w", "r14w", "r15w", "r8b", "r9b", "r10b", "r11b", "r12b", "r13b", "r14b",
         "r15b",
     ];
-    if gprs.contains(&name_lower.as_str()) {
+    let bytes = name.as_bytes();
+    let starts_with_ignore_case = |prefix: &str| {
+        bytes.len() >= prefix.len() && bytes[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    };
+    if GPRS.iter().any(|gpr| name.eq_ignore_ascii_case(gpr)) {
         return true;
     }
-    if name_lower == "reg" || name_lower.starts_with("reg_") {
+    if name.eq_ignore_ascii_case("reg") || starts_with_ignore_case("reg_") {
         return true;
     }
-    if name_lower.starts_with("reg") && name_lower[3..].chars().all(|c| c.is_ascii_digit()) {
+    if starts_with_ignore_case("reg") && bytes[3..].iter().all(u8::is_ascii_digit) {
         return true;
     }
-    if name_lower.starts_with("xmm")
-        || name_lower.starts_with("ymm")
-        || name_lower.starts_with("zmm")
-        || name_lower.starts_with("fvar")
-    {
-        return true;
-    }
-    false
+    starts_with_ignore_case("xmm")
+        || starts_with_ignore_case("ymm")
+        || starts_with_ignore_case("zmm")
+        || starts_with_ignore_case("fvar")
 }
 
 pub(super) fn is_eligible_for_speculative_merge(binding: &PreHirBinding) -> bool {

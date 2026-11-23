@@ -76,6 +76,14 @@ pub struct DecompArgs {
     #[arg(long, value_name = "MS")]
     pub timeout_ms: Option<u64>,
 
+    /// Override a deterministic work limit (repeatable). Limits count units of
+    /// work, not time, so a value trips at the same point on any machine.
+    /// Names: structuring_total_work, condition_recovery_subcalls,
+    /// sese_region_proof_calls, varnode_lowering_work. Overrides the
+    /// `[decompiler.work_limits]` table of fission.toml.
+    #[arg(long = "work-limit", value_name = "NAME=VALUE")]
+    pub work_limit: Vec<super::WorkLimitFlag>,
+
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,

@@ -157,10 +157,8 @@ fn run_one(path: &Path, root: &Path) -> Outcome {
 #[test]
 #[ignore = "a measurement over the whole dev corpus, not an assertion"]
 fn how_much_of_the_dev_corpus_runs() {
-    let Some(root) = corpus() else {
-        eprintln!("skipping: dev corpus not present");
-        return;
-    };
+    // Opt-in: asked for by name, so an absent corpus is a failure.
+    let root = corpus().expect("dev corpus not present (set FISSION_SWEEP_ROOT)");
 
     let mut binaries: Vec<PathBuf> = Vec::new();
     let mut stack = vec![root.clone()];

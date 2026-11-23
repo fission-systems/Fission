@@ -117,6 +117,7 @@ pub fn try_lower_if(
         host.block_start_address(idx),
         "try_lower_if",
         host.structuring_total_work_counter(),
+        host.resource_usage(),
     );
     if diag {
         eprintln!(

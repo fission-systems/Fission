@@ -8,6 +8,8 @@ pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
 #[derive(Debug, Clone)]
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
+    /// Ops touching each address space, derived once from `pcode`.
+    pub(in crate::midend::builder) space_op_index: std::rc::Rc<super::materialize::SpaceOpIndex>,
     pub(crate) options: &'a MlilPreviewOptions,
     pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
@@ -277,6 +279,9 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (which don't hold a `&host` reference) can share a live handle. See
     /// PROJECT.md.
     pub(crate) structuring_total_work_units: std::rc::Rc<std::cell::Cell<u64>>,
+    /// Observed use of the work limits. Shared with every clone and fork of
+    /// this builder, and read only for telemetry.
+    pub(crate) resource_usage: std::rc::Rc<fission_midend_core::ir::ResourceUsage>,
     /// Loop heads whose lowering is in progress on the current call path, innermost last. A plain
     /// `Vec` (not shared like the work counter): a builder cloned for an observation inherits the
     /// path it was cloned on, so the trial cannot re-enter a head either.

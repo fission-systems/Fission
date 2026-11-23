@@ -65,6 +65,8 @@ pub struct OneShotArgs {
     pub decomp_limit: Option<usize>,
     pub include_nonuser_functions: bool,
     pub timeout_ms: Option<u64>,
+    /// `decomp --work-limit` overrides, in command-line order.
+    pub work_limits: Vec<super::WorkLimitFlag>,
     pub format: Option<String>,
     pub preview_candidate_inventory: bool,
     pub preview_candidate_limit: Option<usize>,
@@ -186,6 +188,7 @@ impl Default for OneShotArgs {
             decomp_limit: None,
             include_nonuser_functions: false,
             timeout_ms: None,
+            work_limits: Vec::new(),
             format: None,
             preview_candidate_inventory: false,
             preview_candidate_limit: None,
