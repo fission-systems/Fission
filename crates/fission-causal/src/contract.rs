@@ -31,7 +31,11 @@ pub enum SinkSpec {
     /// The `occurrence`-th (1-based) execution of the conditional branch at
     /// `pc` goes to its branch target (`taken == true`) rather than falling
     /// through. Φ is false if that execution never happens.
-    BranchOutcome { pc: u64, occurrence: u32, taken: bool },
+    BranchOutcome {
+        pc: u64,
+        occurrence: u32,
+        taken: bool,
+    },
     /// `len` bytes at `addr` satisfy `predicate` at `at`.
     MemoryValue {
         addr: u64,
@@ -186,10 +190,16 @@ pub enum EnvSourceStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SinkObservation {
-    Holds { detail: String },
-    DoesNotHold { detail: String },
+    Holds {
+        detail: String,
+    },
+    DoesNotHold {
+        detail: String,
+    },
     /// The run hit the instruction budget before Φ was decided.
-    Undecided { detail: String },
+    Undecided {
+        detail: String,
+    },
 }
 
 impl SinkObservation {
@@ -209,20 +219,32 @@ impl SinkObservation {
 pub enum Verdict {
     /// One value at this location changed Φ, and a fresh replay from the
     /// initial state reproduced the change. Not an actual-cause claim.
-    CounterfactualWitness { witness: InterventionWitness },
+    CounterfactualWitness {
+        witness: InterventionWitness,
+    },
     /// No tried value changed Φ. Holds for exactly these values, in this
     /// experiment.
-    NotACause { tried: Vec<Vec<u8>> },
-    InvalidIntervention { reason: InvalidReason },
+    NotACause {
+        tried: Vec<Vec<u8>>,
+    },
+    InvalidIntervention {
+        reason: InvalidReason,
+    },
     /// The fork replay and the fresh replay disagreed, or the sink depends
     /// on a non-deterministic environment source.
-    NonDeterministic { reason: String },
+    NonDeterministic {
+        reason: String,
+    },
     /// The oracle-execution budget ran out before this candidate was
     /// decided, or a replay hit the instruction budget.
-    BudgetBounded { detail: String },
+    BudgetBounded {
+        detail: String,
+    },
     /// The engine could not run the experiment (decode failure, an
     /// unsupported sink, ...).
-    Unsupported { reason: String },
+    Unsupported {
+        reason: String,
+    },
 }
 
 impl Verdict {

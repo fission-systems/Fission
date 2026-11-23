@@ -27,8 +27,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use anyhow::Result;
-use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode};
 use fission_emulator::os::linux::syscall_conv::SyscallAbi;
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode};
 use serde::Serialize;
 
 use crate::cfg::{CodeIndex, Flow, Insn};
@@ -89,7 +89,11 @@ enum Val {
 }
 
 fn mask(v: u64, size: u32) -> u64 {
-    if size >= 8 { v } else { v & ((1u64 << (8 * size)) - 1) }
+    if size >= 8 {
+        v
+    } else {
+        v & ((1u64 << (8 * size)) - 1)
+    }
 }
 
 /// Block-local abstract evaluation of one instruction's p-code: returns
@@ -280,7 +284,10 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
     let base_regs: Vec<u64> = [program.sp_register.as_str()]
         .into_iter()
         .chain(probe.emu.arch.gp_regs.iter().copied().filter(|r| {
-            matches!(r.to_ascii_uppercase().as_str(), "RBP" | "EBP" | "X29" | "FP" | "R11")
+            matches!(
+                r.to_ascii_uppercase().as_str(),
+                "RBP" | "EBP" | "X29" | "FP" | "R11"
+            )
         }))
         .filter_map(|r| program.register(r))
         .map(|(_, o, _)| o)
@@ -297,16 +304,14 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
     let mut nodes: BTreeMap<u64, Node> = BTreeMap::new();
     let mut call_sites: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new(); // callee -> call pcs
     let mut returns: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new(); // function -> return pcs
+    let mut tail_callers: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new(); // function -> jumpers
     let mut cfgs = Vec::new();
     for &f in &functions {
         if let Some(cfg) = code.function(f) {
             cfgs.push(cfg.clone());
         }
     }
-    let all_pcs: BTreeSet<u64> = cfgs
-        .iter()
-        .flat_map(|c| c.insns.keys().copied())
-        .collect();
+    let all_pcs: BTreeSet<u64> = cfgs.iter().flat_map(|c| c.insns.keys().copied()).collect();
     for cfg in &cfgs {
         let mut leaders: BTreeSet<u64> = BTreeSet::from([cfg.start]);
         for insn in cfg.insns.values() {
@@ -333,7 +338,14 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
                     env.insert((program.register_space, b), Val::Base(b, 0));
                 }
             }
-            let mut node = node_for(program, insn, cfg.start, &mut env, &syscall_regs, result_reg);
+            let mut node = node_for(
+                program,
+                insn,
+                cfg.start,
+                &mut env,
+                &syscall_regs,
+                result_reg,
+            );
             node.control_parents = cfg
                 .control_parents
                 .get(&insn.pc)
@@ -341,7 +353,14 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
                 .unwrap_or_default();
             node.succs = match insn.flow {
                 Flow::Fall => vec![insn.fall_through()],
-                Flow::Branch(t) => vec![t],
+                Flow::Branch(t) => {
+                    // A jump to another function's entry is a tail call: that
+                    // function returns to whoever called this one.
+                    if t != cfg.start && functions.contains(&t) {
+                        tail_callers.entry(t).or_default().insert(cfg.start);
+                    }
+                    vec![t]
+                }
                 Flow::CBranch { target } => vec![target, insn.fall_through()],
                 Flow::Call { target } => {
                     let targets: Vec<u64> = match target {
@@ -359,6 +378,13 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
                         }
                     }
                     if succ.is_empty() {
+                        // A callee outside the scope: assume it reads and
+                        // writes any memory and its argument registers.
+                        for &(offset, size) in &syscall_regs {
+                            node.uses.extend(reg_bytes(offset, size));
+                        }
+                        node.uses.insert(Abs::MemAny);
+                        node.defs.insert(Abs::MemAny);
                         succ.push(insn.fall_through());
                     }
                     succ
@@ -367,10 +393,18 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
                     returns.entry(cfg.start).or_default().insert(insn.pc);
                     Vec::new()
                 }
-                Flow::Indirect => indirect
-                    .get(&insn.pc)
-                    .map(|s| s.iter().copied().collect())
-                    .unwrap_or_default(),
+                Flow::Indirect => {
+                    let targets: Vec<u64> = indirect
+                        .get(&insn.pc)
+                        .map(|s| s.iter().copied().collect())
+                        .unwrap_or_default();
+                    for &t in &targets {
+                        if t != cfg.start && functions.contains(&t) {
+                            tail_callers.entry(t).or_default().insert(cfg.start);
+                        }
+                    }
+                    targets
+                }
             };
             node.succs.retain(|s| all_pcs.contains(s));
             nodes.insert(insn.pc, node);
@@ -387,10 +421,22 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
         }
     }
     for (callee, rets) in &returns {
-        let sites: Vec<u64> = call_sites
-            .get(callee)
-            .map(|s| s.iter().filter_map(|c| fallthrough.get(c).copied()).collect())
-            .unwrap_or_default();
+        // Call sites of the callee and, through tail calls, of every
+        // function that jumps to it.
+        let mut via: BTreeSet<u64> = BTreeSet::from([*callee]);
+        let mut stack = vec![*callee];
+        while let Some(f) = stack.pop() {
+            for g in tail_callers.get(&f).into_iter().flatten() {
+                if via.insert(*g) {
+                    stack.push(*g);
+                }
+            }
+        }
+        let sites: Vec<u64> = via
+            .iter()
+            .flat_map(|f| call_sites.get(f).into_iter().flatten())
+            .filter_map(|c| fallthrough.get(c).copied())
+            .collect();
         for r in rets {
             if let Some(n) = nodes.get_mut(r) {
                 n.succs.extend(sites.iter().copied());
@@ -455,8 +501,11 @@ pub fn slice(program: &Program, trace: &Trace) -> Result<StaticSliceResult> {
                 .iter()
                 .any(|d| out.iter().any(|r| may_alias(*d, *r)));
             let member = hits || forced.contains(&pc);
-            let mut new_in: BTreeSet<Abs> =
-                out.iter().copied().filter(|r| !node.kills.contains(r)).collect();
+            let mut new_in: BTreeSet<Abs> = out
+                .iter()
+                .copied()
+                .filter(|r| !node.kills.contains(r))
+                .collect();
             if member {
                 new_in.extend(node.uses.iter().copied());
                 in_slice.insert(pc);

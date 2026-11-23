@@ -27,7 +27,11 @@ fn max_rss_bytes() -> u64 {
     // SAFETY: getrusage writes into the struct we own.
     unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
     let raw = usage.ru_maxrss as u64;
-    if cfg!(target_os = "macos") { raw } else { raw * 1024 }
+    if cfg!(target_os = "macos") {
+        raw
+    } else {
+        raw * 1024
+    }
 }
 
 fn main() -> anyhow::Result<()> {

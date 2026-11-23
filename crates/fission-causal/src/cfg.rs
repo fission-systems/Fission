@@ -24,8 +24,12 @@ const MAX_FUNCTION_INSNS: usize = 20_000;
 pub enum Flow {
     Fall,
     Branch(u64),
-    CBranch { target: u64 },
-    Call { target: Option<u64> },
+    CBranch {
+        target: u64,
+    },
+    Call {
+        target: Option<u64>,
+    },
     Return,
     /// Indirect jump: target unknown statically.
     Indirect,
@@ -73,7 +77,11 @@ pub fn flow_of(ops: &[PcodeOp], ram_space: u64) -> Flow {
         match op.opcode {
             PcodeOpcode::Return => return Flow::Return,
             PcodeOpcode::BranchInd => return Flow::Indirect,
-            PcodeOpcode::Call => flow = Flow::Call { target: ram_target(op) },
+            PcodeOpcode::Call => {
+                flow = Flow::Call {
+                    target: ram_target(op),
+                }
+            }
             PcodeOpcode::CallInd => flow = Flow::Call { target: None },
             PcodeOpcode::Branch => {
                 // A constant-space target is a p-code-relative branch inside
@@ -197,8 +205,7 @@ fn compute_postdominators(cfg: &mut FunctionCfg) {
         })
         .collect();
     let all: BTreeSet<u64> = nodes.iter().copied().collect();
-    let mut pdom: BTreeMap<u64, BTreeSet<u64>> =
-        nodes.iter().map(|&n| (n, all.clone())).collect();
+    let mut pdom: BTreeMap<u64, BTreeSet<u64>> = nodes.iter().map(|&n| (n, all.clone())).collect();
     let mut changed = true;
     while changed {
         changed = false;

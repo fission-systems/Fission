@@ -30,6 +30,8 @@ pub struct TaintResult {
     pub criterion_bytes: usize,
     /// Fission's control tracking dropped no scopes.
     pub control_complete: bool,
+    /// Which engine carried the taint.
+    pub engine: String,
 }
 
 /// Where to read taint: `(step, accesses)`, read just before `step` runs.
@@ -68,38 +70,107 @@ fn read_sets(program: &Program, run: &mut Run, accesses: &[Access]) -> Vec<u32> 
     sets
 }
 
+/// Run (on either engine) to just before `step`, by breakpoint on that step's pc
+/// and its occurrence count in the recorded trace.
+fn run_jit_to(run: &mut Run, trace: &Trace, step: u64) -> Result<bool> {
+    let Some(target) = trace.step(step) else {
+        return Ok(false);
+    };
+    let pc = target.pc;
+    let mut remaining = trace.steps[..step as usize]
+        .iter()
+        .filter(|s| s.pc == pc)
+        .count()
+        + 1;
+    run.emu.set_breakpoint(pc);
+    let reached = loop {
+        if run.emu.inst_count == step && run.emu.pc == pc {
+            break true;
+        }
+        match run.emu.resume() {
+            Ok(fission_emulator::RunOutcome::HitBreakpoint(at)) if at == pc => {
+                remaining -= 1;
+                if remaining == 0 {
+                    break run.emu.inst_count == step;
+                }
+            }
+            _ => break false,
+        }
+    };
+    run.emu.clear_breakpoint(pc);
+    Ok(reached)
+}
+
 /// Run the incident again with every input byte as its own taint source and
 /// report which sources reach the sink criterion.
 ///
 /// Interpreter throughout: it retires exactly the requested number of
 /// instructions, which the criterion steps need.
 pub fn dynamic_taint(program: &Program, trace: &Trace) -> Result<TaintResult> {
+    // The interpreter first: on the fixtures it keeps data provenance through
+    // memory that the JIT's taint path loses. It panics on a store through a
+    // tainted pointer, though, and then the JIT result is the one reported.
+    let interpreted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        dynamic_taint_on(program, trace, true)
+    }));
+    match interpreted {
+        Ok(result) => result,
+        Err(_) => {
+            let mut result = dynamic_taint_on(program, trace, false)?;
+            result.engine = "jit (interpreter taint panicked)".into();
+            Ok(result)
+        }
+    }
+}
+
+fn dynamic_taint_on(program: &Program, trace: &Trace, interpreter: bool) -> Result<TaintResult> {
     let mut run = program.fresh(Engine::Interpreter)?;
     run.emu.set_shadow_mode(ShadowMode::Taint);
     let mut criteria = taint_criteria(trace);
-    let mut result = TaintResult::default();
+    let mut result = TaintResult {
+        engine: if interpreter { "interpreter" } else { "jit" }.into(),
+        ..TaintResult::default()
+    };
     let mut sets: Vec<u32> = Vec::new();
     let reads: Vec<(u64, Vec<(u64, usize)>)> = trace
         .steps
         .iter()
         .filter(|s| !s.input.is_empty())
-        .map(|s| (s.step + 1, s.input.iter().map(|b| (b.addr, b.offset)).collect()))
+        .map(|s| {
+            (
+                s.step + 1,
+                s.input.iter().map(|b| (b.addr, b.offset)).collect(),
+            )
+        })
         .collect();
     let mut events: Vec<(u64, bool, usize)> = reads
         .iter()
         .enumerate()
         .map(|(i, (step, _))| (*step, false, i))
-        .chain(criteria.iter().enumerate().map(|(i, (step, _))| (*step, true, i)))
+        .chain(
+            criteria
+                .iter()
+                .enumerate()
+                .map(|(i, (step, _))| (*step, true, i)),
+        )
         .collect();
     events.sort();
     for (step, is_criterion, index) in events {
         if step > trace.steps.len() as u64 {
             continue;
         }
-        if step == trace.steps.len() as u64 {
-            // Read at exit: let the run finish.
-            run.emu.max_inst = None;
-            let _ = run.emu.resume();
+        if is_criterion {
+            // After the sources exist, the JIT carries the taint: the
+            // interpreter's taint path panics on a store through a tainted
+            // pointer (it hands the taint set id to the symbolic-array
+            // code as if it were a solver node), see the P1 report.
+            run.emu.force_interpreter = interpreter;
+            // An exit criterion is read just before the last instruction
+            // (the exit itself writes no memory).
+            let at = step.min(trace.steps.len().saturating_sub(1) as u64);
+            if !run_jit_to(&mut run, trace, at)? {
+                break;
+            }
         } else if !run.run_to_step(step)? {
             break;
         }
@@ -123,13 +194,21 @@ pub fn dynamic_taint(program: &Program, trace: &Trace) -> Result<TaintResult> {
     for set in sets {
         let data = run.emu.taint.data_projection(set);
         if let Some(data) = data {
-            result
-                .data
-                .extend(run.emu.taint.labels(data).iter().filter_map(|l| label_offset(l)));
+            result.data.extend(
+                run.emu
+                    .taint
+                    .labels(data)
+                    .iter()
+                    .filter_map(|l| label_offset(l)),
+            );
         }
-        result
-            .data_control
-            .extend(run.emu.taint.labels(set).iter().filter_map(|l| label_offset(l)));
+        result.data_control.extend(
+            run.emu
+                .taint
+                .labels(set)
+                .iter()
+                .filter_map(|l| label_offset(l)),
+        );
     }
     result.control_complete = run.emu.taint.control_tracking_complete();
     Ok(result)

@@ -27,6 +27,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 | [`crates/fission-emulator`](https://github.com/fission-systems/Fission/tree/main/crates/fission-emulator) | P-code execution engine and OS high-level emulation; backs the execution differential |
 | [`crates/fission-solver`](https://github.com/fission-systems/Fission/tree/main/crates/fission-solver) | Native SMT/SAT stack (AST, AIG, CNF, SAT, theory) used by symbolic and concolic paths |
 | [`crates/fission-ttd`](https://github.com/fission-systems/Fission/tree/main/crates/fission-ttd) | Time-travel / trace-adjacent support |
+| `crates/fission-causal` | Experimental CSIC (RFC #1101 Track B): one-variable counterfactual interventions on emulator replays; no production dependents |
 | [`crates/fission-plugin`](https://github.com/fission-systems/Fission/tree/main/crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](https://github.com/fission-systems/Fission/tree/main/crates/fission-cli) | CLI product (`fission_cli`) |
 | [`crates/fission-script`](https://github.com/fission-systems/Fission/tree/main/crates/fission-script) | Rust-native embedded scripting (Rhai) for read-only binary automation |

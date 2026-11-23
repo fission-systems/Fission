@@ -88,7 +88,10 @@ fn the_rfc_case_reproduces_natively_observable_state() {
     let recorded = trace::record(&program, &sink, &[], 100_000).expect("record");
     assert_eq!(recorded.end, EndState::Exited { code: Some(1) });
     assert_eq!(recorded.stdout, b"ADMIN\n");
-    assert!(matches!(recorded.observation, SinkObservation::Holds { .. }));
+    assert!(matches!(
+        recorded.observation,
+        SinkObservation::Holds { .. }
+    ));
     // Input bytes were attributed to offsets in delivery order.
     let offsets: Vec<usize> = recorded.inputs.iter().map(|b| b.offset).collect();
     assert_eq!(offsets, (0..32).collect::<Vec<_>>());
@@ -121,7 +124,13 @@ fn requested_interventions_split_into_witness_non_cause_and_invalid() {
     assert!(matches!(invalid(3), InvalidReason::UnknownRegister { .. }));
     assert_eq!(invalid(4), InvalidReason::Unmapped { addr: 0x10 });
     assert!(matches!(invalid(5), InvalidReason::CodePage { .. }));
-    assert_eq!(invalid(6), InvalidReason::WidthMismatch { expected: 1, got: 2 });
+    assert_eq!(
+        invalid(6),
+        InvalidReason::WidthMismatch {
+            expected: 1,
+            got: 2
+        }
+    );
     assert_eq!(invalid(7), InvalidReason::NoOp);
     assert!(matches!(invalid(8), InvalidReason::NotBeforeSink { .. }));
     let _ = program;
@@ -132,7 +141,11 @@ fn the_rfc_cause_is_found_and_logged_bytes_are_not_blamed() {
     let (report, _) = run("rfc_auth_x64_O0", &small());
     assert!(report.refusal.is_none(), "{:?}", report.refusal);
     // Positive control: the RFC's byte is a witness.
-    assert!(witness_offsets(&report).contains(&3), "{:?}", report.witness_inputs);
+    assert!(
+        witness_offsets(&report).contains(&3),
+        "{:?}",
+        report.witness_inputs
+    );
     // Negative control: no logged byte (8..11) is a witness.
     assert!(
         !witness_offsets(&report).iter().any(|o| (8..12).contains(o)),
@@ -155,7 +168,11 @@ fn the_rfc_cause_is_found_and_logged_bytes_are_not_blamed() {
 fn the_rfc_cause_holds_on_aarch64_too() {
     let (report, _) = run("rfc_auth_a64_O0", &small());
     assert!(report.refusal.is_none(), "{:?}", report.refusal);
-    assert!(witness_offsets(&report).contains(&3), "{:?}", report.witness_inputs);
+    assert!(
+        witness_offsets(&report).contains(&3),
+        "{:?}",
+        report.witness_inputs
+    );
     assert!(!witness_offsets(&report).iter().any(|o| (8..12).contains(o)));
 }
 
@@ -163,7 +180,10 @@ fn the_rfc_cause_holds_on_aarch64_too() {
 fn a_clock_dependent_grant_is_refused_and_a_clock_free_one_is_not() {
     let (time, _) = run("nondet_time", &small());
     let refusal = time.refusal.as_deref().unwrap_or("");
-    assert!(refusal.contains("clock_gettime") || refusal.contains("time"), "{refusal}");
+    assert!(
+        refusal.contains("clock_gettime") || refusal.contains("time"),
+        "{refusal}"
+    );
     assert_eq!(time.joint, JointStatus::Refused);
     assert!(time.candidates.is_empty());
     // Positive control: the same shape of program without the clock read is
@@ -209,8 +229,16 @@ fn a_crash_is_caused_by_the_selector_not_by_the_stored_value() {
     let (report, _) = run("crash_null_x64", &small());
     assert!(report.refusal.is_none(), "{:?}", report.refusal);
     assert!(matches!(report.sink, SinkSpec::FaultAt { .. }));
-    assert!(report.witness_inputs.contains(&0), "{:?}", report.witness_inputs);
-    assert!(!report.witness_inputs.contains(&1), "{:?}", report.witness_inputs);
+    assert!(
+        report.witness_inputs.contains(&0),
+        "{:?}",
+        report.witness_inputs
+    );
+    assert!(
+        !report.witness_inputs.contains(&1),
+        "{:?}",
+        report.witness_inputs
+    );
 }
 
 #[test]

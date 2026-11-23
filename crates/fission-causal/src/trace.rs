@@ -268,7 +268,14 @@ impl<'s> SinkMonitor<'s> {
                 };
                 if due {
                     let obs = evaluate_memory(run, *addr, *len, predicate);
-                    self.decided = Some((step, vec![Access::Mem { addr: *addr, len: *len }], obs));
+                    self.decided = Some((
+                        step,
+                        vec![Access::Mem {
+                            addr: *addr,
+                            len: *len,
+                        }],
+                        obs,
+                    ));
                 }
             }
             _ => {}
@@ -298,7 +305,9 @@ impl<'s> SinkMonitor<'s> {
                     }
                 }
                 other => SinkObservation::Undecided {
-                    detail: format!("instruction at 0x{pc:x} is not a conditional branch ({other:?})"),
+                    detail: format!(
+                        "instruction at 0x{pc:x} is not a conditional branch ({other:?})"
+                    ),
                 },
             };
             self.decided = Some((step, uses.to_vec(), obs));
@@ -352,7 +361,14 @@ impl<'s> SinkMonitor<'s> {
                 ),
                 _ => {
                     let obs = evaluate_memory(run, *addr, *len, predicate);
-                    (last, vec![Access::Mem { addr: *addr, len: *len }], obs)
+                    (
+                        last,
+                        vec![Access::Mem {
+                            addr: *addr,
+                            len: *len,
+                        }],
+                        obs,
+                    )
                 }
             },
             _ => (
@@ -793,8 +809,8 @@ fn analyse_ops(
             }
             if input.space_id == reg {
                 all_const = false;
-                let first_unwritten = (0..u64::from(input.size))
-                    .any(|i| !defined.contains(&(input.offset + i)));
+                let first_unwritten =
+                    (0..u64::from(input.size)).any(|i| !defined.contains(&(input.offset + i)));
                 if first_unwritten {
                     uses.insert((input.offset, input.size));
                 }

@@ -54,6 +54,8 @@ pub struct Config {
     pub control_dependence: bool,
     /// Restore checkpoints instead of replaying from the initial state.
     pub use_checkpoints: bool,
+    /// Minimum distance in steps between two checkpoints.
+    pub checkpoint_spacing: u64,
 }
 
 impl Default for Config {
@@ -66,6 +68,7 @@ impl Default for Config {
             max_pairs: 64,
             control_dependence: true,
             use_checkpoints: true,
+            checkpoint_spacing: 16,
         }
     }
 }
@@ -160,7 +163,10 @@ struct Checkpoint {
     step: u64,
     pc: u64,
     state: MachineState,
-    vfs: SimVFS,
+    /// Shared between checkpoints whose file state is the same: the VFS
+    /// carries the program image as seeded paths, which would otherwise be
+    /// copied into every checkpoint.
+    vfs: std::sync::Arc<SimVFS>,
     stdin_buffer: Option<Vec<u8>>,
     exit_code: Option<u32>,
     heap_cursor: u64,
@@ -186,7 +192,7 @@ impl Checkpoint {
             step: emu.inst_count,
             pc: emu.pc,
             state,
-            vfs: emu.vfs.clone(),
+            vfs: std::sync::Arc::new(emu.vfs.clone()),
             stdin_buffer: emu.stdin_buffer.clone(),
             exit_code: emu.exit_code,
             heap_cursor: emu.heap_cursor,
@@ -205,7 +211,7 @@ impl Checkpoint {
     /// Restore into a freshly built emulator. The OS layer's private state
     /// (task scheduler, HLE tables) is the fresh one's; every checkpoint is
     /// validated by a null-intervention replay before it is trusted.
-    fn restore(&self, run: &mut Run) {
+    fn restore(&self, run: &mut Run, flush_blocks: bool) {
         let emu = &mut run.emu;
         let hooks = std::mem::take(&mut emu.state.hooks);
         emu.state = self.state.clone();
@@ -213,10 +219,12 @@ impl Checkpoint {
         // `host_reg_file` is the register file itself (not a cache), so it
         // comes with the cloned state and must not be cleared.
         emu.state.normalize_host_reg_file();
-        emu.jit_cache.flush_all();
+        if flush_blocks {
+            emu.jit_cache.flush_all();
+        }
         emu.pc = self.pc;
         emu.inst_count = self.step;
-        emu.vfs = self.vfs.clone();
+        emu.vfs = (*self.vfs).clone();
         emu.stdin_buffer = self.stdin_buffer.clone();
         emu.exit_code = self.exit_code;
         emu.heap_cursor = self.heap_cursor;
@@ -327,6 +335,19 @@ fn engine_digest(run: &Run, end: &EndState) -> String {
     hasher.finalize().to_hex().to_string()
 }
 
+/// What can change in the VFS while a program runs: per-descriptor content
+/// length, cursor and EOF, and the next descriptor. Seeded paths do not.
+fn vfs_signature(vfs: &SimVFS) -> Vec<(u64, usize, usize, bool)> {
+    let mut sig: Vec<(u64, usize, usize, bool)> = vfs
+        .files
+        .iter()
+        .map(|(fd, f)| (*fd, f.content.len(), f.cursor, f.eof))
+        .collect();
+    sig.sort_unstable();
+    sig.push((u64::MAX, vfs.next_fd as usize, 0, false));
+    sig
+}
+
 /// A pooled emulator and the checkpoints it can be restored to.
 ///
 /// Building an emulator is not cheap (it re-reads the language's compiled
@@ -338,6 +359,13 @@ fn engine_digest(run: &Run, end: &EndState) -> String {
 pub struct Replayer<'p> {
     pub program: &'p Program,
     pub worker: Run,
+    /// The engine that finishes a replay after positioning. Positioning
+    /// itself always uses the interpreter (exact step counts).
+    engine: Engine,
+    /// Flush compiled blocks on restore. Needed only if the recorded run
+    /// wrote executable memory; otherwise every checkpoint holds the same
+    /// code and the worker's block cache stays valid across restores.
+    flush_on_restore: bool,
     checkpoints: BTreeMap<u64, Checkpoint>,
     pub restore_us: Vec<u128>,
     pub replay_us: Vec<u128>,
@@ -345,14 +373,16 @@ pub struct Replayer<'p> {
 }
 
 impl<'p> Replayer<'p> {
-    pub fn new(program: &'p Program) -> Result<Self> {
+    pub fn new(program: &'p Program, engine: Engine, flush_on_restore: bool) -> Result<Self> {
         let started = Instant::now();
-        let mut worker = program.fresh(Engine::Interpreter)?;
+        let mut worker = program.fresh(engine)?;
         let construction_us = started.elapsed().as_micros();
         let initial = Checkpoint::capture(&mut worker);
         Ok(Self {
             program,
             worker,
+            engine,
+            flush_on_restore,
             checkpoints: BTreeMap::from([(0, initial)]),
             restore_us: Vec::new(),
             replay_us: Vec::new(),
@@ -370,7 +400,12 @@ impl<'p> Replayer<'p> {
             if !self.worker.run_to_step(step)? {
                 break;
             }
-            let cp = Checkpoint::capture(&mut self.worker);
+            let mut cp = Checkpoint::capture(&mut self.worker);
+            if let Some((_, previous)) = self.checkpoints.range(..step).next_back()
+                && vfs_signature(&previous.vfs) == vfs_signature(&cp.vfs)
+            {
+                cp.vfs = std::sync::Arc::clone(&previous.vfs);
+            }
             self.checkpoints.insert(step, cp);
         }
         Ok(())
@@ -395,8 +430,8 @@ impl<'p> Replayer<'p> {
             .range(..=step)
             .next_back()
             .ok_or_else(|| anyhow!("no checkpoint at or before {step}"))?;
-        cp.restore(&mut self.worker);
-        self.worker.emu.force_interpreter = true;
+        cp.restore(&mut self.worker, self.flush_on_restore);
+        self.worker.emu.force_interpreter = self.engine == Engine::Interpreter;
         self.worker.emu.max_inst = None;
         self.restore_us.push(started.elapsed().as_micros());
         if self.worker.emu.inst_count < step {
@@ -577,7 +612,6 @@ impl Runner<'_, '_> {
             },
         };
         let digest = engine_digest(run, &end);
-        run.emu.force_interpreter = true;
         run.emu.max_inst = None;
         Ok(digest)
     }
@@ -867,7 +901,12 @@ impl Runner<'_, '_> {
             partners.extend(slice.input_offsets.iter().copied());
             partners.remove(&first.input_offset.unwrap_or(usize::MAX));
             for offset in partners {
-                let Some(byte) = self.trace.inputs.iter().find(|b| b.offset == offset).copied()
+                let Some(byte) = self
+                    .trace
+                    .inputs
+                    .iter()
+                    .find(|b| b.offset == offset)
+                    .copied()
                 else {
                     continue;
                 };
@@ -913,6 +952,21 @@ impl Runner<'_, '_> {
         }
         Ok(JointStatus::NoWitnessWithinBudget { pairs_tried })
     }
+}
+
+/// Did the recorded run write any executable page?
+fn runner_trace_writes_code(program: &Program, trace: &Trace) -> bool {
+    let Ok(probe) = program.fresh(Engine::Interpreter) else {
+        return true;
+    };
+    trace.steps.iter().any(|s| {
+        s.defs.iter().any(|d| match *d {
+            Access::Mem { addr, len } => {
+                probe.emu.state.page_map.range_has_exec(addr, len as usize)
+            }
+            Access::Reg { .. } => false,
+        })
+    })
 }
 
 fn fault_pc(message: &str) -> Option<u64> {
@@ -994,8 +1048,11 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
     pool.dedup();
     pool.truncate(8);
 
-    let replay = Replayer::new(program)?;
-    let verifier = Replayer::new(program)?;
+    // Forks finish on the JIT and verifications on the interpreter, so a
+    // verified witness has been seen by both engines.
+    let smc = runner_trace_writes_code(program, &recorded);
+    let replay = Replayer::new(program, Engine::Jit, smc)?;
+    let verifier = Replayer::new(program, Engine::Interpreter, smc)?;
     let mut runner = Runner {
         case,
         config: config.clone(),
@@ -1028,7 +1085,17 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
     }
 
     if config.use_checkpoints && refusal.is_none() {
-        let mut steps: BTreeSet<u64> = generated.iter().map(|c| c.step).collect();
+        let mut wanted: BTreeSet<u64> = generated.iter().map(|c| c.step).collect();
+        // Thin to at most one checkpoint per `checkpoint_spacing` steps;
+        // the rest of the way is replayed from the closest one.
+        let mut steps: BTreeSet<u64> = BTreeSet::new();
+        let mut last: Option<u64> = None;
+        for s in std::mem::take(&mut wanted) {
+            if last.is_none_or(|l| s >= l + config.checkpoint_spacing) {
+                steps.insert(s);
+                last = Some(s);
+            }
+        }
         steps.extend(case.requested.iter().map(|iv| iv.step));
         steps.retain(|s| *s < runner.trace.steps.len() as u64);
         runner
@@ -1137,7 +1204,11 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
 }
 
 /// The recorded trace and its slice, for baselines that want them.
-pub fn record_and_slice(program: &Program, sink: &SinkSpec, config: &Config) -> Result<(Trace, Slice)> {
+pub fn record_and_slice(
+    program: &Program,
+    sink: &SinkSpec,
+    config: &Config,
+) -> Result<(Trace, Slice)> {
     let recorded = trace::record(program, sink, &[], config.max_steps)?;
     let slice = slice::backward(
         &recorded,

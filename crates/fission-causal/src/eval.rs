@@ -137,10 +137,18 @@ fn observed_fault(_: &Program, discovery: &Trace) -> Result<SinkSpec> {
 /// The first conditional branch `classify` executed, and the way it went.
 fn classify_branch(program: &Program, discovery: &Trace) -> Result<SinkSpec> {
     let start = func(program, "classify")?;
+    let size = program
+        .binary
+        .find_function("classify")
+        .map_or(0, |f| f.size);
     let step = discovery
         .steps
         .iter()
-        .find(|s| s.pc >= start && matches!(s.flow, crate::cfg::Flow::CBranch { .. }))
+        .find(|s| {
+            s.pc >= start
+                && s.pc < start + size
+                && matches!(s.flow, crate::cfg::Flow::CBranch { .. })
+        })
         .ok_or_else(|| anyhow!("classify executed no conditional branch"))?;
     let crate::cfg::Flow::CBranch { target } = step.flow else {
         unreachable!()
@@ -182,13 +190,19 @@ fn invalid_requests(program: &Program, discovery: &Trace) -> Result<Vec<Interven
         // Positive control: the RFC's cause.
         Intervention {
             step,
-            location: Location::Memory { addr: addr3, len: 1 },
+            location: Location::Memory {
+                addr: addr3,
+                len: 1,
+            },
             value: vec![0x00],
         },
         // Negative control: a logged byte.
         Intervention {
             step,
-            location: Location::Memory { addr: addr9, len: 1 },
+            location: Location::Memory {
+                addr: addr9,
+                len: 1,
+            },
             value: vec![0x00],
         },
         // The program counter.
@@ -218,19 +232,28 @@ fn invalid_requests(program: &Program, discovery: &Trace) -> Result<Vec<Interven
         // Wrong width.
         Intervention {
             step,
-            location: Location::Memory { addr: addr3, len: 1 },
+            location: Location::Memory {
+                addr: addr3,
+                len: 1,
+            },
             value: vec![0, 0],
         },
         // The recorded value itself.
         Intervention {
             step,
-            location: Location::Memory { addr: addr3, len: 1 },
+            location: Location::Memory {
+                addr: addr3,
+                len: 1,
+            },
             value: vec![0x7f],
         },
         // After the run (and so after the sink).
         Intervention {
             step: discovery.steps.len() as u64 + 5,
-            location: Location::Memory { addr: addr3, len: 1 },
+            location: Location::Memory {
+                addr: addr3,
+                len: 1,
+            },
             value: vec![0x00],
         },
     ])
@@ -507,7 +530,7 @@ pub fn exhaustive_inputs(
     let mut flipped = BTreeSet::new();
     let mut oracles = 0u64;
     let original = trace.observation.holds();
-    let mut replay = runner::Replayer::new(program)?;
+    let mut replay = runner::Replayer::new(program, crate::machine::Engine::Jit, false)?;
     let read_steps: BTreeSet<u64> = trace
         .steps
         .iter()
@@ -530,7 +553,8 @@ pub fn exhaustive_inputs(
                     location: loc.clone(),
                     value,
                 };
-                let obs = replay.observe(trace, sink, std::slice::from_ref(&iv), config.max_steps)?;
+                let obs =
+                    replay.observe(trace, sink, std::slice::from_ref(&iv), config.max_steps)?;
                 if obs.holds().is_some() && obs.holds() != original {
                     flipped.insert(b.offset);
                     break;

@@ -93,6 +93,9 @@ impl Run {
             return Ok(true);
         }
         let saved = self.emu.max_inst;
+        // Only the interpreter retires exactly the requested number of
+        // instructions; a JIT block can overrun `max_inst` by one.
+        let engine = std::mem::replace(&mut self.emu.force_interpreter, true);
         self.emu.max_inst = Some(step);
         // A breakpoint set for a sink stops the run early; positioning
         // goes on through it.
@@ -105,6 +108,7 @@ impl Run {
             }
         };
         self.emu.max_inst = saved;
+        self.emu.force_interpreter = engine;
         result
     }
 
