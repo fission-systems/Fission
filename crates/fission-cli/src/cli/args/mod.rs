@@ -1572,7 +1572,7 @@ pub use debug::{
     DebugCapabilitiesArgs, DebugCommand, DebugContextArgs, DebugDllBpArgs, DebugEventArgs, DebugExBpArgs,
     DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs,
     DebugLogpointArgs, DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
-    DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
+    DebugRrRecordArgs, DebugRrReplayArgs, DebugRrStatusArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
     DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 
