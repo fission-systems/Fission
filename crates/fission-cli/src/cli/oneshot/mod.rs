@@ -9,15 +9,15 @@ mod callgraph;
 #[cfg(feature = "debugger")]
 mod debug;
 mod debug_bundle_extra;
+#[cfg(feature = "debugger")]
+mod debug_context;
 mod debug_decomp;
+#[cfg(feature = "debugger")]
+mod debug_remote;
 #[cfg(feature = "debugger")]
 mod debug_session;
 #[cfg(feature = "debugger")]
 mod debug_trace;
-#[cfg(feature = "debugger")]
-mod debug_remote;
-#[cfg(feature = "debugger")]
-mod debug_context;
 mod disasm;
 mod function_select;
 mod functions;
