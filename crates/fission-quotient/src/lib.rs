@@ -36,6 +36,6 @@ pub mod srqa;
 pub mod summary;
 
 pub use boundary::{AbiModel, ContextRegion, InputPort, QuotientBoundary, QuotientBudget};
-pub use engine::{QuotientEngine, Wbcq};
+pub use engine::{QuotientEngine, QuotientModel, ReplayVerdict, Wbcq};
 pub use oracle::{EmulatorOracle, Exit, MembershipOracle, Observation, StepRecord, Symbol};
 pub use report::{CertifiedQuotient, QuotientStatus};

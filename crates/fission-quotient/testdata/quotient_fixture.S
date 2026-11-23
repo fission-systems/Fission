@@ -216,3 +216,19 @@ latch_step:
         pop     rbp
         ret
         .size   latch_step, .-latch_step
+
+/*
+ * A latch set by a conditional move. x86 lifts `cmov` as a branch to the
+ * next instruction, which lies inside the same block: a branch target need
+ * not start a block.
+ */
+        .globl  select_step
+        .type   select_step,@function
+select_step:
+        mov     eax, dword ptr [rdi]
+        mov     ecx, 1
+        cmp     esi, 7
+        cmove   eax, ecx
+        mov     dword ptr [rdi], eax
+        ret
+        .size   select_step, .-select_step

@@ -559,6 +559,8 @@
         "pcode_blocks",
         "pcode_edges",
         "feasible_paths",
+        "feasible_blocks",
+        "feasible_edges",
         "pruned_branches",
         "quotient_states",
         "quotient_transitions"
@@ -573,6 +575,14 @@
           "minimum": 0
         },
         "feasible_paths": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "feasible_blocks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "feasible_edges": {
           "type": "integer",
           "minimum": 0
         },

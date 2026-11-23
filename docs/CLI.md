@@ -628,14 +628,17 @@ The command:
   result) and data fields, which it reports as symbolic updates;
 - learns the machine from the emulator;
 - asks the solver for an input word of up to `--horizon` steps on which the
-  machine and the function differ.
+  machine and the function differ, then deepens the check on results to
+  `states + --max-states` steps. Two machines of those sizes that differ at
+  all differ within that length (Moore), so a state told apart only by a long
+  word is not merged because the horizon was short.
 
 Every pair of states comes with an input sequence that tells them apart, and
 the emulator re-runs it. `status` says how far the result reaches:
 
 | `status.kind` | Meaning |
 |---|---|
-| `proved_under_model` | The solver refuted every distinguishing word up to `--horizon` steps, under the memory model in `model_id`. |
+| `proved_under_model` | The solver refuted every distinguishing word up to `horizon` steps (the deepest it reached), under the memory model in `model_id`. |
 | `empirically_consistent` | The solver could not decide within `--conflict-budget`, and probes found no difference. This is evidence, not proof. |
 | `partial_frontier` | More than `--max-states` states. The states found are real, but there is no machine. |
 | `refuted` | A data field changes in a way the control states cannot express. The input word is confirmed on the emulator. |

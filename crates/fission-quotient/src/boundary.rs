@@ -44,7 +44,8 @@ pub struct QuotientBoundary {
 pub struct QuotientBudget {
     /// `K_max`: the largest quotient the learner may build.
     pub max_states: usize,
-    /// `H`: the length of input words the bounded certificate covers.
+    /// `H`: the shortest input words the certificate covers. The result
+    /// check is deepened from here towards `states + max_states`.
     pub horizon: u32,
     /// SAT conflicts per solver query; past it the query is `Unknown`.
     pub conflict_budget: Option<u64>,

@@ -101,7 +101,7 @@ fn a_flattened_dispatcher_is_reported_as_its_three_protocol_states() {
     assert!(output.status.success(), "{output:?}");
     let text = String::from_utf8_lossy(&output.stdout);
     for line in [
-        "proved under model separated-registers-frame-context.v1 for words of up to 4 steps",
+        "proved under model separated-registers-frame-context.v1 for words of up to 35 steps",
         "context: ctx[0x0:4] control, ctx[0x4:4] data",
         "3 states, 5 transitions",
         "0 -> 1 if (cmd[7:0] == 0x5a) / returns 0",

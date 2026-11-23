@@ -209,7 +209,11 @@ fn validate_boundary(abi: &AbiModel, boundary: &QuotientBoundary) -> Result<(), 
     Ok(())
 }
 
-/// Union of overlapping `(offset, size)` accesses, in offset order.
+/// The context's slots: each union of overlapping `(offset, size)`
+/// accesses, in offset order -- or, where a union is wider than a value can
+/// be (8 bytes; two overlapping 8-byte stores make 12), that union cut at
+/// every access boundary inside it. Each piece lies inside one access, so
+/// none is wider than 8 bytes.
 fn merge_ranges(accesses: &BTreeSet<(u32, u32)>) -> Vec<(u32, u32)> {
     let mut merged: Vec<(u32, u32)> = Vec::new();
     for &(offset, size) in accesses {
@@ -219,7 +223,22 @@ fn merge_ranges(accesses: &BTreeSet<(u32, u32)>) -> Vec<(u32, u32)> {
             _ => merged.push((offset, size)),
         }
     }
-    merged
+    let mut slots = Vec::new();
+    for (start, len) in merged {
+        if len <= 8 {
+            slots.push((start, len));
+            continue;
+        }
+        let end = start + len;
+        let cuts = accesses
+            .iter()
+            .flat_map(|&(offset, size)| [offset, offset + size])
+            .filter(|cut| (start..=end).contains(cut))
+            .collect::<BTreeSet<_>>();
+        let cuts = cuts.into_iter().collect::<Vec<_>>();
+        slots.extend(cuts.windows(2).map(|pair| (pair[0], pair[1] - pair[0])));
+    }
+    slots
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -386,7 +405,10 @@ struct Executor<'a> {
     budget: &'a QuotientBudget,
     inputs: &'a [SymExpr],
     slots: Vec<Slot>,
-    block_at: BTreeMap<u64, usize>,
+    /// Where each machine instruction's P-code starts: a branch may target
+    /// an instruction inside a block (a conditional move skips to the next
+    /// instruction), not only a block's first one.
+    op_at: BTreeMap<u64, (usize, usize)>,
     /// Caller values of registers the slice reads without writing, one
     /// variable per pointer-sized word, shared by every path.
     live_ins: BTreeMap<u64, SymExpr>,
@@ -406,12 +428,13 @@ impl<'a> Executor<'a> {
         inputs: &'a [SymExpr],
         slots: Vec<Slot>,
     ) -> Self {
-        let block_at = function
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(index, block)| (block.start_address, index))
-            .collect();
+        let mut op_at = BTreeMap::new();
+        for (index, block) in function.blocks.iter().enumerate() {
+            op_at.entry(block.start_address).or_insert((index, 0));
+            for (op_index, op) in block.ops.iter().enumerate() {
+                op_at.entry(op.address).or_insert((index, op_index));
+            }
+        }
         let allowed = inputs
             .iter()
             .map(var_id)
@@ -424,7 +447,7 @@ impl<'a> Executor<'a> {
             budget,
             inputs,
             slots,
-            block_at,
+            op_at,
             live_ins: BTreeMap::new(),
             return_address: SymExpr::new_var("return_address", abi.pointer_bits),
             allowed,
@@ -505,9 +528,9 @@ impl<'a> Executor<'a> {
             });
         }
         let entry = self
-            .block_at
+            .op_at
             .get(&self.boundary.entry)
-            .copied()
+            .map(|(block, _)| *block)
             .unwrap_or(0);
         let initial = self.initial_state();
         let mut work = vec![(initial, entry, 0usize)];
@@ -667,8 +690,8 @@ impl<'a> Executor<'a> {
         if target.space_id != self.abi.ram_space {
             return self.unsupported(op, "a branch into a non-code space");
         }
-        match self.block_at.get(&target.offset) {
-            Some(index) => Ok((*index, 0)),
+        match self.op_at.get(&target.offset) {
+            Some(place) => Ok(*place),
             None => self.unsupported(
                 op,
                 format!("a branch to {:#x}, outside the slice", target.offset),
@@ -975,6 +998,15 @@ impl<'a> Executor<'a> {
                         self.unsupported(op, format!("a store through {reason}"))
                     }
                 }
+            }
+            // `x ^ x` and `x - x` are zero whatever x holds -- a pointer, a
+            // byte nothing defined. x86 clears a register this way.
+            PcodeOpcode::IntXor | PcodeOpcode::IntSub
+                if op.inputs.len() == 2 && op.inputs[0] == op.inputs[1] =>
+            {
+                let output = op.output.as_ref().expect("validated: has an output");
+                let zero = Val::Bits(konst(0, output.size * 8));
+                self.write(state, op, output, zero)
             }
             _ => {
                 let Some(output) = op.output.as_ref() else {
@@ -1339,6 +1371,16 @@ mod tests {
                 assert_eq!(got, want, "read [{start}, +{size}) big_endian={big_endian}");
             }
         }
+    }
+
+    /// Two overlapping 8-byte stores (`[0, 8)` and `[4, 12)`) beside 4-byte
+    /// loads: the 12-byte union is cut at the access boundaries.
+    #[test]
+    fn a_union_wider_than_a_value_is_cut_at_access_boundaries() {
+        let accesses = BTreeSet::from([(0, 4), (4, 4), (8, 4), (12, 4), (0, 8), (4, 8)]);
+        assert_eq!(merge_ranges(&accesses), [(0, 4), (4, 4), (8, 4), (12, 4)]);
+        let narrow = BTreeSet::from([(0, 4), (0, 1), (4, 4)]);
+        assert_eq!(merge_ranges(&narrow), [(0, 4), (4, 4)]);
     }
 
     #[test]

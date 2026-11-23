@@ -39,7 +39,11 @@ pub const MODEL_ID: &str = "separated-registers-frame-context.v1";
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum QuotientStatus {
     /// The solver refuted every distinguishing word of length up to
-    /// `horizon`, under the memory model `model_id`.
+    /// `horizon`, under the memory model `model_id`. The result check is
+    /// deepened from the budget's horizon towards `states + K_max`, the
+    /// length within which two machines of that size must differ;
+    /// `horizon` is how deep it got. Data fields are checked to the
+    /// budget's horizon.
     ProvedUnderModel { horizon: u32, model_id: String },
     /// The solver could not decide; `probes_run` concrete words found no
     /// difference. Evidence, not proof.
@@ -165,6 +169,10 @@ pub struct Metrics {
     pub pcode_edges: usize,
     /// Feasible paths through one step.
     pub feasible_paths: usize,
+    /// Blocks and edges some feasible path uses: the graph left after
+    /// path-sensitive constant propagation and dead-branch pruning.
+    pub feasible_blocks: usize,
+    pub feasible_edges: usize,
     /// Branch sides the solver proved dead for every input and state.
     pub pruned_branches: Vec<PrunedBranch>,
     pub quotient_states: usize,

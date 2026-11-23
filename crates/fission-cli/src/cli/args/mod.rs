@@ -117,7 +117,7 @@ pub struct CallArgs {
 /// function (experimental, RFC #1093).
 #[derive(Args, Clone, Debug, PartialEq, Eq)]
 #[command(
-    long_about = "Compute the minimal observable state machine of a step function (experimental).\n\nThe function is treated as one step of a protocol or state machine: each call receives fresh inputs in argument registers and a pointer to a context buffer that persists between calls. Instead of structuring its control-flow graph, the command learns the smallest machine with the same observable behaviour -- the result of every call, for every input sequence -- and asks the solver to certify it.\n\nThe lifted P-code is executed symbolically to get every feasible path of one call; branch sides no input or state can take (opaque predicates) are pruned. Context fields that reach a branch or the result become control state; the rest become data registers with symbolic updates. The emulator answers the learner's queries, and every pair of states comes with an input sequence the emulator re-ran to tell them apart. `status` says how far the result reaches: `proved_under_model` (the solver refuted every distinguishing word up to --horizon steps), `empirically_consistent` (the solver could not decide; probes found no difference), `partial_frontier` (more than --max-states states), `refuted` (a data effect the control states cannot express) or `unsupported_semantics` (calls, user-defined operations, globals or other effects outside the model).\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
+    long_about = "Compute the minimal observable state machine of a step function (experimental).\n\nThe function is treated as one step of a protocol or state machine: each call receives fresh inputs in argument registers and a pointer to a context buffer that persists between calls. Instead of structuring its control-flow graph, the command learns the smallest machine with the same observable behaviour -- the result of every call, for every input sequence -- and asks the solver to certify it.\n\nThe lifted P-code is executed symbolically to get every feasible path of one call; branch sides no input or state can take (opaque predicates) are pruned. Context fields that reach a branch or the result become control state; the rest become data registers with symbolic updates. The emulator answers the learner's queries, and every pair of states comes with an input sequence the emulator re-ran to tell them apart. `status` says how far the result reaches: `proved_under_model` (the solver refuted every distinguishing word up to the reported horizon: --horizon, deepened for results towards states + --max-states), `empirically_consistent` (the solver could not decide; probes found no difference), `partial_frontier` (more than --max-states states), `refuted` (a data effect the control states cannot express) or `unsupported_semantics` (calls, user-defined operations, globals or other effects outside the model).\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
     after_help = "Examples:\n  fission_cli quotient proto.elf --name parser_step --json\n  fission_cli quotient proto.elf --addr 0x401130 --input cmd:1:8 --context-bytes 16 --horizon 6 --json"
 )]
 pub struct QuotientArgs {
@@ -154,7 +154,8 @@ pub struct QuotientArgs {
     #[arg(long, default_value_t = 32)]
     pub output_bits: u32,
 
-    /// Length of the input words the certificate covers (H)
+    /// Shortest input words the certificate covers (H); the result check is
+    /// deepened from here towards states + --max-states
     #[arg(long, default_value_t = 4)]
     pub horizon: u32,
 

@@ -31,7 +31,8 @@ const STATE_BITS: u32 = 16;
 type SubstitutedPath = (SymExpr, SymExpr, Vec<SymExpr>);
 
 /// Ask for a word of length `horizon` on which the slice and the automaton
-/// differ.
+/// differ: in a result or in the automaton having no transition, and -- with
+/// `observe_data` -- in a data field.
 #[must_use]
 pub fn refute(
     summary: &SliceSummary,
@@ -40,6 +41,7 @@ pub fn refute(
     initial_slots: &[u64],
     horizon: u32,
     budget: &QuotientBudget,
+    observe_data: bool,
 ) -> Refutation {
     let mut solver = Solver::new();
     solver.set_conflict_budget(budget.conflict_budget);
@@ -180,12 +182,14 @@ pub fn refute(
 
         divergences.push(bin(Bin::Neq, output, q_output));
         divergences.push(not(or_all(fires.clone())));
-        for (index, slot) in roles.data.iter().enumerate() {
-            divergences.push(bin(
-                Bin::Neq,
-                next_slots[*slot].clone(),
-                next_data[index].clone(),
-            ));
+        if observe_data {
+            for (index, slot) in roles.data.iter().enumerate() {
+                divergences.push(bin(
+                    Bin::Neq,
+                    next_slots[*slot].clone(),
+                    next_data[index].clone(),
+                ));
+            }
         }
 
         inputs.push(word_inputs);

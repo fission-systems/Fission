@@ -62,6 +62,17 @@ impl Wbcq<EmulatorOracle> {
     }
 }
 
+/// Where a distinguishing word came from.
+#[derive(Clone, Copy)]
+enum Source {
+    /// The solver, asked about results only.
+    ResultsQuery,
+    /// The solver, asked about data once the results were proved.
+    DataQuery,
+    /// A concrete probe, after the solver could not decide.
+    Probe,
+}
+
 enum Replay {
     Agrees,
     /// The result or the exit differs: the learner can see it.
@@ -70,12 +81,75 @@ enum Replay {
     DataOnly,
 }
 
+/// The automaton behind a report, for replaying words against it.
+pub struct QuotientModel {
+    summary: SliceSummary,
+    roles: SlotRoles,
+    srqa: Srqa,
+    data_initial: Vec<u64>,
+    big_endian: bool,
+}
+
+/// How a replayed word compared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayVerdict {
+    Agrees,
+    /// The result or the exit differs.
+    ResultDiffers,
+    /// Only a data field differs.
+    DataDiffers,
+}
+
+impl QuotientModel {
+    /// Compare what the machine did on `word` (`records`, from an oracle)
+    /// with what the automaton predicts.
+    #[must_use]
+    pub fn compare(&self, word: &[Symbol], records: &[crate::oracle::StepRecord]) -> ReplayVerdict {
+        let Some(predicted) =
+            self.srqa
+                .run(&self.summary, &self.roles, self.data_initial.clone(), word)
+        else {
+            return ReplayVerdict::ResultDiffers;
+        };
+        let mut data_differs = false;
+        for (record, step) in records.iter().zip(&predicted) {
+            if record.observation.exit != Exit::Returned || record.observation.value != step.output
+            {
+                return ReplayVerdict::ResultDiffers;
+            }
+            for (slot, value) in self.roles.data.iter().zip(&step.data) {
+                let slot = &self.summary.slots[*slot];
+                if slot_value(&record.context, slot.offset, slot.size, self.big_endian) != *value {
+                    data_differs = true;
+                }
+            }
+        }
+        if data_differs {
+            ReplayVerdict::DataDiffers
+        } else {
+            ReplayVerdict::Agrees
+        }
+    }
+}
+
 impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
     fn synthesize(
         &mut self,
         foundation: &PcodeFoundation,
         budget: QuotientBudget,
     ) -> Result<CertifiedQuotient> {
+        Ok(self.synthesize_with_model(foundation, budget)?.0)
+    }
+}
+
+impl<O: MembershipOracle> Wbcq<O> {
+    /// [`QuotientEngine::synthesize`], also returning the automaton when one
+    /// was built (any status but partial and unsupported).
+    pub fn synthesize_with_model(
+        &mut self,
+        foundation: &PcodeFoundation,
+        budget: QuotientBudget,
+    ) -> Result<(CertifiedQuotient, Option<QuotientModel>)> {
         let raw = foundation.pcode().as_raw();
         let identity = foundation.identity();
         let mut report = CertifiedQuotient {
@@ -110,7 +184,7 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
                 report.status = QuotientStatus::UnsupportedSemantics {
                     reason: error.to_string(),
                 };
-                return Ok(report);
+                return Ok((report, None));
             }
         };
         let roles = factor(&summary);
@@ -138,6 +212,17 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
             })
             .collect();
         report.metrics.feasible_paths = summary.paths.len();
+        // The control-flow graph a path-sensitive constant propagation with
+        // dead-branch pruning leaves: the blocks and edges some feasible
+        // path of one step uses.
+        let mut used_blocks = std::collections::BTreeSet::new();
+        let mut used_edges = std::collections::BTreeSet::new();
+        for path in &summary.paths {
+            used_blocks.extend(path.blocks.iter().copied());
+            used_edges.extend(path.blocks.windows(2).map(|pair| (pair[0], pair[1])));
+        }
+        report.metrics.feasible_blocks = used_blocks.len();
+        report.metrics.feasible_edges = used_edges.len();
         report.metrics.pruned_branches = summary.pruned.clone();
         report.evidence.solver_unknowns = summary.solver_unknowns;
 
@@ -163,6 +248,7 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
             .map(|slot| initial_slots[*slot])
             .collect::<Vec<_>>();
 
+        let mut built: Option<Srqa> = None;
         let status = loop {
             if report.evidence.rounds >= budget.max_rounds {
                 break QuotientStatus::UnsupportedSemantics {
@@ -217,26 +303,81 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
                 }
             };
 
+            // The results first: a data field can only be judged once the
+            // control machine stands, or an incomplete machine would be
+            // reported as data that does not factor.
             report.evidence.refutation_queries += 1;
-            let refutation = refute(
+            let mut source = Source::ResultsQuery;
+            let mut refutation = refute(
                 &summary,
                 &roles,
                 &srqa,
                 &initial_slots,
                 budget.horizon,
                 &budget,
+                false,
             );
-            let (candidate, from_solver) = match refutation {
+            // Two machines of n and m states that differ do so on a word of
+            // fewer than n + m steps (Moore). So once the results hold for
+            // `H`, deepen towards `n + K_max`: a state told apart only by a
+            // long word -- a protocol keyword, a counter -- must not be
+            // merged because the horizon was short. The status reports the
+            // deepest horizon proved.
+            let mut proved_horizon = 0;
+            if matches!(refutation, Refutation::Proved) {
+                proved_horizon = budget.horizon;
+                let bound = hypothesis.states.len() as u32 + budget.max_states as u32;
+                let mut next = budget.horizon.max(1) * 2;
+                while proved_horizon < bound {
+                    let depth = next.min(bound);
+                    report.evidence.refutation_queries += 1;
+                    match refute(
+                        &summary,
+                        &roles,
+                        &srqa,
+                        &initial_slots,
+                        depth,
+                        &budget,
+                        false,
+                    ) {
+                        Refutation::Proved => {
+                            proved_horizon = depth;
+                            next = depth * 2;
+                        }
+                        Refutation::Candidate(word) => {
+                            refutation = Refutation::Candidate(word);
+                            break;
+                        }
+                        Refutation::Unknown => break,
+                    }
+                }
+            }
+            if matches!(refutation, Refutation::Proved) {
+                report.evidence.refutation_queries += 1;
+                source = Source::DataQuery;
+                refutation = refute(
+                    &summary,
+                    &roles,
+                    &srqa,
+                    &initial_slots,
+                    budget.horizon,
+                    &budget,
+                    true,
+                );
+            }
+            let candidate = match refutation {
                 Refutation::Proved => {
                     self.finish(&mut report, &summary, &roles, &learner, &hypothesis, &srqa)?;
+                    built = Some(srqa.clone());
                     break QuotientStatus::ProvedUnderModel {
-                        horizon: budget.horizon,
+                        horizon: proved_horizon,
                         model_id: MODEL_ID.to_string(),
                     };
                 }
-                Refutation::Candidate(word) => (Some(word), true),
+                Refutation::Candidate(word) => Some(word),
                 Refutation::Unknown => {
                     report.evidence.solver_unknowns += 1;
+                    source = Source::Probe;
                     let ports = self
                         .boundary
                         .inputs
@@ -254,31 +395,37 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
                             break;
                         }
                     }
-                    (found, false)
+                    found
                 }
             };
             let Some(word) = candidate else {
                 self.finish(&mut report, &summary, &roles, &learner, &hypothesis, &srqa)?;
+                built = Some(srqa.clone());
                 break QuotientStatus::EmpiricallyConsistent {
                     horizon: budget.horizon,
                     probes_run: report.evidence.probes_run,
                     solver_unknowns: report.evidence.solver_unknowns,
                 };
             };
-            match self.replay(&summary, &roles, &srqa, &data_initial, &word)? {
-                Replay::Visible => {
+            match (
+                self.replay(&summary, &roles, &srqa, &data_initial, &word)?,
+                source,
+            ) {
+                (Replay::Visible, _) => {
                     // Into the tree; the next round's consistency check turns
                     // it into a split.
                     let indices = word.iter().map(|s| learner.intern(s)).collect::<Vec<_>>();
                     learner.query(&mut self.oracle, &indices)?;
                 }
-                Replay::DataOnly => {
+                (Replay::DataOnly, Source::DataQuery | Source::Probe) => {
                     self.finish(&mut report, &summary, &roles, &learner, &hypothesis, &srqa)?;
+                    built = Some(srqa.clone());
                     break QuotientStatus::Refuted {
                         counterexample_hex: hex_word(&word),
                     };
                 }
-                Replay::Agrees if from_solver => {
+                (Replay::DataOnly | Replay::Agrees, Source::ResultsQuery)
+                | (Replay::Agrees, Source::DataQuery) => {
                     break QuotientStatus::UnsupportedSemantics {
                         reason: format!(
                             "the solver's distinguishing word {} does not reproduce on the \
@@ -287,7 +434,9 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
                         ),
                     };
                 }
-                Replay::Agrees => unreachable!("a probe is only returned when it disagrees"),
+                (Replay::Agrees, Source::Probe) => {
+                    unreachable!("a probe is only returned when it disagrees")
+                }
             }
         };
 
@@ -322,8 +471,16 @@ impl<O: MembershipOracle> QuotientEngine for Wbcq<O> {
                 reason: "an apartness witness did not reproduce: the slice is not deterministic"
                     .to_string(),
             };
+            built = None;
         }
-        Ok(report)
+        let model = built.map(|srqa| QuotientModel {
+            summary,
+            roles,
+            srqa,
+            data_initial,
+            big_endian: big,
+        });
+        Ok((report, model))
     }
 }
 

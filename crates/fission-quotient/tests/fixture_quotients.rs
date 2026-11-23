@@ -77,10 +77,11 @@ fn transition<'a>(report: &'a CertifiedQuotient, from: usize, guard: &str) -> &'
 #[test]
 fn a_flattened_dispatcher_collapses_to_its_protocol_states() {
     let report = quotient("auth_step");
+    // Proved for H, then deepened to the Moore bound: 3 states + K_max 32.
     assert_eq!(
         report.status,
         QuotientStatus::ProvedUnderModel {
-            horizon: 4,
+            horizon: 35,
             model_id: "separated-registers-frame-context.v1".to_string(),
         }
     );
@@ -274,4 +275,18 @@ fn the_same_protocol_on_aarch64_has_the_same_quotient() {
             .iter()
             .all(|w| w.verified_by_emulator)
     );
+}
+
+/// `cmove` lifts to a branch that lands on the next instruction, in the
+/// middle of a block; the summary must follow it there.
+#[test]
+fn a_branch_into_the_middle_of_a_block_is_followed() {
+    let report = quotient("select_step");
+    assert!(
+        matches!(report.status, QuotientStatus::ProvedUnderModel { .. }),
+        "{:?}",
+        report.status
+    );
+    assert_eq!(report.states.len(), 2);
+    assert_eq!(transition(&report, 0, "(cmd == 7)").to, 1);
 }
