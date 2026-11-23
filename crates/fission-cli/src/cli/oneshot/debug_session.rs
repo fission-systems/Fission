@@ -316,6 +316,20 @@ fn execute(
             rules.remove(&a.addr);
             json!({ "action": "remove_breakpoint", "address": format!("0x{:x}", a.addr) })
         }
+        DebugCommand::HwBp(a) => {
+            use crate::cli::args::HwBpKindArg;
+            let kind = match a.kind {
+                HwBpKindArg::Execute => debug_types_alias::HwBreakpointKind::Execute,
+                HwBpKindArg::Write => debug_types_alias::HwBreakpointKind::Write,
+                HwBpKindArg::ReadWrite => debug_types_alias::HwBreakpointKind::ReadWrite,
+            };
+            backend.set_hardware_breakpoint(a.addr, kind)?;
+            json!({"action":"set_hardware_breakpoint","address": format!("0x{:x}", a.addr), "kind": format!("{:?}", a.kind)})
+        }
+        DebugCommand::RmHwBp(a) => {
+            backend.remove_hardware_breakpoint(a.addr)?;
+            json!({"action":"remove_hardware_breakpoint","address":format!("0x{:x}", a.addr)})
+        }
         DebugCommand::MemBp(a) => {
             let kind = match a.kind {
                 MemoryBpKindArg::Read => MemoryBpKind::Read,
