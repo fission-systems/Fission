@@ -554,7 +554,10 @@ With `--json`, each result's `preview_build_stats` reports how close the
 function came to each limit: `resource_<name>_peak` is the highest value the
 limit's counter reached anywhere in the function's attempts (including discarded
 trials), and `resource_<name>_trip_count` is how many times it crossed the limit.
-A non-zero trip count means the limit changed that function's output.
+A non-zero trip count means the limit cut work in that function, so its output
+may differ from what a higher limit would produce; it does not always (in a
+7,524-function sample, raising the limits changed 76 of the 243 functions that
+tripped one).
 
 #### Function discovery
 
