@@ -500,6 +500,10 @@ fn build_sese_region_body_impl(
                         rule.name()
                     );
                 }
+                // Ownership reported during this rule's attempt is drained by
+                // `consider_structured_candidate`; anything recorded earlier by
+                // an attempt nobody drained must not be credited to it.
+                let _ = host.take_extra_absorbed_members();
                 let res =
                     if matches!(rule, CollapseRule::Conditional) && virtual_exit_plan.is_some() {
                         let mut cond = try_lower_short_circuit_if(host, idx);

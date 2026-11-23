@@ -1695,6 +1695,7 @@ fn lower_loop_body_via_sese_unguarded(
     while body.last() == Some(&PreHirStmt::Continue) {
         body.pop();
     }
+    record_loop_body_ownership(host, body_set, head_idx);
     Ok(Some(body))
 }
 
@@ -1766,7 +1767,7 @@ pub fn lower_loop_body_subgraph(
     head_idx: usize,
     continue_idx: usize,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    with_active_loop_head(host, head_idx, |host| {
+    let lowered = with_active_loop_head(host, head_idx, |host| {
         lower_loop_body_subgraph_unguarded(
             host,
             body_set,
@@ -1775,7 +1776,46 @@ pub fn lower_loop_body_subgraph(
             head_idx,
             continue_idx,
         )
-    })
+    })?;
+    if lowered.is_some() {
+        record_loop_body_ownership(host, body_set, head_idx);
+    }
+    Ok(lowered)
+}
+
+/// Report the blocks a lowered loop body emitted past its head as owned by
+/// the loop.
+///
+/// A loop's body set is not a contiguous index range. Loop-body extension
+/// (Ghidra's `LoopBody::extend`) absorbs blocks that only lead to the exit --
+/// for instance the instruction-free block GCC leaves at a `break` target --
+/// and those can sit past the loop's `[head, exit)` span. A region proof built
+/// from that span alone leaves such a block unowned, so the enclosing
+/// reconstruction emits it a second time after the loop, and the function ends
+/// up with two definitions of one label.
+///
+/// Body blocks laid out *before* the head (a rotated loop's body, entered by a
+/// jump to the test) are not reported: the reconstruction walks the region in
+/// index order, so a block before the head has already been passed by the time
+/// the loop is placed, and the region that walked past it holds it in its own
+/// range. Claiming it here as well would be a second owner, not a missing one.
+///
+/// Every caller of the subgraph lowerings commits the loop once the body has
+/// been lowered, so recording here, on success only, is exact.
+fn record_loop_body_ownership(
+    host: &mut impl StructuringHost,
+    body_set: &HashSet<usize>,
+    head_idx: usize,
+) {
+    let mut members: Vec<usize> = body_set
+        .iter()
+        .copied()
+        .filter(|&member| member > head_idx)
+        .collect();
+    members.sort_unstable();
+    for member in members {
+        host.record_extra_absorbed_member(member);
+    }
 }
 
 fn lower_loop_body_subgraph_unguarded(
@@ -1896,12 +1936,23 @@ fn lower_loop_body_subgraph_unguarded(
         // --- Attempt structured reducers, but only accept if skip_to stays within bounds ---
         macro_rules! try_reducer {
             ($call:expr) => {{
+                // Ownership recorded by a nested attempt belongs to that
+                // attempt: keep it only if the nested region is accepted.
+                let enclosing_members = host.take_extra_absorbed_members();
+                let attempt = $call;
+                let attempt_members = host.take_extra_absorbed_members();
+                for member in enclosing_members {
+                    host.record_extra_absorbed_member(member);
+                }
                 if let Some((stmt, skip_to)) =
-                    capture_structuring_failure($call, &mut last_structuring_failure)?
+                    capture_structuring_failure(attempt, &mut last_structuring_failure)?
                 {
                     if is_valid_skip(skip_to)
                         && host.accept_structured_region(idx, skip_to, &targeted)
                     {
+                        for member in attempt_members {
+                            host.record_extra_absorbed_member(member);
+                        }
                         result_stmts.push(stmt);
                         // Exclusive emission: region owns body_set ∩ [idx, skip_to).
                         if break_indices.contains(&skip_to) {
