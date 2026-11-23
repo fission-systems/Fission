@@ -537,16 +537,28 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn lowering_block_index(&self, block: &crate::pcode::PcodeBasicBlock) -> usize {
+        self.block_position(block).unwrap_or(0)
+    }
+
+    /// Position of `block` in `self.pcode.blocks`.
+    ///
+    /// A block's identity is its index, not its start address: two blocks
+    /// can start at one address when the lifter ends a block inside an
+    /// instruction (a repeat prefix's exit test and its body), and an
+    /// address lookup would hand the body's definitions to the exit test.
+    /// The address map is the fallback for a block that is not from this
+    /// function's own list.
+    pub(in crate::midend::builder) fn block_position(
+        &self,
+        block: &crate::pcode::PcodeBasicBlock,
+    ) -> Option<usize> {
         let indexed = block.index as usize;
         if self.pcode.blocks.get(indexed).is_some_and(|candidate| {
             candidate.start_address == block.start_address && candidate.ops.len() == block.ops.len()
         }) {
-            return indexed;
+            return Some(indexed);
         }
-        self.address_to_index
-            .get(&block.start_address)
-            .copied()
-            .unwrap_or(0)
+        self.address_to_index.get(&block.start_address).copied()
     }
 
     /// Whether this op's output names a location in memory rather than a
@@ -649,7 +661,7 @@ impl<'a> PreviewBuilder<'a> {
         if block.ops.iter().skip(op_idx + 1).any(writes) {
             return true;
         }
-        let Some(start) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(start) = self.block_position(block) else {
             return true;
         };
         let start = self.pcode_block_idx(start);
@@ -1133,7 +1145,7 @@ impl<'a> PreviewBuilder<'a> {
         {
             return Ok(None);
         }
-        let block_idx_for_rhs = self.address_to_index.get(&block.start_address).copied();
+        let block_idx_for_rhs = self.block_position(block);
         let scoped_loop_keys = loop_carried_lhs_name.as_ref().and_then(|name| {
             let block_idx = block_idx_for_rhs?;
             let output_key = VarnodeKey::from(output);

@@ -49,9 +49,9 @@ Read the nearest child file before editing those areas.
 | Task | Location | Notes |
 |---|---|---|
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
-| NIR telemetry contract | `crates/fission-pcode/src/midend/types.rs` | `NirBuildStats` is canonical |
+| NIR telemetry contract | `crates/fission-midend-core/src/ir/build_stats.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`; full-dataset sweep `~/fission-benchmark/decbench-full/sweep.py`; quick gate `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`) | The measurement surface for quality claims is the **whole** dataset (96,103 functions); published source CFGs are the answer key, Ghidra is not the oracle |
+| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`; full-dataset sweep `~/fission-benchmark/decbench-full/sweep.py`; quick gate `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`) | The comparative and regression measurement for output-changing work, on the **whole** dataset (96,103 functions); published source CFGs are the answer key. Neither DecBench nor Ghidra is a correctness oracle ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md), [ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)) |
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
@@ -74,7 +74,7 @@ Read the nearest child file before editing those areas.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
-10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)), measured on the **full dataset** (`~/fission-benchmark/decbench-full/sweep.py`, every config); the 250-function sample-set gate is only the quick pre-check. Caches are disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence.
+10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)), measured on the **full dataset** (`~/fission-benchmark/decbench-full/sweep.py`, every config); the 250-function sample-set gate is only the quick pre-check. Caches are disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence. **DecBench measures similarity to the source, not correctness** ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)). It is reported for every output-changing PR, but a claim that output became *correct* needs correctness evidence: native replay, `fission_cli verify --tier ground-truth`, manuals, DWARF/PDB, call sites counted by instruction address, or the raw diff. A fix that makes wrong output right may land with a worse DecBench score when the PR shows that evidence and explains the regression.
 
 ## Anti-Patterns
 
@@ -129,7 +129,7 @@ submodules and rewrites files you never touched.
 - If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and the full-dataset sweep; sweep results live under `~/fission-benchmark/decbench-full/runs/`, not in the repository.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
-- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`): tags a commit only after **ci.yml push** + **ci-heavy** success on that SHA and **release-e2e** green; then `cd.yml` builds assets. Do not auto-tag every `main` push.
+- Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`). It requires successful **ci.yml main push** and **ci-heavy scheduled or dispatched** runs on the exact candidate SHA, then runs **release-e2e** and builds and smoke-tests the archives through **cd.yml**. It publishes those verified artifacts after creating the tag. Do not auto-tag every `main` push.
 
 ## Decompiler Quality Loop
 
@@ -142,7 +142,8 @@ Use this loop for source-semantic or pseudocode-quality work, especially when a 
 | Allowed as | Requires |
 |---|---|
 | Mechanical change (code + synthetic invariant tests) | nextest / crate checks; **no** “quality improved” language |
-| Semantic quality claim | Anchored DecBench row(s) for the motivation, then a **full-dataset sweep** before/after: output-hash `diff` first, GED / type deltas on the rows whose output changed, total distance next to the perfect count |
+| Correctness claim (output was wrong, now right) | Correctness evidence ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)): native replay, `verify --tier ground-truth`, manual, DWARF/PDB, call-site counts by instruction address, raw before/after hunks; **plus** the full-dataset sweep reported as-is. A score regression is explained, not a veto |
+| Semantic quality claim | Anchored row(s) for the motivation (a DecBench row, a `verify` divergence, or a native replay mismatch), then a **full-dataset sweep** before/after: output-hash `diff` first, GED / type deltas on the rows whose output changed, total distance next to the perfect count |
 | Readability / HIR presentation quality claim | Anchored real-binary decomp (or DecBench row) before/after; not fixture-only |
 | Official ranking / release claim | Full-dataset DecBench sweep from a tagged build, compared with the published tools on the same rows (never a local run as an official ranking) |
 
@@ -153,7 +154,7 @@ Use this loop for source-semantic or pseudocode-quality work, especially when a 
 3. **Generalize** to an invariant (no function/address special cases).
 4. **Implement** at the canonical owner.
 5. **Remeasure** the same path with caches disabled.
-6. **Report** “quality improved” only if the measurement moved; otherwise “landed mechanical / tests only.”
+6. **Report** “quality improved” only with evidence: correctness evidence for a correctness fix, a measured move for a similarity claim; otherwise “landed mechanical / tests only.” DecBench numbers are reported either way, never as the proof of correctness.
 
 If there is no measured baseline, **do not start a “quality” implementation**. Optionally land a pure refactor or test harness, but label it non-quality.
 
@@ -201,7 +202,8 @@ strictly local and will not be used for implementation advice.
 Use [`docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md`](docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md)
 for external or cross-model review prompts. The template exists to keep prompts
 about invariants, not benchmark rows. Ghidra may be cited as a cleanroom
-correctness/reference oracle, but do not ask models to reproduce Ghidra-specific
+reference for algorithms and edge cases, never as proof of correctness
+([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)), and do not ask models to reproduce Ghidra-specific
 output style or known readability artifacts such as side effects hidden inside
 conditions.
 
@@ -277,7 +279,7 @@ Default to extending the existing owner/pass. Add a new pass, helper, or metric 
 4. **Make the scoped change:** keep production changes invariant-based, not function/address/sample-specific. Do not add runtime/build dependencies on `vendor/` reference tools.
 5. **Run local checks:** run the targeted test first, then the relevant crate checks/builds from the Build/Test section. If a known unrelated test is already failing, call it out explicitly.
 6. **Run the focused benchmark / real decomp:** rerun the exact DecBench row (gate `--dump`) or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
-7. **Check regressions:** after a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress, and total distance and type scores should not get worse without an explicit tradeoff.
+7. **Check regressions:** after a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress, and total distance and type scores should not get worse without an explicit tradeoff. A correctness fix is such a tradeoff: when making the output right costs score, say what the output now prints and why the source-shaped score dropped ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)).
 8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only, telemetry-only, or fixture-only presentation change is **not** a quality fix unless the measured row (or agreed multi-row sample) moves.
 
 ## Regression-Prevention Workflow Prompt
@@ -310,6 +312,8 @@ Current priority order:
 4. Maintain SLEIGH lift correctness and prevent regressions.
    Do not add manual mappings in the SLEIGH engine. Keep `.sla` ConstructTpl execution as the success source, and do not grow legacy token cursor, BoundOperand fallback, or compatibility-classifier debt.
    When SLEIGH changes are necessary, validate row-level raw p-code parity first, then the canonical gate, then benchmarks.
+   Parity means against Fission's previous output; each intended difference needs native-execution or architecture-manual evidence.
+   Upstream Ghidra specs can be wrong (AArch64 FCVT/FRINT, #834/#838); fix them as `utils/sleigh-specs/README.md` records ([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)).
 
 5. FID/name recovery.
    Gradually improve packed `.fidb`, exact hash inputs, and program seeker coverage relative to Ghidra Function ID / signature / symbol ecosystems.
@@ -320,7 +324,7 @@ Current priority order:
 Required principles:
 
 1. Improve sample binary quality before real-world binary breadth.
-2. Treat Ghidra as a cleanroom reference for algorithms, invariants, and edge cases.
+2. Treat Ghidra as a cleanroom reference for algorithms, invariants, and edge cases, not as a correctness oracle: Fission lifts from Ghidra's SLEIGH specs, so their errors make both tools agree on the wrong answer. Correctness comes from native execution, architecture manuals, and source-level ground truth ([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)).
 3. Default to zero new production dependencies.
 4. Prefer CFG, dominance, dataflow, fixed-point, and constraint-based reasoning over brittle pattern matching or temporary heuristics.
 5. Avoid overfitting to one ISA/compiler, while keeping x86/x86-64 as the current optimization target.
@@ -360,7 +364,7 @@ Regression-prevention workflow:
 
 - `docs/architecture/ARCHITECTURE.md`
 - `docs/adr/` — architectural decisions (ADR index lives alongside numbered entries)
-- `docs/build/BUILD.md`
+- [Build and locate the CLI](docs/CLI.md#build-and-locate)
 - `README.md`
 - `.github/workflows/ci.yml`
 - `.github/workflows/ci-heavy.yml`

@@ -346,29 +346,61 @@ impl<'a> ParseCursor<'a> {
 
 fn preserve_inner_block_lines(
     block_lines: &[PreprocessedLine],
-    body: &str,
+    _body: &str,
 ) -> Vec<PreprocessedLine> {
+    let Some(open_line_idx) = block_lines
+        .iter()
+        .position(|line| first_structural_char(strip_comments(&line.text), '{').is_some())
+    else {
+        return Vec::new();
+    };
+    let Some(close_line_idx) = block_lines
+        .iter()
+        .rposition(|line| last_structural_char(strip_comments(&line.text), '}').is_some())
+    else {
+        return Vec::new();
+    };
+    if close_line_idx < open_line_idx {
+        return Vec::new();
+    }
+
     let mut lines = Vec::new();
-    if block_lines.len() > 2 {
-        lines.extend(block_lines[1..block_lines.len() - 1].iter().cloned());
-    } else {
-        lines.extend(body.lines().enumerate().map(|(offset, text)| {
-            PreprocessedLine {
-                file: block_lines
-                    .first()
-                    .map(|line| line.file.clone())
-                    .unwrap_or_default(),
-                line_number: block_lines
-                    .first()
-                    .map(|line| line.line_number + offset + 1)
-                    .unwrap_or(offset + 1),
-                text: text.to_string(),
-                include_depth: block_lines
-                    .first()
-                    .map(|line| line.include_depth)
-                    .unwrap_or_default(),
-            }
-        }));
+    for (idx, line) in block_lines
+        .iter()
+        .enumerate()
+        .take(close_line_idx + 1)
+        .skip(open_line_idx)
+    {
+        if idx != open_line_idx && idx != close_line_idx {
+            lines.push(line.clone());
+            continue;
+        }
+        let structural = strip_comments(&line.text);
+        let start_col = if idx == open_line_idx {
+            first_structural_char(structural, '{')
+                .map(|pos| pos + 1)
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        let end_col = if idx == close_line_idx {
+            last_structural_char(structural, '}').unwrap_or(line.text.len())
+        } else {
+            line.text.len()
+        };
+        if end_col < start_col {
+            continue;
+        }
+        let slice = &line.text[start_col..end_col];
+        if strip_comments(slice).trim().is_empty() {
+            continue;
+        }
+        lines.push(PreprocessedLine {
+            file: line.file.clone(),
+            line_number: line.line_number,
+            text: slice.to_string(),
+            include_depth: line.include_depth,
+        });
     }
     lines
 }
@@ -505,5 +537,106 @@ mod tests {
             .items
             .iter()
             .any(|item| matches!(item, AstItem::Constructor(_))));
+    }
+
+    #[test]
+    fn parse_with_block_preserves_items_sharing_opening_and_closing_brace_lines() {
+        let line = |line_number, text: &str| PreprocessedLine {
+            file: PathBuf::from("/tmp/with_sample.sinc"),
+            line_number,
+            text: text.to_string(),
+            include_depth: 1,
+        };
+        let expanded = ExpandedSpec {
+            entry_spec: PathBuf::from("/tmp/with_sample.sinc"),
+            include_manifest: Vec::new(),
+            defines: Default::default(),
+            lines: vec![
+                line(10, "with : mode=0 { :FIRST is byte=0x01 { }"),
+                line(11, "    :MIDDLE is byte=0x02 { }"),
+                line(12, "    :LAST is byte=0x03 { } } # trailing comment }"),
+            ],
+        };
+
+        let ast = parse_expanded_spec(&expanded).expect("parse multiline with block");
+        let with_block = match ast.items.as_slice() {
+            [AstItem::WithBlock(block)] => block,
+            other => panic!("expected single WithBlock, got {other:?}"),
+        };
+        let ctors: Vec<(&str, usize)> = with_block
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                AstItem::Constructor(ctor) => Some((ctor.signature.as_str(), ctor.line_number)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            ctors,
+            vec![
+                (":FIRST is byte=0x01", 10),
+                (":MIDDLE is byte=0x02", 11),
+                (":LAST is byte=0x03", 12),
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_with_block_handles_single_two_line_and_spanning_constructors() {
+        let line = |line_number, text: &str| PreprocessedLine {
+            file: PathBuf::from("/tmp/with_edges.sinc"),
+            line_number,
+            text: text.to_string(),
+            include_depth: 0,
+        };
+        let single = ExpandedSpec {
+            entry_spec: PathBuf::from("/tmp/with_edges.sinc"),
+            include_manifest: Vec::new(),
+            defines: Default::default(),
+            lines: vec![line(5, "with : mode=0 { :ONE is byte=0x01 { } } # }")],
+        };
+        let AstItem::WithBlock(single_block) = &parse_expanded_spec(&single).unwrap().items[0]
+        else {
+            panic!("expected WithBlock");
+        };
+        assert_eq!(single_block.items.len(), 1);
+
+        let two_line = ExpandedSpec {
+            entry_spec: PathBuf::from("/tmp/with_edges.sinc"),
+            include_manifest: Vec::new(),
+            defines: Default::default(),
+            lines: vec![
+                line(20, "with : mode=0 { :TWO_A is byte=0x02 { }"),
+                line(21, "    :TWO_B is byte=0x03 { } }"),
+            ],
+        };
+        let AstItem::WithBlock(two_block) = &parse_expanded_spec(&two_line).unwrap().items[0]
+        else {
+            panic!("expected WithBlock");
+        };
+        assert_eq!(two_block.items.len(), 2);
+
+        let spanning = ExpandedSpec {
+            entry_spec: PathBuf::from("/tmp/with_edges.sinc"),
+            include_manifest: Vec::new(),
+            defines: Default::default(),
+            lines: vec![
+                line(30, "with : mode=0 { :SPAN is byte=0x04 {"),
+                line(31, "    eax = 1;"),
+                line(32, "} }"),
+            ],
+        };
+        let AstItem::WithBlock(span_block) = &parse_expanded_spec(&spanning).unwrap().items[0]
+        else {
+            panic!("expected WithBlock");
+        };
+        let [AstItem::Constructor(ctor)] = span_block.items.as_slice() else {
+            panic!(
+                "expected single spanning constructor, got {:?}",
+                span_block.items
+            );
+        };
+        assert_eq!(ctor.signature, ":SPAN is byte=0x04");
+        assert_eq!(ctor.line_number, 30);
     }
 }

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
 use super::{Confidence, Detection, DetectionResult, DetectionType};
 use crate::loader::{LoadedBinary, SectionInfo};
@@ -40,7 +41,11 @@ impl SignatureDatabase {
     ///
     /// Used by loader identity Phase 2 DIE subset evaluation to avoid scanning the full mirror at analyze time.
     pub fn load_pe_json_only() -> Option<Self> {
-        use std::sync::OnceLock;
+        Self::pe_json_only().cloned()
+    }
+
+    /// The process-wide [`Self::load_pe_json_only`] database, by reference.
+    pub fn pe_json_only() -> Option<&'static Self> {
         static PE_JSON_DB: OnceLock<Option<SignatureDatabase>> = OnceLock::new();
         PE_JSON_DB
             .get_or_init(|| {
@@ -68,12 +73,16 @@ impl SignatureDatabase {
                     None
                 }
             })
-            .clone()
+            .as_ref()
     }
 
     /// Load from default path using [`fission_core::PATHS`] / bundle resolution only (no cwd upward walks).
     pub fn load_default() -> Option<Self> {
-        use std::sync::OnceLock;
+        Self::default_shared().cloned()
+    }
+
+    /// The process-wide [`Self::load_default`] database, by reference.
+    pub fn default_shared() -> Option<&'static Self> {
         static DEFAULT_DB: OnceLock<Option<SignatureDatabase>> = OnceLock::new();
         DEFAULT_DB
             .get_or_init(|| {
@@ -124,7 +133,7 @@ impl SignatureDatabase {
                     Some(db)
                 }
             })
-            .clone()
+            .as_ref()
     }
 
     /// Merge the packed DIE corpus beside the mirror, if it is there.
@@ -791,12 +800,95 @@ fn dedup_rules(rules: &mut Vec<SignatureRule>) {
     rules.retain(|rule| seen.insert(rule_key(rule)));
 }
 
+/// The binary-independent half of a [`DieMatcher`]: the database, its parsed
+/// byte patterns, and one compiled literal set over every `StringMatch`
+/// needle.
+///
+/// None of this depends on the binary being matched, and it used to be
+/// rebuilt on every match: re-parsing every pattern and compiling the needle
+/// set (an Aho-Corasick DFA over thousands of literals) was most of the cost
+/// of loading a small binary, paid on every `LoadedBinary` and so on every
+/// CLI call. Build it once per database and share it; see
+/// [`PreparedSignatures::default_shared`].
+pub struct PreparedSignatures {
+    database: SignatureDatabase,
+    /// Every EP/file/overlay pattern of `database`, parsed.
+    patterns: HashMap<String, Vec<Option<u8>>>,
+    /// Every distinct non-empty `StringMatch` value, in database order.
+    needles: Vec<String>,
+    needle_index: HashMap<String, usize>,
+    /// `needles` as one literal set; `None` when it failed to compile, in
+    /// which case each needle is searched for on its own.
+    needle_set: Option<regex::bytes::RegexSet>,
+}
+
+impl PreparedSignatures {
+    pub fn new(database: SignatureDatabase) -> Self {
+        let mut patterns = HashMap::new();
+        let mut needles = Vec::new();
+        let mut needle_index = HashMap::new();
+        for rule in database.signatures.iter().flat_map(|sig| &sig.rules) {
+            match rule {
+                SignatureRule::EpPattern { pattern, .. }
+                | SignatureRule::FilePattern { pattern, .. }
+                | SignatureRule::OverlayPattern { pattern, .. } => {
+                    patterns
+                        .entry(pattern.clone())
+                        .or_insert_with(|| DieMatcher::parse_pattern(pattern));
+                }
+                SignatureRule::StringMatch { value } if !value.is_empty() => {
+                    if !needle_index.contains_key(value) {
+                        needle_index.insert(value.clone(), needles.len());
+                        needles.push(value.clone());
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Each member is an escaped literal, so whether member `i` matches is
+        // exactly whether needle `i` occurs in the input, whatever else is in
+        // the set: matching against this superset and reading out a subset
+        // gives the subset's answers.
+        let needle_set = if needles.is_empty() {
+            None
+        } else {
+            regex::bytes::RegexSet::new(needles.iter().map(|needle| regex::escape(needle))).ok()
+        };
+        Self {
+            database,
+            patterns,
+            needles,
+            needle_index,
+            needle_set,
+        }
+    }
+
+    /// The prepared [`SignatureDatabase::load_default`] database, built once
+    /// per process. The initialiser parses and compiles only; it never runs
+    /// rayon work, so it cannot park on itself (a `OnceLock` initialiser that
+    /// blocks on rayon can steal a job that waits on the same lock).
+    pub fn default_shared() -> Option<Arc<Self>> {
+        static DEFAULT: OnceLock<Option<Arc<PreparedSignatures>>> = OnceLock::new();
+        DEFAULT
+            .get_or_init(|| {
+                SignatureDatabase::default_shared().map(|db| Arc::new(Self::new(db.clone())))
+            })
+            .clone()
+    }
+
+    pub fn database(&self) -> &SignatureDatabase {
+        &self.database
+    }
+}
+
 /// DIE-compatible signature matcher
 pub struct DieMatcher {
-    database: SignatureDatabase,
+    prepared: Arc<PreparedSignatures>,
     section_cache: HashMap<String, bool>,
-    string_cache: HashMap<String, bool>,
-    ep_pattern_cache: HashMap<String, Vec<Option<u8>>>,
+    /// Per binary: whether needle `i` of `prepared.needles` occurs, for the
+    /// needles prepared for this binary; `None` falls back to a direct search
+    /// of the whole binary.
+    string_hits: Vec<Option<bool>>,
     /// When set, string rules scan only this prefix of the mapped image (identity budgets).
     max_string_scan_bytes: Option<usize>,
     /// When set, entropy primitives hash only this many bytes per section / overlay slice.
@@ -804,12 +896,18 @@ pub struct DieMatcher {
 }
 
 impl DieMatcher {
+    /// A matcher over `database`, prepared from scratch. Prefer
+    /// [`Self::from_prepared`] with a shared [`PreparedSignatures`] when the
+    /// same database is matched against more than one binary.
     pub fn new(database: SignatureDatabase) -> Self {
+        Self::from_prepared(Arc::new(PreparedSignatures::new(database)))
+    }
+
+    pub fn from_prepared(prepared: Arc<PreparedSignatures>) -> Self {
         Self {
-            database,
+            prepared,
             section_cache: HashMap::new(),
-            string_cache: HashMap::new(),
-            ep_pattern_cache: HashMap::new(),
+            string_hits: Vec::new(),
             max_string_scan_bytes: None,
             max_entropy_scan_bytes: None,
         }
@@ -838,12 +936,12 @@ impl DieMatcher {
     pub fn match_binary(&mut self, binary: &LoadedBinary) -> Vec<Detection> {
         let mut detections = Vec::new();
 
-        // Pre-build caches for faster matching
+        // Pre-build the per-binary caches; the patterns are already parsed.
         self.build_section_cache(binary);
         self.build_string_cache(binary);
-        self.build_ep_pattern_cache();
 
-        for sig in &self.database.signatures {
+        let prepared = Arc::clone(&self.prepared);
+        for sig in &prepared.database.signatures {
             if let Some(detection) = self.match_signature(binary, sig) {
                 detections.push(detection);
             }
@@ -867,22 +965,27 @@ impl DieMatcher {
                 data = &data[..cap];
             }
         }
-        Self::fill_string_cache(
-            &mut self.string_cache,
+        let prepared = Arc::clone(&self.prepared);
+        self.fill_string_cache(
             data,
-            self.database.signatures.iter().flat_map(|sig| &sig.rules),
+            prepared
+                .database
+                .signatures
+                .iter()
+                .flat_map(|sig| &sig.rules),
         );
     }
 
     /// Reuse literal results for direct `match_signature` callers. Their
     /// uncached StringMatch fallback reads the full binary, independently of
-    /// match_binary's scan cap. Preserve that domain and leave section/EP
-    /// caches untouched: preparing those would change direct rule results.
+    /// match_binary's scan cap. Preserve that domain and leave the section
+    /// cache untouched: preparing it would change direct rule results.
     pub(crate) fn prepare_direct_signature_strings(&mut self, binary: &LoadedBinary) {
-        Self::fill_string_cache(
-            &mut self.string_cache,
+        let prepared = Arc::clone(&self.prepared);
+        self.fill_string_cache(
             binary.data.as_slice(),
-            self.database
+            prepared
+                .database
                 .signatures
                 .iter()
                 .filter(|sig| {
@@ -894,65 +997,66 @@ impl DieMatcher {
         );
     }
 
+    /// Record, for every needle of `rules`, whether it occurs in `data`;
+    /// forget every other needle's result.
     fn fill_string_cache<'a>(
-        cache: &mut HashMap<String, bool>,
+        &mut self,
         data: &[u8],
         rules: impl Iterator<Item = &'a SignatureRule>,
     ) {
-        cache.clear();
-        let mut unique_needles = Vec::new();
-        let mut seen = HashSet::new();
-
+        self.string_hits.clear();
+        self.string_hits.resize(self.prepared.needles.len(), None);
+        let mut wanted = Vec::new();
         for rule in rules {
             if let SignatureRule::StringMatch { value } = rule
-                && !value.is_empty()
-                && seen.insert(value.clone())
+                && let Some(&idx) = self.prepared.needle_index.get(value)
+                && self.string_hits[idx].is_none()
             {
-                unique_needles.push(value.clone());
+                // Placeholder; overwritten below. Marks the needle as seen.
+                self.string_hits[idx] = Some(false);
+                wanted.push(idx);
             }
         }
 
-        if unique_needles.is_empty() {
+        if wanted.is_empty() {
             return;
         }
 
         // Evaluate all DIE string rules against the binary in one pass.
-        let escaped = unique_needles
-            .iter()
-            .map(|needle| regex::escape(needle))
-            .collect::<Vec<_>>();
-
-        match regex::bytes::RegexSet::new(&escaped) {
-            Ok(set) => {
+        match &self.prepared.needle_set {
+            Some(set) => {
                 let matches = set.matches(data);
-                for (idx, needle) in unique_needles.into_iter().enumerate() {
-                    cache.insert(needle, matches.matched(idx));
+                for idx in wanted {
+                    self.string_hits[idx] = Some(matches.matched(idx));
                 }
             }
-            Err(_) => {
+            None => {
                 // Fallback keeps behavior correct if regex-set compilation fails.
-                for needle in unique_needles {
-                    cache.insert(needle.clone(), Self::contains_string(data, &needle));
+                for idx in wanted {
+                    self.string_hits[idx] =
+                        Some(Self::contains_string(data, &self.prepared.needles[idx]));
                 }
             }
         }
     }
 
-    fn build_ep_pattern_cache(&mut self) {
-        self.ep_pattern_cache.clear();
-        for sig in &self.database.signatures {
-            for rule in &sig.rules {
-                match rule {
-                    SignatureRule::EpPattern { pattern, .. }
-                    | SignatureRule::FilePattern { pattern, .. }
-                    | SignatureRule::OverlayPattern { pattern, .. } => {
-                        self.ep_pattern_cache
-                            .entry(pattern.clone())
-                            .or_insert_with(|| Self::parse_pattern(pattern));
-                    }
-                    _ => {}
-                }
-            }
+    #[cfg(test)]
+    fn prepared_string_count(&self) -> usize {
+        self.string_hits.iter().flatten().count()
+    }
+
+    /// The cached result for the literal `value`, if one was prepared.
+    fn cached_string_hit(&self, value: &str) -> Option<bool> {
+        let idx = *self.prepared.needle_index.get(value)?;
+        self.string_hits.get(idx).copied().flatten()
+    }
+
+    /// `pattern` parsed: from the prepared database, or parsed now for a
+    /// rule that is not in it.
+    fn pattern_bytes<'p>(&'p self, pattern: &str) -> std::borrow::Cow<'p, [Option<u8>]> {
+        match self.prepared.patterns.get(pattern) {
+            Some(parsed) => std::borrow::Cow::Borrowed(parsed.as_slice()),
+            None => std::borrow::Cow::Owned(Self::parse_pattern(pattern)),
         }
     }
 
@@ -1059,9 +1163,7 @@ impl DieMatcher {
             }
 
             SignatureRule::StringMatch { value } => self
-                .string_cache
-                .get(value)
-                .copied()
+                .cached_string_hit(value)
                 .unwrap_or_else(|| Self::contains_string(binary.data.as_slice(), value)),
 
             SignatureRule::EpPattern {
@@ -1170,11 +1272,7 @@ impl DieMatcher {
     ) -> bool {
         // Convert pattern string to bytes with wildcards
         // Pattern format: "60 BE ?? ?? ?? ?? 8D BE"
-        let pattern_bytes = self
-            .ep_pattern_cache
-            .get(pattern)
-            .cloned()
-            .unwrap_or_else(|| Self::parse_pattern(pattern));
+        let pattern_bytes = self.pattern_bytes(pattern);
         if pattern_bytes.is_empty() {
             return false;
         }
@@ -1220,11 +1318,7 @@ impl DieMatcher {
         offset: Option<usize>,
         from_end: bool,
     ) -> bool {
-        let pattern_bytes = self
-            .ep_pattern_cache
-            .get(pattern)
-            .cloned()
-            .unwrap_or_else(|| Self::parse_pattern(pattern));
+        let pattern_bytes = self.pattern_bytes(pattern);
         if pattern_bytes.is_empty() {
             return false;
         }
@@ -1251,11 +1345,7 @@ impl DieMatcher {
         pattern: &str,
         offset: Option<usize>,
     ) -> bool {
-        let pattern_bytes = self
-            .ep_pattern_cache
-            .get(pattern)
-            .cloned()
-            .unwrap_or_else(|| Self::parse_pattern(pattern));
+        let pattern_bytes = self.pattern_bytes(pattern);
         if pattern_bytes.is_empty() {
             return false;
         }
@@ -1545,8 +1635,8 @@ fn loader_cache_dir() -> Option<PathBuf> {
 
 /// Detect using DIE signatures
 pub fn detect_with_die(binary: &LoadedBinary, result: &mut DetectionResult) {
-    if let Some(db) = SignatureDatabase::load_default() {
-        let mut matcher = DieMatcher::new(db);
+    if let Some(prepared) = PreparedSignatures::default_shared() {
+        let mut matcher = DieMatcher::from_prepared(prepared);
         for detection in matcher.match_binary(binary) {
             result.add(detection);
         }
@@ -1615,10 +1705,10 @@ mod tests {
             let legacy = DieMatcher::new(db.clone());
             let mut prepared = DieMatcher::new(db.clone());
             prepared.prepare_direct_signature_strings(&binary);
-            assert_eq!(prepared.string_cache.len(), values.len() - 1);
+            assert_eq!(prepared.prepared_string_count(), values.len() - 1);
             for (value, sig) in values.iter().zip(&db.signatures) {
                 assert_eq!(
-                    prepared.string_cache[*value],
+                    prepared.cached_string_hit(value).unwrap(),
                     DieMatcher::contains_string(binary.data.as_slice(), value)
                 );
                 assert_eq!(
@@ -1640,10 +1730,10 @@ mod tests {
         let legacy = DieMatcher::new(db.clone()).with_scan_budgets(Some(2), Some(7));
         let mut prepared = DieMatcher::new(db.clone()).with_scan_budgets(Some(2), Some(7));
         prepared.prepare_direct_signature_strings(&binary);
-        assert_eq!(prepared.string_cache.len(), 1);
-        assert!(prepared.string_cache["needle"]);
+        assert_eq!(prepared.prepared_string_count(), 1);
+        assert_eq!(prepared.cached_string_hit("needle"), Some(true));
+        assert_eq!(prepared.cached_string_hit("only-elf"), None);
         assert!(prepared.section_cache.is_empty());
-        assert!(prepared.ep_pattern_cache.is_empty());
         assert_eq!(prepared.max_string_scan_bytes, Some(2));
         assert_eq!(prepared.max_entropy_scan_bytes, Some(7));
         for sig in &db.signatures {
@@ -1654,12 +1744,12 @@ mod tests {
         }
         // Ordinary match_binary still applies its existing prefix cap.
         prepared.match_binary(&binary);
-        assert!(!prepared.string_cache["needle"]);
+        assert_eq!(prepared.cached_string_hit("needle"), Some(false));
         assert_eq!(prepared.max_string_scan_bytes, Some(2));
         // Reusing a matcher for another prepared input never retains old hits.
         let other = literal_fixture(b"different bytes".to_vec());
         prepared.prepare_direct_signature_strings(&other);
-        assert!(!prepared.string_cache["needle"]);
+        assert_eq!(prepared.cached_string_hit("needle"), Some(false));
     }
 
     #[test]
@@ -2156,5 +2246,133 @@ mod cache_tests {
             .filter(|name| name != "cache.json")
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+}
+
+#[cfg(test)]
+mod prepared_tests {
+    //! The prepared half of a matcher (parsed patterns, compiled needle set)
+    //! is built once per process and reused for every binary. These check
+    //! that reuse changes no result: a matcher reused across every loader
+    //! fixture in turn against a matcher prepared from scratch for each, and
+    //! the shared needle set against the per-call compilation it replaced.
+
+    use super::*;
+
+    /// Every loader fixture that loads, in name order.
+    fn loader_fixtures() -> Vec<(String, LoadedBinary)> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
+        let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
+            .expect("testdata")
+            .map(|entry| entry.expect("testdata entry").path())
+            .collect();
+        paths.sort();
+        let fixtures: Vec<_> = paths
+            .into_iter()
+            .filter_map(|path| {
+                let name = path.file_name()?.to_string_lossy().into_owned();
+                let binary = LoadedBinary::from_bytes(fs::read(&path).ok()?, name.clone()).ok()?;
+                Some((name, binary))
+            })
+            .collect();
+        assert!(
+            fixtures.len() >= 20,
+            "only {} fixtures loaded",
+            fixtures.len()
+        );
+        fixtures
+    }
+
+    /// The string cache as it was built before preparation was shared: one
+    /// set compiled per call over exactly the needles of `rules`.
+    fn per_call_string_cache<'a>(
+        data: &[u8],
+        rules: impl Iterator<Item = &'a SignatureRule>,
+    ) -> HashMap<String, bool> {
+        let mut needles = Vec::new();
+        let mut seen = HashSet::new();
+        for rule in rules {
+            if let SignatureRule::StringMatch { value } = rule
+                && !value.is_empty()
+                && seen.insert(value.clone())
+            {
+                needles.push(value.clone());
+            }
+        }
+        if needles.is_empty() {
+            return HashMap::new();
+        }
+        let set = regex::bytes::RegexSet::new(needles.iter().map(|n| regex::escape(n)))
+            .expect("per-call needle set");
+        let matches = set.matches(data);
+        needles
+            .into_iter()
+            .enumerate()
+            .map(|(idx, needle)| (needle, matches.matched(idx)))
+            .collect()
+    }
+
+    #[test]
+    fn a_shared_prepared_matcher_detects_exactly_what_a_fresh_one_does() {
+        let shared = PreparedSignatures::default_shared().expect("DiE signature database");
+        let db = SignatureDatabase::default_shared().expect("DiE signature database");
+        // One matcher, reused for every fixture in turn, as a process does.
+        let mut reused = DieMatcher::from_prepared(Arc::clone(&shared));
+        let mut detections = 0;
+        for (name, binary) in loader_fixtures() {
+            let fresh = DieMatcher::new(db.clone()).match_binary(&binary);
+            let cached = reused.match_binary(&binary);
+            assert_eq!(format!("{fresh:?}"), format!("{cached:?}"), "{name}");
+            detections += cached.len();
+        }
+        assert!(detections > 0, "the fixtures exercise no DiE signature");
+    }
+
+    #[test]
+    fn the_shared_needle_set_answers_as_the_per_call_set_did() {
+        let shared = PreparedSignatures::default_shared().expect("DiE signature database");
+        let mut reused = DieMatcher::from_prepared(Arc::clone(&shared));
+        let (mut checked, mut hits) = (0, 0);
+        for (name, binary) in loader_fixtures() {
+            // match_binary's domain: every rule.
+            reused.build_string_cache(&binary);
+            let expected = per_call_string_cache(
+                binary.data.as_slice(),
+                shared.database.signatures.iter().flat_map(|sig| &sig.rules),
+            );
+            for needle in &shared.needles {
+                assert_eq!(
+                    reused.cached_string_hit(needle),
+                    expected.get(needle).copied(),
+                    "{name}: {needle:?}"
+                );
+            }
+            // The direct callers' domain: only signatures of this format,
+            // read out of the set compiled over every needle.
+            reused.prepare_direct_signature_strings(&binary);
+            let expected = per_call_string_cache(
+                binary.data.as_slice(),
+                shared
+                    .database
+                    .signatures
+                    .iter()
+                    .filter(|sig| {
+                        sig.source_format
+                            .as_deref()
+                            .is_none_or(|format| binary_matches_die_format(&binary, format))
+                    })
+                    .flat_map(|sig| &sig.rules),
+            );
+            for needle in &shared.needles {
+                assert_eq!(
+                    reused.cached_string_hit(needle),
+                    expected.get(needle).copied(),
+                    "{name} (direct): {needle:?}"
+                );
+            }
+            checked += expected.len();
+            hits += expected.values().filter(|hit| **hit).count();
+        }
+        assert!(checked > 0 && hits > 0, "checked {checked}, hits {hits}");
     }
 }

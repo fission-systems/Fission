@@ -154,9 +154,10 @@ fission_cli --contract v1 sandbox ./target.bin --json --max-inst 100000 \
 - Some programs exit 0 on both the right and the wrong input. Compare the output
   text, and run wrong, truncated, extended and empty inputs as controls.
 - A run that hit `--max-inst` without a guest exit is incomplete. Do not report it.
-- `fission_cli verify --addr 0x... --tier concrete|ground-truth|symbolic|all` checks
-  Fission's own IR against the machine code; use it when you suspect the
-  decompiler, not the program.
+- Use `verify --tier ground-truth` to compare the decompiled tree with emulated
+  machine behavior on bounded samples. The concrete and symbolic tiers compare
+  earlier and later trees. Check for unsupported inputs and harness failures
+  alongside divergences.
 - `raw-pcode`, `pcode-stages` and `nir-stats` show the lift beneath a suspect line.
 
 The sandbox is an emulator with a modelled Linux x86-64 runtime, not a full libc or

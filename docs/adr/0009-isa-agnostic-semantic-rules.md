@@ -86,7 +86,7 @@ Related ADRs:
 
 ### Follow-up
 
-- Keep [`Agents.md`](../../Agents.md) and NIR `AGENTS.md` aligned with this ADR.
+- Keep [`Agents.md`](https://github.com/fission-systems/Fission/blob/main/AGENTS.md) and NIR `AGENTS.md` aligned with this ADR.
 - When touching quality proposals, the invariant section should name the common
   fact first and the motivating ISA second.
 - Track concrete DEBT/OK rows in

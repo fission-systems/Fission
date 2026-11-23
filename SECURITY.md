@@ -1,7 +1,5 @@
 # Security policy
 
-**Last verified:** 2026-05-02
-
 ## Supported versions
 
 Security fixes land on **`main`** first and ride the next tagged release ([`docs/VERSIONING.md`](docs/VERSIONING.md)). Older tags are **best-effort** unless explicitly declared as extended-support.
@@ -34,7 +32,7 @@ Do **not** attach malware, live offensive samples, or unsolicited exploit binari
 Preferred evidence:
 
 - **SHA256 hashes** (and format/size metadata) rather than raw bytes when possible
-- References to **benign** reproduction fixtures already in-repo (`benchmark/binary/`) or **publicly documented** benign corpora
+- References to **benign** reproduction fixtures already in-repo (`crates/*/testdata/`) or **publicly documented** benign corpora
 - **Password-protected archives** or private links **only after maintainer acknowledgement**, never dropped unsolicited into threads
 
 Operational expectations for CI fixtures and escalation: [`docs/MALWARE_SAMPLE_POLICY.md`](docs/MALWARE_SAMPLE_POLICY.md).

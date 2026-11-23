@@ -577,7 +577,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(call_idx).map(|op| op.opcode),
             Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
         ) {
-            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+            if let Some(block_idx) = self.block_position(block)
                 && let Some(preds) = self.predecessors.get(block_idx)
                 && let [pred_idx] = preds.as_slice()
                 && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)
@@ -912,20 +912,30 @@ impl<'a> PreviewBuilder<'a> {
         None
     }
 
-    /// Return the declaration-locked register arity for an exact resolved call.
+    /// The integer argument registers an exact resolved call's declaration
+    /// proves are read, as indexes into the integer parameter slots.
     ///
     /// A call's basic block may stage only a later ABI slot while an earlier
     /// slot remains live from a dominating predecessor. Ordinary recovery
     /// deliberately requires a contiguous same-block prefix because an
     /// unknown call gives us no proof that a live register is an argument.
     /// An exact prototype supplies that missing proof: every declared
-    /// register-backed slot is consumed at this call site.
-    fn exact_call_register_arity(
+    /// integer-register-backed slot is consumed at this call site.
+    ///
+    /// A floating-point parameter is passed in a vector register and consumes
+    /// no integer slot, so the declared arity is not the integer slot count:
+    /// `Circle::perimeter(double k) const` is `this` in `rdi` and `k` in
+    /// `xmm0`, and counting `k` as `rsi` printed the caller's own stale `rsi`
+    /// as an argument. Under Windows x64 parameters are positional, so a
+    /// floating-point parameter leaves its integer slot unused; under System V
+    /// x86-64 and AArch64 integer and floating-point parameters are numbered
+    /// separately.
+    fn exact_call_integer_register_slots(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         param_count: usize,
-    ) -> Option<usize> {
+    ) -> Option<Vec<usize>> {
         let op = block.ops.get(call_idx)?;
         let target = match op.opcode {
             PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
@@ -959,10 +969,31 @@ impl<'a> PreviewBuilder<'a> {
         // exact arity: `open(const char *, int, ...)` reads `rdi` and `esi` at
         // every call, whatever follows in the variadic tail.
         let summary = self.type_context?.call_prototype_summaries.get(&target)?;
-        summary
+        let arity = summary
             .locked_exact_arity
-            .or(summary.variadic_fixed_arity)
-            .map(|arity| arity.min(param_count))
+            .or(summary.variadic_fixed_arity)?;
+        let is_float = |index: usize| {
+            summary
+                .param_surface_type_names
+                .get(index)
+                .and_then(|name| name.as_deref())
+                .is_some_and(is_floating_point_surface_type)
+        };
+        let slots: Vec<usize> = match self.options.calling_convention {
+            CallingConvention::WindowsX64 => (0..arity).filter(|&index| !is_float(index)).collect(),
+            CallingConvention::SystemVAmd64 | CallingConvention::AArch64 => {
+                (0..(0..arity).filter(|&index| !is_float(index)).count()).collect()
+            }
+            // Conventions that may pass floating point in integer registers
+            // (soft-float ARM, for one) keep the declared arity.
+            _ => (0..arity).collect(),
+        };
+        Some(
+            slots
+                .into_iter()
+                .filter(|&slot| slot < param_count)
+                .collect(),
+        )
     }
 
     /// An exact callee declaration can prove that an ABI register is read by
@@ -1000,7 +1031,7 @@ impl<'a> PreviewBuilder<'a> {
         call_idx: usize,
         vn: &Varnode,
     ) -> bool {
-        let Some(call_block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(call_block_idx) = self.block_position(block) else {
             return false;
         };
         let clobbers = |op: &PcodeOp| {
@@ -1166,7 +1197,7 @@ impl<'a> PreviewBuilder<'a> {
             block.ops.get(call_idx).map(|op| op.opcode),
             Some(PcodeOpcode::BranchInd | PcodeOpcode::CallInd)
         ) {
-            if let Some(&block_idx) = self.address_to_index.get(&block.start_address)
+            if let Some(block_idx) = self.block_position(block)
                 && let Some(preds) = self.predecessors.get(block_idx)
                 && let [pred_idx] = preds.as_slice()
                 && let Some(pred_block) = self.pcode.blocks.get(*pred_idx)
@@ -1317,10 +1348,10 @@ impl<'a> PreviewBuilder<'a> {
         // lookup, but keep the same dominance/realism guard used by ordinary
         // carrier recovery. This does not guess values at joins: when no
         // single realistic reaching definition exists, the slot stays empty.
-        if let Some(exact_register_arity) =
-            self.exact_call_register_arity(block, call_idx, param_count)
+        if let Some(exact_register_slots) =
+            self.exact_call_integer_register_slots(block, call_idx, param_count)
         {
-            for param_index in 0..exact_register_arity {
+            for param_index in exact_register_slots {
                 if skip_param == Some(param_index) || recovered[param_index].is_some() {
                     continue;
                 }
@@ -1460,4 +1491,14 @@ impl<'a> PreviewBuilder<'a> {
         }
         abi.assign_carriers(predecessor_carriers)
     }
+}
+
+/// Whether a declared parameter type is passed in a floating-point register.
+fn is_floating_point_surface_type(surface: &str) -> bool {
+    let name = surface
+        .split_whitespace()
+        .filter(|word| !matches!(*word, "const" | "volatile"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    matches!(name.as_str(), "float" | "double" | "long double")
 }

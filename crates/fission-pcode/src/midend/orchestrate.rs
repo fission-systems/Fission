@@ -9,10 +9,13 @@
 //!
 //! This module must not re-implement owner logic; it only sequences stages.
 
+use super::builder::{
+    apply_pre_hir_debug_array_hints_with_pointer_size,
+    apply_preview_type_hints_with_stack_bias_and_pointer_size,
+};
 use super::{
     DecompFacts, GhidraActionConcept, MlilPreviewError, MlilPreviewOptions, NirRenderOptions,
     NirTypeContext, PreviewBuildStats, PreviewBuilder, PreviewHintStats, PreviewTypeContext,
-    apply_pre_hir_debug_array_hints, apply_preview_type_hints_with_stack_bias,
     discover_guarded_tail_candidates_for_stats, record_ghidra_action_stage,
     record_ghidra_clean_room_pipeline_complete, recover_global_symbol_accesses, structuring,
 };
@@ -202,6 +205,16 @@ pub fn render_mlil_preview_with_binary_and_context(
     .map(|output| output.code)
 }
 
+fn effective_pointer_size(options: &NirRenderOptions) -> u32 {
+    if options.pointer_size != 0 {
+        options.pointer_size
+    } else if options.is_64bit {
+        8
+    } else {
+        4
+    }
+}
+
 fn render_mlil_preview_with_binary_and_context_output(
     pcode: &PcodeFunction,
     name: &str,
@@ -282,11 +295,13 @@ fn render_mlil_preview_with_binary_and_context_output(
         debug_log("build_hir_error");
         err
     })?;
+    let pointer_size = effective_pointer_size(options);
     if let Some(context) = type_context {
-        let _ = apply_pre_hir_debug_array_hints(
+        let _ = apply_pre_hir_debug_array_hints_with_pointer_size(
             &mut hir,
             context,
             builder.debug_cfa_stack_offset_bias(),
+            pointer_size,
         );
     }
     // Returned raw observation, captured for the typed output for the same
@@ -507,11 +522,12 @@ fn render_mlil_preview_with_binary_and_context_output(
         }
         debug_log("type_hints_start");
         let type_hints_start = Instant::now();
-        let stats = apply_preview_type_hints_with_stack_bias(
+        let stats = apply_preview_type_hints_with_stack_bias_and_pointer_size(
             &mut hir,
             context,
             &register_origins,
             builder.debug_cfa_stack_offset_bias(),
+            pointer_size,
         );
         hint_stats = Some(stats);
         if debug.diag {

@@ -1,8 +1,7 @@
 //! `fission_cli schema`: machine-readable description of the contract.
 //!
-//! P0 covers the response envelope and the error-code registry. Per-command
-//! `data` payloads are deliberately left untyped here (`x-data-schema`); typing
-//! them is follow-up work that must also bump each command's `schema_version`.
+//! The generic envelope and the per-command payload contracts are versioned
+//! separately. Publishing a schema for an existing payload preserves its version.
 
 use super::CONTRACT_ID;
 use super::errors::registry_json;
@@ -19,12 +18,28 @@ fn contract_commands() -> Vec<&'static str> {
         .collect()
 }
 
+fn payload_schema(command: &str) -> Option<Value> {
+    let text = match command {
+        "info" => include_str!("../../../../../docs/schemas/cli-info-data.v1.schema.json"),
+        "list" => include_str!("../../../../../docs/schemas/cli-list-data.v1.schema.json"),
+        "decomp" => include_str!("../../../../../docs/schemas/cli-decomp-data.v1.schema.json"),
+        _ => return None,
+    };
+    let mut value: Value =
+        serde_json::from_str(text).expect("committed payload schema is valid JSON");
+    value
+        .as_object_mut()
+        .expect("payload schema is an object")
+        .remove("$schema");
+    Some(value)
+}
+
 pub(crate) fn envelope_schema(command: Option<&str>) -> Value {
     let command_property = match command {
         Some(name) => json!({ "const": name }),
         None => json!({ "type": "string" }),
     };
-    json!({
+    let mut schema = json!({
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "fission_cli --contract v1 response envelope",
         "description": "One JSON document on stdout for every contract-mode invocation, success or failure.",
@@ -102,14 +117,20 @@ pub(crate) fn envelope_schema(command: Option<&str>) -> Value {
                 "then": { "required": ["error"] }
             }
         ]
-    })
+    });
+    if let Some(payload) = command.and_then(payload_schema) {
+        schema["properties"]["data"] = payload;
+        schema["properties"]["schema_version"]["const"] = json!(1);
+    }
+    schema
 }
 
 fn commands_json() -> Value {
     json!({
         "contract": CONTRACT_ID,
         "commands": contract_commands(),
-        "note": "data payloads are not yet typed per command"
+        "note": "typed_data_commands lists the commands whose v1 data schemas are available",
+        "typed_data_commands": contract_commands().into_iter().filter(|name| payload_schema(name).is_some()).collect::<Vec<_>>()
     })
 }
 

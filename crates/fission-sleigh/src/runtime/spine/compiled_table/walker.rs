@@ -2,10 +2,15 @@ use super::*;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+#[derive(Clone, Copy, Debug)]
+struct OperandExtent {
+    absolute_offset: usize,
+    relative_length: usize,
+}
+
 struct DecodePool {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
@@ -79,9 +84,21 @@ impl std::fmt::Display for WalkFrame {
     }
 }
 
+/// Deepest constructor nesting one instruction may resolve to, root at 0.
+///
+/// A table can refer to itself -- x86's `instruction` takes a prefix byte and
+/// descends into `instruction` again -- so without a bound the nesting, and
+/// this walker's recursion, grows with the input: a run of prefix bytes
+/// overflowed the stack. The value is Ghidra's disassembler bound
+/// (`ParserWalker.MAX_PARSE_DEPTH`, which raises `UnknownInstructionException`
+/// at the same point). It bounds the parse, not any ISA: a legal x86
+/// instruction has at most 14 prefix bytes, so a run long enough to reach it
+/// is not one instruction, and a failed parse is a decode error like any other.
+pub(super) const MAX_PARSE_DEPTH: usize = 64;
+
 thread_local! {
-    static DECODE_POOL: RefCell<Vec<DecodePool>> = RefCell::new(Vec::new());
-    static WALK_STACK: RefCell<Vec<WalkFrame>> = RefCell::new(Vec::new());
+    static DECODE_POOL: RefCell<Vec<DecodePool>> = const { RefCell::new(Vec::new()) };
+    static WALK_STACK: RefCell<Vec<WalkFrame>> = const { RefCell::new(Vec::new()) };
 }
 
 pub(super) struct WalkStackGuard;
@@ -109,7 +126,7 @@ pub(super) fn bind_instruction<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
 ) -> Result<RuntimeConstructState> {
-    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None)
+    bind_instruction_with_inst_next(compiled, strategy, ctx, selection, None, 0)
 }
 
 fn bind_instruction_with_inst_next<'a>(
@@ -118,6 +135,7 @@ fn bind_instruction_with_inst_next<'a>(
     ctx: &CompiledInstructionContext<'_>,
     selection: RuntimeSelection<'a>,
     parent_inst_next: Option<Rc<InstNextShared>>,
+    depth: usize,
 ) -> Result<RuntimeConstructState> {
     let result = (|| {
         constructor_matches(ctx, selection.constructor)?;
@@ -126,7 +144,7 @@ fn bind_instruction_with_inst_next<'a>(
         // fallthrough from the second pass.
         if parent_inst_next.is_none() && selection.trace.root_bucket.as_ref() == "instruction" {
             let probe_walker =
-                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None)?;
+                CompiledParserWalker::new(compiled, strategy, ctx, selection.clone(), None, depth)?;
             let estimate = Rc::clone(&probe_walker.inst_next_shared);
             let probe = probe_walker.walk()?;
             // Only the estimate differs between the two walks. If no binding
@@ -149,10 +167,18 @@ fn bind_instruction_with_inst_next<'a>(
                 observed: Cell::new(false),
             });
             // owns=false: root_min_length already set to full probe length.
-            return CompiledParserWalker::new(compiled, strategy, ctx, selection, Some(shared))?
-                .walk();
+            return CompiledParserWalker::new(
+                compiled,
+                strategy,
+                ctx,
+                selection,
+                Some(shared),
+                depth,
+            )?
+            .walk();
         }
-        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next)?.walk()
+        CompiledParserWalker::new(compiled, strategy, ctx, selection, parent_inst_next, depth)?
+            .walk()
     })();
 
     match result {
@@ -182,23 +208,20 @@ fn bind_instruction_with_inst_next<'a>(
 
 pub(super) struct PoolGuard {
     handles: Vec<Option<RuntimeHandle>>,
-    operand_absolute_offsets: Vec<Option<usize>>,
-    operand_relative_lengths: Vec<Option<usize>>,
+    operand_extents: Vec<Option<OperandExtent>>,
     handle_reference_bitmap: Vec<bool>,
 }
 
 impl Drop for PoolGuard {
     fn drop(&mut self) {
         let handles = std::mem::take(&mut self.handles);
-        let operand_absolute_offsets = std::mem::take(&mut self.operand_absolute_offsets);
-        let operand_relative_lengths = std::mem::take(&mut self.operand_relative_lengths);
+        let operand_extents = std::mem::take(&mut self.operand_extents);
         let handle_reference_bitmap = std::mem::take(&mut self.handle_reference_bitmap);
 
         DECODE_POOL.with(|pool| {
             pool.borrow_mut().push(DecodePool {
                 handles,
-                operand_absolute_offsets,
-                operand_relative_lengths,
+                operand_extents,
                 handle_reference_bitmap,
             });
         });
@@ -220,6 +243,8 @@ pub(super) struct CompiledParserWalker<'a, 'b> {
     inst_next_shared: Rc<InstNextShared>,
     /// True when this walker owns/updates the shared fallthrough (root only).
     owns_inst_next: bool,
+    /// Constructor nesting depth of this walker; the root instruction is 0.
+    depth: usize,
 }
 
 impl<'a, 'b> std::ops::Deref for CompiledParserWalker<'a, 'b> {
@@ -237,7 +262,9 @@ impl<'a, 'b> std::ops::DerefMut for CompiledParserWalker<'a, 'b> {
 
 pub(super) struct OperandBinding {
     debug_value: Option<BoundOperand>,
-    subtable_state: Option<RuntimeConstructState>,
+    // The final handle already owns a Box. Allocate it when binding the
+    // subtable so other operands do not carry space for an inline state.
+    subtable_state: Option<Box<RuntimeConstructState>>,
     fixed: Option<RuntimeFixedHandle>,
     requires_fixed: bool,
 }
@@ -264,7 +291,7 @@ impl OperandBinding {
     fn guard_only(subtable_state: RuntimeConstructState) -> Self {
         Self {
             debug_value: None,
-            subtable_state: Some(subtable_state),
+            subtable_state: Some(Box::new(subtable_state)),
             fixed: None,
             requires_fixed: false,
         }
@@ -505,6 +532,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         ctx: &'a CompiledInstructionContext<'b>,
         selection: RuntimeSelection<'a>,
         parent_inst_next: Option<Rc<InstNextShared>>,
+        depth: usize,
     ) -> Result<Self> {
         let replace_current_wrapper = constructor_replaces_current(selection.constructor);
         let opcode_len = if replace_current_wrapper {
@@ -543,21 +571,17 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             .with(|pool| pool.borrow_mut().pop())
             .unwrap_or_else(|| DecodePool {
                 handles: Vec::new(),
-                operand_absolute_offsets: Vec::new(),
-                operand_relative_lengths: Vec::new(),
+                operand_extents: Vec::new(),
                 handle_reference_bitmap: Vec::new(),
             });
 
         let target_len = selection.constructor.constructor_template.handles.len();
 
         pool_item.handles.clear();
-        pool_item.handles.resize(target_len, None);
+        pool_item.handles.resize_with(target_len, || None);
 
-        pool_item.operand_absolute_offsets.clear();
-        pool_item.operand_absolute_offsets.resize(target_len, None);
-
-        pool_item.operand_relative_lengths.clear();
-        pool_item.operand_relative_lengths.resize(target_len, None);
+        pool_item.operand_extents.clear();
+        pool_item.operand_extents.resize(target_len, None);
 
         constructor_template_handle_reference_bitmap(
             &selection.constructor.constructor_template,
@@ -598,13 +622,13 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             cursor,
             pool_guard: PoolGuard {
                 handles: pool_item.handles,
-                operand_absolute_offsets: pool_item.operand_absolute_offsets,
-                operand_relative_lengths: pool_item.operand_relative_lengths,
+                operand_extents: pool_item.operand_extents,
                 handle_reference_bitmap: pool_item.handle_reference_bitmap,
             },
             walker: spine::RuntimeParserWalker::new(ctx.cursor, opcode_len),
             inst_next_shared,
             owns_inst_next,
+            depth,
         })
     }
 
@@ -1030,8 +1054,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             operand_relative_length,
             handle_index,
         );
-        self.operand_absolute_offsets[operand_index] = Some(operand_absolute_offset);
-        self.operand_relative_lengths[operand_index] = Some(operand_relative_length);
+        self.operand_extents[operand_index] = Some(OperandExtent {
+            absolute_offset: operand_absolute_offset,
+            relative_length: operand_relative_length,
+        });
         let fixed = match binding.fixed {
             Some(fixed) => fixed,
             None if !binding.requires_fixed => RuntimeFixedHandle::default(),
@@ -1044,7 +1070,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             spec: template.spec,
             fixed,
             debug_value: binding.debug_value,
-            subtable_state: binding.subtable_state.map(Box::new),
+            subtable_state: binding.subtable_state,
         });
         Ok(())
     }
@@ -1071,33 +1097,24 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         }
         let index = usize::try_from(offsetbase)
             .map_err(|_| anyhow!("{role} base {offsetbase} does not fit usize"))?;
-        let offset = (*self
-            .operand_absolute_offsets
+        let extent = self
+            .operand_extents
             .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
-        let length = (*self
-            .operand_relative_lengths
-            .get(index)
-            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?)
-        .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved length"))?;
-        offset
-            .checked_add(length)
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} is out of range"))?
+            .as_ref()
+            .ok_or_else(|| anyhow!("{role} base {offsetbase} has unresolved offset"))?;
+        extent
+            .absolute_offset
+            .checked_add(extent.relative_length)
             .ok_or_else(|| anyhow!("{role} base {offsetbase} end offset overflowed"))
     }
 
     fn max_operand_end(&self) -> Result<usize> {
         let mut max_end = self.ctx.cursor;
-        for (offset, length) in self
-            .operand_absolute_offsets
-            .iter()
-            .zip(self.operand_relative_lengths.iter())
-        {
-            let (Some(offset), Some(length)) = (*offset, *length) else {
-                continue;
-            };
-            let end = offset
-                .checked_add(length)
+        for extent in self.operand_extents.iter().flatten() {
+            let end = extent
+                .absolute_offset
+                .checked_add(extent.relative_length)
                 .ok_or_else(|| anyhow!("operand end offset overflowed"))?;
             max_end = max_end.max(end);
         }
@@ -1217,7 +1234,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let selector = self.eval_pattern_expression(expr)?;
+                let (selector, _) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "varnode list",
+                )?;
                 let selector_index = checked_selector_index_i64(selector, "varnode list")?;
                 let display_index = checked_selector_display_index(selector_index, "varnode list")?;
                 let entry = entries.get(selector_index).ok_or_else(|| {
@@ -1287,7 +1308,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let selector = self.eval_pattern_expression(expr)?;
+                let (selector, encoded_size) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "value map",
+                )?;
                 let selector_index = checked_selector_index_i64(selector, "value map")?;
                 let value = values.get(selector_index).copied().ok_or_else(|| {
                     anyhow!(
@@ -1300,10 +1325,10 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
                         value: value_bits,
-                        encoded_size: 0,
+                        encoded_size,
                         signed: value < 0,
                     },
-                    fixed_handle_for_const_value(value_bits, 0),
+                    fixed_handle_for_const_value(value_bits, encoded_size),
                 ))
             }
             CompiledOperandSpec::SlaFixedVarnode { varnode } => Ok(OperandBinding::with_fixed(
@@ -1319,36 +1344,11 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 reloffset: _,
                 offsetbase: _,
             } => {
-                let mut encoded_size = 0;
-                let value = if let CompiledPatternExpression::TokenField {
-                    big_endian,
-                    sign_bit,
-                    bit_start,
-                    bit_end,
-                    byte_start,
-                    byte_end,
-                    shift,
-                } = expr
-                {
-                    let token_base = self.token_base_for_sla_field(operand_absolute_offset);
-                    let value = u64_to_i64_bits(read_sla_token_field_at(
-                        self.ctx,
-                        token_base,
-                        *big_endian,
-                        *sign_bit,
-                        *bit_start,
-                        *bit_end,
-                        *byte_start,
-                        *byte_end,
-                        *shift,
-                    )?);
-                    encoded_size =
-                        checked_sla_field_encoded_size(*byte_start, *byte_end, "pattern token")?;
-                    self.advance_cursor_past_sla_field(token_base, encoded_size)?;
-                    value
-                } else {
-                    self.eval_pattern_expression(expr)?
-                };
+                let (value, encoded_size) = self.eval_operand_pattern_expression(
+                    expr,
+                    operand_absolute_offset,
+                    "pattern token",
+                )?;
                 let value_bits = i64_to_u64_bits(value);
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::Immediate {
@@ -1450,7 +1450,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 Ok(OperandBinding {
                     debug_value: value,
                     fixed: Some(exported.fixed.clone()),
-                    subtable_state: Some(sub_state),
+                    subtable_state: Some(Box::new(sub_state)),
                     requires_fixed: true,
                 })
             }
@@ -1581,7 +1581,34 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         Ok(token_base == self.ctx.cursor && token_end <= constructor_end)
     }
 
+    fn eval_operand_pattern_expression(
+        &mut self,
+        expr: &CompiledPatternExpression,
+        operand_absolute_offset: usize,
+        _role: &str,
+    ) -> Result<(i64, u32)> {
+        let token_base = self.token_base_for_sla_field(operand_absolute_offset);
+        let value = self.eval_pattern_expression_at(expr, token_base)?;
+        let encoded_size = if let Some(span) = pattern_expression_primary_sla_token_span(0, expr)? {
+            let encoded_size = span.byte_width()?;
+            let span_end = span.relative_end()?;
+            self.advance_cursor_past_sla_field(token_base, span_end)?;
+            encoded_size
+        } else {
+            0
+        };
+        Ok((value, encoded_size))
+    }
+
     fn eval_pattern_expression(&mut self, expr: &CompiledPatternExpression) -> Result<i64> {
+        self.eval_pattern_expression_at(expr, self.ctx.cursor)
+    }
+
+    fn eval_pattern_expression_at(
+        &mut self,
+        expr: &CompiledPatternExpression,
+        token_base: usize,
+    ) -> Result<i64> {
         match expr {
             CompiledPatternExpression::Constant(value) => Ok(*value),
             CompiledPatternExpression::InstStart => {
@@ -1603,8 +1630,9 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 byte_start,
                 byte_end,
                 shift,
-            } => Ok(u64_to_i64_bits(read_sla_token_field(
+            } => Ok(u64_to_i64_bits(read_sla_token_field_at(
                 self.ctx,
+                token_base,
                 *big_endian,
                 *sign_bit,
                 *bit_start,
@@ -1636,42 +1664,44 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.eval_operand_value_expression(*index)
             }
             CompiledPatternExpression::Add(lhs, rhs) => checked_pattern_add(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::Sub(lhs, rhs) => checked_pattern_sub(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::Mul(lhs, rhs) => Ok(wrapping_pattern_mul(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             )),
             CompiledPatternExpression::Div(lhs, rhs) => {
-                let rhs = self.eval_pattern_expression(rhs)?;
-                checked_pattern_div(self.eval_pattern_expression(lhs)?, rhs)
+                let rhs = self.eval_pattern_expression_at(rhs, token_base)?;
+                checked_pattern_div(self.eval_pattern_expression_at(lhs, token_base)?, rhs)
             }
             CompiledPatternExpression::LeftShift(lhs, rhs) => checked_pattern_left_shift(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
             CompiledPatternExpression::RightShift(lhs, rhs) => checked_pattern_right_shift(
-                self.eval_pattern_expression(lhs)?,
-                self.eval_pattern_expression(rhs)?,
+                self.eval_pattern_expression_at(lhs, token_base)?,
+                self.eval_pattern_expression_at(rhs, token_base)?,
             ),
-            CompiledPatternExpression::And(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? & self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Or(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? | self.eval_pattern_expression(rhs)?)
-            }
-            CompiledPatternExpression::Xor(lhs, rhs) => {
-                Ok(self.eval_pattern_expression(lhs)? ^ self.eval_pattern_expression(rhs)?)
-            }
+            CompiledPatternExpression::And(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                & self.eval_pattern_expression_at(rhs, token_base)?),
+            CompiledPatternExpression::Or(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                | self.eval_pattern_expression_at(rhs, token_base)?),
+            CompiledPatternExpression::Xor(lhs, rhs) => Ok(self
+                .eval_pattern_expression_at(lhs, token_base)?
+                ^ self.eval_pattern_expression_at(rhs, token_base)?),
             CompiledPatternExpression::Negate(inner) => {
-                checked_pattern_negate(self.eval_pattern_expression(inner)?)
+                checked_pattern_negate(self.eval_pattern_expression_at(inner, token_base)?)
             }
-            CompiledPatternExpression::Not(inner) => Ok(!self.eval_pattern_expression(inner)?),
+            CompiledPatternExpression::Not(inner) => {
+                Ok(!self.eval_pattern_expression_at(inner, token_base)?)
+            }
         }
     }
 
@@ -1734,30 +1764,8 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             CompiledOperandSpec::SlaVarnodeListExpression { expr, .. }
             | CompiledOperandSpec::SlaValueMapExpression { expr, .. }
             | CompiledOperandSpec::SlaPatternExpression { expr, .. } => {
-                if let CompiledPatternExpression::TokenField {
-                    big_endian,
-                    sign_bit,
-                    bit_start,
-                    bit_end,
-                    byte_start,
-                    byte_end,
-                    shift,
-                } = expr
-                {
-                    Ok(u64_to_i64_bits(read_sla_token_field_at(
-                        self.ctx,
-                        operand_absolute_offset,
-                        *big_endian,
-                        *sign_bit,
-                        *bit_start,
-                        *bit_end,
-                        *byte_start,
-                        *byte_end,
-                        *shift,
-                    )?))
-                } else {
-                    self.eval_pattern_expression(expr)
-                }
+                let token_base = self.token_base_for_sla_field(operand_absolute_offset);
+                self.eval_pattern_expression_at(expr, token_base)
             }
             CompiledOperandSpec::ContextFieldExtraction {
                 bit_offset,
@@ -1805,6 +1813,12 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
         operand_absolute_offset: Option<usize>,
     ) -> Result<RuntimeConstructState> {
         let _guard = WalkStackGuard::new(WalkFrame::Subtable(table_name.into()));
+        let depth = self.depth + 1;
+        if depth > MAX_PARSE_DEPTH {
+            bail!(
+                "SLEIGH exceeded maximum parse depth ({MAX_PARSE_DEPTH}) descending into subtable {table_name}"
+            );
+        }
         let mut sub_ctx = (*self.ctx).clone();
         sub_ctx.cursor = if let Some(offset) = operand_absolute_offset {
             offset
@@ -1868,6 +1882,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
             &sub_ctx,
             selection,
             Some(Rc::clone(&self.inst_next_shared)),
+            depth,
         )
     }
 }
@@ -2082,7 +2097,8 @@ mod sleigh_parity_gaps_tests {
             .expect("selected instruction");
         let strategy = RuntimeDecodeStrategy::for_table();
         let probe_walker =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None).unwrap();
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), None, 0)
+                .unwrap();
         let estimate = Rc::clone(&probe_walker.inst_next_shared);
         let probe = probe_walker.walk().expect("original probe");
         let observed = estimate.observed.get();
@@ -2098,7 +2114,7 @@ mod sleigh_parity_gaps_tests {
             observed: Cell::new(false),
         });
         let expected =
-            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared))
+            CompiledParserWalker::new(compiled, strategy, &ctx, selection.clone(), Some(shared), 0)
                 .unwrap()
                 .walk()
                 .expect("original second walk");
@@ -2238,6 +2254,7 @@ mod binding_address_witness_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let (value, witness) = super::super::binding_address_use::capture(|| {
@@ -2384,10 +2401,9 @@ mod operand_expression_borrow_tests {
 
     fn snapshot(walker: &CompiledParserWalker<'_, '_>) -> String {
         format!(
-            "{:?} {:?} {:?} {} {:x} {:x} {:?}",
+            "{:?} {:?} {} {:x} {:x} {:?}",
             walker.handles,
-            walker.operand_absolute_offsets,
-            walker.operand_relative_lengths,
+            walker.operand_extents,
             walker.cursor,
             walker.context_register,
             walker.context_known_mask,
@@ -2409,6 +2425,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection.clone(),
             None,
+            0,
         )
         .unwrap();
         let mut owned = CompiledParserWalker::new(
@@ -2417,6 +2434,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         for index in 0..=count {
@@ -2453,6 +2471,7 @@ mod operand_expression_borrow_tests {
             &ctx,
             selection,
             None,
+            0,
         )
         .unwrap();
         let spec = walker.operand_spec_for_expression(0).unwrap();
@@ -2467,6 +2486,170 @@ mod operand_expression_borrow_tests {
             error.to_string(),
             format!("missing operand {} for pattern expression", usize::MAX)
         );
+    }
+
+    #[test]
+    fn compound_sla_pattern_expression_reads_at_operand_offset_sets_size_and_advances_cursor() {
+        use crate::compiler::{
+            CompiledConstructTplKind, CompiledConstructorTemplate, CompiledDisplayTemplate,
+            CompiledHandleTemplate, CompiledOperandDecodeStep, CompiledSlaDecodeStatus,
+            CompiledTemplateSource,
+        };
+        use crate::runtime::spine::RuntimeMatchTrace;
+
+        let compiled = crate::compiler::compile_x86_64_frontend().expect("compile x86-64");
+        let compound_expr = CompiledPatternExpression::Add(
+            Box::new(CompiledPatternExpression::Constant(0x10)),
+            Box::new(CompiledPatternExpression::LeftShift(
+                Box::new(CompiledPatternExpression::TokenField {
+                    big_endian: false,
+                    sign_bit: false,
+                    bit_start: 0,
+                    bit_end: 7,
+                    byte_start: 0,
+                    byte_end: 0,
+                    shift: 0,
+                }),
+                Box::new(CompiledPatternExpression::Constant(2)),
+            )),
+        );
+        let value_map_expr = CompiledPatternExpression::Add(
+            Box::new(CompiledPatternExpression::TokenField {
+                big_endian: false,
+                sign_bit: false,
+                bit_start: 0,
+                bit_end: 7,
+                byte_start: 0,
+                byte_end: 0,
+                shift: 0,
+            }),
+            Box::new(CompiledPatternExpression::Constant(1)),
+        );
+        let constructor = std::sync::Arc::new(CompiledExecutableConstructor {
+            constructor_id: 9999,
+            sla_identity: None,
+            sla_decode_status: CompiledSlaDecodeStatus::Decoded,
+            mnemonic: "test_compound".to_string(),
+            source: "instruction".to_string(),
+            display: String::new(),
+            display_template: std::sync::Arc::new(CompiledDisplayTemplate {
+                constructor_hash: 0,
+                pieces: Vec::new(),
+                first_whitespace: None,
+                flowthru_operand_index: None,
+                display: String::new(),
+            }),
+            signature_hash: 0,
+            minimum_length: 1,
+            context_changes: Vec::new(),
+            context_commits: Vec::new(),
+            matcher: CompiledPatternMatcher::ExactBytes(vec![0xaa]),
+            opsize_variants: Vec::new(),
+            operand_specs: Vec::new(),
+            display_operands: std::sync::Arc::new(Vec::new()),
+            construct_tpl_kind: CompiledConstructTplKind::Generic,
+            constructor_template: std::sync::Arc::new(CompiledConstructorTemplate {
+                handles: vec![
+                    CompiledHandleTemplate {
+                        operand_index: 0,
+                        spec: std::sync::Arc::new(CompiledOperandSpec::SlaPatternExpression {
+                            expr: compound_expr.clone(),
+                            reloffset: 2,
+                            offsetbase: -1,
+                        }),
+                        minimum_length: 0,
+                    },
+                    CompiledHandleTemplate {
+                        operand_index: 1,
+                        spec: std::sync::Arc::new(CompiledOperandSpec::SlaValueMapExpression {
+                            expr: value_map_expr,
+                            values: vec![100, 200, 300, 400],
+                            reloffset: 3,
+                            offsetbase: -1,
+                        }),
+                        minimum_length: 0,
+                    },
+                ],
+                decode_steps: vec![
+                    CompiledOperandDecodeStep::DecodeOperand { operand_index: 0 },
+                    CompiledOperandDecodeStep::DecodeOperand { operand_index: 1 },
+                ],
+                num_labels: 0,
+                result: None,
+                ops: Vec::new(),
+                template_source: CompiledTemplateSource::SpecDerived,
+            }),
+            named_templates: Vec::new(),
+            runtime_ready: true,
+            unsupported_template_kind: None,
+        });
+        let selection = RuntimeSelection {
+            constructor: &constructor,
+            constructor_index: 0,
+            subtable_id: 0,
+            constructor_id: 9999,
+            constructor_slot: 0,
+            trace: RuntimeMatchTrace {
+                root_bucket: "instruction".into(),
+                probes: crate::runtime::spine::RuntimeMatchProbes::default(),
+                leaf_constructor_indexes: vec![0],
+                matched_leaf_pattern: Some(std::sync::Arc::new(
+                    crate::compiler::CompiledDisjointPattern::Instruction(
+                        crate::compiler::CompiledPatternBlock {
+                            offset: 0,
+                            nonzero_size: 1,
+                            mask_words: vec![0xff],
+                            value_words: vec![0xaa],
+                        },
+                    ),
+                )),
+            },
+        };
+        // Byte 0 is opcode 0xaa (at ctx.cursor=0); byte 2 is 0x07; byte 3 is 0x02 (selector = 2 + 1 = 3).
+        let bytes = [0xaa, 0x11, 0x07, 0x02];
+        let ctx = CompiledInstructionContext::parse(&bytes, 0x1000).unwrap();
+
+        let mut walker = CompiledParserWalker::new(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection.clone(),
+            None,
+            0,
+        )
+        .unwrap();
+        // OperandValue evaluation must also read operand 0 at reloffset=2 (0x07), not ctx.cursor=0 (0xaa).
+        let via_operand_value = walker
+            .eval_pattern_expression(&CompiledPatternExpression::OperandValue { index: 0 })
+            .unwrap();
+        assert_eq!(via_operand_value, 0x10 + (0x07 << 2));
+
+        let state = bind_instruction(
+            &compiled,
+            RuntimeDecodeStrategy::for_table(),
+            &ctx,
+            selection,
+        )
+        .expect("bind compound expression operands");
+        assert_eq!(state.length, 4, "cursor must advance past reloffset 3 + 1");
+        assert!(matches!(
+            state.operands[0],
+            BoundOperand::Immediate {
+                value: 0x2c,
+                encoded_size: 1,
+                signed: false,
+            }
+        ));
+        assert_eq!(state.handles[0].fixed.size, 1);
+        assert_eq!(state.handles[0].fixed.offset_size, 1);
+        assert!(matches!(
+            state.operands[1],
+            BoundOperand::Immediate {
+                value: 400,
+                encoded_size: 1,
+                signed: false,
+            }
+        ));
     }
 
     #[test]

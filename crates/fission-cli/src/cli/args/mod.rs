@@ -14,7 +14,6 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
 
-/// Parse hexadecimal address string (supports 0x prefix)
 /// `ADDR:SIZE`: a hex address and a decimal byte count.
 pub fn parse_memory_range(s: &str) -> Result<(u64, usize), String> {
     let (address, size) = s
@@ -30,6 +29,7 @@ pub fn parse_memory_range(s: &str) -> Result<(u64, usize), String> {
     Ok((address, size))
 }
 
+/// Parse hexadecimal address string (supports 0x prefix)
 pub fn parse_hex_address(s: &str) -> Result<u64, String> {
     let s = s.trim_start_matches("0x").trim_start_matches("0X");
     u64::from_str_radix(s, 16).map_err(|e| format!("Invalid hex address: {}", e))
@@ -147,6 +147,9 @@ pub struct SchemaArgs {
     /// Print the registry of stable error codes and their exit-code kinds
     #[arg(long = "error-codes", conflicts_with = "command")]
     pub error_codes: bool,
+    /// Output in JSON format (accepted for consistency; `schema` always emits JSON)
+    #[arg(short, long)]
+    pub json: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

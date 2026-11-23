@@ -29,10 +29,10 @@ FUNCTION_BUDGET = 5000
 THREADS = (1, 4, 4, 4)
 
 
-def sample(entries: list[dict]) -> list[dict]:
+def sample(entries: list[dict], budget: int = FUNCTION_BUDGET) -> list[dict]:
     chosen, total = [], 0
     for entry in sorted(entries, key=lambda e: e["sha256"]):
-        if total >= FUNCTION_BUDGET:
+        if total >= budget:
             break
         chosen.append(entry)
         total += len(entry["functions"])
