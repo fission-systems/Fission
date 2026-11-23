@@ -53,12 +53,16 @@ impl AddressCfgSnapshot {
                 .ops
                 .iter()
                 .any(|op| matches!(op.opcode, PcodeOpcode::CBranch));
+            let has_branch_ind = block
+                .ops
+                .iter()
+                .any(|op| matches!(op.opcode, PcodeOpcode::BranchInd));
             let has_return = block
                 .ops
                 .iter()
                 .any(|op| matches!(op.opcode, PcodeOpcode::Return));
 
-            if has_return {
+            if has_return || has_branch_ind {
                 snapshot.exit_blocks.push(block.start_address);
             }
 
@@ -90,15 +94,10 @@ impl AddressCfgSnapshot {
                             });
                         }
                     }
-                    PcodeOpcode::Call | PcodeOpcode::CallInd => {
-                        if !has_return && let Some(next) = func.blocks.get(index + 1) {
-                            snapshot.edges.push(AddressEdge {
-                                from: block.start_address,
-                                to: next.start_address,
-                            });
-                        }
-                    }
-                    PcodeOpcode::Return | PcodeOpcode::BranchInd => {}
+                    PcodeOpcode::Call
+                    | PcodeOpcode::CallInd
+                    | PcodeOpcode::Return
+                    | PcodeOpcode::BranchInd => {}
                     _ => {}
                 }
             }
@@ -106,6 +105,7 @@ impl AddressCfgSnapshot {
             if !has_branch
                 && !has_return
                 && !has_cbranch
+                && !has_branch_ind
                 && let Some(next) = func.blocks.get(index + 1)
             {
                 snapshot.edges.push(AddressEdge {
@@ -169,8 +169,7 @@ impl AddressCfgSnapshot {
 fn branch_target(op: &crate::PcodeOp) -> Option<u64> {
     op.inputs
         .first()
-        .filter(|input| input.is_constant)
-        .map(|input| input.offset)
+        .and_then(crate::block_cfg::branch_target_address)
 }
 
 #[cfg(test)]
@@ -310,5 +309,80 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn address_cfg_snapshot_handles_call_branch_branchind_and_ram_targets() {
+        let ram_target = Varnode {
+            space_id: 3,
+            offset: 0x1020,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let reg_target = Varnode {
+            space_id: 4,
+            offset: 0,
+            size: 8,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![],
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Call,
+                            address: 0x1000,
+                            output: None,
+                            inputs: vec![const_vn(0x2000)],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x1005,
+                            output: None,
+                            inputs: vec![ram_target],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 2,
+                        opcode: PcodeOpcode::BranchInd,
+                        address: 0x1010,
+                        output: None,
+                        inputs: vec![reg_target],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![],
+                    ops: vec![ret_op(0x1020)],
+                },
+            ],
+        };
+
+        let snapshot = AddressCfgSnapshot::from_pcode_cfg_builder(&func).expect("cfg");
+        assert_eq!(
+            snapshot.edges,
+            vec![AddressEdge {
+                from: 0x1000,
+                to: 0x1020,
+            }],
+            "Call+Branch must jump only to Branch target; BranchInd must not fall through"
+        );
+        assert_eq!(snapshot.exit_blocks, vec![0x1010, 0x1020]);
     }
 }

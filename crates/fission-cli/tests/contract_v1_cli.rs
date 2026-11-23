@@ -203,3 +203,56 @@ fn name_and_addr_together_are_a_usage_error() {
     let output = cli(&["decomp", &fixture, "--name", "dispatch", "--addr", "0x1000"]);
     assert_eq!(output.status.code(), Some(2));
 }
+
+#[test]
+fn schema_works_under_contract_v1_with_or_without_json_flag() {
+    for args in [
+        &["--contract", "v1", "schema"][..],
+        &["--contract", "v1", "schema", "--json"][..],
+        &["--contract", "v1", "schema", "--list"][..],
+        &["--contract", "v1", "schema", "--error-codes"][..],
+    ] {
+        let output = cli(args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "args={args:?} stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let body = envelope(&output);
+        assert_eq!(body["ok"], true, "{body}");
+        assert_eq!(body["command"], "schema", "{body}");
+        assert!(body["data"].is_object(), "{body}");
+    }
+
+    let unknown = cli(&["--contract", "v1", "schema", "no-such-command"]);
+    assert_eq!(unknown.status.code(), Some(1));
+    let body = envelope(&unknown);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["command"], "schema");
+}
+
+#[test]
+fn missing_addresses_file_is_input_not_found_under_contract_v1() {
+    let fixture = switch_fixture();
+    let missing = std::env::temp_dir().join(format!(
+        "fission-contract-missing-addrs-{}.txt",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&missing);
+    let output = cli(&[
+        "--contract",
+        "v1",
+        "decomp",
+        &fixture,
+        "--addresses-file",
+        missing.to_str().expect("utf-8 path"),
+        "--json",
+    ]);
+    assert_eq!(output.status.code(), Some(3));
+    let body = envelope(&output);
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["command"], "decomp");
+    assert_eq!(body["error"]["code"], "input_not_found");
+    assert_eq!(body["error"]["kind"], "input");
+}

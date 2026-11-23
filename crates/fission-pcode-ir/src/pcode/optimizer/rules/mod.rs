@@ -8,13 +8,79 @@
 //! - Constant folding for all operation types
 
 use super::passes::def_use::{DEFAULT_VARNODE_SIZE, DefUseTracker, OpRef};
-use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use crate::pcode::{
+    PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode, truncate_to_varnode_width,
+};
 
 mod dead_bit;
 
 /// Container for all optimization rules
 pub struct OptimizationRules {
     // Can add statistics or configuration here later
+}
+
+fn is_intra_block_folding_boundary(opcode: PcodeOpcode) -> bool {
+    matches!(
+        opcode,
+        PcodeOpcode::Branch
+            | PcodeOpcode::CBranch
+            | PcodeOpcode::BranchInd
+            | PcodeOpcode::Return
+            | PcodeOpcode::Call
+            | PcodeOpcode::CallInd
+            | PcodeOpcode::CallOther
+    )
+}
+
+fn find_safe_intra_block_def<'a>(
+    func: &'a PcodeFunction,
+    use_ref: OpRef,
+    target: &Varnode,
+) -> Option<(usize, &'a PcodeOp)> {
+    if target.is_constant {
+        return None;
+    }
+    let block = func.blocks.get(use_ref.block_idx)?;
+    for idx in (0..use_ref.op_idx).rev() {
+        let candidate = &block.ops[idx];
+        if is_intra_block_folding_boundary(candidate.opcode) {
+            return None;
+        }
+        if let Some(out) = &candidate.output {
+            if out == target {
+                return Some((idx, candidate));
+            }
+            if out.overlaps(target) {
+                return None;
+            }
+        }
+    }
+    None
+}
+
+fn inputs_unclobbered_between(
+    block: &PcodeBasicBlock,
+    def_idx: usize,
+    use_idx: usize,
+    def_op: &PcodeOp,
+    operands: &[&Varnode],
+) -> bool {
+    if let Some(def_out) = &def_op.output
+        && operands.iter().any(|operand| def_out.overlaps(operand))
+    {
+        return false;
+    }
+    for op in &block.ops[(def_idx + 1)..use_idx] {
+        if is_intra_block_folding_boundary(op.opcode) {
+            return false;
+        }
+        if let Some(out) = &op.output
+            && operands.iter().any(|operand| out.overlaps(operand))
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// A constant read at its own width, as an unsigned number. A narrow constant
@@ -53,10 +119,45 @@ impl OptimizationRules {
         Self {}
     }
 
+    /// Try to optimize with def-use tracking at a specific operation location (Phase 2 rules)
+    pub fn try_optimize_with_tracker_at(
+        &self,
+        op: &PcodeOp,
+        use_ref: OpRef,
+        tracker: &DefUseTracker,
+        func: &PcodeFunction,
+    ) -> Option<PcodeOp> {
+        self.try_optimize_with_tracker_inner(op, Some(use_ref), tracker, func)
+    }
+
     /// Try to optimize with def-use tracking (Phase 2 rules)
     pub fn try_optimize_with_tracker(
         &self,
         op: &PcodeOp,
+        tracker: &DefUseTracker,
+        func: &PcodeFunction,
+    ) -> Option<PcodeOp> {
+        let mut matched: Option<OpRef> = None;
+        let mut ambiguous = false;
+        'outer: for (block_idx, block) in func.blocks.iter().enumerate() {
+            for (op_idx, candidate) in block.ops.iter().enumerate() {
+                if candidate == op {
+                    if matched.is_some() {
+                        ambiguous = true;
+                        break 'outer;
+                    }
+                    matched = Some(OpRef { block_idx, op_idx });
+                }
+            }
+        }
+        let use_ref = if ambiguous { None } else { matched };
+        self.try_optimize_with_tracker_inner(op, use_ref, tracker, func)
+    }
+
+    fn try_optimize_with_tracker_inner(
+        &self,
+        op: &PcodeOp,
+        use_ref: Option<OpRef>,
         tracker: &DefUseTracker,
         func: &PcodeFunction,
     ) -> Option<PcodeOp> {
@@ -70,22 +171,20 @@ impl OptimizationRules {
         if let Some(result) = self.try_and_mask(op, tracker) {
             return Some(result);
         }
-        if let Some(result) = self.try_ptr_arith(op, tracker, func) {
-            return Some(result);
-        }
-        if let Some(result) = self.try_pull_sub_indirect(op, tracker, func) {
-            return Some(result);
-        }
-        if let Some(result) = self.try_indirect_collapse(op, tracker, func) {
-            return Some(result);
+        if let Some(use_ref) = use_ref {
+            if let Some(result) = self.try_ptr_arith(op, use_ref, func) {
+                return Some(result);
+            }
+            if let Some(result) = self.try_pull_sub_indirect(op, use_ref, func) {
+                return Some(result);
+            }
+            if let Some(result) = self.try_indirect_collapse(op, use_ref, func) {
+                return Some(result);
+            }
         }
 
         // Fall back to basic rules
         self.try_optimize(op)
-    }
-
-    fn get_op<'a>(&self, func: &'a PcodeFunction, op_ref: OpRef) -> Option<&'a PcodeOp> {
-        func.blocks.get(op_ref.block_idx)?.ops.get(op_ref.op_idx)
     }
 
     /// Try to optimize a single Pcode operation (Phase 1 rules)
@@ -153,7 +252,7 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val ^ op.inputs[1].constant_val;
+            let result = (unsigned_value(&op.inputs[0]) ^ unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -185,7 +284,7 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val & op.inputs[1].constant_val;
+            let result = (unsigned_value(&op.inputs[0]) & unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -228,7 +327,7 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0].constant_val | op.inputs[1].constant_val;
+            let result = (unsigned_value(&op.inputs[0]) | unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -252,9 +351,8 @@ impl OptimizationRules {
 
         // Constant folding: const + const
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0]
-                .constant_val
-                .wrapping_add(op.inputs[1].constant_val);
+            let result =
+                unsigned_value(&op.inputs[0]).wrapping_add(unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -278,9 +376,8 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0]
-                .constant_val
-                .wrapping_sub(op.inputs[1].constant_val);
+            let result =
+                unsigned_value(&op.inputs[0]).wrapping_sub(unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -307,9 +404,8 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0]
-                .constant_val
-                .wrapping_mul(op.inputs[1].constant_val);
+            let result =
+                unsigned_value(&op.inputs[0]).wrapping_mul(unsigned_value(&op.inputs[1])) as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -326,12 +422,20 @@ impl OptimizationRules {
             return Some(self.make_copy(op, &op.inputs[0]));
         }
 
-        // Constant folding
-        if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
+        // Constant folding (guard zero divisor after masking to varnode width)
+        if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = if op.opcode == PcodeOpcode::IntDiv {
-                unsigned_value(&op.inputs[0]).wrapping_div(unsigned_value(&op.inputs[1])) as i64
+                let rhs = unsigned_value(&op.inputs[1]);
+                if rhs == 0 {
+                    return None;
+                }
+                unsigned_value(&op.inputs[0]).wrapping_div(rhs) as i64
             } else {
-                signed_value(&op.inputs[0]).wrapping_div(signed_value(&op.inputs[1]))
+                let rhs = signed_value(&op.inputs[1]);
+                if rhs == 0 {
+                    return None;
+                }
+                signed_value(&op.inputs[0]).wrapping_div(rhs)
             };
             return Some(self.make_constant(op, result));
         }
@@ -349,12 +453,20 @@ impl OptimizationRules {
             return Some(self.make_constant(op, 0));
         }
 
-        // Constant folding
-        if op.inputs[0].is_constant && op.inputs[1].is_constant && !op.inputs[1].is_zero() {
+        // Constant folding (guard zero divisor after masking to varnode width)
+        if op.inputs[0].is_constant && op.inputs[1].is_constant {
             let result = if op.opcode == PcodeOpcode::IntRem {
-                unsigned_value(&op.inputs[0]).wrapping_rem(unsigned_value(&op.inputs[1])) as i64
+                let rhs = unsigned_value(&op.inputs[1]);
+                if rhs == 0 {
+                    return None;
+                }
+                unsigned_value(&op.inputs[0]).wrapping_rem(rhs) as i64
             } else {
-                signed_value(&op.inputs[0]).wrapping_rem(signed_value(&op.inputs[1]))
+                let rhs = signed_value(&op.inputs[1]);
+                if rhs == 0 {
+                    return None;
+                }
+                signed_value(&op.inputs[0]).wrapping_rem(rhs)
             };
             return Some(self.make_constant(op, result));
         }
@@ -376,9 +488,11 @@ impl OptimizationRules {
 
         // Constant folding
         if op.inputs[0].is_constant && op.inputs[1].is_constant {
-            let result = op.inputs[0]
-                .constant_val
-                .wrapping_shl(op.inputs[1].constant_val as u32);
+            let shift = unsigned_value(&op.inputs[1]);
+            let result = u32::try_from(shift)
+                .ok()
+                .map_or(0, |s| safe_shl_u64(unsigned_value(&op.inputs[0]), s))
+                as i64;
             return Some(self.make_constant(op, result));
         }
 
@@ -667,20 +781,21 @@ impl OptimizationRules {
         }
     }
 
-    /// Create a constant load operation
+    /// Create a constant load operation, masking the constant value to the target width.
     fn make_constant(&self, original: &PcodeOp, value: i64) -> PcodeOp {
         let size = if let Some(out) = &original.output {
             out.size
         } else {
             4
         };
+        let truncated = truncate_to_varnode_width(value as u64, size) as i64;
 
         PcodeOp {
             seq_num: original.seq_num,
             opcode: PcodeOpcode::Copy,
             address: original.address,
             output: original.output.clone(),
-            inputs: vec![Varnode::constant(value, size)],
+            inputs: vec![Varnode::constant(truncated, size)],
             asm_mnemonic: original.asm_mnemonic.clone(),
         }
     }
@@ -770,8 +885,8 @@ impl OptimizationRules {
         // Check consume mask
         if let Some(out) = &op.output {
             let consume = tracker.get_consume_mask(out);
-            // If no consumed bits would be affected
-            if (and_mask & consume) == 0 {
+            // If `out` is live/consumed, fold when no consumed bits can be nonzero.
+            if consume != 0 && (and_mask & consume) == 0 {
                 return Some(self.make_constant(op, 0));
             }
         }
@@ -789,12 +904,7 @@ impl OptimizationRules {
 
     /// RulePtrArith: Optimize pointer arithmetic
     /// (A + c1) + c2 => A + (c1 + c2)
-    fn try_ptr_arith(
-        &self,
-        op: &PcodeOp,
-        tracker: &DefUseTracker,
-        func: &PcodeFunction,
-    ) -> Option<PcodeOp> {
+    fn try_ptr_arith(&self, op: &PcodeOp, use_ref: OpRef, func: &PcodeFunction) -> Option<PcodeOp> {
         if op.opcode != PcodeOpcode::IntAdd || op.inputs.len() != 2 {
             return None;
         }
@@ -808,48 +918,45 @@ impl OptimizationRules {
             return None;
         };
 
-        let c2 = op.inputs[const_idx].constant_val;
+        let const_size = op.inputs[const_idx].size;
+        let c2 = unsigned_value(&op.inputs[const_idx]);
         let var_input = &op.inputs[var_idx];
 
-        // Find definition of var_input
-        if let Some(def_ref) = tracker.get_def(var_input) {
-            if let Some(def_op) = self.get_op(func, def_ref) {
-                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
-                    // Check if def_op has a constant input
-                    if let Some(c1_idx) = def_op.inputs.iter().position(|v| v.is_constant) {
-                        let c1 = def_op.inputs[c1_idx].constant_val;
-                        let base_idx = 1 - c1_idx;
-                        let base = &def_op.inputs[base_idx];
+        let (def_idx, def_op) = find_safe_intra_block_def(func, use_ref, var_input)?;
+        if def_op.opcode != PcodeOpcode::IntAdd || def_op.inputs.len() != 2 {
+            return None;
+        }
+        let c1_idx = def_op.inputs.iter().position(|v| v.is_constant)?;
+        if def_op.inputs[c1_idx].size != const_size {
+            return None;
+        }
+        let c1 = unsigned_value(&def_op.inputs[c1_idx]);
+        let base_idx = 1 - c1_idx;
+        let base = &def_op.inputs[base_idx];
 
-                        // New constant: c1 + c2
-                        let new_c = c1.wrapping_add(c2);
-
-                        let new_inputs = vec![
-                            base.clone(),
-                            Varnode::constant(new_c, op.inputs[const_idx].size),
-                        ];
-
-                        return Some(PcodeOp {
-                            seq_num: op.seq_num,
-                            opcode: PcodeOpcode::IntAdd,
-                            address: op.address,
-                            output: op.output.clone(),
-                            inputs: new_inputs,
-                            asm_mnemonic: op.asm_mnemonic.clone(),
-                        });
-                    }
-                }
-            }
+        let block = func.blocks.get(use_ref.block_idx)?;
+        if !inputs_unclobbered_between(block, def_idx, use_ref.op_idx, def_op, &[base]) {
+            return None;
         }
 
-        None
+        let new_c = truncate_to_varnode_width(c1.wrapping_add(c2), const_size) as i64;
+        let new_inputs = vec![base.clone(), Varnode::constant(new_c, const_size)];
+
+        Some(PcodeOp {
+            seq_num: op.seq_num,
+            opcode: PcodeOpcode::IntAdd,
+            address: op.address,
+            output: op.output.clone(),
+            inputs: new_inputs,
+            asm_mnemonic: op.asm_mnemonic.clone(),
+        })
     }
 
     /// RulePullSubIndirect: Optimize (ptr + off) - ptr => off
     fn try_pull_sub_indirect(
         &self,
         op: &PcodeOp,
-        tracker: &DefUseTracker,
+        use_ref: OpRef,
         func: &PcodeFunction,
     ) -> Option<PcodeOp> {
         if op.opcode != PcodeOpcode::IntSub || op.inputs.len() != 2 {
@@ -859,23 +966,25 @@ impl OptimizationRules {
         let ptr_plus_off = &op.inputs[0];
         let ptr = &op.inputs[1];
 
-        // Check if ptr_plus_off is defined by ADD
-        if let Some(def_ref) = tracker.get_def(ptr_plus_off) {
-            if let Some(def_op) = self.get_op(func, def_ref) {
-                if def_op.opcode == PcodeOpcode::IntAdd && def_op.inputs.len() == 2 {
-                    // Check if one of the inputs matches ptr
-                    if def_op.inputs[0] == *ptr {
-                        // (ptr + off) - ptr => off
-                        return Some(self.make_copy(op, &def_op.inputs[1]));
-                    } else if def_op.inputs[1] == *ptr {
-                        // (off + ptr) - ptr => off
-                        return Some(self.make_copy(op, &def_op.inputs[0]));
-                    }
-                }
-            }
+        let (def_idx, def_op) = find_safe_intra_block_def(func, use_ref, ptr_plus_off)?;
+        if def_op.opcode != PcodeOpcode::IntAdd || def_op.inputs.len() != 2 {
+            return None;
         }
 
-        None
+        let off = if def_op.inputs[0] == *ptr {
+            &def_op.inputs[1]
+        } else if def_op.inputs[1] == *ptr {
+            &def_op.inputs[0]
+        } else {
+            return None;
+        };
+
+        let block = func.blocks.get(use_ref.block_idx)?;
+        if !inputs_unclobbered_between(block, def_idx, use_ref.op_idx, def_op, &[ptr, off]) {
+            return None;
+        }
+
+        Some(self.make_copy(op, off))
     }
 
     /// RuleIndirectCollapse: Simplify indirect calculations
@@ -883,7 +992,7 @@ impl OptimizationRules {
     fn try_indirect_collapse(
         &self,
         op: &PcodeOp,
-        tracker: &DefUseTracker,
+        use_ref: OpRef,
         func: &PcodeFunction,
     ) -> Option<PcodeOp> {
         if op.opcode != PcodeOpcode::PtrSub || op.inputs.len() != 2 {
@@ -897,34 +1006,33 @@ impl OptimizationRules {
         if !offset.is_constant {
             return None;
         }
-        let c2 = offset.constant_val;
+        let c2 = unsigned_value(offset);
 
-        if let Some(def_ref) = tracker.get_def(base) {
-            if let Some(def_op) = self.get_op(func, def_ref) {
-                if def_op.opcode == PcodeOpcode::PtrSub && def_op.inputs.len() == 2 {
-                    let inner_base = &def_op.inputs[0];
-                    let inner_offset = &def_op.inputs[1];
-
-                    if inner_offset.is_constant {
-                        let c1 = inner_offset.constant_val;
-                        let new_c = c1.wrapping_add(c2);
-
-                        let new_inputs =
-                            vec![inner_base.clone(), Varnode::constant(new_c, offset.size)];
-
-                        return Some(PcodeOp {
-                            seq_num: op.seq_num,
-                            opcode: PcodeOpcode::PtrSub,
-                            address: op.address,
-                            output: op.output.clone(),
-                            inputs: new_inputs,
-                            asm_mnemonic: op.asm_mnemonic.clone(),
-                        });
-                    }
-                }
-            }
+        let (def_idx, def_op) = find_safe_intra_block_def(func, use_ref, base)?;
+        if def_op.opcode != PcodeOpcode::PtrSub || def_op.inputs.len() != 2 {
+            return None;
+        }
+        let inner_base = &def_op.inputs[0];
+        let inner_offset = &def_op.inputs[1];
+        if !inner_offset.is_constant || inner_offset.size != offset.size {
+            return None;
+        }
+        let block = func.blocks.get(use_ref.block_idx)?;
+        if !inputs_unclobbered_between(block, def_idx, use_ref.op_idx, def_op, &[inner_base]) {
+            return None;
         }
 
-        None
+        let c1 = unsigned_value(inner_offset);
+        let new_c = truncate_to_varnode_width(c1.wrapping_add(c2), offset.size) as i64;
+        let new_inputs = vec![inner_base.clone(), Varnode::constant(new_c, offset.size)];
+
+        Some(PcodeOp {
+            seq_num: op.seq_num,
+            opcode: PcodeOpcode::PtrSub,
+            address: op.address,
+            output: op.output.clone(),
+            inputs: new_inputs,
+            asm_mnemonic: op.asm_mnemonic.clone(),
+        })
     }
 }

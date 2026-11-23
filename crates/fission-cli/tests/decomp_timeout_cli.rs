@@ -56,3 +56,32 @@ fn a_generous_timeout_still_decompiles() {
     assert!(ok, "{text}");
     assert!(!text.contains("timed out"), "{text}");
 }
+
+#[test]
+fn debug_decomp_bundle_writes_to_bare_filename() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let binary = dir.path().join("sample.exe");
+    std::fs::copy(FIXTURE, &binary).expect("copy fixture");
+    let output = Command::new(env!("CARGO_BIN_EXE_fission_cli"))
+        .current_dir(dir.path())
+        .args([
+            "decomp",
+            "sample.exe",
+            "--addr",
+            ENTRY,
+            "--no-db",
+            "--debug-decomp-bundle",
+            "bundle.json",
+        ])
+        .output()
+        .expect("run the CLI");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let bundle_bytes = std::fs::read(dir.path().join("bundle.json")).expect("bundle written");
+    let bundle: serde_json::Value = serde_json::from_slice(&bundle_bytes).expect("valid JSON");
+    assert_eq!(bundle["schema_version"], 1);
+    assert_eq!(bundle["functions"].as_array().map(|v| v.len()), Some(1));
+}

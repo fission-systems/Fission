@@ -456,88 +456,274 @@ fn push_section(out: &mut String, title: &str, lines: &[&str]) {
     }
 }
 
+fn line_spans(text: &str) -> impl Iterator<Item = (usize, &str)> {
+    let mut pos = 0usize;
+    std::iter::from_fn(move || {
+        if pos >= text.len() {
+            return None;
+        }
+        let start = pos;
+        let rest = &text[start..];
+        if let Some(nl) = rest.find('\n') {
+            pos = start + nl + 1;
+            let line = rest[..nl].strip_suffix('\r').unwrap_or(&rest[..nl]);
+            Some((start, line))
+        } else {
+            pos = text.len();
+            Some((start, rest))
+        }
+    })
+}
+
+fn starts_with_keyword(text: &str, keyword: &str) -> bool {
+    text.strip_prefix(keyword).is_some_and(|rest| {
+        rest.is_empty()
+            || (!rest.as_bytes()[0].is_ascii_alphanumeric() && rest.as_bytes()[0] != b'_')
+    })
+}
+
+fn record_starts_with_non_func_prefix(record: &str, line: &str) -> bool {
+    let first = if record.is_empty() {
+        line.trim_start()
+    } else {
+        record.trim_start()
+    };
+    starts_with_keyword(first, "typedef") || first.starts_with('#')
+}
+
+fn record_starts_as_declaration(record: &str, line: &str) -> bool {
+    let first = if record.is_empty() {
+        line.trim_start()
+    } else {
+        record.trim_start()
+    };
+    record_starts_with_non_func_prefix(record, line) || starts_with_keyword(first, "extern")
+}
+
+struct LineScanResult {
+    has_code: bool,
+    opens_function_body: bool,
+    last_code_byte: Option<u8>,
+}
+
+fn scan_declaration_line(
+    line: &str,
+    depth: &mut usize,
+    paren_depth: &mut usize,
+    saw_paren_at_depth0: &mut bool,
+    saw_top_level_equals: &mut bool,
+    in_block_comment: &mut bool,
+    skip_body_open: bool,
+) -> LineScanResult {
+    let bytes = line.as_bytes();
+    let mut i = 0usize;
+    let mut has_code = false;
+    let mut last_code_byte = None;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        if *in_block_comment {
+            if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                *in_block_comment = false;
+                i += 2;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if let Some(q) = quote {
+            has_code = true;
+            last_code_byte = Some(bytes[i]);
+            if bytes[i] == b'\\' {
+                i = (i + 2).min(bytes.len());
+            } else if bytes[i] == q {
+                quote = None;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            break;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            *in_block_comment = true;
+            i += 2;
+            continue;
+        }
+        if matches!(bytes[i], b'"' | b'\'') {
+            has_code = true;
+            last_code_byte = Some(bytes[i]);
+            quote = Some(bytes[i]);
+            i += 1;
+            continue;
+        }
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+
+        has_code = true;
+        let b = bytes[i];
+        last_code_byte = Some(b);
+        match b {
+            b'(' => {
+                if *depth == 0 {
+                    *saw_paren_at_depth0 = true;
+                }
+                *paren_depth += 1;
+            }
+            b')' => {
+                *paren_depth = paren_depth.saturating_sub(1);
+            }
+            b'=' if *depth == 0 && *paren_depth == 0 => {
+                *saw_top_level_equals = true;
+            }
+            b'{' => {
+                if *depth == 0
+                    && *paren_depth == 0
+                    && *saw_paren_at_depth0
+                    && !*saw_top_level_equals
+                    && !skip_body_open
+                {
+                    return LineScanResult {
+                        has_code,
+                        opens_function_body: true,
+                        last_code_byte,
+                    };
+                }
+                *depth += 1;
+            }
+            b'}' => {
+                *depth = depth.saturating_sub(1);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+
+    LineScanResult {
+        has_code,
+        opens_function_body: false,
+        last_code_byte,
+    }
+}
+
 /// Split a render at the first line that opens a function definition.
 ///
 /// Every declaration the printer emits ends in `;`, possibly after a braced
-/// body it opened on an earlier line (`typedef struct ... {`). A function
-/// definition is the first line that takes a parameter list without ending in
-/// one -- that is what separates `void f(void)` from `extern void f();`.
+/// body it opened on an earlier line (`typedef struct ... {`) or a multi-line
+/// parameter list (`extern int f(\n ...);`). A function definition is the first
+/// top-level signature that opens a braced body rather than ending in `;`.
 ///
 /// Two things are not code and must not decide that: a comment, which can
 /// trail a declaration (`extern int f(int); /* inferred from calls */`) or
 /// stand on its own line ahead of one, and a preprocessor directive, which
 /// the printer uses to declare an unknown-arity callee once per C dialect. A
 /// conditional group is one record from `#if` to its `#endif`, and a comment
-/// line belongs to the record that follows it -- or, ahead of the definition,
-/// to the body.
+/// line belongs to the record that follows it. Comments ahead of the
+/// definition are not part of its body.
 fn split_render(text: &str) -> SplitRender<'_> {
     let mut depth = 0usize;
+    let mut paren_depth = 0usize;
     let mut conditional_depth = 0usize;
+    let mut saw_paren_at_depth0 = false;
+    let mut saw_top_level_equals = false;
     let mut in_block_comment = false;
-    let mut offset = 0usize;
-    let mut record_start = 0usize;
     let mut declarations: Vec<String> = Vec::new();
     let mut record = String::new();
-    for line in text.split_inclusive('\n') {
-        let line_start = offset;
-        offset += line.len();
-        let line = line.trim_end_matches(['\n', '\r']);
-        let trimmed = line.trim();
-        let comment_only = in_block_comment || is_comment_line(trimmed);
-        if in_block_comment {
-            in_block_comment = !trimmed.contains("*/");
-        } else if trimmed.starts_with("/*") && !trimmed.contains("*/") {
-            in_block_comment = true;
-        }
-        if trimmed.is_empty() {
-            continue;
-        }
-        if record.is_empty() {
-            record_start = line_start;
-        }
-        let code = strip_trailing_comment(trimmed);
-        if !comment_only
-            && depth == 0
-            && conditional_depth == 0
-            && !code.starts_with('#')
-            && code.contains('(')
-            && !code.ends_with(';')
-        {
-            // Comment lines already gathered lead into the definition.
+    // Where the record starts, its leading comments included, and where its
+    // first line of code starts.
+    let mut record_start: Option<usize> = None;
+    let mut code_start: Option<usize> = None;
+
+    for (offset, line) in line_spans(text) {
+        let line_starts_in_comment = in_block_comment;
+        let code_record = code_start.map_or("", |start| &text[start..offset]);
+        let skip_body_open = record_starts_with_non_func_prefix(code_record, line);
+        let scan = scan_declaration_line(
+            line,
+            &mut depth,
+            &mut paren_depth,
+            &mut saw_paren_at_depth0,
+            &mut saw_top_level_equals,
+            &mut in_block_comment,
+            skip_body_open,
+        );
+        if scan.opens_function_body {
+            let body_start = code_start.unwrap_or(offset);
             return SplitRender {
                 declarations,
-                body: &text[record_start..],
+                body: &text[body_start..],
             };
         }
-        if !comment_only {
-            if let Some(directive) = code.strip_prefix('#') {
-                match directive.trim_start().split_whitespace().next() {
-                    Some("if" | "ifdef" | "ifndef") => conditional_depth += 1,
-                    Some("endif") => conditional_depth = conditional_depth.saturating_sub(1),
-                    _ => {}
-                }
-            } else {
-                depth += code.matches('{').count();
-                depth = depth.saturating_sub(code.matches('}').count());
-            }
+
+        if code_start.is_none() && line.trim().is_empty() {
+            continue;
+        }
+
+        if record_start.is_none() {
+            record_start = Some(offset);
+        }
+        if code_start.is_none() && scan.has_code {
+            code_start = Some(offset);
         }
         if !record.is_empty() {
             record.push('\n');
         }
         record.push_str(line);
-        if !comment_only && depth == 0 && conditional_depth == 0 {
+
+        let directive = (!line_starts_in_comment && scan.has_code)
+            .then(|| line.trim_start().strip_prefix('#'))
+            .flatten();
+        if let Some(directive) = directive {
+            match directive.split_whitespace().next() {
+                Some("if" | "ifdef" | "ifndef") => conditional_depth += 1,
+                Some("endif") => conditional_depth = conditional_depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+
+        let is_preprocessor =
+            code_start.is_some_and(|start| text[start..].trim_start().starts_with('#'));
+        if scan.has_code
+            && depth == 0
+            && paren_depth == 0
+            && conditional_depth == 0
+            && (scan.last_code_byte == Some(b';')
+                || (is_preprocessor && !line.trim_end().ends_with('\\')))
+        {
             declarations.push(std::mem::take(&mut record));
+            record_start = None;
+            code_start = None;
+            saw_paren_at_depth0 = false;
+            saw_top_level_equals = false;
         }
     }
+
+    if let Some(code_start) = code_start {
+        if saw_paren_at_depth0
+            && !saw_top_level_equals
+            && !record_starts_as_declaration(&text[code_start..], "")
+        {
+            return SplitRender {
+                declarations,
+                body: &text[code_start..],
+            };
+        }
+        declarations.push(record);
+        return SplitRender {
+            declarations,
+            body: "",
+        };
+    }
+
     SplitRender {
         declarations,
         // Comments with no declaration after them (an error render is only
         // one) stay where the function would have been.
-        body: if record.is_empty() {
-            ""
-        } else {
-            &text[record_start..]
-        },
+        body: record_start.map_or("", |start| &text[start..]),
     }
 }
 
@@ -566,32 +752,114 @@ fn strip_trailing_comment(text: &str) -> &str {
     text.trim_end()
 }
 
-/// The lines of a declaration record that are C declarations: comments and
-/// preprocessor directives dropped, trailing comments stripped.
-fn declaration_code_lines(decl: &str) -> impl Iterator<Item = &str> {
-    decl.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !is_comment_line(line) && !line.starts_with('#'))
-        .map(strip_trailing_comment)
+/// The C declarations a record makes, one per `;`: comment lines and
+/// preprocessor directives dropped, trailing comments stripped. A declaration
+/// can span lines (`extern int f(\n    int a,\n    int b);`) and stays whole.
+fn declaration_statements(decl: &str) -> Vec<&str> {
+    let mut statements = Vec::new();
+    let mut in_block_comment = false;
+    let mut start: Option<usize> = None;
+    for (offset, line) in line_spans(decl) {
+        let trimmed = line.trim();
+        if in_block_comment {
+            in_block_comment = !trimmed.contains("*/");
+            continue;
+        }
+        if start.is_none() {
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                continue;
+            }
+            if is_comment_line(trimmed) {
+                in_block_comment = trimmed.starts_with("/*") && !trimmed.contains("*/");
+                continue;
+            }
+            start = Some(offset + (line.len() - line.trim_start().len()));
+        }
+        let code = strip_trailing_comment(trimmed);
+        if code.ends_with(';')
+            && let Some(begin) = start.take()
+        {
+            let end = offset + (line.len() - line.trim_start().len()) + code.len();
+            statements.push(&decl[begin..end]);
+        }
+    }
+    if let Some(begin) = start {
+        statements.push(strip_trailing_comment(&decl[begin..]));
+    }
+    statements
 }
 
-/// The declaration a record makes, without the comment lines ahead of it.
+/// The declaration a record makes, without the comments ahead of it.
 fn declaration_code(decl: &str) -> &str {
     let mut rest = decl.trim_start();
-    while let Some(first) = rest.lines().next() {
-        let line = first.trim();
-        if !is_comment_line(line) || line.starts_with("/*") && !line.ends_with("*/") {
+    loop {
+        if rest.starts_with("//") {
+            rest = rest.find('\n').map_or("", |newline| &rest[newline + 1..]);
+        } else if let Some(comment) = rest.strip_prefix("/*") {
+            rest = comment.find("*/").map_or("", |close| &comment[close + 2..]);
+        } else {
             break;
         }
-        rest = rest[first.len()..].trim_start();
+        rest = rest.trim_start();
     }
     strip_trailing_comment(rest)
 }
 
-/// The definition line of the function a body opens, comments skipped.
+/// The definition header of the function a body opens, comments skipped.
 fn definition_line(body: &str) -> Option<&str> {
-    body.lines()
-        .find(|line| !line.trim().is_empty() && !is_comment_line(line.trim()))
+    let bytes = body.as_bytes();
+    let mut i = 0usize;
+    let mut start: Option<usize> = None;
+    let mut quote: Option<u8> = None;
+
+    while i < bytes.len() {
+        if let Some(q) = quote {
+            if bytes[i] == b'\\' {
+                i = (i + 2).min(bytes.len());
+            } else if bytes[i] == q {
+                quote = None;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if start.is_none() {
+            start = Some(i);
+        }
+        if bytes[i] == b'{' {
+            let header = body[start.unwrap()..i].trim_end();
+            return (!header.is_empty()).then_some(header);
+        }
+        if matches!(bytes[i], b'"' | b'\'') {
+            quote = Some(bytes[i]);
+        }
+        i += 1;
+    }
+
+    // No body opened: the header is the line the first code starts on. A
+    // render that is only comments has none.
+    let start = start?;
+    body[start..].lines().next().map(str::trim_end)
 }
 
 /// The name a function-style `extern` declaration declares, whether its
@@ -603,7 +871,7 @@ fn definition_line(body: &str) -> Option<&str> {
 /// same one: that is how an unknown-arity callee is spelled for C17 and C23.
 fn extern_function_name(decl: &str) -> Option<&str> {
     let mut name = None;
-    for line in declaration_code_lines(decl) {
+    for line in declaration_statements(decl) {
         let (_, this, _) = parse_extern_function(line)?;
         if name.is_some_and(|name| name != this) {
             return None;
@@ -640,7 +908,7 @@ enum ExternEvidence {
 }
 
 fn extern_evidence(decl: &str) -> ExternEvidence {
-    let unknown = declaration_code_lines(decl).all(|line| {
+    let unknown = declaration_statements(decl).into_iter().all(|line| {
         parse_extern_function(line).is_some_and(|(_, _, params)| matches!(params, "" | "..."))
     });
     if unknown {
@@ -671,7 +939,7 @@ fn merge_extern_declarations(name: &str, variants: &[&str]) -> String {
     }
     let parameter_lists: HashSet<&str> = variants
         .iter()
-        .flat_map(|decl| declaration_code_lines(decl))
+        .flat_map(|decl| declaration_statements(decl))
         .filter_map(|line| parse_extern_function(line).map(|(_, _, params)| params))
         .collect();
     let agree = variants
@@ -681,7 +949,8 @@ fn merge_extern_declarations(name: &str, variants: &[&str]) -> String {
     if agree {
         return first.to_owned();
     }
-    let return_type = declaration_code_lines(first)
+    let return_type = declaration_statements(first)
+        .into_iter()
         .find_map(parse_extern_function)
         .map_or("unsigned long long", |(return_type, _, _)| return_type);
     fission_decompiler::print_unknown_arity_extern(return_type, name)
@@ -1277,26 +1546,109 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("temp dir");
         let source = dir.join("unit.c");
         std::fs::write(&source, &unit).expect("write unit");
-        for std in ["gnu17", "gnu23"] {
-            let output = match std::process::Command::new("cc")
-                .arg("-fsyntax-only")
-                .arg(format!("-std={std}"))
-                .arg(&source)
-                .output()
-            {
-                Ok(output) => output,
-                Err(error) => {
-                    eprintln!("SKIPPED: no C compiler (`cc`): {error}");
-                    return;
+        // GCC before 14 (Ubuntu 24.04's default) names C23 `gnu2x`; it already
+        // reads `()` as `(void)` and accepts a bare `(...)` there.
+        for spellings in [&["gnu17"][..], &["gnu23", "gnu2x"][..]] {
+            let mut compiled = false;
+            for std in spellings {
+                let output = match std::process::Command::new("cc")
+                    .arg("-fsyntax-only")
+                    .arg(format!("-std={std}"))
+                    .arg(&source)
+                    .output()
+                {
+                    Ok(output) => output,
+                    Err(error) => {
+                        eprintln!("SKIPPED: no C compiler (`cc`): {error}");
+                        return;
+                    }
+                };
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !output.status.success() && stderr.contains("std=") {
+                    eprintln!("`cc` does not accept -std={std}: {stderr}");
+                    continue;
                 }
-            };
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !output.status.success() && stderr.contains("std=") {
-                eprintln!("SKIPPED: `cc` does not accept -std={std}: {stderr}");
-                continue;
+                assert!(output.status.success(), "-std={std}:\n{stderr}\n{unit}");
+                compiled = true;
+                break;
             }
-            assert!(output.status.success(), "-std={std}:\n{stderr}\n{unit}");
+            if !compiled {
+                eprintln!("SKIPPED: `cc` accepts none of {spellings:?}");
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn split_render_tracks_exact_crlf_offsets_and_skips_comments_and_wrapped_externs() {
+        let input = concat!(
+            "// Preamble comment (with parens)\r\n",
+            "/* Block comment\r\n",
+            "   also (with parens) */\r\n",
+            "typedef struct Box {\r\n",
+            "    int val;\r\n",
+            "} Box;\r\n",
+            "\r\n",
+            "extern int wrapped_callee(\r\n",
+            "    int a,\r\n",
+            "    int b);\r\n",
+            "\r\n",
+            "// Function note (before body)\r\n",
+            "void caller(Box box)\r\n",
+            "{\r\n",
+            "    wrapped_callee(box.val, 1);\r\n",
+            "}\r\n",
+        );
+
+        let split = split_render(input);
+        assert_eq!(split.declarations.len(), 2, "{:?}", split.declarations);
+        assert!(split.declarations[0].contains("} Box;"));
+        assert!(split.declarations[1].contains("extern int wrapped_callee("));
+        assert!(
+            split.body.starts_with("void caller(Box box)\r\n{"),
+            "body offset drifted on CRLF:\n{:?}",
+            split.body
+        );
+
+        let unit = assemble(&[
+            input.to_string(),
+            "int wrapped_callee(int a, int b)\r\n{\r\n    return a + b;\r\n}\r\n".to_string(),
+        ]);
+        assert!(
+            !unit.code.contains("extern int wrapped_callee("),
+            "{}",
+            unit.code
+        );
+        assert!(unit.code.contains("void caller(Box box);"), "{}", unit.code);
+        assert!(
+            unit.code.contains("int wrapped_callee(int a, int b);"),
+            "{}",
+            unit.code
+        );
+    }
+
+    #[test]
+    fn split_render_handles_multiline_function_signature() {
+        let input = concat!(
+            "extern int helper();\n\n",
+            "int compute(\n",
+            "    int first,\n",
+            "    int second)\n",
+            "{\n",
+            "    return helper();\n",
+            "}\n",
+        );
+
+        let split = split_render(input);
+        assert_eq!(split.declarations, vec!["extern int helper();"]);
+        assert!(split.body.starts_with("int compute(\n"), "{:?}", split.body);
+
+        let unit = assemble(&[input.to_string()]);
+        assert!(
+            unit.code
+                .contains("int compute(\n    int first,\n    int second);"),
+            "{}",
+            unit.code
+        );
     }
 }
