@@ -1827,10 +1827,10 @@ impl<'a> PreviewBuilder<'a> {
 
         // A declared parameter the recovery could not name still precedes
         // the ones it did: `__fwritex(s, len, f)` with `s` a merge of several
-        // writes the builder has no variable for kept `len` and `f` only up
-        // to that hole, and printed `__fwritex()` -- plus a spill to `[rsp]`
-        // taken for a stack argument. Mark the hole explicitly instead of
-        // dropping what follows it (or guessing the register's entry value).
+        // writes the builder has no variable for dropped `len` and `f` with
+        // it, and printed a spill to `[rsp]` as a stack argument instead.
+        // Mark the hole explicitly instead of dropping what follows it (or
+        // guessing the register's entry value).
         if let Some(exact) = exact_slots.as_ref()
             && let Some(&last) = exact
                 .slots
@@ -1843,7 +1843,7 @@ impl<'a> PreviewBuilder<'a> {
                     let size = param_slots[slot].1;
                     recovered[slot] = Some(PreHirExpr::Call {
                         origin: None,
-                        target: UNRESOLVED_MERGED_ARGUMENT.to_string(),
+                        target: UNRECOVERED_ARGUMENT.to_string(),
                         args: Vec::new(),
                         ty: type_from_size(size, false),
                     });
@@ -1949,10 +1949,11 @@ struct ExactRegisterSlots {
     register_only: bool,
 }
 
-/// Printed for a declared argument whose value is a merge of several writes
-/// the builder has no variable for: visibly unresolved, never the register's
-/// entry value and never silently dropped together with the arguments after it.
-pub(crate) const UNRESOLVED_MERGED_ARGUMENT: &str = "__fission_merged_value";
+/// Printed for a declared argument whose value the recovery could not name --
+/// typically a merge of several writes the builder has no variable for:
+/// visibly unrecovered, never a guess such as the register's entry value, and
+/// never dropped together with the declared arguments after it.
+pub(crate) const UNRECOVERED_ARGUMENT: &str = "__fission_unrecovered_arg";
 
 /// Whether the writes reaching a call carry more than one value, given how
 /// many writes reach it and their distinct printed expressions.
