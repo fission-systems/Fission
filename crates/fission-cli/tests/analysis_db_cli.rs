@@ -306,12 +306,10 @@ fn a_chosen_signature_reaches_the_callers() {
             break;
         }
     }
-    let Some((caller, callee, _)) = found else {
-        // Nothing in this fixture calls a locally defined function through an
-        // `extern`; there is no pair to check rather than a failure to report.
-        eprintln!("skipped: no caller/callee pair in the fixture");
-        return;
-    };
+    // The fixture is committed and has such a pair; finding none means the
+    // decompiler stopped emitting the `extern`, not that there is nothing to
+    // check.
+    let (caller, callee, _) = found.expect("no caller/callee pair in the committed fixture");
 
     let (ok, out) = run(&["db", path, "name", &callee, "chosen_callee"]);
     assert!(ok, "{out}");
