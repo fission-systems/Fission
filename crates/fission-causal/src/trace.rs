@@ -647,7 +647,12 @@ pub fn observe_fast(
     to_end: bool,
 ) -> (SinkObservation, EndState) {
     let stops: Vec<u64> = match monitor.sink {
-        SinkSpec::FaultAt { .. } => return observe(program, run, monitor, max_steps, to_end),
+        // The interpreter's fault error does not name the instruction, so a
+        // fault sink single-steps there; the JIT's error does.
+        SinkSpec::FaultAt { .. } if run.emu.force_interpreter => {
+            return observe(program, run, monitor, max_steps, to_end);
+        }
+        SinkSpec::FaultAt { .. } => Vec::new(),
         SinkSpec::CallTo { target, .. } => vec![*target],
         SinkSpec::BranchOutcome { pc, .. } => vec![*pc],
         SinkSpec::MemoryValue {
@@ -711,14 +716,15 @@ pub fn observe_fast(
                 };
             }
             Err(e) => {
+                let message = e.to_string();
                 break EndState::Faulted {
-                    pc: run.emu.pc,
-                    message: e.to_string(),
+                    pc: guest_fault_pc(&message).unwrap_or(run.emu.pc),
+                    message,
                 };
             }
         }
     };
-    let last = run.emu.inst_count;
+    let last = run.emu.inst_count + u64::from(matches!(end, EndState::Faulted { .. }));
     monitor.finish(run, &end, last, &[]);
     let obs = monitor
         .decided
@@ -728,6 +734,16 @@ pub fn observe_fast(
             detail: "no decision".into(),
         });
     (obs, end)
+}
+
+/// The guest PC a JIT memory-fault error names.
+pub fn guest_fault_pc(message: &str) -> Option<u64> {
+    let at = message.find("guest PC 0x")? + "guest PC 0x".len();
+    let hex: String = message[at..]
+        .chars()
+        .take_while(char::is_ascii_hexdigit)
+        .collect();
+    u64::from_str_radix(&hex, 16).ok()
 }
 
 fn read_args(run: &mut Run, n: usize) -> Vec<u64> {

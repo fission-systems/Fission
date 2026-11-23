@@ -601,16 +601,7 @@ impl Runner<'_, '_> {
         }
         run.emu.force_interpreter = false;
         run.emu.max_inst = Some(max_steps);
-        let end = match run.emu.resume() {
-            Ok(_) if run.emu.halt_requested => EndState::Exited {
-                code: run.emu.exit_code,
-            },
-            Ok(_) => EndState::Budget,
-            Err(e) => EndState::Faulted {
-                pc: fault_pc(&e.to_string()).unwrap_or(run.emu.pc),
-                message: e.to_string(),
-            },
-        };
+        let end = finish_on_jit(run);
         let digest = engine_digest(run, &end);
         run.emu.max_inst = None;
         Ok(digest)
@@ -954,6 +945,28 @@ impl Runner<'_, '_> {
     }
 }
 
+/// Run to the end on the JIT, through any sink breakpoints the run carries.
+fn finish_on_jit(run: &mut Run) -> EndState {
+    run.emu.force_interpreter = false;
+    loop {
+        match run.emu.resume() {
+            Ok(fission_emulator::RunOutcome::HitBreakpoint(_)) => {}
+            Ok(_) if run.emu.halt_requested => {
+                return EndState::Exited {
+                    code: run.emu.exit_code,
+                };
+            }
+            Ok(_) => return EndState::Budget,
+            Err(e) => {
+                return EndState::Faulted {
+                    pc: fault_pc(&e.to_string()).unwrap_or(run.emu.pc),
+                    message: e.to_string(),
+                };
+            }
+        }
+    }
+}
+
 /// Did the recorded run write any executable page?
 fn runner_trace_writes_code(program: &Program, trace: &Trace) -> bool {
     let Ok(probe) = program.fresh(Engine::Interpreter) else {
@@ -970,12 +983,7 @@ fn runner_trace_writes_code(program: &Program, trace: &Trace) -> bool {
 }
 
 fn fault_pc(message: &str) -> Option<u64> {
-    let at = message.find("guest PC 0x")? + "guest PC 0x".len();
-    let hex: String = message[at..]
-        .chars()
-        .take_while(char::is_ascii_hexdigit)
-        .collect();
-    u64::from_str_radix(&hex, 16).ok()
+    trace::guest_fault_pc(message)
 }
 
 /// Run one case end to end.
@@ -997,16 +1005,7 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
     for _ in 0..2 {
         let mut run = program.fresh(Engine::Jit)?;
         run.emu.max_inst = Some(config.max_steps);
-        let end = match run.emu.resume() {
-            Ok(_) if run.emu.halt_requested => EndState::Exited {
-                code: run.emu.exit_code,
-            },
-            Ok(_) => EndState::Budget,
-            Err(e) => EndState::Faulted {
-                pc: fault_pc(&e.to_string()).unwrap_or(run.emu.pc),
-                message: e.to_string(),
-            },
-        };
+        let end = finish_on_jit(&mut run);
         jit_digests.push(engine_digest(&run, &end));
     }
     let determinism = Determinism {
