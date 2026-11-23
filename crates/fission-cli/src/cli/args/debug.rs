@@ -117,6 +117,12 @@ pub enum DebugCommand {
     SwitchThread(DebugSwitchThreadArgs),
     /// Poll for the next debug event
     Event(DebugEventArgs),
+    /// Offline HLE/API and instruction trace summary
+    TraceInspect(DebugTraceInspectArgs),
+    /// Compare two JSONL execution traces, reporting the first difference
+    TraceDiff(DebugTraceDiffArgs),
+    /// Combine observed instruction hits with on-disk static pseudocode
+    TraceDecomp(DebugTraceDecompArgs),
     /// Inspect rr availability and known Linux recordings
     RrStatus(DebugRrStatusArgs),
     /// Record a local Linux program under rr
@@ -214,6 +220,40 @@ pub struct DebugEventArgs {
     pub timeout_ms: u32,
     /// Output in JSON format
     #[arg(short, long)]
+    pub json: bool,
+}
+
+/// Inspect a bounded Fission emulator trace (JSON Lines).
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugTraceInspectArgs {
+    pub trace: String,
+    #[arg(long, default_value_t = 100000)]
+    pub max_events: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Compare recorded JSONL events without claiming semantic equivalence.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugTraceDiffArgs {
+    pub left: String,
+    pub right: String,
+    #[arg(long, default_value_t = 100000)]
+    pub max_events: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Report static pseudocode together with observed PCs in its function range.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugTraceDecompArgs {
+    pub binary: String,
+    pub trace: String,
+    #[arg(long, value_parser = parse_hex_address)]
+    pub addr: u64,
+    #[arg(long, default_value_t = 100000)]
+    pub max_events: usize,
+    #[arg(long)]
     pub json: bool,
 }
 
