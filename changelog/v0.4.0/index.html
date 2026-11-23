@@ -1024,10 +1024,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cli-additions" class="md-nav__link">
+  <a href="#installing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CLI additions
+        Installing
       
     </span>
   </a>
@@ -1035,10 +1035,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#analysis-and-performance" class="md-nav__link">
+  <a href="#the-printed-c-was-wrong-in-these-places" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Analysis and performance
+        The printed C was wrong in these places
       
     </span>
   </a>
@@ -1046,10 +1046,87 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
+  <a href="#checking-output-against-the-machine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation
+        Checking output against the machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#for-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Faster
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emulation-and-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Emulation and debugging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Robustness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quality-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known issues
       
     </span>
   </a>
@@ -1463,10 +1540,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#cli-additions" class="md-nav__link">
+  <a href="#installing" class="md-nav__link">
     <span class="md-ellipsis">
       
-        CLI additions
+        Installing
       
     </span>
   </a>
@@ -1474,10 +1551,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#analysis-and-performance" class="md-nav__link">
+  <a href="#the-printed-c-was-wrong-in-these-places" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Analysis and performance
+        The printed C was wrong in these places
       
     </span>
   </a>
@@ -1485,10 +1562,87 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#installation" class="md-nav__link">
+  <a href="#checking-output-against-the-machine" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Installation
+        Checking output against the machine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#for-agents" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For agents
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faster" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Faster
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#emulation-and-debugging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Emulation and debugging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#robustness" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Robustness
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quality-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quality numbers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known issues
       
     </span>
   </a>
@@ -1516,21 +1670,332 @@
 
 
 <h1 id="fission-v040">Fission v0.4.0<a class="headerlink" href="#fission-v040" title="Permanent link">&para;</a></h1>
-<p>Fission adds CLI workflows for collecting sandbox evidence, verifying recovered behavior, and analyzing raw images. Function discovery reuses eligible SLEIGH results while building instruction coverage, and decompiler control-flow preparation reads calls and jumps directly.</p>
-<h2 id="cli-additions">CLI additions<a class="headerlink" href="#cli-additions" title="Permanent link">&para;</a></h2>
+<p>Most of the 116 pull requests merged since v0.3.0 are correctness fixes. In
+many of them the printed C did something other than what the binary does:
+- a call printed twice
+- an argument the machine does not pass
+- a global read at the wrong time
+- a switch case attached to the wrong value
+- code printed after a jump that never comes back</p>
+<p>None of these changes the shape of the control flow, so the structure score
+could not see most of them. They were found by the new <code>verify</code> command,
+which checks the printed code against the machine, and by reading changed
+output against the disassembly.</p>
+<p>Decompiling is also faster: three performance passes cut full-dataset time by
+42%, 38% and 11.5% (CPU). And the CLI exposes more of what Fission already
+computes: raw images, sandbox exploration, calling a function, stepping back
+in a debug session, type and API lookups. Every <code>--json</code> output now has a
+shape that tests pin.</p>
+<h2 id="installing">Installing<a class="headerlink" href="#installing" title="Permanent link">&para;</a></h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Homebrew (macOS, Linux)</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>brew<span class="w"> </span>install<span class="w"> </span>fission-systems/tap/fission-cli
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Install script (macOS, Linux): installs into ~/.local and checks the SHA-256</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://raw.githubusercontent.com/fission-systems/Fission/main/install.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>sh
+</span></code></pre></div>
+<p><strong>Cargo</strong> builds from source. The processor specifications and signatures come
+from this release:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>install<span class="w"> </span>--locked<span class="w"> </span>--git<span class="w"> </span>https://github.com/fission-systems/Fission<span class="w"> </span>--tag<span class="w"> </span>v0.4.0<span class="w"> </span>fission-cli
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.cargo/share/fission
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>curl<span class="w"> </span>-fsSL<span class="w"> </span>https://github.com/fission-systems/Fission/releases/download/v0.4.0/fission-resources.tar.gz<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>tar<span class="w"> </span>-xz<span class="w"> </span>-C<span class="w"> </span>~/.cargo/share/fission
+</span></code></pre></div>
+<p><strong>Archives</strong> are attached to the release for five targets:</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Archive</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Linux x86-64</td>
+<td><code>fission-x86_64-unknown-linux-gnu.tar.gz</code></td>
+</tr>
+<tr>
+<td>Linux arm64</td>
+<td><code>fission-aarch64-unknown-linux-gnu.tar.gz</code></td>
+</tr>
+<tr>
+<td>macOS Apple silicon</td>
+<td><code>fission-aarch64-apple-darwin.tar.gz</code></td>
+</tr>
+<tr>
+<td>macOS Intel</td>
+<td><code>fission-x86_64-apple-darwin.tar.gz</code></td>
+</tr>
+<tr>
+<td>Windows x64</td>
+<td><code>fission-x86_64-pc-windows-msvc.zip</code></td>
+</tr>
+</tbody>
+</table>
+<p>Unpack one anywhere and run <code>bin/fission_cli</code>; it finds <code>share/fission/</code> next
+to itself. <code>SHA256SUMS</code> covers every asset.</p>
+<h2 id="the-printed-c-was-wrong-in-these-places">The printed C was wrong in these places<a class="headerlink" href="#the-printed-c-was-wrong-in-these-places" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>sandbox</code> reports exploration, time-travel state, and snapshots in machine-readable output. The <a href="../../CLI/#sandbox-execution-evidence">sandbox documentation</a> describes the completeness fields.</li>
-<li><code>verify</code> reports machine-readable verification results. Native fixture replay and Python export have dedicated CI coverage. See the <a href="../../CLI/#verify-command">verification documentation</a>.</li>
-<li>Raw images can be loaded with an explicit base address and language. The CLI also lists available languages and surfaces DWARF source lines where they are present.</li>
+<li><strong>Calls printed twice, or with arguments the machine does not pass.</strong></li>
+<li><code>call write; leave; ret</code> printed as <code>write(fd, buf, n); return write();</code>.
+    A call's result is now the value the following <code>ret</code> returns (#929).</li>
+<li>A call's arguments are the registers it reads where it is made. A
+    prologue <code>push rbp</code> is no longer read as a stack argument: <code>fcntl(fd)</code>
+    becomes <code>fcntl(fd, 3, 0)</code> (#932).</li>
+<li>A float or double parameter no longer takes an integer argument slot on
+    SysV and AArch64 (#1013).</li>
+<li>Arguments that differ per path into a call are kept. <code>dcgettext</code> calls
+    printed with all three arguments rose from 2,861 to 3,589 on the full
+    dataset, and one-argument calls fell from 168 to 0 (#1019).</li>
+<li><strong>Switch case values</strong> were attached to the wrong targets. In tar, <code>'R'</code>
+  printed under case 74 instead of 82. A jump table's <code>default</code> is now the
+  range check's out-of-range target, so unused entries stop printing as
+  dozens of <code>case N:</code> arms (#1019).</li>
+<li><strong>Globals:</strong></li>
+<li>A global is read where the machine reads it, and a read after a call is a
+    fresh load (#930, #931).</li>
+<li>Part of a named global is accessed through its address (#933).</li>
+<li>A test of a register copied from a global tests the global (#934).</li>
+<li><strong>Code after a jump that leaves the function</strong> was printed as if it ran.
+  On a 453-row sample, statements after a tail jump went from 322 sites in
+  186 functions to 14 in 13 (#1039).</li>
+<li><strong>Flags and casts:</strong></li>
+<li>A flag is a snapshot, so a Thumb <code>subs; it ne; movne</code> boolean no longer
+    prints as a branch on a named flag (#900).</li>
+<li>Unsigned casts are restored in every statement and loop condition.
+    <code>(uint)(uchar)x</code> keeps its truncation (#901).</li>
+<li><strong>Conditions folded on the wrong path.</strong> A remembered path condition now
+  ends at a memory write, a label or a call. At <code>-O0</code>,
+  <code>r = f(); if (r) return r; r = g(); if (r) return r;</code> lost its second test
+  (#919).</li>
+<li><strong>Inlining past a write.</strong> A definition is no longer inlined past a store
+  to its input (#952).</li>
+<li><strong>Stack-protector checks</strong> are removed in four layouts instead of one
+  (#903).</li>
+<li><strong>Output explosion.</strong> One guarded-tail rewrite deleted jumps over live code
+  and copied the rest of a ladder into both arms; <code>process_row</code> printed
+  1.24 MB for a 40-line function (#1023).</li>
+<li><strong>Output depended on the host CPU.</strong> The same binary decompiled to 4.4 KB on
+  aarch64 and 17.8 MB on x86-64, because a hash set's iteration order chose a
+  follow block (#1025). Where several symbols share a name, the choice is
+  now by address order too (#986).</li>
+<li><strong><code>char</code> and <code>short</code> parameters</strong> are declared at the width the compiler
+  stores them in their stack home. The type-perfect count rose by 274 on the
+  full dataset (#1066). See Known issues.</li>
+<li><strong>SLEIGH runtime and optimizer:</strong></li>
+<li>Fixes to pattern offsets, non-RAM branch targets, relative-label sign
+    extension and decode context (#993).</li>
+<li>Constructor nesting is bounded at Ghidra's parse depth (#1009).</li>
+<li>Optimizer soundness and sub-register aliasing in <code>fission-pcode-ir</code>
+    (#1015).</li>
+<li><strong>C23.</strong> Inferred callee declarations compile under C17 and C23 (#1016).</li>
 </ul>
-<h2 id="analysis-and-performance">Analysis and performance<a class="headerlink" href="#analysis-and-performance" title="Permanent link">&para;</a></h2>
+<h2 id="checking-output-against-the-machine">Checking output against the machine<a class="headerlink" href="#checking-output-against-the-machine" title="Permanent link">&para;</a></h2>
+<p><code>fission_cli verify --tier ground-truth</code> runs the printed tree and the machine
+code on the same inputs, with memory, globals and stubbed calls. It compares
+the return value, every call with its arguments, and every store outside the
+frame, and it can check a whole binary (#927, #951, #954, #955, #961). On gzip
+<code>-O0</code>, functions proved equivalent went from 11 to 82. A diverged function is
+a lead to read against the disassembly, not a verdict.</p>
+<p>A native replay fixture compares the real CPU, the emulator and the printed
+code on identical inputs. A small integer subset of the printed code can be
+exported to Python (#1020).</p>
+<p>Two decisions are recorded as ADRs:
+- <a href="../../adr/0017-ghidra-is-not-an-oracle/">ADR 0017</a>: Ghidra is a reference,
+  not a correctness oracle. Its SLEIGH specifications were wrong for AArch64
+  FCVT and FRINT, and Fission patches them locally.
+- <a href="../../adr/0018-decbench-is-not-a-correctness-oracle/">ADR 0018</a>: DecBench
+  measures similarity to the source, not correctness.</p>
+<h2 id="for-agents">For agents<a class="headerlink" href="#for-agents" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Function discovery records contiguous covered instruction ranges and reuses matching instruction decodes during the initial coverage walk. Reuse is bounded and depends on the address, processor context, and available bytes.</li>
-<li>Control-flow preparation streams call and jump references, and local no-return analysis prepares independent functions in parallel.</li>
-<li>The <a href="../../BENCHMARK_DECBENCH/">DecBench guide</a> explains how to reproduce the corpus measurements and interpret the structural similarity metrics.</li>
+<li><strong>New commands:</strong></li>
+<li><code>call</code> runs one function in the emulator with arguments you choose (#1006).</li>
+<li><code>types</code>, <code>whatis</code> and <code>api</code> look up recovered types, addresses and known
+    API signatures (#1008).</li>
+<li><code>languages</code> lists the available processors (#991).</li>
+<li><strong>Raw images:</strong> firmware, shellcode and memory dumps load with
+  <code>--base</code>/<code>--entry</code> (#991).</li>
+<li><strong>Debug sessions</strong> can step back (#1006), and every session command
+  attaches (#957).</li>
+<li><strong><code>sandbox</code></strong> reports exploration, time-travel state and snapshots as data
+  (#996).</li>
+<li><strong><code>decomp</code></strong> carries globals, layout, DWARF source lines and verify results
+  in its JSON (#988, #991).</li>
+<li><strong>Flags:</strong></li>
+<li>Flags that used to do nothing silently now say so (#988).</li>
+<li><code>--work-limit</code> sets the decompiler's work limits and reports when one cut
+    work. The defaults are unchanged (#1038).</li>
+<li><strong>Stable shapes:</strong></li>
+<li>The shape of every <code>--json</code> output is pinned by tests, so a removed or
+    renamed key fails CI (#1011).</li>
+<li><code>fission_cli schema &lt;command&gt;</code> prints JSON Schemas for <code>info</code>, <code>list</code> and
+    <code>decomp</code> (#1020).</li>
+<li><strong><code>--contract v1</code></strong> error and schema routing is fixed (#989).</li>
 </ul>
-<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<p>GitHub Releases distributes the CLI and runtime resources together for Linux x64 and arm64, macOS Apple Silicon and Intel, and Windows x64. The <a href="../../RELEASE/">release checklist</a> describes the unpacked-package smoke tests, SHA-256 manifest, and build attestations.</p>
+<h2 id="faster">Faster<a class="headerlink" href="#faster" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>Measured on the full DecBench dataset</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Loop hoisting, global index, partial-register scan, SSA validation (#883)</td>
+<td>−42%</td>
+</tr>
+<tr>
+<td>Callee previews, type fixed point, guard crossings, per-query scans (#899)</td>
+<td>−38%</td>
+</tr>
+<tr>
+<td>Three repeated per-function scans (#977)</td>
+<td>−11.5% CPU</td>
+</tr>
+</tbody>
+</table>
+<p>Also:
+- No-return preparation runs in parallel (#1041).
+- Masked Ghidra function-start patterns are indexed (#1034).
+- Discovery reuses its decodes (#1040, #1044).
+- Control-flow facts are built without a full xref index (#1042).
+- Worker stacks and type context are reused (#982).
+- Mach-O function boundaries are binary-searched, and the DiE matcher is
+  prepared once per process (#1021, #1022).
+- SLEIGH decoding classifies control flow once and keeps less state per
+  operand (#1026–#1029).
+- Covered pattern hits and indexed call targets skip revalidation (#1024,
+  #1030).</p>
+<p>The PRs report speedups under their own loads. Measured together for this
+release, decompiling the full dataset takes 53% less CPU time than v0.3.0
+(11,890 s → 5,608 s; see Quality numbers).</p>
+<h2 id="emulation-and-debugging">Emulation and debugging<a class="headerlink" href="#emulation-and-debugging" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Emulator:</strong></li>
+<li>Fixed a JIT temporary-cache miscompile (#941).</li>
+<li>Fixed JIT and interpreter disagreements from three audits: a failed
+    <code>cmpxchg</code> that still stored, snapshots that lost registers, mmap
+    overflow, TTD forward seek, and soft-float conversion (#948, #949, #950,
+    #958).</li>
+<li><strong>Guest ABIs:</strong></li>
+<li>Windows guests get cooperative threads, events, waits and per-thread TLS,
+    which a cgo Go program needs before <code>main</code> (#942).</li>
+<li>Linux and Windows guests are answered in their own ABI: <code>stat</code>, <code>iovec</code>,
+    auxv, dynamic linking, <code>int 0x80</code>, string conversion, CRT <code>realloc</code>,
+    32-bit structure sizes (#965, #975).</li>
+<li><strong>Debugger:</strong></li>
+<li>On macOS and Linux, a trap is classified by the thread that took it (#966).</li>
+<li>GDB/MI lists terminate and keep their entries (#956).</li>
+<li>The Windows native debugger rewinds and steps off breakpoints, and reads
+    PE and OS structures by checked offsets (#973). See Known issues.</li>
+</ul>
+<h2 id="robustness">Robustness<a class="headerlink" href="#robustness" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Hostile inputs:</strong></li>
+<li>Hostile headers are refused instead of panicking (#960).</li>
+<li>Mach-O load commands are bounded (#962).</li>
+<li>Loader fixes for raw word size, LSDA byte order, DWARF 5 names, cyclic
+    PDB types and COFF string tables (#967, #968).</li>
+<li><strong>Solver:</strong></li>
+<li>Fixed assumption backtracking, AIG bits, the array axioms, and constants
+    read at another width (#936, #963, #970).</li>
+<li>The z3 differential now covers 64-bit vectors, arrays and incremental
+    queries (#964).</li>
+<li>SAT restarts follow the Luby sequence (#974).</li>
+<li><strong>Other crates:</strong> bounds and lifetime fixes in signatures, core, static,
+  cspec, project, script and plugin (#937, #938, #940, #944, #946, #947).</li>
+</ul>
+<h2 id="ci">CI<a class="headerlink" href="#ci" title="Permanent link">&para;</a></h2>
+<p>Every merge to main now goes through a merge queue. Required checks depend
+only on the change, and a red nightly opens an issue (#980, #984, #985).
+- <strong>Nightly:</strong> the full DecBench dataset (96,103 functions) is swept every
+  night (#980).
+- <strong>Lint:</strong> actions are pinned, and clippy runs with <code>--all-targets</code> (#985,
+  #1017).
+- <strong>Fuzzing</strong> covers more targets (#997).
+- <strong>Tests:</strong> a test whose input is missing now fails instead of passing
+  silently (#1012).</p>
+<h2 id="quality-numbers">Quality numbers<a class="headerlink" href="#quality-numbers" title="Permanent link">&para;</a></h2>
+<p>Full DecBench dataset (770 binaries), local sweep, caches disabled, both
+released <code>aarch64-apple-darwin</code> binaries:</p>
+<table>
+<thead>
+<tr>
+<th>full (91.6k GED-scored rows)</th>
+<th>v0.3.0</th>
+<th>v0.4.0</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GED exact matches</td>
+<td>31,982</td>
+<td><strong>32,560</strong> (+578)</td>
+</tr>
+<tr>
+<td>GED total distance</td>
+<td>1,605,260</td>
+<td><strong>1,544,605</strong> (−3.8%)</td>
+</tr>
+<tr>
+<td>Type exact matches (of 86,937)</td>
+<td>5,697</td>
+<td><strong>6,167</strong> (+470)</td>
+</tr>
+<tr>
+<td>Type mean</td>
+<td>0.2258</td>
+<td><strong>0.2355</strong></td>
+</tr>
+<tr>
+<td>Union (GED or type exact)</td>
+<td>35,325</td>
+<td><strong>36,034</strong> (+709)</td>
+</tr>
+<tr>
+<td>Decompile CPU time</td>
+<td>11,890 s</td>
+<td><strong>5,608 s</strong> (−53%)</td>
+</tr>
+<tr>
+<td>Decompile failures</td>
+<td>0</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p>By config, GED exact matches and total distance went from v0.3.0 to v0.4.0 as
+follows:
+- unoptimized: 13,260 → 13,465, distance 399,120 → 381,371
+- optimized: 11,184 → 11,418, distance 562,165 → 532,914
+- inlined: 7,538 → 7,677, distance 643,975 → 630,320</p>
+<p>GED (structure) measures how close the output's control flow is to the
+source's. It does not measure correctness (ADR 0018).</p>
+<h2 id="known-issues">Known issues<a class="headerlink" href="#known-issues" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Signedness bug (#1066).</strong> A parameter whose stack home is read both
+  sign-extended and unsigned can be declared <code>char</code>, which turns a <code>%</code>
+  signed. One case is known (an AArch64 USB driver function). Fixed on main
+  by #1098, for v0.4.1.</li>
+<li><strong>One jump table lost.</strong> In tar's O2 no-inline build, the function at
+  <code>0x11730</code> recovers one of its two switch tables. The PR that caused it has
+  not been found.</li>
+<li><strong>Windows native debug sessions.</strong></li>
+<li><code>debug session &lt;exe&gt;</code> reads registers with the process id as the thread
+    id, so <code>regs</code> fails with "OpenThread failed".</li>
+<li><code>event</code> can fail while a debug event is pending.</li>
+<li>The fix is #1045, which still needs a run on Windows.</li>
+<li><code>modules</code> reports the main image as <code>&lt;unknown&gt;</code>.</li>
+<li><strong>Lift errors found by native execution.</strong> Running single instructions on
+  real x86-64 and AArch64 CPUs against Fission's p-code found 22 divergences
+  (#1048–#1072):</li>
+<li>x86 AF, CVT rounding, XADD and XCHG forms</li>
+<li>AArch64 FCVT saturation, FRINT ties, LSE atomics</li>
+<li>evaluator NaN propagation and half-precision floats</li>
+</ul>
+<p>The CI job that runs this differential (#1073) is not yet merged.
+- <strong>Contract.</strong> Per-command data schemas exist for <code>info</code>, <code>list</code> and
+  <code>decomp</code> only.</p>
 <p><a href="https://github.com/fission-systems/Fission/compare/v0.3.0...v0.4.0">Compare with v0.3.0</a></p>
 
 
