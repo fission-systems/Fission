@@ -488,6 +488,10 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             Ok(())
         }
 
+        DebugCommand::BpWhen(_) | DebugCommand::Logpoint(_) => {
+            anyhow::bail!("conditional breakpoints and logpoints require a persistent debug session")
+        }
+
         DebugCommand::Bp(args) => {
             let (mut state, mut session) = attach_active()?;
             session.debugger.set_sw_breakpoint(args.addr)?;
