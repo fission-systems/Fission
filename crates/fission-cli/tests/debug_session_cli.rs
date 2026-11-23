@@ -689,3 +689,59 @@ fn interactive_native_launch_reports_exit_events() {
     assert_eq!(ended["state"]["status"], "terminated");
     session.wait_success();
 }
+
+/// A Windows launch learns its main thread from the first debug event, after
+/// the session has started. The session used to fix its thread id at start-up,
+/// when the only id it had was the fallback -- the process id -- so every
+/// register read asked `OpenThread` for a thread that does not exist and
+/// failed with "The parameter is incorrect".
+#[cfg(all(windows, feature = "windows_native_debugger"))]
+#[test]
+fn windows_native_launch_reads_registers_of_the_thread_it_stopped() {
+    let target = r"C:\Windows\System32\whoami.exe";
+    let mut session = InteractiveCli::spawn(&["debug", "session", target, "--interactive"]);
+    let started = session.next_response();
+    assert_eq!(started["type"], "session_started", "{started:#}");
+    let pid = started["target"]["pid"].clone();
+
+    // Run to the loader's initial breakpoint: the process exists, its main
+    // thread is known, and it is stopped. A session drains pending events into
+    // every reply, so the stop may arrive in a `continue` frame's `events`
+    // rather than as the answer to `event`.
+    let breakpoint = |frame: &serde_json::Value| -> Option<serde_json::Value> {
+        std::iter::once(&frame["result"]["event"])
+            .chain(frame["events"].as_array().into_iter().flatten())
+            .find(|event| event["event"] == "breakpoint_hit")
+            .cloned()
+    };
+    let mut stopped = None;
+    for _ in 0..60 {
+        session.send("event --timeout-ms 5000");
+        let event = session.next_response();
+        assert_eq!(event["status"], "ok", "{event:#}");
+        if let Some(hit) = breakpoint(&event) {
+            stopped = Some(hit);
+            break;
+        }
+        session.send("continue");
+        let continued = session.next_response();
+        assert_eq!(continued["status"], "ok", "{continued:#}");
+        if let Some(hit) = breakpoint(&continued) {
+            stopped = Some(hit);
+            break;
+        }
+    }
+    let stopped = stopped.expect("the loader breakpoint is reported");
+    let thread = stopped["thread_id"].clone();
+    assert_ne!(thread, pid, "a thread id, not the process id");
+
+    session.send("regs");
+    let registers = session.next_response();
+    assert_eq!(registers["status"], "ok", "{registers:#}");
+    assert_eq!(registers["state"]["thread_id"], thread, "{registers:#}");
+    assert!(registers["state"]["pc"].is_string(), "{registers:#}");
+
+    session.send("stop");
+    let _ = session.next_response();
+    session.close_input();
+}

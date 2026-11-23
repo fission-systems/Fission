@@ -286,10 +286,13 @@ impl WindowsDebugger {
         &mut self,
         timeout_ms: u32,
     ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        // A reported event leaves the whole process frozen until it is
+        // continued, so no further event can arrive: report none rather than
+        // fail. A session drains events after every command and may already
+        // have taken the one an `event` command is waiting for; that event was
+        // returned to the caller, and the target is `Suspended` on it.
         if self.pending_continue_status.is_some() {
-            return Err(FissionError::debug(
-                "Continue the pending Windows debug event before polling again",
-            ));
+            return Ok(None);
         }
 
         let mut raw = DEBUG_EVENT::default();
@@ -323,6 +326,11 @@ impl WindowsDebugger {
                     Some(crate::debug::types::DebugEvent::ProcessExited { .. })
                 ) {
                     self.continue_pending_debug_event()?;
+                } else if event.is_some() && self.state.status == DebugStatus::Running {
+                    // Every thread is stopped until `ContinueDebugEvent`, a DLL
+                    // load or a new thread no less than a breakpoint. Saying
+                    // `Running` here told the caller it could wait for more.
+                    self.state.status = DebugStatus::Suspended;
                 }
 
                 Ok(event)

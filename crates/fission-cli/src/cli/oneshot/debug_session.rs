@@ -190,6 +190,7 @@ fn execute(
     thread_id: u32,
     command: DebugCommand,
 ) -> Result<Value> {
+    let thread_id = active_thread(backend, thread_id);
     let value = match command {
         DebugCommand::Capabilities(_) => serde_json::to_value(backend.capabilities())?,
         DebugCommand::Bp(a) => {
@@ -333,6 +334,7 @@ fn execution_progress(
     thread_id: u32,
     action: &str,
 ) -> Result<Value> {
+    let thread_id = active_thread(backend, thread_id);
     let pc = if backend.get_state().status == DebugStatus::Running {
         Value::Null
     } else {
@@ -419,7 +421,25 @@ fn restore_saved_breakpoints(backend: &mut dyn ExecutionBackend, path: Option<&s
     restored
 }
 
+/// The thread a register read or write is about, asked of the backend at the
+/// moment of the command rather than fixed when the session started.
+///
+/// A Windows launch learns its main thread only from the first debug event, so
+/// a thread id taken at start-up was the fallback -- the process id -- and every
+/// `regs` asked `OpenThread` for a thread that does not exist. `switch-thread`
+/// changes the backend's current thread, which a fixed id never saw either.
+/// `fallback` is used only while the backend knows no thread at all.
+fn active_thread(backend: &mut dyn ExecutionBackend, fallback: u32) -> u32 {
+    let state = backend.get_state();
+    state
+        .current_thread_id
+        .or(state.last_thread_id)
+        .or(state.main_thread_id)
+        .unwrap_or(fallback)
+}
+
 fn session_state_json(backend: &mut dyn ExecutionBackend, thread_id: u32) -> Value {
+    let thread_id = active_thread(backend, thread_id);
     let state = backend.get_state();
     let pc = if state.status == DebugStatus::Running {
         Value::Null
@@ -433,7 +453,10 @@ fn session_state_json(backend: &mut dyn ExecutionBackend, thread_id: u32) -> Val
     json!({
         "status": format!("{:?}", state.status).to_ascii_lowercase(),
         "attached_pid": state.attached_pid,
-        "thread_id": state.current_thread_id.or(state.main_thread_id),
+        "thread_id": state
+            .current_thread_id
+            .or(state.last_thread_id)
+            .or(state.main_thread_id),
         "pc": pc,
         "stop": backend.stop_reason(),
     })
