@@ -1501,7 +1501,19 @@ green and red mean what they say. Measured over the same 30 days
 <li><strong>Every check can fail and has run.</strong> No <code>|| true</code> on tests; nextest uses
    <code>--no-tests=fail</code>; a lane's definition changing runs the lane (#980). A gate
    that fires on a change it cannot be about (a removal) is narrowed, not
-   worked around with a placeholder test.</li>
+   worked around with a placeholder test. A test whose input is missing does
+   not return early, which nextest counts as a pass: a committed input
+   (<code>utils/</code>, <code>testdata/</code>) is <code>expect</code>ed; one only a developer machine has (a
+   benchmark corpus, the gitignored <code>utils/source/</code>) makes the test
+   <code>#[ignore = "..."]</code>, and it panics when an opt-in run cannot find it; an
+   external tool (python3, the Swift demangler) goes through
+   <code>fission_core::test_inputs::absent</code>, which fails under
+   <code>FISSION_REQUIRE_TEST_INPUTS=1</code>, set in every CI test job. The z3
+   differential is opt-in, so a missing z3 always fails it. Counted
+   on 2026-11-22: 37 tests had passed in CI without running because their
+   input was absent there (besides the three engine differential tests
+   #997 fixed), and 46 more skipped on a committed input that could only be
+   missing from a broken checkout.</li>
 </ol>
 <h2 id="hardening-and-what-was-measured-before-adding-it">Hardening, and what was measured before adding it<a class="headerlink" href="#hardening-and-what-was-measured-before-adding-it" title="Permanent link">&para;</a></h2>
 <p>Each check below was measured on main (9dd3bb658) before it was added, so its
