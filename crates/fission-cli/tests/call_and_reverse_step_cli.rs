@@ -8,6 +8,8 @@ const GROUND_TRUTH: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../fission-dir/testdata/ground_truth_fixture.elf"
 );
+// The session tests drive `debug`, which only a `debugger` build has.
+#[cfg(feature = "debugger")]
 const CONCOLIC: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../fission-emulator/testdata/x64_concolic_branch_sys.elf"
@@ -81,6 +83,7 @@ fn an_unknown_function_name_is_an_error() {
     assert!(!out.status.success());
 }
 
+#[cfg(feature = "debugger")]
 fn session(extra: &[&str]) -> Value {
     let mut argv = vec![
         "debug",
@@ -97,6 +100,7 @@ fn session(extra: &[&str]) -> Value {
 
 /// The fixture's fourth instruction is `mov rsi, rsp`. Stepping back undoes
 /// it, and seeking forward redoes it.
+#[cfg(feature = "debugger")]
 #[test]
 fn a_recording_session_steps_back_and_seeks() {
     let body = session(&[
@@ -135,6 +139,7 @@ fn a_recording_session_steps_back_and_seeks() {
 }
 
 /// Without `--record` there is no history, and the session says so.
+#[cfg(feature = "debugger")]
 #[test]
 fn back_step_needs_a_recording() {
     let body = session(&["-c", "step", "-c", "back-step"]);
@@ -150,6 +155,7 @@ fn back_step_needs_a_recording() {
 /// there, a seek forward to step 8 has to execute the changed machine --
 /// `mov rsi, rsp` at step 4 copies the new RSP -- where replaying the
 /// recording lands on the old RSP and RSI.
+#[cfg(feature = "debugger")]
 #[test]
 fn seeking_forward_after_set_reg_executes_the_changed_machine() {
     let body = session(&[
@@ -174,6 +180,7 @@ fn seeking_forward_after_set_reg_executes_the_changed_machine() {
     assert_eq!(regs["rsi"], "0x7ffffffe0000", "{body}");
 }
 
+#[cfg(feature = "debugger")]
 #[test]
 fn a_zero_record_interval_is_refused() {
     let out = run(&[
@@ -193,6 +200,7 @@ fn a_zero_record_interval_is_refused() {
 /// A session restores the breakpoints saved in the database `--db` names, and
 /// none under `--no-db`. It used to read only the file beside the binary and
 /// drop both flags without a word.
+#[cfg(feature = "debugger")]
 #[test]
 fn a_session_restores_from_the_database_db_names() {
     let dir = std::env::temp_dir().join(format!("fission-session-db-{}", std::process::id()));
