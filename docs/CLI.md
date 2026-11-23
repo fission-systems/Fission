@@ -317,6 +317,25 @@ The first milestone uses the underlying driver's existing single-byte
 watch length. Write/read-write traps are therefore **one-byte** observations,
 not arbitrary ranges. Use `debug capabilities --json` to check support.
 
+### Linux native record/replay (rr)
+
+Linux users can now access the repository's existing Mozilla `rr` bridge
+through the CLI rather than reaching into its Rust library. Commands fail
+explicitly when `rr` is unavailable:
+
+```bash
+fission_cli debug rr-status --json
+fission_cli debug rr-record ./target --json
+fission_cli debug rr-replay ~/.local/share/rr/latest-trace --json
+```
+
+`rr-record` runs the target in a local rr process and reports the recorded
+trace path. `rr-replay` opens a local GDB/MI replay and reports its initial
+state; the replay subprocess is cleaned up when the command returns. This
+provides **record/replay entrypoints**, not yet a persistent interactive
+reverse-stepping CLI. The independent native-versus-emulator semantic
+comparison remains a separate step.
+
 ### Stopped execution context
 
 `context` reads the currently stopped thread's PC, registers and optional
