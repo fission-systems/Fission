@@ -4254,3 +4254,138 @@ fn systemv_conditional_overwrite_argument_is_the_select_not_one_path() {
         "the argument is the conditional overwrite of 17 by 34: {call}\n{code}"
     );
 }
+
+#[test]
+fn systemv_exact_call_keeps_declared_arguments_after_an_unnamed_merge() {
+    // Three paths set rdi differently and meet at the call block, which
+    // stages rsi and rdx itself and spills r10 to [rsp] around the call:
+    // target3(rdi, 5, 6) with target3 declared with three parameters. The
+    // builder has no variable for the three-way merge of rdi; that must not
+    // drop the two arguments it does know, nor turn the spill into a fourth.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let rdi = reg(0x38, 8);
+    let set_rdi = |address: u64, value: i64| {
+        op(
+            address,
+            PcodeOpcode::Copy,
+            Some(rdi.clone()),
+            vec![cst(value, 8)],
+        )
+    };
+    let branch_to_join = |address: u64, flag: u64| {
+        vec![
+            op(
+                address + 1,
+                PcodeOpcode::IntEqual,
+                Some(uniq(flag, 1)),
+                vec![reg(0x10, 8), cst(flag as i64, 8)],
+            ),
+            op(
+                address + 2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![cst(0x401030, 8), uniq(flag, 1)],
+            ),
+        ]
+    };
+    let mut block0 = vec![set_rdi(base, 0x11)];
+    block0.extend(branch_to_join(base, 0x100));
+    let mut block1 = vec![set_rdi(0x401010, 0x22)];
+    block1.extend(branch_to_join(0x401010, 0x101));
+    let blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 3],
+            ops: block0,
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x401010,
+            successors: vec![2, 3],
+            ops: block1,
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x401020,
+            successors: vec![3],
+            ops: vec![set_rdi(0x401020, 0x33)],
+        },
+        PcodeBasicBlock {
+            index: 3,
+            start_address: 0x401030,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401030,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x30, 8)),
+                    vec![cst(5, 8)],
+                ),
+                op(
+                    0x401034,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x10, 8)),
+                    vec![cst(6, 8)],
+                ),
+                op(
+                    0x401038,
+                    PcodeOpcode::Store,
+                    None,
+                    vec![cst(0, 8), reg(0x20, 8), reg(0x90, 8)],
+                ),
+                op(0x40103c, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x401041, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x401200,
+        CallTargetRef {
+            address: Some(0x401200),
+            symbol: "target3".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        "target3".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 3,
+            max_arity: 3,
+            locked_exact_arity: Some(3),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target3(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target3:\n{code}"));
+    assert!(
+        call.contains(", 5, 6)"),
+        "the declared arguments staged in the call block are kept, and nothing follows them: {call}\n{code}"
+    );
+    assert!(
+        !call.contains("param_1") && !call.contains("target3(17") && !call.contains("target3(51"),
+        "the merge is neither the entry value nor one path's value: {call}\n{code}"
+    );
+}

@@ -425,7 +425,29 @@ impl<'a> PreviewBuilder<'a> {
                 entry_param,
                 reads_entry_value || path_values.contains(&expr)
             ));
-            if reads_entry_value || path_values.contains(&expr) {
+            // A merged variable is the join only if every write reaching the
+            // call is emitted under that name; otherwise the name stands for
+            // the one write that owns it and the other paths' values are lost
+            // (`target3(17, ...)` where 17 is one of three paths).
+            let named_on_every_path = matches!(bare, PreHirExpr::Var(var) if reached_defs.iter().all(|&site| {
+                self.pcode
+                    .blocks
+                    .get(site.block_idx)
+                    .and_then(|block| block.ops.get(site.op_idx))
+                    .is_some_and(|op| {
+                        matches!(
+                            self.name_emitted_for_definition(vn, site, op),
+                            Some(PreHirExpr::Var(ref name)) if name == var
+                        )
+                    })
+            }));
+            let rejected = reads_entry_value
+                || path_values.contains(&expr)
+                || (matches!(bare, PreHirExpr::Var(_)) && !named_on_every_path);
+            self.debug_call_recovery(&format!(
+                "join_arg named_on_every_path={named_on_every_path}"
+            ));
+            if rejected {
                 if let Some(name) = live_in_name
                     && !had_live_in
                 {
@@ -507,16 +529,18 @@ impl<'a> PreviewBuilder<'a> {
             {
                 continue;
             }
-            let true_idx = fission_pcode_ir::block_cfg::resolve_branch_target_index(
-                self.pcode,
-                &self.address_to_index,
-                branch_idx,
-                &term_op,
-                &term_op.inputs[0],
-            )?;
-            let arm_on_true = if true_idx == arm_idx {
+            // The branch's own recovered condition, as the printed `if` uses
+            // it: lowering the raw flag operand instead made every flag the
+            // condition reads a live variable (`cf = ...; zf = ...;`).
+            let LoweredTerminator::Cond {
+                cond, true_target, ..
+            } = self.lower_block_terminator(branch_idx).ok()?
+            else {
+                continue;
+            };
+            let arm_on_true = if true_target == self.block_target_key(arm_idx) {
                 true
-            } else if true_idx == call_block_idx {
+            } else if true_target == self.block_target_key(call_block_idx) {
                 false
             } else {
                 continue;
@@ -536,16 +560,6 @@ impl<'a> PreviewBuilder<'a> {
             };
             let branch_value = lower_def(self, branch_def)?;
             let arm_value = lower_def(self, arm_def)?;
-            let cond_vn = term_op.inputs[1].clone();
-            let cond = self
-                .with_lowering_site(
-                    LoweringSite {
-                        block_idx: branch_idx,
-                        op_idx: term_idx,
-                    },
-                    |this| this.lower_varnode(&cond_vn, &mut HashSet::default()),
-                )
-                .ok()?;
             let (then_expr, else_expr) = if arm_on_true {
                 (arm_value, branch_value)
             } else {
@@ -1296,7 +1310,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         param_count: usize,
-    ) -> Option<Vec<usize>> {
+    ) -> Option<ExactRegisterSlots> {
         let op = block.ops.get(call_idx)?;
         let target = match op.opcode {
             PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
@@ -1349,12 +1363,27 @@ impl<'a> PreviewBuilder<'a> {
             // (soft-float ARM, for one) keep the declared arity.
             _ => (0..arity).collect(),
         };
-        Some(
-            slots
+        // Every declared parameter travels in a register: a locked (not
+        // variadic) declaration whose integer parameters all have a slot,
+        // under a convention that passes floating point in its own registers.
+        // Such a call takes nothing from the stack.
+        let register_only = summary.locked_exact_arity.is_some()
+            && slots.iter().all(|&slot| slot < param_count)
+            && matches!(
+                self.options.calling_convention,
+                CallingConvention::SystemVAmd64
+                    | CallingConvention::AArch64
+                    | CallingConvention::WindowsX64
+            )
+            && (self.options.calling_convention != CallingConvention::WindowsX64
+                || arity <= param_count);
+        Some(ExactRegisterSlots {
+            slots: slots
                 .into_iter()
                 .filter(|&slot| slot < param_count)
                 .collect(),
-        )
+            register_only,
+        })
     }
 
     /// An exact callee declaration can prove that an ABI register is read by
@@ -1712,10 +1741,9 @@ impl<'a> PreviewBuilder<'a> {
         // merge of several writes). Only integer-register slots are filled:
         // a floating-point parameter takes no integer slot on SysV/AArch64,
         // and Windows leaves that slot unused.
-        if let Some(exact_register_slots) =
-            self.exact_call_integer_register_slots(block, call_idx, param_count)
-        {
-            for param_index in exact_register_slots {
+        let exact_slots = self.exact_call_integer_register_slots(block, call_idx, param_count);
+        if let Some(exact) = exact_slots.as_ref() {
+            for &param_index in &exact.slots {
                 if skip_param == Some(param_index) || recovered[param_index].is_some() {
                     continue;
                 }
@@ -1797,8 +1825,40 @@ impl<'a> PreviewBuilder<'a> {
             }
         }
 
+        // A declared parameter the recovery could not name still precedes
+        // the ones it did: `__fwritex(s, len, f)` with `s` a merge of several
+        // writes the builder has no variable for kept `len` and `f` only up
+        // to that hole, and printed `__fwritex()` -- plus a spill to `[rsp]`
+        // taken for a stack argument. Mark the hole explicitly instead of
+        // dropping what follows it (or guessing the register's entry value).
+        if let Some(exact) = exact_slots.as_ref()
+            && let Some(&last) = exact
+                .slots
+                .iter()
+                .rev()
+                .find(|&&slot| recovered.get(slot).is_some_and(Option::is_some))
+        {
+            for &slot in exact.slots.iter().filter(|&&slot| slot < last) {
+                if recovered[slot].is_none() && skip_param != Some(slot) {
+                    let size = param_slots[slot].1;
+                    recovered[slot] = Some(PreHirExpr::Call {
+                        origin: None,
+                        target: UNRESOLVED_MERGED_ARGUMENT.to_string(),
+                        args: Vec::new(),
+                        ty: type_from_size(size, false),
+                    });
+                }
+            }
+        }
         let contiguous_reg_count = recovered.iter().take_while(|expr| expr.is_some()).count();
-        let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
+        let stack_args = if exact_slots
+            .as_ref()
+            .is_some_and(|exact| exact.register_only)
+        {
+            Vec::new()
+        } else {
+            self.recover_call_stack_args_from_block(block, call_idx)?
+        };
         if contiguous_reg_count == 0 {
             if !stack_args.is_empty() {
                 self.debug_call_recovery(&format!("reg_args=0 total_args={}", stack_args.len()));
@@ -1881,6 +1941,18 @@ fn is_floating_point_surface_type(surface: &str) -> bool {
         .join(" ");
     matches!(name.as_str(), "float" | "double" | "long double")
 }
+
+/// The integer-register slots an exact callee declaration fills, and whether
+/// the declaration leaves nothing to pass on the stack.
+struct ExactRegisterSlots {
+    slots: Vec<usize>,
+    register_only: bool,
+}
+
+/// Printed for a declared argument whose value is a merge of several writes
+/// the builder has no variable for: visibly unresolved, never the register's
+/// entry value and never silently dropped together with the arguments after it.
+pub(crate) const UNRESOLVED_MERGED_ARGUMENT: &str = "__fission_merged_value";
 
 /// Whether the writes reaching a call carry more than one value, given how
 /// many writes reach it and their distinct printed expressions.

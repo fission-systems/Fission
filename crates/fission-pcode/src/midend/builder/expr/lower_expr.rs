@@ -577,7 +577,7 @@ impl<'a> PreviewBuilder<'a> {
     /// Only names: nothing here rebuilds the definition's expression, so the
     /// result is right for any read the definition's storage name is right
     /// for, merged or not.
-    fn name_emitted_for_definition(
+    pub(in crate::midend::builder) fn name_emitted_for_definition(
         &self,
         vn: &Varnode,
         site: LoweringSite,
