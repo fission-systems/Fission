@@ -187,6 +187,12 @@ impl WindowsDebugger {
         }
         self.state.breakpoints.clear();
         self.step_off = None;
+        // Hardware debug registers persist in the thread after debugger
+        // detachment. Never leave DR7 armed in a process without a debugger.
+        let armed_hw: Vec<u64> = self.hw_breakpoints.keys().copied().collect();
+        for address in armed_hw {
+            self.remove_hw_breakpoint(address)?;
+        }
 
         if self.pending_continue_status.is_some() {
             self.continue_pending_debug_event()?;
