@@ -1,0 +1,1868 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A cross-platform, Rust-powered reverse engineering and decompilation framework.">
+      
+      
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.2">
+    
+    
+      
+        <title>Decompiler hot paths and work-limit usage - Fission</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#decompiler-hot-paths-and-work-limit-usage" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Fission" class="md-header__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Fission
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Decompiler hot paths and work-limit usage
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fission-systems/Fission
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../PROJECT_MAP/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Project Map
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../CLI/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  CLI Guide
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Architecture
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../BENCHMARK_DECBENCH/" class="md-tabs__link">
+          
+  
+  
+  Benchmarks
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../EVALUATION/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Evaluation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../MALWARE_SAMPLE_POLICY/" class="md-tabs__link">
+          
+  
+  
+  Developer Policies
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../changelog/v0.3.0/" class="md-tabs__link">
+          
+  
+  
+  Release Notes
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Fission" class="md-nav__button md-logo" aria-label="Fission" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Fission
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/fission-systems/Fission" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    fission-systems/Fission
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../PROJECT_MAP/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project Map
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CLI/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI Guide
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Benchmarks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Benchmarks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BENCHMARK_DECBENCH/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    DecBench
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../QUALITY_METRICS/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quality metrics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../EVALUATION/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Evaluation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Policies
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Policies
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../MALWARE_SAMPLE_POLICY/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Malware Sample Policy
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../VERSIONING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Versioning
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CI_RELEASE_GATES/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CI and release gates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../RELEASE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Release Notes
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Release Notes
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.3.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.3.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.1/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.1
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.2.0/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.2.0
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.9/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.9
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.8/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.8
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.7/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.7
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.6/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.6
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.5/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.5
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.4/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.4
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.3
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/v0.1.2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Fission 0.1.2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#changes-and-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Changes and invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#method" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Method
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#executed-instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Executed instructions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#re-verified-on-current-main" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Re-verified on current main
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#work-limit-usage-across-a-corpus-sample" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Work-limit usage across a corpus sample
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raising-the-limits" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raising the limits
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decbench-sample-set-gate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        DecBench sample-set gate
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limits-of-this-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits of this evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#reproduction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reproduction
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="decompiler-hot-paths-and-work-limit-usage">Decompiler hot paths and work-limit usage<a class="headerlink" href="#decompiler-hot-paths-and-work-limit-usage" title="Permanent link">&para;</a></h1>
+<p>Mechanical performance work plus a measurement of how far the decompiler's deterministic work limits are reached, 2026-11-23. <strong>No semantic, readability, score or ranking improvement is claimed.</strong> Decompiled output is unchanged at the default limits.</p>
+<h2 id="changes-and-invariants">Changes and invariants<a class="headerlink" href="#changes-and-invariants" title="Permanent link">&para;</a></h2>
+<p>Four commits. The speedup, distribution, raised-limit and gate measurements below were taken on base <code>100878b1593890e578525d372738b5e14778b50d</code>; the branch was then rebased onto main <code>1f10b8c789b2db66a70277f8cbe884010968b7d8</code> and the output-equality and instruction measurements were repeated there ("Re-verified on current main").</p>
+<ol>
+<li><strong><code>perf(midend)</code></strong> removes repeated scans. The register-name predicates in <code>variable_merge</code> no longer allocate a lowercased <code>String</code> per call inside the O(n²) pair loop, and name-derived facts are computed once per local. The SSA initialization dataflow keeps states as bit vectors over the tracked names instead of cloned <code>BTreeSet&lt;String&gt;</code>. <code>SpaceOpIndex</code>, built once in <code>PreviewBuilder::new</code> and shared by clones, files ops under 16-byte buckets of their varnode ranges, so <code>collect_output_use_sites_outside_block</code> and <code>first_reaching_output_use_after_block_exit</code> visit only ops that can match; <code>varnode_matches_key</code> stays the sole judge. <code>TraceDag::push_branches</code> computes <code>check_retirement</code> once per branch point per step. Each rewrite keeps the implementation it replaced as the reference in a differential test.</li>
+<li><strong><code>refactor(midend)</code></strong> turns the four work limits (whole-structuring checkpoints, condition-recovery subcalls, SESE region-proof attempts, varnode-lowering steps) from module constants into <code>ResourceLimits</code> on <code>NirRenderOptions</code>. The defaults are the former constants and the field is <code>#[serde(default)]</code>.</li>
+<li><strong><code>feat(midend)</code></strong> records, per limit, the peak its counter reached and how many times it crossed the limit in <code>NirBuildStats</code> (<code>resource_&lt;limit&gt;_peak</code>, <code>resource_&lt;limit&gt;_trip_count</code>). The meter is observation only: one <code>ResourceUsage</code> is shared by a builder and all its clones and forks, so discarded attempts are counted, and nothing reads it to decide. The enforcing counters are untouched.</li>
+<li><strong><code>feat(cli)</code></strong> adds <code>decomp --work-limit NAME=VALUE</code> and <code>[decompiler.work_limits]</code> in <code>fission.toml</code> (flag over file over default).</li>
+</ol>
+<p>A limit counts a unit of work, never time, so where it trips does not depend on machine speed or load. These commits do not change that; they make the numbers visible and settable.</p>
+<h2 id="method">Method<a class="headerlink" href="#method" title="Permanent link">&para;</a></h2>
+<p>Apple M4 Pro, 14 logical CPUs, 24 GiB, macOS 26.5.1, rustc 1.97.0, <strong><code>quick-release</code> profile</strong> (no LTO, 16 codegen units), one function at a time (<code>FISSION_RUST_DECOMP_WORKERS=1</code>), <code>--no-db</code>, <code>FISSION_BENCHMARK_NO_CACHE=1</code>. Baseline CLI is base <code>100878b15</code> (SHA256 <code>ac0a2f41…cf48735</code>); final CLI is the fourth commit's tree (SHA256 <code>8438a1af…20c325c6</code>). Inputs are stripped binaries of the DecBench eval-kit sample-set; none was executed.</p>
+<p>The machine was shared: load average was 40-56 during every run. Wall-clock medians taken under that load overlapped between builds and are <strong>not reported</strong>. The comparison is instructions retired (<code>/usr/bin/time -l</code>), which load barely moves, and output equality.</p>
+<p>Baseline and final were built from separate worktrees, and the two binaries' SHA256 were checked to differ before measuring: two worktrees that share one cargo target directory can hand back each other's binary as up to date.</p>
+<p>Outputs are compared on every field except <code>*_duration_ms</code>, <code>*_sec</code>, <code>total_time_ms</code> and the new <code>resource_*_peak</code> / <code>_trip_count</code> keys.</p>
+<h2 id="executed-instructions">Executed instructions<a class="headerlink" href="#executed-instructions" title="Permanent link">&para;</a></h2>
+<p>Baseline and final measured back to back, same inputs and address lists. Output is identical on every function.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th style="text-align: right;">Functions</th>
+<th style="text-align: right;">Baseline</th>
+<th style="text-align: right;">Final</th>
+<th style="text-align: right;">Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bin_074.elf, the four heaviest</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">98.29G</td>
+<td style="text-align: right;">76.08G</td>
+<td style="text-align: right;">-22.6%</td>
+</tr>
+<tr>
+<td>bin_074.elf</td>
+<td style="text-align: right;">383</td>
+<td style="text-align: right;">224.85G</td>
+<td style="text-align: right;">194.03G</td>
+<td style="text-align: right;">-13.7%</td>
+</tr>
+<tr>
+<td>bin_121.so</td>
+<td style="text-align: right;">133</td>
+<td style="text-align: right;">182.70G</td>
+<td style="text-align: right;">159.88G</td>
+<td style="text-align: right;">-12.5%</td>
+</tr>
+<tr>
+<td>bin_164.elf</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">3.97G</td>
+<td style="text-align: right;">3.47G</td>
+<td style="text-align: right;">-12.8%</td>
+</tr>
+<tr>
+<td>bin_193.elf</td>
+<td style="text-align: right;">250</td>
+<td style="text-align: right;">193.74G</td>
+<td style="text-align: right;">175.49G</td>
+<td style="text-align: right;">-9.4%</td>
+</tr>
+<tr>
+<td>bin_172.dll</td>
+<td style="text-align: right;">125</td>
+<td style="text-align: right;">20.50G</td>
+<td style="text-align: right;">19.78G</td>
+<td style="text-align: right;">-3.5%</td>
+</tr>
+</tbody>
+</table>
+<p>908 functions in five binaries, plus the four-function subset of one of them. Large functions gain most, small-function inputs least. The usage meters cost about 0.1% of instructions (bin_074, 383 functions: 194.57G without, 194.79G with) and the limit option about 0.03%. This is an instruction count, not a time or throughput claim.</p>
+<h2 id="re-verified-on-current-main">Re-verified on current main<a class="headerlink" href="#re-verified-on-current-main" title="Permanent link">&para;</a></h2>
+<p>After rebasing onto main <code>1f10b8c789b2db66a70277f8cbe884010968b7d8</code> (11 upstream commits beyond the first rebase target, one overlapping file, merged cleanly) the baseline CLI was rebuilt from that main in its own target directory and the comparison repeated on the same inputs. Output is identical on every function.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th style="text-align: right;">Functions</th>
+<th style="text-align: right;">Baseline</th>
+<th style="text-align: right;">Final</th>
+<th style="text-align: right;">Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bin_074.elf, the four heaviest</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">81.61G</td>
+<td style="text-align: right;">66.50G</td>
+<td style="text-align: right;">-18.5%</td>
+</tr>
+<tr>
+<td>bin_074.elf</td>
+<td style="text-align: right;">383</td>
+<td style="text-align: right;">202.67G</td>
+<td style="text-align: right;">182.89G</td>
+<td style="text-align: right;">-9.8%</td>
+</tr>
+<tr>
+<td>bin_121.so</td>
+<td style="text-align: right;">133</td>
+<td style="text-align: right;">162.91G</td>
+<td style="text-align: right;">142.55G</td>
+<td style="text-align: right;">-12.5%</td>
+</tr>
+<tr>
+<td>bin_164.elf</td>
+<td style="text-align: right;">17</td>
+<td style="text-align: right;">3.61G</td>
+<td style="text-align: right;">3.24G</td>
+<td style="text-align: right;">-10.2%</td>
+</tr>
+<tr>
+<td>bin_193.elf</td>
+<td style="text-align: right;">250</td>
+<td style="text-align: right;">175.77G</td>
+<td style="text-align: right;">159.19G</td>
+<td style="text-align: right;">-9.4%</td>
+</tr>
+<tr>
+<td>bin_172.dll</td>
+<td style="text-align: right;">125</td>
+<td style="text-align: right;">19.11G</td>
+<td style="text-align: right;">18.86G</td>
+<td style="text-align: right;">-1.3%</td>
+</tr>
+</tbody>
+</table>
+<p>Upstream main is itself faster than the original base on these inputs (bin_074, four heaviest: 98.29G then, 81.61G now), so the relative gain is smaller than in the first table. The corpus distribution, raised-limit and gate measurements were not repeated on this main.</p>
+<h2 id="work-limit-usage-across-a-corpus-sample">Work-limit usage across a corpus sample<a class="headerlink" href="#work-limit-usage-across-a-corpus-sample" title="Permanent link">&para;</a></h2>
+<p>45 of the 202 sample-set binaries (every fifth by size), 7,565 functions, 7,524 with stats, 41 fell back. Per binary, the 25 largest functions plus an even stride, at most 300. <strong>The sample over-represents large functions</strong>, so the overall rates below are higher than a whole-corpus rate; the by-size rates are not affected by that.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th style="text-align: right;">Default</th>
+<th style="text-align: right;">Max peak</th>
+<th style="text-align: right;">p50</th>
+<th style="text-align: right;">p90</th>
+<th style="text-align: right;">p99</th>
+<th style="text-align: right;">≥50%</th>
+<th style="text-align: right;">Functions tripped</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>structuring_total_work</code></td>
+<td style="text-align: right;">200,000</td>
+<td style="text-align: right;">204,435</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">728</td>
+<td style="text-align: right;">142,581</td>
+<td style="text-align: right;">90</td>
+<td style="text-align: right;">62</td>
+</tr>
+<tr>
+<td><code>condition_recovery_subcalls</code></td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">513</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">513</td>
+<td style="text-align: right;">318</td>
+<td style="text-align: right;">238</td>
+</tr>
+<tr>
+<td><code>sese_region_proof_calls</code></td>
+<td style="text-align: right;">20,000</td>
+<td style="text-align: right;">20,022</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">63</td>
+<td style="text-align: right;">771</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">1</td>
+</tr>
+<tr>
+<td><code>varnode_lowering_work</code></td>
+<td style="text-align: right;">20,000</td>
+<td style="text-align: right;">20,340</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">117</td>
+<td style="text-align: right;">908</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+</tr>
+</tbody>
+</table>
+<p>243 functions (3.2%) tripped at least one limit, in 31 of the 45 binaries. All 62 that crossed the structuring limit also crossed the condition-recovery limit; none of the 41 fallback functions tripped one.</p>
+<table>
+<thead>
+<tr>
+<th>Validated p-code ops</th>
+<th style="text-align: right;">Functions</th>
+<th style="text-align: right;">Tripped</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>&lt; 100</td>
+<td style="text-align: right;">3,304</td>
+<td style="text-align: right;">0 (0%)</td>
+</tr>
+<tr>
+<td>100-300</td>
+<td style="text-align: right;">2,426</td>
+<td style="text-align: right;">0 (0%)</td>
+</tr>
+<tr>
+<td>300-1,000</td>
+<td style="text-align: right;">1,352</td>
+<td style="text-align: right;">39 (2.9%)</td>
+</tr>
+<tr>
+<td>1,000-3,000</td>
+<td style="text-align: right;">345</td>
+<td style="text-align: right;">134 (38.8%)</td>
+</tr>
+<tr>
+<td>≥ 3,000</td>
+<td style="text-align: right;">97</td>
+<td style="text-align: right;">70 (72.2%)</td>
+</tr>
+</tbody>
+</table>
+<p>On the 233 functions the DecBench gate scores, 22 (9.4%) tripped at the default: 21 only condition recovery, one also the structuring limit.</p>
+<h2 id="raising-the-limits">Raising the limits<a class="headerlink" href="#raising-the-limits" title="Permanent link">&para;</a></h2>
+<p>The 243 tripped functions were decompiled again with every limit raised (<code>condition_recovery_subcalls=4096</code>, <code>structuring_total_work=2000000</code>, <code>sese_region_proof_calls=200000</code>, <code>varnode_lowering_work=200000</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Tripped at default</th>
+<th style="text-align: right;">Functions</th>
+<th style="text-align: right;">Output identical when raised</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>condition recovery only</td>
+<td style="text-align: right;">176</td>
+<td style="text-align: right;">158</td>
+</tr>
+<tr>
+<td>structuring total work (and condition recovery)</td>
+<td style="text-align: right;">62</td>
+<td style="text-align: right;">9</td>
+</tr>
+<tr>
+<td>varnode lowering</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+</tr>
+<tr>
+<td>SESE region proof</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>76 of 243 functions (31%) produce different output; no function changed its fallback status. Where output changed, the line-count delta ranges from -273 to +631 and the <code>goto</code> delta from -14 to +163. Whether the changed output is better was not measured here.</li>
+<li>Even raised, 36 functions still crossed the structuring limit (peak 2,004,290) and 111 the condition-recovery limit (peak 4,097), so some functions are not bounded by any of these values. The SESE peak among the raised runs was 53,419, above its default.</li>
+<li>Instructions for the same 243 functions: 3,697.0G at the defaults, 3,974.2G raised (+7.5%).</li>
+</ul>
+<p>Peak usage against validated p-code op count, over functions that did not trip, fits <code>peak ≈ ops^α</code>: <code>structuring_total_work</code> α=1.42 (R²=0.66, 5,257 functions), <code>condition_recovery_subcalls</code> 0.96 (0.56), <code>sese_region_proof_calls</code> 0.90 (0.67), <code>varnode_lowering_work</code> 0.86 (0.67). Size explains about 60% of the variance; the per-op demand of the largest outliers is 50 to 2,000 times the median, so a size-proportional limit would follow the trend but not remove the cut-off for runaway searches.</p>
+<h2 id="decbench-sample-set-gate">DecBench sample-set gate<a class="headerlink" href="#decbench-sample-set-gate" title="Permanent link">&para;</a></h2>
+<p><code>decbench_sample_set_gate.py check</code>, 250 functions decompiled, 233 scored for GED, caches disabled, same environment for the three runs:</p>
+<table>
+<thead>
+<tr>
+<th>CLI</th>
+<th style="text-align: right;">HIR GED perfect</th>
+<th style="text-align: right;">HIR GED total distance</th>
+<th style="text-align: right;">HIR types perfect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>baseline code</td>
+<td style="text-align: right;">67/233</td>
+<td style="text-align: right;">7,529</td>
+<td style="text-align: right;">15/223</td>
+</tr>
+<tr>
+<td>final, default limits</td>
+<td style="text-align: right;">67/233</td>
+<td style="text-align: right;">7,529</td>
+<td style="text-align: right;">15/223</td>
+</tr>
+<tr>
+<td>final, limits raised as above</td>
+<td style="text-align: right;">67/233</td>
+<td style="text-align: right;">7,505</td>
+<td style="text-align: right;">15/223</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Baseline vs final at the defaults: <strong>0 of 233 rows differ</strong> in GED or output node count.</li>
+<li>Default vs raised: <strong>1 of 233 rows differs</strong>, <code>bin_029.elf</code> <code>readproc</code> (source graph 104 nodes): output nodes 71 → 77, GED 127 → 103. It is the one scored row that crossed the structuring limit.</li>
+</ul>
+<p><code>bin_029</code> is not among the 45 sampled binaries, so this row is not one of the 76 functions above, and none of those 76 is a scored gate row: their changed outputs were not scored. One row is below this project's bar for acting on a shape (three functions across two programs), and structure distance prices node count and degree only, so the lower total distance is recorded as measured and <strong>not</strong> as a quality gain.</p>
+<p>The gate exits 1 for all three runs, including the baseline code: the stored floor is 68 / 16 perfect and this environment scores the unmodified base 67 / 15. Two environment gaps explain part of that and apply equally to every run: the published source CFGs for <code>nuttx</code> are absent, and the <code>decbench</code> and <code>rust_joern</code> editable installs point into a <code>vendor/</code> that is a self-referential symlink here. The gate was run from a scratch copy of the script with <code>PYTHONPATH</code> set to <code>scorer-vendor-snapshot</code> and <code>~/rust-joern</code>, and the kit linked in. The comparison between the three runs is valid; the floor comparison is not.</p>
+<h2 id="validation">Validation<a class="headerlink" href="#validation" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Each of the four code commits was rebuilt and tested on its own after the rebase onto main <code>775139eb5</code>: <code>cargo fmt --all --check</code>, <code>cargo check --workspace --tests</code> and <code>cargo nextest</code> over <code>fission-core</code>, <code>fission-pcode</code>, <code>fission-midend-*</code>, <code>fission-cspec</code>, <code>fission-decompiler</code> and <code>fission-cli</code> (2,841 / 2,849 / 2,854 / 2,867 tests). The final head on <code>1f10b8c78</code> passes fmt, the workspace check, CI-line clippy over the touched crates and <code>scripts/check/owner_boundaries.sh</code>; of 2,881 tests, 2,878 pass and the three <code>debug_session_cli</code> tests below fail.</li>
+<li><code>fission-cli</code> <code>debug_session_cli</code> has three interactive-emulator tests that fail with a 5 s timeout, zero to three of them per run. They failed the same way on the unmodified original base (<code>100878b15</code>); they were not re-run on the newer main.</li>
+<li><code>scripts/test/check_resource_path_literals.sh</code> reports three hits in <code>crates/fission-signatures</code>, files this change does not touch.</li>
+<li>New tests: differential tests for the register-name predicates, the outside-block use scan (including bucket-boundary, oversized and zero-size varnodes) and the first-reaching-use scan; the <code>ResourceLimits</code> defaults, serde compatibility, override and trip paths; the meter's peaks, trips and merge rule; <code>--work-limit</code> and <code>[decompiler.work_limits]</code> parsing, precedence and rejection of bad input.</li>
+<li>Rebasing exposed a semantic collision that merged without a textual conflict. Upstream <code>b6d13fb36</code> makes an output-less <code>Call</code>/<code>CallInd</code> end a return-register definition, which no varnode match can see, so the <code>SpaceOpIndex</code> premise (an op outside the candidates cannot redefine) no longer held for <code>first_reaching_output_use_after_block_exit</code>. For a return register the scan now also visits every output-less call. The differential fixture gained a return-register definition whose only read sits behind a call; with the fix disabled both that fixture and the dedicated test fail, with it enabled they pass.</li>
+<li>Rejected during the work: a dense-bitmatrix <code>DomTree::dominates</code>, because <code>dominates</code> was 0.1% of the profile and <code>push_branches</code> did not move. It is not in the branch.</li>
+</ul>
+<h2 id="limits-of-this-evidence">Limits of this evidence<a class="headerlink" href="#limits-of-this-evidence" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>quick-release</code>, instructions retired, one function at a time on a loaded machine; no wall-clock, release-profile or parallel-throughput claim.</li>
+<li>908 functions in five binaries for output equality; 45 of 202 binaries for the distribution. One PE (a DLL); no Mach-O.</li>
+<li>The gate run is one environment with the floor mismatch above; no full-dataset sweep and no <code>corpus/scale</code> run. The 76 changed outputs from the corpus sample were not scored.</li>
+<li>The distribution, raised-limit and gate measurements are from <code>100878b15</code>, 146 commits behind main when taken. Only output equality and instruction counts were repeated on the rebased branch, and main keeps moving: re-verify against the base the pull request merges into.</li>
+</ul>
+<h2 id="reproduction">Reproduction<a class="headerlink" href="#reproduction" title="Permanent link">&para;</a></h2>
+<div class="language-sh highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--profile<span class="w"> </span>quick-release<span class="w"> </span>-p<span class="w"> </span>fission-cli
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="c1"># instructions: FISSION_RUST_DECOMP_WORKERS=1 /usr/bin/time -l fission_cli --resource-root . decomp BIN \</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="c1">#   --addresses-file ADDRS --json --no-db --no-header --no-warnings --timeout-ms 120000</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>fission_cli<span class="w"> </span>decomp<span class="w"> </span>BIN<span class="w"> </span>--addr<span class="w"> </span>0xa746<span class="w"> </span>--json<span class="w"> </span>--work-limit<span class="w"> </span><span class="nv">sese_region_proof_calls</span><span class="o">=</span><span class="m">1</span><span class="w">   </span><span class="c1"># trips show in preview_build_stats</span>
+</span></code></pre></div>
+<p>Local raw artifacts, not committed: <code>benchmark/artifacts/performance/2026-11-23-hotpaths/</code> (<code>corpus_run.py</code>, <code>raise_exp.py</code>, <code>paired.py</code>, <code>cmp.py</code>, the per-function corpus rows, the raised-limit results, the three gate dumps and wrappers). Compact evidence: <a href="../decompiler-hotpath-work-limits-performance.json"><code>decompiler-hotpath-work-limits-performance.json</code></a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "search.suggest", "search.highlight", "content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
+      
+    
+  </body>
+</html>
