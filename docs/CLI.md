@@ -274,6 +274,29 @@ See [Patch Command](#patch-command) for the flags and for what `patch` refuses.
 
 ## Debug Command
 
+### Conditional breakpoints and logpoints
+
+The `bp-when` and `logpoint` commands are **persistent-session-only**
+commands. They use software breakpoints and evaluate an explicitly named
+scalar register when a breakpoint event is observed. A false `bp-when`
+predicate or a logpoint automatically resumes the target; errors leave the
+target stopped and appear as `rule_error` events. Auto-resume is bounded to
+32 events per command to prevent runaway sessions.
+
+```bash
+fission_cli debug --emulator session ./guest.elf \
+  --command "bp-when 0x401000 --register rax --equals 0x2" \
+  --command "logpoint 0x401020 --register rdi" \
+  --command continue --json
+```
+
+This first version supports **register equality only**, not arbitrary
+expressions or conditional memory reads. Rules last for the current session
+and are removed with `rm-bp`. Event evaluation depends on the backend's
+`BreakpointHit` delivery and its ability to read a stopped thread; use
+`debug capabilities --json` to check support. A native backend may report
+a running state until its next event, so clients must keep consuming events.
+
 ### Stopped execution context
 
 `context` reads the currently stopped thread's PC, registers and optional
