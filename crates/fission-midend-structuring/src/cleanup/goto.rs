@@ -241,21 +241,46 @@ fn first_live_in_skipped_run(stmts: &[PreHirStmt], start: usize, end: usize) -> 
 }
 
 /// Rule 1: If a `Goto(L)` is immediately followed by `Label(L)`, remove the Goto.
+///
+/// Also when the next statement is a loop entered unconditionally -- a
+/// `do { L: ... }` or a `while (1) { L: ... }` -- whose body begins at `L`:
+/// falling into it reaches `L` exactly as the jump does. A rotated loop's
+/// entry jump to its head is this shape once the head is the body's first
+/// statement.
 fn empty_jump_removal(stmts: Vec<PreHirStmt>, changed: &mut bool) -> Vec<PreHirStmt> {
     let mut out = Vec::with_capacity(stmts.len());
     let mut iter = stmts.into_iter().peekable();
     while let Some(stmt) = iter.next() {
         if let PreHirStmt::Goto(ref label) = stmt {
-            if let Some(PreHirStmt::Label(next_label)) = iter.peek() {
-                if label == next_label {
-                    *changed = true;
-                    continue; // drop the Goto; Label stays
-                }
+            if iter
+                .peek()
+                .is_some_and(|next| enters_unconditionally_at(next, label))
+            {
+                *changed = true;
+                continue; // drop the Goto; Label stays
             }
         }
         out.push(stmt);
     }
     out
+}
+
+/// Whether falling into `stmt` reaches `label` before anything else runs.
+fn enters_unconditionally_at(stmt: &PreHirStmt, label: &str) -> bool {
+    let body_starts_at = |body: &[PreHirStmt]| {
+        body.iter()
+            .take_while(|stmt| matches!(stmt, PreHirStmt::Label(_)))
+            .any(|stmt| matches!(stmt, PreHirStmt::Label(name) if name == label))
+    };
+    match stmt {
+        PreHirStmt::Label(next_label) => next_label == label,
+        PreHirStmt::DoWhile { body, .. } => body_starts_at(body),
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(value, _),
+            body,
+        } => *value != 0 && body_starts_at(body),
+        _ => false,
+    }
 }
 
 /// Rule 2: If a `Label(L)` is referenced exactly once (as a `Goto(L)`) in the same list,
@@ -520,4 +545,56 @@ pub fn eliminate_redundant_gotos_with(
         }
     }
     stmts
+}
+
+#[cfg(test)]
+mod loop_entry_jump_tests {
+    use super::*;
+
+    fn effect(n: i64) -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: format!("effect{n}"),
+            args: Vec::new(),
+            ty: NirType::Unknown,
+        })
+    }
+
+    fn loop_from(label: &str, cond: PreHirExpr) -> PreHirStmt {
+        PreHirStmt::While {
+            cond,
+            body: std::rc::Rc::new(vec![
+                PreHirStmt::Label(label.to_string()),
+                effect(1),
+                PreHirStmt::Break,
+            ]),
+        }
+    }
+
+    #[test]
+    fn jump_into_the_top_of_an_unconditional_loop_is_dropped() {
+        let body = vec![
+            effect(0),
+            PreHirStmt::Goto("block_head".to_string()),
+            loop_from("block_head", PreHirExpr::Const(1, NirType::Bool)),
+        ];
+        let mut changed = false;
+        let out = empty_jump_removal(body, &mut changed);
+        assert!(changed);
+        assert!(!out.iter().any(|stmt| matches!(stmt, PreHirStmt::Goto(_))));
+    }
+
+    #[test]
+    fn jump_into_a_conditional_loop_is_kept() {
+        // Falling into `while (c)` tests `c` first; the jump to its first
+        // statement does not, so the two are not the same path.
+        let body = vec![
+            PreHirStmt::Goto("block_head".to_string()),
+            loop_from("block_head", PreHirExpr::Var("c".to_string())),
+        ];
+        let mut changed = false;
+        let out = empty_jump_removal(body, &mut changed);
+        assert!(!changed);
+        assert!(matches!(out[0], PreHirStmt::Goto(_)));
+    }
 }
