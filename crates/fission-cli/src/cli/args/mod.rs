@@ -1569,7 +1569,7 @@ mod debug;
 #[allow(unused_imports)]
 pub use debug::{
     DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs,
-    DebugCapabilitiesArgs, DebugCommand, DebugDllBpArgs, DebugEventArgs, DebugExBpArgs,
+    DebugCapabilitiesArgs, DebugCommand, DebugContextArgs, DebugDllBpArgs, DebugEventArgs, DebugExBpArgs,
     DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs,
     DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
     DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
