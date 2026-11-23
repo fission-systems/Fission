@@ -337,6 +337,10 @@ impl<'a> PrintCtx<'a> {
         }
     }
 
+    fn constant_name(&self, value: i64) -> Option<&str> {
+        self.global_names?.get(&(value as u64)).map(String::as_str)
+    }
+
     fn expr_is_pointer(&self, expr: &HirExpr) -> bool {
         match expr {
             HirExpr::AddressOfGlobal(_) | HirExpr::AddressOfLocal(_) => true,
@@ -623,14 +627,51 @@ pub(crate) fn print_hir_function_with_provenance(
     (code, mappings)
 }
 
-/// Whether C11 can only express this callable as a declaration without a
-/// prototype. A C function definition with an empty parameter list declares
-/// zero parameters, so it cannot stand in for an unknown-arity thunk.
+/// Whether the callable can be declared but its forwarding body cannot be
+/// defined because its parameters are unknown.
 pub(super) fn has_unknown_arity_declaration(func: &HirFunction) -> bool {
     let variadic_fixed_arity = func
         .variadic_fixed_arity
         .or_else(|| is_known_variadic_runtime_symbol(&func.name).then_some(func.params.len()));
     func.params.is_empty() && (func.has_unknown_arity_prototype || variadic_fixed_arity == Some(0))
+}
+
+/// The comment that marks a callee prototype whose parameter list was read off
+/// this function's call sites rather than declared anywhere.
+///
+/// It is part of the output contract: a consumer that merges several
+/// functions' declarations (the CLI's `--project` unit) has to know that two
+/// different inferred lists for one callee are two partial views, not a
+/// declaration to keep and a mistake to drop.
+pub const INFERRED_PROTOTYPE_MARKER: &str = "/* inferred from calls */";
+
+/// `extern T name(params);` for a parameter list inferred from call sites.
+/// An empty list is a prototype with no parameters, `(void)`.
+pub fn print_inferred_extern(return_type: &str, name: &str, params: &[String]) -> String {
+    let params = if params.is_empty() {
+        "void".to_string()
+    } else {
+        params.join(", ")
+    };
+    format!("extern {return_type} {name}({params}); {INFERRED_PROTOTYPE_MARKER}\n")
+}
+
+/// The declaration of a callable whose parameters are unknown, valid in both
+/// C17 and C23. It is a preprocessor group, not one line: a consumer that
+/// takes declarations apart has to keep `#if` .. `#endif` together.
+pub fn print_unknown_arity_extern(return_type: &str, name: &str) -> String {
+    // C23 gives an empty parameter list the meaning of (void) and allows
+    // ellipsis without a fixed parameter. GCC 14 implements both rules in
+    // its C23 mode, which still uses the draft __STDC_VERSION__ of 202000L.
+    // C11 and C17 use the empty list for this.
+    format!(
+        "/* inferred return type; parameters unknown */\n\
+         #if defined(__STDC_VERSION__) && __STDC_VERSION__ > 201710L\n\
+         extern {return_type} {name}(...);\n\
+         #else\n\
+         extern {return_type} {name}();\n\
+         #endif\n"
+    )
 }
 
 fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
@@ -644,10 +685,7 @@ fn print_hir_function_impl(func: &HirFunction, ctx: PrintCtx<'_>) -> String {
         func.name.clone()
     };
     if has_unknown_arity_declaration(func) {
-        // C11 has no syntax for defining a function with an unknown number of
-        // parameters. Keep the no-prototype contract as a declaration; the
-        // opaque thunk body cannot be represented faithfully in this dialect.
-        return format!("extern {return_type} {function_name}();\n");
+        return print_unknown_arity_extern(&return_type, &function_name);
     }
 
     let mut out = String::new();
@@ -1564,6 +1602,87 @@ fn callind_target_symbol(fn_ptr: &HirExpr) -> Option<String> {
     }
 }
 
+/// Infer the written argument type only when it agrees with the printer's
+/// treatment of the operand. The HIR type alone can be a storage integer
+/// even when a binding's surface declaration or pointer arithmetic prints a pointer.
+pub(super) fn call_argument_type<'a>(
+    func: &'a HirFunction,
+    global_names: &'a HashMap<u64, String>,
+    profile: PrintProfile,
+) -> impl Fn(&HirExpr) -> Option<String> + 'a {
+    let mut ctx = PrintCtx::build_with_profile(func, profile);
+    ctx.global_names = Some(global_names);
+    move |arg| {
+        let ty = match arg {
+            HirExpr::Var(name) | HirExpr::AddressOfGlobal(name) if name.starts_with('"') => {
+                return Some("const char *".into());
+            }
+            HirExpr::Const(value, ty) => {
+                if let Some(name) = ctx.constant_name(*value) {
+                    // A relocation or string can print here in place of the
+                    // integer literal. Only string names also tell us its type.
+                    return name.starts_with('"').then(|| "const char *".into());
+                }
+                ty.clone()
+            }
+            HirExpr::Var(name) | HirExpr::AddressOfLocal(name) => {
+                let ty = *ctx.var_types.get(name.as_str())?;
+                let declared = ctx.decl_type_text.get(name.as_str())?;
+                if *declared != print_type(ty) {
+                    // An alias or surface override can change the pointee and
+                    // even pointer depth. They cannot be inferred from storage.
+                    return None;
+                }
+                if matches!(arg, HirExpr::AddressOfLocal(_)) {
+                    NirType::Ptr(Box::new(ty.clone()))
+                } else {
+                    ty.clone()
+                }
+            }
+            _ => expr_type(arg),
+        };
+        if ctx.operand_prints_as_pointer(arg) && !matches!(ty, NirType::Ptr(_)) {
+            return None;
+        }
+        c_parameter_type(&ty)
+    }
+}
+
+fn c_parameter_type(ty: &NirType) -> Option<String> {
+    // Declarations stand on their own without the decompiler's shorthand
+    // typedefs. Unknown or unrepresentable arguments leave the list open.
+    let name = match ty {
+        NirType::Unknown => return None,
+        NirType::Bool => "_Bool",
+        NirType::Int {
+            bits: 8,
+            signed: false,
+        } => "unsigned char",
+        NirType::Int {
+            bits: 8,
+            signed: true,
+        } => "char",
+        NirType::Int {
+            bits: 16,
+            signed: false,
+        } => "unsigned short",
+        NirType::Int {
+            bits: 32,
+            signed: false,
+        } => "unsigned int",
+        NirType::Int {
+            bits: 16 | 32 | 64 | 128,
+            ..
+        }
+        | NirType::Aggregate { .. }
+        | NirType::Float { bits: 32 | 64 | 80 } => return Some(print_type(ty)),
+        NirType::Ptr(inner) if **inner == NirType::Unknown => "void *",
+        NirType::Ptr(inner) => return c_parameter_type(inner).map(|name| format!("{name} *")),
+        NirType::Int { .. } | NirType::Float { .. } => return None,
+    };
+    Some(name.to_string())
+}
+
 /// Append the constant's Win32 name to a call argument, when win32metadata
 /// says that parameter carries an enum group and the value resolves in it.
 ///
@@ -1808,11 +1927,8 @@ fn print_expr_prec_ctx(
         }
         HirExpr::Var(name) => (name.clone(), 120),
         HirExpr::Const(value, ty) => {
-            let name = ctx
-                .global_names
-                .and_then(|names| names.get(&((*value) as u64)).cloned());
-            if let Some(name) = name {
-                (name, 120)
+            if let Some(name) = ctx.constant_name(*value) {
+                (name.to_string(), 120)
             } else {
                 (print_integer_const(*value, ty), 120)
             }
@@ -2841,7 +2957,7 @@ mod tests {
     }
 
     #[test]
-    fn import_thunk_uses_c11_unknown_arity_declaration() {
+    fn import_thunk_declares_unknown_arity_in_both_dialects() {
         let hir = HirFunction {
             name: "import_thunk".to_string(),
             return_type: u64_ty(),
@@ -2858,15 +2974,15 @@ mod tests {
         let rendered = print_hir_function(&hir);
 
         assert!(
-            rendered.starts_with("extern unsigned long long import_thunk();\n"),
+            rendered.contains("extern unsigned long long import_thunk();\n"),
             "{rendered}"
         );
         assert!(!rendered.contains("import_thunk()\n{"));
-        assert!(!rendered.contains("import_thunk(...)"));
+        assert!(rendered.contains("extern unsigned long long import_thunk(...);"));
     }
 
     #[test]
-    fn zero_fixed_variadic_definition_uses_c11_no_prototype_declaration() {
+    fn zero_fixed_variadic_definition_uses_unknown_arity_declaration() {
         let hir = HirFunction {
             name: "opaque_variadic".to_string(),
             return_type: u64_ty(),
@@ -2877,7 +2993,10 @@ mod tests {
 
         let rendered = print_hir_function(&hir);
 
-        assert_eq!(rendered, "extern unsigned long long opaque_variadic();\n");
+        assert_eq!(
+            rendered,
+            print_unknown_arity_extern("unsigned long long", "opaque_variadic")
+        );
     }
 
     #[test]

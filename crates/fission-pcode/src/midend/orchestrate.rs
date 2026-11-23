@@ -563,6 +563,7 @@ fn render_mlil_preview_with_binary_and_context_output(
     let (rendered, line_mappings) = crate::render::render_hir_function_with_provenance(
         &printed_hir,
         options,
+        type_context,
         crate::render::PrintProfile::Hir,
         &definitions,
     );

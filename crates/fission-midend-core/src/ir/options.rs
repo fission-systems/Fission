@@ -85,11 +85,8 @@ pub struct NirRenderOptions {
     /// Function name → the declaration somebody wrote for it, already
     /// rendered as C: `int list_sum(const Node *head)`.
     ///
-    /// A called function this unit does not define is declared `extern T
-    /// f(...)`, with an open parameter list, because the call sites are the
-    /// only evidence of arity and they disagree often enough not to be
-    /// trusted. A signature a person wrote down is the one case where that
-    /// reasoning does not apply, so it is carried here and used verbatim.
+    /// Explicit signatures are emitted verbatim and take precedence over
+    /// prototypes inferred from call sites.
     #[serde(default)]
     pub declared_signatures: HashMap<String, String>,
     /// Source-level callable signatures for named function-pointer aliases
