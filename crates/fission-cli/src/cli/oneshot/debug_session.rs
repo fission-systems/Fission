@@ -199,6 +199,54 @@ fn predicate_matches(regs: &RegisterState, rule: &BreakpointRule) -> Result<bool
 
 /// Consume events before ordinary session reporting can discard conditional
 /// breakpoint information. Unknown registers and failed resumes fail closed.
+/// Apply a session-scoped breakpoint rule to a single event. Does not swallow
+/// the observation, even if a false predicate caused an automatic resume.
+fn process_rule_event(
+    backend: &mut dyn ExecutionBackend,
+    rules: &BTreeMap<u64, BreakpointRule>,
+    event: &DebugEvent,
+    resumes: &mut usize,
+) -> Value {
+    let mut observation = event_json(&event);
+    if let DebugEvent::BreakpointHit { address, thread_id } = event
+        && let Some(rule) = rules.get(address)
+    {
+        match backend.fetch_registers(*thread_id) {
+            Ok(regs) => match predicate_matches(&regs, rule) {
+                Ok(matched) => {
+                    observation["condition_met"] = json!(matched);
+                    observation["logpoint"] = json!(rule.log_only);
+                    if rule.log_only {
+                        observation["registers"] = registers_json(&regs);
+                    }
+                    if let Some(name) = &rule.register {
+                        observation["watched_register"] = json!(name);
+                        observation["watched_value"] = regs.get(name).map(|v| json!(format!("0x{v:x}"))).unwrap_or(Value::Null);
+                    }
+                    if rule.log_only || !matched {
+                        if *resumes == 32 {
+                            observation["rule_error"] = json!("automatic resume budget exhausted (32)");
+                        } else {
+                            match backend.continue_execution() {
+                                Ok(()) => {
+                                    *resumes += 1;
+                                    observation["auto_resumed"] = json!(true);
+                                }
+                                Err(err) => {
+                                    observation["rule_error"] = json!(err.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(err) => observation["rule_error"] = json!(err.to_string()),
+            },
+            Err(err) => observation["rule_error"] = json!(format!("register read: {err}")),
+        }
+    }
+    observation
+}
+
 fn drain_events(
     backend: &mut dyn ExecutionBackend,
     rules: &BTreeMap<u64, BreakpointRule>,
@@ -214,44 +262,7 @@ fn drain_events(
                 break;
             }
         };
-        let mut observation = event_json(&event);
-        if let DebugEvent::BreakpointHit { address, thread_id } = &event
-            && let Some(rule) = rules.get(address)
-        {
-            match backend.fetch_registers(*thread_id) {
-                Ok(regs) => match predicate_matches(&regs, rule) {
-                    Ok(matched) => {
-                        observation["condition_met"] = json!(matched);
-                        observation["logpoint"] = json!(rule.log_only);
-                        if rule.log_only {
-                            observation["registers"] = registers_json(&regs);
-                        }
-                        if let Some(name) = &rule.register {
-                            observation["watched_register"] = json!(name);
-                            observation["watched_value"] = regs.get(name).map(|v| json!(format!("0x{v:x}"))).unwrap_or(Value::Null);
-                        }
-                        if rule.log_only || !matched {
-                            if resumes == 32 {
-                                observation["rule_error"] = json!("automatic resume budget exhausted (32)");
-                            } else {
-                                match backend.continue_execution() {
-                                    Ok(()) => {
-                                        resumes += 1;
-                                        observation["auto_resumed"] = json!(true);
-                                    }
-                                    Err(err) => {
-                                        observation["rule_error"] = json!(err.to_string());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(err) => observation["rule_error"] = json!(err.to_string()),
-                },
-                Err(err) => observation["rule_error"] = json!(format!("register read: {err}")),
-            }
-        }
-        out.push(observation);
+        out.push(process_rule_event(backend, rules, &event, &mut resumes));
     }
     out
 }
@@ -404,7 +415,10 @@ fn execute(
             json!({ "action": "stack_peek", "offset": a.offset, "value": format!("0x{value:x}") })
         }
         DebugCommand::Event(args) => match backend.poll_event(args.timeout_ms)? {
-            Some(event) => json!({ "action": "event", "event": event_json(&event) }),
+            Some(event) => {
+                let mut resumes = 0;
+                json!({ "action": "event", "event": process_rule_event(backend, rules, &event, &mut resumes) })
+            }
             None => json!({
                 "action": "event",
                 "event": Value::Null,
@@ -1046,5 +1060,35 @@ fn run_rhai(
                 .map(|d| d.message.as_str())
                 .unwrap_or("no diagnostic")
         )),
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_rule_tests {
+    use super::*;
+
+    #[test]
+    fn equality_predicates_are_case_insensitive_and_fail_closed() {
+        let regs = RegisterState::at(0x401000).with("RAX", 0x42);
+        let mut rule = BreakpointRule {
+            register: Some("rax".into()),
+            equals: Some(0x42),
+            log_only: false,
+        };
+        assert!(predicate_matches(&regs, &rule).unwrap());
+        rule.equals = Some(0x40);
+        assert!(!predicate_matches(&regs, &rule).unwrap());
+        rule.register = Some("nonexistent".into());
+        assert!(predicate_matches(&regs, &rule).is_err());
+        rule.register = Some("r@x".into());
+        assert!(!valid_register_name(rule.register.as_deref().unwrap()));
+    }
+
+    #[test]
+    fn register_name_validation_is_bounded() {
+        assert!(valid_register_name("x29"));
+        assert!(!valid_register_name(""));
+        assert!(!valid_register_name("rax == 1"));
+        assert!(!valid_register_name(&"a".repeat(33)));
     }
 }
