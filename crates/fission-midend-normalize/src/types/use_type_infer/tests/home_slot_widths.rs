@@ -325,3 +325,33 @@ fn home_slot_initializer_narrows_the_formal() {
     assert!(apply_use_driven_type_infer_pass(&mut func));
     assert_eq!(param_2_bits(&func), Some(8));
 }
+
+#[test]
+fn formal_read_as_both_signed_and_unsigned_bytes_keeps_its_width() {
+    // `if ((int)(char)param_2 < 0) *dst = (uchar)param_2 % 128;` -- declared
+    // `char`, the `(uchar)` cast would read as a no-op and the `%` would turn
+    // signed; declared `uchar`, the sign test would. Neither is exact.
+    let mut func = truncating_reads_func(
+        vec![home_slot("local_24", -0x24, 8)],
+        vec![
+            set("local_24", cast(8, false, var("param_2"))),
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
+                    lhs: Box::new(cast(32, true, cast(8, true, var("param_2")))),
+                    rhs: Box::new(PreHirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                },
+                then_body: std::rc::Rc::new(vec![byte_store_of(binary(
+                    PreHirBinaryOp::Mod,
+                    cast(8, false, var("param_2")),
+                    PreHirExpr::Const(128, int_ty(32, false)),
+                ))]),
+                else_body: std::rc::Rc::new(vec![]),
+            },
+        ],
+    );
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(32));
+}

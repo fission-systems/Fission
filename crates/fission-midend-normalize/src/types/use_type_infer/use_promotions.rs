@@ -687,17 +687,44 @@ pub(super) fn narrow_integer_params_from_wrapping_return_uses(func: &mut PreHirF
     changed
 }
 
+/// The signedness a narrowing view reads its bits with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Sign {
+    /// A store or a frame slot: memory holds bits, not a signedness.
+    Any,
+    Signed,
+    Unsigned,
+    /// Casts of the same width disagree (`(char)x < 0` next to
+    /// `(uchar)x % 128`): no one declaration makes both casts no-ops, and a
+    /// cleanup that drops either changes the operation it feeds.
+    Mixed,
+}
+
+impl Sign {
+    fn of(signed: bool) -> Sign {
+        if signed { Sign::Signed } else { Sign::Unsigned }
+    }
+
+    fn join(self, other: Sign) -> Sign {
+        match (self, other) {
+            (Sign::Any, s) | (s, Sign::Any) => s,
+            (a, b) if a == b => a,
+            _ => Sign::Mixed,
+        }
+    }
+}
+
 /// How many low bits of a value its consumer can observe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Demand {
     /// The value is never observed (a copy into a local nothing reads).
     Zero,
-    /// Only the low `bits` are observed, as an integer of that signedness.
+    /// Only the low `bits` are observed, read with `sign`.
     /// `arithmetic` records that the value reached that consumer through an
     /// additive or bitwise operation.
     Low {
         bits: u32,
-        signed: bool,
+        sign: Sign,
         arithmetic: bool,
     },
     /// Any bit may be observed.
@@ -712,22 +739,22 @@ impl Demand {
             (
                 Demand::Low {
                     bits: a_bits,
-                    signed: a_signed,
+                    sign: a_sign,
                     arithmetic: a_arith,
                 },
                 Demand::Low {
                     bits: b_bits,
-                    signed: b_signed,
+                    sign: b_sign,
                     arithmetic: b_arith,
                 },
             ) => Demand::Low {
                 bits: a_bits.max(b_bits),
-                signed: match a_bits.cmp(&b_bits) {
-                    std::cmp::Ordering::Greater => a_signed,
-                    std::cmp::Ordering::Less => b_signed,
-                    // Two equally wide views that disagree on signedness say
-                    // nothing about it; unsigned is the neutral reading.
-                    std::cmp::Ordering::Equal => a_signed && b_signed,
+                // A narrower view stays a real truncating cast after
+                // narrowing; only views of the declared width must agree.
+                sign: match a_bits.cmp(&b_bits) {
+                    std::cmp::Ordering::Greater => a_sign,
+                    std::cmp::Ordering::Less => b_sign,
+                    std::cmp::Ordering::Equal => a_sign.join(b_sign),
                 },
                 arithmetic: a_arith || b_arith,
             },
@@ -746,7 +773,19 @@ impl Demand {
             ) if bits <= *cast_bits => self,
             (_, NirType::Int { bits, signed }) => Demand::Low {
                 bits: *bits,
-                signed: *signed,
+                sign: Sign::of(*signed),
+                arithmetic: false,
+            },
+            _ => Demand::All,
+        }
+    }
+
+    /// The demand a store or frame slot of `ty` places on the stored value.
+    fn stored_as(ty: &NirType) -> Demand {
+        match ty {
+            NirType::Int { bits, .. } => Demand::Low {
+                bits: *bits,
+                sign: Sign::Any,
                 arithmetic: false,
             },
             _ => Demand::All,
@@ -757,9 +796,9 @@ impl Demand {
     /// low result bits depend only on the operands' low bits.
     fn through_arithmetic(self) -> Demand {
         match self {
-            Demand::Low { bits, signed, .. } => Demand::Low {
+            Demand::Low { bits, sign, .. } => Demand::Low {
                 bits,
-                signed,
+                sign,
                 arithmetic: true,
             },
             other => other,
@@ -818,9 +857,9 @@ impl DemandedBits<'_> {
         }
         let demand = self.demand_of(name);
         match self.home_slots.get(name) {
-            Some(&(bits, signed)) => demand.join(Demand::Low {
+            Some(&(bits, _)) => demand.join(Demand::Low {
                 bits,
-                signed,
+                sign: Sign::Any,
                 arithmetic: false,
             }),
             None => demand,
@@ -900,7 +939,7 @@ impl DemandedBits<'_> {
             }
             PreHirLValue::Deref { ptr, ty } => {
                 self.expr(ptr, Demand::All);
-                Demand::All.through_cast(ty)
+                Demand::stored_as(ty)
             }
             PreHirLValue::Index {
                 base,
@@ -909,11 +948,11 @@ impl DemandedBits<'_> {
             } => {
                 self.expr(base, Demand::All);
                 self.expr(index, Demand::All);
-                Demand::All.through_cast(elem_ty)
+                Demand::stored_as(elem_ty)
             }
             PreHirLValue::FieldAccess { base, ty, .. } => {
                 self.expr(base, Demand::All);
-                Demand::All.through_cast(ty)
+                Demand::stored_as(ty)
             }
         };
         self.expr(rhs, demand);
@@ -1136,7 +1175,10 @@ fn formal_home_slot_widths(
 /// compare, a multiply, a shift, a call argument, an address, a return, a
 /// write to a global -- demands every bit. A formal never assigned, whose
 /// widest demand is N < its width and whose home slot is N bits wide, is
-/// declared N bits wide -- unless N is 32 and the formal feeds arithmetic:
+/// declared N bits wide, with the signedness its N-bit casts read it with --
+/// unless those casts disagree (`(char)x < 0` beside `(uchar)x % 128`: one
+/// of them would turn into a no-op that changes the operation it feeds), or
+/// N is 32 and the formal feeds arithmetic:
 /// a `char`/`short` operand of `+ - & | ^` is promoted to `int`, where those
 /// cannot overflow, but an `int` is not, and the machine's wider operation
 /// wrapped.
@@ -1179,11 +1221,16 @@ pub(super) fn narrow_integer_params_from_truncating_reads(func: &mut PreHirFunct
         };
         let Some(Demand::Low {
             bits: read_bits,
-            signed: read_signed,
+            sign,
             arithmetic,
         }) = demand.get(&binding.name).copied()
         else {
             continue;
+        };
+        let read_signed = match sign {
+            Sign::Signed => true,
+            Sign::Unsigned | Sign::Any => false,
+            Sign::Mixed => continue,
         };
         // A `char`/`short` operand of `+ - & | ^` is promoted to `int`, where
         // those cannot overflow. A 32-bit one is not promoted: narrowed from
