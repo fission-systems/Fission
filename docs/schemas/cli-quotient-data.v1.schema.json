@@ -1,0 +1,609 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fission quotient data v1",
+  "description": "The minimal observable state machine of one step function (`fission-quotient`, experimental). `status` says how far the claim reaches. `transitions` and `apartness_witnesses` are filled only when a machine was built; with `partial_frontier`, `states` lists the states found before the budget ran out.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "foundation",
+    "boundary",
+    "budget",
+    "status",
+    "slots",
+    "states",
+    "transitions",
+    "apartness_witnesses",
+    "assumptions",
+    "evidence",
+    "metrics"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "quotient.v1"
+    },
+    "foundation": {
+      "type": "object",
+      "required": [
+        "function_address",
+        "block_count",
+        "op_count",
+        "digest"
+      ],
+      "properties": {
+        "function_address": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]+$"
+        },
+        "block_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "op_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        }
+      },
+      "description": "The lifted P-code the result was computed from."
+    },
+    "boundary": {
+      "type": "object",
+      "required": [
+        "entry",
+        "inputs",
+        "context",
+        "output_bits"
+      ],
+      "properties": {
+        "entry": {
+          "type": "string",
+          "pattern": "^0x[0-9a-f]+$"
+        },
+        "inputs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "arg_index",
+              "bits"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "arg_index": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "bits": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "required": [
+            "arg_index",
+            "initial"
+          ],
+          "properties": {
+            "arg_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "initial": {
+              "type": "string",
+              "pattern": "^([0-9a-f]{2})+$"
+            }
+          }
+        },
+        "output_bits": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "required": [
+        "max_states",
+        "horizon",
+        "conflict_budget",
+        "max_paths",
+        "max_path_ops",
+        "probes",
+        "max_rounds",
+        "max_alphabet"
+      ],
+      "properties": {
+        "max_states": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "horizon": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "conflict_budget": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "max_paths": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_path_ops": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_alphabet": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "status": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "horizon",
+            "model_id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "proved_under_model"
+            },
+            "horizon": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "model_id": {
+              "type": "string"
+            }
+          },
+          "description": "The solver refuted every distinguishing input word of up to `horizon` steps, under the memory model `model_id`."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "horizon",
+            "probes_run",
+            "solver_unknowns"
+          ],
+          "properties": {
+            "kind": {
+              "const": "empirically_consistent"
+            },
+            "horizon": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "probes_run": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "solver_unknowns": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "The solver could not decide; concrete probes found no difference. Evidence, not proof."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "max_states_hit",
+            "unmodeled_edges"
+          ],
+          "properties": {
+            "kind": {
+              "const": "partial_frontier"
+            },
+            "max_states_hit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unmodeled_edges": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "description": "The state budget ran out: at least `max_states_hit` observably distinct states exist."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "counterexample_hex"
+          ],
+          "properties": {
+            "kind": {
+              "const": "refuted"
+            },
+            "counterexample_hex": {
+              "type": "string"
+            }
+          },
+          "description": "An input word, confirmed on the emulator, on which a data field differs from what the control states express."
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unsupported_semantics"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "description": "The function does something outside the model (a call, a user-defined operation, a global, ...); no machine."
+        }
+      ]
+    },
+    "slots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "offset",
+          "size",
+          "role",
+          "initial"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "role": {
+            "enum": [
+              "control",
+              "data"
+            ]
+          },
+          "initial": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "states": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "access_word",
+          "control_valuation"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "access_word": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "description": "One value per input port, in `boundary.inputs` order."
+            }
+          },
+          "control_valuation": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slot",
+                "value"
+              ],
+              "properties": {
+                "slot": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from",
+          "guard",
+          "output",
+          "updates",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "guard": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "updates": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "slot",
+                "value"
+              ],
+              "properties": {
+                "slot": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "to": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "apartness_witnesses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "state_a",
+          "state_b",
+          "input_sequence",
+          "obs_a",
+          "obs_b",
+          "verified_by_emulator"
+        ],
+        "properties": {
+          "state_a": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state_b": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "input_sequence": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "description": "One value per input port, in `boundary.inputs` order."
+            }
+          },
+          "obs_a": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "exit",
+                "value"
+              ],
+              "properties": {
+                "exit": {
+                  "enum": [
+                    "returned",
+                    "fault",
+                    "budget",
+                    "halted"
+                  ]
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "obs_b": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "exit",
+                "value"
+              ],
+              "properties": {
+                "exit": {
+                  "enum": [
+                    "returned",
+                    "fault",
+                    "budget",
+                    "halted"
+                  ]
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "verified_by_emulator": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "description"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "memory",
+              "calling_convention",
+              "environment",
+              "bound"
+            ]
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "rounds",
+        "membership_queries",
+        "emulator_steps",
+        "refutation_queries",
+        "solver_unknowns",
+        "probes_run",
+        "alphabet"
+      ],
+      "properties": {
+        "rounds": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "membership_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "emulator_steps": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "refutation_queries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "solver_unknowns": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "probes_run": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "alphabet": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "One value per input port, in `boundary.inputs` order."
+          }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "pcode_blocks",
+        "pcode_edges",
+        "feasible_paths",
+        "pruned_branches",
+        "quotient_states",
+        "quotient_transitions"
+      ],
+      "properties": {
+        "pcode_blocks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pcode_edges": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "feasible_paths": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pruned_branches": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "address",
+              "taken"
+            ],
+            "properties": {
+              "address": {
+                "type": "string",
+                "pattern": "^0x[0-9a-f]+$"
+              },
+              "taken": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "quotient_states": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "quotient_transitions": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

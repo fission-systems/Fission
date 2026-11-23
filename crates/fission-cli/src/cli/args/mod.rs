@@ -72,6 +72,8 @@ pub enum ParsedInvocation {
     Call(CallArgs),
     /// A known API's prototype from the bundled type library
     Api(ApiArgs),
+    /// The minimal observable state machine of a step function (experimental)
+    Quotient(QuotientArgs),
 }
 
 /// `fission_cli call`: run one function of the binary in the emulator, from
@@ -109,6 +111,118 @@ pub struct CallArgs {
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,
+}
+
+/// `fission_cli quotient`: the minimal observable state machine of one step
+/// function (experimental, RFC #1093).
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Compute the minimal observable state machine of a step function (experimental).\n\nThe function is treated as one step of a protocol or state machine: each call receives fresh inputs in argument registers and a pointer to a context buffer that persists between calls. Instead of structuring its control-flow graph, the command learns the smallest machine with the same observable behaviour -- the result of every call, for every input sequence -- and asks the solver to certify it.\n\nThe lifted P-code is executed symbolically to get every feasible path of one call; branch sides no input or state can take (opaque predicates) are pruned. Context fields that reach a branch or the result become control state; the rest become data registers with symbolic updates. The emulator answers the learner's queries, and every pair of states comes with an input sequence the emulator re-ran to tell them apart. `status` says how far the result reaches: `proved_under_model` (the solver refuted every distinguishing word up to --horizon steps), `empirically_consistent` (the solver could not decide; probes found no difference), `partial_frontier` (more than --max-states states), `refuted` (a data effect the control states cannot express) or `unsupported_semantics` (calls, user-defined operations, globals or other effects outside the model).\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
+    after_help = "Examples:\n  fission_cli quotient proto.elf --name parser_step --json\n  fission_cli quotient proto.elf --addr 0x401130 --input cmd:1:8 --context-bytes 16 --horizon 6 --json"
+)]
+pub struct QuotientArgs {
+    /// Path to the binary (ELF or PE)
+    pub binary: PathBuf,
+
+    /// Address of the step function
+    #[arg(long, value_parser = parse_hex_address, required_unless_present = "name", conflicts_with = "name")]
+    pub addr: Option<u64>,
+
+    /// Name of the step function (exact, as `list` prints it)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// An input port, `NAME:ARG:BITS`: the low BITS of integer argument ARG
+    /// (0-based), drawn afresh at every step; repeatable. Default `input:1:32`
+    #[arg(long = "input", value_name = "NAME:ARG:BITS", value_parser = parse_input_port)]
+    pub inputs: Vec<QuotientInputArg>,
+
+    /// Integer argument (0-based) that carries the context pointer
+    #[arg(long, default_value_t = 0)]
+    pub context_arg: usize,
+
+    /// Size of the context buffer, zero-filled at the start
+    #[arg(long, default_value_t = 8, conflicts_with = "context_init")]
+    pub context_bytes: usize,
+
+    /// Initial context bytes as hex (e.g. `0100000000000000`); its length is
+    /// the context size
+    #[arg(long, value_name = "HEX", value_parser = parse_hex_bytes)]
+    pub context_init: Option<HexBytes>,
+
+    /// Bits of the return register that are observed
+    #[arg(long, default_value_t = 32)]
+    pub output_bits: u32,
+
+    /// Length of the input words the certificate covers (H)
+    #[arg(long, default_value_t = 4)]
+    pub horizon: u32,
+
+    /// Largest machine to learn (K_max); past it the result is partial
+    #[arg(long, default_value_t = 32)]
+    pub max_states: usize,
+
+    /// SAT conflicts per solver query; past it the query is undecided
+    #[arg(long, default_value_t = 200_000)]
+    pub conflict_budget: u64,
+
+    /// Instruction budget for each emulated step
+    #[arg(long, default_value_t = 1_000_000)]
+    pub max_inst: u64,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+/// One `--input` port of `quotient`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientInputArg {
+    pub name: String,
+    pub arg_index: usize,
+    pub bits: u32,
+}
+
+/// `NAME:ARG:BITS`, e.g. `cmd:1:8`.
+pub fn parse_input_port(s: &str) -> Result<QuotientInputArg, String> {
+    let parts = s.split(':').collect::<Vec<_>>();
+    let [name, arg, bits] = parts.as_slice() else {
+        return Err(format!("`{s}`: expected NAME:ARG:BITS, e.g. cmd:1:8"));
+    };
+    if name.is_empty() {
+        return Err(format!("`{s}`: the port needs a name"));
+    }
+    let arg_index = arg
+        .parse::<usize>()
+        .map_err(|e| format!("`{s}`: argument index: {e}"))?;
+    let bits = bits
+        .parse::<u32>()
+        .map_err(|e| format!("`{s}`: bit width: {e}"))?;
+    if bits == 0 || bits > 64 || bits % 8 != 0 {
+        return Err(format!("`{s}`: the width must be 8, 16, ..., 64 bits"));
+    }
+    Ok(QuotientInputArg {
+        name: (*name).to_string(),
+        arg_index,
+        bits,
+    })
+}
+
+/// Bytes given on the command line as hex.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HexBytes(pub Vec<u8>);
+
+/// An even-length hex string as bytes.
+pub fn parse_hex_bytes(s: &str) -> Result<HexBytes, String> {
+    let t = s.trim().trim_start_matches("0x");
+    if t.is_empty() || t.len() % 2 != 0 {
+        return Err(format!("`{s}`: expected an even number of hex digits"));
+    }
+    (0..t.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&t[at..at + 2], 16).map_err(|e| format!("`{s}`: {e}")))
+        .collect::<Result<_, _>>()
+        .map(HexBytes)
 }
 
 /// An integer argument for `call`: decimal, `0x` hex, or a negative decimal
@@ -350,6 +464,8 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
     Languages(LanguagesArgs),
     /// Call one function in the emulator with chosen arguments
     Call(CallArgs),
+    /// Minimal observable state machine of a step function (experimental)
+    Quotient(QuotientArgs),
     /// Print the agent usage guide (SKILL.md) built into this binary
     #[command(
         long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
@@ -1323,6 +1439,7 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "skill",
     "languages",
     "call",
+    "quotient",
     "types",
     "whatis",
     "api",
@@ -1475,12 +1592,14 @@ fn ignored_option_warnings(
         | ParsedInvocation::Sandbox(_)
         | ParsedInvocation::Verify(_)
         | ParsedInvocation::Call(_)
+        | ParsedInvocation::Quotient(_)
         | ParsedInvocation::Db(_) => {
             let command = match invocation {
                 ParsedInvocation::Script(_) => "script",
                 ParsedInvocation::Sandbox(_) => "sandbox",
                 ParsedInvocation::Verify(_) => "verify",
                 ParsedInvocation::Call(_) => "call",
+                ParsedInvocation::Quotient(_) => "quotient",
                 _ => "db",
             };
             if language.is_some() {
@@ -1520,6 +1639,7 @@ fn raw_load_warnings(
         ParsedInvocation::Skill => "skill",
         ParsedInvocation::Languages(_) => "languages",
         ParsedInvocation::Call(_) => "call",
+        ParsedInvocation::Quotient(_) => "quotient",
         ParsedInvocation::Api(_) => "api",
     };
     [
@@ -1827,6 +1947,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     return ParsedInvocation::Languages(languages);
                 }
                 CliCommand::Call(call) => return ParsedInvocation::Call(call),
+                CliCommand::Quotient(quotient) => return ParsedInvocation::Quotient(quotient),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1872,6 +1993,7 @@ mod tests {
             ParsedInvocation::Languages(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Call(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Api(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Quotient(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1891,7 +2013,46 @@ mod tests {
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
             ParsedInvocation::Call(_) => panic!("legacy parser cannot emit call"),
             ParsedInvocation::Api(_) => panic!("legacy parser cannot emit api"),
+            ParsedInvocation::Quotient(_) => panic!("legacy parser cannot emit quotient"),
         }
+    }
+
+    #[test]
+    fn quotient_ports_and_context_bytes_parse() {
+        assert_eq!(
+            parse_input_port("cmd:1:8"),
+            Ok(QuotientInputArg {
+                name: "cmd".to_string(),
+                arg_index: 1,
+                bits: 8,
+            })
+        );
+        for bad in ["cmd:1:7", "cmd:1:72", "cmd:1", ":1:8", "cmd:-1:8"] {
+            assert!(parse_input_port(bad).is_err(), "{bad}");
+        }
+        assert_eq!(parse_hex_bytes("0x0102ff"), Ok(HexBytes(vec![1, 2, 0xff])));
+        assert!(parse_hex_bytes("012").is_err());
+        assert!(parse_hex_bytes("zz").is_err());
+
+        let ParsedInvocation::Quotient(args) = parse_oneshot_args_from([
+            "fission_cli",
+            "quotient",
+            "a.elf",
+            "--addr",
+            "0x1000",
+            "--input",
+            "cmd:1:8",
+            "--input",
+            "key:2:32",
+            "--horizon",
+            "6",
+        ]) else {
+            panic!("expected quotient");
+        };
+        assert_eq!(args.addr, Some(0x1000));
+        assert_eq!(args.inputs.len(), 2);
+        assert_eq!(args.horizon, 6);
+        assert_eq!((args.context_arg, args.context_bytes), (0, 8));
     }
 
     #[test]

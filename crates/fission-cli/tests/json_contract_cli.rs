@@ -52,6 +52,7 @@ const CONCOLIC: &str = "crates/fission-emulator/testdata/x64_concolic_branch_sys
 const DWARF5: &str = "crates/fission-loader/testdata/x64_dwarf5_strx.elf";
 const PDB_EXE: &str = "crates/fission-loader/testdata/x64_pdb_struct_test.exe";
 const WIN_EXE: &str = "crates/fission-emulator/testdata/win_x64_write.exe";
+const QUOTIENT: &str = "crates/fission-quotient/testdata/quotient_fixture.elf";
 
 fn repo_root() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
@@ -570,6 +571,10 @@ contract!(
         "5",
         "--json"
     ]
+);
+contract!(
+    quotient,
+    ["quotient", QUOTIENT, "--name", "auth_step", "--json"]
 );
 contract!(
     call_stubbed,

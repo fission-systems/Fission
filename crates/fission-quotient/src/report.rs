@@ -9,6 +9,28 @@ use crate::summary::PrunedBranch;
 
 pub const SCHEMA_VERSION: &str = "quotient.v1";
 
+/// Byte strings are written as one lowercase hex string.
+pub(crate) fn hex_bytes<S: serde::Serializer>(
+    value: &[u8],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(
+        &value
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>(),
+    )
+}
+
+/// Addresses are written as `0x`-prefixed hex strings, as every other
+/// `fission_cli` JSON payload writes them.
+pub(crate) fn hex_address<S: serde::Serializer>(
+    value: &u64,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&format!("0x{value:x}"))
+}
+
 /// The memory model a `ProvedUnderModel` certificate is relative to.
 pub const MODEL_ID: &str = "separated-registers-frame-context.v1";
 
@@ -43,6 +65,7 @@ pub enum QuotientStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FoundationRef {
+    #[serde(serialize_with = "hex_address")]
     pub function_address: u64,
     pub block_count: u32,
     pub op_count: u32,

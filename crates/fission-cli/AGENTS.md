@@ -21,6 +21,7 @@ Canonical subcommands (the source of truth is `CANONICAL_SUBCOMMANDS` in
 | Changes and decisions | `patch`, `db` | CLI (`patch`), `fission-project` (`db`) |
 | Batch | `inventory {program-metadata, function-facts, preview-candidates}` | `fission-static`, `fission-analysis-db` |
 | Dynamic | `sandbox`, `call`, `debug` (+ `debug session`), `verify` | `fission-emulator`, `fission-dynamic`, `fission-dir` |
+| Experimental | `quotient` | `fission-quotient` (RFC #1093) |
 | Scripting | `script {check, run}` | `fission-script` |
 | Environment and contract | `resources status`, `languages`, `schema`, `skill` | `fission-core`, `fission-sleigh` |
 

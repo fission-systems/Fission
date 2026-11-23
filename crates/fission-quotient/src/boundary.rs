@@ -22,6 +22,7 @@ pub struct InputPort {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ContextRegion {
     pub arg_index: usize,
+    #[serde(serialize_with = "crate::report::hex_bytes")]
     pub initial: Vec<u8>,
 }
 
@@ -30,6 +31,7 @@ pub struct ContextRegion {
 /// register, plus how each step ended).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct QuotientBoundary {
+    #[serde(serialize_with = "crate::report::hex_address")]
     pub entry: u64,
     pub inputs: Vec<InputPort>,
     pub context: ContextRegion,

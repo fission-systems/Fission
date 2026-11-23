@@ -74,6 +74,7 @@ class ChangePlanTests(unittest.TestCase):
 
     def test_cli_contract_and_replay_gates_are_selected_for_their_owners(self):
         self.assertTrue(plan(["crates/fission-cli/src/cli/contract/schema.rs"], "merge_group")[1]["run_doc_checks"])
+        self.assertTrue(plan(["crates/fission-quotient/src/report.rs"], "pull_request")[1]["run_doc_checks"])
         self.assertTrue(plan(["crates/fission-dir/src/eval.rs"], "pull_request")[1]["run_replay_checks"])
         self.assertFalse(plan(["docs/CLI.md"], "merge_group")[1]["run_replay_checks"])
 

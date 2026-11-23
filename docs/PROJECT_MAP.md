@@ -21,7 +21,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 | `crates/fission-midend-normalize` | Normalize owner (**owns** normalize pipeline source; ADR 0012) |
 | `crates/fission-midend-structuring` | Structuring free-function owners + pcode PreviewBuilder residual (ADR 0012) |
 | `crates/fission-dir` | Experimental P-code-rooted DIR product, native pure-region reconstruction, emulator/solver observation verification, and transition diagnostics (ADR 0014) |
-| `crates/fission-quotient` | Experimental WBCQ prototype (RFC #1093): minimal observable state machines of P-code slices, learned against the emulator and certified by the solver; no production dependents |
+| `crates/fission-quotient` | Experimental WBCQ prototype (RFC #1093): minimal observable state machines of P-code slices, learned against the emulator and certified by the solver; reached only through the experimental `fission_cli quotient` |
 | [`crates/fission-signatures`](https://github.com/fission-systems/Fission/tree/main/crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](https://github.com/fission-systems/Fission/tree/main/crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](https://github.com/fission-systems/Fission/tree/main/crates/fission-dynamic) | Dynamic analysis support |

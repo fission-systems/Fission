@@ -75,6 +75,7 @@ pub struct PathSummary {
 /// A branch side no input and no state can take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct PrunedBranch {
+    #[serde(serialize_with = "crate::report::hex_address")]
     pub address: u64,
     /// Whether the refuted side is the taken one.
     pub taken: bool,

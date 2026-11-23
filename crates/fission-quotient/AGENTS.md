@@ -6,8 +6,10 @@ Scope: `crates/fission-quotient`
 
 Experimental WBCQ prototype (RFC #1093, stages P0/P1): computes the minimal
 observable state machine of a P-code slice instead of structuring its CFG.
-Nothing in the production pipeline (`fission-midend-*` -> HIR) or the CLI
-depends on this crate. It is not a decompiler output surface, and nothing it
+Nothing in the production pipeline (`fission-midend-*` -> HIR) depends on
+this crate; the CLI reaches it only through the experimental `quotient`
+command (`crates/fission-cli/src/cli/oneshot/quotient.rs`), which builds a
+boundary from flags and prints the report. It is not a decompiler output surface, and nothing it
 reports is a DecBench or readability claim.
 
 ## Module map
@@ -21,7 +23,7 @@ reports is a DecBench or readability claim.
 | `srqa.rs` | Control/data slot factoring; the symbolic register quotient automaton built from a hypothesis and the summaries |
 | `certify.rs` | Bounded divergence query (slice vs automaton, `H` steps); deterministic probes |
 | `oracle.rs` | `MembershipOracle`; `EmulatorOracle` over `fission_dir::EmulatorHarness` |
-| `report.rs` | The `quotient.v1` JSON contract |
+| `report.rs` | The `quotient.v1` JSON contract; its schema is `docs/schemas/cli-quotient-data.v1.schema.json` (`fission_cli schema quotient`) -- change both together |
 | `engine.rs` | `WBCQ_Synthesize`: the learn / build / refute loop and the final report |
 
 ## Invariants

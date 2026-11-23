@@ -838,6 +838,7 @@ dependencies = [
  "fission-emulator",
  "fission-loader",
  "fission-project",
+ "fission-quotient",
  "fission-script",
  "fission-signatures",
  "fission-sleigh",

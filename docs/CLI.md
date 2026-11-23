@@ -596,6 +596,59 @@ its argument registers are recorded in `calls`, VALUE is returned, and every
 byte stored outside the function's frame is listed in `writes`. This executes
 the binary's code in the emulator; use it only on binaries you may run.
 
+## Quotient Command
+
+`quotient` is **experimental** (RFC #1093). It treats one function as a
+single step of a state machine, such as a protocol parser or a flattened
+dispatcher, and prints the smallest machine that behaves the same, instead of
+pseudocode.
+
+```sh
+fission_cli quotient proto.elf --name parser_step
+fission_cli quotient proto.elf --addr 0x401130 --input cmd:1:8 --context-bytes 16 --json
+fission_cli --contract v1 quotient proto.elf --name parser_step --json
+```
+
+The function is called as `step(ctx, inputs...)`, and each call is one step:
+
+- Each `--input NAME:ARG:BITS` port takes the low BITS of integer argument
+  ARG. Every port gets a fresh value at each step. Default: `input:1:32`.
+- Argument `--context-arg` (default 0) points at a buffer of
+  `--context-bytes` bytes (default 8, zero-filled), or `--context-init HEX`.
+  The buffer persists from one step to the next.
+- What is observed is the low `--output-bits` of the return value.
+
+The command:
+
+- executes the lifted P-code symbolically to find every feasible path of one
+  step;
+- prunes branch sides that no input and no state can take, such as opaque
+  predicates;
+- splits the context into control fields (those that reach a branch or the
+  result) and data fields, which it reports as symbolic updates;
+- learns the machine from the emulator;
+- asks the solver for an input word of up to `--horizon` steps on which the
+  machine and the function differ.
+
+Every pair of states comes with an input sequence that tells them apart, and
+the emulator re-runs it. `status` says how far the result reaches:
+
+| `status.kind` | Meaning |
+|---|---|
+| `proved_under_model` | The solver refuted every distinguishing word up to `--horizon` steps, under the memory model in `model_id`. |
+| `empirically_consistent` | The solver could not decide within `--conflict-budget`, and probes found no difference. This is evidence, not proof. |
+| `partial_frontier` | More than `--max-states` states. The states found are real, but there is no machine. |
+| `refuted` | A data field changes in a way the control states cannot express. The input word is confirmed on the emulator. |
+| `unsupported_semantics` | The function calls out, uses a user-defined operation (`rdtsc`, ...), reads or writes a global, or computes an address from data. `reason` says which. |
+
+Every status is a result (exit 0). Only a missing input, an unknown name, or
+a bad flag is an error. The JSON is the `quotient.v1` payload (`fission_cli
+schema quotient`). It contains `states` (each with its access word and
+control-field values), `transitions` (guard, result and data updates, as
+expressions over the ports and the `ctx[offset:size]` fields),
+`apartness_witnesses`, `assumptions`, `evidence` and `metrics`. The emulator
+runs the binary's code, so use this only on binaries you may run.
+
 ## Decomp Command
 
 `decomp` is the canonical human-facing decompilation entrypoint.
@@ -1414,8 +1467,9 @@ fission_cli schema --error-codes   # stable error codes, kinds, exit codes
 | 70 | internal | The command crashed or panicked. |
 
 `data` is the command's existing JSON output, unchanged (arrays stay arrays).
-`fission_cli schema info`, `fission_cli schema list`, and
-`fission_cli schema decomp` include the corresponding v1 `data` schemas.
+`fission_cli schema info`, `fission_cli schema list`,
+`fission_cli schema decomp`, and `fission_cli schema quotient` include the
+corresponding v1 `data` schemas.
 `fission_cli schema --list` lists these commands under `typed_data_commands`.
 The generic envelope and commands without a published payload schema mark
 `data` as `x-data-schema: untyped`. The

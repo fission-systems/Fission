@@ -1,0 +1,181 @@
+{
+  "command": [
+    "quotient",
+    "crates/fission-quotient/testdata/quotient_fixture.elf",
+    "--name",
+    "auth_step",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "apartness_witnesses": {
+        "array": {
+          "object": {
+            "input_sequence": {
+              "array": {
+                "array": "number"
+              }
+            },
+            "obs_a": {
+              "array": {
+                "object": {
+                  "exit": "string",
+                  "value": "number"
+                }
+              }
+            },
+            "obs_b": {
+              "array": {
+                "object": {
+                  "exit": "string",
+                  "value": "number"
+                }
+              }
+            },
+            "state_a": "number",
+            "state_b": "number",
+            "verified_by_emulator": "bool"
+          }
+        }
+      },
+      "assumptions": {
+        "array": {
+          "object": {
+            "description": "string",
+            "kind": "string"
+          }
+        }
+      },
+      "boundary": {
+        "object": {
+          "context": {
+            "object": {
+              "arg_index": "number",
+              "initial": "string"
+            }
+          },
+          "entry": "string",
+          "inputs": {
+            "array": {
+              "object": {
+                "arg_index": "number",
+                "bits": "number",
+                "name": "string"
+              }
+            }
+          },
+          "output_bits": "number"
+        }
+      },
+      "budget": {
+        "object": {
+          "conflict_budget": "number",
+          "horizon": "number",
+          "max_alphabet": "number",
+          "max_path_ops": "number",
+          "max_paths": "number",
+          "max_rounds": "number",
+          "max_states": "number",
+          "probes": "number"
+        }
+      },
+      "evidence": {
+        "object": {
+          "alphabet": {
+            "array": {
+              "array": "number"
+            }
+          },
+          "emulator_steps": "number",
+          "membership_queries": "number",
+          "probes_run": "number",
+          "refutation_queries": "number",
+          "rounds": "number",
+          "solver_unknowns": "number"
+        }
+      },
+      "foundation": {
+        "object": {
+          "block_count": "number",
+          "digest": "string",
+          "function_address": "string",
+          "op_count": "number"
+        }
+      },
+      "metrics": {
+        "object": {
+          "feasible_paths": "number",
+          "pcode_blocks": "number",
+          "pcode_edges": "number",
+          "pruned_branches": {
+            "array": {
+              "object": {
+                "address": "string",
+                "taken": "bool"
+              }
+            }
+          },
+          "quotient_states": "number",
+          "quotient_transitions": "number"
+        }
+      },
+      "schema_version": "string",
+      "slots": {
+        "array": {
+          "object": {
+            "initial": "number",
+            "name": "string",
+            "offset": "number",
+            "role": "string",
+            "size": "number"
+          }
+        }
+      },
+      "states": {
+        "array": {
+          "object": {
+            "access_word": {
+              "array": {
+                "array": "number"
+              }
+            },
+            "control_valuation": {
+              "array": {
+                "object": {
+                  "slot": "string",
+                  "value": "number"
+                }
+              }
+            },
+            "id": "number"
+          }
+        }
+      },
+      "status": {
+        "object": {
+          "horizon": "number",
+          "kind": "string",
+          "model_id": "string"
+        }
+      },
+      "transitions": {
+        "array": {
+          "object": {
+            "from": "number",
+            "guard": "string",
+            "output": "string",
+            "to": "number",
+            "updates": {
+              "array": {
+                "object": {
+                  "slot": "string",
+                  "value": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
