@@ -180,7 +180,7 @@ fn widening_and_narrowing_use_the_operands_own_width() {
     // SEXT from 8 bytes to 16: the sign comes from bit 63, not bit 127.
     let (src, dst) = (slot(0x00, 8), slot(0x20, 16));
     bench.put(&src, (-1i64) as u64 as u128);
-    bench.run(PcodeOpcode::IntSExt, &[src.clone()], &dst);
+    bench.run(PcodeOpcode::IntSExt, std::slice::from_ref(&src), &dst);
     assert_eq!(bench.get(&dst), u128::MAX);
 
     bench.run(PcodeOpcode::IntZExt, &[src], &dst);
@@ -288,7 +288,7 @@ fn leading_zeros_count_the_whole_varnode() {
     let run = |bench: &mut Bench, size: u32, value: u128| -> u128 {
         let (v, out) = (slot(0x00, size), slot(0x40, 8));
         bench.put(&v, value);
-        bench.run(PcodeOpcode::LzCount, &[v.clone()], &out);
+        bench.run(PcodeOpcode::LzCount, std::slice::from_ref(&v), &out);
         bench.get(&out)
     };
     // `64 - bits` underflowed for anything wider than eight bytes.

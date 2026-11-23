@@ -5,7 +5,11 @@
 //! return values, unknown calls, stored values, or narrowing return expressions
 //! to strengthen types after the ordinary use constraints have been merged.
 
-use super::*;
+use super::binding_roles::BindingUseRole;
+use super::constraints::UseConstraint;
+use super::expression_types::{collect_known_binding_types, nir_type_bits, return_expr_type};
+use crate::HashMap;
+use crate::prelude::*;
 
 pub(super) fn promote_return_signedness_from_returns(func: &mut PreHirFunction) -> bool {
     if func.surface_return_type_name.is_some() {

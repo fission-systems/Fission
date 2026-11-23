@@ -84,6 +84,10 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_NET_RETRY: "10"
   RUST_BACKTRACE: "1"
+  # A test whose external input (python3; on macOS, `swift demangle`) is
+  # absent fails here instead of returning early, which nextest would count
+  # as a pass. See crates/fission-core/src/test_inputs.rs.
+  FISSION_REQUIRE_TEST_INPUTS: "1"
 
 jobs:
   test:

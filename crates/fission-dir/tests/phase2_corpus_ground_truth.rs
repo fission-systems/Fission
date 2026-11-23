@@ -48,7 +48,7 @@
 //! is not a matter of a few more expression forms.
 
 use fission_dir::report::VerifyOutcome;
-use fission_dir::{EmulatorHarness, RunPlan, check_ground_truth, decompile_one};
+use fission_dir::{EmulatorHarness, Grounding, RunPlan, check_ground_truth_with, decompile_one};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::path::PathBuf;
@@ -180,12 +180,13 @@ fn check_binary(
             continue;
         }
         let samples = RunPlan::default();
-        match check_ground_truth(
+        match check_ground_truth_with(
             &mut harness,
             func.address,
             &pair.prehir,
             &pair.hir,
             &samples,
+            &Grounding::for_function(&binary, func.address, &pair),
         ) {
             VerifyOutcome::Equivalent { checked } if checked > 0 => tally.equivalent += 1,
             VerifyOutcome::Diverged(divergences) => {
@@ -207,19 +208,14 @@ fn check_binary(
 
 /// Every function the emulator can drive must agree with its machine code.
 ///
-/// Skips rather than fails when the corpus is absent, matching the other
-/// phase tests -- the corpus lives outside this repository.
+/// Opt-in: the corpus lives outside this repository. It used to skip when the
+/// corpus was absent, which nextest counted as a pass in every checkout.
 #[test]
+#[ignore = "sweeps the local dev corpus (~/fission-benchmark/corpus/dev); run with --ignored"]
 fn corpus_decompilations_match_real_machine_code() {
     let dir = corpus_dir();
-    if !dir.exists() {
-        eprintln!("skipping: corpus not found at {}", dir.display());
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(&dir) else {
-        eprintln!("skipping: corpus unreadable at {}", dir.display());
-        return;
-    };
+    let entries = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("dev corpus unreadable at {}: {e}", dir.display()));
     let mut paths: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).collect();
     paths.sort();
 

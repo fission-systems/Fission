@@ -87,9 +87,15 @@ fn boolean(rng: &mut Rng, vars: &[SymExpr], width: u32, depth: u32) -> SymExpr {
     }
 }
 
-fn z3_path() -> Option<String> {
+/// The z3 binary to compare against.
+///
+/// Every test here is `#[ignore]`d, so reaching this means the run asked for
+/// the differential by name: a missing z3 is a failure. It used to print
+/// "skipping" and return, which nextest reported as a pass -- including in
+/// CI, had the install step ever failed to export `FISSION_Z3`.
+fn z3_path() -> String {
     if let Ok(path) = std::env::var("FISSION_Z3") {
-        return Some(path);
+        return path;
     }
     for candidate in [
         "/opt/homebrew/bin/z3",
@@ -105,10 +111,10 @@ fn z3_path() -> Option<String> {
             .map(|s| s.success())
             .unwrap_or(false);
         if ok {
-            return Some(candidate.to_string());
+            return candidate.to_string();
         }
     }
-    None
+    panic!("no z3 found: install z3 or set FISSION_Z3 to run the differential tests")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,10 +149,7 @@ fn ask_z3(z3: &str, script: &str) -> Verdict {
 #[test]
 #[ignore = "needs a z3 binary; run with --ignored"]
 fn the_solver_agrees_with_z3_on_random_bitvector_formulas() {
-    let Some(z3) = z3_path() else {
-        eprintln!("skipping: no z3 found (set FISSION_Z3)");
-        return;
-    };
+    let z3 = z3_path();
     let cases: u64 = std::env::var("FISSION_DIFF_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
@@ -1122,10 +1125,7 @@ struct Finding {
 /// `constructors`, this solver is given the formula rebuilt through the
 /// folding constructors while z3 keeps the one the generator wrote.
 fn run_batch(name: &str, shape: Shape, default_cases: u64, constructors: bool) {
-    let Some(z3) = z3_path() else {
-        eprintln!("skipping: no z3 found (set FISSION_Z3)");
-        return;
-    };
+    let z3 = z3_path();
     let cases = env_u64("FISSION_DIFF_CASES", default_cases);
     let seed = env_u64("FISSION_DIFF_SEED", 0x5EED_F155_1017);
     let only = std::env::var("FISSION_DIFF_ONLY")
@@ -1631,10 +1631,7 @@ impl Clock {
 }
 
 fn run_incremental(name: &str, shape: Shape, default_cases: u64) {
-    let Some(z3) = z3_path() else {
-        eprintln!("skipping: no z3 found (set FISSION_Z3)");
-        return;
-    };
+    let z3 = z3_path();
     let cases = env_u64("FISSION_DIFF_CASES", default_cases);
     let seed = env_u64("FISSION_DIFF_SEED", 0x5EED_F155_1017);
     let only = std::env::var("FISSION_DIFF_ONLY")

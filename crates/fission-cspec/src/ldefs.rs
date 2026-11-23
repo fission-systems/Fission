@@ -576,10 +576,11 @@ mod tests {
             .to_path_buf();
         let languages_root = repo_root.join("utils/sleigh-specs/languages");
 
-        if !languages_root.exists() {
-            // Skip if not in a full repo checkout.
-            return;
-        }
+        assert!(
+            languages_root.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            languages_root.display()
+        );
 
         let index = build_ldefs_index(&languages_root);
 
@@ -635,9 +636,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let languages_root = repo_root.join("utils/sleigh-specs/languages");
-        if !languages_root.exists() {
-            return;
-        }
+        assert!(
+            languages_root.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            languages_root.display()
+        );
         let index = build_ldefs_index(&languages_root);
         assert!(
             index.len() > 50,

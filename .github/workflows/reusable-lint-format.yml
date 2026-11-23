@@ -92,9 +92,9 @@ jobs:
             done
           fi
           if [ "${#package_flags[@]}" -gt 0 ]; then
-            cargo clippy "${package_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+            cargo clippy "${package_flags[@]}" --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
           else
-            cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+            cargo clippy --workspace "${exclude_flags[@]}" --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
           fi
 
       # Static audit for Rust tests missed by harness discovery. Keep it in

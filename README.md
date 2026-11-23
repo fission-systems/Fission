@@ -159,7 +159,15 @@ binary ─▶ fission-loader     format, sections, symbols, imports
 ```
 
 Fission reads Ghidra's Sleigh specifications but does not run Ghidra; the Sleigh
-runtime and everything downstream of it are Fission's own Rust code. Structuring
+runtime and everything downstream of it are Fission's own Rust code. The
+specifications are input data, not ground truth: upstream's AArch64 specs lifted
+every FCVT and FRINT rounding mode as a plain truncation, and Fission carries its
+own fixes for both, checked against the Arm architecture manual
+([local deviations](utils/sleigh-specs/README.md#local-deviations-from-upstream-ghidra-122)).
+Ghidra is a reference, not a correctness oracle: agreeing with it proves nothing
+when both read the same specification
+([ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)), and correctness is
+checked against native execution, architecture manuals and source ground truth. Structuring
 runs three published approaches against one shrinking control-flow graph and
 picks one result per function: Ghidra-style collapse rules, angr Phoenix
 schema matching, and DREAM reaching conditions. The crate-by-crate map is in
