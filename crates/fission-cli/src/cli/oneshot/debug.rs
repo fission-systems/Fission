@@ -530,6 +530,24 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             anyhow::bail!("hardware breakpoints require a persistent debug session; Windows x64 native backend only")
         }
 
+        DebugCommand::TraceInspect(args) => {
+            let report = super::debug_trace::trace_inspect(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+
+        DebugCommand::TraceDiff(args) => {
+            let report = super::debug_trace::trace_diff(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+
+        DebugCommand::TraceDecomp(args) => {
+            let report = super::debug_trace::trace_decomp(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+
         DebugCommand::RrStatus(args) => {
             let available = fission_dynamic::debug::rr::RRDebugger::is_available();
             let traces = fission_dynamic::debug::rr::RRDebugger::list_traces()
