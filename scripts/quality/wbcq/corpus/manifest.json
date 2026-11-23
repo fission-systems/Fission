@@ -1,0 +1,20 @@
+{
+  "description": "WBCQ P3 evaluation corpus (RFC #1093). Each entry is a step function `unsigned step(ctx *, unsigned in)`; `context_bytes` is sizeof(ctx). `expect` is what the RFC requires of the engine: `machine` (a quotient), or for a negative case any of `fail_closed` statuses.",
+  "functions": [
+    {"name": "tcp_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "RFC 793 connection states"},
+    {"name": "http_reqline_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "HTTP/1.x request line (RFC 9112 section 3)"},
+    {"name": "utf8_step", "source": "state_machines.c", "context_bytes": 16, "expect": "machine", "origin": "UTF-8 validation (RFC 3629 section 4)"},
+    {"name": "telnet_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "Telnet commands (RFC 854/855)"},
+    {"name": "slip_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "SLIP decoding (RFC 1055)"},
+    {"name": "pin_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "keypad lock with lockout"},
+    {"name": "debounce_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "switch debouncer"},
+    {"name": "vending_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "coin acceptor"},
+    {"name": "traffic_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "traffic light with pedestrian request"},
+    {"name": "base64_step", "source": "state_machines.c", "context_bytes": 12, "expect": "machine", "origin": "Base64 decoding (RFC 4648)"},
+    {"name": "frame_step", "source": "state_machines.c", "context_bytes": 12, "expect": "large", "origin": "serial frame with XOR checksum"},
+    {"name": "sha256_round_step", "source": "negatives.c", "context_bytes": 32, "expect": "fail_closed", "origin": "SHA-256 compression round (FIPS 180-4)"},
+    {"name": "list_walk_step", "source": "negatives.c", "context_bytes": 16, "expect": "fail_closed", "origin": "linked-list traversal"},
+    {"name": "clock_step", "source": "negatives.c", "context_bytes": 4, "expect": "fail_closed", "origin": "time stamp counter"},
+    {"name": "syscall_step", "source": "negatives.c", "context_bytes": 4, "expect": "fail_closed", "origin": "system call"}
+  ]
+}

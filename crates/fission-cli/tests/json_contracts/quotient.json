@@ -104,6 +104,8 @@
       },
       "metrics": {
         "object": {
+          "feasible_blocks": "number",
+          "feasible_edges": "number",
           "feasible_paths": "number",
           "pcode_blocks": "number",
           "pcode_edges": "number",

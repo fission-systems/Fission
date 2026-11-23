@@ -59,6 +59,18 @@ assembled, not compiled, so the control-flow shape is exactly what the tests
 name. The build command is in each file's header; rebuild and commit the
 `.elf` with any change to the `.S`.
 
+## Evaluation
+
+`scripts/quality/wbcq/` holds the RFC's P3 evaluation:
+- an OLLVM-style obfuscator;
+- a state-machine corpus with negative cases;
+- a native ground truth;
+- a DecBench step-function sample.
+
+Results and procedure are in `docs/proposals/2026-11-23-wbcq-p3-evaluation.md`.
+Re-run it after any change to what the engine accepts. A changed state count
+on the corpus is a regression until the ground truth says otherwise.
+
 ## Validation
 
 ```bash
