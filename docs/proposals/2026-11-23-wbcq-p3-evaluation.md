@@ -333,3 +333,48 @@ The `quotient.v1` schema gains:
 - `calls` on each observation, and the exit `no_return`.
 
 These are additions. Existing fields keep their meaning.
+
+### 10.2 Corpus: call-using machines and their controls
+
+There are five new machines in `scripts/quality/wbcq/corpus/call_machines.c`.
+Each calls out in a different way:
+
+| function | the call | callee class | ground truth |
+|---|---|---|---|
+| `lex_step` | a lexer that classifies each byte with `isdigit`, then `isalpha` (up to 2 calls per step) | library | 3 |
+| `door_step` | a garage door controller that logs each change of motion with `putchar` | library | 5 |
+| `turnstile_step` | a coin turnstile with an application logger, `wbcq_log`, that no library describes | unknown | 2 |
+| `hs_step` | a greeting handshake that calls `abort()` on a NUL byte | no-return | 4 (3 + halted) |
+| `emit_step` | a parity reporter whose result is what `putchar` returned (`jmp putchar` at -O1) | library, tail call | 2 |
+
+**Ground truth.** It is computed without Fission. `ground_truth.py` runs the
+natively compiled source against `call_env_native.c`, which stands in for
+every callee: it records the call (which function, which argument) and
+returns a scripted value. `abort` records itself and unwinds out of the step.
+- A symbol is an input byte plus one return value per call, drawn from
+  {0, 1, 0xffffffff}.
+- An observation is the result (or "did not return") plus the call trace.
+- After a step that does not return, the machine is halted.
+- Moore refinement then gives the minimal machine, as in section 2.
+
+This is the semantics the engine uses: a callee's return is an input. The
+ground truth observes the *declared* arguments. For the unknown callee, the
+engine observes every defined argument register, so a match there also tests
+that the over-observation did not split states.
+
+**Positive controls.** Before this change, all 40 builds (5 machines x 8
+builds) were `unsupported_semantics`:
+- 34 were rejected as "a call: the callee's effects are outside the slice";
+- 6 `emit_step` builds were rejected as "a branch outside the slice": the tail
+  `jmp putchar`. At -O0 and on the flattened x86 builds the tail call is a
+  plain call.
+
+The control runs are kept in `~/fission-benchmark/wbcq-p4/controls-before/`.
+
+**Unit fixtures** (`testdata/quotient_fixture.S`, assembled):
+- `digits_step`: a classifier call with an environment-chosen return;
+- `guarded_step`: `abort()` halts the machine;
+- `tail_step`: `jmp isdigit`;
+- `padded_select_step`: a `cmov` followed by a `nop`;
+- `calling_step`, which now fails closed because an unknown callee is handed
+  the context pointer.
