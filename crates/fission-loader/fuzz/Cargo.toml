@@ -1,7 +1,7 @@
 # cargo-fuzz workspace for the parent crate (`fission-loader`).
 #
 # Keep this directory next to the crate under test (standard `cargo-fuzz` layout).
-# Run from `crates/fission-loader`: `cargo fuzz run fuzz_pe_parser` / `fuzz_elf_parser`.
+# Run from `crates/fission-loader`: `cargo fuzz run <target>` (`cargo fuzz list`).
 # Scheduled CI: `.github/workflows/fuzz.yml` (`working-directory: crates/fission-loader`).
 [workspace]
 
@@ -32,6 +32,27 @@ bench = false
 [[bin]]
 name = "fuzz_elf_parser"
 path = "fuzz_targets/fuzz_elf_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_any_format"
+path = "fuzz_targets/fuzz_any_format.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_macho_parser"
+path = "fuzz_targets/fuzz_macho_parser.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_coff_object"
+path = "fuzz_targets/fuzz_coff_object.rs"
 test = false
 doc = false
 bench = false

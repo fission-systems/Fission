@@ -263,3 +263,17 @@ mod tests {
         assert!(image_executes_thumb(&image));
     }
 }
+
+/// The processor context a sweep or validation decode should start from.
+///
+/// `None` everywhere except a Thumb image, whose addresses cannot say what
+/// mode they are in once the ABI's bit-0 marker is gone with the symbols.
+/// Cheap enough to ask per candidate: it reads the vector table's first
+/// words and the language's context-field layout, against validation's own
+/// budget of up to four thousand decoded instructions.
+pub(super) fn image_decode_context(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+) -> Option<PackedContextOverride> {
+    decode_context_for_address(binary, frontend, 0, None)
+}

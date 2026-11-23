@@ -62,7 +62,13 @@ pub struct TraceDag<'a> {
 
     branch_points: Vec<BranchPoint>,
     traces: Vec<BlockTrace>,
-    active_traces: HashSet<usize>,
+    /// Active trace ids in activation order (Ghidra `TraceDAG::activetrace`,
+    /// a `list` appended by `insertActive`). `push_branches` advances the
+    /// first trace in this order that can move, so the order is part of the
+    /// result: a hash set iterates in an order that depends on the host's
+    /// SIMD group width (16 on x86-64, 8 on aarch64), and the same binary
+    /// decompiled to different code on the two architectures.
+    active_traces: Vec<usize>,
     node_visit_counts: HashMap<usize, usize>,
     /// Accumulated likely unstructured edges (from → to).
     likely_gotos: Vec<(usize, usize)>,
@@ -84,7 +90,7 @@ impl<'a> TraceDag<'a> {
             dom_tree,
             branch_points: Vec::new(),
             traces: Vec::new(),
-            active_traces: HashSet::default(),
+            active_traces: Vec::new(),
             node_visit_counts: HashMap::default(),
             likely_gotos: Vec::new(),
             active_list_scratch: Vec::new(),
@@ -103,6 +109,18 @@ impl<'a> TraceDag<'a> {
             .copied()
             .filter(|&succ| !self.dom_tree.dominates(succ, node))
             .collect()
+    }
+
+    fn activate(&mut self, trace_id: usize) {
+        if !self.active_traces.contains(&trace_id) {
+            self.active_traces.push(trace_id);
+        }
+    }
+
+    fn deactivate(&mut self, trace_id: usize) {
+        if let Some(pos) = self.active_traces.iter().position(|&t| t == trace_id) {
+            self.active_traces.remove(pos);
+        }
     }
 
     fn create_branch_point(&mut self, parent_trace: Option<usize>, destnode: usize) -> usize {
@@ -125,7 +143,7 @@ impl<'a> TraceDag<'a> {
                 active: true,
                 terminal: false,
             });
-            self.active_traces.insert(trace_id);
+            self.activate(trace_id);
             *self.node_visit_counts.entry(succ).or_insert(0) += 1;
         }
 
@@ -192,7 +210,7 @@ impl<'a> TraceDag<'a> {
         let bp = self.branch_points[bp_id].clone();
 
         for &trace_id in &bp.paths {
-            self.active_traces.remove(&trace_id);
+            self.deactivate(trace_id);
         }
 
         if let Some(parent_trace_id) = bp.parent_trace {
@@ -202,12 +220,12 @@ impl<'a> TraceDag<'a> {
                 parent_trace.destnode = exitblock;
                 parent_trace.active = true;
                 parent_trace.terminal = false;
-                self.active_traces.insert(parent_trace_id);
+                self.activate(parent_trace_id);
                 *self.node_visit_counts.entry(exitblock).or_insert(0) += 1;
             } else {
                 parent_trace.active = true;
                 parent_trace.terminal = true;
-                self.active_traces.insert(parent_trace_id);
+                self.activate(parent_trace_id);
             }
         }
     }
@@ -409,7 +427,7 @@ impl<'a> TraceDag<'a> {
                         }
                         _ => {
                             self.traces[trace_id].active = false;
-                            self.active_traces.remove(&trace_id);
+                            self.deactivate(trace_id);
                             self.create_branch_point(Some(trace_id), dest);
                         }
                     }
@@ -520,5 +538,69 @@ mod tests {
         }
         // Follow discovery may still succeed; edge selection is best-effort when stuck.
         let _ = edge;
+    }
+
+    #[test]
+    fn active_traces_are_scanned_in_activation_order() {
+        // 0 → 1,2,3 (three traces); 1 → 4,5 opens a nested branch point.
+        // The scan order is the order traces were activated -- creation
+        // order, with a trace re-activated by a retiring branch appended at
+        // the end -- never a hash order, which differs between hosts.
+        let succs = vec![
+            vec![1, 2, 3],
+            vec![4, 5],
+            vec![6],
+            vec![6],
+            vec![6],
+            vec![6],
+            vec![],
+        ];
+        let preds = vec![
+            vec![],
+            vec![0],
+            vec![0],
+            vec![0],
+            vec![1],
+            vec![1],
+            vec![2, 3, 4, 5],
+        ];
+        let dom = DomTree::analyze(&succs, &preds);
+        let mut dag = TraceDag::new(&succs, &preds, &dom);
+        let root = dag.create_branch_point(None, 0);
+        assert_eq!(dag.active_traces, vec![0, 1, 2]);
+        // Trace 0 reaches block 1 and branches: it leaves the active list and
+        // its two children are appended.
+        dag.deactivate(0);
+        let child = dag.create_branch_point(Some(0), 1);
+        assert_eq!(dag.active_traces, vec![1, 2, 3, 4]);
+        // Retiring the child branch re-activates trace 0 at the end.
+        dag.retire_branch(child, Some(6));
+        assert_eq!(dag.active_traces, vec![1, 2, 0]);
+        assert_eq!(root, 0);
+    }
+
+    #[test]
+    fn follow_of_three_way_branch_is_independent_of_scan_order() {
+        let succs = vec![
+            vec![1, 2, 3],
+            vec![4, 5],
+            vec![6],
+            vec![6],
+            vec![6],
+            vec![6],
+            vec![],
+        ];
+        let preds = vec![
+            vec![],
+            vec![0],
+            vec![0],
+            vec![0],
+            vec![1],
+            vec![1],
+            vec![2, 3, 4, 5],
+        ];
+        let dom = DomTree::analyze(&succs, &preds);
+        let mut dag = TraceDag::new(&succs, &preds, &dom);
+        assert_eq!(dag.find_follow_block(0).expect("ok"), Some(6));
     }
 }

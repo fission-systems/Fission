@@ -407,9 +407,9 @@ impl std::str::FromStr for PcodeOpcode {
 /// Varnode - represents a value in Pcode (register, memory, constant, etc.)
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Varnode {
-    pub space_id: u64,     // Address space (0=const, 1=unique, 2=register, etc.)
-    pub offset: u64,       // Offset within space
-    pub size: u32,         // Size in bytes
+    pub space_id: u64, // Address space (0=const, 1/4/5=register, 2/3=unique, etc.; see crate::space)
+    pub offset: u64,   // Offset within space
+    pub size: u32,     // Size in bytes
     pub is_constant: bool, // Is this a constant value?
     pub constant_val: i64, // Constant value if is_constant
 }
@@ -426,14 +426,14 @@ impl Varnode {
         }
     }
 
-    /// Check if this is zero
+    /// Check if this is zero within its declared byte width
     pub fn is_zero(&self) -> bool {
-        self.is_constant && self.constant_val == 0
+        self.is_constant && truncate_to_varnode_width(self.constant_val as u64, self.size) == 0
     }
 
-    /// Check if this is one
+    /// Check if this is one within its declared byte width
     pub fn is_one(&self) -> bool {
-        self.is_constant && self.constant_val == 1
+        self.is_constant && truncate_to_varnode_width(self.constant_val as u64, self.size) == 1
     }
 
     /// Check if this is all bits set (e.g., 0xFF for 1 byte, 0xFFFFFFFF for 4 bytes)
@@ -449,11 +449,22 @@ impl Varnode {
             64 => u64::MAX,
             _ => return false,
         };
-        self.offset == mask
+        truncate_to_varnode_width(self.constant_val as u64, self.size) == mask
+    }
+
+    /// Check whether two non-constant varnodes occupy overlapping byte ranges
+    /// in the same address space.
+    pub fn overlaps(&self, other: &Varnode) -> bool {
+        if self.is_constant || other.is_constant || self.space_id != other.space_id {
+            return false;
+        }
+        let a_end = self.offset.saturating_add(u64::from(self.size.max(1)));
+        let b_end = other.offset.saturating_add(u64::from(other.size.max(1)));
+        self.offset < b_end && other.offset < a_end
     }
 }
 
-fn truncate_to_varnode_width(value: u64, size: u32) -> u64 {
+pub(crate) fn truncate_to_varnode_width(value: u64, size: u32) -> u64 {
     let Some(bits) = size.checked_mul(8) else {
         return value;
     };
@@ -1001,12 +1012,14 @@ impl PcodeFunction {
 
     /// Parse Pcode from flat binary format (zero-copy friendly).
     /// Format: FPCD magic(4) version(1) num_blocks(4) [block...]
-    /// Block: index(4) start_addr(8) num_ops(4) [op...]
+    /// Block (v1): index(4) start_addr(8) num_ops(4) [op...]
+    /// Block (v2): index(4) start_addr(8) num_successors(4) [succ_idx(4)...] num_ops(4) [op...]
     /// Op: seq(4) opcode(4) addr(8) has_out(1) out_vn(32 if has_out) num_in(4) in_vn(32 each)
     /// Varnode: space_id(8) offset(8) size(4) is_const(1) _pad(3) const_val(8) = 32 bytes
     pub fn from_flat_bytes(bytes: &[u8]) -> Result<Self, FlatFormatError> {
         const MAGIC: &[u8; 4] = b"FPCD";
         const VARNODE_SIZE: usize = 32;
+        const MIN_OP_BYTES: usize = 21;
 
         if bytes.len() < 4 + 1 + 4 {
             return Err(FlatFormatError::TooShort);
@@ -1014,9 +1027,16 @@ impl PcodeFunction {
         if &bytes[0..4] != MAGIC {
             return Err(FlatFormatError::BadMagic);
         }
-        let _version = bytes[4];
+        let version = bytes[4];
+        if !matches!(version, 1 | 2) {
+            return Err(FlatFormatError::UnsupportedVersion(version));
+        }
+        let min_block_bytes = if version == 2 { 20 } else { 16 };
         let num_blocks = u32::from_le_bytes(bytes[5..9].try_into().unwrap()) as usize;
         let mut pos = 9;
+        if num_blocks > (bytes.len() - pos) / min_block_bytes {
+            return Err(FlatFormatError::Truncated);
+        }
         let mut blocks = Vec::with_capacity(num_blocks);
 
         for _ in 0..num_blocks {
@@ -1027,8 +1047,32 @@ impl PcodeFunction {
             pos += 4;
             let start_address = u64::from_le_bytes(bytes[pos..pos + 8].try_into().unwrap());
             pos += 8;
+
+            let successors = if version >= 2 {
+                let num_successors =
+                    u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4;
+                if num_successors > (bytes.len() - pos) / 4 {
+                    return Err(FlatFormatError::Truncated);
+                }
+                let mut succs = Vec::with_capacity(num_successors);
+                for _ in 0..num_successors {
+                    succs.push(u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()));
+                    pos += 4;
+                }
+                succs
+            } else {
+                vec![]
+            };
+
+            if pos + 4 > bytes.len() {
+                return Err(FlatFormatError::Truncated);
+            }
             let num_ops = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
             pos += 4;
+            if num_ops > (bytes.len() - pos) / MIN_OP_BYTES {
+                return Err(FlatFormatError::Truncated);
+            }
 
             let mut ops = Vec::with_capacity(num_ops);
             for _ in 0..num_ops {
@@ -1063,12 +1107,12 @@ impl PcodeFunction {
                 let num_inputs =
                     u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
                 pos += 4;
+                if num_inputs > (bytes.len() - pos) / VARNODE_SIZE {
+                    return Err(FlatFormatError::Truncated);
+                }
 
                 let mut inputs = Vec::with_capacity(num_inputs);
                 for _ in 0..num_inputs {
-                    if pos + VARNODE_SIZE > bytes.len() {
-                        return Err(FlatFormatError::Truncated);
-                    }
                     inputs.push(read_varnode(&bytes[pos..pos + VARNODE_SIZE]));
                     pos += VARNODE_SIZE;
                 }
@@ -1088,7 +1132,7 @@ impl PcodeFunction {
             blocks.push(PcodeBasicBlock {
                 index,
                 start_address,
-                successors: vec![],
+                successors,
                 ops,
             });
         }
@@ -1100,18 +1144,22 @@ impl PcodeFunction {
         Ok(function)
     }
 
-    /// Serialize to flat binary format.
+    /// Serialize to flat binary format (version 2, including block successors).
     pub fn to_flat_bytes(&self) -> Vec<u8> {
         const MAGIC: &[u8; 4] = b"FPCD";
 
         let mut out = Vec::new();
         out.extend_from_slice(MAGIC);
-        out.push(1u8); // version
+        out.push(2u8); // version
         out.extend_from_slice(&(self.blocks.len() as u32).to_le_bytes());
 
         for block in &self.blocks {
             out.extend_from_slice(&block.index.to_le_bytes());
             out.extend_from_slice(&block.start_address.to_le_bytes());
+            out.extend_from_slice(&(block.successors.len() as u32).to_le_bytes());
+            for &succ in &block.successors {
+                out.extend_from_slice(&succ.to_le_bytes());
+            }
             out.extend_from_slice(&(block.ops.len() as u32).to_le_bytes());
 
             for op in &block.ops {
@@ -1172,6 +1220,7 @@ fn parse_json_const_val(value: Option<&serde_json::Value>) -> Option<i64> {
 pub enum FlatFormatError {
     TooShort,
     BadMagic,
+    UnsupportedVersion(u8),
     Truncated,
     InvalidPcodeShape(PcodeValidationError),
 }
@@ -1181,6 +1230,7 @@ impl std::fmt::Display for FlatFormatError {
         match self {
             Self::TooShort => write!(f, "Flat buffer too short"),
             Self::BadMagic => write!(f, "Invalid flat format magic"),
+            Self::UnsupportedVersion(v) => write!(f, "Unsupported flat format version {v}"),
             Self::Truncated => write!(f, "Truncated flat buffer"),
             Self::InvalidPcodeShape(err) => write!(f, "{err}"),
         }
@@ -1522,5 +1572,144 @@ mod tests {
         let json = r#"{"blocks":[{"index":0,"start_addr":"0x1000","ops":[{"seq":0,"opcode":"INT_ADD","addr":"0x1000","output":{"space":1,"offset":"0x100","size":8},"inputs":[{"space":2,"offset":"0x20","size":8}]}]}]}"#;
         let err = PcodeFunction::from_json(json).expect_err("invalid pcode must be rejected");
         assert!(err.to_string().contains("InvalidPcodeShape"));
+    }
+
+    #[test]
+    fn width_aware_is_zero_and_is_one() {
+        let wrapped_zero = Varnode::constant(0x1_0000_0000u64 as i64, 4);
+        assert!(wrapped_zero.is_zero());
+        assert!(!wrapped_zero.is_one());
+
+        let wrapped_one = Varnode::constant(0x1_0000_0001u64 as i64, 4);
+        assert!(wrapped_one.is_one());
+        assert!(!wrapped_one.is_zero());
+
+        assert!(Varnode::constant(0x100, 1).is_zero());
+    }
+
+    #[test]
+    fn flat_bytes_preserves_successors_and_rejects_truncated_headers() {
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1, 2],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1000,
+                        output: None,
+                        inputs: vec![
+                            Varnode::constant(0x1020, 8),
+                            Varnode {
+                                space_id: 1,
+                                offset: 0x20,
+                                size: 1,
+                                is_constant: false,
+                                constant_val: 0,
+                            },
+                        ],
+                        asm_mnemonic: None,
+                    }],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1010,
+                    successors: vec![2],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1020,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1020,
+                        output: None,
+                        inputs: vec![],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+
+        let flat = func.to_flat_bytes();
+        let restored = PcodeFunction::from_flat_bytes(&flat).expect("v2 flat round-trip");
+        assert_eq!(restored, func);
+
+        // Legacy v1 payload still parses with empty successors.
+        let mut v1 = Vec::new();
+        v1.extend_from_slice(b"FPCD");
+        v1.push(1);
+        v1.extend_from_slice(&1u32.to_le_bytes()); // num_blocks
+        v1.extend_from_slice(&0u32.to_le_bytes()); // index
+        v1.extend_from_slice(&0x1000u64.to_le_bytes()); // start_addr
+        v1.extend_from_slice(&0u32.to_le_bytes()); // num_ops
+        let parsed_v1 = PcodeFunction::from_flat_bytes(&v1).expect("legacy v1 parse");
+        assert_eq!(parsed_v1.blocks.len(), 1);
+        assert!(parsed_v1.blocks[0].successors.is_empty());
+
+        // Unknown version is rejected.
+        let mut bad_ver = v1.clone();
+        bad_ver[4] = 99;
+        assert!(matches!(
+            PcodeFunction::from_flat_bytes(&bad_ver),
+            Err(FlatFormatError::UnsupportedVersion(99))
+        ));
+
+        // Forged huge num_blocks fails cleanly without OOM.
+        let mut huge_blocks = Vec::new();
+        huge_blocks.extend_from_slice(b"FPCD\x02");
+        huge_blocks.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(
+            PcodeFunction::from_flat_bytes(&huge_blocks),
+            Err(FlatFormatError::Truncated)
+        ));
+
+        // Forged huge num_successors fails cleanly without OOM.
+        let mut huge_succs = Vec::new();
+        huge_succs.extend_from_slice(b"FPCD\x02");
+        huge_succs.extend_from_slice(&1u32.to_le_bytes());
+        huge_succs.extend_from_slice(&0u32.to_le_bytes());
+        huge_succs.extend_from_slice(&0x1000u64.to_le_bytes());
+        huge_succs.extend_from_slice(&u32::MAX.to_le_bytes());
+        huge_succs.extend_from_slice(&0u32.to_le_bytes());
+        assert!(matches!(
+            PcodeFunction::from_flat_bytes(&huge_succs),
+            Err(FlatFormatError::Truncated)
+        ));
+
+        // Forged huge num_ops fails cleanly without OOM.
+        let mut huge_ops = Vec::new();
+        huge_ops.extend_from_slice(b"FPCD\x02");
+        huge_ops.extend_from_slice(&1u32.to_le_bytes());
+        huge_ops.extend_from_slice(&0u32.to_le_bytes());
+        huge_ops.extend_from_slice(&0x1000u64.to_le_bytes());
+        huge_ops.extend_from_slice(&0u32.to_le_bytes());
+        huge_ops.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert!(matches!(
+            PcodeFunction::from_flat_bytes(&huge_ops),
+            Err(FlatFormatError::Truncated)
+        ));
+
+        // Forged huge num_inputs fails cleanly without OOM.
+        let mut huge_inputs = Vec::new();
+        huge_inputs.extend_from_slice(b"FPCD\x02");
+        huge_inputs.extend_from_slice(&1u32.to_le_bytes());
+        huge_inputs.extend_from_slice(&0u32.to_le_bytes());
+        huge_inputs.extend_from_slice(&0x1000u64.to_le_bytes());
+        huge_inputs.extend_from_slice(&0u32.to_le_bytes());
+        huge_inputs.extend_from_slice(&1u32.to_le_bytes()); // num_ops = 1
+        huge_inputs.extend_from_slice(&0u32.to_le_bytes()); // seq
+        huge_inputs.extend_from_slice(&PcodeOpcode::Copy.to_flat_u32().to_le_bytes());
+        huge_inputs.extend_from_slice(&0x1000u64.to_le_bytes()); // addr
+        huge_inputs.push(0); // has_output
+        huge_inputs.extend_from_slice(&u32::MAX.to_le_bytes()); // num_inputs
+        assert!(matches!(
+            PcodeFunction::from_flat_bytes(&huge_inputs),
+            Err(FlatFormatError::Truncated)
+        ));
     }
 }

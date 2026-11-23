@@ -7,10 +7,12 @@ exploration.
 
 ## Dynamic Analysis and Emulator
 
-Fission includes a pure-Rust dynamic analysis engine (`fission-emulator`) capable of executing arbitrary x86/x86-64 P-Code sequences produced by Sleigh, without requiring any external runtime like QEMU or Unicorn.
+The Rust emulator (`fission-emulator`) executes SLEIGH p-code. Execution
+coverage depends on the guest architecture, implemented p-code operations and
+OS high-level emulation (HLE).
 
 The emulator is a core pillar for future dynamic reasoning capabilities:
-- **Tracing and Differential Analysis** — Execute binaries with a full instruction trace and diff the output against expected behavior.
+- **Execution evidence** — Record guest behavior and compare sandbox snapshots with Semantic Replay Diff.
 - **Time-Travel Debugging (TTD)** — Record/replay execution with memory and register delta snapshots.
 - **Concolic Execution** — Use TTD snapshots to fork execution at unexplored conditional branches.
 - **Symbolic Taint Tracking** — Propagate symbolic expressions through P-Code operations and track tainted data flows from inputs (e.g. `stdin`) through memory and registers.
@@ -30,35 +32,32 @@ fission-emulator
   │   └── bare_metal/  — No-OS / embedded HLE
   ├── sym/
   │   └── mod.rs       — SymbolicExecutor: TTD-backed concolic path exploration
-  ├── trace.rs         — TraceLog: per-instruction audit trail
+  ├── trace.rs         — TraceLog: recorded emulator events
   ├── snapshot.rs      — Lightweight snapshot helpers
   └── loader.rs        — Binary loading bridge for the emulator
 ```
 
 ### CLI Integration
 
+`sandbox` runs a guest in the emulator. `--json` writes the sandbox metrics
+to stdout. `--dump-trace` writes recorded events as JSON Lines. A run can
+produce an empty trace file. Use `--coverage` to report reached code and
+inspect `behavior` in the JSON report for syscall and HLE activity.
+
 ```bash
-# Emulate a binary (default: auto-detect OS, no limits)
-fission_cli run <binary>
+fission_cli sandbox <binary> --max-inst 10000
+fission_cli sandbox <binary> --stdin-mock hello
+fission_cli sandbox <binary> --dump-trace trace.jsonl --json
 
-# Limit to N instructions
-fission_cli run <binary> --max-inst 10000
+# Record snapshots every 1,000 instructions and seek after execution halts.
+fission_cli sandbox <binary> --ttd-record 1000 --ttd-seek 5000
 
-# Provide stdin mock data
-fission_cli run <binary> --stdin "hello\n"
-
-# Emit full instruction trace (JSON)
-fission_cli run <binary> --trace --json
-
-# Enable TTD recording (snapshot every 1000 instructions)
-fission_cli run <binary> --ttd-record 1000
-
-# Seek TTD to step N (rewind and replay from that point)
-fission_cli run <binary> --ttd-record 1000 --ttd-seek 5000
-
-# Enable concolic path exploration
-fission_cli run <binary> --ttd-record 500 --sym-explore
+# Explore bounded paths through conditional branches.
+fission_cli sandbox <binary> --ttd-record 500 --sym-explore
 ```
+
+Use [`debug --emulator session`](../CLI.md#debug-command) for interactive
+guest inspection. `sandbox --ttd-seek` seeks within its own run's recording.
 
 ### Operating System HLE
 

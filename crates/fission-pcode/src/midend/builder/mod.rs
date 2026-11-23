@@ -133,29 +133,68 @@ pub(super) fn apply_preview_type_hints(
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
 ) -> PreviewHintStats {
-    type_hints::apply_preview_type_hints(func, context, register_origins, None)
+    apply_preview_type_hints_with_stack_bias_and_pointer_size(
+        func,
+        context,
+        register_origins,
+        None,
+        8,
+    )
 }
 
+#[cfg(test)]
 pub(super) fn apply_preview_type_hints_with_stack_bias(
     func: &mut HirFunction,
     context: &PreviewTypeContext,
     register_origins: &HashMap<String, (u64, u32)>,
     debug_cfa_stack_offset_bias: Option<i64>,
 ) -> PreviewHintStats {
+    apply_preview_type_hints_with_stack_bias_and_pointer_size(
+        func,
+        context,
+        register_origins,
+        debug_cfa_stack_offset_bias,
+        8,
+    )
+}
+
+pub(super) fn apply_preview_type_hints_with_stack_bias_and_pointer_size(
+    func: &mut HirFunction,
+    context: &PreviewTypeContext,
+    register_origins: &HashMap<String, (u64, u32)>,
+    debug_cfa_stack_offset_bias: Option<i64>,
+    pointer_size: u32,
+) -> PreviewHintStats {
     type_hints::apply_preview_type_hints(
         func,
         context,
         register_origins,
         debug_cfa_stack_offset_bias,
+        pointer_size,
     )
 }
 
+#[cfg(test)]
 pub(super) fn apply_pre_hir_debug_array_hints(
     func: &mut PreHirFunction,
     context: &PreviewTypeContext,
     debug_cfa_stack_offset_bias: Option<i64>,
 ) -> usize {
-    type_hints::apply_pre_hir_debug_array_hints(func, context, debug_cfa_stack_offset_bias)
+    apply_pre_hir_debug_array_hints_with_pointer_size(func, context, debug_cfa_stack_offset_bias, 8)
+}
+
+pub(super) fn apply_pre_hir_debug_array_hints_with_pointer_size(
+    func: &mut PreHirFunction,
+    context: &PreviewTypeContext,
+    debug_cfa_stack_offset_bias: Option<i64>,
+    pointer_size: u32,
+) -> usize {
+    type_hints::apply_pre_hir_debug_array_hints(
+        func,
+        context,
+        debug_cfa_stack_offset_bias,
+        pointer_size,
+    )
 }
 
 fn seed_callee_summaries_from_type_context(
@@ -271,12 +310,13 @@ pub(super) fn collect_local_surface_hints(
     func: &HirFunction,
     local_hints: &mut HashMap<String, String>,
 ) {
-    let alias_collector = type_hints::StackAliasCollector::new(func);
+    let alias_collector = type_hints::StackAliasCollector::new(func, 8);
     type_hints::collect_local_surface_hints(
         body,
         pointer_hints,
         func,
         &alias_collector,
+        8,
         local_hints,
     );
 }

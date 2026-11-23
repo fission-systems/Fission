@@ -296,11 +296,17 @@ fn require_function(binary: &LoadedBinary, address: u64) -> Result<()> {
         .filter(|f| f.address <= address)
         .max_by_key(|f| f.address);
     match nearest {
-        Some(f) if address < f.address + f.size.max(1) => bail!(
-            "0x{address:x} is inside {} but not its entry; name 0x{:x} instead",
-            f.name,
-            f.address
-        ),
+        Some(f)
+            if address
+                .checked_sub(f.address)
+                .is_some_and(|offset| offset < f.size.max(1)) =>
+        {
+            bail!(
+                "0x{address:x} is inside {} but not its entry; name 0x{:x} instead",
+                f.name,
+                f.address
+            )
+        }
         _ => {
             bail!("no function starts at 0x{address:x}; `fission_cli list` shows the ones that do")
         }
@@ -350,4 +356,28 @@ fn report(
     text: impl FnOnce() -> String,
 ) {
     reports.push((value, text()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::require_function;
+    use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder};
+
+    #[test]
+    fn require_function_handles_near_max_address_plus_size_without_overflow() {
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0; 16]))
+            .format("ELF")
+            .add_function(FunctionInfo {
+                name: "high_fn".into(),
+                address: u64::MAX - 4,
+                size: 0x20,
+                ..Default::default()
+            })
+            .build()
+            .expect("build binary");
+
+        assert!(require_function(&binary, u64::MAX - 4).is_ok());
+        let err = require_function(&binary, u64::MAX).unwrap_err().to_string();
+        assert!(err.contains("is inside high_fn"), "{err}");
+    }
 }

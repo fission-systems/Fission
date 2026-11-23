@@ -19,12 +19,12 @@ While in `0.x`, **minor releases may still introduce significant behavior change
   layered gates (Fast Gate + Heavy + Release E2E). See
   [`docs/CI_RELEASE_GATES.md`](CI_RELEASE_GATES.md).
 - Preferred path: Actions → **Release Tag (CI green)**
-  ([`release-tag.yml`](../.github/workflows/release-tag.yml)).
-- Continuous delivery builds from tag pushes per [`.github/workflows/cd.yml`](../.github/workflows/cd.yml).
+  ([`release-tag.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-tag.yml)).
+- Continuous delivery builds from tag pushes per [`.github/workflows/cd.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/cd.yml).
 
 ## Branches
 
-- **`main`** is the integration branch; tags are cut from commits that pass merge gates described in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+- **`main`** is the integration branch; tags are cut from commits that pass merge gates described in [`CONTRIBUTING.md`](https://github.com/fission-systems/Fission/blob/main/CONTRIBUTING.md).
 - Long-lived release branches are **optional**; if adopted later, document them here and in [`docs/RELEASE.md`](RELEASE.md).
 
 ## Pre-releases
