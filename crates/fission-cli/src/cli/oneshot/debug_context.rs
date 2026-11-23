@@ -145,9 +145,13 @@ pub(super) fn run_context(
     if args.stack > 4096 {
         bail!("context --stack is limited to 4096 bytes");
     }
-    if backend.get_state().status != DebugStatus::Suspended {
+    let state = backend.get_state();
+    if state.status != DebugStatus::Suspended {
         bail!("context requires a stopped target; wait for an event or breakpoint first");
     }
+    // A preceding switch-thread command can select a thread other than the
+    // session's original main thread. Snapshot the selected one.
+    let thread_id = state.current_thread_id.unwrap_or(thread_id);
     let regs = backend.fetch_registers(thread_id)?;
     let pc = regs.pc;
     let binary_path = args.binary.as_deref().or(session_binary);
