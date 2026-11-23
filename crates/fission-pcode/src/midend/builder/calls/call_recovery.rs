@@ -938,11 +938,21 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<Vec<usize>> {
         let op = block.ops.get(call_idx)?;
         let target = match op.opcode {
-            PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
-                op,
-                self.options,
-                self.type_context,
-            )?,
+            // A direct call to a function with no symbol (every internal
+            // callee of a stripped binary) resolves to no name here, but its
+            // body was still summarised: the facts layer keys that summary,
+            // and the call is printed, as `sub_<address>`. Without this the
+            // callee's proven arity never reached its callers, and a caller
+            // that hands its own argument register straight on (`f(x) {
+            // return g(x); }`) printed `g()` and lost the parameter.
+            PcodeOpcode::Call => {
+                super::super::resolve_lifted_direct_call_target(op, self.options, self.type_context)
+                    .or_else(|| {
+                        let address = branch_target_address(op.inputs.first()?)?;
+                        (!self.address_to_index.contains_key(&address))
+                            .then(|| format!("sub_{address:x}"))
+                    })?
+            }
             // Rust-Sleigh represents an IAT-backed Windows call as
             // `Copy unique <- ram:IAT_slot; CallInd unique`. The existing
             // target resolver already proves that shape and returns the
