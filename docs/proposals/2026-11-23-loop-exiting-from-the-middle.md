@@ -1,7 +1,7 @@
 # A loop that exits from the middle of its body is a loop
 
 Date: 2026-11-23. Status: **implemented and measured** -- see section 5.
-Filled from [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../templates/DECOMPILER_CHANGE_PROPOSAL.md).
+Filled from `docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`.
 
 ## 1. Baseline Row Anchor
 
