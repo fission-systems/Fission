@@ -59,8 +59,10 @@ pub enum DebugCommand {
     BpDisable(DebugBpArgs),
     /// List all breakpoints
     BpList(DebugBpListArgs),
-    /// Hardware breakpoints (not currently exposed by the native debugger)
+    /// Hardware breakpoint (Windows x64 native, selected thread only)
     HwBp(DebugHwBpArgs),
+    /// Remove an active hardware breakpoint
+    RmHwBp(DebugBpArgs),
     /// Memory breakpoints (not currently supported by the native debugger)
     MemBp(DebugMemBpArgs),
     /// Remove a memory breakpoint (not currently supported by the native debugger)
