@@ -52,7 +52,7 @@ impl Emulator {
     /// than failing the run, because an observer must never change what the
     /// guest does.
     fn varnode_value(&mut self, vn: &Varnode) -> u64 {
-        let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
+        let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
         evaluator.read_varnode_u64(vn).unwrap_or(0)
     }
 
@@ -187,7 +187,7 @@ impl Emulator {
             let taint_snapshot = self.snapshot_taint_op(op, control_mem);
 
             let (step, unimplemented) = {
-                let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
+                let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
                 let step = evaluator.step(op)?;
                 (step, evaluator.unimplemented)
             };
@@ -342,7 +342,7 @@ impl Emulator {
                         // data result is one, so this changed the predicate
                         // that controls the exclusive-store path.
                         let result = crate::jit::callbacks::jit_callother_result(self as *mut _);
-                        let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
+                        let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
                         evaluator.write_varnode_u64(&out, result)?;
                     }
                     if self.halt_requested {
