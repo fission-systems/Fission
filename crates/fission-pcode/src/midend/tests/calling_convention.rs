@@ -214,14 +214,22 @@ fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
 
     let overwritten_slot = render_with_leaf_effect(Some(vec![0]));
     assert!(
-        overwritten_slot.contains("target_fn()"),
-        "a callee write to slot 0 must keep the argument tuple conservative: {overwritten_slot}"
+        !overwritten_slot.contains("target_fn(xVar0"),
+        "a callee write to slot 0 must not pass the caller's stale value: {overwritten_slot}"
+    );
+    assert!(
+        overwritten_slot.contains("target_fn(__fission_unrecovered_arg(), 5, 7)"),
+        "the overwritten slot is visibly unrecovered; the proven-untouched slots stay: {overwritten_slot}"
     );
 
     let unknown_effect = render_with_leaf_effect(None);
     assert!(
-        unknown_effect.contains("target_fn()"),
-        "an unknown effect must not preserve caller-saved slots: {unknown_effect}"
+        !unknown_effect.contains("target_fn(xVar0") && !unknown_effect.contains("5, 7)"),
+        "an unknown effect must not preserve caller-saved slots staged before the call: {unknown_effect}"
+    );
+    assert!(
+        unknown_effect.contains("target_fn(__fission_unrecovered_arg(), 5)"),
+        "only the slot staged after the call survives an unknown effect: {unknown_effect}"
     );
 }
 
