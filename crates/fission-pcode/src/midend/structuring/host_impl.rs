@@ -160,6 +160,9 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
         self.structuring_total_work_units.clone()
     }
+    fn resource_usage(&self) -> std::rc::Rc<fission_midend_core::ir::ResourceUsage> {
+        self.resource_usage.clone()
+    }
     fn reset_structuring_total_work_counter(&mut self) {
         self.structuring_total_work_units.set(0);
     }

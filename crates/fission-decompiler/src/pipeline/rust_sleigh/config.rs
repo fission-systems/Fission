@@ -1,4 +1,5 @@
 use crate::engine::NirEngineMode;
+use fission_midend_core::ir::ResourceLimits;
 
 #[derive(Debug, Clone)]
 pub struct RustSleighDecompileConfig {
@@ -16,6 +17,9 @@ pub struct RustSleighDecompileConfig {
     pub nir_timeout_ms: Option<u64>,
     pub pe_x64_only: bool,
     pub conservative_irreducible_fallback: bool,
+    /// Deterministic work limits for the render pipeline; copied into the
+    /// render options, so they travel with the call.
+    pub resource_limits: ResourceLimits,
 }
 
 impl RustSleighDecompileConfig {
@@ -39,6 +43,7 @@ impl RustSleighDecompileConfig {
             nir_timeout_ms: None,
             pe_x64_only: false,
             conservative_irreducible_fallback: true,
+            resource_limits: ResourceLimits::DEFAULT,
         }
     }
 }

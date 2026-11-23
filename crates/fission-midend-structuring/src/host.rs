@@ -82,6 +82,8 @@ pub trait StructuringHost {
     /// `try_lower_if`/`try_lower_while` attempts a single function's
     /// structuring makes. Reset alongside `reset_sese_region_proof_budget`.
     fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>>;
+    /// Observed use of the work limits (telemetry; never read to decide).
+    fn resource_usage(&self) -> std::rc::Rc<fission_midend_core::ir::ResourceUsage>;
     fn reset_structuring_total_work_counter(&mut self);
 
     // ── Address / block identity ───────────────────────────────────────────

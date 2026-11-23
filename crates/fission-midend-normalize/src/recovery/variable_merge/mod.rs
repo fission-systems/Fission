@@ -215,6 +215,17 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
         .iter()
         .map(|binding| [binding.name.clone()].into_iter().collect::<HashSet<_>>())
         .collect::<Vec<_>>();
+    // Binding names never change inside the pair loop (only `ty` / `origin`
+    // do), so name-derived predicates are computed once per local.
+    let name_facts = current_locals
+        .iter()
+        .map(|binding| LocalNameFacts {
+            eligible: is_eligible_for_speculative_merge(binding),
+            hardware_register: is_hardware_register_variable(&binding.name),
+            sp_or_bp: is_sp_or_bp_name(&binding.name),
+            priority: name_priority(&binding.name),
+        })
+        .collect::<Vec<_>>();
 
     for i in 0..current_locals.len() {
         if disjoint_merged[i] {
@@ -233,7 +244,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             continue;
         }
 
-        if !is_eligible_for_speculative_merge(&current_locals[i]) {
+        if !name_facts[i].eligible {
             continue;
         }
         let span1 = get_stack_span_from_parts(current_locals[i].origin, &b1_ty);
@@ -242,19 +253,19 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             if disjoint_merged[j] {
                 continue;
             }
-            if !is_eligible_for_speculative_merge(&current_locals[j]) {
+            if !name_facts[j].eligible {
                 continue;
             }
-            let b2_name = current_locals[j].name.clone();
-            let b2_ty = current_locals[j].ty.clone();
+            let b2_name = &current_locals[j].name;
+            let b2_ty = &current_locals[j].ty;
             let b2_init = current_locals[j].initializer.is_some();
-            if param_names.contains(&b2_name) || b2_init {
+            if param_names.contains(b2_name) || b2_init {
                 continue;
             }
-            if copy_merge_barriers.contains(&b2_name) {
+            if copy_merge_barriers.contains(b2_name) {
                 continue;
             }
-            let Some(&(start2, end2)) = live_ranges.ranges.get(&b2_name) else {
+            let Some(&(start2, end2)) = live_ranges.ranges.get(b2_name) else {
                 continue;
             };
             let Some(&(start1, end1)) = live_ranges.ranges.get(&b1_name) else {
@@ -265,10 +276,8 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             // synthetic temporary. Architectural register bindings are never
             // candidates here; their identity may only be shared by an
             // explicit materialize/def-use join proof.
-            let is_temp1 =
-                current_locals[i].is_temp_like() || name_priority(&current_locals[i].name) <= 1;
-            let is_temp2 =
-                current_locals[j].is_temp_like() || name_priority(&current_locals[j].name) <= 1;
+            let is_temp1 = current_locals[i].is_temp_like() || name_facts[i].priority <= 1;
+            let is_temp2 = current_locals[j].is_temp_like() || name_facts[j].priority <= 1;
             if !is_temp1 && !is_temp2 {
                 continue;
             }
@@ -288,7 +297,7 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
                 continue;
             }
 
-            let span2 = get_stack_span_from_parts(current_locals[j].origin, &b2_ty);
+            let span2 = get_stack_span_from_parts(current_locals[j].origin, b2_ty);
             if let (Some((off1, _, _)), Some((off2, _, _))) = (span1, span2) {
                 if off1 != off2 {
                     continue;
@@ -307,10 +316,10 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
             // Distinct architectural GPRs are storage identities, not free
             // temps. Coalescing ecx→eax via imprecise live ranges collapses
             // multi-register sequences into `eax + eax`.
-            if is_hardware_register_variable(&b1_name)
-                && is_hardware_register_variable(&b2_name)
-                && !is_sp_or_bp_name(&b1_name)
-                && !is_sp_or_bp_name(&b2_name)
+            if name_facts[i].hardware_register
+                && name_facts[j].hardware_register
+                && !name_facts[i].sp_or_bp
+                && !name_facts[j].sp_or_bp
             {
                 continue;
             }
@@ -320,9 +329,9 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
                 continue;
             }
 
-            if let Some(unified_ty) = unify_types_for_merge(&b1_ty, &b2_ty) {
-                let p1 = name_priority(&b1_name);
-                let p2 = name_priority(&b2_name);
+            if let Some(unified_ty) = unify_types_for_merge(&b1_ty, b2_ty) {
+                let p1 = name_facts[i].priority;
+                let p2 = name_facts[j].priority;
 
                 let is_stack1 = current_locals[i]
                     .origin
@@ -402,6 +411,13 @@ pub fn apply_variable_merge_pass(func: &mut PreHirFunction) -> bool {
     }
 
     changed
+}
+
+struct LocalNameFacts {
+    eligible: bool,
+    hardware_register: bool,
+    sp_or_bp: bool,
+    priority: usize,
 }
 
 #[derive(Clone, Debug)]
