@@ -4,15 +4,32 @@ mod decomp;
 mod inventory;
 mod legacy;
 mod oneshot;
+mod work_limit;
 
 pub use decomp::DecompArgs;
 pub use inventory::{InventoryArgs, InventoryCommand};
 pub use legacy::{LegacyCliArgs, LegacyInvocationKind, ParsedOneShotArgs, normalize_legacy};
 pub use oneshot::OneShotArgs;
+pub use work_limit::{WorkLimitFlag, overrides_with_flags};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
+
+/// `ADDR:SIZE`: a hex address and a decimal byte count.
+pub fn parse_memory_range(s: &str) -> Result<(u64, usize), String> {
+    let (address, size) = s
+        .split_once(':')
+        .ok_or_else(|| format!("expected ADDR:SIZE, got `{s}`"))?;
+    let address = parse_hex_address(address)?;
+    let size: usize = size
+        .parse()
+        .map_err(|_| format!("size `{size}` is not a number"))?;
+    if size == 0 || size > 1 << 20 {
+        return Err(format!("size must be 1..=1048576 bytes, got {size}"));
+    }
+    Ok((address, size))
+}
 
 /// Parse hexadecimal address string (supports 0x prefix)
 pub fn parse_hex_address(s: &str) -> Result<u64, String> {
@@ -444,12 +461,20 @@ pub struct SandboxArgs {
     #[arg(value_name = "BINARY")]
     pub binary: Option<PathBuf>,
 
-    /// Take a snapshot when execution reaches this address
+    /// Take a snapshot when execution reaches this address (the start of a
+    /// translated block); write it with `--snapshot-out`
     #[arg(long, value_parser = parse_hex_address)]
     pub snapshot_at: Option<u64>,
 
-    /// Restore snapshot from this directory before executing
-    #[arg(long)]
+    /// Write the `--snapshot-at` snapshot to this file, for `--restore-snapshot`
+    ///
+    /// Fails if the run never reached the address, rather than leaving no
+    /// file and no word about it.
+    #[arg(long, value_name = "FILE", requires = "snapshot_at")]
+    pub snapshot_out: Option<PathBuf>,
+
+    /// Restore a snapshot file (written by `--snapshot-out`) before executing
+    #[arg(long, value_name = "FILE")]
     pub restore_snapshot: Option<PathBuf>,
 
     /// Maximum number of instructions to execute (for infinite loop prevention)
@@ -460,7 +485,11 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub stdin_mock: Option<String>,
 
-    /// Dump execution trace to the specified JSON file
+    /// Write the emulator's event trace as JSON lines to this file
+    ///
+    /// The trace records decode errors and high-level-emulation dispatches,
+    /// not every executed instruction; use `--coverage` for which code ran
+    /// and `--ttd-record`/`--ttd-seek` for the machine at a given step.
     #[arg(long)]
     pub dump_trace: Option<PathBuf>,
 
@@ -469,12 +498,68 @@ pub struct SandboxArgs {
     pub ttd_record: Option<u64>,
 
     /// Seek to a specific instruction step (via TTD) after execution halts
+    ///
+    /// Needs `--ttd-record`. The machine at that step -- registers, and any
+    /// `--ttd-read` ranges -- is reported under `ttd_state` with `--json`.
     #[arg(long)]
     pub ttd_seek: Option<u64>,
 
+    /// Memory to report after `--ttd-seek`, as `ADDR:SIZE` (hex address,
+    /// decimal size); repeatable
+    #[arg(long, value_name = "ADDR:SIZE", value_parser = parse_memory_range, requires = "ttd_seek")]
+    pub ttd_read: Vec<(u64, usize)>,
+
     /// Enable concolic/symbolic path exploration on TTD (fork on CBranch)
+    ///
+    /// Standard input is the symbolic input. With `--json` the report's
+    /// `symbolic` section lists each finished and found path with the input
+    /// bytes that drive execution down it.
     #[arg(long)]
     pub sym_explore: bool,
+
+    /// Exploration target: a path reaching this address is `found` and stops there
+    #[arg(long, value_name = "ADDR", value_parser = parse_hex_address, requires = "sym_explore")]
+    pub find: Option<u64>,
+
+    /// Exploration dead end: a path reaching this address is dropped; repeatable
+    #[arg(long, value_name = "ADDR", value_parser = parse_hex_address, requires = "find")]
+    pub avoid: Vec<u64>,
+
+    /// Exploration bound: how many rounds of stepping every live path
+    #[arg(long, value_name = "N", default_value_t = 64, requires = "sym_explore")]
+    pub sym_max_steps: u64,
+
+    /// Run on the p-code interpreter instead of the JIT
+    ///
+    /// Slower, but covers every opcode and every host; use it to cross-check
+    /// a result that looks wrong. Same as `FISSION_EMU_INTERP=1`.
+    #[arg(long)]
+    pub interp: bool,
+
+    /// Stop the run after this many milliseconds of wall-clock time
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+
+    /// Linux ELF: map the guest's own dynamic loader (`PT_INTERP`) from the
+    /// host and let it bind imports, instead of emulating them
+    ///
+    /// Same as `FISSION_ENABLE_DYNLINK=1`. Needs the loader on this host, at
+    /// the guest's path or at `--ld-so`.
+    #[arg(long)]
+    pub dynlink: bool,
+
+    /// Host path of the dynamic loader for `--dynlink` (`FISSION_LD_SO`)
+    #[arg(long, value_name = "PATH", requires = "dynlink")]
+    pub ld_so: Option<PathBuf>,
+
+    /// Directory searched first for the guest's `DT_NEEDED` libraries;
+    /// repeatable (`FISSION_LIB_PATH`)
+    #[arg(long, value_name = "DIR")]
+    pub lib_path: Vec<PathBuf>,
+
+    /// Bind PLT slots on first call instead of at load (`FISSION_LAZY_BIND=1`)
+    #[arg(long)]
+    pub lazy_bind: bool,
 
     /// Track where untrusted input flows
     ///
@@ -1398,6 +1483,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;
+                    args.work_limits = decomp.work_limit;
                     args.json = decomp.json;
                     args.output = decomp.output;
                     args.verbose = decomp.verbose;
@@ -1612,6 +1698,55 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
+        }
+    }
+
+    #[test]
+    fn decomp_work_limit_flags_reach_the_normalized_args_in_order() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x401000",
+            "--work-limit",
+            "structuring_total_work=10",
+            "--work-limit",
+            "sese_region_proof_calls=5",
+        ]);
+        let overrides = overrides_with_flags(
+            fission_core::WorkLimitOverrides::default(),
+            &parsed.args.work_limits,
+        );
+        assert_eq!(parsed.args.work_limits.len(), 2);
+        assert_eq!(overrides.structuring_total_work, Some(10));
+        assert_eq!(overrides.sese_region_proof_calls, Some(5));
+    }
+
+    #[test]
+    fn decomp_without_work_limit_flags_carries_none() {
+        let parsed = parse_canonical(&["fission_cli", "decomp", "bin.exe", "--addr", "0x401000"]);
+        assert!(parsed.args.work_limits.is_empty());
+    }
+
+    #[test]
+    fn a_malformed_work_limit_is_rejected_at_parse_time() {
+        for bad in [
+            "structuring_total_work",
+            "nope=3",
+            "structuring_total_work=-4",
+        ] {
+            let err = CliArgs::try_parse_from([
+                "fission_cli",
+                "decomp",
+                "bin.exe",
+                "--addr",
+                "0x401000",
+                "--work-limit",
+                bad,
+            ])
+            .expect_err(bad);
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{bad}");
         }
     }
 

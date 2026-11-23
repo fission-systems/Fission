@@ -35,7 +35,7 @@
 ## Validation
 
 - [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity` (CI's exact line)
+- [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity` (CI's exact line)
 - [ ] `cargo nextest run -p <crates touched>`
 - [ ] Each new test fails with the fix disabled (positive control)
 - [ ] Correctness evidence, if this fixes wrong output (see below)

@@ -31,6 +31,7 @@ pub(crate) use instruction_loops::InstructionLoop;
 pub(in crate::midend::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
 pub(in crate::midend::builder) use self::loop_carried::LoopCarriedDefinitionProof;
+pub(in crate::midend::builder) use self::no_consumer::SpaceOpIndex;
 use self::scans::DefinitionReachesReturnProof;
 
 struct SameBlockRegisterJoinProof {

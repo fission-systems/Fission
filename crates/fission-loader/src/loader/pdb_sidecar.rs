@@ -927,18 +927,14 @@ mod tests {
         assert!(pdb_identity_matches(Some(&image), GUID, 4));
     }
 
+    /// Uses the committed `testdata/x64_pdb_struct_test.exe` and its `.pdb`.
+    /// It read a third-party sample from a `samples/` tree no checkout has,
+    /// and returned without loading anything.
     #[test]
     fn loads_focused_pdb_function_facts_from_repo_sample() {
         let sample = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../samples/other/binaries-master/tests/x86_64/windows/fauxware.exe");
-        if !sample.exists() {
-            eprintln!(
-                "skipping PDB sidecar sample test; missing {}",
-                sample.display()
-            );
-            return;
-        }
-        let binary = LoadedBinary::from_file(&sample).expect("load fauxware sample");
+            .join("testdata/x64_pdb_struct_test.exe");
+        let binary = LoadedBinary::from_file(&sample).expect("load the committed PDB fixture");
 
         assert!(
             binary.inner().pdb_debug_info.is_some(),

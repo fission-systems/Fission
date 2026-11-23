@@ -1,0 +1,373 @@
+{
+ "measurement_base": "100878b1593890e578525d372738b5e14778b50d",
+ "machine": {
+  "cpu": "Apple M4 Pro",
+  "logical_cpus": 14,
+  "memory_bytes": 25769803776,
+  "os": "macOS 26.5.1",
+  "rustc": "1.97.0",
+  "profile": "quick-release",
+  "load_average_during_runs": "40-56 (shared machine)"
+ },
+ "binaries_sha256": {
+  "baseline_cli": "ac0a2f4107e4c6846cd6589450b89b4f38429c7cdc32b195b32029296cf48735",
+  "final_cli": "8438a1affe69939efbcc15db94e718b652454a98aff46f7337e3c20ee0c325c6"
+ },
+ "inputs": "DecBench eval-kit sample-set stripped binaries (decbench-full/kit-official/decbench-evalkit-sample-set/binaries); never executed",
+ "timing_keys_excluded": [
+  "*_duration_ms",
+  "*_sec",
+  "total_time_ms",
+  "resource_*_peak",
+  "resource_*_trip_count"
+ ],
+ "instructions_retired": [
+  {
+   "input": "bin_074_top4",
+   "functions": 4,
+   "baseline": 98285904193,
+   "final": 76080092887,
+   "change_pct": -22.6,
+   "output_identical": true
+  },
+  {
+   "input": "bin_074_all",
+   "functions": 383,
+   "baseline": 224848768666,
+   "final": 194032726106,
+   "change_pct": -13.7,
+   "output_identical": true
+  },
+  {
+   "input": "bin_164",
+   "functions": 17,
+   "baseline": 3971838517,
+   "final": 3465257713,
+   "change_pct": -12.8,
+   "output_identical": true
+  },
+  {
+   "input": "bin_172",
+   "functions": 125,
+   "baseline": 20500281886,
+   "final": 19784747706,
+   "change_pct": -3.5,
+   "output_identical": true
+  },
+  {
+   "input": "bin_121",
+   "functions": 133,
+   "baseline": 182701501980,
+   "final": 159881541313,
+   "change_pct": -12.5,
+   "output_identical": true
+  },
+  {
+   "input": "bin_193",
+   "functions": 250,
+   "baseline": 193742299801,
+   "final": 175489268101,
+   "change_pct": -9.4,
+   "output_identical": true
+  }
+ ],
+ "corpus_distribution": {
+  "binaries": 45,
+  "functions": 7565,
+  "functions_with_stats": 7524,
+  "fell_back": 41,
+  "sampling": "binaries stratified by size (every 5th of 202); per binary the 25 largest functions plus an even stride, at most 300 functions",
+  "limits": {
+   "structuring_total_work": {
+    "limit": 200000,
+    "max_peak": 204435,
+    "p50": 40,
+    "p90": 728,
+    "p99": 142581,
+    "at_least_50pct": 90,
+    "at_least_90pct": 66,
+    "functions_tripped": 62
+   },
+   "condition_recovery_subcalls": {
+    "limit": 512,
+    "max_peak": 513,
+    "p50": 7,
+    "p90": 64,
+    "p99": 513,
+    "at_least_50pct": 318,
+    "at_least_90pct": 246,
+    "functions_tripped": 238
+   },
+   "sese_region_proof_calls": {
+    "limit": 20000,
+    "max_peak": 20022,
+    "p50": 10,
+    "p90": 63,
+    "p99": 771,
+    "at_least_50pct": 2,
+    "at_least_90pct": 1,
+    "functions_tripped": 1
+   },
+   "varnode_lowering_work": {
+    "limit": 20000,
+    "max_peak": 20340,
+    "p50": 16,
+    "p90": 117,
+    "p99": 908,
+    "at_least_50pct": 4,
+    "at_least_90pct": 4,
+    "functions_tripped": 4
+   }
+  },
+  "functions_tripped_any": 243,
+  "binaries_with_a_trip": 31,
+  "trip_rate_by_ops": [
+   {
+    "ops_from": 0,
+    "ops_to": 100,
+    "functions": 3304,
+    "tripped": 0
+   },
+   {
+    "ops_from": 100,
+    "ops_to": 300,
+    "functions": 2426,
+    "tripped": 0
+   },
+   {
+    "ops_from": 300,
+    "ops_to": 1000,
+    "functions": 1352,
+    "tripped": 39
+   },
+   {
+    "ops_from": 1000,
+    "ops_to": 3000,
+    "functions": 345,
+    "tripped": 134
+   },
+   {
+    "ops_from": 3000,
+    "ops_to": null,
+    "functions": 97,
+    "tripped": 70
+   }
+  ],
+  "tripped_combinations": [
+   {
+    "limits": [
+     "condition_recovery_subcalls"
+    ],
+    "functions": 176
+   },
+   {
+    "limits": [
+     "structuring_total_work",
+     "condition_recovery_subcalls"
+    ],
+    "functions": 62
+   },
+   {
+    "limits": [
+     "varnode_lowering_work"
+    ],
+    "functions": 4
+   },
+   {
+    "limits": [
+     "sese_region_proof_calls"
+    ],
+    "functions": 1
+   }
+  ]
+ },
+ "raised_limits_experiment": {
+  "raised_to": {
+   "condition_recovery_subcalls": 4096,
+   "structuring_total_work": 2000000,
+   "sese_region_proof_calls": 200000,
+   "varnode_lowering_work": 200000
+  },
+  "functions": 243,
+  "output_identical": 167,
+  "output_changed": 76,
+  "by_default_tripped_limits": [
+   {
+    "limits": [
+     "condition_recovery_subcalls"
+    ],
+    "output_identical": true,
+    "functions": 158
+   },
+   {
+    "limits": [
+     "structuring_total_work",
+     "condition_recovery_subcalls"
+    ],
+    "output_identical": false,
+    "functions": 53
+   },
+   {
+    "limits": [
+     "condition_recovery_subcalls"
+    ],
+    "output_identical": false,
+    "functions": 18
+   },
+   {
+    "limits": [
+     "structuring_total_work",
+     "condition_recovery_subcalls"
+    ],
+    "output_identical": true,
+    "functions": 9
+   },
+   {
+    "limits": [
+     "varnode_lowering_work"
+    ],
+    "output_identical": false,
+    "functions": 4
+   },
+   {
+    "limits": [
+     "sese_region_proof_calls"
+    ],
+    "output_identical": false,
+    "functions": 1
+   }
+  ],
+  "functions_still_tripping_when_raised": {
+   "structuring_total_work": 36,
+   "condition_recovery_subcalls": 111,
+   "sese_region_proof_calls": 0,
+   "varnode_lowering_work": 3
+  },
+  "instructions_default": 3697049128909,
+  "instructions_raised": 3974152938184,
+  "changed_lines_delta": {
+   "min": -273,
+   "max": 631
+  },
+  "changed_goto_delta": {
+   "min": -14,
+   "max": 163
+  }
+ },
+ "peak_vs_ops_loglog_fit": {
+  "note": "peak ~ ops^exponent over functions that did not trip (the 10x-limit run stands in for those the default limit cut off)",
+  "fits": {
+   "structuring_total_work": {
+    "functions": 5257,
+    "exponent": 1.42,
+    "r_squared": 0.66
+   },
+   "condition_recovery_subcalls": {
+    "functions": 5182,
+    "exponent": 0.96,
+    "r_squared": 0.56
+   },
+   "sese_region_proof_calls": {
+    "functions": 5286,
+    "exponent": 0.9,
+    "r_squared": 0.67
+   },
+   "varnode_lowering_work": {
+    "functions": 7151,
+    "exponent": 0.86,
+    "r_squared": 0.67
+   }
+  }
+ },
+ "decbench_sample_set_gate": {
+  "scored_rows": 233,
+  "functions_decompiled": 250,
+  "hir_ged_perfect": {
+   "baseline_code": 67,
+   "candidate_default_limits": 67,
+   "candidate_raised_limits": 67
+  },
+  "hir_ged_total_distance": {
+   "baseline_code": 7529.0,
+   "candidate_default_limits": 7529.0,
+   "candidate_raised_limits": 7505.0
+  },
+  "rows_differing_baseline_vs_candidate_default": 0,
+  "rows_differing_default_vs_raised": [
+   {
+    "anon": "bin_029.elf",
+    "addr": "0x38b0",
+    "fn": "readproc",
+    "src_nodes": 104,
+    "out_nodes": [
+     71,
+     77
+    ],
+    "ged": [
+     127.0,
+     103.0
+    ]
+   }
+  ],
+  "scored_rows_tripping_a_limit_at_default": 22,
+  "stored_floor": {
+   "ged_perfect": 68,
+   "types_perfect": 16,
+   "note": "the baseline code itself scores 67 / 15 in this environment, so the floor comparison fails identically for all three runs"
+  }
+ },
+ "reverified_base": "1f10b8c789b2db66a70277f8cbe884010968b7d8",
+ "reverified_instructions_retired": [
+  {
+   "input": "bin_074_top4",
+   "functions": 4,
+   "baseline": 81610630996,
+   "final": 66503555627,
+   "change_pct": -18.5,
+   "output_identical": true
+  },
+  {
+   "input": "bin_074_all",
+   "functions": 383,
+   "baseline": 202673584593,
+   "final": 182888180688,
+   "change_pct": -9.8,
+   "output_identical": true
+  },
+  {
+   "input": "bin_164",
+   "functions": 17,
+   "baseline": 3612673602,
+   "final": 3242955232,
+   "change_pct": -10.2,
+   "output_identical": true
+  },
+  {
+   "input": "bin_172",
+   "functions": 125,
+   "baseline": 19111481174,
+   "final": 18859170649,
+   "change_pct": -1.3,
+   "output_identical": true
+  },
+  {
+   "input": "bin_121",
+   "functions": 133,
+   "baseline": 162911760146,
+   "final": 142548392460,
+   "change_pct": -12.5,
+   "output_identical": true
+  },
+  {
+   "input": "bin_193",
+   "functions": 250,
+   "baseline": 175772562892,
+   "final": 159188562303,
+   "change_pct": -9.4,
+   "output_identical": true
+  }
+ ],
+ "binaries_sha256_reverified": {
+  "note": "baseline and final CLI built from separate worktrees; SHA256 differ"
+ }
+}

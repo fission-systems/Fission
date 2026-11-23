@@ -16,10 +16,11 @@ use fission_core::core::ghidra_no_return::{
 use fission_loader::loader::{LoadedBinary, RelocationEntry};
 use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
 use lru::LruCache;
+use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::noreturn::{DecodeSeeds, no_return_functions_with_seeds};
-use crate::analysis::xrefs::{XrefDatabase, XrefType};
+use crate::analysis::xrefs::{XrefType, visit_code_flow_xrefs};
 
 pub use decode_context::{decode_memory_context_for, function_max_bytes};
 
@@ -173,39 +174,40 @@ impl ControlFlowFacts {
         let mut noreturn_callsites = BTreeSet::new();
 
         if let Some(frontend) = frontend {
-            let xref_db = XrefDatabase::build_with_frontend(binary, frontend);
             let ghidra_format = binary_format_to_ghidra_format(&binary.format);
             let compiler_key = ghidra_no_return_compiler_key(binary);
             let no_return_idx = ghidra_no_return_index();
-            // Transitively-computed no-return functions (a local wrapper
-            // around a known no-return like `abort`, propagated to fixpoint)
-            // -- see `analysis::noreturn`. Checked alongside the by-name
-            // lookup below, not instead of it: that lookup already covers
-            // every case this set also covers (it seeds from the same
-            // index), but keeping both is a smaller, more obviously
-            // behavior-preserving change than replacing the existing check.
+            // Local wrappers come from the structural fixed point. Name lookup
+            // also handles indirect import slots that have no function entry.
             let computed_no_return = no_return_functions_with_seeds(binary, seeds);
-
-            for xref in xref_db.iter() {
-                match xref.xref_type {
-                    XrefType::Jump => {
-                        flow_edges.push((xref.from_addr, xref.to_addr));
-                    }
-                    XrefType::Call => {
-                        let by_name = ghidra_format.is_some_and(|fmt| {
-                            resolve_call_target_name(binary, xref.to_addr).is_some_and(
-                                |(symbol, library)| {
-                                    no_return_idx.is_no_return(fmt, compiler_key, library, &symbol)
-                                },
-                            )
-                        });
-                        if by_name || computed_no_return.contains(&xref.to_addr) {
-                            noreturn_callsites.insert(xref.from_addr);
-                        }
-                    }
-                    XrefType::Data | XrefType::DataRead | XrefType::DataWrite => {}
+            let mut no_return_by_target = FxHashMap::default();
+            visit_code_flow_xrefs(binary, frontend, |xref| match xref.xref_type {
+                XrefType::Jump => {
+                    flow_edges.push((xref.from_addr, xref.to_addr));
                 }
-            }
+                XrefType::Call => {
+                    let target = xref.to_addr;
+                    let no_return = no_return_by_target.entry(target).or_insert_with(|| {
+                        computed_no_return.contains(&target)
+                            || ghidra_format.is_some_and(|format| {
+                                resolve_call_target_name(binary, target).is_some_and(
+                                    |(symbol, library)| {
+                                        no_return_idx.is_no_return(
+                                            format,
+                                            compiler_key,
+                                            library,
+                                            &symbol,
+                                        )
+                                    },
+                                )
+                            })
+                    });
+                    if *no_return {
+                        noreturn_callsites.insert(xref.from_addr);
+                    }
+                }
+                XrefType::Data | XrefType::DataRead | XrefType::DataWrite => {}
+            });
         }
 
         flow_edges.sort_unstable();

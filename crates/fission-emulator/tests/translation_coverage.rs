@@ -392,10 +392,8 @@ fn language_of(path: &Path) -> String {
 #[test]
 #[ignore = "a measurement over the whole benchmark corpus, not an assertion"]
 fn how_much_of_the_benchmark_corpus_translates() {
-    let Some(root) = corpus_root() else {
-        eprintln!("skipping: DecBench corpus not present");
-        return;
-    };
+    // Opt-in: asked for by name, so an absent corpus is a failure.
+    let root = corpus_root().expect("DecBench corpus not present (set TRANSLATE_ROOT)");
 
     let mut files: Vec<PathBuf> = Vec::new();
     let mut stack = vec![root.clone()];

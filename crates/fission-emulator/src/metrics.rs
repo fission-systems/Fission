@@ -428,6 +428,71 @@ pub struct SandboxMetricsReport {
     pub exit_code: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guest_output: Option<GuestOutputReport>,
+    /// What a symbolic exploration (`--sym-explore`) found, when one ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub symbolic: Option<SymbolicExploreReport>,
+    /// The machine after a time-travel seek (`--ttd-seek`), when one ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ttd_state: Option<MachineStateReport>,
+}
+
+/// The outcome of a symbolic exploration: how far it went, how many states
+/// ended in each stash, and the states worth acting on -- each with the
+/// inputs that drive execution down its path.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SymbolicExploreReport {
+    pub steps: u64,
+    pub max_steps: u64,
+    /// State count per stash (`active`, `found`, `avoid`, `deadended`, `unsat`, ...).
+    pub stashes: BTreeMap<String, usize>,
+    /// States that reached a `--find` address.
+    pub found: Vec<ExploredStateReport>,
+    /// States whose path ended (exit, error or no further symbolic branch).
+    pub deadended: Vec<ExploredStateReport>,
+    /// States left out of `found`/`deadended` because of the report's cap.
+    pub omitted: usize,
+}
+
+/// One explored state.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExploredStateReport {
+    pub pc: u64,
+    /// Instructions executed when the state stopped.
+    pub step: u64,
+    /// Branch constraints on its path.
+    pub constraints: usize,
+    /// Values that drive execution down this path; `None` when the solver
+    /// found the path unsatisfiable or could not decide.
+    pub inputs: Option<Vec<SolvedInputReport>>,
+}
+
+/// One symbolic input and its solved value.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SolvedInputReport {
+    pub name: String,
+    pub value: u64,
+}
+
+/// Registers and requested memory of the machine at one execution step.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MachineStateReport {
+    pub step: u64,
+    pub pc: u64,
+    /// General-purpose registers, the stack pointer and the program counter.
+    pub registers: BTreeMap<String, u64>,
+    pub memory: Vec<MemoryReadReport>,
+}
+
+/// Bytes read from guest memory, or why they could not be.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryReadReport {
+    pub address: u64,
+    pub size: usize,
+    /// Lower-case hex, two digits per byte.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 impl SandboxMetricsReport {
@@ -494,7 +559,19 @@ impl SandboxMetricsReport {
             behavior: None,
             exit_code: None,
             guest_output: None,
+            symbolic: None,
+            ttd_state: None,
         }
+    }
+
+    pub fn with_symbolic(mut self, report: SymbolicExploreReport) -> Self {
+        self.symbolic = Some(report);
+        self
+    }
+
+    pub fn with_ttd_state(mut self, report: MachineStateReport) -> Self {
+        self.ttd_state = Some(report);
+        self
     }
 
     /// Records the guest's exit status. See the field doc comment on

@@ -1732,6 +1732,47 @@ impl Emulator {
         state
     }
 
+    /// The machine as a report: the debugger's register view (see
+    /// [`Self::debug_register_state`]) and the requested `(address, size)`
+    /// memory ranges, each read on its own so one unmapped range does not
+    /// hide the others.
+    pub fn machine_state_report(
+        &mut self,
+        reads: &[(u64, usize)],
+    ) -> crate::metrics::MachineStateReport {
+        let registers = self
+            .debug_register_state()
+            .iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect();
+        let ram = self.state.ram_space();
+        let memory = reads
+            .iter()
+            .map(
+                |&(address, size)| match self.state.read_space(ram, address, size) {
+                    Ok(bytes) => crate::metrics::MemoryReadReport {
+                        address,
+                        size,
+                        bytes: Some(bytes.iter().map(|b| format!("{b:02x}")).collect()),
+                        error: None,
+                    },
+                    Err(err) => crate::metrics::MemoryReadReport {
+                        address,
+                        size,
+                        bytes: None,
+                        error: Some(err.to_string()),
+                    },
+                },
+            )
+            .collect();
+        crate::metrics::MachineStateReport {
+            step: self.inst_count,
+            pc: self.pc,
+            registers,
+            memory,
+        }
+    }
+
     /// Write one register from a snapshot, whatever its width.
     ///
     /// `write_register_u64` refuses anything wider than eight bytes, which is
@@ -2478,6 +2519,10 @@ impl Emulator {
             if let Some(deadline) = self.deadline {
                 if std::time::Instant::now() >= deadline {
                     tracing::warn!("Execution deadline exceeded. Halting safely.");
+                    // `Interrupted` is also Ctrl+C; the report says which.
+                    if self.metrics.exit_reason.is_none() {
+                        self.metrics.exit_reason = Some("deadline".into());
+                    }
                     break RunOutcome::Interrupted;
                 }
             }

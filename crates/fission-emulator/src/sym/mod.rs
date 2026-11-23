@@ -2,7 +2,7 @@ pub mod exploration;
 pub mod manager;
 pub mod state;
 
-pub use manager::SimulationManager;
+pub use manager::{SimulationManager, SolvedInput};
 pub use state::{SimState, SimStateHistory};
 
 /// Alias for CLI compatibility — `SymbolicExecutor` is the public-facing name

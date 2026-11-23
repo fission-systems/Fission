@@ -1720,7 +1720,15 @@ impl<'a> PreviewBuilder<'a> {
             LoweredTerminator::Fallthrough(None) | LoweredTerminator::Return(None) => {}
             _ => return Ok(None),
         }
-        tail_body.push(PreHirStmt::Return(None));
+        // The tail-jump surface may already end in its own `return`.
+        let ends_in_return = |stmt: &PreHirStmt| match stmt {
+            PreHirStmt::Return(_) => true,
+            PreHirStmt::Block(body) => matches!(body.last(), Some(PreHirStmt::Return(_))),
+            _ => false,
+        };
+        if !tail_body.last().is_some_and(ends_in_return) {
+            tail_body.push(PreHirStmt::Return(None));
+        }
 
         let return_cond = if return_on_true {
             cond
