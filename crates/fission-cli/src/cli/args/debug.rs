@@ -136,6 +136,9 @@ pub struct DebugContextArgs {
     /// Capture at most this many bytes at the stack pointer (0 to disable)
     #[arg(long, default_value_t = 0)]
     pub stack: usize,
+    /// Walk at most 32 frame-pointer frames (heuristic, not DWARF/SEH unwinding)
+    #[arg(long, default_value_t = 0)]
+    pub frames: usize,
     /// Decompile the discovered on-disk function containing the current PC
     #[arg(long)]
     pub decomp: bool,
