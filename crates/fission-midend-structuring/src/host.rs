@@ -100,6 +100,15 @@ pub trait StructuringHost {
         &mut self,
         block_idx: usize,
     ) -> Result<LoweredTerminator, MlilPreviewError>;
+    /// What `lower_block_terminator` returns for `block_idx` when the block
+    /// is already lowered, so that asking again only reads a memo.
+    ///
+    /// `None` when it is not: lowering it now would mint names and record
+    /// bindings (see `lower_isolated`), so a caller that must not change the
+    /// host cannot learn the answer. Hosts without a memo answer `None`.
+    fn cached_block_terminator(&self, _block_idx: usize) -> Option<LoweredTerminator> {
+        None
+    }
     /// Run a speculative lowering against forked host state, committing only
     /// if it succeeds.
     ///

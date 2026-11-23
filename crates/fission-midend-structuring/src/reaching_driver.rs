@@ -816,6 +816,52 @@ fn materialize_virtual_gotos(
     host: &mut impl StructuringHost,
     graph: &mut CollapseGraph,
 ) -> Result<(), MlilPreviewError> {
+    let facts = collect_virtual_goto_facts(host, graph, |host, block| {
+        host.lower_block_terminator(block).map(Some)
+    })?
+    .unwrap_or_default();
+    if facts.is_empty() {
+        return Ok(());
+    }
+    apply_collected_virtual_goto_facts(host, graph, facts)
+}
+
+/// Whether the virtual-goto variants of DREAM would structure `host` exactly
+/// as their plain counterparts do.
+///
+/// The two differ only in [`materialize_virtual_gotos`], which runs first, on
+/// a graph built straight from the CFG. When every terminator it reads is
+/// already lowered and none of them is a virtual goto, that step only reads
+/// memos and returns without changing anything, so the rest of the run starts
+/// from the same host and the same graph as the plain variant's. `false` when
+/// that cannot be shown without lowering a terminator, which would change the
+/// host.
+pub fn virtual_gotos_absent_without_lowering(host: &mut impl StructuringHost) -> bool {
+    let successors: Vec<Vec<usize>> = host.successors().to_vec();
+    if successors.is_empty() {
+        // `describe_region` declines before materialising, for both variants.
+        return true;
+    }
+    let graph = CollapseGraph::from_cfg(&successors);
+    matches!(
+        collect_virtual_goto_facts(host, &graph, |host, block| {
+            Ok(host.cached_block_terminator(block))
+        }),
+        Ok(Some(facts)) if facts.is_empty()
+    )
+}
+
+/// The transfers [`materialize_virtual_gotos`] places on `graph`: blocks left
+/// with no successor whose terminator is a `goto` into this function.
+///
+/// `terminator` supplies a block's lowered terminator. When it answers
+/// `Ok(None)` for a block that needs one, the facts cannot be known and the
+/// result is `Ok(None)`.
+fn collect_virtual_goto_facts<H: StructuringHost>(
+    host: &mut H,
+    graph: &CollapseGraph,
+    mut terminator: impl FnMut(&mut H, usize) -> Result<Option<LoweredTerminator>, MlilPreviewError>,
+) -> Result<Option<Vec<VirtualGotoFact>>, MlilPreviewError> {
     let mut facts = Vec::new();
     for id in graph.live_nodes().collect::<Vec<_>>() {
         let Some(node) = graph.node(id) else { continue };
@@ -826,7 +872,10 @@ fn materialize_virtual_gotos(
         if !host.successors()[block].is_empty() {
             continue;
         }
-        let LoweredTerminator::Goto(target) = host.lower_block_terminator(block)? else {
+        let Some(lowered) = terminator(host, block)? else {
+            return Ok(None);
+        };
+        let LoweredTerminator::Goto(target) = lowered else {
             continue;
         };
         let Some(target_block) = host.find_block_index_by_address(target) else {
@@ -846,10 +895,14 @@ fn materialize_virtual_gotos(
             label,
         });
     }
-    if facts.is_empty() {
-        return Ok(());
-    }
+    Ok(Some(facts))
+}
 
+fn apply_collected_virtual_goto_facts(
+    host: &mut impl StructuringHost,
+    graph: &mut CollapseGraph,
+    facts: Vec<VirtualGotoFact>,
+) -> Result<(), MlilPreviewError> {
     // Collect every fact before lowering any body. A target may itself be a
     // virtual-goto source; marking it materialized while walking the first
     // edge would otherwise hide its own outgoing transfer.
