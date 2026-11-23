@@ -536,6 +536,12 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             Ok(())
         }
 
+        DebugCommand::RspProbe(args) => {
+            let report = super::debug_remote::probe(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
+        }
+
         DebugCommand::TraceDiff(args) => {
             let report = super::debug_trace::trace_diff(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
