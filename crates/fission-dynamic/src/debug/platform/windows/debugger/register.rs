@@ -235,14 +235,15 @@ impl WindowsDebugger {
     /// Set a hardware breakpoint (x86 debug register DR0-DR3).
     ///
     /// Only 4 slots are available.  `kind` maps to DR7 type/length bits.
-    // Kept internal until the shared debugger interface can expose hardware
-    // breakpoint lifecycle operations; the CLI currently rejects them.
-    #[allow(dead_code)]
-    fn set_hw_breakpoint(
+    /// Bound to the currently stopped thread; not process-wide.
+    pub(super) fn set_hw_breakpoint(
         &mut self,
         address: u64,
         kind: crate::debug::types::HwBreakpointKind,
     ) -> FissionResult<()> {
+        if self.hw_breakpoints.contains_key(&address) {
+            return Ok(());
+        }
         if self.hw_breakpoints.len() >= 4 {
             return Err(FissionError::debug(
                 "All 4 hardware breakpoint slots are in use",
@@ -302,12 +303,11 @@ impl WindowsDebugger {
     }
 
     /// Remove a hardware breakpoint previously set with [`set_hw_breakpoint`].
-    // See `set_hw_breakpoint`: this is not reachable through ExecutionBackend.
-    #[allow(dead_code)]
-    fn remove_hw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
-        let slot = self
+    /// Remove a previously configured slot on the original stopped thread.
+    pub(super) fn remove_hw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
+        let slot = *self
             .hw_breakpoints
-            .remove(&address)
+            .get(&address)
             .ok_or_else(|| FissionError::debug("Hardware breakpoint not found"))?;
 
         let tid = self
@@ -342,6 +342,7 @@ impl WindowsDebugger {
             let _ = CloseHandle(h_thread);
         }
 
+        self.hw_breakpoints.remove(&address);
         self.state.last_event = Some(format!("Hardware breakpoint removed at 0x{:016x}", address));
         Ok(())
     }
