@@ -47,6 +47,10 @@ pub enum DebugCommand {
     Skip,
     /// Set a software breakpoint at an address
     Bp(DebugBpArgs),
+    /// Session-only conditional software breakpoint
+    BpWhen(DebugBpWhenArgs),
+    /// Session-only breakpoint that records state and auto-resumes
+    Logpoint(DebugLogpointArgs),
     /// Remove a software breakpoint at an address
     RmBp(DebugBpArgs),
     /// Enable a breakpoint by address
@@ -260,6 +264,29 @@ pub enum HwBpKindArg {
     Execute,
     Write,
     ReadWrite,
+}
+
+/// Bounded equality predicate evaluated when the debugger reports a breakpoint hit.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugBpWhenArgs {
+    /// Breakpoint address (hex)
+    #[arg(value_parser = parse_hex_address)]
+    pub addr: u64,
+    /// A scalar register such as rax or x0
+    #[arg(long)]
+    pub register: String,
+    /// Expected value (hex)
+    #[arg(long, value_parser = parse_hex_address)]
+    pub equals: u64,
+}
+
+/// Unconditional logpoint with optional scalar register of interest.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugLogpointArgs {
+    #[arg(value_parser = parse_hex_address)]
+    pub addr: u64,
+    #[arg(long)]
+    pub register: Option<String>,
 }
 
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
