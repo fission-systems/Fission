@@ -12,7 +12,9 @@ use std::time::Duration;
 const MAX_PACKET: usize = 128 * 1024;
 
 fn checksum(payload: &[u8]) -> u8 {
-    payload.iter().fold(0u8, |sum, byte| sum.wrapping_add(*byte))
+    payload
+        .iter()
+        .fold(0u8, |sum, byte| sum.wrapping_add(*byte))
 }
 
 fn outgoing(payload: &[u8]) -> Vec<u8> {
@@ -27,7 +29,9 @@ fn decode_response(packet: &[u8]) -> Result<Vec<u8>> {
     if packet.first() != Some(&b'$') {
         bail!("RSP packet must begin with '$'");
     }
-    let hash = packet.iter().position(|b| *b == b'#')
+    let hash = packet
+        .iter()
+        .position(|b| *b == b'#')
         .context("RSP packet has no checksum")?;
     if hash + 3 != packet.len() {
         bail!("RSP packet has an incomplete checksum or trailing bytes");
@@ -87,9 +91,12 @@ fn send_packet(stream: &mut TcpStream, command: &str) -> Result<String> {
 }
 
 pub(super) fn probe(args: &DebugRspProbeArgs) -> Result<Value> {
-    let address = args.endpoint.to_socket_addrs()
+    let address = args
+        .endpoint
+        .to_socket_addrs()
         .with_context(|| format!("resolve RSP endpoint {}", args.endpoint))?
-        .next().context("no endpoint address resolved")?;
+        .next()
+        .context("no endpoint address resolved")?;
     let timeout = Duration::from_millis(args.timeout_ms);
     if !(100..=10000).contains(&args.timeout_ms) {
         bail!("--timeout-ms must be between 100 and 10000");
