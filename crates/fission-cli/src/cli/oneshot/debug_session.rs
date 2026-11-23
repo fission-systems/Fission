@@ -14,6 +14,7 @@
 
 use anyhow::{Context, Result, bail};
 use serde_json::{Value, json};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 
 use crate::cli::args::{DebugCommand, DebugSessionArgs, MemoryBpKindArg};
@@ -170,12 +171,87 @@ pub(super) fn event_json(event: &DebugEvent) -> Value {
     }
 }
 
-/// Drain whatever the backend has queued, so every command's result carries
-/// what happened during it.
-fn drain_events(backend: &mut dyn ExecutionBackend) -> Vec<Value> {
+#[derive(Clone, Debug)]
+struct BreakpointRule {
+    register: Option<String>,
+    equals: Option<u64>,
+    log_only: bool,
+}
+
+fn valid_register_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 32
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+fn predicate_matches(regs: &RegisterState, rule: &BreakpointRule) -> Result<bool> {
+    match (&rule.register, rule.equals) {
+        (Some(name), Some(expected)) => {
+            let value = regs.get(name).ok_or_else(|| {
+                anyhow::anyhow!("register {name} is unavailable or is not a scalar value")
+            })?;
+            Ok(value == expected)
+        }
+        (_, None) => Ok(true),
+        (None, Some(_)) => bail!("breakpoint rule requires a register"),
+    }
+}
+
+/// Consume events before ordinary session reporting can discard conditional
+/// breakpoint information. Unknown registers and failed resumes fail closed.
+fn drain_events(
+    backend: &mut dyn ExecutionBackend,
+    rules: &BTreeMap<u64, BreakpointRule>,
+) -> Vec<Value> {
     let mut out = Vec::new();
-    while let Ok(Some(event)) = backend.poll_event(0) {
-        out.push(event_json(&event));
+    let mut resumes = 0usize;
+    loop {
+        let event = match backend.poll_event(0) {
+            Ok(Some(event)) => event,
+            Ok(None) => break,
+            Err(err) => {
+                out.push(json!({"event": "poll_error", "reason": err.to_string()}));
+                break;
+            }
+        };
+        let mut observation = event_json(&event);
+        if let DebugEvent::BreakpointHit { address, thread_id } = &event
+            && let Some(rule) = rules.get(address)
+        {
+            match backend.fetch_registers(*thread_id) {
+                Ok(regs) => match predicate_matches(&regs, rule) {
+                    Ok(matched) => {
+                        observation["condition_met"] = json!(matched);
+                        observation["logpoint"] = json!(rule.log_only);
+                        if rule.log_only {
+                            observation["registers"] = registers_json(&regs);
+                        }
+                        if let Some(name) = &rule.register {
+                            observation["watched_register"] = json!(name);
+                            observation["watched_value"] = regs.get(name).map(|v| json!(format!("0x{v:x}"))).unwrap_or(Value::Null);
+                        }
+                        if rule.log_only || !matched {
+                            if resumes == 32 {
+                                observation["rule_error"] = json!("automatic resume budget exhausted (32)");
+                            } else {
+                                match backend.continue_execution() {
+                                    Ok(()) => {
+                                        resumes += 1;
+                                        observation["auto_resumed"] = json!(true);
+                                    }
+                                    Err(err) => {
+                                        observation["rule_error"] = json!(err.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(err) => observation["rule_error"] = json!(err.to_string()),
+                },
+                Err(err) => observation["rule_error"] = json!(format!("register read: {err}")),
+            }
+        }
+        out.push(observation);
     }
     out
 }
@@ -191,15 +267,53 @@ fn execute(
     command: DebugCommand,
     session_binary: Option<&str>,
     emulator: bool,
+    rules: &mut BTreeMap<u64, BreakpointRule>,
 ) -> Result<Value> {
     let value = match command {
         DebugCommand::Capabilities(_) => serde_json::to_value(backend.capabilities())?,
         DebugCommand::Bp(a) => {
             backend.set_sw_breakpoint(a.addr)?;
+            rules.remove(&a.addr);
             json!({ "action": "set_breakpoint", "address": format!("0x{:x}", a.addr) })
+        }
+        DebugCommand::BpWhen(a) => {
+            if !valid_register_name(&a.register) {
+                bail!("invalid scalar register name");
+            }
+            backend.set_sw_breakpoint(a.addr)?;
+            rules.insert(a.addr, BreakpointRule {
+                register: Some(a.register.clone()),
+                equals: Some(a.equals),
+                log_only: false,
+            });
+            json!({
+                "action": "set_conditional_breakpoint",
+                "address": format!("0x{:x}", a.addr),
+                "register": a.register,
+                "equals": format!("0x{:x}", a.equals),
+            })
+        }
+        DebugCommand::Logpoint(a) => {
+            if let Some(name) = &a.register
+                && !valid_register_name(name)
+            {
+                bail!("invalid scalar register name");
+            }
+            backend.set_sw_breakpoint(a.addr)?;
+            rules.insert(a.addr, BreakpointRule {
+                register: a.register.clone(),
+                equals: None,
+                log_only: true,
+            });
+            json!({
+                "action": "set_logpoint",
+                "address": format!("0x{:x}", a.addr),
+                "register": a.register,
+            })
         }
         DebugCommand::RmBp(a) => {
             backend.remove_sw_breakpoint(a.addr)?;
+            rules.remove(&a.addr);
             json!({ "action": "remove_breakpoint", "address": format!("0x{:x}", a.addr) })
         }
         DebugCommand::MemBp(a) => {
@@ -482,12 +596,12 @@ fn interactive_command(
     target: &Value,
     backend_name: &str,
     writer: &mut impl Write,
+    rules: &mut BTreeMap<u64, BreakpointRule>,
 ) -> Result<Option<InteractiveEndReason>> {
-    let outcome =
-        parse_command(command_line).and_then(|command| {
-            execute(backend, thread_id, command, target["path"].as_str(), backend_name == "emulator")
-        });
-    let events = drain_events(backend);
+    let outcome = parse_command(command_line).and_then(|command| {
+        execute(backend, thread_id, command, target["path"].as_str(), backend_name == "emulator", rules)
+    });
+    let events = drain_events(backend, rules);
     let state = session_state_json(backend, thread_id);
     let (status, result, error) = match outcome {
         Ok(result) => ("ok", result, Value::Null),
@@ -572,11 +686,12 @@ fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result
     let session_id = format!("{}-{pid}", std::process::id());
     let target = json!({ "path": args.path, "pid": pid });
     let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
+    let mut rules = BTreeMap::new();
 
     let stdout = std::io::stdout();
     let mut output = stdout.lock();
     let run_result = (|| -> Result<InteractiveEndReason> {
-        let events = drain_events(session.debugger.as_mut());
+        let events = drain_events(session.debugger.as_mut(), &rules);
         let started = json!({
             "schema_version": 1,
             "type": "session_started",
@@ -601,6 +716,7 @@ fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result
                 &target,
                 backend_name,
                 &mut output,
+                &mut rules,
             )? {
                 return Ok(reason);
             }
@@ -632,6 +748,7 @@ fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result
                 &target,
                 backend_name,
                 &mut output,
+                &mut rules,
             )? {
                 return Ok(reason);
             }
@@ -646,7 +763,7 @@ fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result
     if matches!(reason, InteractiveEndReason::InputEof) {
         // Check once for an exit that raced with stdin closing before deciding
         // whether there is a live process to detach.
-        end_events = drain_events(session.debugger.as_mut());
+        end_events = drain_events(session.debugger.as_mut(), &rules);
         if session.debugger.get_state().status == DebugStatus::Terminated {
             reason = InteractiveEndReason::TargetExited;
         }
@@ -696,15 +813,22 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
     let commands = collect_commands(&args)?;
     let (mut session, pid, thread_id) = start_session(&args, use_emulator)?;
     let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
+    let mut rules = BTreeMap::new();
 
     let mut results: Vec<Value> = Vec::new();
     let mut failed = false;
     for line in &commands {
-        let outcome = parse_command(line)
-            .and_then(|command| {
-                execute(session.debugger.as_mut(), thread_id, command, args.path.as_deref(), use_emulator)
-            });
-        let events = drain_events(session.debugger.as_mut());
+        let outcome = parse_command(line).and_then(|command| {
+            execute(
+                session.debugger.as_mut(),
+                thread_id,
+                command,
+                args.path.as_deref(),
+                use_emulator,
+                &mut rules,
+            )
+        });
+        let events = drain_events(session.debugger.as_mut(), &rules);
         let mut entry = match outcome {
             Ok(mut value) => {
                 if let Some(map) = value.as_object_mut() {
