@@ -1569,11 +1569,13 @@ mod debug;
 #[allow(unused_imports)]
 pub use debug::{
     DebugAllocArgs, DebugArgs, DebugAttachArgs, DebugBpArgs, DebugBpListArgs, DebugBpWhenArgs,
-    DebugCapabilitiesArgs, DebugCommand, DebugContextArgs, DebugDllBpArgs, DebugEventArgs, DebugExBpArgs,
-    DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs,
-    DebugLogpointArgs, DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
-    DebugRrRecordArgs, DebugRrReplayArgs, DebugRrStatusArgs, DebugRspProbeArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
-    DebugSwitchThreadArgs, DebugTraceDecompArgs, DebugTraceDiffArgs, DebugTraceInspectArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
+    DebugCapabilitiesArgs, DebugCommand, DebugContextArgs, DebugDllBpArgs, DebugEventArgs,
+    DebugExBpArgs, DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs,
+    DebugLogpointArgs, DebugMemBpArgs, DebugModuleArgs, DebugModulesArgs, DebugProtectArgs,
+    DebugReadArgs, DebugRrRecordArgs, DebugRrReplayArgs, DebugRrStatusArgs, DebugRspProbeArgs,
+    DebugSessionArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
+    DebugSwitchThreadArgs, DebugTraceDecompArgs, DebugTraceDiffArgs, DebugTraceInspectArgs,
+    DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 
 #[cfg(test)]
