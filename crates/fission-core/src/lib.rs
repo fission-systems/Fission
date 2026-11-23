@@ -45,6 +45,8 @@ pub mod utils {
     pub use crate::core::utils::*;
 }
 
+pub mod test_inputs;
+
 // Commonly used standalone utilities
 pub use crate::core::utils::{
     format_addr, normalize_named_type_identity, parse_address, sanitize_symbol_name,

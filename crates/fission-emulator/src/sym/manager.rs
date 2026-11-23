@@ -234,4 +234,113 @@ impl SimulationManager {
     pub fn explore(&mut self) -> Result<()> {
         self.step_all()
     }
+
+    /// Concrete values for the symbolic inputs `state`'s path depends on:
+    /// one assignment, from the solver's model, that drives execution down
+    /// the path its constraints record. `None` when the path is not
+    /// satisfiable (or the solver could not decide). Inputs are the
+    /// variables the constraints mention -- `stdin_<address>` for a byte
+    /// read from standard input -- in order of the address in the name, so
+    /// stdin bytes come out in the order the program read them.
+    pub fn solve_inputs(&mut self, state: &SimState) -> Option<Vec<SolvedInput>> {
+        let mut vars: std::collections::BTreeMap<fission_solver::SymNodeId, String> =
+            Default::default();
+        for constraint in &state.history.constraints {
+            constraint.visit_preorder(&mut |expr| {
+                if let SymExpr::Var { id, name, .. } = expr {
+                    vars.insert(*id, name.clone());
+                }
+            });
+        }
+        // Not `path_sat`: it reads a solver panic as "satisfiable" so that a
+        // fork is kept, and the model would then be the previous query's --
+        // another path's inputs reported as this one's. Only a model this
+        // query produced is an answer.
+        let solved = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.emu
+                .solver
+                .check_sat_with_oracle(Some(&state.machine_state), &state.history.constraints)
+        }));
+        if !matches!(solved, Ok(Ok(fission_solver::SatResult::Sat))) {
+            return None;
+        }
+        let mut inputs: Vec<SolvedInput> = vars
+            .into_iter()
+            .filter_map(|(id, name)| {
+                let value = self.emu.solver.get_value(id)?;
+                Some(SolvedInput { name, value })
+            })
+            .collect();
+        inputs.sort_by_key(|input| (input_order(&input.name), input.name.clone()));
+        Some(inputs)
+    }
+}
+
+impl SimulationManager {
+    /// What the exploration found, for a report: per-stash counts, and the
+    /// `found` and `deadended` states with the inputs that reach each one.
+    /// At most `cap` states are listed (found first); the rest are counted
+    /// in `omitted`.
+    pub fn report(&mut self, cap: usize) -> crate::metrics::SymbolicExploreReport {
+        let stashes = self
+            .stashes
+            .iter()
+            .map(|(name, states)| (name.clone(), states.len()))
+            .collect();
+        let mut listed = 0usize;
+        let mut omitted = 0usize;
+        let mut take = |manager: &mut Self, stash: &str| {
+            let states = manager.stashes.get(stash).cloned().unwrap_or_default();
+            let mut out = Vec::new();
+            for state in &states {
+                if listed >= cap {
+                    omitted += 1;
+                    continue;
+                }
+                listed += 1;
+                let inputs = manager.solve_inputs(state).map(|inputs| {
+                    inputs
+                        .into_iter()
+                        .map(|input| crate::metrics::SolvedInputReport {
+                            name: input.name,
+                            value: input.value,
+                        })
+                        .collect()
+                });
+                out.push(crate::metrics::ExploredStateReport {
+                    pc: state.pc,
+                    step: state.step_index,
+                    constraints: state.history.constraints.len(),
+                    inputs,
+                });
+            }
+            out
+        };
+        let found = take(self, "found");
+        let deadended = take(self, "deadended");
+        crate::metrics::SymbolicExploreReport {
+            steps: self.steps_taken,
+            max_steps: self.max_steps,
+            stashes,
+            found,
+            deadended,
+            omitted,
+        }
+    }
+}
+
+/// One symbolic input and the value a solved path gives it.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct SolvedInput {
+    pub name: String,
+    pub value: u64,
+}
+
+/// The number at the end of an input's name (`stdin_4198400` -> 4198400),
+/// so inputs sort by the address they were read into.
+fn input_order(name: &str) -> u64 {
+    name.rsplit('_')
+        .next()
+        .and_then(|tail| tail.parse().ok())
+        .unwrap_or(u64::MAX)
 }

@@ -6,6 +6,7 @@ use fission_sleigh::runtime::{DecodedFlowKind, PackedContextOverride, RuntimeSle
 use super::coverage_decode::{
     COVERAGE_WINDOW_BYTES, CoverageDecodes, CoverageFlow, CoverageInstruction,
 };
+use super::ranges::is_in_executable_ranges;
 use super::targets::{is_target_no_return, normalize_target, same_section};
 use super::thumb::{decode_context_for_address, image_decode_context};
 
@@ -40,17 +41,19 @@ impl InstructionCoverage {
         binary: &LoadedBinary,
         frontend: &RuntimeSleighFrontend,
         known_functions: &HashSet<u64>,
+        executable_ranges: &[(u64, u64)],
         coverage_decodes: &CoverageDecodes,
     ) -> Self {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| {
+            .flat_map_iter(|&addr| {
                 walk_function_boundaries(
                     binary,
                     frontend,
                     addr,
                     known_functions,
+                    executable_ranges,
                     Some(coverage_decodes),
                 )
             })
@@ -71,6 +74,7 @@ impl InstructionCoverage {
         binary: &LoadedBinary,
         frontend: &RuntimeSleighFrontend,
         addrs: &[u64],
+        executable_ranges: &[(u64, u64)],
     ) {
         if addrs.is_empty() {
             return;
@@ -80,7 +84,9 @@ impl InstructionCoverage {
         let known = &self.known_functions;
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known, None))
+            .flat_map_iter(|&addr| {
+                walk_function_boundaries(binary, frontend, addr, known, executable_ranges, None)
+            })
             .collect();
 
         let mut all_intervals = std::mem::take(&mut self.intervals);
@@ -130,6 +136,7 @@ pub(super) fn walk_function_boundaries(
     frontend: &RuntimeSleighFrontend,
     addr: u64,
     known_functions: &HashSet<u64>,
+    executable_ranges: &[(u64, u64)],
     coverage_decodes: Option<&CoverageDecodes>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
@@ -137,7 +144,6 @@ pub(super) fn walk_function_boundaries(
     // or a pattern said so.
     let mode_context = decode_context_for_address(binary, frontend, addr, None);
     {
-        let exec_ranges = super::ranges::executable_ranges(binary);
         let mut visited = HashSet::new();
         let mut worklist = vec![addr];
 
@@ -153,12 +159,13 @@ pub(super) fn walk_function_boundaries(
             }
 
             let mut ip = curr;
+            let mut covered_end = curr;
             let mut count = 0;
             while count < 4000 {
                 if !visited.insert(ip) {
                     break;
                 }
-                if !super::ranges::is_in_executable_ranges(ip, &exec_ranges) {
+                if !is_in_executable_ranges(ip, executable_ranges) {
                     break;
                 }
                 let Some(bytes) = binary.view_bytes(ip, COVERAGE_WINDOW_BYTES) else {
@@ -174,15 +181,26 @@ pub(super) fn walk_function_boundaries(
                 };
                 let instruction = reused.or_else(|| {
                     let decoded = frontend
-                        .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                        .decode_single_no_pcode(bytes, ip, mode_context)
                         .ok()?;
-                    CoverageInstruction::from_decoded(decoded.first()?)
+                    if decoded.length == 0 || decoded.length > bytes.len() {
+                        return None;
+                    }
+                    // The single decoder leaves pending commit validation to its caller.
+                    if !decoded.pending_context_commits.is_empty() {
+                        frontend
+                            .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                            .ok()?;
+                    }
+                    CoverageInstruction::from_decoded(&decoded)
                 });
                 let Some(instruction) = instruction else {
                     break;
                 };
-                let next_ip = ip + instruction.length;
-                boundaries.push((ip, next_ip));
+                let Some(next_ip) = ip.checked_add(instruction.length) else {
+                    break;
+                };
+                covered_end = next_ip;
                 count += 1;
 
                 match instruction.flow {
@@ -196,7 +214,7 @@ pub(super) fn walk_function_boundaries(
                         let target = normalize_target(binary, target);
                         let in_same_section =
                             binary.sections.is_empty() || same_section(binary, ip, target);
-                        if super::ranges::is_in_executable_ranges(target, &exec_ranges)
+                        if is_in_executable_ranges(target, executable_ranges)
                             && !known_functions.contains(&target)
                             && !binary.function_addr_index.contains_key(&target)
                             && in_same_section
@@ -207,6 +225,10 @@ pub(super) fn walk_function_boundaries(
                     CoverageFlow::Fallthrough => {}
                 }
                 ip = next_ip;
+            }
+            // Keep the union of the contiguous run, leaving branch gaps clear.
+            if covered_end > curr {
+                boundaries.push((curr, covered_end));
             }
         }
     }
@@ -333,7 +355,7 @@ pub(super) fn is_plausible_function_boundary(
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
                         let exec_ranges = super::ranges::executable_ranges(binary);
-                        if super::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                        if is_in_executable_ranges(target, &exec_ranges) {
                             return true;
                         }
                     }
@@ -352,7 +374,7 @@ pub(super) fn is_plausible_function_boundary(
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
                         let exec_ranges = super::ranges::executable_ranges(binary);
-                        if super::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                        if is_in_executable_ranges(target, &exec_ranges) {
                             return true;
                         }
                     }
