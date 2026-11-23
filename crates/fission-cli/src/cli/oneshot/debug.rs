@@ -530,6 +530,76 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             anyhow::bail!("hardware breakpoints require a persistent debug session; Windows x64 native backend only")
         }
 
+        DebugCommand::RrStatus(args) => {
+            let available = fission_dynamic::debug::rr::RRDebugger::is_available();
+            let traces = fission_dynamic::debug::rr::RRDebugger::list_traces()
+                .into_iter()
+                .map(|trace| serde_json::json!({
+                    "path": trace.path,
+                    "binary_name": trace.binary_name,
+                    "event_count": trace.event_count,
+                    "timestamp": trace.timestamp,
+                }))
+                .collect::<Vec<_>>();
+            let report = serde_json::json!({
+                "schema_version": 1,
+                "backend": "rr",
+                "available": available,
+                "traces": traces,
+            });
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            Ok(())
+        }
+
+        DebugCommand::RrRecord(args) => {
+            anyhow::ensure!(
+                fission_dynamic::debug::rr::RRDebugger::is_available(),
+                "rr is unavailable on this host; Linux and the rr executable are required"
+            );
+            let refs = args.args.iter().map(String::as_str).collect::<Vec<_>>();
+            let trace = fission_dynamic::debug::rr::RRDebugger::record(&args.binary, &refs)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let report = serde_json::json!({
+                "schema_version": 1,
+                "action": "rr_record",
+                "binary": args.binary,
+                "trace": trace,
+            });
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            Ok(())
+        }
+
+        DebugCommand::RrReplay(args) => {
+            anyhow::ensure!(
+                fission_dynamic::debug::rr::RRDebugger::is_available(),
+                "rr is unavailable on this host; Linux and the rr executable are required"
+            );
+            let mut rr = fission_dynamic::debug::rr::RRDebugger::new();
+            rr.replay(&args.trace_dir)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let report = serde_json::json!({
+                "schema_version": 1,
+                "action": "rr_replay",
+                "trace": args.trace_dir,
+                "state": format!("{:?}", rr.state()),
+                "architecture": format!("{:?}", rr.arch()),
+            });
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            Ok(())
+        }
+
         DebugCommand::Context(args) => {
             let (state, mut session) = attach_active()?;
             let tid = session.debugger.get_state().current_thread_id
