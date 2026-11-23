@@ -121,6 +121,8 @@ pub enum DebugCommand {
     TraceInspect(DebugTraceInspectArgs),
     /// Compare two JSONL execution traces, reporting the first difference
     TraceDiff(DebugTraceDiffArgs),
+    /// Read-only probe of a GDB RSP stub (QEMU/gdbserver)
+    RspProbe(DebugRspProbeArgs),
     /// Combine observed instruction hits with on-disk static pseudocode
     TraceDecomp(DebugTraceDecompArgs),
     /// Inspect rr availability and known Linux recordings
@@ -229,6 +231,20 @@ pub struct DebugTraceInspectArgs {
     pub trace: String,
     #[arg(long, default_value_t = 100000)]
     pub max_events: usize,
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Query a stopped QEMU/gdbserver RSP endpoint without executing instructions.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugRspProbeArgs {
+    /// Host:port, e.g. 127.0.0.1:1234
+    pub endpoint: String,
+    /// Read g packet register data as opaque hex (no unsupported architecture guesses)
+    #[arg(long)]
+    pub read_registers: bool,
+    #[arg(long, default_value_t = 2000)]
+    pub timeout_ms: u64,
     #[arg(long)]
     pub json: bool,
 }
