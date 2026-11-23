@@ -53,9 +53,9 @@ use collect_constraints::collect_constraints;
 use constraints::{UseConstraint, merge_constraint};
 use expression_types::collect_known_binding_types;
 use use_promotions::{
-    narrow_integer_params_from_wrapping_return_uses, promote_return_signedness_from_returns,
-    promote_store_value_only_aggregate_bindings, promote_store_value_only_unsigned_params,
-    promote_unknown_call_return_type,
+    narrow_integer_params_from_truncating_reads, narrow_integer_params_from_wrapping_return_uses,
+    promote_return_signedness_from_returns, promote_store_value_only_aggregate_bindings,
+    promote_store_value_only_unsigned_params, promote_unknown_call_return_type,
 };
 
 type TypeStateSignature = (NirType, Vec<(String, NirType)>, Vec<(String, NirType)>);
@@ -143,6 +143,7 @@ pub fn apply_use_driven_type_infer_pass(func: &mut PreHirFunction) -> bool {
         round_changed |= promote_unknown_call_return_type(func);
         round_changed |= promote_return_signedness_from_returns(func);
         round_changed |= narrow_integer_params_from_wrapping_return_uses(func);
+        round_changed |= narrow_integer_params_from_truncating_reads(func);
         round_changed |= promote_store_value_only_unsigned_params(func);
         round_changed |= promote_store_value_only_aggregate_bindings(func, &constraints, &roles);
         round_changed |= restore_scalar_only_pointer_locals(
