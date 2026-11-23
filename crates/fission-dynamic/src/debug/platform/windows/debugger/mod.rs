@@ -1074,6 +1074,7 @@ impl ExecutionBackend for WindowsDebugger {
                 DebugOperation::Terminate,
                 DebugOperation::SkipInstruction,
                 DebugOperation::SoftwareBreakpoints,
+                DebugOperation::HardwareBreakpoints,
                 DebugOperation::BreakpointEnableDisable,
                 DebugOperation::BreakpointList,
                 DebugOperation::RegisterRead,
@@ -1149,6 +1150,18 @@ impl ExecutionBackend for WindowsDebugger {
 
     fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
         WindowsDebugger::remove_sw_breakpoint(self, address)
+    }
+
+    fn set_hardware_breakpoint(
+        &mut self,
+        address: u64,
+        kind: crate::debug::types::HwBreakpointKind,
+    ) -> FissionResult<()> {
+        WindowsDebugger::set_hw_breakpoint(self, address, kind)
+    }
+
+    fn remove_hardware_breakpoint(&mut self, address: u64) -> FissionResult<()> {
+        WindowsDebugger::remove_hw_breakpoint(self, address)
     }
 
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
