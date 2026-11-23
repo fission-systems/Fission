@@ -682,3 +682,377 @@ pub(super) fn narrow_integer_params_from_wrapping_return_uses(func: &mut PreHirF
     }
     changed
 }
+
+/// How many low bits of a value its consumer can observe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Demand {
+    /// The value is never observed (a copy into a name nothing reads).
+    Zero,
+    /// Only the low `bits` are observed, as an integer of that signedness.
+    /// `home` records that this width is the width of a frame slot the value
+    /// is stored into -- the slot a compiler gives a variable of that type.
+    Low { bits: u32, signed: bool, home: bool },
+    /// Any bit may be observed.
+    All,
+}
+
+impl Demand {
+    fn join(self, other: Demand) -> Demand {
+        match (self, other) {
+            (Demand::Zero, d) | (d, Demand::Zero) => d,
+            (Demand::All, _) | (_, Demand::All) => Demand::All,
+            (
+                Demand::Low {
+                    bits: a_bits,
+                    signed: a_signed,
+                    home: a_home,
+                },
+                Demand::Low {
+                    bits: b_bits,
+                    signed: b_signed,
+                    home: b_home,
+                },
+            ) => {
+                if a_bits != b_bits {
+                    if a_bits > b_bits { self } else { other }
+                } else {
+                    Demand::Low {
+                        bits: a_bits,
+                        // Two equally wide views that disagree on signedness
+                        // say nothing about it; unsigned is the neutral reading.
+                        signed: a_signed && b_signed,
+                        home: a_home || b_home,
+                    }
+                }
+            }
+        }
+    }
+
+    /// The demand on a cast's operand, given the demand on the cast.
+    fn through_cast(self, ty: &NirType) -> Demand {
+        match (self, ty) {
+            (Demand::Zero, _) => Demand::Zero,
+            (
+                Demand::Low { bits, .. },
+                NirType::Int {
+                    bits: cast_bits, ..
+                },
+            ) if bits <= *cast_bits => self,
+            (_, NirType::Int { bits, signed }) => Demand::Low {
+                bits: *bits,
+                signed: *signed,
+                home: false,
+            },
+            _ => Demand::All,
+        }
+    }
+}
+
+/// Demanded low bits per name: a backward walk from every consumer.
+///
+/// A name assigned from an expression passes its own demand on to that
+/// expression, so the analysis follows values through copies and wrapping
+/// arithmetic into other names. Demands only grow, and are recomputed from
+/// the previous round's until nothing changes.
+struct DemandedBits {
+    /// The previous round's demand per name; absent means `Zero`.
+    previous: HashMap<String, Demand>,
+    current: HashMap<String, Demand>,
+    /// Integer frame-slot bindings, by name: storing into one writes exactly
+    /// the slot's width.
+    home_slots: HashMap<String, (u32, bool)>,
+    assigned: HashSet<String>,
+    visited_bodies: HashSet<*const Vec<PreHirStmt>>,
+}
+
+impl DemandedBits {
+    fn demand_of(&self, name: &str) -> Demand {
+        self.previous.get(name).copied().unwrap_or(Demand::Zero)
+    }
+
+    /// What an assignment into `name` demands of the assigned value: what the
+    /// name's own readers demand, and -- for a frame slot -- the slot's width.
+    fn assignment_demand(&self, name: &str) -> Demand {
+        let demand = self.demand_of(name);
+        match self.home_slots.get(name) {
+            Some(&(bits, signed)) => demand.join(Demand::Low {
+                bits,
+                signed,
+                home: true,
+            }),
+            None => demand,
+        }
+    }
+
+    fn record(&mut self, name: &str, demand: Demand) {
+        if demand == Demand::Zero {
+            return;
+        }
+        let joined = self
+            .current
+            .get(name)
+            .copied()
+            .unwrap_or(Demand::Zero)
+            .join(demand);
+        self.current.insert(name.to_owned(), joined);
+    }
+
+    fn expr(&mut self, expr: &PreHirExpr, demand: Demand) {
+        match expr {
+            PreHirExpr::Var(name) => self.record(name, demand),
+            PreHirExpr::AddressOfGlobal(name) | PreHirExpr::AddressOfLocal(name) => {
+                // The storage escapes; any width of it may be observed.
+                self.record(name, Demand::All);
+            }
+            PreHirExpr::Const(_, _) => {}
+            PreHirExpr::Cast { ty, expr } => self.expr(expr, demand.through_cast(ty)),
+            // The low bits of these depend only on the low bits of their operands.
+            PreHirExpr::Unary {
+                op: PreHirUnaryOp::Neg | PreHirUnaryOp::BitNot,
+                expr,
+                ..
+            } => self.expr(expr, demand),
+            PreHirExpr::Binary { op, lhs, rhs, .. } if wrapping_narrow_op(*op) => {
+                self.expr(lhs, demand);
+                self.expr(rhs, demand);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                self.expr(cond, Demand::All);
+                self.expr(then_expr, demand);
+                self.expr(else_expr, demand);
+            }
+            PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => self.expr(expr, Demand::All),
+            PreHirExpr::Binary { lhs, rhs, .. }
+            | PreHirExpr::Index {
+                base: lhs,
+                index: rhs,
+                ..
+            } => {
+                self.expr(lhs, Demand::All);
+                self.expr(rhs, Demand::All);
+            }
+            PreHirExpr::Call { args, .. } => {
+                for arg in args {
+                    self.expr(arg, Demand::All);
+                }
+            }
+        }
+    }
+
+    fn assign(&mut self, lhs: &PreHirLValue, rhs: &PreHirExpr) {
+        // A store writes exactly its access width: `*(uchar *)p = x` keeps
+        // the low byte of `x` and nothing else.
+        let demand = match lhs {
+            PreHirLValue::Var(name) => {
+                self.assigned.insert(name.clone());
+                self.assignment_demand(name)
+            }
+            PreHirLValue::Deref { ptr, ty } => {
+                self.expr(ptr, Demand::All);
+                Demand::All.through_cast(ty)
+            }
+            PreHirLValue::Index {
+                base,
+                index,
+                elem_ty,
+            } => {
+                self.expr(base, Demand::All);
+                self.expr(index, Demand::All);
+                Demand::All.through_cast(elem_ty)
+            }
+            PreHirLValue::FieldAccess { base, ty, .. } => {
+                self.expr(base, Demand::All);
+                Demand::All.through_cast(ty)
+            }
+        };
+        self.expr(rhs, demand);
+    }
+
+    fn body(&mut self, body: &std::rc::Rc<Vec<PreHirStmt>>) {
+        // PreHIR bodies are shared through `Rc`; one visit records every read.
+        if self.visited_bodies.insert(std::rc::Rc::as_ptr(body)) {
+            self.stmts(body);
+        }
+    }
+
+    fn stmts(&mut self, stmts: &[PreHirStmt]) {
+        for stmt in stmts {
+            self.stmt(stmt);
+        }
+    }
+
+    fn stmt(&mut self, stmt: &PreHirStmt) {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => self.assign(lhs, rhs),
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => self.expr(expr, Demand::All),
+            PreHirStmt::VaStart {
+                va_list,
+                last_named_param,
+            } => {
+                self.expr(va_list, Demand::All);
+                self.record(last_named_param, Demand::All);
+            }
+            PreHirStmt::Block(body) => self.body(body),
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                self.expr(cond, Demand::All);
+                self.body(body);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    self.stmt(init);
+                }
+                if let Some(cond) = cond {
+                    self.expr(cond, Demand::All);
+                }
+                if let Some(update) = update {
+                    self.stmt(update);
+                }
+                self.body(body);
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                self.expr(cond, Demand::All);
+                self.body(then_body);
+                self.body(else_body);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                self.expr(expr, Demand::All);
+                for case in cases {
+                    self.body(&case.body);
+                }
+                self.body(default);
+            }
+            PreHirStmt::Return(None)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+
+    /// Demanded bits of every name and the names assigned anywhere, or `None`
+    /// when the rounds do not settle.
+    fn solve(func: &PreHirFunction) -> Option<(HashMap<String, Demand>, HashSet<String>)> {
+        const MAX_ROUNDS: usize = 16;
+        let home_slots: HashMap<String, (u32, bool)> = func
+            .locals
+            .iter()
+            .filter(|binding| {
+                matches!(
+                    binding.origin,
+                    Some(NirBindingOrigin::StackOffset(_) | NirBindingOrigin::HomeSlot(_))
+                )
+            })
+            .filter_map(|binding| match binding.ty {
+                NirType::Int { bits, signed } => Some((binding.name.clone(), (bits, signed))),
+                _ => None,
+            })
+            .collect();
+        let mut previous = HashMap::default();
+        for _ in 0..MAX_ROUNDS {
+            let mut round = DemandedBits {
+                previous,
+                current: HashMap::default(),
+                home_slots: home_slots.clone(),
+                assigned: HashSet::default(),
+                visited_bodies: HashSet::default(),
+            };
+            round.stmts(&func.body);
+            for binding in func.locals.iter().chain(func.params.iter()) {
+                if let Some(init) = &binding.initializer {
+                    let demand = round.assignment_demand(&binding.name);
+                    round.expr(init, demand);
+                }
+            }
+            if round.current == round.previous {
+                return Some((round.current, round.assigned));
+            }
+            previous = round.current;
+        }
+        None
+    }
+}
+
+/// Narrow an integer formal to the width of the frame slot it is kept in.
+///
+/// A formal arrives in a register wider than its C type: a `char` argument
+/// occupies the low byte of a 32/64-bit register, and the ABI leaves the bits
+/// above the declared width unspecified. Where the compiler gives the formal
+/// a home in the frame (every formal at `-O0`), it stores exactly the
+/// declared width there -- `mov [rbp-0x24], dil` for a `char`, `mov
+/// [rbp-0x14], edi` for an `int` -- so the home slot's width is the formal's
+/// declared width. The register width is not: the formal was declared
+/// `uint param_2` and read as `(uchar)param_2` at every use.
+///
+/// Truncating reads alone are not that evidence. An `int c` stored as a
+/// byte (`*p = c`) and a `char c` stored as a byte are the same machine
+/// code, and a 64-bit CRC accumulator that only ever reads its low 32 bits is
+/// still declared 64-bit. Narrowing on uses alone was measured to retype
+/// more correctly-declared `int`/`long` formals than it fixed.
+///
+/// The proof is a whole-function demanded-bits analysis. A consumer demands
+/// only the low N bits through an explicit integer cast to N bits, an N-bit
+/// store, or an assignment into an N-bit frame slot; the demand flows back
+/// unchanged through operations whose low result bits depend only on their
+/// operands' low bits (`+ - * & | ^`, negation, complement, a select's arms)
+/// and through assignments into other names. Every other consumer -- a
+/// compare, a call argument, an address, a return, a shift -- demands every
+/// bit. A formal never assigned, whose widest demand is N < its width bits
+/// and is the width of a frame slot it is stored into, is declared N bits
+/// wide: the function reads no more of it, and the slot says that is the
+/// declared width.
+pub(super) fn narrow_integer_params_from_truncating_reads(func: &mut PreHirFunction) -> bool {
+    let Some((demand, assigned)) = DemandedBits::solve(func) else {
+        return false;
+    };
+
+    let mut changed = false;
+    for binding in &mut func.params {
+        if binding.surface_type_name.is_some()
+            || !matches!(binding.origin, Some(NirBindingOrigin::ParamIndex(_)))
+            || assigned.contains(&binding.name)
+        {
+            continue;
+        }
+        let NirType::Int { bits, .. } = binding.ty else {
+            continue;
+        };
+        let Some(Demand::Low {
+            bits: read_bits,
+            signed: read_signed,
+            home: true,
+        }) = demand.get(&binding.name).copied()
+        else {
+            continue;
+        };
+        if read_bits < bits && matches!(read_bits, 8 | 16 | 32) {
+            binding.ty = NirType::Int {
+                bits: read_bits,
+                signed: read_signed,
+            };
+            changed = true;
+        }
+    }
+    changed
+}
