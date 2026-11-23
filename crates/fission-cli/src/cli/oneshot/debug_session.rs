@@ -221,11 +221,15 @@ fn process_rule_event(
                     }
                     if let Some(name) = &rule.register {
                         observation["watched_register"] = json!(name);
-                        observation["watched_value"] = regs.get(name).map(|v| json!(format!("0x{v:x}"))).unwrap_or(Value::Null);
+                        observation["watched_value"] = regs
+                            .get(name)
+                            .map(|v| json!(format!("0x{v:x}")))
+                            .unwrap_or(Value::Null);
                     }
                     if rule.log_only || !matched {
                         if *resumes == 32 {
-                            observation["rule_error"] = json!("automatic resume budget exhausted (32)");
+                            observation["rule_error"] =
+                                json!("automatic resume budget exhausted (32)");
                         } else {
                             match backend.continue_execution() {
                                 Ok(()) => {
@@ -292,11 +296,14 @@ fn execute(
                 bail!("invalid scalar register name");
             }
             backend.set_sw_breakpoint(a.addr)?;
-            rules.insert(a.addr, BreakpointRule {
-                register: Some(a.register.clone()),
-                equals: Some(a.equals),
-                log_only: false,
-            });
+            rules.insert(
+                a.addr,
+                BreakpointRule {
+                    register: Some(a.register.clone()),
+                    equals: Some(a.equals),
+                    log_only: false,
+                },
+            );
             json!({
                 "action": "set_conditional_breakpoint",
                 "address": format!("0x{:x}", a.addr),
@@ -311,11 +318,14 @@ fn execute(
                 bail!("invalid scalar register name");
             }
             backend.set_sw_breakpoint(a.addr)?;
-            rules.insert(a.addr, BreakpointRule {
-                register: a.register.clone(),
-                equals: None,
-                log_only: true,
-            });
+            rules.insert(
+                a.addr,
+                BreakpointRule {
+                    register: a.register.clone(),
+                    equals: None,
+                    log_only: true,
+                },
+            );
             json!({
                 "action": "set_logpoint",
                 "address": format!("0x{:x}", a.addr),
@@ -627,7 +637,14 @@ fn interactive_command(
     rules: &mut BTreeMap<u64, BreakpointRule>,
 ) -> Result<Option<InteractiveEndReason>> {
     let outcome = parse_command(command_line).and_then(|command| {
-        execute(backend, thread_id, command, target["path"].as_str(), backend_name == "emulator", rules)
+        execute(
+            backend,
+            thread_id,
+            command,
+            target["path"].as_str(),
+            backend_name == "emulator",
+            rules,
+        )
     });
     let events = drain_events(backend, rules);
     let state = session_state_json(backend, thread_id);
