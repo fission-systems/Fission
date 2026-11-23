@@ -425,27 +425,29 @@ impl<'a> PreviewBuilder<'a> {
                 entry_param,
                 reads_entry_value || path_values.contains(&expr)
             ));
-            // A merged variable is the join only if every write reaching the
-            // call is emitted under that name; otherwise the name stands for
-            // the one write that owns it and the other paths' values are lost
-            // (`target3(17, ...)` where 17 is one of three paths).
-            let named_on_every_path = matches!(bare, PreHirExpr::Var(var) if reached_defs.iter().all(|&site| {
-                self.pcode
-                    .blocks
-                    .get(site.block_idx)
-                    .and_then(|block| block.ops.get(site.op_idx))
-                    .is_some_and(|op| {
-                        matches!(
-                            self.name_emitted_for_definition(vn, site, op),
-                            Some(PreHirExpr::Var(ref name)) if name == var
-                        )
-                    })
-            }));
-            let rejected = reads_entry_value
-                || path_values.contains(&expr)
-                || (matches!(bare, PreHirExpr::Var(_)) && !named_on_every_path);
+            // A merged variable that is the emitted name of some of the
+            // writes reaching the call but not of the others stands for those
+            // writes only: the other paths' values never reach it
+            // (`target3(17, ...)` for a three-way merge whose only named
+            // write is 17). A name no reaching write owns -- a stack slot or
+            // join variable the merge itself is stored in -- is the merge.
+            let owners = reached_defs
+                .iter()
+                .map(|&site| {
+                    self.pcode
+                        .blocks
+                        .get(site.block_idx)
+                        .and_then(|block| block.ops.get(site.op_idx))
+                        .and_then(|op| self.name_emitted_for_definition(vn, site, op))
+                })
+                .collect::<Vec<_>>();
+            let named_by_some_paths_only = matches!(bare, PreHirExpr::Var(var)
+                if owners.iter().any(|owner| matches!(owner, Some(PreHirExpr::Var(name)) if name == var))
+                    && owners.iter().any(|owner| !matches!(owner, Some(PreHirExpr::Var(name)) if name == var)));
+            let rejected =
+                reads_entry_value || path_values.contains(&expr) || named_by_some_paths_only;
             self.debug_call_recovery(&format!(
-                "join_arg named_on_every_path={named_on_every_path}"
+                "join_arg named_by_some_paths_only={named_by_some_paths_only}"
             ));
             if rejected {
                 if let Some(name) = live_in_name
