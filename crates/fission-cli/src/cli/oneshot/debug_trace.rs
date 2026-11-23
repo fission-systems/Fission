@@ -67,7 +67,10 @@ fn inspect<R: BufRead>(reader: R, max: usize) -> Result<TraceData> {
                 }
             }
             Some("HleDispatch") | Some("UseropeDispatch") => {
-                let name = event["func_name"].as_str().or_else(|| event["userop_name"].as_str()).unwrap_or("<unknown>");
+                let name = event["func_name"]
+                    .as_str()
+                    .or_else(|| event["userop_name"].as_str())
+                    .unwrap_or("<unknown>");
                 *trace.call_counts.entry(name.to_owned()).or_default() += 1;
                 if trace.calls.len() < MAX_DISPLAY_CALLS {
                     trace.calls.push(json!({
@@ -179,20 +182,29 @@ pub(super) fn trace_decomp(args: &DebugTraceDecompArgs) -> Result<Value> {
     let mut binary = LoadedBinary::from_file(Path::new(&args.binary))
         .with_context(|| format!("open binary {}", args.binary))?;
     let _ = fission_static::analysis::discover_functions_with_runtime(&mut binary);
-    let func = binary.function_at(args.addr)
+    let func = binary
+        .function_at(args.addr)
         .with_context(|| format!("no discovered function contains 0x{:x}", args.addr))?;
 
     let trace = open_trace(&args.trace, args.max_events)?;
-    let within = |pc: &u64| {
-        func.size != 0 && *pc >= func.address && (*pc - func.address) < func.size
-    };
-    let observed: Vec<Value> = trace.instructions.iter().filter(|(pc, _)| within(pc))
+    let within =
+        |pc: &u64| func.size != 0 && *pc >= func.address && (*pc - func.address) < func.size;
+    let observed: Vec<Value> = trace
+        .instructions
+        .iter()
+        .filter(|(pc, _)| within(pc))
         .map(|(pc, count)| json!({"pc": format!("0x{pc:x}"), "hits": count}))
         .collect();
     let config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
     let decompiled = fission_decompiler::decompile_with_rust_sleigh(
-        &binary, func.address, &func.name, &config, None, None,
-    ).map_err(|err| anyhow::anyhow!("static decompile failed: {err}"))?;
+        &binary,
+        func.address,
+        &func.name,
+        &config,
+        None,
+        None,
+    )
+    .map_err(|err| anyhow::anyhow!("static decompile failed: {err}"))?;
     Ok(json!({
         "schema_version": 1,
         "action": "trace_decomp",
