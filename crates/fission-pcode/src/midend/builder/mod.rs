@@ -1087,18 +1087,52 @@ impl<'a> PreviewBuilder<'a> {
             return PreHirStmt::Return(target_expr);
         }
 
+        // A jump that leaves the function has to end the printed path too.
+        // Callers print blocks in address order and let one run into the next
+        // unless its last statement ends the path, so a bare expression here
+        // put the next block's statements behind a tail jump that never comes
+        // back (`jmp other_func` followed by an unrelated switch case).
+        let leaves_function = matches!(
+            evidence.surface,
+            IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
+        ) && self.transfer_leaves_function(evidence.source_block);
+        // The jump's result is the function's result, under the same contract
+        // as a recovered tail call above: return the call's value, unless the
+        // callee is proven to produce none. A bare `return;` here would
+        // make the function `void` whenever this is its last statement.
+        let end_path = |this: &Self, stmt: PreHirStmt| {
+            if !leaves_function {
+                return stmt;
+            }
+            match stmt {
+                PreHirStmt::Expr(call @ PreHirExpr::Call { .. })
+                    if !matches!(
+                        &call,
+                        PreHirExpr::Call { target, .. }
+                            if this.call_result_is_proven_non_source(target)
+                    ) =>
+                {
+                    PreHirStmt::Return(Some(call))
+                }
+                stmt => PreHirStmt::Block(vec![stmt, PreHirStmt::Return(None)].into()),
+            }
+        };
+
         if matches!(
             evidence.surface,
             IndirectControlSurface::BranchInd | IndirectControlSurface::SwitchLike
         ) && let Some(PreHirExpr::Var(target_name)) = target_expr.as_ref()
             && let Some(resolved_target) = self.resolve_address_like_call_target_name(target_name)
         {
-            return PreHirStmt::Expr(PreHirExpr::Call {
-                origin: None,
-                target: resolved_target,
-                args: Vec::new(),
-                ty: NirType::Unknown,
-            });
+            return end_path(
+                self,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: resolved_target,
+                    args: Vec::new(),
+                    ty: NirType::Unknown,
+                }),
+            );
         }
 
         let pseudo_target = match evidence.surface {
@@ -1114,19 +1148,49 @@ impl<'a> PreviewBuilder<'a> {
             self.telemetry
                 .indirect_control
                 .indirect_surface_preserved_count += 1;
-            return PreHirStmt::Expr(PreHirExpr::Call {
-                origin: None,
-                target: pseudo_target.to_string(),
-                args: target_expr.into_iter().collect(),
-                ty: NirType::Unknown,
-            });
+            return end_path(
+                self,
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: pseudo_target.to_string(),
+                    args: target_expr.into_iter().collect(),
+                    ty: NirType::Unknown,
+                }),
+            );
         }
-        PreHirStmt::Expr(PreHirExpr::Call {
-            origin: None,
-            target: "__fission_indirect_cf_unsupported".to_string(),
-            args: Vec::new(),
-            ty: NirType::Unknown,
-        })
+        end_path(
+            self,
+            PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "__fission_indirect_cf_unsupported".to_string(),
+                args: Vec::new(),
+                ty: NirType::Unknown,
+            }),
+        )
+    }
+
+    /// Whether the block starting at `source_block` ends in an unconditional
+    /// transfer out of this function: a one-target `Branch` or a `BranchInd`
+    /// with no successor in the lifted CFG -- a tail jump, or an indirect
+    /// jump none of whose targets lies in this function. Nothing printed after
+    /// such a transfer can run. A conditional branch keeps its fall-through
+    /// edge and a call returns, so neither qualifies.
+    fn transfer_leaves_function(&self, source_block: Option<u64>) -> bool {
+        let Some(idx) = source_block.and_then(|start| self.address_to_index.get(&start).copied())
+        else {
+            return false;
+        };
+        if !self.heritage_successors.get(idx).is_some_and(Vec::is_empty) {
+            return false;
+        }
+        let block = &self.pcode.blocks[self.pcode_block_idx(idx)];
+        self.block_terminator_index(block)
+            .and_then(|term_idx| block.ops.get(term_idx))
+            .is_some_and(|op| match op.opcode {
+                PcodeOpcode::Branch => op.inputs.len() == 1,
+                PcodeOpcode::BranchInd => true,
+                _ => false,
+            })
     }
 
     pub(in crate::midend) fn with_lowering_site<T>(
