@@ -5646,6 +5646,73 @@ fn call_result_definition_varnodes_registers_both_int_and_float_return_slots() {
 }
 
 #[test]
+fn integer_call_result_does_not_define_the_float_return_register() {
+    // call f; mov [out], rax; ... read xmm0: `f` returns through rax (its
+    // result is read there first), so the call is not a definition of
+    // xmm0. Declaring every call a definition of both families made an
+    // integer call's result the function's float return value (AArch64
+    // `return s0` printed `return x0`).
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+
+    let namer = crate::midend::cspec::RegisterNamer::from_options(&options);
+    let xmm0_model = namer
+        .float_return_registers()
+        .into_iter()
+        .next()
+        .expect("xmm0");
+    let xmm0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        ..xmm0_model
+    };
+    let rax = register(0, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(xmm0.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(varnode(0x408)),
+                vec![rax.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::Copy,
+                Some(varnode(0x400)),
+                vec![xmm0.clone()],
+            ),
+        ],
+    )]);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    assert_eq!(
+        builder.lookup_def_site(&rax).map(|(site, _)| site.op_idx),
+        Some(1),
+        "the call defines its integer result"
+    );
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    });
+    assert_ne!(
+        builder.lookup_def_site(&xmm0).map(|(site, _)| site.op_idx),
+        Some(1),
+        "a call whose result is read through rax does not define xmm0"
+    );
+}
+
+#[test]
 fn lower_register_subpiece_lane_returns_none_across_clobbering_call() {
     let rax = register(0, 8);
     let eax_sub = register(0, 4);

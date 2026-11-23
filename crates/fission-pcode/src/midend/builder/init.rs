@@ -25,10 +25,15 @@ pub(super) fn op_is_lifted_return(block: &crate::PcodeBasicBlock, op_idx: usize)
         .is_some_and(|next| next.opcode == PcodeOpcode::Return)
 }
 
-fn call_result_definition_varnodes(
+/// The registers a call's result is defined in: the primary integer return
+/// register (one spelling), and separately every seen width of the
+/// floating-point return register. Floating-point views are a call's result
+/// only where that call's result is read through them -- see
+/// [`call_result_read_as_float`].
+pub(super) fn call_result_definition_varnodes(
     pcode: &PcodeFunction,
     options: &crate::midend::MlilPreviewOptions,
-) -> Vec<Varnode> {
+) -> (Vec<Varnode>, Vec<Varnode>) {
     let namer = crate::midend::cspec::RegisterNamer::from_options(options);
     let mut seen: HashSet<(u64, u64, u32)> = HashSet::default();
     for block in &pcode.blocks {
@@ -63,6 +68,7 @@ fn call_result_definition_varnodes(
         }
     }
 
+    let primary = std::mem::take(&mut out);
     // Float return slot: independently record at most ONE register/space
     // spelling, collecting all seen sub-widths (e.g. f32/f64 views in XMM0) in
     // deterministic size order.
@@ -101,7 +107,64 @@ fn call_result_definition_varnodes(
         }
     }
 
-    out
+    (primary, out)
+}
+
+/// Whether the call at `op_idx` returns through the floating-point return
+/// register: the first read of a return register after the call, on any path
+/// through the call's block and its successors, reads a floating-point view
+/// before anything writes it.
+///
+/// One function returns in both families from different calls. Declaring
+/// every call a definition of both made an integer call's result the
+/// definition of `s0`/`d0` too, and on AArch64 the function's own `return s0`
+/// read the integer call instead (`return x0`).
+fn call_result_read_as_float(
+    pcode: &PcodeFunction,
+    block_idx: usize,
+    op_idx: usize,
+    float_views: &[Varnode],
+    primary: &[Varnode],
+) -> bool {
+    if float_views.is_empty() {
+        return false;
+    }
+    let overlaps = |vn: &Varnode, set: &[Varnode]| {
+        set.iter()
+            .any(|reg| reg.space_id == vn.space_id && reg.offset == vn.offset)
+    };
+    // (block, first op) pairs to scan, bounded: a result is read close to
+    // the call that produced it.
+    let mut pending = vec![(block_idx, op_idx + 1)];
+    let mut visited = HashSet::default();
+    while let Some((block, start)) = pending.pop() {
+        if !visited.insert((block, start)) || visited.len() > 16 {
+            continue;
+        }
+        let Some(current) = pcode.blocks.get(block) else {
+            continue;
+        };
+        let mut decided = false;
+        for op in current.ops.iter().skip(start) {
+            if op.inputs.iter().any(|input| overlaps(input, float_views)) {
+                return true;
+            }
+            if op.opcode.is_call()
+                || op.inputs.iter().any(|input| overlaps(input, primary))
+                || op
+                    .output
+                    .as_ref()
+                    .is_some_and(|out| overlaps(out, float_views))
+            {
+                decided = true;
+                break;
+            }
+        }
+        if !decided {
+            pending.extend(current.successors.iter().map(|&succ| (succ as usize, 0)));
+        }
+    }
+    false
 }
 
 impl<'a> PreviewBuilder<'a> {
@@ -146,7 +209,8 @@ impl<'a> PreviewBuilder<'a> {
         // lowered to `if (__buf < 0)` and `unlink(p) < 0` to `if (__name <
         // 0)`, while an argument-less `getpid() < 0` was right -- there being
         // no earlier definition to find.
-        let call_result_registers = call_result_definition_varnodes(pcode, options);
+        let (primary_result_registers, float_result_registers) =
+            call_result_definition_varnodes(pcode, options);
         for (block_idx, block) in pcode.blocks.iter().enumerate() {
             let mut block_def_map: HashMap<VarnodeKey, Vec<usize>> = HashMap::default();
             for (op_idx, op) in block.ops.iter().enumerate() {
@@ -174,7 +238,20 @@ impl<'a> PreviewBuilder<'a> {
                 } else if matches!(op.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
                     && !op_is_lifted_return(block, op_idx)
                 {
-                    for vn in &call_result_registers {
+                    let float_result = call_result_read_as_float(
+                        pcode,
+                        block_idx,
+                        op_idx,
+                        &float_result_registers,
+                        &primary_result_registers,
+                    );
+                    let registers = primary_result_registers.iter().chain(
+                        float_result
+                            .then_some(float_result_registers.iter())
+                            .into_iter()
+                            .flatten(),
+                    );
+                    for vn in registers {
                         record(
                             VarnodeKey::from(vn),
                             &mut block_def_map,
