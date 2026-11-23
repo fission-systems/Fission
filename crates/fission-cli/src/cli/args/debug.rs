@@ -69,6 +69,8 @@ pub enum DebugCommand {
     ExBp(DebugExBpArgs),
     /// Remove an exception breakpoint (not currently supported by the native debugger)
     RmExBp(DebugExBpArgs),
+    /// Read one stopped machine state, with optional static function/decompilation context
+    Context(DebugContextArgs),
     /// Show CPU registers for the active thread
     Regs,
     /// Set a single register value (e.g. rax, rip)
@@ -117,6 +119,23 @@ pub enum DebugCommand {
 #[derive(Clone, Args, Debug, PartialEq, Eq)]
 pub struct DebugCapabilitiesArgs {
     /// Emit the versioned machine-readable capability report
+    #[arg(long)]
+    pub json: bool,
+}
+
+/// Snapshot one stopped thread, optionally resolving its PC to on-disk code.
+#[derive(Clone, Args, Debug, PartialEq, Eq)]
+pub struct DebugContextArgs {
+    /// Analysis binary for --attach or a PC in a different module
+    #[arg(long, value_name = "BINARY")]
+    pub binary: Option<String>,
+    /// Capture at most this many bytes at the stack pointer (0 to disable)
+    #[arg(long, default_value_t = 0)]
+    pub stack: usize,
+    /// Decompile the discovered on-disk function containing the current PC
+    #[arg(long)]
+    pub decomp: bool,
+    /// Output one machine-readable JSON object for the one-shot command
     #[arg(long)]
     pub json: bool,
 }
