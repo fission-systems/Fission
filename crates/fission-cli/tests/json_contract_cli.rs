@@ -538,6 +538,8 @@ contract!(
     contract_envelope,
     ["--contract", "v1", "list", A64, "--json", "--no-db"]
 );
+// `debug` exists only in a `debugger` build.
+#[cfg(feature = "debugger")]
 contract!(
     debug_capabilities,
     ["debug", "--emulator", "capabilities", "--json"]
@@ -616,6 +618,7 @@ contract!(
 );
 /// A recording session with a remembered breakpoint (so `restored` is not
 /// empty) and one result of each kind the stepping commands produce.
+#[cfg(feature = "debugger")]
 #[test]
 fn debug_session() {
     let dir = Scratch::new("debug-session");
