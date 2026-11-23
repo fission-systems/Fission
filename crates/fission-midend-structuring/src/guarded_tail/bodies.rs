@@ -66,6 +66,9 @@ pub fn canonicalize_interleaved_local_aliases(
     let mut canonicalized_local_nonfallthrough = 0usize;
     let mut external_safe_redirect_labels = Vec::new();
     let segment_end = segment_start + body.len();
+    // `(label_idx, goto positions before it)` for every label whose gotos are
+    // deleted although something sits between a goto and the label.
+    let mut deleted_jumps_over_gaps: Vec<(usize, Vec<usize>)> = Vec::new();
 
     for (idx, stmt) in body.iter().enumerate() {
         let PreHirStmt::Label(label) = stmt else {
@@ -354,6 +357,16 @@ pub fn canonicalize_interleaved_local_aliases(
             }) {
                 return Err(GuardedTailCanonicalizationFailure::PayloadCrossesJoin);
             }
+            // Deleting these gotos makes control run what they jumped over;
+            // checked once every redirect is known, below.
+            deleted_jumps_over_gaps.push((
+                idx,
+                goto_positions
+                    .iter()
+                    .copied()
+                    .filter(|pos| *pos < idx)
+                    .collect::<Vec<_>>(),
+            ));
             alias_redirects.insert(label.clone(), None);
             continue;
         }
@@ -373,6 +386,31 @@ pub fn canonicalize_interleaved_local_aliases(
 
     if alias_redirects.is_empty() {
         return Ok((body.to_vec(), Vec::new()));
+    }
+
+    // A `None` redirect deletes `goto label` and lets control fall into the
+    // label instead, through whatever the goto used to jump over. That is the
+    // same program only when every statement in between is inert once the
+    // rewrite is done: a label, a pure value, or a goto that is itself deleted
+    // the same way. An `if (c) goto next; arm(); goto tail; next: ...` ladder
+    // has calls in that gap, and deleting `goto tail` sent every arm into the
+    // next test and never reached the tail.
+    let deleted = |target: &str| {
+        alias_redirects.contains_key(target)
+            && crate::guarded_tail::pure_hir::resolve_alias_redirect(target, &alias_redirects)
+                .is_none()
+    };
+    for (label_idx, positions) in &deleted_jumps_over_gaps {
+        for &pos in positions {
+            let inert = body[pos + 1..*label_idx].iter().all(|stmt| {
+                is_ignorable_discovery_stmt(stmt)
+                    || crate::guarded_tail::pure_hir::stmt_is_pure_value_expr(stmt)
+                    || matches!(stmt, PreHirStmt::Goto(target) if deleted(target))
+            });
+            if !inert {
+                return Err(GuardedTailCanonicalizationFailure::AliasNotFallthrough);
+            }
+        }
     }
 
     host.bump_structuring_counter(

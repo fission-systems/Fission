@@ -28,6 +28,9 @@ DECBENCH = "0cba66d66e9af0f8555c9844eb2a868440c366c1"
 JOERN = "a2c16ece800f0843df21f6bb09efed2d0430a83a"
 MANIFEST = "configs/full/manifest.json"
 REPO = Path(__file__).resolve().parents[2]
+# The resource bundle the CLI is given. The PR output diff points this at the
+# base checkout's bundle when it runs the base CLI.
+RESOURCES = REPO / "utils"
 BATCH = 128
 
 
@@ -151,7 +154,7 @@ def decompile(cli: Path, binary: Path, addresses: list[int], temp: Path):
         nonlocal crashes
         address_file.write_text("".join(f"0x{addr:x}\n" for addr in values))
         with subprocess.Popen(
-            [str(cli), "--resource-root", str(REPO / "utils"), "decomp", str(binary),
+            [str(cli), "--resource-root", str(RESOURCES), "decomp", str(binary),
              "--json", "--no-header", "--no-warnings", "--no-db", "--addresses-file", str(address_file)],
             cwd=temp, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
         ) as proc:

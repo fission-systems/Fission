@@ -1,0 +1,99 @@
+name: Reusable base-vs-head decompiler comparison
+
+# Fast Gate calls this on Rust changes. It builds the base and head CLIs once
+# and, on a fixed DecBench sample, reports to the job summary:
+# - speed: instructions executed by each (scripts/ci/speed_compare.py),
+#   flagged at +3%;
+# - output (decompiler changes only): functions whose text changed, then GED
+#   and type deltas (scripts/ci/output_diff.py).
+# Report-only: neither gates the merge yet.
+
+on:
+  workflow_call:
+    inputs:
+      base_sha:
+        description: "Commit to compare against (the PR or merge group base)"
+        required: true
+        type: string
+      output_diff:
+        description: "Also diff decompiler output and scores"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FISSION_BENCHMARK_NO_CACHE: "1"
+  DECBENCH_NO_CACHE: "1"
+
+jobs:
+  diff:
+    name: Base vs head (speed${{ inputs.output_diff && ', output' || '' }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      BASE_SHA: ${{ inputs.base_sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-output-diff-${{ runner.os }}
+      - name: Build head and base CLIs
+        run: |
+          set -euo pipefail
+          cargo build --locked --release -p fission-cli
+          cp target/release/fission_cli "$RUNNER_TEMP/head_cli"
+          git worktree add --detach "$RUNNER_TEMP/base" "$BASE_SHA"
+          # One target directory: the base build reuses every unchanged crate.
+          (cd "$RUNNER_TEMP/base" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --release -p fission-cli)
+          cp target/release/fission_cli "$RUNNER_TEMP/base_cli"
+      - name: Check out pinned Rust Joern
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: Noelo-Lab/rust-joern
+          ref: a2c16ece800f0843df21f6bb09efed2d0430a83a
+          path: ci-rust-joern
+          persist-credentials: false
+      - name: Build the CFG parser outside the workspace
+        run: |
+          set -euo pipefail
+          mv ci-rust-joern "$RUNNER_TEMP/rust-joern"
+          cargo build --locked --release --lib --manifest-path "$RUNNER_TEMP/rust-joern/Cargo.toml"
+          echo "RUST_JOERN_DIR=$RUNNER_TEMP/rust-joern" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Install the pinned scorer and binary tools
+        run: |
+          set -euo pipefail
+          python -m pip install -r scripts/quality/decbench-ci-requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends llvm binutils-mingw-w64 valgrind
+      - name: Compare decompile cost (instructions executed)
+        run: |
+          python scripts/ci/speed_compare.py --data "$RUNNER_TEMP/decbench" \
+            --base-cli "$RUNNER_TEMP/base_cli" --head-cli "$RUNNER_TEMP/head_cli" \
+            --base-resources "$RUNNER_TEMP/base/utils" --out output-diff
+      - name: Decompile the sample with both and compare output
+        if: inputs.output_diff
+        run: |
+          python scripts/ci/output_diff.py --data "$RUNNER_TEMP/decbench" \
+            --base-cli "$RUNNER_TEMP/base_cli" --head-cli "$RUNNER_TEMP/head_cli" \
+            --base-resources "$RUNNER_TEMP/base/utils" --out output-diff
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: base-vs-head
+          path: output-diff
+          if-no-files-found: ignore
+          retention-days: 14

@@ -167,10 +167,11 @@ fission_cli --contract v1 sandbox ./target.bin --json --max-inst 100000 \
   symbolic input, and each found path comes with the solved bytes.
 - To test one function, call it with your own arguments instead of running the
   whole program.
-- `fission_cli verify --addr 0x... --tier concrete|ground-truth|symbolic|all` checks
-  Fission's own IR against the machine code; use it when you suspect the
-  decompiler, not the program. JSON results carry `counterexamples` as fields and
-  the `seed` that reproduces them.
+- Use `verify --tier ground-truth` to compare the decompiled tree with emulated
+  machine behavior on bounded samples. The concrete and symbolic tiers compare
+  earlier and later trees. Check for unsupported inputs and harness failures
+  alongside divergences. JSON results carry `counterexamples` as fields and the
+  `seed` that reproduces them.
 
 ```bash
 fission_cli --contract v1 sandbox ./target.bin --stdin-mock X --sym-explore --find 0x4011a2 --avoid 0x4011c0 --json

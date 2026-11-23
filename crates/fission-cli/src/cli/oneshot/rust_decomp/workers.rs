@@ -145,6 +145,25 @@ pub(crate) fn render_one_function_on_large_stack(
     }
 }
 
+fn render_one_function_catching_panic(
+    binary: &fission_loader::loader::LoadedBinary,
+    facts: &FactStore,
+    func: &FunctionInfo,
+    config: RenderConfig,
+) -> FunctionRenderResult {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        render_one_function_inner(binary, facts, func, config)
+    }))
+    .unwrap_or_else(|_| {
+        make_internal_error_result(
+            binary,
+            func,
+            "worker thread panicked while rendering function".to_string(),
+            config,
+        )
+    })
+}
+
 struct PersistentDecompWorker {
     request_tx: mpsc::SyncSender<FunctionInfo>,
     result_rx: mpsc::Receiver<FunctionRenderResult>,
@@ -166,18 +185,12 @@ impl PersistentDecompWorker {
             .stack_size(stack_size_bytes)
             .spawn(move || {
                 while let Ok(func) = request_rx.recv() {
-                    let func_for_panic = func.clone();
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        render_one_function_inner(binary.as_ref(), facts.as_ref(), &func, config)
-                    }))
-                    .unwrap_or_else(|_| {
-                        make_internal_error_result(
-                            binary.as_ref(),
-                            &func_for_panic,
-                            "worker thread panicked while rendering function".to_string(),
-                            config,
-                        )
-                    });
+                    let result = render_one_function_catching_panic(
+                        binary.as_ref(),
+                        facts.as_ref(),
+                        &func,
+                        config,
+                    );
                     if result_tx.send(result).is_err() {
                         break;
                     }
@@ -212,6 +225,7 @@ pub(crate) fn run_worker_fanout_fanin(
     let timeout = config.timeout_ms.filter(|ms| *ms > 0);
 
     let mut worker_handles = Vec::with_capacity(worker_count);
+    let mut last_spawn_error = None;
     for worker_idx in 0..worker_count {
         let rx = Arc::clone(&task_rx);
         let tx = result_tx.clone();
@@ -311,23 +325,12 @@ pub(crate) fn run_worker_fanout_fanin(
                         }
                     }
                 } else {
-                    let func_owned = func.clone();
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        render_one_function_inner(
-                            binary.as_ref(),
-                            facts.as_ref(),
-                            &func_owned,
-                            config,
-                        )
-                    }))
-                    .unwrap_or_else(|_| {
-                        make_internal_error_result(
-                            binary.as_ref(),
-                            &func_owned,
-                            "worker thread panicked while rendering function".to_string(),
-                            config,
-                        )
-                    })
+                    render_one_function_catching_panic(
+                        binary.as_ref(),
+                        facts.as_ref(),
+                        &func,
+                        config,
+                    )
                 };
                 if tx.send(rendered).is_err() {
                     break;
@@ -338,11 +341,26 @@ pub(crate) fn run_worker_fanout_fanin(
             }
         });
 
-        if let Ok(handle) = spawn {
-            worker_handles.push(handle);
+        match spawn {
+            Ok(handle) => worker_handles.push(handle),
+            Err(err) => last_spawn_error = Some(err),
         }
     }
     drop(result_tx);
+
+    if worker_handles.is_empty() {
+        if let Some(err) = last_spawn_error {
+            tracing::warn!(
+                "failed to spawn decompilation worker threads ({err}); falling back to sequential rendering"
+            );
+        }
+        return functions
+            .iter()
+            .map(|func| {
+                render_one_function_catching_panic(binary.as_ref(), facts.as_ref(), func, config)
+            })
+            .collect();
+    }
 
     // Schedule largest functions first (LPT) to avoid long-tail stragglers;
     // `rust_decomp::mod` re-sorts outputs by entry address before formatting.
@@ -395,5 +413,87 @@ mod tests {
             render_timeout_message(37),
             "preview_timeout: Rust-Sleigh render timed out after 37ms"
         );
+    }
+
+    #[test]
+    fn fanout_falls_back_sequentially_when_no_workers_can_spawn() {
+        use super::RenderConfig;
+        use fission_loader::loader::{
+            BinaryLoadSpec, DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo,
+        };
+        use fission_static::analysis::decomp::facts::FactStore;
+        use std::sync::Arc;
+
+        let mut code = vec![0x90u8; 0x20];
+        code[0..6].copy_from_slice(&[0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3]);
+        code[0x10..0x16].copy_from_slice(&[0xb8, 0x02, 0x00, 0x00, 0x00, 0xc3]);
+        let binary = Arc::new(
+            LoadedBinaryBuilder::new("worker-fallback.elf".into(), DataBuffer::Heap(code))
+                .format("ELF")
+                .image_base(0x1000)
+                .entry_point(0x1000)
+                .is_64bit(true)
+                .load_spec(BinaryLoadSpec::new(
+                    "ELF",
+                    0x1000,
+                    "x86:LE:64:default",
+                    "gcc",
+                    "synthetic-test",
+                ))
+                .add_section(SectionInfo {
+                    name: ".text".into(),
+                    virtual_address: 0x1000,
+                    virtual_size: 0x20,
+                    file_offset: 0,
+                    file_size: 0x20,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .add_functions([
+                    FunctionInfo {
+                        name: "fn_one".into(),
+                        address: 0x1000,
+                        size: 6,
+                        ..Default::default()
+                    },
+                    FunctionInfo {
+                        name: "fn_two".into(),
+                        address: 0x1010,
+                        size: 6,
+                        ..Default::default()
+                    },
+                ])
+                .build()
+                .expect("build binary"),
+        );
+        let facts = Arc::new(FactStore::from_binary_without_signature_matches(&binary));
+        let functions = binary.functions.clone();
+        let config = RenderConfig {
+            benchmark: false,
+            ghidra_compat: false,
+            effective_no_warnings: true,
+            debug_decomp: false,
+            debug_decomp_bundle: false,
+            requested_address: None,
+            timeout_ms: Some(0),
+            prehir: false,
+        };
+
+        // Zero workers: sequential fallback still returns all functions.
+        let zero_workers = super::run_worker_fanout_fanin(
+            Arc::clone(&binary),
+            Arc::clone(&facts),
+            &functions,
+            config,
+            0,
+            8 * 1024 * 1024,
+        );
+        assert_eq!(zero_workers.len(), 2);
+
+        // Unsatisfiable stack size triggers OS thread spawn error -> sequential fallback.
+        let impossible_stack =
+            super::run_worker_fanout_fanin(binary, facts, &functions, config, 2, usize::MAX / 2);
+        assert_eq!(impossible_stack.len(), 2);
     }
 }

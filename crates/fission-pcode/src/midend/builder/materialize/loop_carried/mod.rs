@@ -22,7 +22,7 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Option<String> {
         let is_candidate = Self::is_loop_carried_register_update_candidate(output);
-        let block_idx = self.address_to_index.get(&block.start_address).copied();
+        let block_idx = self.block_position(block);
 
         if !is_candidate {
             return None;
@@ -424,7 +424,7 @@ impl<'a> PreviewBuilder<'a> {
         let input = op.inputs.first()?;
         let input_key = VarnodeKey::from(input);
         let output_key = VarnodeKey::from(output);
-        let block_idx = self.address_to_index.get(&block.start_address).copied()?;
+        let block_idx = self.block_position(block)?;
         let input_def_idx = block.ops.iter().take(op_idx).position(|candidate| {
             candidate
                 .output

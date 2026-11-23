@@ -23,6 +23,10 @@ tooling should use this directory.
 
 ## Local deviations from upstream Ghidra 12.2
 
+Upstream specs are not ground truth ([ADR 0017](../../docs/adr/0017-ghidra-is-not-an-oracle.md)).
+A semantic fix needs architecture-manual or native-execution evidence, a re-apply script,
+a byte-for-byte recompile control, and a test that fails with the upstream `.sla`.
+
 `languages/` is upstream `Ghidra/Processors/<P>/data/languages/` verbatim (the `.sla`
 files go to `compiled/`), except for the following. Re-apply them when upgrading;
 each is recorded in `MANIFEST.sha256.json` (`source_path`).

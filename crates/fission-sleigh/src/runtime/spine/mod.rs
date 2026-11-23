@@ -24,7 +24,7 @@ pub use construct::{
 };
 pub use context::RuntimeInstructionContext;
 pub use decision::{
-    select_constructor, DecisionProbeEvaluator, ProbeChain, ProbeValues, RuntimeMatchTrace,
+    select_constructor, DecisionProbeEvaluator, ProbeValues, RuntimeMatchProbes, RuntimeMatchTrace,
     RuntimeSelection,
 };
 pub use emitter::RuntimePcodeEmitter;

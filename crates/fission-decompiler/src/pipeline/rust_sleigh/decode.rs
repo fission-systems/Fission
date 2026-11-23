@@ -199,12 +199,17 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // last-resort weak prior) -- see its doc comment for why this fits
     // Fission's single-address decode model better than Ghidra's
     // full-binary constant-propagation approach.
+    let base_memory_context = memory_context.clone();
+    let mut memory_context = memory_context;
     let thumb_preferred = super::arm_thumb_heuristic::should_prefer_thumb_decode(
         decode_entry_address,
         bytes,
         binary.entry_point,
         &binary.hash,
     );
+    let mut active_context_override = initial_context_override;
+    let mut first_lift_stop_reason = "success_first_lift";
+    let mut initial_override_lifted = None;
     if thumb_preferred
         && initial_context_override.is_none()
         && let Some(forced_override) = lifter.low_bit_code_mode_override()
@@ -216,22 +221,304 @@ pub(crate) fn decode_rust_sleigh_pcode(
             Some(forced_override),
         )
     {
-        let template_source_counts = thumb_first.template_source_counts.clone();
-        super::arm_thumb_heuristic::record_direct_call_targets(
-            &binary.hash,
-            true,
-            &thumb_first.instructions,
-        );
-        return Ok((
-            thumb_first.function,
-            DecodeDiag {
-                attempts: 1,
-                stop_reason: "success_thumb_preferred_entry_hint".into(),
-                template_source_counts,
-            },
-            userops,
-        ));
+        active_context_override = Some(forced_override);
+        first_lift_stop_reason = "success_thumb_preferred_entry_hint";
+        initial_override_lifted = Some(thumb_first);
     }
+
+    let (result, last_good, discovered_edges) = run_indirect_branch_fixpoint(
+        lifter,
+        binary.is_little_endian(),
+        bytes,
+        decode_entry_address,
+        lift_contract,
+        continue_past_indirect_branch,
+        active_context_override,
+        &mut memory_context,
+        initial_override_lifted,
+    );
+
+    match result {
+        Ok(lifted) => {
+            let template_source_counts = lifted.template_source_counts.clone();
+            super::arm_thumb_heuristic::record_direct_call_targets(
+                &binary.hash,
+                active_context_override.is_some(),
+                &lifted.instructions,
+            );
+            Ok((
+                lifted.function,
+                DecodeDiag {
+                    attempts: 1,
+                    stop_reason: first_lift_stop_reason.into(),
+                    template_source_counts,
+                },
+                userops.clone(),
+            ))
+        }
+        Err(first_err) => {
+            let mut truncated_retry_failed = false;
+            if retry_on_decode_error {
+                if last_good.is_none() {
+                    for variant_lifter in lifters.iter().skip(1) {
+                        let variant_address_state =
+                            variant_lifter.normalize_low_bit_code_address(entry_address);
+                        let variant_decode_entry_address = variant_address_state.address;
+                        let Some(variant_bytes) =
+                            binary.view_bytes(variant_decode_entry_address, max_bytes)
+                        else {
+                            continue;
+                        };
+                        let variant_memory_context =
+                            decode_memory_context(binary, variant_decode_entry_address, max_bytes);
+                        if let Ok(mut retry) = variant_lifter
+                            .lift_raw_pcode_function_with_context_and_memory_context(
+                                variant_bytes,
+                                variant_decode_entry_address,
+                                lift_contract,
+                                &variant_memory_context,
+                                variant_address_state.context_override,
+                            )
+                        {
+                            if !discovered_edges.is_empty() {
+                                fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                    &mut retry.function,
+                                    &discovered_edges,
+                                );
+                            }
+                            let template_source_counts = retry.template_source_counts.clone();
+                            return Ok((
+                                retry.function,
+                                DecodeDiag {
+                                    attempts: 2,
+                                    stop_reason: format!(
+                                        "success_after_sibling_language_retry:{}",
+                                        variant_lifter.entry().entry_id
+                                    ),
+                                    template_source_counts,
+                                },
+                                userops.clone(),
+                            ));
+                        }
+                    }
+
+                    if continue_past_indirect_branch {
+                        if let Ok(mut retry) = lifter
+                            .lift_raw_pcode_function_with_context_and_memory_context(
+                                bytes,
+                                decode_entry_address,
+                                DecodeContract::strict_function(instruction_limit),
+                                &base_memory_context,
+                                active_context_override,
+                            )
+                        {
+                            if !discovered_edges.is_empty() {
+                                fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                    &mut retry.function,
+                                    &discovered_edges,
+                                );
+                            }
+                            let template_source_counts = retry.template_source_counts.clone();
+                            return Ok((
+                                retry.function,
+                                DecodeDiag {
+                                    attempts: 2,
+                                    stop_reason: "success_after_strict_indirect_retry".into(),
+                                    template_source_counts,
+                                },
+                                userops.clone(),
+                            ));
+                        }
+                    }
+                }
+
+                let err_str = first_err.clone();
+                if let Some(safe) =
+                    extract_safe_bytes_from_decode_error(&err_str, decode_entry_address)
+                {
+                    if safe > 0 && safe < bytes.len() {
+                        if let Ok(mut retry) = lifter
+                            .lift_raw_pcode_function_with_context_and_memory_context(
+                                &bytes[..safe],
+                                decode_entry_address,
+                                lift_contract,
+                                &memory_context,
+                                active_context_override,
+                            )
+                        {
+                            if !discovered_edges.is_empty() {
+                                fission_sleigh::runtime::attach_inferred_indirect_edges(
+                                    &mut retry.function,
+                                    &discovered_edges,
+                                );
+                            }
+                            super::arm_thumb_heuristic::record_direct_call_targets(
+                                &binary.hash,
+                                active_context_override.is_some(),
+                                &retry.instructions,
+                            );
+                            let template_source_counts = retry.template_source_counts.clone();
+                            return Ok((
+                                retry.function,
+                                DecodeDiag {
+                                    attempts: 2,
+                                    stop_reason: "success_after_truncated_retry".into(),
+                                    template_source_counts,
+                                },
+                                userops.clone(),
+                            ));
+                        }
+                        truncated_retry_failed = true;
+                    }
+                }
+
+                if let Some(mut fallback) = last_good {
+                    super::arm_thumb_heuristic::record_direct_call_targets(
+                        &binary.hash,
+                        active_context_override.is_some(),
+                        &fallback.instructions,
+                    );
+                    if !discovered_edges.is_empty() {
+                        fission_sleigh::runtime::attach_inferred_indirect_edges(
+                            &mut fallback.function,
+                            &discovered_edges,
+                        );
+                    }
+                    let template_source_counts = fallback.template_source_counts.clone();
+                    return Ok((
+                        fallback.function,
+                        DecodeDiag {
+                            attempts: 2,
+                            stop_reason: "success_from_decode_fixpoint_fallback".into(),
+                            template_source_counts,
+                        },
+                        userops.clone(),
+                    ));
+                }
+
+                // `entry_address` was even, so `normalize_low_bit_code_address`
+                // trusted its bit 0 and assumed the CPU's default (non-Thumb)
+                // code mode -- correct for a real ARM/Thumb-interworking
+                // function pointer, but wrong for a Thumb-only target
+                // (Cortex-M/ARMv7-M) given a bare address with the ABI's
+                // Thumb marker already normalized away (e.g. by an external
+                // caller reporting addresses in stripped form). Only try this
+                // once every other retry has failed, and only when we didn't
+                // already decode in forced low-bit-code mode.
+                if active_context_override.is_none()
+                    && let Some(forced_override) = lifter.low_bit_code_mode_override()
+                {
+                    let mut forced_memory_context = base_memory_context.clone();
+                    let (forced_result, forced_last_good, _) = run_indirect_branch_fixpoint(
+                        lifter,
+                        binary.is_little_endian(),
+                        bytes,
+                        decode_entry_address,
+                        lift_contract,
+                        continue_past_indirect_branch,
+                        Some(forced_override),
+                        &mut forced_memory_context,
+                        None,
+                    );
+                    if let Some(retry) = forced_result.ok().or(forced_last_good) {
+                        super::arm_thumb_heuristic::record_direct_call_targets(
+                            &binary.hash,
+                            true,
+                            &retry.instructions,
+                        );
+                        let template_source_counts = retry.template_source_counts.clone();
+                        return Ok((
+                            retry.function,
+                            DecodeDiag {
+                                attempts: 2,
+                                stop_reason: "success_after_forced_low_bit_code_mode_retry".into(),
+                                template_source_counts,
+                            },
+                            userops.clone(),
+                        ));
+                    }
+                }
+            } else if let Some(mut fallback) = last_good {
+                super::arm_thumb_heuristic::record_direct_call_targets(
+                    &binary.hash,
+                    active_context_override.is_some(),
+                    &fallback.instructions,
+                );
+                if !discovered_edges.is_empty() {
+                    fission_sleigh::runtime::attach_inferred_indirect_edges(
+                        &mut fallback.function,
+                        &discovered_edges,
+                    );
+                }
+                let template_source_counts = fallback.template_source_counts.clone();
+                return Ok((
+                    fallback.function,
+                    DecodeDiag {
+                        attempts: 2,
+                        stop_reason: "success_from_decode_fixpoint_fallback".into(),
+                        template_source_counts,
+                    },
+                    userops.clone(),
+                ));
+            }
+            // Every retry failed. If the decode fixed point had a round that
+            // lifted before a later one failed, that round is a real decode of
+            // this function; returning it beats returning an error, and it is
+            // exactly the function this call would have produced had the loop
+            // stopped one round earlier.
+            if let Some(mut fallback) = cached_fallback.map(|cached| (*cached).clone()) {
+                if !discovered_edges.is_empty() {
+                    fission_sleigh::runtime::attach_inferred_indirect_edges(
+                        &mut fallback.function,
+                        &discovered_edges,
+                    );
+                }
+                let template_source_counts = fallback.template_source_counts.clone();
+                return Ok((
+                    fallback.function,
+                    DecodeDiag {
+                        attempts: 2,
+                        stop_reason: "success_from_decode_fixpoint_fallback".into(),
+                        template_source_counts,
+                    },
+                    userops.clone(),
+                ));
+            }
+            Err(DecodeFailure {
+                message: format!(
+                    "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err}"
+                ),
+                diag: DecodeDiag {
+                    attempts: if truncated_retry_failed { 2 } else { 1 },
+                    stop_reason: if truncated_retry_failed {
+                        "lift_failed_after_truncated_retry"
+                    } else {
+                        "lift_failed"
+                    }
+                    .into(),
+                    template_source_counts: Default::default(),
+                },
+            })
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_indirect_branch_fixpoint(
+    lifter: &RuntimeSleighFrontend,
+    little_endian: bool,
+    bytes: &[u8],
+    decode_entry_address: u64,
+    lift_contract: DecodeContract,
+    continue_past_indirect_branch: bool,
+    context_override: Option<fission_sleigh::runtime::PackedContextOverride>,
+    memory_context: &mut DecodeMemoryContext,
+    initial_override_lifted: Option<fission_sleigh::runtime::DecodedPcodeFunction>,
+) -> (
+    Result<fission_sleigh::runtime::DecodedPcodeFunction, String>,
+    Option<fission_sleigh::runtime::DecodedPcodeFunction>,
+    std::collections::BTreeMap<u64, Vec<u64>>,
+) {
     // ── Decode/analyse fixed point ────────────────────────────────────────
     // Recursive descent cannot enumerate the successors of a computed jump, so
     // a `switch` dispatch leaves every case unreachable and the function is
@@ -247,26 +534,20 @@ pub(crate) fn decode_rust_sleigh_pcode(
     // appears. `additional_decode_entries` already seeds both the decode
     // worklist and the reachability pass, which is what makes the feedback a
     // few lines rather than a new pipeline.
-    let base_memory_context = memory_context.clone();
-    let mut memory_context = memory_context;
-    // The best decode any round of the fixed point produced, kept so a round
-    // that fails cannot leave the function worse off than before it ran.
     let mut last_good: Option<fission_sleigh::runtime::DecodedPcodeFunction> = None;
-    // Every `BranchInd` -> targets edge any round's post-decode analysis
-    // found, across the whole fixed point. `additional_decode_entries` alone
-    // gets the target bytes decoded into real blocks; this is what makes the
-    // dispatch actually branch to them -- see `attach_inferred_indirect_edges`'s
-    // doc comment. Accumulated rather than only using the last round's answer
-    // because a table found in an early round is still real even once later
-    // rounds move on to a different (e.g. nested) dispatch.
     let mut discovered_edges: std::collections::BTreeMap<u64, Vec<u64>> = Default::default();
-    let mut result = lifter.lift_raw_pcode_function_with_context_and_memory_context(
-        bytes,
-        decode_entry_address,
-        lift_contract,
-        &memory_context,
-        initial_context_override,
-    );
+    let mut result = match initial_override_lifted {
+        Some(lifted) => Ok(lifted),
+        None => lifter
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                decode_entry_address,
+                lift_contract,
+                memory_context,
+                context_override,
+            )
+            .map_err(|err| format!("{err:#}")),
+    };
     if continue_past_indirect_branch {
         last_good = result.as_ref().ok().cloned();
         // Each round can only add entries, and a round that adds none stops
@@ -274,7 +555,6 @@ pub(crate) fn decode_rust_sleigh_pcode(
         // rather than the usual exit: a `switch` inside a `switch` converges
         // in three.
         const MAX_DECODE_ROUNDS: usize = 8;
-        let little_endian = binary.is_little_endian();
         for _ in 0..MAX_DECODE_ROUNDS {
             let Ok(lifted) = result.as_ref() else {
                 break;
@@ -283,7 +563,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
                 &lifted.function,
                 decode_entry_address,
                 bytes,
-                &memory_context,
+                memory_context,
                 little_endian,
             );
             if std::env::var_os("FISSION_JT_TRACE").is_some() {
@@ -308,42 +588,22 @@ pub(crate) fn decode_rust_sleigh_pcode(
             if fresh.is_empty() {
                 break;
             }
-            // Entries are read out of a table and believed on four structural
-            // grounds, not proven, so one can land somewhere that is not an
-            // instruction, and a single `DecodeNoMatch` fails the whole lift.
-            //
-            // The failure is *not* swallowed here. The error path below knows
-            // how to recover from a bad byte -- `success_after_truncated_retry`
-            // re-lifts up to the offending offset, keeping the entries -- and
-            // on `bzip2` `BZ2_decompress` that path is what turns a truncated
-            // dispatcher into 3,541 lines. Stopping the loop and keeping the
-            // last good round instead produced 65.
-            //
-            // What is remembered is the last round that *did* lift, so that a
-            // function the error path cannot rescue falls back to it rather
-            // than to an error: taking the failure as final cost 14 functions
-            // their decompilation on a corpus sweep (`coreutils` `head`
-            // `main`: 195 lines, then "no match at 0x4c38").
             memory_context.additional_decode_entries.extend(fresh);
-            let next = lifter.lift_raw_pcode_function_with_context_and_memory_context(
-                bytes,
-                decode_entry_address,
-                lift_contract,
-                &memory_context,
-                initial_context_override,
-            );
+            let next = lifter
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    decode_entry_address,
+                    lift_contract,
+                    memory_context,
+                    context_override,
+                )
+                .map_err(|err| format!("{err:#}"));
             if let Ok(better) = &next {
                 last_good = Some(better.clone());
             }
             result = next;
         }
     }
-    // Every round's decoded-and-seeded targets are real bytes by now, but the
-    // dispatch itself still has no edge to them until this runs -- see
-    // `attach_inferred_indirect_edges`'s doc comment. Applied to both
-    // `result` and `last_good`: whichever one downstream actually returns
-    // (a later round can still fail and fall back to an earlier one) needs
-    // the wiring, not just whichever happens to be `result` right here.
     if !discovered_edges.is_empty() {
         if let Ok(lifted) = &mut result {
             fission_sleigh::runtime::attach_inferred_indirect_edges(
@@ -358,238 +618,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
             );
         }
     }
-    match result {
-        Ok(lifted) => {
-            let template_source_counts = lifted.template_source_counts.clone();
-            super::arm_thumb_heuristic::record_direct_call_targets(
-                &binary.hash,
-                initial_context_override.is_some(),
-                &lifted.instructions,
-            );
-            Ok((
-                lifted.function,
-                DecodeDiag {
-                    attempts: 1,
-                    stop_reason: "success_first_lift".into(),
-                    template_source_counts,
-                },
-                userops.clone(),
-            ))
-        }
-        Err(first_err) => {
-            if retry_on_decode_error {
-                for variant_lifter in lifters.iter().skip(1) {
-                    let variant_address_state =
-                        variant_lifter.normalize_low_bit_code_address(entry_address);
-                    let variant_decode_entry_address = variant_address_state.address;
-                    let Some(variant_bytes) =
-                        binary.view_bytes(variant_decode_entry_address, max_bytes)
-                    else {
-                        continue;
-                    };
-                    let variant_memory_context =
-                        decode_memory_context(binary, variant_decode_entry_address, max_bytes);
-                    if let Ok(mut retry) = variant_lifter
-                        .lift_raw_pcode_function_with_context_and_memory_context(
-                            variant_bytes,
-                            variant_decode_entry_address,
-                            lift_contract,
-                            &variant_memory_context,
-                            variant_address_state.context_override,
-                        )
-                    {
-                        if !discovered_edges.is_empty() {
-                            fission_sleigh::runtime::attach_inferred_indirect_edges(
-                                &mut retry.function,
-                                &discovered_edges,
-                            );
-                        }
-                        let template_source_counts = retry.template_source_counts.clone();
-                        return Ok((
-                            retry.function,
-                            DecodeDiag {
-                                attempts: 2,
-                                stop_reason: format!(
-                                    "success_after_sibling_language_retry:{}",
-                                    variant_lifter.entry().entry_id
-                                ),
-                                template_source_counts,
-                            },
-                            userops.clone(),
-                        ));
-                    }
-                }
-
-                if continue_past_indirect_branch {
-                    if let Ok(mut retry) = lifter
-                        .lift_raw_pcode_function_with_context_and_memory_context(
-                            &bytes,
-                            decode_entry_address,
-                            DecodeContract::strict_function(instruction_limit),
-                            &base_memory_context,
-                            initial_context_override,
-                        )
-                    {
-                        if !discovered_edges.is_empty() {
-                            fission_sleigh::runtime::attach_inferred_indirect_edges(
-                                &mut retry.function,
-                                &discovered_edges,
-                            );
-                        }
-                        let template_source_counts = retry.template_source_counts.clone();
-                        return Ok((
-                            retry.function,
-                            DecodeDiag {
-                                attempts: 2,
-                                stop_reason: "success_after_strict_indirect_retry".into(),
-                                template_source_counts,
-                            },
-                            userops.clone(),
-                        ));
-                    }
-                }
-
-                let err_str = format!("{first_err:#}");
-                if let Some(safe) =
-                    extract_safe_bytes_from_decode_error(&err_str, decode_entry_address)
-                {
-                    if safe > 0 && safe < bytes.len() {
-                        if let Ok(mut retry) = lifter
-                            .lift_raw_pcode_function_with_context_and_memory_context(
-                                &bytes[..safe],
-                                decode_entry_address,
-                                lift_contract,
-                                &memory_context,
-                                initial_context_override,
-                            )
-                        {
-                            if !discovered_edges.is_empty() {
-                                fission_sleigh::runtime::attach_inferred_indirect_edges(
-                                    &mut retry.function,
-                                    &discovered_edges,
-                                );
-                            }
-                            let template_source_counts = retry.template_source_counts.clone();
-                            return Ok((
-                                retry.function,
-                                DecodeDiag {
-                                    attempts: 2,
-                                    stop_reason: "success_after_truncated_retry".into(),
-                                    template_source_counts,
-                                },
-                                userops.clone(),
-                            ));
-                        }
-                        // The truncated retry is the last thing tried on this
-                        // path, so the fixed point's last good round is the
-                        // fallback here too -- not only at the end of the
-                        // outer error path.
-                        if let Some(mut fallback) = last_good {
-                            if !discovered_edges.is_empty() {
-                                fission_sleigh::runtime::attach_inferred_indirect_edges(
-                                    &mut fallback.function,
-                                    &discovered_edges,
-                                );
-                            }
-                            let template_source_counts = fallback.template_source_counts.clone();
-                            return Ok((
-                                fallback.function,
-                                DecodeDiag {
-                                    attempts: 2,
-                                    stop_reason: "success_from_decode_fixpoint_fallback".into(),
-                                    template_source_counts,
-                                },
-                                userops.clone(),
-                            ));
-                        }
-                        return Err(DecodeFailure {
-                            message: format!(
-                                "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err:#}"
-                            ),
-                            diag: DecodeDiag {
-                                attempts: 2,
-                                stop_reason: "lift_failed_after_truncated_retry".into(),
-                                template_source_counts: Default::default(),
-                            },
-                        });
-                    }
-                }
-
-                // `entry_address` was even, so `normalize_low_bit_code_address`
-                // trusted its bit 0 and assumed the CPU's default (non-Thumb)
-                // code mode -- correct for a real ARM/Thumb-interworking
-                // function pointer, but wrong for a Thumb-only target
-                // (Cortex-M/ARMv7-M) given a bare address with the ABI's
-                // Thumb marker already normalized away (e.g. by an external
-                // caller reporting addresses in stripped form). Only try this
-                // once every other retry has failed, and only when we didn't
-                // already decode in forced low-bit-code mode.
-                if initial_context_override.is_none()
-                    && let Some(forced_override) = lifter.low_bit_code_mode_override()
-                    && let Ok(mut retry) = lifter
-                        .lift_raw_pcode_function_with_context_and_memory_context(
-                            &bytes,
-                            decode_entry_address,
-                            lift_contract,
-                            &memory_context,
-                            Some(forced_override),
-                        )
-                {
-                    if !discovered_edges.is_empty() {
-                        fission_sleigh::runtime::attach_inferred_indirect_edges(
-                            &mut retry.function,
-                            &discovered_edges,
-                        );
-                    }
-                    let template_source_counts = retry.template_source_counts.clone();
-                    return Ok((
-                        retry.function,
-                        DecodeDiag {
-                            attempts: 2,
-                            stop_reason: "success_after_forced_low_bit_code_mode_retry".into(),
-                            template_source_counts,
-                        },
-                        userops.clone(),
-                    ));
-                }
-            }
-            // Every retry failed. If the decode fixed point had a round that
-            // lifted before a later one failed, that round is a real decode of
-            // this function; returning it beats returning an error, and it is
-            // exactly the function this call would have produced had the loop
-            // stopped one round earlier.
-            if let Some(mut fallback) =
-                last_good.or_else(|| cached_fallback.map(|cached| (*cached).clone()))
-            {
-                if !discovered_edges.is_empty() {
-                    fission_sleigh::runtime::attach_inferred_indirect_edges(
-                        &mut fallback.function,
-                        &discovered_edges,
-                    );
-                }
-                let template_source_counts = fallback.template_source_counts.clone();
-                return Ok((
-                    fallback.function,
-                    DecodeDiag {
-                        attempts: 2,
-                        stop_reason: "success_from_decode_fixpoint_fallback".into(),
-                        template_source_counts,
-                    },
-                    userops.clone(),
-                ));
-            }
-            Err(DecodeFailure {
-                message: format!(
-                    "rust_sleigh: function lift failed for {name} at 0x{entry_address:x}: {first_err:#}"
-                ),
-                diag: DecodeDiag {
-                    attempts: 1,
-                    stop_reason: "lift_failed".into(),
-                    template_source_counts: Default::default(),
-                },
-            })
-        }
-    }
+    (result, last_good, discovered_edges)
 }
 
 #[cfg(test)]
@@ -791,6 +820,143 @@ mod thumb_only_image_tests {
             addresses,
             vec![0x0800_0020, 0x0800_0022, 0x0800_0024, 0x0800_0026],
             "expected a Thumb instruction grid (stop={})",
+            diag.stop_reason
+        );
+    }
+
+    /// A jump table whose second entry lands on bytes that do not decode.
+    ///
+    /// `.text` (0x1000):  `jmp [rdi*8 + 0x2000]`, `nop`, `ret` at 0x1008, and
+    /// an invalid-in-64-bit opcode (`06`) at 0x1009.
+    /// `.rodata` (0x2000): the table `{0x1008, 0x1009}`.
+    ///
+    /// The table lives in a read-only data section, so the in-lift reader
+    /// (function bytes only) does not see it and round 0 lifts cleanly up to
+    /// the dispatch. The post-decode resolver then finds both entries, round 1
+    /// seeds them, and decoding 0x1009 fails. That is the error path after a
+    /// good fixpoint round: the decode must not throw away what the fixed
+    /// point learned by re-lifting under the strict contract with the base
+    /// memory context (which knows neither the entries nor the edges), but
+    /// keep the seeded case at 0x1008 wired as the dispatch's successor.
+    #[test]
+    fn decode_error_after_good_fixpoint_round_keeps_discovered_edges() {
+        let load_spec = fission_core::architecture::BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x1000,
+            pair: fission_core::architecture::LanguageCompilerSpecPair {
+                language_id: fission_core::architecture::GhidraLanguageId(
+                    "x86:LE:64:default".to_string(),
+                ),
+                compiler_spec_id: fission_core::architecture::CompilerSpecId("gcc".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+        let mut data = vec![0x90u8; 0x30];
+        // jmp qword ptr [rdi*8 + 0x2000]
+        data[..7].copy_from_slice(&[0xff, 0x24, 0xfd, 0x00, 0x20, 0x00, 0x00]);
+        data[8] = 0xc3; // 0x1008: ret
+        data[9] = 0x06; // 0x1009: invalid in 64-bit mode
+        data[0x20..0x28].copy_from_slice(&0x1008u64.to_le_bytes());
+        data[0x28..0x30].copy_from_slice(&0x1009u64.to_le_bytes());
+        let binary = fission_loader::loader::LoadedBinaryBuilder::new(
+            "jt_decode_error_after_good_round.elf".to_string(),
+            fission_loader::loader::DataBuffer::Heap(data),
+        )
+        .format("ELF")
+        .is_64bit(true)
+        .load_spec(load_spec)
+        .add_section(fission_loader::loader::SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: 0x1000,
+            virtual_size: 0x10,
+            file_offset: 0,
+            file_size: 0x10,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .add_section(fission_loader::loader::SectionInfo {
+            name: ".rodata".to_string(),
+            virtual_address: 0x2000,
+            virtual_size: 0x10,
+            file_offset: 0x20,
+            file_size: 0x10,
+            is_executable: false,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("build jump-table fixture");
+
+        // Preconditions, so the test cannot pass by never reaching the path:
+        // round 0 lifts, and the resolver finds both table entries in it.
+        let lifter = RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().expect("spec"))
+            .expect("lifter");
+        let bytes = binary.view_bytes(0x1000, 0x10).expect("bytes");
+        let memory_context = decode_memory_context(&binary, 0x1000, 0x10);
+        let round_zero = lifter
+            .lift_raw_pcode_function_with_context_and_memory_context(
+                bytes,
+                0x1000,
+                DecodeContract::decomp_function(64),
+                &memory_context,
+                None,
+            )
+            .expect("round 0 lifts up to the dispatch");
+        let discovered = fission_sleigh::runtime::resolve_indirect_branch_targets(
+            &round_zero.function,
+            0x1000,
+            bytes,
+            &memory_context,
+            true,
+        );
+        assert_eq!(
+            discovered,
+            std::collections::BTreeMap::from([(0x1000, vec![0x1008, 0x1009])])
+        );
+        let mut seeded = memory_context.clone();
+        seeded.additional_decode_entries.extend([0x1008, 0x1009]);
+        assert!(
+            lifter
+                .lift_raw_pcode_function_with_context_and_memory_context(
+                    bytes,
+                    0x1000,
+                    DecodeContract::decomp_function(64),
+                    &seeded,
+                    None,
+                )
+                .is_err(),
+            "round 1 must fail on the invalid table entry"
+        );
+
+        let (pcode, diag, _) =
+            decode_rust_sleigh_pcode(&binary, "dispatch", 0x1000, 0x10, 64, true, true, None)
+                .expect("a decode error after a good round still yields a function");
+
+        assert_ne!(
+            diag.stop_reason, "success_after_strict_indirect_retry",
+            "the strict re-lift discards the fixed point's entries and edges"
+        );
+        let dispatch = pcode
+            .blocks
+            .iter()
+            .find(|block| {
+                block
+                    .ops
+                    .last()
+                    .is_some_and(|op| op.opcode == fission_pcode::PcodeOpcode::BranchInd)
+            })
+            .expect("dispatch block");
+        let successor_starts = dispatch
+            .successors
+            .iter()
+            .filter_map(|index| pcode.blocks.iter().find(|block| block.index == *index))
+            .map(|block| block.start_address)
+            .collect::<Vec<_>>();
+        assert!(
+            successor_starts.contains(&0x1008),
+            "the resolved case must stay wired to the dispatch (stop={}, successors={successor_starts:x?})",
             diag.stop_reason
         );
     }

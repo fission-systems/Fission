@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fission list data v1",
+  "description": "Discovered function rows.",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": [
+      "address",
+      "name",
+      "origin",
+      "kind",
+      "source_section",
+      "external_library",
+      "is_thunk_like",
+      "thunk_target",
+      "size",
+      "is_import",
+      "is_export"
+    ],
+    "properties": {
+      "address": {
+        "type": "string",
+        "pattern": "^0x[0-9a-f]+$"
+      },
+      "name": {
+        "type": "string"
+      },
+      "origin": {
+        "type": "string"
+      },
+      "kind": {
+        "type": "string"
+      },
+      "source_section": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "external_library": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "is_thunk_like": {
+        "type": "boolean"
+      },
+      "thunk_target": {
+        "anyOf": [
+          {
+            "type": "string",
+            "pattern": "^0x[0-9a-f]+$"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "size": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "is_import": {
+        "type": "boolean"
+      },
+      "is_export": {
+        "type": "boolean"
+      },
+      "isa_mode": {
+        "type": "string"
+      }
+    }
+  }
+}

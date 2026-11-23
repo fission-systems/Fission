@@ -1,8 +1,10 @@
 use super::provenance::{
     InventoryCandidateEntry, detect_pdb_source_present, to_inventory_row, update_inventory_summary,
 };
-use super::schema::{FunctionFactsInventorySummary, write_inventory_summary};
-use crate::cli::args::OneShotArgs;
+use super::schema::{
+    FunctionFactsInventoryRow, FunctionFactsInventorySummary, write_inventory_summary,
+};
+use crate::cli::args::{OneShotArgs, parse_hex_address};
 use crate::cli::oneshot::function_select::{
     BatchFunctionSelection, select_batch_functions, select_explicit_functions,
     select_function_by_address, select_functions_from_addresses_file,
@@ -11,9 +13,11 @@ use fission_decompiler::{NirEngineMode, NirSurfaceKind, auto_nir_eligible};
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decode_context_for_address;
 use fission_static::analysis::decomp::FactStore;
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::path::Path;
 
 use crate::cli::oneshot::assessment::canonical_indirect_classification;
 
@@ -816,6 +820,81 @@ fn rust_candidate_entry_with_recovery(
     }
 }
 
+fn ensure_parent_dir(path: &Path) -> io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(())
+}
+
+fn paths_refer_to_same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    fs::canonicalize(a)
+        .ok()
+        .zip(fs::canonicalize(b).ok())
+        .is_some_and(|(ca, cb)| ca == cb)
+}
+
+fn file_needs_trailing_newline(path: &Path) -> io::Result<bool> {
+    let mut file = fs::File::open(path)?;
+    let len = file.metadata()?.len();
+    if len == 0 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut byte = [0u8; 1];
+    file.read_exact(&mut byte)?;
+    Ok(byte[0] != b'\n')
+}
+
+fn load_resumed_inventory(
+    path: &Path,
+    summary: &mut FunctionFactsInventorySummary,
+) -> io::Result<(Vec<String>, HashSet<u64>)> {
+    let file = fs::File::open(path)?;
+    let reader = io::BufReader::new(file);
+    let mut lines = Vec::new();
+    let mut seen_addresses = HashSet::new();
+
+    for (line_idx, line) in reader.lines().enumerate() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let row: FunctionFactsInventoryRow = serde_json::from_str(trimmed).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "invalid resume JSONL row at {}:{}: {e}",
+                    path.display(),
+                    line_idx + 1
+                ),
+            )
+        })?;
+        let address = parse_hex_address(&row.address).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "invalid row address `{}` at {}:{}: {e}",
+                    row.address,
+                    path.display(),
+                    line_idx + 1
+                ),
+            )
+        })?;
+        update_inventory_summary(summary, &row);
+        seen_addresses.insert(address);
+        lines.push(trimmed.to_string());
+    }
+
+    Ok((lines, seen_addresses))
+}
+
 pub(crate) fn emit_function_facts_inventory(
     cli: &OneShotArgs,
     binary: &LoadedBinary,
@@ -846,14 +925,8 @@ pub(crate) fn emit_function_facts_inventory(
     let selection_accounting = functions.accounting;
     let functions = functions.functions;
 
-    if let Some(parent) = output_jsonl.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if let Some(parent) = summary_json.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(output_jsonl, b"")?;
-    let mut writer = std::io::BufWriter::new(OpenOptions::new().append(true).open(output_jsonl)?);
+    ensure_parent_dir(output_jsonl)?;
+    ensure_parent_dir(summary_json)?;
 
     let mut summary = FunctionFactsInventorySummary {
         binary: binary_name.clone(),
@@ -873,7 +946,41 @@ pub(crate) fn emit_function_facts_inventory(
         ..Default::default()
     };
 
-    for chunk in functions.chunks(chunk_size) {
+    let (mut writer, remaining_functions) = if let Some(resume_path) = &cli.resume_from {
+        let (resumed_lines, seen_addresses) = load_resumed_inventory(resume_path, &mut summary)?;
+        let same_output = paths_refer_to_same_file(resume_path, output_jsonl);
+        let mut writer = if same_output {
+            let needs_newline = file_needs_trailing_newline(output_jsonl)?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(output_jsonl)?;
+            if needs_newline {
+                file.write_all(b"\n")?;
+            }
+            io::BufWriter::new(file)
+        } else {
+            let mut bw = io::BufWriter::new(fs::File::create(output_jsonl)?);
+            for line in &resumed_lines {
+                bw.write_all(line.as_bytes())?;
+                bw.write_all(b"\n")?;
+            }
+            bw
+        };
+        writer.flush()?;
+        let remaining: Vec<FunctionInfo> = functions
+            .into_iter()
+            .filter(|func| !seen_addresses.contains(&func.address))
+            .collect();
+        (writer, remaining)
+    } else {
+        (
+            io::BufWriter::new(fs::File::create(output_jsonl)?),
+            functions,
+        )
+    };
+
+    for chunk in remaining_functions.chunks(chunk_size) {
         for func in chunk {
             let candidate =
                 rust_candidate_entry_with_recovery(cli, binary, &fact_store, &binary_name, func);
@@ -895,4 +1002,175 @@ pub(crate) fn emit_function_facts_inventory(
     writer.flush()?;
     write_inventory_summary(summary_json, &summary)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fission_loader::loader::{BinaryLoadSpec, DataBuffer, LoadedBinaryBuilder, SectionInfo};
+    use std::path::PathBuf;
+
+    fn two_function_binary() -> LoadedBinary {
+        let mut code = vec![0x90; 0x30];
+        // func_a at 0x1000: mov eax, 1; ret
+        code[0..6].copy_from_slice(&[0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3]);
+        // func_b at 0x1020: mov eax, 2; ret
+        code[0x20..0x26].copy_from_slice(&[0xb8, 0x02, 0x00, 0x00, 0x00, 0xc3]);
+
+        LoadedBinaryBuilder::new("sample.elf".into(), DataBuffer::Heap(code))
+            .format("ELF")
+            .image_base(0x1000)
+            .entry_point(0x1000)
+            .is_64bit(true)
+            .load_spec(BinaryLoadSpec::new(
+                "ELF",
+                0x1000,
+                "x86:LE:64:default",
+                "gcc",
+                "synthetic-test",
+            ))
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x30,
+                file_offset: 0,
+                file_size: 0x30,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_functions([
+                FunctionInfo {
+                    name: "func_a".into(),
+                    address: 0x1000,
+                    size: 6,
+                    ..Default::default()
+                },
+                FunctionInfo {
+                    name: "func_b".into(),
+                    address: 0x1020,
+                    size: 6,
+                    ..Default::default()
+                },
+            ])
+            .build()
+            .expect("build synthetic binary")
+    }
+
+    #[test]
+    fn resume_from_same_file_preserves_existing_rows_and_appends_remaining() {
+        let binary = two_function_binary();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let rows_path = dir.path().join("rows.jsonl");
+        let summary_path = dir.path().join("summary.json");
+
+        // First run limited to 1 function (`func_a`).
+        let first_cli = OneShotArgs {
+            binary: PathBuf::from("sample.elf"),
+            emit_function_facts_inventory: true,
+            functions_limit: Some(1),
+            output_jsonl: Some(rows_path.clone()),
+            summary_json: Some(summary_path.clone()),
+            ..OneShotArgs::default()
+        };
+        emit_function_facts_inventory(&first_cli, &binary, binary.data.as_slice())
+            .expect("first inventory run");
+        let first_contents = fs::read_to_string(&rows_path).expect("read initial jsonl");
+        let first_lines: Vec<&str> = first_contents.lines().collect();
+        assert_eq!(first_lines.len(), 1);
+        assert!(first_lines[0].contains("0x1000"));
+
+        // Resume in-place for all functions.
+        let resume_cli = OneShotArgs {
+            binary: PathBuf::from("sample.elf"),
+            emit_function_facts_inventory: true,
+            output_jsonl: Some(rows_path.clone()),
+            summary_json: Some(summary_path.clone()),
+            resume_from: Some(rows_path.clone()),
+            ..OneShotArgs::default()
+        };
+        emit_function_facts_inventory(&resume_cli, &binary, binary.data.as_slice())
+            .expect("resumed inventory run");
+
+        let final_contents = fs::read_to_string(&rows_path).expect("read resumed jsonl");
+        let final_lines: Vec<&str> = final_contents.lines().collect();
+        assert_eq!(final_lines.len(), 2, "{final_contents}");
+        assert_eq!(final_lines[0], first_lines[0]);
+        assert!(final_lines[1].contains("0x1020"));
+
+        let summary: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&summary_path).expect("read summary"))
+                .expect("parse summary");
+        assert_eq!(summary["functions_total"], 2);
+        assert_eq!(summary["rows_emitted"], 2);
+    }
+
+    #[test]
+    fn resume_from_separate_file_copies_prior_rows_and_emits_remaining() {
+        let binary = two_function_binary();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let partial_path = dir.path().join("partial.jsonl");
+        let partial_summary = dir.path().join("partial-summary.json");
+        let full_path = dir.path().join("full.jsonl");
+        let full_summary = dir.path().join("full-summary.json");
+
+        let first_cli = OneShotArgs {
+            binary: PathBuf::from("sample.elf"),
+            emit_function_facts_inventory: true,
+            functions_limit: Some(1),
+            output_jsonl: Some(partial_path.clone()),
+            summary_json: Some(partial_summary),
+            ..OneShotArgs::default()
+        };
+        emit_function_facts_inventory(&first_cli, &binary, binary.data.as_slice())
+            .expect("partial run");
+
+        let resume_cli = OneShotArgs {
+            binary: PathBuf::from("sample.elf"),
+            emit_function_facts_inventory: true,
+            output_jsonl: Some(full_path.clone()),
+            summary_json: Some(full_summary.clone()),
+            resume_from: Some(partial_path.clone()),
+            ..OneShotArgs::default()
+        };
+        emit_function_facts_inventory(&resume_cli, &binary, binary.data.as_slice())
+            .expect("resumed separate run");
+
+        assert_eq!(
+            fs::read_to_string(&partial_path).unwrap().lines().count(),
+            1
+        );
+        let full_contents = fs::read_to_string(&full_path).unwrap();
+        let full_lines: Vec<&str> = full_contents.lines().collect();
+        assert_eq!(full_lines.len(), 2);
+        assert!(full_lines[0].contains("0x1000"));
+        assert!(full_lines[1].contains("0x1020"));
+    }
+
+    #[test]
+    fn missing_resume_file_fails_without_truncating_output() {
+        let binary = two_function_binary();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let output_path = dir.path().join("existing.jsonl");
+        let summary_path = dir.path().join("summary.json");
+        fs::write(&output_path, "keep-me\n").expect("seed output");
+
+        let cli = OneShotArgs {
+            binary: PathBuf::from("sample.elf"),
+            emit_function_facts_inventory: true,
+            output_jsonl: Some(output_path.clone()),
+            summary_json: Some(summary_path),
+            resume_from: Some(dir.path().join("missing.jsonl")),
+            ..OneShotArgs::default()
+        };
+
+        let err = emit_function_facts_inventory(&cli, &binary, binary.data.as_slice()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+        assert_eq!(fs::read_to_string(&output_path).unwrap(), "keep-me\n");
+    }
+
+    #[test]
+    fn bare_filename_parent_dir_check_succeeds() {
+        assert!(ensure_parent_dir(Path::new("rows.jsonl")).is_ok());
+    }
 }

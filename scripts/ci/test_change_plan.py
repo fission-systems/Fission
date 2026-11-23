@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import subprocess
 import tempfile
@@ -65,9 +67,15 @@ class ChangePlanTests(unittest.TestCase):
         self.assertFalse(plan(["docs/CLI.md"], "pull_request")[1]["run_lint"])
 
     def test_docs_do_not_select_runtime_jobs(self):
-        self.assertEqual(plan(["docs/CLI.md"], "pull_request"), ("docs", {
-            name: False for name in plan(["docs/CLI.md"], "pull_request")[1]
-        }))
+        for path in ("docs/CLI.md", "mkdocs.yml"):
+            lane, jobs = plan([path], "pull_request")
+            self.assertEqual(lane, "docs")
+            self.assertEqual({name for name, enabled in jobs.items() if enabled}, {"run_doc_checks"})
+
+    def test_cli_contract_and_replay_gates_are_selected_for_their_owners(self):
+        self.assertTrue(plan(["crates/fission-cli/src/cli/contract/schema.rs"], "merge_group")[1]["run_doc_checks"])
+        self.assertTrue(plan(["crates/fission-dir/src/eval.rs"], "pull_request")[1]["run_replay_checks"])
+        self.assertFalse(plan(["docs/CLI.md"], "merge_group")[1]["run_replay_checks"])
 
     def test_stacked_pr_merge_group_and_rename_use_event_shas(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -99,6 +107,45 @@ class ChangePlanTests(unittest.TestCase):
                     event_paths("merge_group", {"merge_group": {
                         "base_sha": base, "head_sha": base,
                     }}, head)
+            finally:
+                os.chdir(prior)
+
+    def test_a_retargeted_pr_with_a_stale_merge_ref_is_still_classified(self):
+        # GitHub fires `edited` for a base change before it recomputes the
+        # merge ref, so the checkout is the merge with the *old* base and the
+        # new base is not among its ancestors.
+        with tempfile.TemporaryDirectory() as temp:
+            prior = Path.cwd()
+            try:
+                os.chdir(temp)
+                self.git("init", "-q")
+                self.git("config", "user.name", "Test")
+                self.git("config", "user.email", "test@example.invalid")
+                Path("root.txt").touch()
+                self.git("add", "root.txt")
+                self.git("commit", "-qm", "root")
+                root = self.git("rev-parse", "HEAD")
+                self.git("checkout", "-qb", "old-base")
+                Path("old.txt").touch()
+                self.git("add", "old.txt")
+                self.git("commit", "-qm", "old base")
+                self.git("checkout", "-qb", "feature")
+                Path("feature.txt").touch()
+                self.git("add", "feature.txt")
+                self.git("commit", "-qm", "feature")
+                head = self.git("rev-parse", "HEAD")
+                stale_merge = head  # the merge ref still built on old-base
+                self.git("checkout", "-q", root)
+                Path("new.txt").touch()
+                self.git("add", "new.txt")
+                self.git("commit", "-qm", "new base (main moved)")
+                new_base = self.git("rev-parse", "HEAD")
+                self.git("checkout", "-q", stale_merge)
+                payload = {"pull_request": {"base": {"sha": new_base}, "head": {"sha": head}}}
+                with contextlib.redirect_stderr(io.StringIO()) as err:
+                    paths = event_paths("pull_request", payload, stale_merge)
+                self.assertIn("feature.txt", paths)
+                self.assertIn("Stale merge ref", err.getvalue())
             finally:
                 os.chdir(prior)
 

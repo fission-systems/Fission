@@ -117,12 +117,13 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         if index.is_empty() {
             bail!("similarity index {} contains no functions", path.display());
         }
-        let queries: Vec<_> = if let Some(address) = cli.similar_function {
+        let queries: Vec<_> = if let Some(target_addr) = target_function_addr {
             let Some(document) = documents
                 .iter()
-                .find(|document| document.function_address == address)
+                .find(|document| document.function_address == target_addr)
             else {
-                bail!("0x{address:x} is not a known (non-import) function in this binary");
+                let requested = cli.similar_function.unwrap_or(target_addr);
+                bail!("0x{requested:x} is not a known (non-import) function in this binary");
             };
             vec![document]
         } else {
@@ -160,9 +161,10 @@ pub(super) fn run_similar(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<()
         return Ok(());
     }
 
-    if let Some(address) = cli.similar_function {
-        let Some((key, _)) = keys.iter().find(|(_, addr)| *addr == address) else {
-            bail!("0x{address:x} is not a known (non-import) function in this binary");
+    if let Some(target_addr) = target_function_addr {
+        let Some((key, _)) = keys.iter().find(|(_, addr)| *addr == target_addr) else {
+            let requested = cli.similar_function.unwrap_or(target_addr);
+            bail!("0x{requested:x} is not a known (non-import) function in this binary");
         };
         let matches = corpus.most_similar_to(key, cli.similar_top_k);
         if cli.json {
@@ -485,5 +487,97 @@ mod tests {
                 }],
             })
         );
+    }
+
+    #[test]
+    fn similar_function_accepts_thumb_odd_low_bit_addresses() {
+        use fission_core::architecture::ArchitectureDescriptor;
+        use fission_loader::loader::{
+            BinaryLoadSpec, DataBuffer, FunctionInfo, LoadedBinaryBuilder, SectionInfo,
+        };
+
+        // Two small Thumb functions: `movs r0, #1; bx lr` and `movs r0, #2; bx lr`.
+        let mut code = vec![0x00u8; 0x20];
+        code[0..4].copy_from_slice(&[0x01, 0x20, 0x70, 0x47]);
+        code[0x10..0x14].copy_from_slice(&[0x02, 0x20, 0x70, 0x47]);
+
+        let binary = LoadedBinaryBuilder::new("thumb.elf".into(), DataBuffer::Heap(code))
+            .format("ELF")
+            .image_base(0x1000)
+            .entry_point(0x1001)
+            .is_64bit(false)
+            .arch_spec("ARM:LE:32:v8")
+            .architecture(ArchitectureDescriptor {
+                processor: "ARM".into(),
+                endian: "little".into(),
+                bitness: 32,
+                variant: "v8".into(),
+                abi: None,
+                raw_machine: "EM_ARM".into(),
+            })
+            .load_spec(BinaryLoadSpec::new(
+                "ELF",
+                0x1000,
+                "ARM:LE:32:v8",
+                "default",
+                "synthetic-test",
+            ))
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x20,
+                file_offset: 0,
+                file_size: 0x20,
+                is_executable: true,
+                is_readable: true,
+                is_writable: false,
+            })
+            .add_functions([
+                FunctionInfo {
+                    name: "thumb_one".into(),
+                    address: 0x1001,
+                    size: 4,
+                    ..Default::default()
+                },
+                FunctionInfo {
+                    name: "thumb_two".into(),
+                    address: 0x1011,
+                    size: 4,
+                    ..Default::default()
+                },
+            ])
+            .build()
+            .expect("build thumb binary");
+
+        // Same-binary mode with odd Thumb address `--function 0x1001`.
+        let same_binary_cli = OneShotArgs {
+            similar_cmd: true,
+            similar_function: Some(0x1001),
+            similar_top_k: 5,
+            json: true,
+            ..OneShotArgs::default()
+        };
+        run_similar(&same_binary_cli, &binary).expect("same-binary Thumb query succeeds");
+
+        // Cross-binary index mode with odd Thumb address `--function 0x1001`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let index_path = dir.path().join("thumb-index.json");
+        let update_cli = OneShotArgs {
+            similar_cmd: true,
+            similar_update_index: Some(index_path.clone()),
+            json: true,
+            ..OneShotArgs::default()
+        };
+        run_similar(&update_cli, &binary).expect("update similarity index");
+
+        let index_cli = OneShotArgs {
+            similar_cmd: true,
+            similar_index: Some(index_path),
+            similar_function: Some(0x1001),
+            similar_top_k: 5,
+            json: true,
+            ..OneShotArgs::default()
+        };
+        run_similar(&index_cli, &binary).expect("cross-binary index Thumb query succeeds");
     }
 }

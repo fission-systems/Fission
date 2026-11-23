@@ -20,9 +20,11 @@ Use this skill when improving Fission's Rust-native decompiler pipeline. The goa
 
 `fission-pcode` owns shipped decompiler semantics, but it is not a dumping ground for every fix. Treat it as:
 
-- **Substrate:** IR/HIR types, p-code/NIR contracts, telemetry, action pipeline, shared CFG facts, def-use facts, type constraints, calling-convention facts, and alias facts.
-- **Owner layers:** builder/materialize, normalize, type/data recovery, structuring, and render/printer.
-- **Future split candidates:** `fission-nir-analysis`, `fission-nir-normalize`, `fission-structuring`.
+- **Substrate:** `fission-pcode-ir` owns p-code and block CFG facts.
+  `fission-midend-core` and `fission-midend-prehir` own shared midend and PreHIR types.
+- **Semantic stages:** follow the owners in [the project map](docs/PROJECT_MAP.md),
+  including `fission-midend-normalize` and `fission-midend-structuring`.
+  `fission-pcode` houses the builder and the final HIR presentation.
 
 Before adding code, translate the observed failure into an owner-native invariant. Prefer reusable dataflow, def-use, type-constraint, calling-convention, CFG, or alias analysis over another narrow pass/helper.
 
@@ -66,7 +68,7 @@ Use `docs/templates/AI_DECOMPILER_REVIEW_PROMPT.md` for cross-model review and `
 Run the smallest relevant checks first, then broaden:
 
 ```bash
-cargo nextest run -p fission-pcode --filter <targeted_test>
+cargo nextest run -p fission-pcode <targeted_test>
 cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
@@ -76,7 +78,10 @@ python3 scripts/audit/ai_prompt_leak_scan.py --root .
 python3 scripts/audit/nir_boundary_scan.py --root .
 ```
 
-For semantic claims, also rerun the focused source-semantic benchmark row with stale decompilation and behavior caches disabled. Compare behavior status, case progress, stderr/stdout, pseudocode size, and feature gaps, not just aggregate scores.
+Rerun the motivating row and compare cache-disabled full-dataset DecBench
+sweeps before making a quality claim. Check per-row output hashes before score
+deltas. Report status and failure changes, GED perfect count with total
+distance, and type results. Follow the [DecBench guide](docs/BENCHMARK_DECBENCH.md).
 
 ## Review Rejection Rules
 

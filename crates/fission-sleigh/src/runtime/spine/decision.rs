@@ -1,10 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use smallvec::SmallVec;
 
 use crate::compiler::{
     CompiledDecisionLeafEntry, CompiledDecisionProbe, CompiledDisjointPattern,
-    CompiledExecutableConstructor, CompiledFrontend, CompiledPatternBlock,
-    CompiledSubtableDefinition,
+    CompiledExecutableConstructor, CompiledPatternBlock, CompiledSubtableDefinition,
 };
 
 /// Almost every decision probe resolves to exactly one branch value; only
@@ -33,138 +34,84 @@ pub struct RuntimeSelection<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeMatchTrace {
-    // `Arc<str>`: this whole struct is cloned once per candidate branch
-    // value in `walk_decision_tree`'s backtracking search (every value the
-    // current decision node's probe returns, for every internal node
-    // visited during every instruction decode), so every field here should
-    // be cheap to clone.
-    pub root_bucket: std::sync::Arc<str>,
-    pub probes: ProbeChain,
+    pub root_bucket: Arc<str>,
+    pub probes: RuntimeMatchProbes,
     pub leaf_constructor_indexes: Vec<usize>,
-    pub matched_leaf_pattern: Option<std::sync::Arc<CompiledDisjointPattern>>,
+    pub matched_leaf_pattern: Option<Arc<CompiledDisjointPattern>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeMatchProbe {
     pub probe: CompiledDecisionProbe,
     pub value: u8,
 }
 
-/// A persistent (structure-sharing) singly-linked list of
-/// [`RuntimeMatchProbe`]s: `push` prepends one new `Arc`-boxed node in front
-/// of the existing chain, and `clone` is then just an `Option<Arc<..>>`
-/// clone (a refcount bump) regardless of how long the chain has grown --
-/// unlike `Vec<RuntimeMatchProbe>`, which would need a full O(depth)
-/// reallocate-and-copy on every one of those same backtracking clones.
-/// Write-only in current use (push + is_empty; see `tests.rs`), so no
-/// iteration/indexing API is provided.
+/// The selected probes in root-to-leaf order, shared by clones of the match.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ProbeChain(Option<std::sync::Arc<ProbeChainNode>>);
+pub struct RuntimeMatchProbes(Option<Arc<[RuntimeMatchProbe]>>);
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct ProbeChainNode {
-    probe: RuntimeMatchProbe,
-    prev: ProbeChain,
-}
-
-impl ProbeChain {
+impl RuntimeMatchProbes {
     pub fn is_empty(&self) -> bool {
         self.0.is_none()
     }
 
-    /// Conservative owned payload estimate; bounded traversal avoids extending
-    /// retention policy into a second unbounded parse-tree walk.
+    /// Owned payload estimate including the Arc's reference counts.
     pub(in crate::runtime::spine) fn retained_payload(&self, limit: usize) -> Option<usize> {
-        let mut node = self.0.as_deref();
-        let mut bytes = 0usize;
-        let mut count = 0usize;
-        while let Some(current) = node {
-            count += 1;
-            if count > 128 {
-                return None;
-            }
-            bytes = bytes.checked_add(
-                std::mem::size_of::<ProbeChainNode>() + 2 * std::mem::size_of::<usize>(),
-            )?;
-            if bytes > limit {
-                return None;
-            }
-            node = current.prev.0.as_deref();
+        let Some(probes) = self.0.as_deref() else {
+            return Some(0);
+        };
+        if probes.len() > 128 {
+            return None;
         }
-        Some(bytes)
-    }
-
-    pub fn push(&mut self, probe: RuntimeMatchProbe) {
-        let prev = std::mem::take(self);
-        self.0 = Some(std::sync::Arc::new(ProbeChainNode { probe, prev }));
+        let bytes = std::mem::size_of_val(probes) + 2 * std::mem::size_of::<usize>();
+        (bytes <= limit).then_some(bytes)
     }
 }
 
+// Reused for backtracking. A successful leaf snapshots the path into the trace.
+type ProbePath = SmallVec<[RuntimeMatchProbe; 8]>;
+
 pub fn select_constructor<'a, E, M>(
-    compiled: &'a CompiledFrontend,
-    roots: impl IntoIterator<Item = (String, usize)>,
-    mut evaluator_factory: impl FnMut() -> E,
+    subtable: &'a CompiledSubtableDefinition,
+    table_name: &str,
+    mut evaluator: E,
     mut constructor_matches: M,
 ) -> Result<Option<RuntimeSelection<'a>>>
 where
     E: DecisionProbeEvaluator,
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
-    for (table_name, root_node_index) in roots {
-        let subtable = compiled
-            .subtables
-            .get(&table_name)
-            .ok_or_else(|| anyhow::anyhow!("missing subtable {table_name} for decision root"))?;
-        let mut evaluator = evaluator_factory();
-        if let Some(selection) = walk_decision_tree(
-            subtable,
-            &subtable.decision_tree,
-            root_node_index,
-            &mut evaluator,
-            &mut constructor_matches,
-            RuntimeMatchTrace {
-                root_bucket: table_name.as_str().into(),
-                probes: ProbeChain::default(),
-                leaf_constructor_indexes: Vec::new(),
-                matched_leaf_pattern: None,
-            },
-        )? {
-            return Ok(Some(selection));
-        }
-    }
-    Ok(None)
+    walk_decision_tree(
+        subtable,
+        table_name,
+        subtable.decision_tree.root_node_index,
+        &mut evaluator,
+        &mut constructor_matches,
+        &mut ProbePath::new(),
+    )
 }
 
 fn walk_decision_tree<'a, E, M>(
     subtable: &'a CompiledSubtableDefinition,
-    decision_tree: &'a crate::compiler::CompiledDecisionTree,
+    root_bucket: &str,
     node_index: usize,
     evaluator: &mut E,
     constructor_matches: &mut M,
-    mut trace: RuntimeMatchTrace,
+    path: &mut ProbePath,
 ) -> Result<Option<RuntimeSelection<'a>>>
 where
     E: DecisionProbeEvaluator,
     M: FnMut(&CompiledExecutableConstructor) -> Result<()>,
 {
-    let node = decision_tree
+    let node = subtable
+        .decision_tree
         .nodes
         .get(node_index)
         .ok_or_else(|| anyhow::anyhow!("decision tree node index {node_index} is out of range"))?;
     let trace_walk = crate::runtime::diagnostics::terminal_reselect_trace_enabled();
     match node.probe {
         CompiledDecisionProbe::Terminal => {
-            trace.leaf_constructor_indexes = if node.leaf_entries.is_empty() {
-                node.leaf_constructor_indexes.clone()
-            } else {
-                node.leaf_entries
-                    .iter()
-                    .map(|entry| entry.constructor_index)
-                    .collect()
-            };
-            let mut first_unsupported_match = None;
             let trace_terminal = crate::runtime::diagnostics::terminal_verify_trace_enabled();
-            let mut matched_any_pattern = false;
             // `Cow` rather than an unconditional `.clone()`: this terminal
             // branch runs on every decision-tree leaf visit (i.e. every
             // constructor selection at every subtable level of every
@@ -195,6 +142,7 @@ where
                 } else {
                     std::borrow::Cow::Borrowed(node.leaf_entries.as_slice())
                 };
+            let mut selected = None;
             for entry in leaf_entries.as_ref() {
                 let Some((constructor_index, constructor)) =
                     resolve_leaf_constructor(subtable, entry)
@@ -214,73 +162,49 @@ where
                         entry.pattern
                     );
                 }
-                if !matched {
+                if !matched || constructor_matches(constructor).is_err() {
                     continue;
                 }
-                matched_any_pattern = true;
-                if constructor_matches(constructor).is_ok() {
-                    if constructor.runtime_ready {
-                        trace.matched_leaf_pattern = Some(entry.pattern.clone());
-                        let constructor_slot = selection_constructor_slot(
-                            subtable,
-                            constructor,
-                            constructor_index,
-                            entry.subtable_id,
-                        )
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "selected constructor {} is missing SLA selection identity",
-                                constructor.constructor_id
-                            )
-                        })?;
-                        return Ok(Some(RuntimeSelection {
-                            constructor,
-                            constructor_index,
-                            subtable_id: entry.subtable_id,
-                            constructor_id: entry.constructor_id,
-                            constructor_slot,
-                            trace,
-                        }));
-                    }
-                    if first_unsupported_match.is_none() {
-                        first_unsupported_match = Some((
-                            constructor,
-                            constructor_index,
-                            entry.subtable_id,
-                            entry.constructor_id,
-                        ));
-                    }
+                let candidate = (constructor_index, constructor, entry);
+                if constructor.runtime_ready {
+                    selected = Some(candidate);
+                    break;
                 }
+                selected.get_or_insert(candidate);
             }
-            if !matched_any_pattern {
+            let Some((constructor_index, constructor, entry)) = selected else {
                 return Ok(None);
-            }
-            first_unsupported_match
-                .map(
-                    |(constructor, constructor_index, subtable_id, constructor_id)| {
-                        let constructor_slot = selection_constructor_slot(
-                            subtable,
-                            constructor,
-                            constructor_index,
-                            subtable_id,
-                        )
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "selected constructor {} is missing SLA selection identity",
-                                constructor.constructor_id
-                            )
-                        })?;
-                        Ok(RuntimeSelection {
-                            constructor,
-                            constructor_index,
-                            subtable_id,
-                            constructor_id,
-                            constructor_slot,
-                            trace,
-                        })
-                    },
+            };
+            let constructor_slot = selection_constructor_slot(
+                subtable,
+                constructor,
+                constructor_index,
+                entry.subtable_id,
+            )
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "selected constructor {} is missing SLA selection identity",
+                    constructor.constructor_id
                 )
-                .transpose()
+            })?;
+            Ok(Some(RuntimeSelection {
+                constructor,
+                constructor_index,
+                subtable_id: entry.subtable_id,
+                constructor_id: entry.constructor_id,
+                constructor_slot,
+                trace: RuntimeMatchTrace {
+                    root_bucket: root_bucket.into(),
+                    probes: RuntimeMatchProbes(
+                        (!path.is_empty()).then(|| Arc::from(path.as_slice())),
+                    ),
+                    leaf_constructor_indexes: leaf_entries
+                        .iter()
+                        .map(|entry| entry.constructor_index)
+                        .collect(),
+                    matched_leaf_pattern: constructor.runtime_ready.then(|| entry.pattern.clone()),
+                },
+            }))
         }
         probe => {
             let values = evaluator.probe_values(probe)?;
@@ -312,16 +236,17 @@ where
                         node_index, probe, value, edge.next_node_index,
                     );
                 }
-                let mut branch_trace = trace.clone();
-                branch_trace.probes.push(RuntimeMatchProbe { probe, value });
-                if let Some(selection) = walk_decision_tree(
+                path.push(RuntimeMatchProbe { probe, value });
+                let result = walk_decision_tree(
                     subtable,
-                    decision_tree,
+                    root_bucket,
                     edge.next_node_index,
                     evaluator,
                     constructor_matches,
-                    branch_trace,
-                )? {
+                    path,
+                );
+                path.pop();
+                if let Some(selection) = result? {
                     return Ok(Some(selection));
                 }
             }
@@ -489,8 +414,13 @@ mod tests {
     }
 
     impl DecisionProbeEvaluator for BytesEvaluator {
-        fn probe_values(&mut self, _probe: CompiledDecisionProbe) -> Result<ProbeValues> {
-            Ok(ProbeValues::from_slice(&[0]))
+        fn probe_values(&mut self, probe: CompiledDecisionProbe) -> Result<ProbeValues> {
+            match probe {
+                CompiledDecisionProbe::ContextBitSlice { .. } => {
+                    Ok(ProbeValues::from_slice(&[0, 1]))
+                }
+                _ => Ok(ProbeValues::from_slice(&[0])),
+            }
         }
 
         fn instruction_bytes(&self, offset: i32, size: u32) -> Result<u32> {
@@ -500,6 +430,74 @@ mod tests {
         fn context_bytes(&self, offset: i32, size: u32) -> Result<u32> {
             Self::read(&self.context, offset, size)
         }
+    }
+
+    #[test]
+    fn decision_trace_keeps_only_the_selected_branch() {
+        use crate::compiler::{CompiledDecisionEdge, CompiledDecisionNode, CompiledDecisionTree};
+
+        let frontend = crate::compiler::compile_x86_64_frontend().expect("compile x86-64 frontend");
+        let constructor = frontend.subtables["instruction"]
+            .constructors
+            .iter()
+            .find(|constructor| constructor.runtime_ready)
+            .expect("executable constructor");
+        let probe = CompiledDecisionProbe::ContextBitSlice {
+            offset: 0,
+            mask: 1,
+            shift: 0,
+        };
+        let miss = CompiledDecisionNode {
+            probe: CompiledDecisionProbe::Terminal,
+            branches: Vec::new(),
+            leaf_constructor_indexes: Vec::new(),
+            leaf_entries: Vec::new(),
+        };
+        let mut subtable = subtable_with_tree(CompiledDecisionTree {
+            root_node_index: 0,
+            root_buckets: Vec::new(),
+            decision_node_count: 3,
+            nodes: vec![
+                CompiledDecisionNode {
+                    probe,
+                    branches: vec![
+                        CompiledDecisionEdge {
+                            value: 0,
+                            next_node_index: 1,
+                        },
+                        CompiledDecisionEdge {
+                            value: 1,
+                            next_node_index: 2,
+                        },
+                    ],
+                    ..miss.clone()
+                },
+                miss.clone(),
+                CompiledDecisionNode {
+                    leaf_constructor_indexes: vec![0],
+                    ..miss
+                },
+            ],
+        });
+        subtable.constructors.push(constructor.clone());
+
+        let selection = select_constructor(
+            &subtable,
+            "instruction",
+            BytesEvaluator {
+                instruction: Vec::new(),
+                context: Vec::new(),
+            },
+            |_| Ok(()),
+        )
+        .expect("decision walk")
+        .expect("second branch match");
+
+        assert_eq!(
+            selection.trace.probes.0.as_deref(),
+            Some(&[RuntimeMatchProbe { probe, value: 1 }][..])
+        );
+        assert_eq!(selection.trace.leaf_constructor_indexes, [0]);
     }
 
     struct FailingProbeEvaluator;
@@ -518,55 +516,21 @@ mod tests {
         }
     }
 
-    fn minimal_frontend_with_tree(
+    fn subtable_with_tree(
         decision_tree: crate::compiler::CompiledDecisionTree,
-    ) -> CompiledFrontend {
-        let mut subtables = BTreeMap::new();
-        subtables.insert(
-            "instruction".to_string(),
-            CompiledSubtableDefinition {
-                name: "instruction".to_string(),
-                sla_subtable_id: 0,
-                constructors_by_sla_id: BTreeMap::new(),
-                constructors: Vec::new(),
-                decision_tree,
-            },
-        );
-        CompiledFrontend {
-            arch: "test".to_string(),
-            default_context: Default::default(),
-            default_context_known_mask: Default::default(),
-            entry_spec: "test.slaspec".to_string(),
-            entry_id: "test".to_string(),
-            include_manifest: Vec::new(),
-            defines: Vec::new(),
-            definitions: Vec::new(),
-            macros: Vec::new(),
+    ) -> CompiledSubtableDefinition {
+        CompiledSubtableDefinition {
+            name: "instruction".to_string(),
+            sla_subtable_id: 0,
+            constructors_by_sla_id: BTreeMap::new(),
             constructors: Vec::new(),
-            subtables,
-            language_layout: crate::compiler::CompiledLanguageLayout {
-                address_spaces: Vec::new(),
-                registers: Vec::new(),
-                token_fields: Vec::new(),
-                context_fields: Vec::new(),
-                subtables: Vec::new(),
-                display_templates: Vec::new(),
-            },
-            construct_templates: Vec::new(),
-            pcode_ops: Vec::new(),
-            pattern_nodes: Vec::new(),
-            sla_spaces: BTreeMap::new(),
-            sla_unique_space_index: 0,
-            sla_register_space_index: 0,
-            sla_uniqbase: 0,
-            sla_uniqmask: u64::MAX,
-            userops: std::sync::Arc::new(std::collections::BTreeMap::new()),
+            decision_tree,
         }
     }
 
     #[test]
     fn decision_probe_evaluator_errors_propagate() {
-        let compiled = minimal_frontend_with_tree(crate::compiler::CompiledDecisionTree {
+        let subtable = subtable_with_tree(crate::compiler::CompiledDecisionTree {
             root_node_index: 0,
             root_buckets: Vec::new(),
             nodes: vec![crate::compiler::CompiledDecisionNode {
@@ -582,13 +546,8 @@ mod tests {
             decision_node_count: 1,
         });
 
-        let error = select_constructor(
-            &compiled,
-            [("instruction".to_string(), 0)],
-            || FailingProbeEvaluator,
-            |_| Ok(()),
-        )
-        .expect_err("decision probe evaluator errors must fail closed");
+        let error = select_constructor(&subtable, "instruction", FailingProbeEvaluator, |_| Ok(()))
+            .expect_err("decision probe evaluator errors must fail closed");
 
         assert!(
             error.to_string().contains("synthetic probe failure"),
