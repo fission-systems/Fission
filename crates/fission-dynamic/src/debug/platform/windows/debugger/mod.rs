@@ -1684,9 +1684,17 @@ mod tests {
                 stopped_at_breakpoint,
                 "launch did not reach the initial breakpoint"
             );
+            // Polling must not bypass an uncontinued debug event: it reports
+            // no new event (a frozen process raises none) and leaves the
+            // target suspended on the one it has, still to be continued.
             assert!(
-                debugger.poll_event(0).is_err(),
+                matches!(debugger.poll_event(0), Ok(None)),
                 "polling must not bypass an uncontinued debug event"
+            );
+            assert_eq!(
+                debugger.get_state().status,
+                crate::debug::types::DebugStatus::Suspended,
+                "the target stays suspended on the pending event"
             );
 
             let thread_id = debugger
