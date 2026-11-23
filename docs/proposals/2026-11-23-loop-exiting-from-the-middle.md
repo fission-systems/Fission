@@ -100,7 +100,28 @@ Comparable coverage:
 
 ## 5. Validation Matrix
 
-See the PR for the full-dataset sweep tables (base `main-1f10b8c78`).
+Full-dataset sweep, base `runs/main-1f10b8c78` (release build of 1f10b8c78),
+after `runs/o2lane-loop-fix9` (this branch), 0 decompile failures on either
+side; 999 of 96,084 outputs changed, 2 rows of scorer noise (identical text).
+
+| config | GED perfect | total distance | type perfect / mean | Union |
+|---|---|---|---|---|
+| full | 32,521 -> 32,528 | 1,536,036 -> 1,533,142 (-0.19%) | 5,889 -> 5,889 / 0.2301 -> 0.2302 | 35,886 -> 35,893 |
+| unoptimized | 13,465 -> 13,465 | 381,280 -> 379,717 (-0.41%) | 3,673 -> 3,673 | 15,556 -> 15,556 |
+| optimized | 11,391 -> 11,395 | 532,135 -> 532,040 (-0.02%) | 1,545 -> 1,545 | 12,332 -> 12,336 |
+| inlined | 7,665 -> 7,668 | 622,621 -> 621,385 (-0.20%) | 671 -> 671 | 7,998 -> 8,001 |
+
+Changed rows with a GED on both sides: 883, distance 41,264 -> 38,362,
+perfect 6 -> 15, 220 better / 123 worse.
+
+Correctness: on every changed row whose call-site set by instruction address
+shrank (71), each callee the machine function calls is still printed at least
+`min(machine call instructions, base prints)` times (static disassembly of
+the stripped binary): 0 candidate losses. The same check flags the
+`handle_dollar` loss on the intermediate build that still had the tier-1
+filter (positive control). Shrinking attribution is the peeled-iteration
+copy disappearing (e.g. coreutils `docolon`: the machine calls `0x2ab0`
+once, base printed it twice, this prints it once inside the loop).
 
 - [x] Targeted invariant tests: `cargo nextest run -p fission-pcode -E 'test(rotated_mid_exit) | test(acyclic_twin)'`
 - [x] Crate gates: `cargo nextest run -p fission-midend-structuring` (396 passed),
