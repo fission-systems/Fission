@@ -1,5 +1,7 @@
 //! SAILR structuring: Phoenix schemas, compiler-aware concessions.
 //!
+//! Opt-in (`FISSION_SAILR=1`); see [`sailr_driver_enabled`] for why.
+//!
 //! The fourth strategy, alongside Ghidra's rules ([`crate::collapse_structure`]),
 //! the match-fold schemas ([`crate::collapse_driver`]) and DREAM
 //! ([`crate::reaching_driver`]). It follows "Ahoy SAILR! There is No Need to
@@ -83,13 +85,20 @@ const MAX_RETURN_PREDS: usize = 8;
 const H2_MAX_EDGES: usize = 10;
 const H2_MAX_NODES: usize = 50;
 
-/// Whether the SAILR driver is offered. On unless `FISSION_SAILR` disables it.
+/// Whether the SAILR driver is offered. **Off unless `FISSION_SAILR=1`.**
+///
+/// Measured on the DecBench sample set (250 functions, same binary, only this
+/// switch flipped): GED perfect 68 -> 65, total distance 7,406 -> 7,394, seven
+/// rows changed. The losses are loops: the shared `WhileDo` lowering rotates
+/// the test into a preheader and latch (`for (zf = x == 0; x; ...)`) where the
+/// existing path keeps the source's single head (`while (1) { ...; if (!x)
+/// break; ... }`). Until that is resolved the driver stays opt-in.
 pub fn sailr_driver_enabled() -> bool {
     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ENABLED.get_or_init(|| {
-        !matches!(
+        matches!(
             std::env::var("FISSION_SAILR").as_deref(),
-            Ok("0" | "false" | "off" | "no")
+            Ok("1" | "true" | "on" | "yes")
         )
     })
 }
