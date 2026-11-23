@@ -6,6 +6,7 @@
 //! 3. Can optimize before high-level C constructs are generated
 //! 4. Matches Ghidra's own optimization framework
 
+use super::passes::def_use::OpRef;
 use super::passes::{
     CommonSubexpressionEliminator, CopyPropagator, DeadCodeEliminator, DefUseTracker,
     LoopHeaderTempCoalescer, SubvariableFlowOptimizer,
@@ -158,10 +159,12 @@ impl PcodeOptimizer {
         for (block_idx, block) in func.blocks.iter().enumerate() {
             for (op_idx, op) in block.ops.iter().enumerate() {
                 // Use try_optimize_with_tracker which includes all rules
-                if let Some(optimized) =
-                    self.rules
-                        .try_optimize_with_tracker(op, &self.def_use_tracker, func)
-                {
+                if let Some(optimized) = self.rules.try_optimize_with_tracker_at(
+                    op,
+                    OpRef { block_idx, op_idx },
+                    &self.def_use_tracker,
+                    func,
+                ) {
                     modifications.push((block_idx, op_idx, optimized));
                 }
             }

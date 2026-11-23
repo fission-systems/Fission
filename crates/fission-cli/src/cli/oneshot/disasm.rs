@@ -98,20 +98,29 @@ pub(super) fn disassemble(
     let section = binary.section_containing_for_execution(decode_addr);
 
     let (bytes, base) = if let Some(sec) = section {
-        // Calculate offset within section
-        let offset = (decode_addr - sec.virtual_address) as usize;
-        let file_offset = sec.file_offset as usize + offset;
-        let remaining = (sec.virtual_size as usize).saturating_sub(offset);
-        let len = remaining
-            .min(DISASM_READ_WINDOW)
-            .min(data.len().saturating_sub(file_offset));
+        let offset_u64 = decode_addr.checked_sub(sec.virtual_address);
+        let file_offset = offset_u64
+            .and_then(|offset| sec.file_offset.checked_add(offset))
+            .and_then(|file_offset| usize::try_from(file_offset).ok());
+        let slice = match (offset_u64, file_offset) {
+            (Some(offset), Some(file_offset)) if file_offset <= data.len() => {
+                let remaining =
+                    usize::try_from(sec.virtual_size.saturating_sub(offset)).unwrap_or(usize::MAX);
+                let len = remaining
+                    .min(DISASM_READ_WINDOW)
+                    .min(data.len() - file_offset);
+                file_offset
+                    .checked_add(len)
+                    .and_then(|end| data.get(file_offset..end))
+            }
+            _ => None,
+        };
 
-        if file_offset + len <= data.len() {
-            (&data[file_offset..file_offset + len], decode_addr)
+        if let Some(bytes) = slice {
+            (bytes, decode_addr)
         } else {
             let message = format!("Address 0x{decode_addr:x} is outside file bounds");
             if json {
-                let mut stdout = io::stdout().lock();
                 let _ = writeln!(stdout, "{}", serde_json::json!({ "error": message }));
             } else {
                 eprintln!("Error: {message}");
@@ -152,11 +161,15 @@ pub(super) fn disassemble(
         let instr_json: Vec<serde_json::Value> = instructions
             .iter()
             .map(|(ip, bytes, mnemonic)| {
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "address": format!("0x{:x}", ip),
                     "bytes": bytes,
                     "instruction": mnemonic,
-                })
+                });
+                if let Some(source) = source_line(binary, *ip) {
+                    row["source"] = source;
+                }
+                row
             })
             .collect();
         let json_output = serde_json::to_string_pretty(&instr_json).map_err(|e| {
@@ -237,6 +250,9 @@ pub(super) fn disassemble_function(
                     if !note.is_empty() {
                         row["refers_to"] = serde_json::json!(note);
                     }
+                    if let Some(source) = source_line(binary, *ip) {
+                        row["source"] = source;
+                    }
                     row
                 })
                 .collect::<Vec<_>>(),
@@ -315,4 +331,46 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert!(err.to_string().contains("not in any section"));
     }
+
+    #[test]
+    fn disassemble_overflowing_section_file_offset_returns_invalid_input() {
+        let binary = LoadedBinaryBuilder::new("test.bin".into(), DataBuffer::Heap(vec![0x90; 16]))
+            .format("ELF")
+            .image_base(0x1000)
+            .load_spec(BinaryLoadSpec::new(
+                "ELF",
+                0x1000,
+                "x86:LE:64:default",
+                "gcc",
+                "synthetic-test",
+            ))
+            .add_section(SectionInfo {
+                name: ".text".into(),
+                virtual_address: 0x1000,
+                virtual_size: 0x20,
+                file_offset: u64::MAX - 4,
+                file_size: 0x20,
+                is_readable: true,
+                is_writable: false,
+                is_executable: true,
+            })
+            .build()
+            .expect("build fixture");
+
+        let err = disassemble(&binary, binary.data.as_slice(), 0x1008, 10, false).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("outside file bounds"));
+    }
+}
+
+/// The DWARF line-table row covering `address`, if the binary has one. A row
+/// with line 0 is a marker for code with no source line, so it is not one.
+pub(crate) fn source_line(
+    binary: &fission_loader::loader::LoadedBinary,
+    address: u64,
+) -> Option<serde_json::Value> {
+    binary
+        .line_for_address(address)
+        .filter(|row| row.line > 0)
+        .map(|row| serde_json::json!({ "file": row.file, "line": row.line }))
 }

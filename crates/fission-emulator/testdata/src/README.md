@@ -103,7 +103,8 @@ All three run only inside Fission's emulator.
 ## Engine differential fixtures
 
 `aarch64_control_flow.elf` and `x86_control_flow.exe` drive both engines in
-`tests/interp_differential.rs`; the program returns 27. From `testdata/`:
+`tests/interp_differential.rs`; the program returns 27. `tests/ttd_travel.rs`
+also time-travels the AArch64 one. From `testdata/`:
 
 ```sh
 zig cc -target aarch64-linux-musl -O0 -static -s -o aarch64_control_flow.elf src/control_flow.c

@@ -14,18 +14,6 @@ pub struct CommonSubexpressionEliminator {
     available_exprs: HashMap<(PcodeOpcode, Vec<Varnode>, Option<u32>), Varnode>,
 }
 
-/// Whether two varnodes name overlapping storage. Constants name none.
-fn varnodes_overlap(a: &Varnode, b: &Varnode) -> bool {
-    if a.is_constant || b.is_constant || a.space_id != b.space_id {
-        return false;
-    }
-    let (a_end, b_end) = (
-        a.offset.saturating_add(u64::from(a.size.max(1))),
-        b.offset.saturating_add(u64::from(b.size.max(1))),
-    );
-    a.offset < b_end && b.offset < a_end
-}
-
 impl CommonSubexpressionEliminator {
     pub fn new() -> Self {
         Self {
@@ -54,8 +42,12 @@ impl CommonSubexpressionEliminator {
                         | PcodeOpcode::CallInd
                         | PcodeOpcode::CallOther
                         | PcodeOpcode::Store
+                        | PcodeOpcode::Branch
+                        | PcodeOpcode::CBranch
+                        | PcodeOpcode::BranchInd
+                        | PcodeOpcode::Return
                 ) {
-                    // A call or a store can change anything an expression reads.
+                    // Calls, stores, and control-flow ops invalidate intra-block availability.
                     self.available_exprs.clear();
                 }
 
@@ -100,12 +92,7 @@ impl CommonSubexpressionEliminator {
                 // If not found, register this expression -- unless its own result
                 // overwrote one of its inputs, in which case `key` describes the
                 // old input value and no longer matches what is stored.
-                if !found
-                    && !op
-                        .inputs
-                        .iter()
-                        .any(|input| varnodes_overlap(input, &written))
-                {
+                if !found && !op.inputs.iter().any(|input| input.overlaps(&written)) {
                     self.available_exprs.insert(key, written);
                 }
             }
@@ -117,8 +104,7 @@ impl CommonSubexpressionEliminator {
     /// Forget every expression that reads, or is held in, storage `written` overlaps.
     fn kill_overlapping(&mut self, written: &Varnode) {
         self.available_exprs.retain(|(_, inputs, _), holder| {
-            !varnodes_overlap(holder, written)
-                && !inputs.iter().any(|input| varnodes_overlap(input, written))
+            !holder.overlaps(written) && !inputs.iter().any(|input| input.overlaps(written))
         });
     }
 

@@ -4,12 +4,24 @@ use super::handles::u64_to_i64_bits;
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SlaTokenByteSpan {
-    start: i32,
-    end: i32,
+pub(super) struct SlaTokenByteSpan {
+    pub(super) start: i32,
+    pub(super) end: i32,
 }
 
 impl SlaTokenByteSpan {
+    pub(super) fn byte_width(self) -> Result<u32> {
+        let width = self
+            .end
+            .checked_sub(self.start)
+            .ok_or_else(|| anyhow!("SLA token span width underflowed"))?;
+        u32::try_from(width).map_err(|_| anyhow!("SLA token span width {width} exceeds u32"))
+    }
+
+    pub(super) fn relative_end(self) -> Result<u32> {
+        u32::try_from(self.end).map_err(|_| anyhow!("SLA token span end {} exceeds u32", self.end))
+    }
+
     fn shifted(self, delta: i32) -> Result<Self> {
         Ok(Self {
             start: self
@@ -104,7 +116,7 @@ fn operand_spec_primary_sla_token_span_with_stack(
     }
 }
 
-fn pattern_expression_primary_sla_token_span(
+pub(super) fn pattern_expression_primary_sla_token_span(
     reloffset: i32,
     expr: &CompiledPatternExpression,
 ) -> Result<Option<SlaTokenByteSpan>> {
@@ -200,6 +212,9 @@ fn token_span_from_sla_field(
     byte_start: u32,
     byte_end: u32,
 ) -> Result<SlaTokenByteSpan> {
+    if byte_end < byte_start {
+        bail!("SLA token field byte range is inverted: {byte_start}..={byte_end}");
+    }
     let start =
         i32::try_from(byte_start).map_err(|_| anyhow!("SLA token byte_start exceeds i32"))?;
     let end = byte_end

@@ -36,13 +36,13 @@ fn build(max_inst: u64, ttd_interval: u64) -> Emulator {
     build_at(&path, max_inst, ttd_interval)
 }
 
-/// An aarch64 ELF, from the dev corpus: the crate carries no aarch64 fixture,
-/// and this architecture is the whole point of the test below.
-fn build_aarch64(max_inst: u64, ttd_interval: u64) -> Option<Emulator> {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/c/control_flow_gcc-aarch64_O0");
-    path.is_file()
-        .then(|| build_at(&path, max_inst, ttd_interval))
+/// The static AArch64 fixture built from `testdata/src/control_flow.c`: this
+/// architecture is the whole point of the test below. It read a dev-corpus
+/// binary and skipped when that was absent -- which was everywhere, CI
+/// included, so the test had never run.
+fn build_aarch64(max_inst: u64, ttd_interval: u64) -> Emulator {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/aarch64_control_flow.elf");
+    build_at(&path, max_inst, ttd_interval)
 }
 
 fn build_at(path: &std::path::Path, max_inst: u64, ttd_interval: u64) -> Emulator {
@@ -223,10 +223,7 @@ fn seeking_back_arrives_where_the_run_was() {
 /// see it: both run the x86-64 fixture.
 #[test]
 fn time_travel_works_on_an_architecture_that_is_not_x86() {
-    let Some(mut traveler) = build_aarch64(2_000, 50) else {
-        eprintln!("skipped: no aarch64 binary in the dev corpus");
-        return;
-    };
+    let mut traveler = build_aarch64(2_000, 50);
     let _ = traveler.run();
 
     let snapshot = traveler
@@ -259,7 +256,7 @@ fn time_travel_works_on_an_architecture_that_is_not_x86() {
         .find(|step| *step >= 500)
         .expect("a snapshot at or after step 500");
 
-    let mut reference = build_aarch64(target, 0).expect("the same binary");
+    let mut reference = build_aarch64(target, 0);
     let _ = reference.run();
     let want_pc = reference.pc;
     let want: Vec<(String, u64)> = snapshot

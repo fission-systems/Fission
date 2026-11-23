@@ -224,7 +224,7 @@ impl<'a> PreviewBuilder<'a> {
                 return NoConsumerSuppressionBlockPosition::PreBranch;
             }
         }
-        let Some(block_idx) = self.address_to_index.get(&block.start_address).copied() else {
+        let Some(block_idx) = self.block_position(block) else {
             return NoConsumerSuppressionBlockPosition::Local;
         };
         if self.successors.get(block_idx).is_some_and(|succs| {

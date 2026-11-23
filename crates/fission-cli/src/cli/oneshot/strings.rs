@@ -10,7 +10,6 @@
 //! referring function costs a disassembly pass, so it is behind `--xrefs`.
 
 use fission_loader::loader::{LoadedBinary, SectionInfo};
-use std::collections::HashMap;
 use std::io::{self, Write};
 
 /// One extracted string with whatever the loader can say about where it lives.
@@ -221,7 +220,13 @@ fn print_context(
         .iter()
         .map(|found| {
             let context = found.address.filter(|_| !found.executable).map(|address| {
-                string_reference_context(binary, &index, &graph, address, found.byte_length as u64)
+                string_reference_context(
+                    binary,
+                    &index,
+                    &graph,
+                    address,
+                    u64::try_from(found.byte_length).unwrap_or(u64::MAX),
+                )
             });
             (found, context)
         })
@@ -376,6 +381,13 @@ fn scan(data: &[u8], min_len: usize) -> Vec<FoundString> {
     strings
 }
 
+fn section_contains_file_offset(section: &SectionInfo, offset: u64) -> bool {
+    section
+        .file_offset
+        .checked_add(section.file_size)
+        .is_some_and(|end| (section.file_offset..end).contains(&offset))
+}
+
 /// Map each string's file offset to the section that loads it, and its address.
 fn locate(binary: &LoadedBinary, strings: &mut [FoundString]) {
     // Partition sections into addressable (loadable) and non-addressable (metadata/debug) sections.
@@ -394,20 +406,93 @@ fn locate(binary: &LoadedBinary, strings: &mut [FoundString]) {
         .collect();
 
     for found in strings.iter_mut() {
-        let offset = found.file_offset as u64;
-        if let Some(section) = mapped_sections.iter().find(|section| {
-            offset >= section.file_offset && offset < section.file_offset + section.file_size
-        }) {
+        let Ok(offset) = u64::try_from(found.file_offset) else {
+            continue;
+        };
+        if let Some(section) = mapped_sections
+            .iter()
+            .find(|section| section_contains_file_offset(section, offset))
+        {
             found.section = Some(section.name.clone());
             found.executable = section.is_executable;
-            found.address = Some(section.virtual_address + (offset - section.file_offset));
-        } else if let Some(section) = unmapped_sections.iter().find(|section| {
-            offset >= section.file_offset && offset < section.file_offset + section.file_size
-        }) {
+            found.address = section
+                .virtual_address
+                .checked_add(offset - section.file_offset);
+        } else if let Some(section) = unmapped_sections
+            .iter()
+            .find(|section| section_contains_file_offset(section, offset))
+        {
             found.section = Some(section.name.clone());
             found.executable = false;
             found.address = None;
         }
+    }
+}
+
+struct StringSpan {
+    start: u64,
+    end_inclusive: u64,
+    string_index: usize,
+    prefix_max_end: u64,
+}
+
+struct StringAddressIndex {
+    spans: Vec<StringSpan>,
+}
+
+impl StringAddressIndex {
+    fn build(strings: &[FoundString]) -> Self {
+        let mut spans: Vec<StringSpan> = strings
+            .iter()
+            .enumerate()
+            .filter_map(|(string_index, found)| {
+                // A printable run inside code is a coincidence -- `AWAVAUATUWVSH` is
+                // the x86-64 prologue pushing the callee-saved registers -- and a
+                // reference to it is a pointer to the function, not a string read.
+                // Left in the listing, kept out of the leads.
+                if found.executable || found.byte_length == 0 {
+                    return None;
+                }
+                let start = found.address?;
+                let len_minus_one = u64::try_from(found.byte_length)
+                    .unwrap_or(u64::MAX)
+                    .saturating_sub(1);
+                let end_inclusive = start.saturating_add(len_minus_one);
+                Some(StringSpan {
+                    start,
+                    end_inclusive,
+                    string_index,
+                    prefix_max_end: end_inclusive,
+                })
+            })
+            .collect();
+        spans.sort_by_key(|span| (span.start, span.string_index));
+        let mut max_end = 0u64;
+        for span in &mut spans {
+            max_end = max_end.max(span.end_inclusive);
+            span.prefix_max_end = max_end;
+        }
+        Self { spans }
+    }
+
+    fn find(&self, address: u64) -> Option<usize> {
+        let upper = self.spans.partition_point(|span| span.start <= address);
+        if upper == 0 || self.spans[upper - 1].prefix_max_end < address {
+            return None;
+        }
+        let mut best: Option<usize> = None;
+        for span in self.spans[..upper].iter().rev() {
+            if span.prefix_max_end < address {
+                break;
+            }
+            if span.end_inclusive >= address {
+                best = Some(match best {
+                    Some(prev) => prev.min(span.string_index),
+                    None => span.string_index,
+                });
+            }
+        }
+        best
     }
 }
 
@@ -421,25 +506,7 @@ fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
     use fission_static::analysis::build_xref_index;
     use fission_static::analysis::xref_index::{XrefKind, XrefSourceCategory};
 
-    // Address -> index, for every byte a string covers, so a reference into
-    // the middle of one (a suffix pointer, or a `+ 4` past a prefix) still
-    // finds it.
-    let mut by_address: HashMap<u64, usize> = HashMap::new();
-    for (index, found) in strings.iter().enumerate() {
-        let Some(address) = found.address else {
-            continue;
-        };
-        // A printable run inside code is a coincidence -- `AWAVAUATUWVSH` is
-        // the x86-64 prologue pushing the callee-saved registers -- and a
-        // reference to it is a pointer to the function, not a string read.
-        // Left in the listing, kept out of the leads.
-        if found.executable {
-            continue;
-        }
-        for offset in 0..found.byte_length as u64 {
-            by_address.entry(address + offset).or_insert(index);
-        }
-    }
+    let by_address = StringAddressIndex::build(strings);
 
     let index = build_xref_index(binary, true);
     for record in &index.refs {
@@ -456,7 +523,7 @@ fn attach_referrers(binary: &LoadedBinary, strings: &mut [FoundString]) {
         let Some(target) = record.target.address else {
             continue;
         };
-        let Some(&string_index) = by_address.get(&target) else {
+        let Some(string_index) = by_address.find(target) else {
             continue;
         };
         let XrefSourceCategory::Instruction { enclosing_function } = record.source.category else {
@@ -681,5 +748,84 @@ mod tests {
         // Must resolve to .rodata at 0x402000, not the unmapped header at 0x0 + 0x100
         assert_eq!(found.section.as_deref(), Some(".rodata"));
         assert_eq!(found.address, Some(0x402000));
+    }
+
+    #[test]
+    fn locate_handles_overflowing_section_bounds_without_panicking() {
+        let mut data = vec![0u8; 0x100];
+        data[0x10..0x18].copy_from_slice(b"overflow");
+        let binary =
+            LoadedBinaryBuilder::new("test.bin".to_string(), DataBuffer::Heap(data.clone()))
+                .image_base(0x1000)
+                .format("ELF")
+                .add_section(SectionInfo {
+                    name: ".bad_range".to_string(),
+                    virtual_address: u64::MAX - 4,
+                    virtual_size: 0x20,
+                    file_offset: u64::MAX - 2,
+                    file_size: 0x20,
+                    is_executable: false,
+                    is_writable: false,
+                    is_readable: true,
+                })
+                .add_section(SectionInfo {
+                    name: ".bad_va".to_string(),
+                    virtual_address: u64::MAX - 2,
+                    virtual_size: 0x40,
+                    file_offset: 0,
+                    file_size: 0x40,
+                    is_executable: false,
+                    is_writable: false,
+                    is_readable: true,
+                })
+                .build()
+                .expect("build binary");
+
+        let mut strings = scan(&data, 4);
+        locate(&binary, &mut strings);
+        assert_eq!(strings[0].section.as_deref(), Some(".bad_va"));
+        assert_eq!(strings[0].address, None);
+    }
+
+    #[test]
+    fn string_address_index_handles_huge_and_near_max_runs_without_per_byte_map() {
+        let strings = vec![
+            FoundString {
+                file_offset: 0,
+                byte_length: 1 << 30,
+                text: "huge".into(),
+                address: Some(0x1000),
+                section: Some(".rodata".into()),
+                executable: false,
+                referrers: Vec::new(),
+            },
+            FoundString {
+                file_offset: 1,
+                byte_length: 16,
+                text: "overlap".into(),
+                address: Some(0x1020),
+                section: Some(".rodata".into()),
+                executable: false,
+                referrers: Vec::new(),
+            },
+            FoundString {
+                file_offset: 2,
+                byte_length: 16,
+                text: "near_max".into(),
+                address: Some(u64::MAX - 4),
+                section: Some(".rodata".into()),
+                executable: false,
+                referrers: Vec::new(),
+            },
+        ];
+
+        let index = StringAddressIndex::build(&strings);
+        assert_eq!(index.find(0x0fff), None);
+        assert_eq!(index.find(0x1000), Some(0));
+        assert_eq!(index.find(0x1025), Some(0));
+        assert_eq!(index.find(0x1000 + (1u64 << 30) - 1), Some(0));
+        assert_eq!(index.find(0x1000 + (1u64 << 30)), None);
+        assert_eq!(index.find(u64::MAX - 4), Some(2));
+        assert_eq!(index.find(u64::MAX), Some(2));
     }
 }

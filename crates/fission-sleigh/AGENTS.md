@@ -81,6 +81,9 @@ crates/fission-sleigh/
 1. Keep this crate dependency-free for Sleigh execution.
    - Do not reintroduce `sleigh-rs`, native decode DLLs, or equivalent runtime dependencies.
    - Treat `vendor/ghidra/` as reference-only for algorithms and invariants.
+   - Upstream specs are input data, not ground truth: AArch64 FCVT/FRINT were wrong upstream (#834/#838).
+     Semantics are checked against the architecture manual or native execution, never against
+     Ghidra's p-code, which comes from the same `.sla` ([ADR 0017](../../docs/adr/0017-ghidra-is-not-an-oracle.md)).
    - Production resources live under `utils/sleigh-specs/` (`languages/`, `compiled/`, manifest).
    - Keep the checked-in `utils/sleigh-specs` snapshot aligned with
      `utils/sleigh-specs/ghidra_language_manifest.json`.
