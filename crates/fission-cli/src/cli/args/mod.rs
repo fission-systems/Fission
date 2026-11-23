@@ -1573,7 +1573,7 @@ pub use debug::{
     DebugFindArgs, DebugFlagArgs, DebugFreeArgs, DebugHwBpArgs, DebugInitArgs, DebugMemBpArgs,
     DebugLogpointArgs, DebugModuleArgs, DebugModulesArgs, DebugProtectArgs, DebugReadArgs, DebugSessionArgs,
     DebugRrRecordArgs, DebugRrReplayArgs, DebugRrStatusArgs, DebugSetRegArgs, DebugStackPeekArgs, DebugStackPopArgs, DebugStackPushArgs,
-    DebugSwitchThreadArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
+    DebugSwitchThreadArgs, DebugTraceDecompArgs, DebugTraceDiffArgs, DebugTraceInspectArgs, DebugWriteArgs, HwBpKindArg, MemoryBpKindArg,
 };
 
 #[cfg(test)]
