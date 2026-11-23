@@ -1,0 +1,83 @@
+{
+  "command": [
+    "--db",
+    "$TMP/fission-contract-57215-db-show/fixture.fission.json",
+    "db",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "show",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "binary_hash": "string",
+      "binary_path": "string",
+      "breakpoints": {
+        "array": "string"
+      },
+      "comments": {
+        "map": {
+          "object": {
+            "text": "string"
+          }
+        }
+      },
+      "history": {
+        "object": {
+          "cursor": "number",
+          "next_id": "number",
+          "revisions": {
+            "array": {
+              "object": {
+                "changes": {
+                  "array": {
+                    "object": {
+                      "address": "string",
+                      "after": "any",
+                      "before": {
+                        "array": "empty"
+                      },
+                      "kind": "string"
+                    },
+                    "optional": [
+                      "address"
+                    ]
+                  }
+                },
+                "id": "number"
+              }
+            }
+          }
+        }
+      },
+      "names": {
+        "map": "string"
+      },
+      "schema_version": "number",
+      "signatures": {
+        "map": {
+          "object": {
+            "params": {
+              "array": {
+                "object": {
+                  "name": "string",
+                  "type": "string"
+                }
+              }
+            },
+            "returns": "string"
+          }
+        }
+      },
+      "watchpoints": {
+        "array": {
+          "object": {
+            "address": "string",
+            "on_read": "bool",
+            "on_write": "bool",
+            "size": "number"
+          }
+        }
+      }
+    }
+  }
+}

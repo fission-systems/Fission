@@ -1,0 +1,21 @@
+{
+  "command": [
+    "call",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--addr",
+    "0x2014f0",
+    "--arg",
+    "5",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "args": {
+        "array": "string"
+      },
+      "outcome": "string",
+      "return_value": "string"
+    }
+  }
+}

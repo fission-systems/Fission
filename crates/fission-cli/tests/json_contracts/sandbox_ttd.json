@@ -1,0 +1,157 @@
+{
+  "command": [
+    "sandbox",
+    "crates/fission-emulator/testdata/x64_concolic_branch_sys.elf",
+    "--stdin-mock",
+    "A",
+    "--ttd-record",
+    "1",
+    "--ttd-seek",
+    "8",
+    "--ttd-read",
+    "0x400078:4",
+    "--coverage",
+    "--taint",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "behavior": {
+        "object": {
+          "coverage": {
+            "object": {
+              "blocks": {
+                "array": "number"
+              },
+              "blocks_executed": "number",
+              "bytes_covered": "number",
+              "instructions_executed": "number"
+            }
+          },
+          "events": {
+            "array": {
+              "object": {
+                "kind": "string",
+                "line": "string",
+                "name": "string",
+                "number": "number",
+                "pc": "number"
+              }
+            }
+          },
+          "taint": {
+            "object": {
+              "control_scopes_dropped": "number",
+              "control_tracking_complete": "bool",
+              "hits": {
+                "array": {
+                  "object": {
+                    "detail": "string",
+                    "kind": "string",
+                    "pc": "number",
+                    "sink": "string",
+                    "sources": {
+                      "array": "string"
+                    }
+                  }
+                }
+              },
+              "sources": {
+                "array": "string"
+              }
+            }
+          }
+        }
+      },
+      "binary": "string",
+      "exit_code": "number",
+      "format": "string",
+      "guest_output": {
+        "object": {
+          "stderr": {
+            "array": "empty"
+          },
+          "stdout": {
+            "array": "empty"
+          }
+        }
+      },
+      "halt_requested": "bool",
+      "metrics": {
+        "object": {
+          "decode_errors": "number",
+          "exit_reason": "string",
+          "guest_syscalls": {
+            "map": "number"
+          },
+          "hard_chains": "number",
+          "hle_misses": {
+            "object": {}
+          },
+          "instructions": "number",
+          "memory_faults": "number",
+          "reg_cache_hits": "number",
+          "reg_cache_misses": "number",
+          "soft_chains": "number",
+          "stop_pc": "number",
+          "syscalls": {
+            "map": "number"
+          },
+          "tbs_cache_hits": "number",
+          "tbs_compiled": "number",
+          "unhandled_userops": {
+            "object": {}
+          },
+          "unimplemented_opcodes": {
+            "object": {}
+          },
+          "unknown_syscalls": {
+            "object": {}
+          },
+          "userops": {
+            "object": {
+              "syscall": "number"
+            }
+          }
+        }
+      },
+      "pc": "number",
+      "ttd_state": {
+        "object": {
+          "memory": {
+            "array": {
+              "object": {
+                "address": "number",
+                "bytes": "string",
+                "size": "number"
+              }
+            }
+          },
+          "pc": "number",
+          "registers": {
+            "object": {
+              "R10": "number",
+              "R11": "number",
+              "R12": "number",
+              "R13": "number",
+              "R14": "number",
+              "R15": "number",
+              "R8": "number",
+              "R9": "number",
+              "RAX": "number",
+              "RBP": "number",
+              "RBX": "number",
+              "RCX": "number",
+              "RDI": "number",
+              "RDX": "number",
+              "RSI": "number",
+              "rip": "number",
+              "rsp": "number"
+            }
+          },
+          "step": "number"
+        }
+      }
+    }
+  }
+}

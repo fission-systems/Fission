@@ -1,0 +1,201 @@
+{
+  "command": [
+    "pcode-stages",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "binary": {
+        "object": {
+          "compiler_id": "string",
+          "format": "string",
+          "image_base": "string",
+          "language_id": "string",
+          "path": "string"
+        }
+      },
+      "function": {
+        "object": {
+          "function_origin": "string",
+          "is_export": "bool",
+          "is_import": "bool",
+          "is_thunk_like": "bool",
+          "name": "string",
+          "requested_address": "string",
+          "resolved_address": "string",
+          "size": "number"
+        }
+      },
+      "function_provenance": {
+        "object": {
+          "address": "number",
+          "confidence": "string",
+          "evidence": {
+            "array": "string"
+          },
+          "kind": "string"
+        }
+      },
+      "owner_buckets": {
+        "array": "string"
+      },
+      "preview_hint_stats": {
+        "object": {}
+      },
+      "quality_evidence": {
+        "object": {
+          "blockgraph_region_candidate_count": "number",
+          "blockgraph_region_complete_count": "number",
+          "blockgraph_region_rejected_emit_ready_count": "number",
+          "blockgraph_region_rejected_external_ref_count": "number",
+          "blockgraph_region_rejected_follow_owner_conflict_count": "number",
+          "blockgraph_region_rejected_irreducible_count": "number",
+          "blockgraph_region_rejected_join_owner_conflict_count": "number",
+          "blockgraph_region_rejected_middle_ref_count": "number",
+          "blockgraph_region_rejected_missing_follow_count": "number",
+          "blockgraph_region_rejected_must_emit_label_count": "number",
+          "blockgraph_region_rejected_nonterminal_join_count": "number",
+          "call_prototype_signature_missing_count": "number",
+          "call_prototype_unknown_target_kept_count": "number",
+          "call_signature_refined_count": "number",
+          "call_target_context_missing_count": "number",
+          "call_target_direct_symbol_resolved_count": "number",
+          "call_target_iat_slot_resolved_count": "number",
+          "call_target_import_resolved_count": "number",
+          "call_target_indirect_const_resolved_count": "number",
+          "call_target_indirect_load_resolved_count": "number",
+          "call_target_unresolved_no_exact_identity_count": "number",
+          "call_target_unresolved_sub_fallback_count": "number",
+          "forced_linear_structuring_count": "number",
+          "guarded_tail_rejected_alias_interleave_conflict_count": "number",
+          "guarded_tail_rejected_ambiguous_follow_count": "number",
+          "guarded_tail_rejected_missing_terminal_join_count": "number",
+          "guarded_tail_rejected_side_effectful_callee_count": "number",
+          "guarded_tail_rejected_side_entry_conflict_count": "number",
+          "invalid_pcode_shape_count": "number",
+          "materialization_stabilized_count": "number",
+          "object_root_fact_promotion_count": "number",
+          "object_root_recovered_count": "number",
+          "object_shape_recovered_count": "number",
+          "prototype_summary_refined_count": "number",
+          "prototype_summary_round_count": "number",
+          "region_emit_ready_failed_count": "number",
+          "region_proof_candidate_count": "number",
+          "region_proof_completed_count": "number",
+          "replacement_plan_rejected_alias_unsafe_count": "number",
+          "replacement_plan_rejected_missing_merge_count": "number",
+          "representative_downgrade_count": "number",
+          "structuring_irreducible_scc_count": "number",
+          "structuring_scc_component_count": "number",
+          "surface_binding_promoted_count": "number",
+          "typed_fact_conflict_count": "number",
+          "typed_fact_evidence_count": "number",
+          "typed_object_shape_refined_count": "number",
+          "validated_pcode_op_count": "number"
+        }
+      },
+      "rust_sleigh_pipeline": {
+        "object": {
+          "decode_attempt_count": "number",
+          "decode_stop_reason": "string",
+          "entry_address": "number",
+          "instruction_limit": "number",
+          "max_bytes": "number",
+          "nir_fallback_kind": "null",
+          "nir_fallback_kind_refined": "null",
+          "nir_fallback_reason_summary": "null",
+          "pipeline_stage_status": {
+            "object": {
+              "decode": "string",
+              "nir_render": "string"
+            }
+          },
+          "raw_pcode_block_count": "number",
+          "raw_pcode_block_evidence_truncated": "bool",
+          "raw_pcode_blocks": {
+            "array": {
+              "object": {
+                "index": "number",
+                "op_count": "number",
+                "start_address": "number",
+                "successors": {
+                  "array": "number"
+                },
+                "terminal_address": "number",
+                "terminal_opcode": "string",
+                "terminal_seq_num": "number",
+                "terminal_target": "null"
+              }
+            }
+          },
+          "raw_pcode_edge_count": "number",
+          "raw_pcode_op_count": "number",
+          "raw_pcode_terminal_opcode_counts": {
+            "object": {
+              "CBranch": "number",
+              "Copy": "number",
+              "Return": "number"
+            }
+          },
+          "strict_indirect_retry_attempted": "bool",
+          "template_source_counts": {
+            "object": {
+              "sla_construct_tpl": "number"
+            }
+          },
+          "wrapper_probe_attempted": "bool",
+          "wrapper_probe_matched": "bool"
+        }
+      },
+      "schema_version": "number",
+      "stage_metrics": {
+        "object": {
+          "build_duration_ms": "number",
+          "invalid_pcode_shape_count": "number",
+          "normalize_duration_ms": "number",
+          "render_duration_ms": "number",
+          "structuring_duration_ms": "number",
+          "validated_pcode_op_count": "number"
+        }
+      },
+      "stage_status": {
+        "object": {
+          "decode": "string",
+          "load": "string",
+          "nir_build": "string",
+          "normalize": "string",
+          "raw_pcode": "string",
+          "render": "string",
+          "structuring": "string"
+        }
+      },
+      "xref_summary_loader_only": {
+        "object": {
+          "by_kind": {
+            "object": {
+              "export_ref": "number"
+            }
+          },
+          "by_layer": {
+            "object": {
+              "loader": "number"
+            }
+          },
+          "calls": "number",
+          "data": "number",
+          "exports": "number",
+          "globals": "number",
+          "imports": "number",
+          "jumps": "number",
+          "relocations": "number",
+          "strings": "number",
+          "total": "number"
+        }
+      }
+    }
+  }
+}

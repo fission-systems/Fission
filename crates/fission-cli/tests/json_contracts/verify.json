@@ -1,0 +1,47 @@
+{
+  "command": [
+    "verify",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--addr",
+    "0x2014e0",
+    "--name",
+    "pick",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "concrete": "string",
+      "ground_truth": "string",
+      "seed": "number",
+      "symbolic": "string",
+      "tiers": {
+        "object": {
+          "concrete": {
+            "object": {
+              "category": "string",
+              "checked": "number",
+              "detail": "string",
+              "reason": "string"
+            }
+          },
+          "ground_truth": {
+            "object": {
+              "category": "string",
+              "checked": "number",
+              "detail": "string",
+              "reason": "string"
+            }
+          },
+          "symbolic": {
+            "object": {
+              "category": "string",
+              "detail": "string",
+              "proved": "bool",
+              "reason": "string"
+            }
+          }
+        }
+      }
+    }
+  }
+}

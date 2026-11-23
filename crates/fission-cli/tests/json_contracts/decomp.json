@@ -1,0 +1,80 @@
+{
+  "command": [
+    "decomp",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "address": "string",
+        "call_mapping_source": "string",
+        "code": "string",
+        "declared_callees": {
+          "array": "empty"
+        },
+        "engine_used": "string",
+        "fallback_reason": "null",
+        "fell_back": "bool",
+        "frame": {
+          "array": "empty"
+        },
+        "globals": {
+          "array": "empty"
+        },
+        "line_mapping_source": "string",
+        "line_mappings": {
+          "array": "empty"
+        },
+        "name": "string",
+        "preview_build_stats": {
+          "object": {}
+        },
+        "preview_hint_stats": {
+          "object": {}
+        },
+        "size": "number",
+        "variables": {
+          "array": {
+            "object": {
+              "addresses": {
+                "array": "number"
+              },
+              "arg_index": "number",
+              "kind": "string",
+              "name": "string",
+              "size": "number",
+              "stack_offset": "null",
+              "type": "string",
+              "type_shape": {
+                "object": {
+                  "bits": "number",
+                  "kind": "string",
+                  "pointee": {
+                    "object": {
+                      "bits": "number",
+                      "kind": "string",
+                      "signed": "bool"
+                    }
+                  },
+                  "signed": "bool"
+                },
+                "optional": [
+                  "bits",
+                  "pointee",
+                  "signed"
+                ]
+              }
+            },
+            "optional": [
+              "addresses"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

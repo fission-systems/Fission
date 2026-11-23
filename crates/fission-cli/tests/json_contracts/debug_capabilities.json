@@ -1,0 +1,45 @@
+{
+  "command": [
+    "debug",
+    "--emulator",
+    "capabilities",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "availability": {
+        "object": {
+          "status": "string"
+        }
+      },
+      "backend": "string",
+      "host": {
+        "object": {
+          "architecture": "string",
+          "os": "string"
+        }
+      },
+      "operations": {
+        "array": {
+          "object": {
+            "operation": "string",
+            "support": {
+              "object": {
+                "reason": "string",
+                "requirements": {
+                  "array": "string"
+                },
+                "status": "string"
+              },
+              "optional": [
+                "reason",
+                "requirements"
+              ]
+            }
+          }
+        }
+      },
+      "schema_version": "number"
+    }
+  }
+}

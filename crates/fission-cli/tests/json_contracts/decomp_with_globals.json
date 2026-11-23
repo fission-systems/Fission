@@ -1,0 +1,57 @@
+{
+  "command": [
+    "decomp",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--addr",
+    "0x201500",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "address": "string",
+        "call_mapping_source": "string",
+        "code": "string",
+        "declared_callees": {
+          "array": "empty"
+        },
+        "engine_used": "string",
+        "fallback_reason": "null",
+        "fell_back": "bool",
+        "frame": {
+          "array": {
+            "object": {
+              "cfa_offset": "number",
+              "name": "string"
+            }
+          }
+        },
+        "globals": {
+          "array": {
+            "object": {
+              "address": "string",
+              "name": "string",
+              "type": "string"
+            }
+          }
+        },
+        "line_mapping_source": "string",
+        "line_mappings": {
+          "array": "empty"
+        },
+        "name": "string",
+        "preview_build_stats": {
+          "object": {}
+        },
+        "preview_hint_stats": {
+          "object": {}
+        },
+        "size": "number",
+        "variables": {
+          "array": "empty"
+        }
+      }
+    }
+  }
+}

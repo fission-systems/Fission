@@ -1,0 +1,94 @@
+{
+  "command": [
+    "inventory",
+    "program-metadata",
+    "crates/fission-sleigh/testdata/a64_csel_select.so"
+  ],
+  "shape": {
+    "object": {
+      "binary": {
+        "object": {
+          "abi": "string",
+          "bitness": "number",
+          "compiler_spec_id": "string",
+          "content_hash": "string",
+          "endian": "string",
+          "entry_point": "number",
+          "format": "string",
+          "image_base": "number",
+          "language_id": "string",
+          "processor": "string"
+        }
+      },
+      "functions": {
+        "array": {
+          "object": {
+            "entry": "number",
+            "id": "number",
+            "is_export": "bool",
+            "is_import": "bool",
+            "is_thunk": "bool",
+            "kind": "string",
+            "memory_block": "number",
+            "name": "string",
+            "provenance": {
+              "object": {
+                "confidence": "string",
+                "detail": "string",
+                "source": "string"
+              }
+            },
+            "size": "number"
+          }
+        }
+      },
+      "memory_blocks": {
+        "array": {
+          "object": {
+            "file_offset": "number",
+            "file_size": "number",
+            "id": "number",
+            "name": "string",
+            "permissions": {
+              "object": {
+                "execute": "bool",
+                "read": "bool",
+                "write": "bool"
+              }
+            },
+            "provenance": {
+              "object": {
+                "confidence": "string",
+                "source": "string"
+              }
+            },
+            "size": "number",
+            "start": "number",
+            "virtual_size": "number"
+          }
+        }
+      },
+      "relocations": {
+        "array": "empty"
+      },
+      "schema": "string",
+      "symbols": {
+        "array": {
+          "object": {
+            "address": "number",
+            "id": "number",
+            "kind": "string",
+            "name": "string",
+            "provenance": {
+              "object": {
+                "confidence": "string",
+                "source": "string"
+              }
+            },
+            "size": "number"
+          }
+        }
+      }
+    }
+  }
+}
