@@ -88,10 +88,12 @@ does not use it.
   - The OS layer's private state is the pooled emulator's own. This is the one
     unsoundness a checkpoint could carry, which is why each checkpoint must pass
     a null-intervention replay (same Φ, same exit status and stdout) before it
-    is trusted. *Measured: TBD.*
+    is trusted. *Measured: 595 checkpoints over the 16 cases; 0 failed
+    validation.* A restore costs a median of 43 µs per case.
 - **`Emulator::new` is expensive.** `register_map_for_load_spec` and
   `userop_map_for_load_spec` each re-read and re-parse the compiled `.sla`, with no
-  cache. *Measured: TBD ms per emulator.* A fork therefore cannot be "build a new
+  cache. *Measured: a median of 845 ms per emulator (369–2163 ms on a loaded
+  machine).* A fork therefore cannot be "build a new
   emulator"; that would dominate every experiment.
 
 ### Replay determinism
@@ -239,6 +241,11 @@ this pair did.
      memory addresses are concrete. Control dependence uses each activation's
      dynamic control parent from static postdominators; a call opens a new
      activation whose parent is the call.
+   - Potential dependence: a branch executed between a value's last definition
+     and its use counts when the arm it did not take could have redefined the
+     value. That arm is the static region up to the branch's immediate
+     postdominator, and "could have redefined" means a store or call, or a
+     write to the same register bytes.
    - Ordered as: input bytes by offset (intervened right after the read that
      delivered them), then every location a slice step read, nearest the sink
      first.
@@ -263,9 +270,202 @@ this pair did.
 
 ## 5. Results
 
-*Filled in from `examples/csic_eval.rs`; see below.*
+Run with `cargo run --profile quick-release -p fission-causal --example csic_eval -- --out report.json`
+and the default `Config`:
+- at most 600 candidates and 6 values each;
+- at most 4 000 oracle executions and 64 pairs;
+- a checkpoint every 16 steps or more;
+- control and potential dependence on.
 
-RESULTS_PLACEHOLDER
+Each case ran in its own process. The machine was shared with two DecBench
+sweeps and another build, so absolute times are pessimistic and noisy; the counts
+are deterministic.
+
+### Explanations against ground truth (input bytes; TP/FP/FN)
+
+| Case | Property | Truth | Static slice | Dynamic slice | Taint (data) | Taint (data+ctrl) | CSIC | Exhaustive |
+|---|---|---|---|---|---|---|---|---|
+| `rfc_auth_x64_O0` | RFC case | {3} | 32 bytes 1/31/0 | {3} 1/0/0 | {} 0/0/1 | {} 0/0/1 | {3} 1/0/0 | {3} |
+| `rfc_auth_x64_O2` | RFC case at -O2 (the branch may become data flow) | {3} | 32 bytes 1/31/0 | {3} 1/0/0 | {} 0/0/1 | {} 0/0/1 | {3} 1/0/0 | {3} |
+| `rfc_auth_a64_O0` | RFC case on AArch64 (ISA-agnostic path) | {3} | 32 bytes 1/31/0 | {3} 1/0/0 | {} 0/0/1 | {3} 1/0/0 | {3} 1/0/0 | {3} |
+| `invalid_interventions` | contract violations are refused; valid positive/negative controls judged | {3} | 32 bytes 1/31/0 | {3} 1/0/0 | {} 0/0/1 | {} 0/0/1 | {3} 1/0/0 | {3} |
+| `implicit_call_arg` | implicit flow | {5} | 16 bytes 1/15/0 | {5} 1/0/0 | {} 0/0/1 | {5} 1/0/0 | {5} 1/0/0 | {5} |
+| `false_alias_ptr` | false alias | {0} | 16 bytes 1/15/0 | {0} 1/0/0 | {0} 1/0/0 | {0} 1/0/0 | {0} 1/0/0 | {0} |
+| `real_alias` | real alias | {2,9} | 16 bytes 2/14/0 | {2,9} 2/0/0 | {2,9} 2/0/0 | {2,9} 2/0/0 | {2,9} 2/0/0 | {2,9} |
+| `joint_or` | overdetermined grant (A || B, both true) | joint{0,1} | 16 bytes 2/14/0 | {0} 1/0/1 | {} 0/0/2 | {} 0/0/2 | {0,1} + pair{0,1} 2/0/0 | {} |
+| `joint_and` | conjunctive grant (K && Y) | {0,1} | 16 bytes 2/14/0 | {0,1} 2/0/0 | {} 0/0/2 | {} 0/0/2 | {0,1} 2/0/0 | {0,1} |
+| `nondet_time` | grant depends on the wall clock | refuse | 16 bytes 1/15/0 | {0} 1/0/0 | {} 0/0/1 | {} 0/0/1 | refused 0/0/1 | {0} |
+| `nondet_random` | grant depends on getrandom | refuse | 16 bytes 1/15/0 | {0} 1/0/0 | {} 0/0/1 | {} 0/0/1 | refused 0/0/1 | {0} |
+| `crash_null_x64` | crash | {0} | 8 bytes 1/7/0 | {0,1} 1/1/0 | {0,1} 1/1/0 | {0,1} 1/1/0 | {0} 1/0/0 | {0} |
+| `crash_null_a64` | the crash case on AArch64 | {0} | 8 bytes 1/7/0 | {0,1} 1/1/0 | {0,1} 1/1/0 | {0,1} 1/1/0 | {0} 1/0/0 | {0} |
+| `password_x64` | authorization sink | {0,1,2,3} | 16 bytes 4/12/0 | {0,1,2,3} 4/0/0 | {} 0/0/4 | {} 0/0/4 | {0,1,2,3} 4/0/0 | {0,1,2,3} |
+| `password_a64` | the authorization case on AArch64 | {0,1,2,3} | 16 bytes 4/12/0 | {0,1,2,3} 4/0/0 | {} 0/0/4 | {} 0/0/4 | {0,1,2,3} 4/0/0 | {0,1,2,3} |
+| `branch_len` | branch-outcome sink with direct data flow (positive control for taint) | {0} | 16 bytes 1/15/0 | {0} 1/0/0 | {0} 1/0/0 | {0} 1/0/0 | {0} 1/0/0 | {0} |
+
+**Legend.**
+- *Static slice*: the pinned conservative slice defined in
+  `src/static_slice.rs`. Its scope is every function the run entered, decoded
+  completely. It is interprocedural and context-insensitive, with no points-to
+  analysis: an unresolved access may alias all memory. Libc is analysed, not
+  modelled. Indirect targets are the observed ones. Its node count is static
+  instructions in the slice.
+- *Dynamic slice*: the runner's own data, control and potential slice, before
+  any intervention.
+- *Taint*: Fission's taint engine with one label per input byte. *data* is the
+  direct-data projection; *data+ctrl* adds Fission's implicit-flow scopes.
+  - An event sink with no value ("the call happened") is read at the branch
+    that guards it.
+  - The taint engine is the interpreter unless it panics, and then the JIT.
+    In spot checks, `rfc_auth`, `real_alias` and `crash_null` used the JIT and
+    `false_alias_ptr` used the interpreter. This report does not record the
+    engine for each case.
+- *CSIC*: input bytes with a verified single-byte witness, plus the members of
+  a verified joint pair.
+- *Exhaustive*: every delivered byte tried alone with the runner's values; the
+  recall reference for single-byte causes.
+
+**Totals over the 14 attributable cases** (the two refusals excluded):
+
+| Method | TP | FP | FN | Precision | Recall |
+|---|---|---|---|---|---|
+| Static slice | 23 | 249 | 0 | 0.08 | 1.00 |
+| Dynamic slice (data + control + potential) | 22 | 2 | 1 | 0.92 | 0.96 |
+| Taint, data | 6 | 2 | 17 | 0.75 | 0.26 |
+| Taint, data + control | 8 | 2 | 15 | 0.80 | 0.35 |
+| **CSIC** | **23** | **0** | **0** | **1.00** | **1.00** |
+| Exhaustive single-byte | 21 | 0 | 2 | 1.00 | 0.91 |
+
+**Refusals.** Both non-deterministic cases were refused (`clock_gettime`,
+`getrandom` in the sink slice), and no other case was. Every case consumed
+`set_tid_address` (musl start-up); it was flagged `OutsideSliceStable` every time.
+
+**Invalid interventions** (`invalid_interventions`):
+- Positive control: `req_buf[3] := 0` is a witness.
+- Negative control: `req_buf[9] := 0` is `NotACause`.
+- Each of the seven violations got its own reason: `ProgramCounter`,
+  `UnknownRegister`, `Unmapped`, `CodePage`, `WidthMismatch`, `NoOp`,
+  `NotBeforeSink`.
+
+### What each case shows
+
+- **RFC case** (`rfc_auth_*`, `invalid_interventions`). `req_buf[3]` is the only
+  witness on x86-64 -O0, x86-64 -O2 and AArch64 -O0.
+  - The static slice blames all 32 bytes. The logged bytes 8..11 reach
+    `session.is_admin` through the variable-index `log_buf` store, which it must
+    treat as aliasing, and through `MemAny` everywhere after that.
+  - Data taint misses `req_buf[3]` (the stored value is the constant 1).
+  - Fission's control taint catches it on AArch64 but not on x86-64. That
+    divergence follows the JIT store-provenance defect in section 2.
+- **Implicit flow** (`implicit_call_arg`). Data taint misses `req[5]`; control
+  taint and CSIC find it.
+- **False alias** (`false_alias_ptr`). Every dynamic method is right. The static
+  slice blames 15 non-causes.
+- **Real alias** (`real_alias`). `req[2]` (store offset) and `req[9]` (stored
+  value) are both witnesses. The JIT taint finds both because it propagates
+  pointer taint.
+- **Joint cause** (`joint_or`).
+  - No single byte is a witness, and the exhaustive sweep agrees.
+  - The recorded run never reads `req[1]` (`||` short-circuits). CSIC finds it
+    from the counterfactual run's slice and reports a verified `JointWitness`
+    `{req[0], req[1]}`, not "no cause".
+  - Contrast `joint_and`: two single witnesses and no pair search.
+- **Crash** (`crash_null_*`).
+  - The fault is caused by the slot selector `req[0]`, through an address
+    dependence.
+  - The dynamic slice and both taints also blame the stored value `req[1]`,
+    because it flows into the faulting store. Intervening on it never prevents
+    the fault, so CSIC drops it.
+- **Authorization sink** (`password_*`).
+  - With plain data and control slicing, the slice holds no input byte at all.
+    The `ok = 0` store that depends on the compared bytes never executed: an
+    omission dependence. The exhaustive sweep shows all four bytes are causes.
+  - Following *potential* dependence fixes it: a branch counts if its untaken
+    arm could have redefined a used value (relevant slicing).
+  - Both taints still miss all four.
+  - `tests/csic_cases.rs::a_check_whose_failing_arm_never_ran_needs_potential_dependence`
+    has the positive and negative controls.
+- **Branch outcome** (`branch_len`). Every dynamic method agrees.
+
+### Native execution
+
+`testdata/native/verify_native.py` runs the fixtures natively in Docker:
+- AArch64 runs on the host CPU in the Linux VM;
+- x86-64 runs under Docker's x86-64 translation, which is independent of
+  Fission's SLEIGH lift.
+
+It checks:
+- the recorded input;
+- every CSIC input-byte witness (Φ must flip natively);
+- both members of each joint pair (each alone must not flip Φ; together they
+  must);
+- **every byte CSIC did not name**, with the runner's first two alternatives
+  (Φ must not flip natively). This includes the bytes each baseline blames.
+
+For the two refused cases, it repeats the recorded input 12 times and requires
+both outcomes to occur natively.
+
+**Result: 559 native checks over the 16 cases, all agree with the emulator replay
+and the CSIC verdicts.** This covers:
+- every input-level witness;
+- the joint pair and its members;
+- the bytes each baseline wrongly blamed: `req_buf[8..11]` in the RFC case, the
+  stored value `req[1]` in the crash cases, and every static-slice false
+  positive.
+
+Both refused programs showed both outcomes natively within 12 runs, so the
+non-determinism the emulator's stubs hide is real.
+
+The internal-location witnesses (registers, stack slots) cannot be checked
+natively. Their evidence is the fresh replay from step 0 plus the JIT and
+interpreter agreeing on the end state.
+
+### Cost
+
+| Case | Steps | SS instrs | DS steps | CSIC candidates | witnesses (input/internal) | oracles | fresh verifs | checkpoints (invalid) | ckpt capture ms | restore µs | replay-to-step µs | oracle ms | fresh emulator ms | peak RSS MiB | CSIC total s | exhaustive oracles |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `rfc_auth_x64_O0` | 808 | 378 | 507 | 600 | 1/245 | 2589 | 246 | 38 (0) | 36 | 52 | 653 | 23.0 | 1243 | 462 | 67.9 | 156 |
+| `rfc_auth_x64_O2` | 722 | 358 | 464 | 600 | 1/253 | 2518 | 254 | 36 (0) | 69 | 21 | 598 | 4.9 | 1074 | 501 | 18.6 | 156 |
+| `rfc_auth_a64_O0` | 840 | 500 | 432 | 542 | 1/271 | 2433 | 272 | 40 (0) | 44 | 311 | 672 | 7.6 | 2163 | 497 | 28.5 | 156 |
+| `invalid_interventions` | 808 | 378 | 507 | 600 | 1/245 | 2593 | 247 | 39 (0) | 83 | 57 | 418 | 15.0 | 813 | 502 | 45.8 | 156 |
+| `implicit_call_arg` | 733 | 332 | 469 | 600 | 1/253 | 2521 | 254 | 35 (0) | 34 | 22 | 349 | 11.2 | 678 | 509 | 31.7 | 76 |
+| `false_alias_ptr` | 808 | 382 | 506 | 600 | 1/248 | 2570 | 249 | 39 (0) | 21 | 21 | 257 | 7.9 | 369 | 561 | 23.1 | 76 |
+| `real_alias` | 719 | 366 | 468 | 600 | 2/255 | 2517 | 257 | 36 (0) | 17 | 51 | 892 | 21.7 | 457 | 519 | 57.9 | 74 |
+| `joint_or` | 718 | 329 | 468 | 600 | 0/249 | 2539 | 250 | 35 (0) | 18 | 39 | 651 | 18.4 | 896 | 507 | 53.6 | 80 |
+| `joint_and` | 721 | 329 | 471 | 600 | 2/253 | 2514 | 255 | 36 (0) | 42 | 53 | 855 | 20.1 | 814 | 552 | 59.5 | 72 |
+| `nondet_time` | 906 | 618 | 651 | 0 | 0/0 | 52 | 0 | 39 (0) | 92 | 47 | 1670 | 6.6 | 0 | 526 | 7.9 | 76 |
+| `nondet_random` | 757 | 349 | 505 | 0 | 0/0 | 50 | 0 | 37 (0) | 125 | 22 | 2973 | 6.0 | 0 | 510 | 6.4 | 76 |
+| `crash_null_x64` | 602 | 294 | 470 | 600 | 1/254 | 2530 | 255 | 36 (0) | 53 | 63 | 845 | 45.9 | 876 | 518 | 123.6 | 37 |
+| `crash_null_a64` | 577 | 424 | 394 | 515 | 1/272 | 2266 | 273 | 36 (0) | 9 | 36 | 245 | 7.3 | 588 | 737 | 23.1 | 36 |
+| `password_x64` | 779 | 342 | 517 | 600 | 4/266 | 2530 | 270 | 37 (0) | 46 | 58 | 550 | 16.6 | 912 | 503 | 49.8 | 64 |
+| `password_a64` | 797 | 458 | 450 | 585 | 4/327 | 2503 | 331 | 40 (0) | 45 | 24 | 188 | 3.1 | 380 | 737 | 10.8 | 64 |
+| `branch_len` | 718 | 334 | 471 | 600 | 1/252 | 2522 | 253 | 36 (0) | 91 | 33 | 410 | 11.6 | 1556 | 506 | 33.5 | 77 |
+
+**Where the cost goes.**
+- About 2 500 oracle executions per case (35 247 in total). Almost all of them
+  test internal locations: registers, flags and stack slots read by slice
+  steps.
+- Those produce 3 664 internal witnesses. They are true counterfactuals but not
+  explanations.
+- The input-byte answer needed 36 to 156 oracle executions per case in the
+  exhaustive sweep (1 432 in total).
+- Where `candidates_generated` exceeded 600, the tail went untested. Input bytes
+  come first, so the scored explanations are unaffected.
+- 828 candidate verdicts are `BudgetBounded`. A replay ran past its instruction
+  budget, typically because a corrupted loop counter or return address made
+  the program loop.
+
+**Fork and replay costs** (median of per-case means):
+- restoring a checkpoint: 43 µs;
+- replaying to the exact step: 0.2–3 ms;
+- one oracle on the JIT: 3–46 ms;
+- building a fresh emulator: 845 ms. That is 20 000 times a restore, which is
+  why the pooled-worker design matters.
+
+**Peak RSS: 462–737 MiB per case.** It is dominated by emulator instances: the
+recorder, the worker, the verifier, the taint run and the exhaustive sweep each
+hold the parsed Sleigh tables. Checkpoints are not the main cost: about 37 per
+case, each a 32 KiB register file plus the pages written since.
+
 
 ## 6. Limitations: what the runner cannot do yet
 
@@ -312,4 +512,55 @@ RESULTS_PLACEHOLDER
 
 ## 7. Recommendation for P2/P3
 
-RECOMMENDATION_PLACEHOLDER
+CSIC should **continue**, but it should change what it spends oracles on before
+it grows. The numbers that drive that:
+
+1. **Precision is the point, and it held.**
+   - CSIC: 23 TP, 0 FP, 0 FN on 14 attributable cases, both refusals correct,
+     and every input-level verdict confirmed natively.
+   - The best non-interventional baseline, the runner's own dynamic slice, still
+     had 2 FP (crash) and needed potential dependence to avoid 8 FN (password).
+   - Taint reached a recall of 0.35. The static slice reached a precision of
+     0.08.
+   - The fixtures were built to separate these methods, so this is a mechanism
+     check, not an accuracy estimate.
+2. **Cost is in the wrong place.**
+   - 99% of oracle executions (about 2 500 a case) test internal locations,
+     against 36–156 for the input-level answer.
+   - **P2 change:** make input bytes (and later, named program variables) the
+     primary candidates, ranked by the slice. Test internal locations only on
+     request, or to localise a mechanism after an input-level witness.
+   - Expected effect, from this run: about 15–25x fewer oracle executions
+     (35 247 down to roughly 1.5–2 k on the same cases) with the same scored
+     explanations.
+3. **Joint causes need a real search.** One bounded pair is enough for the
+   fixtures, not for HP. P2 should:
+   - encode Φ's guard over the input bytes with the emulator's
+     `ShadowMode::Symbolic` and `fission-solver`;
+   - ask for contingencies (keep W fixed, flip X) inside a stated budget;
+   - replay every solver model in the emulator before using it, as the RFC asks;
+   - test AC2/AC3 within the budget, and only then use a minimality label.
+4. **Fix the emulator issues this found**, as separate emulator PRs before
+   anything depends on them:
+   - `Emulator::new` re-parses the `.sla` twice: a median of 845 ms per
+     emulator, about 20 000x a checkpoint restore.
+   - JIT `max_inst` overruns by one instruction in 16–26% of sampled budgets.
+   - The interpreter's taint panics on a store through a tainted pointer.
+   - The JIT's taint loses direct-data provenance through a memory store.
+   - A first-class `Emulator::checkpoint/restore` (this crate's `Checkpoint`) would
+     let the TTD and the debugger share it.
+5. **Held-out evaluation (P3).**
+   - Run CSIC with input-first candidates on `~/fission-benchmark/dir-verify/binaries`.
+     These are real GNU programs with real I/O, which will exercise the refusal
+     path harder.
+   - Run a second, independently written fixture set, with native execution as
+     the check.
+   - Compare against a stronger static slicer (points-to, value ranges, libc
+     models) and a dual-slicing baseline before any Adopt/Redesign/Reject ADR.
+
+**Suggested stop triggers for P3:**
+- any native disagreement with a `CounterfactualWitness`;
+- more than 10% `BudgetBounded` among input-level candidates;
+- a refusal rate above 50% on real programs, which would make the determinism
+  gate too blunt to be useful.
+

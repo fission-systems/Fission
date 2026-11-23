@@ -98,7 +98,6 @@ def main():
         "--fixtures",
         default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."),
     )
-    ap.add_argument("--negatives", type=int, default=4, help="not-a-cause bytes checked per case")
     args = ap.parse_args()
     build_images(args.fixtures)
     rows = json.load(open(args.report))
@@ -133,15 +132,17 @@ def main():
                     data = apply_inputs(original, [(c["input_offset"], w["intervened_bytes"][0])])
                     out, rc = run_native(fixture, data)
                     checks.append((f"witness in[{c['input_offset']}]", phi(out, rc), phi(out, rc) != want))
-            negatives = [
-                c for c in rep["candidates"]
-                if c["verdict"]["kind"] == "not_a_cause" and c["origin"] == "input_byte"
-            ][: args.negatives]
-            for c in negatives:
-                for value in c["verdict"]["tried"]:
-                    data = apply_inputs(original, [(c["input_offset"], value[0])])
+            # Every byte CSIC did not name (including the ones a baseline
+            # blames) must leave native Φ unchanged under the runner's first
+            # two alternatives: the low-bit flip and zero (or one).
+            named = set(ev["csic"]["explanation"])
+            for offset, byte in enumerate(original):
+                if offset in named:
+                    continue
+                for value in (byte ^ 1, 0 if byte else 1):
+                    data = apply_inputs(original, [(offset, value)])
                     out, rc = run_native(fixture, data)
-                    checks.append((f"not-a-cause in[{c['input_offset']}]={value[0]:#x}", phi(out, rc), phi(out, rc) == want))
+                    checks.append((f"unnamed in[{offset}]={value:#x}", phi(out, rc), phi(out, rc) == want))
             joint = rep["joint"]
             if joint["kind"] == "joint_witness":
                 edits = [
