@@ -341,6 +341,22 @@ sound trace-guided FactStore injection are not yet implemented.**
 The parser enforces a maximum event budget of 1,000,000 entries and fails
 with the source line number on malformed JSON.
 
+### GDB remote (QEMU/gdbserver) read-only probe
+
+The first RSP integration is a **read-only remote probe**, designed for
+stopped QEMU guests and gdbserver instances:
+
+```bash
+fission_cli debug rsp-probe 127.0.0.1:1234 --read-registers --json
+```
+
+It uses a bounded TCP connection, verifies RSP checksums, and queries only
+`?` (stop reply), `qSupported` (features), and optionally `g` (opaque
+register bytes). It does not silently guess the register layout, interpret
+guest virtual addresses or claim to provide interactive step/breakpoint
+control. A full multi-architecture RSP `ExecutionBackend`, remote memory
+reads and vmlinux symbolization remain future milestones.
+
 ### Linux native record/replay (rr)
 
 Linux users can now access the repository's existing Mozilla `rr` bridge
