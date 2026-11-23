@@ -372,7 +372,7 @@ mod tests {
             offset: i128::from(OFFSET),
             size: 4,
         };
-        builder.scalar_ssa.memory_values = vec![
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).memory_values = vec![
             SsaMemoryValue {
                 id: SsaMemoryValueId(0),
                 storage,
@@ -384,9 +384,9 @@ mod tests {
                 definition: SsaValueDefinition::Operation(SsaOpSite { block: 1, op: 0 }),
             },
         ];
-        builder.scalar_ssa.value_memory_high_variables =
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).value_memory_high_variables =
             vec![SsaMemoryHighVariableId(0), SsaMemoryHighVariableId(1)];
-        builder.scalar_ssa.memory_high_variables = vec![
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).memory_high_variables = vec![
             SsaMemoryHighVariable {
                 id: SsaMemoryHighVariableId(0),
                 members: vec![SsaMemoryValueId(0)],
@@ -406,7 +406,7 @@ mod tests {
                 }],
             },
         ];
-        builder.scalar_ssa.memory_value_covers = vec![
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).memory_value_covers = vec![
             vec![SsaCoverBlock {
                 block: 1,
                 start: 0,
@@ -418,13 +418,15 @@ mod tests {
                 end_exclusive: 6,
             }],
         ];
-        builder.scalar_ssa.memory_operation_outputs.insert(
-            SsaOpSite { block: 1, op: 0 },
-            vec![fission_midend_core::ir::SsaMemoryAccessPiece {
-                byte_offset: 0,
-                value: SsaMemoryValueId(1),
-            }],
-        );
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa)
+            .memory_operation_outputs
+            .insert(
+                SsaOpSite { block: 1, op: 0 },
+                vec![fission_midend_core::ir::SsaMemoryAccessPiece {
+                    byte_offset: 0,
+                    value: SsaMemoryValueId(1),
+                }],
+            );
         builder.current_lowering_site = Some(LoweringSite {
             block_idx: 1,
             op_idx: 0,
@@ -456,16 +458,18 @@ mod tests {
     fn different_non_interfering_group_is_safe() {
         let mut builder = builder_with_interfering_groups(SsaMemoryHighVariableId(0));
         // Move group A's cover away from group B's -- no more overlap.
-        builder.scalar_ssa.memory_high_variables[0].cover = vec![SsaCoverBlock {
-            block: 1,
-            start: 6,
-            end_exclusive: 10,
-        }];
-        builder.scalar_ssa.memory_value_covers[0] = vec![SsaCoverBlock {
-            block: 1,
-            start: 6,
-            end_exclusive: 10,
-        }];
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).memory_high_variables[0].cover =
+            vec![SsaCoverBlock {
+                block: 1,
+                start: 6,
+                end_exclusive: 10,
+            }];
+        std::rc::Rc::make_mut(&mut builder.scalar_ssa).memory_value_covers[0] =
+            vec![SsaCoverBlock {
+                block: 1,
+                start: 6,
+                end_exclusive: 10,
+            }];
         assert!(!builder.cover_proves_stack_slot_reuse_unsafe(OFFSET));
     }
 

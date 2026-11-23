@@ -6306,7 +6306,7 @@ fn rejected_ssa_emission_keeps_existing_bindings_unchanged() {
     let options = test_support::test_options();
     let mut builder = PreviewBuilder::new(&pcode, &options, None);
     let invalid = SsaValueId(builder.scalar_ssa.values.len() as u32 + 1);
-    builder.scalar_ssa.out_of_ssa_copies[0].source = invalid;
+    std::rc::Rc::make_mut(&mut builder.scalar_ssa).out_of_ssa_copies[0].source = invalid;
     let before_temps = builder.temps.clone();
     let before_params = builder.params.clone();
     builder.prepare_ssa_emission();
