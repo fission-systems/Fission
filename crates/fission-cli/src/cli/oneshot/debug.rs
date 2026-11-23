@@ -526,17 +526,8 @@ pub fn run_debug_command(args: crate::cli::args::DebugArgs) -> Result<()> {
             Ok(())
         }
 
-        DebugCommand::HwBp(args) => {
-            // Hardware breakpoints are not part of the cross-platform
-            // ExecutionBackend contract on any host. This used to print a
-            // line and exit 0 off Windows, so a caller read "set" for a
-            // breakpoint that did not exist.
-            let _ = args;
-            anyhow::bail!(
-                "hardware breakpoints are not exposed by the debugger interface; \
-                 use a software breakpoint (`bp`) for instruction addresses; \
-                 hardware data watchpoints are not available in this backend"
-            );
+        DebugCommand::HwBp(_) | DebugCommand::RmHwBp(_) => {
+            anyhow::bail!("hardware breakpoints require a persistent debug session; Windows x64 native backend only")
         }
 
         DebugCommand::Context(args) => {
