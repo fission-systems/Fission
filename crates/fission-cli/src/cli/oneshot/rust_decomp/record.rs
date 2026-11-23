@@ -10,6 +10,8 @@ pub(crate) struct RenderConfig {
     pub debug_decomp_bundle: bool,
     pub requested_address: Option<u64>,
     pub timeout_ms: Option<u64>,
+    /// Deterministic work limits for each function's render.
+    pub resource_limits: fission_decompiler::midend_core::ir::ResourceLimits,
     /// Also capture/render PreHIR alongside NIR/HIR (`decomp --prehir`).
     pub prehir: bool,
 }

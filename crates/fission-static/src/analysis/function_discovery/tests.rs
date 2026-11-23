@@ -546,7 +546,32 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
 
     // 0x401012 is known as a separate function!
     let known_functions = HashSet::from([0x401000, 0x401012]);
-    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+    let boundaries = walk_function_boundaries(
+        &binary,
+        &frontend,
+        0x401000,
+        &known_functions,
+        &executable_ranges(&binary),
+        None,
+    );
+    let sweep = super::control_flow_scan::scan_executable_sections(&binary, &frontend);
+    let entry_bytes = binary.view_bytes(0x401000, 15).unwrap();
+    assert!(
+        sweep
+            .coverage_decodes
+            .contains_key(&(0x401000, entry_bytes.as_ptr() as usize))
+    );
+    assert_eq!(
+        walk_function_boundaries(
+            &binary,
+            &frontend,
+            0x401000,
+            &known_functions,
+            &executable_ranges(&binary),
+            Some(&sweep.coverage_decodes),
+        ),
+        boundaries
+    );
 
     assert!(
         boundaries.contains(&(0x401000, 0x401002)),
@@ -556,6 +581,32 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
         !boundaries.iter().any(|&(s, _)| s >= 0x401012),
         "must NOT envelope tail call target function"
     );
+}
+
+#[test]
+fn walk_function_boundaries_coalesces_fallthrough_without_covering_a_branch_gap() {
+    use super::instruction_boundaries::walk_function_boundaries;
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    let _guard = sleigh_runtime_discovery_lock();
+    let mut binary = pe64_executable_shell();
+    let start = binary.entry_point;
+    let text = Arc::make_mut(&mut binary.data).to_mut_vec();
+    // test eax,eax; jne +8; ret. The other return skips seven padding bytes.
+    text[..5].copy_from_slice(&[0x85, 0xc0, 0x75, 0x08, 0xc3]);
+    text[12] = 0xc3;
+    let frontend = RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().unwrap()).unwrap();
+    let intervals = walk_function_boundaries(
+        &binary,
+        &frontend,
+        start,
+        &HashSet::from([start]),
+        &executable_ranges(&binary),
+        None,
+    );
+    assert_eq!(intervals, [(start, start + 5), (start + 12, start + 13)]);
 }
 
 #[test]
@@ -606,7 +657,14 @@ fn walk_function_boundaries_terminates_on_noreturn_call() {
     let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec).expect("frontend");
 
     let known_functions = HashSet::from([0x401000]);
-    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+    let boundaries = walk_function_boundaries(
+        &binary,
+        &frontend,
+        0x401000,
+        &known_functions,
+        &executable_ranges(&binary),
+        None,
+    );
 
     assert!(
         boundaries.contains(&(0x401000, 0x401005)),

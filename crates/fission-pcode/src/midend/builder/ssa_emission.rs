@@ -398,18 +398,16 @@ impl<'a> PreviewBuilder<'a> {
         bodies: &[Vec<PreHirStmt>],
         terminators: &[LoweredTerminator],
     ) -> bool {
-        let tracked = self.ssa_initialization_tracked_names();
-        let seed: BTreeSet<_> = self
-            .params
-            .values()
-            .map(|binding| binding.name.clone())
-            .chain(
+        let tracked = SsaTrackedNames::new(&self.ssa_initialization_tracked_names());
+        let seed = tracked.state_of(
+            self.params.values().map(|binding| &binding.name).chain(
                 self.temps
                     .values()
                     .filter(|binding| binding.initializer.is_some())
-                    .map(|binding| binding.name.clone()),
-            )
-            .collect();
+                    .map(|binding| &binding.name),
+            ),
+        );
+        let full = tracked.full();
         let mut reachable = BTreeSet::new();
         let mut pending = vec![0];
         while let Some(block) = pending.pop() {
@@ -420,20 +418,20 @@ impl<'a> PreviewBuilder<'a> {
         let mut edge_states = BTreeMap::new();
         for &pred in &reachable {
             for &succ in &self.heritage_successors[pred] {
-                edge_states.insert((pred, succ), tracked.clone());
+                edge_states.insert((pred, succ), full.clone());
             }
         }
-        let incoming = |block: usize, edges: &BTreeMap<(usize, usize), BTreeSet<String>>| {
+        let incoming = |block: usize, edges: &BTreeMap<(usize, usize), SsaInitState>| {
             if block == 0 {
                 return seed.clone();
             }
-            let mut state = tracked.clone();
+            let mut state = full.clone();
             for &pred in &self.heritage_predecessors[block] {
                 if reachable.contains(&pred) {
-                    state.retain(|name| edges[&(pred, block)].contains(name));
+                    state.intersect_with(&edges[&(pred, block)]);
                 }
             }
-            state.extend(seed.iter().cloned());
+            state.union_with(&seed);
             state
         };
         loop {
@@ -488,7 +486,8 @@ impl<'a> PreviewBuilder<'a> {
                 if !ssa_transfer_definitions(&bodies[block], &mut state, &tracked, decision, true) {
                     if super::debug::preview_builder_diag_enabled() {
                         eprintln!(
-                            "[DIAG] SSA initialization declined block={block} edge={successor:?} incoming={input:?} body={:?}",
+                            "[DIAG] SSA initialization declined block={block} edge={successor:?} incoming={:?} body={:?}",
+                            tracked.defined_names(&input),
                             bodies[block]
                         );
                     }
@@ -504,7 +503,8 @@ impl<'a> PreviewBuilder<'a> {
                 if expr.is_some_and(|expr| !ssa_expr_initialized(expr, &state, &tracked)) {
                     if super::debug::preview_builder_diag_enabled() {
                         eprintln!(
-                            "[DIAG] SSA terminator initialization declined block={block} state={state:?} term={:?}",
+                            "[DIAG] SSA terminator initialization declined block={block} state={:?} term={:?}",
+                            tracked.defined_names(&state),
                             terminators[block]
                         );
                     }
@@ -1299,14 +1299,102 @@ impl<'a> PreviewBuilder<'a> {
     }
 }
 
+/// The names whose initialization the plan owes, numbered once so that a
+/// definition state is a bit vector instead of a set of cloned strings.
+///
+/// A name outside this set is never owed a definition, so only tracked names
+/// are ever recorded in a state: nothing reads the others.
+struct SsaTrackedNames {
+    names: Vec<String>,
+    index: HashMap<String, usize>,
+}
+
+/// Which tracked names are defined at a point; bit `i` is `names[i]`.
+#[derive(Clone, PartialEq, Eq)]
+struct SsaInitState(Vec<u64>);
+
+impl SsaInitState {
+    fn insert(&mut self, bit: usize) {
+        self.0[bit / 64] |= 1 << (bit % 64);
+    }
+
+    fn contains(&self, bit: usize) -> bool {
+        self.0[bit / 64] & (1 << (bit % 64)) != 0
+    }
+
+    fn intersect_with(&mut self, other: &Self) {
+        for (word, other) in self.0.iter_mut().zip(&other.0) {
+            *word &= other;
+        }
+    }
+
+    fn union_with(&mut self, other: &Self) {
+        for (word, other) in self.0.iter_mut().zip(&other.0) {
+            *word |= other;
+        }
+    }
+}
+
+impl SsaTrackedNames {
+    fn new(names: &BTreeSet<String>) -> Self {
+        let names: Vec<String> = names.iter().cloned().collect();
+        let index = names
+            .iter()
+            .enumerate()
+            .map(|(bit, name)| (name.clone(), bit))
+            .collect();
+        Self { names, index }
+    }
+
+    fn empty(&self) -> SsaInitState {
+        SsaInitState(vec![0; self.names.len().div_ceil(64)])
+    }
+
+    fn full(&self) -> SsaInitState {
+        let mut state = self.empty();
+        for bit in 0..self.names.len() {
+            state.insert(bit);
+        }
+        state
+    }
+
+    /// The state holding exactly the tracked ones among `names`.
+    fn state_of<'a>(&self, names: impl IntoIterator<Item = &'a String>) -> SsaInitState {
+        let mut state = self.empty();
+        for name in names {
+            self.define(&mut state, name);
+        }
+        state
+    }
+
+    fn define(&self, state: &mut SsaInitState, name: &str) {
+        if let Some(&bit) = self.index.get(name) {
+            state.insert(bit);
+        }
+    }
+
+    /// An untracked name is never owed a definition, so it always reads as
+    /// initialized.
+    fn is_initialized(&self, state: &SsaInitState, name: &str) -> bool {
+        self.index.get(name).is_none_or(|&bit| state.contains(bit))
+    }
+
+    fn defined_names(&self, state: &SsaInitState) -> BTreeSet<&str> {
+        (0..self.names.len())
+            .filter(|&bit| state.contains(bit))
+            .map(|bit| self.names[bit].as_str())
+            .collect()
+    }
+}
+
 fn ssa_expr_initialized(
     expr: &PreHirExpr,
-    state: &BTreeSet<String>,
-    tracked: &BTreeSet<String>,
+    state: &SsaInitState,
+    tracked: &SsaTrackedNames,
 ) -> bool {
     let valid = |expr| ssa_expr_initialized(expr, state, tracked);
     match expr {
-        PreHirExpr::Var(name) => !tracked.contains(name) || state.contains(name),
+        PreHirExpr::Var(name) => tracked.is_initialized(state, name),
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::Load { ptr: expr, .. }
@@ -1330,8 +1418,8 @@ fn ssa_expr_initialized(
 
 fn ssa_transfer_definitions(
     body: &[PreHirStmt],
-    state: &mut BTreeSet<String>,
-    tracked: &BTreeSet<String>,
+    state: &mut SsaInitState,
+    tracked: &SsaTrackedNames,
     decision: Option<(&str, bool)>,
     check_reads: bool,
 ) -> bool {
@@ -1343,7 +1431,7 @@ fn ssa_transfer_definitions(
                 }
                 let destination_exprs: Vec<&PreHirExpr> = match lhs {
                     PreHirLValue::Var(name) => {
-                        state.insert(name.clone());
+                        tracked.define(state, name);
                         Vec::new()
                     }
                     PreHirLValue::Deref { ptr, .. } => vec![ptr],
@@ -1402,7 +1490,7 @@ fn ssa_transfer_definitions(
                     ) {
                         return false;
                     }
-                    then_state.retain(|name| else_state.contains(name));
+                    then_state.intersect_with(&else_state);
                     *state = then_state;
                 }
             }
@@ -1439,18 +1527,18 @@ mod initialization_tests {
 
     #[test]
     fn previous_definition_is_required_even_when_a_later_write_exists() {
-        let tracked = ["value".into()].into_iter().collect();
+        let tracked = SsaTrackedNames::new(&["value".into()].into_iter().collect());
         let body = vec![assign("value", PreHirExpr::Var("value".into()))];
         assert!(!ssa_transfer_definitions(
             &body,
-            &mut BTreeSet::new(),
+            &mut tracked.empty(),
             &tracked,
             None,
             true
         ));
         assert!(ssa_transfer_definitions(
             &body,
-            &mut tracked.clone(),
+            &mut tracked.full(),
             &tracked,
             None,
             true
@@ -1463,7 +1551,8 @@ mod initialization_tests {
             .into_iter()
             .map(str::to_string)
             .collect();
-        let input: BTreeSet<String> = ["decision".into()].into_iter().collect();
+        let tracked = SsaTrackedNames::new(&tracked);
+        let input = tracked.state_of(&["decision".to_string()]);
         let body = vec![PreHirStmt::If {
             cond: PreHirExpr::Var("decision".into()),
             then_body: vec![assign("carrier", PreHirExpr::Const(7, NirType::Unknown))].into(),
@@ -1478,7 +1567,7 @@ mod initialization_tests {
             assert!(ssa_transfer_definitions(
                 &body, &mut state, &tracked, decision, true
             ));
-            assert_eq!(state.contains("carrier"), expected);
+            assert_eq!(tracked.is_initialized(&state, "carrier"), expected);
         }
     }
 
@@ -1488,7 +1577,8 @@ mod initialization_tests {
             .into_iter()
             .map(str::to_string)
             .collect();
-        let mut state = BTreeSet::new();
+        let tracked = SsaTrackedNames::new(&tracked);
+        let mut state = tracked.empty();
         assert!(ssa_transfer_definitions(
             &[assign(
                 "address",

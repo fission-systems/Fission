@@ -2027,3 +2027,292 @@ fn a_dispatch_already_being_bounded_gets_no_bound_on_re_entry() {
     // The probe that was already running is not ours to clear.
     assert!(builder.branchind_bound_probes.contains(&1));
 }
+
+#[test]
+fn selector_upper_bound_requires_both_sides_on_disjunction_edges() {
+    let sel = PreHirExpr::Var("sel".to_string());
+    let other = PreHirExpr::Var("other".to_string());
+    let five = PreHirExpr::Const(5, NirType::Unknown);
+    let eight = PreHirExpr::Const(8, NirType::Unknown);
+    let one = PreHirExpr::Const(1, NirType::Unknown);
+    let sel_le_5 = test_binary(PreHirBinaryOp::Le, sel.clone(), five, NirType::Bool);
+    let sel_le_8 = test_binary(PreHirBinaryOp::Le, sel.clone(), eight, NirType::Bool);
+    let unbounded = test_binary(PreHirBinaryOp::Eq, other, one, NirType::Bool);
+    let is_sel = |expr: &PreHirExpr| super::strip_casts(expr) == sel;
+
+    // `!(sel <= 5 && other == 1)` is `!sel_le_5 || other != 1`: false arm of `&&`
+    // with one unbounded arm yields no upper bound.
+    let and_cond = test_binary(
+        PreHirBinaryOp::LogicalAnd,
+        sel_le_5.clone(),
+        unbounded.clone(),
+        NirType::Bool,
+    );
+    assert_eq!(
+        extract_selector_upper_bound_from_cond(&and_cond, &is_sel, false),
+        None
+    );
+
+    // `(sel <= 5 || other == 1)` true arm has no bound when `other == 1` can hold.
+    let or_unbounded = test_binary(
+        PreHirBinaryOp::LogicalOr,
+        sel_le_5.clone(),
+        unbounded,
+        NirType::Bool,
+    );
+    assert_eq!(
+        extract_selector_upper_bound_from_cond(&or_unbounded, &is_sel, true),
+        None
+    );
+
+    // `(sel <= 5 || sel <= 8)` true arm is bounded by max(5, 8) = 8.
+    let or_both = test_binary(PreHirBinaryOp::LogicalOr, sel_le_5, sel_le_8, NirType::Bool);
+    assert_eq!(
+        extract_selector_upper_bound_from_cond(&or_both, &is_sel, true),
+        Some(8)
+    );
+}
+
+#[test]
+fn branchind_upper_bound_combines_all_predecessors_with_max_and_rejects_unbounded() {
+    let reg = |offset| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let uniq = |offset| Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let konst = |value: u64| Varnode {
+        space_id: 0,
+        offset: value,
+        size: 4,
+        is_constant: true,
+        constant_val: value as i64,
+    };
+
+    // Pred 0: if (3 < sel) goto default (0x1040) else goto dispatch (0x1030) -> sel <= 3
+    // Pred 1: if (7 < sel) goto default (0x1040) else goto dispatch (0x1030) -> sel <= 7
+    let two_bounded = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![3, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0x1000,
+                        output: Some(uniq(0x10)),
+                        inputs: vec![konst(3), reg(0x38)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1002,
+                        output: None,
+                        inputs: vec![konst(0x1040), uniq(0x10)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x1010,
+                successors: vec![3, 2],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0x1010,
+                        output: Some(uniq(0x20)),
+                        inputs: vec![konst(7), reg(0x38)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x1012,
+                        output: None,
+                        inputs: vec![konst(0x1040), uniq(0x20)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x1030,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x1030,
+                    output: None,
+                    inputs: vec![reg(0x38)],
+                    asm_mnemonic: None,
+                }],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x1040,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x1040,
+                    output: None,
+                    inputs: vec![konst(0)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    };
+    let options = bound_probe_options();
+    let mut builder = PreviewBuilder::new(&two_bounded, &options, None);
+    let selector_vn = two_bounded.blocks[2].ops[0].inputs[0].clone();
+    let mut visiting = Default::default();
+    let selector = builder
+        .lower_wrapped_varnode(&selector_vn, &mut visiting)
+        .expect("selector");
+    assert_eq!(
+        builder.infer_branchind_selector_upper_bound(2, &selector, Some(&selector_vn), 0),
+        Some(7)
+    );
+
+    // Replace pred 1 with an unbounded goto to dispatch -> combined bound must be None.
+    let mut one_unbounded = two_bounded;
+    one_unbounded.blocks[1].successors = vec![2];
+    one_unbounded.blocks[1].ops = vec![PcodeOp {
+        seq_num: 0,
+        opcode: PcodeOpcode::Branch,
+        address: 0x1010,
+        output: None,
+        inputs: vec![konst(0x1030)],
+        asm_mnemonic: None,
+    }];
+    let mut builder = PreviewBuilder::new(&one_unbounded, &options, None);
+    let selector_vn = one_unbounded.blocks[2].ops[0].inputs[0].clone();
+    let mut visiting = Default::default();
+    let selector = builder
+        .lower_wrapped_varnode(&selector_vn, &mut visiting)
+        .expect("selector");
+    assert_eq!(
+        builder.infer_branchind_selector_upper_bound(2, &selector, Some(&selector_vn), 0),
+        None
+    );
+}
+
+#[test]
+fn predicate_family_respects_bool_negate_and_distinguishes_lower_bound() {
+    let reg = |offset| Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        offset,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let uniq = |offset| Varnode {
+        space_id: crate::midend::UNIQUE_SPACE_ID,
+        offset,
+        size: 1,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let konst = |value: u64| Varnode {
+        space_id: 0,
+        offset: value,
+        size: 4,
+        is_constant: true,
+        constant_val: value as i64,
+    };
+    let family = (RUST_SLEIGH_REGISTER_SPACE_ID, 0x38);
+    let options = bound_probe_options();
+
+    // `5 < sel`: true arm is lower-bounded (no upper bound), false arm is `sel <= 5`.
+    let lower_cmp = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntLess,
+                    address: 0x1000,
+                    output: Some(uniq(0x10)),
+                    inputs: vec![konst(5), reg(0x38)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1002,
+                    output: None,
+                    inputs: vec![konst(0x1010), uniq(0x10)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let builder = PreviewBuilder::new(&lower_cmp, &options, None);
+    assert_eq!(
+        builder.extract_selector_upper_bound_from_predicate_family(0, family, true),
+        None
+    );
+    assert_eq!(
+        builder.extract_selector_upper_bound_from_predicate_family(0, family, false),
+        Some(5)
+    );
+
+    // `BoolNegate(IntLess(sel, 5))` (`sel >= 5`): true arm has no upper bound, false has `sel < 5` -> 4.
+    let negated_cmp = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x1000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::IntLess,
+                    address: 0x1000,
+                    output: Some(uniq(0x10)),
+                    inputs: vec![reg(0x38), konst(5)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::BoolNegate,
+                    address: 0x1001,
+                    output: Some(uniq(0x11)),
+                    inputs: vec![uniq(0x10)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 2,
+                    opcode: PcodeOpcode::CBranch,
+                    address: 0x1002,
+                    output: None,
+                    inputs: vec![konst(0x1010), uniq(0x11)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let builder = PreviewBuilder::new(&negated_cmp, &options, None);
+    assert_eq!(
+        builder.extract_selector_upper_bound_from_predicate_family(0, family, true),
+        None
+    );
+    assert_eq!(
+        builder.extract_selector_upper_bound_from_predicate_family(0, family, false),
+        Some(4)
+    );
+}

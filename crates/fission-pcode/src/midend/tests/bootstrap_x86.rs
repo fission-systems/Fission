@@ -3739,3 +3739,88 @@ fn a_constant_is_not_read_out_of_an_unmapped_section() {
     assert!(!code.contains(".interp"), "{code}");
     assert!(code.contains("11"), "{code}");
 }
+
+#[test]
+fn preview_branchind_default_is_the_range_guard_exit_not_the_next_block() {
+    // `cmp eax, 3; ja exit; jmp [table]` with table = {case0, exit, case2,
+    // exit}: the compiler fills unused entries with the default label, which
+    // is the guard's out-of-range edge. The block laid out after the
+    // dispatch (case0) is a real case, not the default.
+    let ret = |index: u32, address: u64, value: i64| PcodeBasicBlock {
+        index,
+        start_address: address,
+        successors: vec![],
+        ops: vec![PcodeOp {
+            seq_num: 0,
+            opcode: PcodeOpcode::Return,
+            address,
+            output: None,
+            inputs: vec![cst(0, 4), cst(value, 4)],
+            asm_mnemonic: None,
+        }],
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x405000,
+                successors: vec![1, 4],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::IntLess,
+                        address: 0x405000,
+                        output: Some(uniq(0x100, 1)),
+                        inputs: vec![cst(3, 4), reg(0x00, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x405003,
+                        output: None,
+                        inputs: vec![cst(0x405040, 4), uniq(0x100, 1)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x405010,
+                successors: vec![2, 4, 3, 4],
+                ops: vec![PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::BranchInd,
+                    address: 0x405010,
+                    output: None,
+                    inputs: vec![reg(0x00, 4)],
+                    asm_mnemonic: Some("JMP EAX".to_string()),
+                }],
+            },
+            ret(2, 0x405020, 10),
+            ret(3, 0x405030, 30),
+            ret(4, 0x405040, 99),
+        ],
+    };
+
+    let options = preview_options_x86();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    match builder
+        .lower_block_terminator(1)
+        .expect("terminator lowering")
+    {
+        LoweredTerminator::Switch {
+            targets,
+            default_target,
+            ..
+        } => {
+            assert_eq!(targets, vec![0x405020, 0x405040, 0x405030, 0x405040]);
+            assert_eq!(
+                default_target,
+                Some(0x405040),
+                "the guard's out-of-range target is the default"
+            );
+        }
+        other => panic!("expected switch terminator, got {other:?}"),
+    }
+}

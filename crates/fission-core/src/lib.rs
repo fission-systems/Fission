@@ -21,7 +21,7 @@ pub use crate::core::path_config;
 pub use crate::core::prelude;
 pub use crate::core::settings;
 
-pub use crate::core::config::{LogConfig, LogLevel};
+pub use crate::core::config::{LogConfig, LogLevel, WorkLimitOverrides};
 pub use crate::core::{CONFIG, CallingConvention, FissionError, PATHS, Result};
 
 pub use crate::core::path_config::find_sla_dir;
@@ -44,6 +44,8 @@ pub mod resources {
 pub mod utils {
     pub use crate::core::utils::*;
 }
+
+pub mod test_inputs;
 
 // Commonly used standalone utilities
 pub use crate::core::utils::{

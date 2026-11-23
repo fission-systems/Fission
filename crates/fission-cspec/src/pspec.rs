@@ -477,9 +477,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let pspec_path = repo_root.join("utils/sleigh-specs/languages/x86/x86-64.pspec");
-        if !pspec_path.exists() {
-            return; // skip if not in full repo checkout
-        }
+        assert!(
+            pspec_path.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            pspec_path.display()
+        );
 
         let doc = PspecDocument::parse_file(&pspec_path).expect("parse x86-64.pspec");
         assert_eq!(doc.programcounter.as_deref(), Some("RIP"));
@@ -514,9 +516,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let pspec_path = repo_root.join("utils/sleigh-specs/languages/AARCH64/AARCH64.pspec");
-        if !pspec_path.exists() {
-            return;
-        }
+        assert!(
+            pspec_path.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            pspec_path.display()
+        );
 
         let doc = PspecDocument::parse_file(&pspec_path).expect("parse AARCH64.pspec");
         assert_eq!(doc.programcounter.as_deref(), Some("pc"));
@@ -538,9 +542,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let languages_root = repo_root.join("utils/sleigh-specs/languages");
-        if !languages_root.exists() {
-            return;
-        }
+        assert!(
+            languages_root.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            languages_root.display()
+        );
         let index = super::super::ldefs::build_ldefs_index(&languages_root);
         let entry = index
             .get(&("x86:LE:64:default".to_string(), "gcc".to_string()))

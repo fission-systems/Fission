@@ -6,6 +6,7 @@
 
 mod candidate_validation;
 mod control_flow_scan;
+mod coverage_decode;
 mod data_references;
 mod ghidra_patterns;
 mod instruction_boundaries;

@@ -214,14 +214,22 @@ fn x64_live_argument_slots_cross_only_proven_nonwriting_calls() {
 
     let overwritten_slot = render_with_leaf_effect(Some(vec![0]));
     assert!(
-        overwritten_slot.contains("target_fn()"),
-        "a callee write to slot 0 must keep the argument tuple conservative: {overwritten_slot}"
+        !overwritten_slot.contains("target_fn(xVar0"),
+        "a callee write to slot 0 must not pass the caller's stale value: {overwritten_slot}"
+    );
+    assert!(
+        overwritten_slot.contains("target_fn(__fission_unrecovered_arg(), 5, 7)"),
+        "the overwritten slot is visibly unrecovered; the proven-untouched slots stay: {overwritten_slot}"
     );
 
     let unknown_effect = render_with_leaf_effect(None);
     assert!(
-        unknown_effect.contains("target_fn()"),
-        "an unknown effect must not preserve caller-saved slots: {unknown_effect}"
+        !unknown_effect.contains("target_fn(xVar0") && !unknown_effect.contains("5, 7)"),
+        "an unknown effect must not preserve caller-saved slots staged before the call: {unknown_effect}"
+    );
+    assert!(
+        unknown_effect.contains("target_fn(__fission_unrecovered_arg(), 5)"),
+        "only the slot staged after the call survives an unknown effect: {unknown_effect}"
     );
 }
 
@@ -4019,4 +4027,373 @@ fn mips32_guarded_trap_callother_does_not_surface_as_pcodeop() {
     assert!(!code.contains("__fission_branchind"), "{code}");
     assert!(!code.contains("__pcodeop_1"), "{code}");
     assert!(code.contains("return param_1;"), "{code}");
+}
+
+#[test]
+fn systemv_join_call_keeps_an_argument_each_path_restages_differently() {
+    // call leaf; jcc; {mov esi, 0x11 | mov esi, 0x22}; join: mov edi, 7;
+    // call target_fn(int, int). Both arms restage rsi after the call that
+    // clobbered it, with different values: the second argument is the value
+    // merged at the join. Dropping it printed `target_fn(7)`.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let arm = |address: u64, value: i64| PcodeBasicBlock {
+        index: 0,
+        start_address: address,
+        successors: vec![3],
+        ops: vec![
+            op(
+                address,
+                PcodeOpcode::Copy,
+                Some(reg(0x30, 8)),
+                vec![cst(value, 8)],
+            ),
+            op(
+                address + 4,
+                PcodeOpcode::Branch,
+                None,
+                vec![cst(0x401030, 8)],
+            ),
+        ],
+    };
+    let mut blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 2],
+            ops: vec![
+                op(base, PcodeOpcode::Call, None, vec![cst(0x401100, 8)]),
+                op(
+                    base + 5,
+                    PcodeOpcode::IntEqual,
+                    Some(uniq(0x100, 1)),
+                    vec![reg(0x10, 8), cst(0, 8)],
+                ),
+                op(
+                    base + 8,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![cst(0x401020, 8), uniq(0x100, 1)],
+                ),
+            ],
+        },
+        arm(0x401010, 0x11),
+        arm(0x401020, 0x22),
+        PcodeBasicBlock {
+            index: 3,
+            start_address: 0x401030,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401030,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x38, 8)),
+                    vec![cst(7, 8)],
+                ),
+                op(0x401035, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x40103a, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    for (index, block) in blocks.iter_mut().enumerate() {
+        block.index = index as u32;
+    }
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    for (address, symbol) in [(0x401100, "leaf"), (0x401200, "target_fn")] {
+        context.call_target_refs.insert(
+            address,
+            CallTargetRef {
+                address: Some(address),
+                symbol: symbol.to_string(),
+                provenance: CallTargetProvenance::Direct,
+                edge_kind: CallEdgeKind::Direct,
+                confidence: 100,
+            },
+        );
+    }
+    context.call_prototype_summaries.insert(
+        "target_fn".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{code}"));
+    assert!(
+        call.contains("target_fn(7, "),
+        "the call at the join must keep its second argument: {call}\n{code}"
+    );
+    assert!(
+        !call.contains("target_fn(7, 17)")
+            && !call.contains("target_fn(7, 34)")
+            && !call.contains("target_fn(7, param_"),
+        "the second argument is the joined value, not one path's or the entry value: {call}\n{code}"
+    );
+}
+
+#[test]
+fn systemv_conditional_overwrite_argument_is_the_select_not_one_path() {
+    // mov esi, 0x11; test rdx, rdx; je join; mov esi, 0x22; join: mov edi, 7;
+    // call target_fn(int, int) -- a conditional move into an argument
+    // register. The dominating write is the value on one path only; the
+    // argument is `cond ? 17 : 34`, never just `17`.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 2],
+            ops: vec![
+                op(
+                    base,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x30, 8)),
+                    vec![cst(0x11, 8)],
+                ),
+                op(
+                    base + 5,
+                    PcodeOpcode::IntEqual,
+                    Some(uniq(0x100, 1)),
+                    vec![reg(0x10, 8), cst(0, 8)],
+                ),
+                op(
+                    base + 8,
+                    PcodeOpcode::CBranch,
+                    None,
+                    vec![cst(0x401020, 8), uniq(0x100, 1)],
+                ),
+            ],
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x401010,
+            successors: vec![2],
+            ops: vec![op(
+                0x401010,
+                PcodeOpcode::Copy,
+                Some(reg(0x30, 8)),
+                vec![cst(0x22, 8)],
+            )],
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x401020,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401020,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x38, 8)),
+                    vec![cst(7, 8)],
+                ),
+                op(0x401025, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x40102a, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x401200,
+        CallTargetRef {
+            address: Some(0x401200),
+            symbol: "target_fn".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        "target_fn".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 2,
+            max_arity: 2,
+            locked_exact_arity: Some(2),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target_fn(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target_fn:\n{code}"));
+    assert!(
+        !call.contains("target_fn(7, 17)"),
+        "the dominating write is one path's value only: {call}\n{code}"
+    );
+    assert!(
+        call.contains("17") && call.contains("34") && call.contains('?'),
+        "the argument is the conditional overwrite of 17 by 34: {call}\n{code}"
+    );
+}
+
+#[test]
+fn systemv_exact_call_keeps_declared_arguments_after_an_unnamed_merge() {
+    // Three paths set rdi differently and meet at the call block, which
+    // stages rsi and rdx itself and spills r10 to [rsp] around the call:
+    // target3(rdi, 5, 6) with target3 declared with three parameters. The
+    // builder has no variable for the three-way merge of rdi; that must not
+    // drop the two arguments it does know, nor turn the spill into a fourth.
+    let base = 0x401000;
+    let op = |address: u64, opcode, output, inputs| PcodeOp {
+        seq_num: 0,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let rdi = reg(0x38, 8);
+    let set_rdi = |address: u64, value: i64| {
+        op(
+            address,
+            PcodeOpcode::Copy,
+            Some(rdi.clone()),
+            vec![cst(value, 8)],
+        )
+    };
+    let branch_to_join = |address: u64, flag: u64| {
+        vec![
+            op(
+                address + 1,
+                PcodeOpcode::IntEqual,
+                Some(uniq(flag, 1)),
+                vec![reg(0x10, 8), cst(flag as i64, 8)],
+            ),
+            op(
+                address + 2,
+                PcodeOpcode::CBranch,
+                None,
+                vec![cst(0x401030, 8), uniq(flag, 1)],
+            ),
+        ]
+    };
+    let mut block0 = vec![set_rdi(base, 0x11)];
+    block0.extend(branch_to_join(base, 0x100));
+    let mut block1 = vec![set_rdi(0x401010, 0x22)];
+    block1.extend(branch_to_join(0x401010, 0x101));
+    let blocks = vec![
+        PcodeBasicBlock {
+            index: 0,
+            start_address: base,
+            successors: vec![1, 3],
+            ops: block0,
+        },
+        PcodeBasicBlock {
+            index: 1,
+            start_address: 0x401010,
+            successors: vec![2, 3],
+            ops: block1,
+        },
+        PcodeBasicBlock {
+            index: 2,
+            start_address: 0x401020,
+            successors: vec![3],
+            ops: vec![set_rdi(0x401020, 0x33)],
+        },
+        PcodeBasicBlock {
+            index: 3,
+            start_address: 0x401030,
+            successors: vec![],
+            ops: vec![
+                op(
+                    0x401030,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x30, 8)),
+                    vec![cst(5, 8)],
+                ),
+                op(
+                    0x401034,
+                    PcodeOpcode::Copy,
+                    Some(reg(0x10, 8)),
+                    vec![cst(6, 8)],
+                ),
+                op(
+                    0x401038,
+                    PcodeOpcode::Store,
+                    None,
+                    vec![cst(0, 8), reg(0x20, 8), reg(0x90, 8)],
+                ),
+                op(0x40103c, PcodeOpcode::Call, None, vec![cst(0x401200, 8)]),
+                op(0x401041, PcodeOpcode::Return, None, vec![cst(0, 8)]),
+            ],
+        },
+    ];
+    let func = PcodeFunction { blocks };
+    let mut context = PreviewTypeContext::default();
+    context.call_target_refs.insert(
+        0x401200,
+        CallTargetRef {
+            address: Some(0x401200),
+            symbol: "target3".to_string(),
+            provenance: CallTargetProvenance::Direct,
+            edge_kind: CallEdgeKind::Direct,
+            confidence: 100,
+        },
+    );
+    context.call_prototype_summaries.insert(
+        "target3".to_string(),
+        NirCallPrototypeSummary {
+            min_arity: 3,
+            max_arity: 3,
+            locked_exact_arity: Some(3),
+            ..Default::default()
+        },
+    );
+    let code = crate::midend::render_mechanical_preview_with_context(
+        &func,
+        "caller",
+        base,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render");
+    let call = code
+        .lines()
+        .find(|line| line.contains("target3(") && !line.contains("extern"))
+        .unwrap_or_else(|| panic!("no call to target3:\n{code}"));
+    assert!(
+        call.contains(", 5, 6)"),
+        "the declared arguments staged in the call block are kept, and nothing follows them: {call}\n{code}"
+    );
+    assert!(
+        !call.contains("param_1") && !call.contains("target3(17") && !call.contains("target3(51"),
+        "the merge is neither the entry value nor one path's value: {call}\n{code}"
+    );
 }

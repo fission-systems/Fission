@@ -72,9 +72,10 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     pub(super) fn fallthrough_index(&self, idx: usize) -> Option<usize> {
-        let layout_idx = self.pcode_block_idx(idx);
-        self.layout_fallthrough[layout_idx]
-            .filter(|succ| self.successors[layout_idx].contains(succ))
+        if idx >= self.pcode.blocks.len() {
+            return None;
+        }
+        self.layout_fallthrough[idx].filter(|succ| self.successors[idx].contains(succ))
     }
 
     pub(super) fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
@@ -82,9 +83,11 @@ impl<'a> PreviewBuilder<'a> {
             return Ok(cached.clone());
         }
         let mut targets = HashSet::default();
-        for idx in 0..self.pcode.blocks.len() {
-            for succ in &self.successors[idx] {
-                targets.insert(self.block_target_key(*succ));
+        for idx in 0..self.block_target_keys.len() {
+            if let Some(succs) = self.successors.get(idx) {
+                for succ in succs {
+                    targets.insert(self.block_target_key(*succ));
+                }
             }
             // Do not force-lower uncached terminators here: this helper should
             // stay side-effect free for inventory/stat counters.
@@ -577,5 +580,112 @@ mod tests {
 
         assert!(builder.forwarding_block_defines_return_tail_live_in(1, 2));
         assert!(!builder.forwarding_block_defines_return_tail_live_in(0, 2));
+    }
+
+    #[test]
+    fn virtual_clone_has_no_fallthrough_contributes_targets_and_emits_explicit_goto() {
+        let func = PcodeFunction {
+            blocks: vec![
+                PcodeBasicBlock {
+                    index: 0,
+                    start_address: 0x1000,
+                    successors: vec![1],
+                    ops: vec![],
+                },
+                PcodeBasicBlock {
+                    index: 1,
+                    start_address: 0x1100,
+                    successors: vec![2],
+                    // A side effect keeps block 1 from being threaded away.
+                    ops: vec![
+                        PcodeOp {
+                            seq_num: 0,
+                            opcode: PcodeOpcode::Store,
+                            address: 0x1100,
+                            output: None,
+                            inputs: vec![
+                                Varnode::constant(0, 8),
+                                Varnode::constant(0x9000, 8),
+                                Varnode::constant(7, 8),
+                            ],
+                            asm_mnemonic: None,
+                        },
+                        PcodeOp {
+                            seq_num: 1,
+                            opcode: PcodeOpcode::Branch,
+                            address: 0x1100,
+                            output: None,
+                            inputs: vec![Varnode::constant(0x1200, 8)],
+                            asm_mnemonic: None,
+                        },
+                    ],
+                },
+                PcodeBasicBlock {
+                    index: 2,
+                    start_address: 0x1200,
+                    successors: vec![],
+                    ops: vec![PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x1200,
+                        output: None,
+                        inputs: vec![Varnode::constant(1, 8)],
+                        asm_mnemonic: None,
+                    }],
+                },
+            ],
+        };
+        let options = test_options();
+        let mut builder = PreviewBuilder::new(&func, &options, None);
+        // Node splitting as `split_irreducible_nodes` does it: clone 3 of
+        // block 0 starts with block 0's successors, clone 4 is a clone of
+        // block 1, and a later split redirected clone 3's edge to clone 4.
+        builder.virtual_block_map.extend([0, 1]);
+        builder.extend_virtual_block_target_keys(&[0, 1]);
+        let (clone_idx, succ_clone_idx) = (3, 4);
+        let succ_clone_key = builder.block_target_key(succ_clone_idx);
+        assert_ne!(succ_clone_key, 0x1100);
+        // Block 2 stands in for the back-edge source a split redirects to the
+        // clone, so the clone is reachable and gets laid out.
+        builder.successors.push(vec![1]);
+        builder.successors.push(vec![2]);
+        builder.predecessors[1].push(clone_idx);
+        builder.successors[2].push(clone_idx);
+        builder.predecessors.push(vec![2]);
+        builder.predecessors.push(vec![]);
+
+        // A clone has no layout position of its own, so nothing falls
+        // through into it or out of it; its fall-through edge is the CFG
+        // successor carrying the layout successor's body.
+        assert_eq!(builder.next_block_address(0), Some(0x1100));
+        assert_eq!(builder.next_block_address(clone_idx), None);
+        assert_eq!(builder.fallthrough_index(clone_idx), None);
+        assert_eq!(builder.pcode_fallthrough_address(clone_idx), Some(0x1100));
+
+        let linear_body =
+            fission_midend_structuring::build_linear_multiblock_body(&mut builder, false)
+                .expect("linear multiblock");
+        assert!(
+            linear_body
+                .iter()
+                .any(|stmt| matches!(stmt, PreHirStmt::Goto(lbl) if lbl == "block_1100")),
+            "a clone keeping block 0's successor must jump to block 1: {linear_body:?}"
+        );
+
+        builder.successors[clone_idx] = vec![succ_clone_idx];
+        builder.predecessors[1].retain(|&pred| pred != clone_idx);
+        builder.predecessors[succ_clone_idx].push(clone_idx);
+        builder.invalidate_materialization_dependent_caches();
+        builder.jump_targets_cache = None;
+        assert_eq!(
+            builder.pcode_fallthrough_address(clone_idx),
+            Some(succ_clone_key),
+            "a redirected fall-through edge must target the successor clone"
+        );
+        let targets = builder.collect_jump_targets().expect("targets");
+        assert!(
+            targets.contains(&succ_clone_key),
+            "virtual clone successor must contribute jump target: {targets:?}"
+        );
     }
 }

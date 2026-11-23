@@ -807,11 +807,9 @@ fn collapse_trivial_assign_returns(stmts: &mut Vec<HirStmt>, globals: &HashSet<S
         }
         let name = name.clone();
         let rhs = rhs.clone();
-        // Skip pure labels between assign and return.
-        let mut j = i + 1;
-        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
-            j += 1;
-        }
+        // Do not fold across intermediate labels (a branch target may enter
+        // with a different value in `name`).
+        let j = i + 1;
         if j < stmts.len() {
             if let HirStmt::Return(Some(HirExpr::Var(ret))) = &stmts[j] {
                 if ret == &name {
@@ -1187,9 +1185,13 @@ fn fold_seed_while_to_for(stmts: &mut Vec<HirStmt>) -> bool {
             i += 1;
             continue;
         }
-        // Body (excluding trailing update) must not re-assign induction (for clarity).
+        // Body (excluding trailing update) must not re-assign induction or
+        // contain uncaptured `continue` (which in `while` skips trailing update,
+        // whereas in `for` it runs `For.update`).
         let body_core = &body[..body.len() - 1];
-        if body_core.iter().any(|s| assigns_var_name(s, &ind_name)) {
+        if body_core.iter().any(|s| assigns_var_name(s, &ind_name))
+            || has_uncaptured_continue(body_core)
+        {
             i += 1;
             continue;
         }
@@ -1212,6 +1214,24 @@ fn fold_seed_while_to_for(stmts: &mut Vec<HirStmt>) -> bool {
         i += 1;
     }
     changed
+}
+
+fn has_uncaptured_continue(stmts: &[HirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        HirStmt::Continue => true,
+        HirStmt::Block(body) => has_uncaptured_continue(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => has_uncaptured_continue(then_body) || has_uncaptured_continue(else_body),
+        HirStmt::Switch { cases, default, .. } => {
+            cases.iter().any(|case| has_uncaptured_continue(&case.body))
+                || has_uncaptured_continue(default)
+        }
+        HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => false,
+        _ => false,
+    })
 }
 
 fn assigns_var_name(stmt: &HirStmt, name: &str) -> bool {
@@ -1565,10 +1585,7 @@ fn fold_seed_if_overwrite_assign(stmts: &mut Vec<HirStmt>) -> bool {
         let seed_name = seed_name.clone();
         let seed_rhs = seed_rhs.clone();
 
-        let mut j = i + 1;
-        while j < stmts.len() && matches!(&stmts[j], HirStmt::Label(_)) {
-            j += 1;
-        }
+        let j = i + 1;
         let Some(HirStmt::If {
             cond,
             then_body,
@@ -4580,6 +4597,191 @@ mod tests {
                 .any(|s| matches!(s, HirStmt::Label(l) if l == "Lcond")),
             "Label(Lcond) must not be consumed while an external goto Lcond remains: {:?}",
             func.body
+        );
+    }
+
+    #[test]
+    fn goto_recovery_does_not_rewrite_outer_lcond_inside_inner_loop_to_continue() {
+        let i32 = int_ty(32, true);
+        let mut func = HirFunction {
+            name: "nested_outer_lcond".into(),
+            params: vec![param("c1"), param("c2")],
+            locals: vec![local("x")],
+            return_type: i32.clone(),
+            body: vec![
+                HirStmt::Goto("Lcond".into()),
+                HirStmt::Label("Lbody".into()),
+                HirStmt::While {
+                    cond: HirExpr::Var("c2".into()),
+                    body: vec![HirStmt::If {
+                        cond: HirExpr::Var("c1".into()),
+                        then_body: vec![HirStmt::Goto("Lcond".into())],
+                        else_body: vec![],
+                    }],
+                },
+                HirStmt::Label("Lcond".into()),
+                HirStmt::If {
+                    cond: HirExpr::Var("c1".into()),
+                    then_body: vec![HirStmt::Goto("Lbody".into())],
+                    else_body: vec![],
+                },
+                HirStmt::Return(Some(HirExpr::Var("x".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut func);
+        assert!(
+            func.body
+                .iter()
+                .any(|s| matches!(s, HirStmt::Label(l) if l == "Lcond")),
+            "outer Lcond jumped to from an inner loop must be preserved: {:?}",
+            func.body
+        );
+        let inner_while = func
+            .body
+            .iter()
+            .find_map(|s| match s {
+                HirStmt::While { body, .. } => Some(body),
+                _ => None,
+            })
+            .expect("inner while loop remains");
+        assert!(
+            !has_uncaptured_continue(inner_while),
+            "outer goto Lcond inside inner while must not become inner Continue: {inner_while:?}"
+        );
+    }
+
+    #[test]
+    fn fold_seed_while_to_for_rejects_uncaptured_continue_and_allows_inner_continue() {
+        let i32 = int_ty(32, true);
+        let cond = HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Var("i".into())),
+            rhs: Box::new(HirExpr::Const(10, i32.clone())),
+            ty: NirType::Bool,
+        };
+        let init = HirStmt::Assign {
+            lhs: HirLValue::Var("i".into()),
+            rhs: HirExpr::Const(0, i32.clone()),
+        };
+        let step = HirStmt::Assign {
+            lhs: HirLValue::Var("i".into()),
+            rhs: HirExpr::Binary {
+                op: HirBinaryOp::Add,
+                lhs: Box::new(HirExpr::Var("i".into())),
+                rhs: Box::new(HirExpr::Const(1, i32)),
+                ty: int_ty(32, true),
+            },
+        };
+
+        let mut with_continue = HirFunction {
+            name: "while_continue".into(),
+            params: vec![param("flag")],
+            locals: vec![local("i")],
+            return_type: int_ty(32, true),
+            body: vec![
+                init.clone(),
+                HirStmt::While {
+                    cond: cond.clone(),
+                    body: vec![
+                        HirStmt::If {
+                            cond: HirExpr::Var("flag".into()),
+                            then_body: vec![HirStmt::Continue],
+                            else_body: vec![],
+                        },
+                        step.clone(),
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut with_continue);
+        assert!(
+            with_continue
+                .body
+                .iter()
+                .any(|s| matches!(s, HirStmt::While { .. })),
+            "uncaptured Continue must keep While: {:?}",
+            with_continue.body
+        );
+
+        let mut nested_continue = HirFunction {
+            name: "inner_continue".into(),
+            params: vec![param("flag")],
+            locals: vec![local("i")],
+            return_type: int_ty(32, true),
+            body: vec![
+                init,
+                HirStmt::While {
+                    cond,
+                    body: vec![
+                        HirStmt::While {
+                            cond: HirExpr::Var("flag".into()),
+                            body: vec![HirStmt::Continue],
+                        },
+                        step,
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+        apply_hir_presentation(&mut nested_continue);
+        assert!(
+            nested_continue
+                .body
+                .iter()
+                .any(|s| matches!(s, HirStmt::For { .. })),
+            "inner-loop Continue must still fold outer While into For: {:?}",
+            nested_continue.body
+        );
+    }
+
+    #[test]
+    fn trivial_assign_return_and_seed_if_do_not_fold_across_labels() {
+        let i32 = int_ty(32, true);
+        let mut ret_stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: HirExpr::Const(1, i32.clone()),
+            },
+            HirStmt::Label("L_ret".into()),
+            HirStmt::Return(Some(HirExpr::Var("x".into()))),
+        ];
+        assert!(
+            !collapse_trivial_assign_returns(&mut ret_stmts, &HashSet::new()),
+            "return x must not fold across Label(L_ret): {ret_stmts:?}"
+        );
+        assert!(
+            ret_stmts
+                .iter()
+                .any(|s| matches!(s, HirStmt::Return(Some(HirExpr::Var(v))) if v == "x")),
+            "{ret_stmts:?}"
+        );
+
+        let mut seed_stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: HirExpr::Const(1, i32.clone()),
+            },
+            HirStmt::Label("L_mid".into()),
+            HirStmt::If {
+                cond: HirExpr::Var("cond".into()),
+                then_body: vec![HirStmt::Assign {
+                    lhs: HirLValue::Var("x".into()),
+                    rhs: HirExpr::Const(2, i32),
+                }],
+                else_body: vec![],
+            },
+        ];
+        assert!(
+            !fold_seed_if_overwrite_assign(&mut seed_stmts),
+            "seed-if must not fold across Label(L_mid): {seed_stmts:?}"
+        );
+        assert!(
+            seed_stmts
+                .iter()
+                .any(|s| matches!(s, HirStmt::Label(l) if l == "L_mid")),
+            "{seed_stmts:?}"
         );
     }
 }

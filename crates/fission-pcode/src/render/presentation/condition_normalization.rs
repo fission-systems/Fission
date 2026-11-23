@@ -472,7 +472,7 @@ pub(super) fn fold_redundant_select_return_join(
                         HirExpr::Select {
                             cond: c1,
                             then_expr: t1,
-                            else_expr: _e1,
+                            else_expr: e1,
                             ..
                         },
                 },
@@ -493,8 +493,8 @@ pub(super) fn fold_redundant_select_return_join(
                 (cond_are_negations(c1, c2) && x_var(t2) && t1.as_ref() == e2.as_ref())
                     // x = c ? a : b; return c ? a : x
                     || (cond_logically_same(c1, c2) && t1.as_ref() == t2.as_ref() && x_var(e2))
-                    // x = c ? a : b; return ~c ? a : x  (less common)
-                    || (cond_are_negations(c1, c2) && t1.as_ref() == t2.as_ref() && x_var(e2))
+                    // x = c ? a : b; return !c ? b : x
+                    || (cond_are_negations(c1, c2) && e1.as_ref() == t2.as_ref() && x_var(e2))
             }
             _ => false,
         };
@@ -534,7 +534,11 @@ fn cond_logically_same(a: &HirExpr, b: &HirExpr) -> bool {
     if a == b {
         return true;
     }
-    normalize_truthiness(a) == normalize_truthiness(b)
+    match (normalize_truthiness(a), normalize_truthiness(b)) {
+        (Truthiness::Zero(x), Truthiness::Zero(y))
+        | (Truthiness::NonZero(x), Truthiness::NonZero(y)) => x == y,
+        _ => false,
+    }
 }
 
 fn cond_are_negations(a: &HirExpr, b: &HirExpr) -> bool {
@@ -613,5 +617,67 @@ fn peel_logical_not(expr: &HirExpr) -> Option<HirExpr> {
             ..
         } => Some(expr.as_ref().clone()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cond_logically_same_does_not_equate_distinct_other_expressions() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let a_lt_5 = HirExpr::Binary {
+            op: HirBinaryOp::SLt,
+            lhs: Box::new(HirExpr::Var("a".into())),
+            rhs: Box::new(HirExpr::Const(5, i32_ty.clone())),
+            ty: NirType::Bool,
+        };
+        let b_gt_2 = HirExpr::Binary {
+            op: HirBinaryOp::SGt,
+            lhs: Box::new(HirExpr::Var("b".into())),
+            rhs: Box::new(HirExpr::Const(2, i32_ty)),
+            ty: NirType::Bool,
+        };
+        assert!(!cond_logically_same(&a_lt_5, &b_gt_2));
+    }
+
+    #[test]
+    fn fold_redundant_select_return_join_preserves_unsound_negated_arm() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let cond = HirExpr::Var("cond".into());
+        let not_cond = HirExpr::Unary {
+            op: HirUnaryOp::Not,
+            expr: Box::new(cond.clone()),
+            ty: NirType::Bool,
+        };
+        let mut stmts = vec![
+            HirStmt::Assign {
+                lhs: HirLValue::Var("x".into()),
+                rhs: HirExpr::Select {
+                    cond: Box::new(cond),
+                    then_expr: Box::new(HirExpr::Const(1, i32_ty.clone())),
+                    else_expr: Box::new(HirExpr::Const(2, i32_ty.clone())),
+                    ty: i32_ty.clone(),
+                },
+            },
+            HirStmt::Return(Some(HirExpr::Select {
+                cond: Box::new(not_cond),
+                then_expr: Box::new(HirExpr::Const(1, i32_ty.clone())),
+                else_expr: Box::new(HirExpr::Var("x".into())),
+                ty: i32_ty,
+            })),
+        ];
+        assert!(!fold_redundant_select_return_join(
+            &mut stmts,
+            &HashSet::new()
+        ));
+        assert_eq!(stmts.len(), 2);
     }
 }

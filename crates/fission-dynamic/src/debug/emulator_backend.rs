@@ -88,6 +88,9 @@ pub struct EmulatorBackend {
     stdout_reported: usize,
     /// Execution deadline for bounded emulator runs.
     deadline: Option<std::time::Instant>,
+    /// Record a time-travel snapshot every this many instructions, so the
+    /// session can seek backwards; 0 records nothing.
+    ttd_interval: u64,
 }
 
 impl EmulatorBackend {
@@ -99,7 +102,15 @@ impl EmulatorBackend {
             events: std::collections::VecDeque::new(),
             stdout_reported: 0,
             deadline: None,
+            ttd_interval: 0,
         }
+    }
+
+    /// Record the launched machine's execution (a snapshot every `interval`
+    /// instructions) so [`ExecutionBackend::seek_step`] can move it back.
+    /// Applies to the next launch.
+    pub fn set_ttd_recording(&mut self, interval: u64) {
+        self.ttd_interval = interval;
     }
 
     /// Turn a stop into the events a front end polls for.
@@ -409,6 +420,27 @@ impl ExecutionBackend for EmulatorBackend {
         Ok(())
     }
 
+    fn execution_step(&self) -> Option<u64> {
+        self.emulator.as_ref().map(|emu| emu.inst_count)
+    }
+
+    fn seek_step(&mut self, step: u64) -> FissionResult<()> {
+        if self.ttd_interval == 0 {
+            return Err(fission_core::err!(
+                debug,
+                "this session records no execution history; start it with --record to seek"
+            ));
+        }
+        let emu = self
+            .emulator
+            .as_mut()
+            .ok_or_else(|| fission_core::err!(debug, "Emulator not running"))?;
+        emu.ttd_seek(step)
+            .map_err(|e| fission_core::err!(debug, "seek to step {step}: {e}"))?;
+        self.last_outcome = Some(RunOutcome::Stepped);
+        Ok(())
+    }
+
     fn single_step(&mut self) -> FissionResult<()> {
         let emu = self.runnable()?;
         // `run_instruction` runs a whole translation block; this used to call
@@ -592,6 +624,9 @@ impl ExecutionBackend for EmulatorBackend {
         // same thing to the block cache: what it compiled is no longer what is
         // there.
         emu.invalidate_translations(address, data.len());
+        // The recorded future is the unchanged machine's; a seek must not
+        // replay it into this one.
+        emu.ttd_discard_future();
         Ok(())
     }
 
@@ -608,6 +643,7 @@ impl ExecutionBackend for EmulatorBackend {
                 .map_err(|e| fission_core::err!(debug, "Cannot write {}: {}", name, e))?;
         }
         emu.pc = regs.pc;
+        emu.ttd_discard_future();
         Ok(())
     }
 
@@ -699,6 +735,12 @@ impl ExecutionBackend for EmulatorBackend {
         }
         if let Some(deadline) = self.deadline {
             emu.set_deadline(Some(deadline));
+        }
+        if self.ttd_interval > 0 {
+            emu = emu.with_ttd(self.ttd_interval);
+            // Step 0, so there is always a snapshot at or before any step to
+            // seek to: single steps never reach the run loop's recording.
+            emu.record_ttd_snapshot();
         }
         self.emulator = Some(emu);
         if let Some(timeline) = &self.timeline {

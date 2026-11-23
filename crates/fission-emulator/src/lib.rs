@@ -21,7 +21,10 @@ pub(crate) const fn bit_width_from_byte_size(byte_size: u32) -> u32 {
 
 pub use arch::{ArchInfo, Endianness};
 pub use core::{Emulator, RunOutcome};
-pub use metrics::{BudgetReport, EmulatorMetrics, SandboxMetricsReport};
+pub use metrics::{
+    BudgetReport, EmulatorMetrics, ExploredStateReport, MachineStateReport, MemoryReadReport,
+    SandboxMetricsReport, SolvedInputReport, SymbolicExploreReport,
+};
 pub use observe::{BehaviorEvent, BehaviorLog, Coverage, ObserveMask, Observer, ShadowMode};
 pub use os::{BareMetalEnv, HleResult, LinuxEnv, OsEnvironment, WindowsEnv};
 pub use pcode::eval::Evaluator;

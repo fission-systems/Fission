@@ -11,8 +11,7 @@ use crate::graph::capture_structuring_failure;
 use crate::helpers::{block_label, recovered_switch_case_values};
 use crate::host::StructuringHost;
 use crate::linear_types::{
-    IfLoweringBudget, LinearExit, LoweredTerminator, STRUCTURING_TOTAL_WORK_BUDGET,
-    structuring_diag_enabled,
+    IfLoweringBudget, LinearExit, LoweredTerminator, structuring_diag_enabled,
 };
 use crate::switch::try_lower_switch;
 use fission_midend_core::ir::{MlilPreviewError, NirType};
@@ -404,7 +403,11 @@ fn structuring_total_work_budget_exceeded(host: &impl StructuringHost) -> bool {
     let counter = host.structuring_total_work_counter();
     let total = counter.get() + 1;
     counter.set(total);
-    total > STRUCTURING_TOTAL_WORK_BUDGET
+    let limit = host.options().resource_limits.structuring_total_work;
+    host.resource_usage()
+        .structuring_total_work
+        .observe(total, limit);
+    total > limit
 }
 
 // ---------------------------------------------------------------------------
@@ -726,6 +729,7 @@ fn try_lower_while_impl(
         block_addr,
         "try_lower_while",
         host.structuring_total_work_counter(),
+        host.resource_usage(),
     );
     if diag {
         eprintln!(

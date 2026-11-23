@@ -13,8 +13,8 @@ mod redundant_load;
 mod sccp;
 
 pub use bit_consume::apply_bit_consume_dead_code_pass;
-pub use conditional_const::apply_conditional_const_pass;
 pub(crate) use conditional_const::collect_written_vars;
+pub use conditional_const::{apply_conditional_const_pass, fold_branch_decided_selects};
 pub use cse::apply_cse_pass;
 pub use dead_store::apply_dead_store_elimination;
 pub use gvn_join::apply_gvn_join_hoist_pass;

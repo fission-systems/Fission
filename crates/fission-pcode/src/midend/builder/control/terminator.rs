@@ -1720,7 +1720,15 @@ impl<'a> PreviewBuilder<'a> {
             LoweredTerminator::Fallthrough(None) | LoweredTerminator::Return(None) => {}
             _ => return Ok(None),
         }
-        tail_body.push(PreHirStmt::Return(None));
+        // The tail-jump surface may already end in its own `return`.
+        let ends_in_return = |stmt: &PreHirStmt| match stmt {
+            PreHirStmt::Return(_) => true,
+            PreHirStmt::Block(body) => matches!(body.last(), Some(PreHirStmt::Return(_))),
+            _ => false,
+        };
+        if !tail_body.last().is_some_and(ends_in_return) {
+            tail_body.push(PreHirStmt::Return(None));
+        }
 
         let return_cond = if return_on_true {
             cond
@@ -1955,7 +1963,7 @@ impl<'a> PreviewBuilder<'a> {
                                     err
                                 })?;
                             let false_target = {
-                                let mut f_target = this.next_block_address(idx);
+                                let mut f_target = this.pcode_fallthrough_address(idx);
                                 if let Some(succs) = this.successors.get(idx) {
                                     for succ_idx in succs {
                                         let succ_addr = this.block_target_key(*succ_idx);
@@ -2439,12 +2447,12 @@ impl<'a> PreviewBuilder<'a> {
                                 })
                             }
                         }
-                        _ => Ok(LoweredTerminator::Fallthrough(this.next_block_address(idx))),
+                        _ => Ok(LoweredTerminator::Fallthrough(this.pcode_fallthrough_address(idx))),
                     }
                 },
             )?
         } else {
-            LoweredTerminator::Fallthrough(self.next_block_address(idx))
+            LoweredTerminator::Fallthrough(self.pcode_fallthrough_address(idx))
         };
 
         // Cache invalidation does not revoke an emitted edge decision. The

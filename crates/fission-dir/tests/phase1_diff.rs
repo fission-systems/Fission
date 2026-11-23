@@ -10,24 +10,33 @@ use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::path::PathBuf;
 
-fn corpus_binary(name: &str) -> PathBuf {
+/// A MinGW x64 PE built from `fission-emulator/testdata/src/
+/// mingw_control_flow.c`. These tests read `control_flow_gcc_O0.exe` from a
+/// local dev corpus and skipped when it was absent -- which was everywhere,
+/// CI included, so none of them had run.
+fn fixture() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/corpus/dev/binaries/c")
-        .join(name)
+        .join("../fission-emulator/testdata/x64_mingw_control_flow.exe")
+}
+
+/// A function's entry, from the fixture's COFF symbols.
+fn entry_of(binary: &LoadedBinary, name: &str) -> u64 {
+    binary
+        .functions
+        .iter()
+        .find(|f| f.name == name)
+        .unwrap_or_else(|| panic!("{name} in the fixture's symbol table"))
+        .address
 }
 
 #[test]
 fn count_bits_dir_and_hir_are_equivalent() {
-    let path = corpus_binary("control_flow_gcc_O0.exe");
-    if !path.exists() {
-        eprintln!("skipping: corpus binary not found at {}", path.display());
-        return;
-    }
+    let path = fixture();
     let binary = LoadedBinary::from_file(&path).expect("load binary");
     let facts = FactStore::from_binary(&binary);
     let func = FunctionInfo {
         name: "count_bits".to_string(),
-        address: 0x140001530,
+        address: entry_of(&binary, "count_bits"),
         ..Default::default()
     };
 

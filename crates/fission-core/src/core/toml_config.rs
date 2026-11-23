@@ -17,7 +17,7 @@ use super::constants::{
 
 use crate::core::config::{
     AnalysisConfig, Config, DebugConfig, DecompilerConfig, LogConfig, LogLevel, PathsConfig,
-    UiConfig,
+    UiConfig, WorkLimitOverrides,
 };
 
 /// TOML-compatible configuration structure
@@ -68,6 +68,7 @@ pub struct TomlDecompilerConfig {
     pub sla_dir: String,
     pub log_verbose: bool,
     pub log_file: String,
+    pub work_limits: WorkLimitOverrides,
 }
 
 impl Default for TomlDecompilerConfig {
@@ -84,6 +85,7 @@ impl Default for TomlDecompilerConfig {
             sla_dir: String::new(),
             log_verbose: false,
             log_file: String::new(),
+            work_limits: WorkLimitOverrides::default(),
         }
     }
 }
@@ -253,6 +255,7 @@ impl From<TomlConfig> for Config {
                 sla_dir: toml.decompiler.sla_dir,
                 log_verbose: toml.decompiler.log_verbose,
                 log_file: toml.decompiler.log_file,
+                work_limits: toml.decompiler.work_limits,
             },
             analysis: AnalysisConfig {
                 max_string_search_size: toml.analysis.max_string_search_size,
@@ -354,5 +357,49 @@ patterns_dir = "/tmp/patterns"
 
         let empty_log_cfg: Config = TomlConfig::default().into();
         assert!(!empty_log_cfg.logging.file_enabled);
+    }
+
+    #[test]
+    fn work_limits_default_to_no_overrides() {
+        let config = TomlConfig::default();
+        assert_eq!(config.decompiler.work_limits, WorkLimitOverrides::default());
+        let runtime: Config = config.into();
+        assert_eq!(
+            runtime.decompiler.work_limits,
+            WorkLimitOverrides::default()
+        );
+    }
+
+    #[test]
+    fn work_limits_table_overrides_only_the_named_limits() {
+        let toml_str = r#"
+[decompiler]
+timeout_ms = 60000
+
+[decompiler.work_limits]
+structuring_total_work = 1000
+sese_region_proof_calls = 7
+"#;
+        let config: TomlConfig = toml::from_str(toml_str).expect("toml parse should succeed");
+        let limits = config.decompiler.work_limits;
+        assert_eq!(limits.structuring_total_work, Some(1000));
+        assert_eq!(limits.sese_region_proof_calls, Some(7));
+        assert_eq!(limits.condition_recovery_subcalls, None);
+        assert_eq!(limits.varnode_lowering_work, None);
+        assert_eq!(config.decompiler.timeout_ms, 60000);
+        let runtime: Config = config.into();
+        assert_eq!(
+            runtime.decompiler.work_limits.structuring_total_work,
+            Some(1000)
+        );
+    }
+
+    #[test]
+    fn an_unknown_work_limit_name_is_an_error_not_silently_ignored() {
+        let toml_str = r#"
+[decompiler.work_limits]
+structuring_total_wrok = 1000
+"#;
+        assert!(toml::from_str::<TomlConfig>(toml_str).is_err());
     }
 }
