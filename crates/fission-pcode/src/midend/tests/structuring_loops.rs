@@ -2774,3 +2774,169 @@ fn irreducible_two_head_cycle_does_not_lower_loops_into_each_other() {
         "the cycle between the two heads must be cut by declining a re-entry, not by exhausting the work budget"
     );
 }
+
+fn store_through(seq: u32, address: u64, base: Varnode, value: i64) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::Store,
+        address,
+        output: None,
+        inputs: vec![cst(0, 4), base, cst(value, 4)],
+        asm_mnemonic: None,
+    }
+}
+
+fn copy_into(seq: u32, address: u64, out: &Varnode, from: Varnode) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::Copy,
+        address,
+        output: Some(out.clone()),
+        inputs: vec![from],
+        asm_mnemonic: None,
+    }
+}
+
+fn cbranch_on(seq: u32, address: u64, target: i64, cond: Varnode) -> PcodeOp {
+    PcodeOp {
+        seq_num: seq,
+        opcode: PcodeOpcode::CBranch,
+        address,
+        output: None,
+        inputs: vec![cst(target, 8), cond],
+        asm_mnemonic: None,
+    }
+}
+
+/// A rotated "loop and a half": the entry jumps over a reload block to the
+/// head, the head branches inside the body, the only exit test sits in a
+/// later block, and the back edge comes from the unconditional block laid out
+/// *above* the head.
+///
+/// ```text
+/// B0: *rax = 1; goto B2
+/// B1: *rax = 3;                   // latch, falls into B2
+/// B2: if (c1) goto B4;            // head, both arms stay in the loop
+/// B3: *rax = 2;
+/// B4: *rdx = 4; if (c2) goto B1;  // exit test, falls out to B5
+/// B5: return
+/// ```
+///
+/// Neither `while` (the head does not exit) nor `do-while` (the latch is
+/// unconditional) fits. With `back_edge == false` B4 branches to B5 instead,
+/// which leaves the same layout without a cycle.
+fn rotated_mid_exit_loop(back_edge: bool) -> PcodeFunction {
+    let c1 = uniq(0x500, 1);
+    let c2 = uniq(0x510, 1);
+    let exit_test_target = if back_edge { 0xB010 } else { 0xB040 };
+    PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0xB000,
+                successors: vec![2],
+                ops: vec![
+                    store_through(0, 0xB000, reg(0, 8), 1),
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0xB004,
+                        output: None,
+                        inputs: vec![cst(0xB020, 8)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0xB010,
+                successors: vec![2],
+                ops: vec![store_through(2, 0xB010, reg(0, 8), 3)],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0xB020,
+                successors: vec![3, 4],
+                ops: vec![
+                    copy_into(3, 0xB020, &c1, reg(0x08, 1)),
+                    cbranch_on(4, 0xB024, 0xB030, c1),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0xB028,
+                successors: vec![4],
+                ops: vec![store_through(5, 0xB028, reg(0, 8), 2)],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0xB030,
+                successors: if back_edge { vec![5, 1] } else { vec![5] },
+                ops: vec![
+                    store_through(6, 0xB030, reg(0x10, 8), 4),
+                    copy_into(7, 0xB034, &c2, reg(0x30, 1)),
+                    cbranch_on(8, 0xB038, exit_test_target, c2),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0xB040,
+                successors: vec![],
+                ops: vec![PcodeOp {
+                    seq_num: 9,
+                    opcode: PcodeOpcode::Return,
+                    address: 0xB040,
+                    output: None,
+                    inputs: vec![cst(0, 8), cst(0, 4)],
+                    asm_mnemonic: None,
+                }],
+            },
+        ],
+    }
+}
+
+#[test]
+fn rotated_mid_exit_loop_lowers_to_while_with_break() {
+    let code = render_mlil_preview(
+        &rotated_mid_exit_loop(true),
+        "rotated_mid_exit_fn",
+        0xB000,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(
+        code.contains("while (true)") || code.contains("while (1)"),
+        "the loop must be structured: {code}"
+    );
+    assert!(code.contains("break;"), "the exit test must break: {code}");
+    assert!(
+        !code.contains("goto block_b010"),
+        "no backward jump to the reload block may remain: {code}"
+    );
+    // Each store is emitted exactly once: the reload block above the head
+    // belongs to the loop, not also to the region in front of it.
+    for value in ["= 1;", "= 2;", "= 3;", "= 4;"] {
+        assert_eq!(
+            code.matches(value).count(),
+            1,
+            "store `{value}` must appear exactly once: {code}"
+        );
+    }
+}
+
+#[test]
+fn acyclic_twin_of_rotated_loop_stays_loop_free() {
+    // Negative control: the same layout without the back edge has no cycle
+    // and must not be printed as a loop.
+    let code = render_mlil_preview(
+        &rotated_mid_exit_loop(false),
+        "acyclic_twin_fn",
+        0xB000,
+        &preview_options(),
+    )
+    .expect("preview render");
+    assert!(
+        !code.contains("while"),
+        "an acyclic graph must not be printed as a loop: {code}"
+    );
+}

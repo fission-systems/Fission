@@ -2234,6 +2234,112 @@ pub fn try_lower_multiblock_infloop(
     )))
 }
 
+/// Structures a natural loop whose only exit leaves from the **middle** of
+/// the body: `while (1) { A; if (c) break; B; }`.
+///
+/// `try_lower_while` needs the exit test at the head and
+/// `try_lower_multiblock_dowhile` needs it at the latch. When the back edge
+/// comes from an unconditional block (the "loop and a half", or a latch that
+/// only reloads loop-carried values before jumping back to the head), neither
+/// applies, and the loop used to surface as a backward `goto`.
+///
+/// Admission is a CFG fact, not a layout guess:
+/// - the head has a natural loop body (`LoopBody`) with exactly one exit
+///   target, which is the canonical exit;
+/// - the body occupies exactly the block range `[head, exit)`, so the region
+///   the collapse driver claims for the candidate (`[start, skip_to)`) is the
+///   loop body and nothing else.
+///
+/// Every edge to the exit becomes `break` and every edge back to the head
+/// `continue`, through the same subgraph lowering the other loop reducers use.
+pub fn try_lower_single_exit_loop(
+    host: &mut impl StructuringHost,
+    idx: usize,
+) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+    if structuring_total_work_budget_exceeded(host) {
+        return Ok(None);
+    }
+    let (exit_idx, body_set, first_member) = {
+        let Some(loop_body) = host.get_loop_body(idx) else {
+            return Ok(None);
+        };
+        let Some(exit_idx) = loop_body.exit_idx else {
+            return Ok(None);
+        };
+        if loop_body.all_exits.as_slice() != [exit_idx] || exit_idx <= idx {
+            return Ok(None);
+        }
+        let body_set: HashSet<usize> = loop_body.body.iter().copied().collect();
+        let Some(first_member) = body_set.iter().copied().min() else {
+            return Ok(None);
+        };
+        if body_set.len() != exit_idx - first_member
+            || !(first_member..exit_idx).all(|b| body_set.contains(&b))
+        {
+            return Ok(None);
+        }
+        (exit_idx, body_set, first_member)
+    };
+    // A rotated layout places part of the body (typically the block that
+    // reloads loop-carried values and jumps back) below the head. Those blocks
+    // are outside the `[head, exit)` range the collapse driver claims, so they
+    // must be claimed explicitly -- and only when no rule can have built a
+    // region of its own from them: a single successor and not a loop head.
+    for member in first_member..idx {
+        if host.successors().get(member).map_or(0, Vec::len) != 1
+            || host.get_loop_body(member).is_some()
+        {
+            return Ok(None);
+        }
+    }
+
+    let Some(lowered) = lower_loop_body_subgraph(host, &body_set, idx, Some(exit_idx), idx, idx)?
+    else {
+        return Ok(None);
+    };
+    // A body that never reaches its `break` would make the loop's exit, and
+    // everything structured after it, unreachable in the printed code.
+    if !stmts_contain_break(&lowered) {
+        return Ok(None);
+    }
+    for member in first_member..idx {
+        host.record_extra_absorbed_member(member);
+    }
+    host.bump_loop_while_subgraph_lowered();
+    Ok(Some((
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(1, NirType::Bool),
+            body: std::rc::Rc::new(lowered),
+        },
+        exit_idx,
+    )))
+}
+
+/// Whether `stmts` hold a `break` that leaves the loop they are the body of
+/// (a `break` inside a nested loop or switch belongs to that construct).
+fn stmts_contain_break(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::Break => true,
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => stmts_contain_break(then_body) || stmts_contain_break(else_body),
+        PreHirStmt::Block(body) => stmts_contain_break(body),
+        PreHirStmt::While { .. }
+        | PreHirStmt::DoWhile { .. }
+        | PreHirStmt::For { .. }
+        | PreHirStmt::Switch { .. }
+        | PreHirStmt::Assign { .. }
+        | PreHirStmt::VaStart { .. }
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Return(_)
+        | PreHirStmt::Continue => false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

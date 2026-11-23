@@ -124,7 +124,7 @@ pub use linear_types::{
 pub use loops::{
     lower_loop_body_subgraph, try_lower_dowhile, try_lower_for, try_lower_infloop,
     try_lower_infloop_with_break, try_lower_multiblock_dowhile, try_lower_multiblock_infloop,
-    try_lower_rotated_while, try_lower_while,
+    try_lower_rotated_while, try_lower_single_exit_loop, try_lower_while,
 };
 pub use orphan_repair::{find_block_index_by_label, try_repair_orphan_gotos};
 pub use sese_discovery::{
