@@ -178,6 +178,7 @@ fn extract_pdb_struct_types(
             name: name.clone(),
             mangled_name: name,
             kind: kind.to_string(),
+            source: "pdb".to_string(),
             fields: members,
             size: u32::try_from(class.size).unwrap_or(0),
             metadata_address: 0,

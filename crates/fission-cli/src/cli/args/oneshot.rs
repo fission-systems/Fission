@@ -104,6 +104,8 @@ pub struct OneShotArgs {
     pub identify_cmd: bool,
     /// Optional single function VA to identify (`identify --function`).
     pub identify_function: Option<u64>,
+    /// `types` / `whatis`: a query over the loaded binary's facts.
+    pub lookup: Option<crate::cli::oneshot::LookupQuery>,
     /// Canonical `similar` subcommand (fuzzy function similarity).
     pub similar_cmd: bool,
     /// Optional single function VA to query (`similar --function`); reports
@@ -214,6 +216,7 @@ impl Default for OneShotArgs {
             callgraph_function: None,
             identify_cmd: false,
             identify_function: None,
+            lookup: None,
             similar_cmd: false,
             similar_function: None,
             similar_top_k: 5,

@@ -196,6 +196,12 @@ pub struct InferredTypeInfo {
     pub mangled_name: String,
     /// Kind of type (class, struct, enum)
     pub kind: String,
+    /// Which analysis recovered it: `cpp_rtti`, `dwarf`, `pdb`, `go`,
+    /// `rust_vtable`, `objc`, `swift`, `pe_header`, `elf_header`,
+    /// `te_header`, or `user_sidecar`. Two analyses can name the same kind
+    /// (`Struct` from Go and from Swift), so the kind alone cannot say how
+    /// far to trust a type.
+    pub source: String,
     /// Fields in this type
     pub fields: Vec<InferredFieldInfo>,
     /// Total size of type (0 if unknown)
