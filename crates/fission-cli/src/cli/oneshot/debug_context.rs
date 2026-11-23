@@ -133,6 +133,84 @@ fn stack_json(backend: &dyn ExecutionBackend, regs: &RegisterState, size: usize)
     }
 }
 
+/// Best-effort frame-pointer traversal. This is an architectural heuristic,
+/// not unwind-table reconstruction and never claims a proven caller.
+fn frame_pointer_trace(
+    backend: &dyn ExecutionBackend,
+    regs: &RegisterState,
+    max_frames: usize,
+) -> Value {
+    if max_frames == 0 {
+        return json!({"status": "not_requested"});
+    }
+    let (fp, ptr_size, architecture) =
+        if let Some(fp) = regs.get("rbp") {
+            (fp, 8usize, "x86_64")
+        } else if let Some(fp) = regs.get("ebp") {
+            (fp, 4usize, "x86_32")
+        } else if let Some(fp) = regs.get("x29") {
+            (fp, 8usize, "aarch64")
+        } else {
+            return json!({"status": "unavailable", "reason": "no recognized frame pointer register"});
+        };
+
+    let mut frames = vec![json!({
+        "index": 0,
+        "kind": "current_pc",
+        "runtime_pc": hex(regs.pc),
+    })];
+    let mut cursor = fp;
+    let mut reason = "frame_chain_ended";
+    for index in 1..max_frames {
+        if cursor == 0 || cursor % (ptr_size as u64) != 0 {
+            reason = "invalid_or_unaligned_frame_pointer";
+            break;
+        }
+        let bytes = match backend.read_memory(cursor, ptr_size * 2) {
+            Ok(bytes) if bytes.len() == ptr_size * 2 => bytes,
+            _ => {
+                reason = "frame_memory_unavailable";
+                break;
+            }
+        };
+        let read_ptr = |offset: usize| -> u64 {
+            let mut arr = [0u8; 8];
+            arr[..ptr_size].copy_from_slice(&bytes[offset..offset + ptr_size]);
+            u64::from_le_bytes(arr)
+        };
+        let next = read_ptr(0);
+        let return_address = read_ptr(ptr_size);
+        if return_address == 0 {
+            reason = "zero_return_address";
+            break;
+        }
+        frames.push(json!({
+            "index": index,
+            "kind": "return_address",
+            "runtime_pc": hex(return_address),
+            "frame_pointer": hex(cursor),
+            "confidence": "heuristic",
+        }));
+        // A normal downward-growing stack advances to a higher saved FP.
+        if next <= cursor || next - cursor > 1024 * 1024 {
+            reason = "non_monotonic_frame_chain";
+            break;
+        }
+        cursor = next;
+        if index + 1 == max_frames {
+            reason = "frame_limit";
+        }
+    }
+
+    json!({
+        "status": "heuristic",
+        "strategy": "frame_pointer_chain",
+        "architecture": architecture,
+        "termination": reason,
+        "frames": frames,
+    })
+}
+
 /// Read exactly one stopped machine state. A static decompile never claims to
 /// be a rendering of the live memory image (which might be patched/unpacked).
 pub(super) fn run_context(
@@ -145,6 +223,9 @@ pub(super) fn run_context(
     if args.stack > 4096 {
         bail!("context --stack is limited to 4096 bytes");
     }
+    if args.frames > 32 {
+        bail!("context --frames is limited to 32 frames");
+    }
     let state = backend.get_state();
     if state.status != DebugStatus::Suspended {
         bail!("context requires a stopped target; wait for an event or breakpoint first");
@@ -156,6 +237,7 @@ pub(super) fn run_context(
     let pc = regs.pc;
     let binary_path = args.binary.as_deref().or(session_binary);
     let stack = stack_json(backend, &regs, args.stack);
+    let mut callstack = frame_pointer_trace(backend, &regs, args.frames);
 
     let (module, mut analysis, analysis_pc) = if emulator {
         (
@@ -196,6 +278,39 @@ pub(super) fn run_context(
                     });
                 } else {
                     let _discovery = fission_static::analysis::discover_functions_with_runtime(&mut binary);
+                    if let Some(frames) = callstack["frames"].as_array_mut() {
+                        for frame in frames {
+                            let Some(runtime_pc) = frame["runtime_pc"].as_str()
+                                .and_then(|value| u64::from_str_radix(value.trim_start_matches("0x"), 16).ok())
+                            else {
+                                continue;
+                            };
+                            // Only the current PC is known to share the file VA.
+                            // Return addresses require independently proven module mapping.
+                            if emulator {
+                                let lookup = if frame["kind"] == "return_address" {
+                                    runtime_pc.saturating_sub(1)
+                                } else {
+                                    runtime_pc
+                                };
+                                if let Some(func) = binary.function_at(lookup) {
+                                    frame["function"] = json!({
+                                        "name": func.name,
+                                        "entry": hex(func.address),
+                                        "evidence": "on_disk_emulator_address",
+                                    });
+                                }
+                            } else if frame["kind"] == "current_pc" {
+                                if let Some(func) = binary.function_at(va) {
+                                    frame["function"] = json!({
+                                        "name": func.name,
+                                        "entry": hex(func.address),
+                                        "evidence": "proven_module_load_bias",
+                                    });
+                                }
+                            }
+                        }
+                    }
                     if let Some(func) = binary.function_at(va) {
                         function = json!({
                             "name": func.name,
@@ -252,6 +367,7 @@ pub(super) fn run_context(
         "stop": backend.stop_reason(),
         "registers": registers_json(&regs),
         "stack": stack,
+        "callstack": callstack,
         "module": module,
         "analysis": analysis,
         "function": function,
