@@ -37,6 +37,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
         call_targets,
         jump_targets,
         jump_edges,
+        coverage_decodes,
     } = scan_executable_sections(binary, &frontend);
 
     report.decoded_instruction_count = total_decoded;
@@ -137,8 +138,14 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
     // `FunctionInfo::is_scan_inferred`.
     let mut scan_inferred: HashSet<u64> = HashSet::new();
 
-    let mut coverage =
-        InstructionCoverage::build(binary, &frontend, &coverage_seeds, &executable_ranges);
+    let mut coverage = InstructionCoverage::build(
+        binary,
+        &frontend,
+        &coverage_seeds,
+        &executable_ranges,
+        &coverage_decodes,
+    );
+    drop(coverage_decodes);
 
     let mut all_known = known_function_addresses;
     all_known.extend(candidates.iter().copied());

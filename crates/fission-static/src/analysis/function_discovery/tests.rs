@@ -552,6 +552,25 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
         0x401000,
         &known_functions,
         &executable_ranges(&binary),
+        None,
+    );
+    let sweep = super::control_flow_scan::scan_executable_sections(&binary, &frontend);
+    let entry_bytes = binary.view_bytes(0x401000, 15).unwrap();
+    assert!(
+        sweep
+            .coverage_decodes
+            .contains_key(&(0x401000, entry_bytes.as_ptr() as usize))
+    );
+    assert_eq!(
+        walk_function_boundaries(
+            &binary,
+            &frontend,
+            0x401000,
+            &known_functions,
+            &executable_ranges(&binary),
+            Some(&sweep.coverage_decodes),
+        ),
+        boundaries
     );
 
     assert!(
@@ -585,6 +604,7 @@ fn walk_function_boundaries_coalesces_fallthrough_without_covering_a_branch_gap(
         start,
         &HashSet::from([start]),
         &executable_ranges(&binary),
+        None,
     );
     assert_eq!(intervals, [(start, start + 5), (start + 12, start + 13)]);
 }
@@ -643,6 +663,7 @@ fn walk_function_boundaries_terminates_on_noreturn_call() {
         0x401000,
         &known_functions,
         &executable_ranges(&binary),
+        None,
     );
 
     assert!(

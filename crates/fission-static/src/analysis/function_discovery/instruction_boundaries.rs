@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
 use fission_loader::LoadedBinary;
-use fission_sleigh::runtime::{
-    DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeSleighFrontend,
-};
+use fission_sleigh::runtime::{DecodedFlowKind, PackedContextOverride, RuntimeSleighFrontend};
 
+use super::coverage_decode::{
+    COVERAGE_WINDOW_BYTES, CoverageDecodes, CoverageFlow, CoverageInstruction,
+};
 use super::ranges::is_in_executable_ranges;
 use super::targets::{is_target_no_return, normalize_target, same_section};
 use super::thumb::{decode_context_for_address, image_decode_context};
@@ -41,12 +42,20 @@ impl InstructionCoverage {
         frontend: &RuntimeSleighFrontend,
         known_functions: &HashSet<u64>,
         executable_ranges: &[(u64, u64)],
+        coverage_decodes: &CoverageDecodes,
     ) -> Self {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
             .flat_map_iter(|&addr| {
-                walk_function_boundaries(binary, frontend, addr, known_functions, executable_ranges)
+                walk_function_boundaries(
+                    binary,
+                    frontend,
+                    addr,
+                    known_functions,
+                    executable_ranges,
+                    Some(coverage_decodes),
+                )
             })
             .collect();
 
@@ -76,7 +85,7 @@ impl InstructionCoverage {
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
             .flat_map_iter(|&addr| {
-                walk_function_boundaries(binary, frontend, addr, known, executable_ranges)
+                walk_function_boundaries(binary, frontend, addr, known, executable_ranges, None)
             })
             .collect();
 
@@ -128,6 +137,7 @@ pub(super) fn walk_function_boundaries(
     addr: u64,
     known_functions: &HashSet<u64>,
     executable_ranges: &[(u64, u64)],
+    coverage_decodes: Option<&CoverageDecodes>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
     // The mode the function runs in: the image's, or its own when the loader
@@ -158,93 +168,65 @@ pub(super) fn walk_function_boundaries(
                 if !is_in_executable_ranges(ip, executable_ranges) {
                     break;
                 }
-                let Some(bytes) = binary.view_bytes(ip, 15) else {
+                let Some(bytes) = binary.view_bytes(ip, COVERAGE_WINDOW_BYTES) else {
                     break;
                 };
-                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, mode_context) else {
+                let reused = if mode_context.is_none() {
+                    coverage_decodes
+                        .and_then(|decodes| decodes.get(&(ip, bytes.as_ptr() as usize)))
+                        .filter(|(prefix, _)| *prefix <= bytes.len())
+                        .map(|(_, instruction)| *instruction)
+                } else {
+                    None
+                };
+                let instruction = reused.or_else(|| {
+                    let decoded = frontend
+                        .decode_single_no_pcode(bytes, ip, mode_context)
+                        .ok()?;
+                    if decoded.length == 0 || decoded.length > bytes.len() {
+                        return None;
+                    }
+                    // The single decoder leaves pending commit validation to its caller.
+                    if !decoded.pending_context_commits.is_empty() {
+                        frontend
+                            .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                            .ok()?;
+                    }
+                    CoverageInstruction::from_decoded(&decoded)
+                });
+                let Some(instruction) = instruction else {
                     break;
                 };
-                let Some(next_ip) = ip.checked_add(inst.length as u64) else {
+                let Some(next_ip) = ip.checked_add(instruction.length) else {
                     break;
                 };
-                if inst.length == 0 || inst.length > bytes.len() {
-                    break;
-                }
-                // A one-instruction window also validates pending context commits.
-                // Keep that validation for instructions that supply them.
-                if !inst.pending_context_commits.is_empty()
-                    && frontend
-                        .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
-                        .is_err()
-                {
-                    break;
-                }
-                if inst.mnemonic.is_empty() || inst.mnemonic.eq_ignore_ascii_case("invalid") {
-                    break;
-                }
-
                 covered_end = next_ip;
                 count += 1;
 
-                match inst.flow_kind {
-                    DecodedFlowKind::Return => {
-                        break;
-                    }
-                    DecodedFlowKind::Jump => {
-                        // Do not trace unconditional jumps to avoid enveloping tail call targets
-                        break;
-                    }
-                    DecodedFlowKind::Call => {
-                        let call_target = inst.direct_target.or_else(|| {
-                            inst.references.iter().find_map(|r| match r.kind {
-                                DecodedReferenceKind::CallTarget
-                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                                _ => None,
-                            })
-                        });
-                        let is_noreturn = if let Some(target) = call_target {
-                            let norm_target = normalize_target(binary, target);
-                            is_target_no_return(binary, norm_target)
-                        } else {
-                            false
-                        };
-                        if is_noreturn {
+                match instruction.flow {
+                    CoverageFlow::Stop => break,
+                    CoverageFlow::Call(target) => {
+                        if is_target_no_return(binary, normalize_target(binary, target)) {
                             break;
                         }
-                        ip = next_ip;
                     }
-                    DecodedFlowKind::ConditionalJump => {
-                        let jump_target = inst.direct_target.or_else(|| {
-                            inst.references.iter().find_map(|r| match r.kind {
-                                DecodedReferenceKind::BranchTarget
-                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                                _ => None,
-                            })
-                        });
-                        if let Some(target) = jump_target {
-                            let norm_target = normalize_target(binary, target);
-                            let in_same_section =
-                                binary.sections.is_empty() || same_section(binary, ip, norm_target);
-                            if is_in_executable_ranges(norm_target, executable_ranges)
-                                && !known_functions.contains(&norm_target)
-                                && !binary.function_addr_index.contains_key(&norm_target)
-                                && in_same_section
-                            {
-                                worklist.push(norm_target);
-                            }
+                    CoverageFlow::ConditionalJump(target) => {
+                        let target = normalize_target(binary, target);
+                        let in_same_section =
+                            binary.sections.is_empty() || same_section(binary, ip, target);
+                        if is_in_executable_ranges(target, executable_ranges)
+                            && !known_functions.contains(&target)
+                            && !binary.function_addr_index.contains_key(&target)
+                            && in_same_section
+                        {
+                            worklist.push(target);
                         }
-                        ip = next_ip;
                     }
-                    DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
-                        break;
-                    }
-                    _ => {
-                        ip = next_ip;
-                    }
+                    CoverageFlow::Fallthrough => {}
                 }
+                ip = next_ip;
             }
-            // The inner walk advances by each instruction's length. Record
-            // its union directly, leaving gaps between paths uncovered.
+            // Keep the union of the contiguous run, leaving branch gaps clear.
             if covered_end > curr {
                 boundaries.push((curr, covered_end));
             }
@@ -373,7 +355,7 @@ pub(super) fn is_plausible_function_boundary(
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
                         let exec_ranges = super::ranges::executable_ranges(binary);
-                        if super::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                        if is_in_executable_ranges(target, &exec_ranges) {
                             return true;
                         }
                     }
@@ -392,7 +374,7 @@ pub(super) fn is_plausible_function_boundary(
                     let rel32 = i32::from_le_bytes([op[1], op[2], op[3], op[4]]);
                     if let Some(target) = next_ip.checked_add_signed(i64::from(rel32)) {
                         let exec_ranges = super::ranges::executable_ranges(binary);
-                        if super::ranges::is_in_executable_ranges(target, &exec_ranges) {
+                        if is_in_executable_ranges(target, &exec_ranges) {
                             return true;
                         }
                     }

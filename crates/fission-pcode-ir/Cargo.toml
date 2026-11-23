@@ -1,6 +1,6 @@
 [package]
 name = "fission-pcode-ir"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "P-code IR, optimizer and block-level CFG facts for Fission"
