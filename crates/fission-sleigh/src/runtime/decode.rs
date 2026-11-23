@@ -46,6 +46,22 @@ enum DecodeStepError {
     Fail(anyhow::Error),
 }
 
+/// Merge a baseline context override with a pending per-address `globalset` commit.
+///
+/// Pending bits override the baseline bits they mask while preserving any
+/// uncommitted baseline mode bits (such as ARM Thumb `TMode`).
+fn merge_base_and_pending_override(
+    base: Option<PackedContextOverride>,
+    pending: Option<PackedContextOverride>,
+) -> Option<PackedContextOverride> {
+    match (base, pending) {
+        (Some(base), Some(pending)) => Some(base.merge_override(pending)),
+        (Some(base), None) => Some(base),
+        (None, Some(pending)) => Some(pending),
+        (None, None) => None,
+    }
+}
+
 /// Queue the instruction's context commits and step past it.
 fn advance_after(
     pending_overrides: &mut std::collections::BTreeMap<u64, PackedContextOverride>,
@@ -318,12 +334,10 @@ impl RuntimeSleighFrontend {
             let remaining = &bytes[offset..];
 
             // Apply any pending ContextCommit overrides for this address.
-            let ctx_override = match (initial_context_override, pending_overrides.get(&current)) {
-                (Some(base), Some(pending)) => Some(base.merge_override(*pending)),
-                (Some(base), None) => Some(base),
-                (None, Some(pending)) => Some(*pending),
-                (None, None) => None,
-            };
+            let ctx_override = merge_base_and_pending_override(
+                initial_context_override,
+                pending_overrides.get(&current).copied(),
+            );
 
             let decoded = match self.decode_instruction_with_context_override(
                 remaining,
@@ -847,10 +861,10 @@ impl RuntimeSleighFrontend {
     /// ABI's bit-0 Thumb marker lives on function symbols and there are none
     /// left, yet every instruction in it is Thumb.
     ///
-    /// `base_context` seeds the decode and applies to each instruction that a
-    /// preceding one has not already committed a context for -- those still
-    /// win, so a mode switch encoded in the instruction stream is honoured
-    /// rather than overridden.
+    /// `base_context` seeds the decode; any pending context commits from
+    /// preceding instructions merge over it so committed fields win while
+    /// uncommitted baseline mode bits (such as ARM Thumb `TMode`) remain
+    /// intact.
     ///
     /// [`decode_window_no_pcode`]: Self::decode_window_no_pcode
     pub fn decode_window_no_pcode_in_context(
@@ -872,7 +886,10 @@ impl RuntimeSleighFrontend {
         while offset < bytes.len() && decoded.len() < limit {
             let remaining = &bytes[offset..];
 
-            let ctx_override = pending_overrides.get(&current).copied().or(base_context);
+            let ctx_override = merge_base_and_pending_override(
+                base_context,
+                pending_overrides.get(&current).copied(),
+            );
 
             let instruction = match self.decode_single_no_pcode(remaining, current, ctx_override) {
                 Ok(instruction) => instruction,
@@ -937,5 +954,53 @@ impl RuntimeSleighFrontend {
                 address,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod decode_context_merge_tests {
+    use super::*;
+
+    #[test]
+    fn decode_window_no_pcode_in_context_merges_pending_commits_with_base_context() {
+        let frontend = RuntimeSleighFrontend::new_for_language("ARM8m_le").unwrap();
+        let address = frontend.normalize_low_bit_code_address(0x1001);
+        assert!(
+            address.context_override.is_some(),
+            "Thumb odd entry address must yield TMode base_context"
+        );
+        // Thumb stream:
+        //   0x1000: 88 bf  it hi         (globalset commits condit at 0x1002 without re-setting TMode)
+        //   0x1002: 08 44  add r0, r1    (must still see TMode=1 merged with IT pending override)
+        //   0x1004: 70 47  bx lr
+        let bytes = [0x88u8, 0xbf, 0x08, 0x44, 0x70, 0x47];
+
+        let no_pcode = frontend
+            .decode_window_no_pcode_in_context(
+                &bytes,
+                address.address,
+                10,
+                address.context_override,
+            )
+            .expect("decode Thumb IT window without pcode");
+        let with_pcode = frontend
+            .decode_window_with_context_override(
+                &bytes,
+                address.address,
+                10,
+                address.context_override,
+            )
+            .expect("decode Thumb IT window with pcode");
+
+        assert_eq!(no_pcode.len(), 3, "decoded={no_pcode:?}");
+        let no_pcode_summary: Vec<(&str, usize, u64)> = no_pcode
+            .iter()
+            .map(|ins| (ins.mnemonic.as_str(), ins.length, ins.address))
+            .collect();
+        let with_pcode_summary: Vec<(&str, usize, u64)> = with_pcode
+            .iter()
+            .map(|ins| (ins.mnemonic.as_str(), ins.length, ins.address))
+            .collect();
+        assert_eq!(no_pcode_summary, with_pcode_summary);
     }
 }

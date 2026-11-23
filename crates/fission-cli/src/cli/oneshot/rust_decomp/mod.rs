@@ -423,7 +423,7 @@ pub(crate) fn run_decompilation_rust_sleigh(
     }
 
     let init_start = std::time::Instant::now();
-    let selected_functions = collect_target_functions(cli, binary);
+    let selected_functions = collect_target_functions(cli, binary)?;
     let selection_accounting = selected_functions.accounting;
     let functions = selected_functions.functions;
     // Selection above reads the whole inventory; decompilation reads only the

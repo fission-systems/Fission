@@ -3,9 +3,9 @@
 Scope: `crates/fission-pcode/src/render/`
 
 Canonical policy:
-- [`docs/adr/0011-hir-presentation-contract.md`](../../../docs/adr/0011-hir-presentation-contract.md)
-- [`docs/adr/0013-print-expr-vs-dual-layer-printer.md`](../../../docs/adr/0013-print-expr-vs-dual-layer-printer.md) — midend-core diagnostic `format_expr_key` is **not** this surface
-- [`docs/adr/0008-nir-substrate-and-owner-boundaries.md`](../../../docs/adr/0008-nir-substrate-and-owner-boundaries.md)
+- [`docs/adr/0011-hir-presentation-contract.md`](../../../../docs/adr/0011-hir-presentation-contract.md)
+- [`docs/adr/0013-print-expr-vs-dual-layer-printer.md`](../../../../docs/adr/0013-print-expr-vs-dual-layer-printer.md) — midend-core diagnostic `format_expr_key` is **not** this surface
+- [`docs/adr/0008-nir-substrate-and-owner-boundaries.md`](../../../../docs/adr/0008-nir-substrate-and-owner-boundaries.md)
 
 ## Layout
 
@@ -55,7 +55,7 @@ nir (types / builder / normalize / structuring / labels)
 3. Structural invariants only (def counts, purity, goto/label shape, truthiness).
 4. Preserve single evaluation of calls/loads.
 5. Focused tests under `presentation` / `layered` / `globals` for every new transform.
-6. **Measurement-only quality claims** (repo root `Agents.md` Core Rule 10): new presentation folds that claim readability improvement need a **measured** real-binary/row baseline and remeasure — not synthetic IR alone. Fixture tests may land mechanical coverage; they do not prove quality.
+6. **Measurement-only quality claims** (repo root `AGENTS.md` Core Rule 10): new presentation folds that claim readability improvement need a **measured** real-binary/row baseline and remeasure — not synthetic IR alone. Fixture tests may land mechanical coverage; they do not prove quality.
 7. Real-binary verification with `fission_cli decomp` and/or fission-benchmark when the change is a quality claim. There is one surface, so report total distance next to the perfect count.
 8. Dead pure-assign elim must use **whole-function** use counts (never subtree-local).
 9. Rely on `presentation/invariants.rs` post-pass firewall; on violation polish is rolled back.

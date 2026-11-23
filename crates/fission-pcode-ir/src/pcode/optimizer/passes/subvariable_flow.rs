@@ -1,7 +1,36 @@
-use super::def_use::{DEFAULT_VARNODE_SIZE, DefUseTracker};
-use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+use super::def_use::DefUseTracker;
+use super::function_unique_space_id;
+use crate::pcode::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode, truncate_to_varnode_width};
 
 pub struct SubvariableFlowOptimizer;
+
+fn initial_next_temp_offset(func: &PcodeFunction, unique_space_id: u64) -> u64 {
+    let mut max_end: u64 = 0x10000;
+    for block in &func.blocks {
+        for op in &block.ops {
+            for vn in op.output.iter().chain(op.inputs.iter()) {
+                if !vn.is_constant && vn.space_id == unique_space_id {
+                    let end = vn.offset.saturating_add(u64::from(vn.size.max(1)));
+                    max_end = max_end.max(end);
+                }
+            }
+        }
+    }
+    max_end.next_multiple_of(8)
+}
+
+fn alloc_temp(next_offset: &mut u64, unique_space_id: u64, size: u32) -> Varnode {
+    let offset = *next_offset;
+    let step = u64::from(size.max(1)).next_multiple_of(8);
+    *next_offset = offset.saturating_add(step);
+    Varnode {
+        space_id: unique_space_id,
+        offset,
+        size,
+        is_constant: false,
+        constant_val: 0,
+    }
+}
 
 impl SubvariableFlowOptimizer {
     pub fn new() -> Self {
@@ -11,18 +40,14 @@ impl SubvariableFlowOptimizer {
     pub fn eliminate(&mut self, func: &mut PcodeFunction, def_use: &DefUseTracker) -> bool {
         let mut modified = false;
 
-        // Collect operations to narrow
-        // We will store pairs of (block_idx, op_idx, target_size)
-        // Note: we can't mutate `func.blocks` while iterating over it,
-        // so we collect changes first.
+        // Collect operations to narrow: (block_idx, op_idx, target_size)
         let mut optimizations = Vec::new();
 
         for (block_idx, block) in func.blocks.iter().enumerate() {
             for (op_idx, op) in block.ops.iter().enumerate() {
-                if op.output.is_none() {
+                let Some(out) = op.output.as_ref() else {
                     continue;
-                }
-                let out = op.output.as_ref().unwrap();
+                };
                 let orig_size = out.size;
 
                 if orig_size <= 1 {
@@ -47,10 +72,8 @@ impl SubvariableFlowOptimizer {
                     orig_size // No viable narrowing, keep original size
                 };
 
-                if target_size < orig_size {
-                    if Self::can_narrow_opcode(op.opcode) {
-                        optimizations.push((block_idx, op_idx, target_size, orig_size));
-                    }
+                if target_size < orig_size && Self::can_narrow_opcode(op.opcode) {
+                    optimizations.push((block_idx, op_idx, target_size));
                 }
             }
         }
@@ -59,52 +82,36 @@ impl SubvariableFlowOptimizer {
             return false;
         }
 
-        // Apply narrowed operations from back to front to avoid indices shifting,
-        // though `op_idx` will shift if we insert ops *before* it, but wait!
-        // We want to:
-        // 1. Convert `V_old = OP(X, Y)`  -> `V_new = OP(Subpiece(X)_target, Subpiece(Y)_target)`
-        // 2. Add bridge `V_old = ZExt(V_new)` AFTER the operation.
-        // If we add operations *before* `op`, we must insert them carefully.
-        for (block_idx, op_idx, target_size, orig_size) in optimizations.into_iter().rev() {
+        // Fresh temporaries go in the function's own unique space; with no
+        // evidence of which space that is, allocating one could land in RAM.
+        let Some(unique_space_id) = function_unique_space_id(func) else {
+            return false;
+        };
+        let mut next_temp_offset = initial_next_temp_offset(func, unique_space_id);
+
+        // Apply narrowed operations from back to front to avoid shifting earlier op_idx values.
+        for (block_idx, op_idx, target_size) in optimizations.into_iter().rev() {
             let block = &mut func.blocks[block_idx];
             let op = &block.ops[op_idx];
 
             let out_vn = op.output.as_ref().unwrap().clone();
 
-            // Allocate a new unique varnode for the narrowed result
-            let mut narrowed_out = out_vn.clone();
-            narrowed_out.size = target_size;
-            // Best practice: allocate new space offset to avoid aliasing.
-            // Using a temporary register space usually requires knowing the space_id.
-            // For Pcode, we can just use a unique offset derived from a counter, or
-            // since we don't have func.allocate_temp, we usually use the same offset
-            // but change the size. Wait! In Fission's Pcode, `space_id, offset, size` uniquely identify.
-            // If we reuse the same space/offset but different size, it's technically a distinct varnode in `DefUseTracker`
-            // BUT it might alias physically if not careful!
-            // However, this is an intermediate temp variable (most likely in the `unique` space).
-            // If it's a register or memory, changing its size might overlap adjacent memory.
-            // But since these are intermediate ops that only produced `orig_size` bits that were *never consumed* fully,
-            // we'll just treat the lower `target_size` bytes as uniquely identifying enough,
-            // OR we can create a new temp. `func.allocate_temp()` usually exists in builder.
-            // Oh well, if we just copy the ID and change size, Fission will treat it as a distinct `VarnodeId`.
+            // Allocate fresh unique temps so narrowed intermediates never alias physical
+            // registers or collide when multiple inputs share storage.
+            let narrowed_out = alloc_temp(&mut next_temp_offset, unique_space_id, target_size);
 
             let mut new_inputs = Vec::new();
             let mut subpiece_ops = Vec::new();
 
             for input in &op.inputs {
                 if input.is_constant {
-                    let mut new_const = input.clone();
-                    new_const.size = target_size;
-                    new_const.constant_val &= (1i64 << (target_size * 8)) - 1;
-                    new_inputs.push(new_const);
+                    let masked =
+                        truncate_to_varnode_width(input.constant_val as u64, target_size) as i64;
+                    new_inputs.push(Varnode::constant(masked, target_size));
                 } else if input.size == target_size {
                     new_inputs.push(input.clone());
                 } else if input.size < target_size {
-                    // We must ZExt it here (which adds another op, skip narrowing if so?)
-                    // Actually, if an input is SMALLER than the target size, but the OP produced `orig_size`,
-                    // that shouldn't happen for most bitwise/arithmetic unless it's weird Pcode. Let's just ZExt it.
-                    let mut zext_out = input.clone();
-                    zext_out.size = target_size;
+                    let zext_out = alloc_temp(&mut next_temp_offset, unique_space_id, target_size);
 
                     let zext_op = PcodeOp {
                         seq_num: op.seq_num,
@@ -118,18 +125,11 @@ impl SubvariableFlowOptimizer {
                     new_inputs.push(zext_out);
                 } else {
                     // input.size > target_size
-                    let mut subpiece_out = input.clone();
-                    subpiece_out.size = target_size;
+                    let subpiece_out =
+                        alloc_temp(&mut next_temp_offset, unique_space_id, target_size);
 
-                    // Create subpiece op
                     // SubPiece takes 2 inputs: original value, and CONST offset (in bytes).
-                    let offset_const = Varnode {
-                        space_id: 0, // usually const space
-                        offset: 0,
-                        size: 4,
-                        is_constant: true,
-                        constant_val: 0,
-                    };
+                    let offset_const = Varnode::constant(0, 4);
 
                     let subpiece_op = PcodeOp {
                         seq_num: op.seq_num,
@@ -175,6 +175,8 @@ impl SubvariableFlowOptimizer {
     }
 
     fn can_narrow_opcode(opcode: PcodeOpcode) -> bool {
+        // Expanding a bare Copy into SubPiece + Copy + IntZExt increases op count
+        // without simplifying arithmetic.
         matches!(
             opcode,
             PcodeOpcode::IntAdd
@@ -183,7 +185,6 @@ impl SubvariableFlowOptimizer {
                 | PcodeOpcode::IntAnd
                 | PcodeOpcode::IntOr
                 | PcodeOpcode::IntXor
-                | PcodeOpcode::Copy
         )
     }
 }

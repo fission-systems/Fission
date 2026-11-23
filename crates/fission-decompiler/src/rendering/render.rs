@@ -29,6 +29,18 @@ fn surface_render_panic(address: u64, payload: &(dyn std::any::Any + Send)) -> S
     format!("nir_structuring_failure[unsupported_cfg_region_shape]: render panicked: {detail}")
 }
 
+fn optimize_pcode_with_backup(
+    pcode: &mut PcodeFunction,
+    run_optimize: impl FnOnce(&mut PcodeFunction),
+) -> Result<(), ()> {
+    let raw_pcode_backup = pcode.clone();
+    if catch_unwind(AssertUnwindSafe(|| run_optimize(pcode))).is_err() {
+        *pcode = raw_pcode_backup;
+        return Err(());
+    }
+    Ok(())
+}
+
 pub(crate) fn nir_diag_stage(address: u64, stage: &str, start: Instant) {
     if std::env::var_os("FISSION_PREVIEW_DIAG").is_some() {
         eprintln!(
@@ -76,7 +88,8 @@ pub(crate) fn nir_options_with_recovery(
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> NirRenderOptions {
-    let options = crate::seed_nir_render_options(binary);
+    let mut options = crate::seed_nir_render_options(binary);
+    crate::rust_sleigh::apply_spec_overrides(binary, &mut options);
     apply_nir_recovery_flags(
         options,
         region_linearize_structuring,
@@ -103,11 +116,39 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
     name: &str,
     enforce_auto_gate: bool,
     timeout_ms: Option<u64>,
-    mut decomp_ctx: crate::context::DecompContext<'bin>,
+    decomp_ctx: crate::context::DecompContext<'bin>,
     base_options: NirRenderOptions,
     region_linearize_structuring: bool,
     force_linear_structuring: bool,
 ) -> Result<Option<(crate::NirDecompileOutput, FactStore)>, String> {
+    render_nir_from_pcode_with_decomp_context_preserving_options(
+        pcode,
+        binary,
+        address,
+        name,
+        enforce_auto_gate,
+        timeout_ms,
+        decomp_ctx,
+        base_options,
+        region_linearize_structuring,
+        force_linear_structuring,
+    )
+    .map_err(|(_options, err)| err)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_nir_from_pcode_with_decomp_context_preserving_options<'bin>(
+    pcode: &PcodeFunction,
+    binary: &'bin LoadedBinary,
+    address: u64,
+    name: &str,
+    enforce_auto_gate: bool,
+    timeout_ms: Option<u64>,
+    mut decomp_ctx: crate::context::DecompContext<'bin>,
+    base_options: NirRenderOptions,
+    region_linearize_structuring: bool,
+    force_linear_structuring: bool,
+) -> Result<Option<(crate::NirDecompileOutput, FactStore)>, (NirRenderOptions, String)> {
     if enforce_auto_gate && !auto_nir_admission_eligible(binary, pcode) {
         return Ok(None);
     }
@@ -133,9 +174,12 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
         if let Some(timeout) = timeout_ms {
             if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
                 nir_diag_stage(address, "render_preview_timeout", render_start);
-                return Err(format!(
-                    "nir_timeout: Fission NIR direct render timed out after {timeout}ms at round {}",
-                    round + 1
+                return Err((
+                    options,
+                    format!(
+                        "nir_timeout: Fission NIR direct render timed out after {timeout}ms at round {}",
+                        round + 1
+                    ),
                 ));
             }
         }
@@ -159,9 +203,12 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     if let Some(timeout) = timeout_ms {
                         if render_start.elapsed() >= std::time::Duration::from_millis(timeout) {
                             nir_diag_stage(address, "render_preview_timeout", render_start);
-                            return Err(format!(
-                                "nir_timeout: Fission NIR direct render timed out after {timeout}ms before feedback round {}",
-                                round + 2
+                            return Err((
+                                options,
+                                format!(
+                                    "nir_timeout: Fission NIR direct render timed out after {timeout}ms before feedback round {}",
+                                    round + 2
+                                ),
                             ));
                         }
                     }
@@ -190,11 +237,11 @@ pub(crate) fn render_nir_from_pcode_with_decomp_context<'bin>(
                     })
                     .unwrap_or_else(|| format!("Fission NIR unavailable: {err}"));
                 nir_diag_stage(address, "render_preview_error", render_start);
-                return Err(surfaced_error);
+                return Err((options, surfaced_error));
             }
             Err(payload) => {
                 nir_diag_stage(address, "render_preview_error", render_start);
-                return Err(surface_render_panic(address, payload.as_ref()));
+                return Err((options, surface_render_panic(address, payload.as_ref())));
             }
         }
     }
@@ -263,7 +310,9 @@ pub(crate) fn render_nir_request(
     }
     let mut optimizer = PcodeOptimizer::new(PcodeOptimizerConfig::default());
     let optimize_start = Instant::now();
-    let optimize_result = catch_unwind(AssertUnwindSafe(|| optimizer.optimize(&mut pcode)));
+    let optimize_result = optimize_pcode_with_backup(&mut pcode, |fn_ir| {
+        optimizer.optimize(fn_ir);
+    });
     nir_diag_stage(request.address, "optimize_pcode_done", optimize_start);
     if optimize_result.is_err() && std::env::var_os("FISSION_PREVIEW_DEBUG").is_some() {
         let _ = std::fs::OpenOptions::new()
@@ -480,5 +529,103 @@ mod tests {
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.contains("nir_timeout"), "{err}");
+    }
+
+    #[test]
+    fn nir_options_with_recovery_applies_spec_overrides() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../fission-emulator/testdata/win_x64_exit.exe");
+        let binary = LoadedBinary::from_file(fixture).expect("load Win64 PE fixture");
+        let options = nir_options_with_recovery(&binary, true, false);
+        assert!(options.region_linearize_structuring);
+        assert!(!options.force_linear_structuring);
+        assert!(
+            options
+                .cspec_alloca_probe_targets
+                .iter()
+                .any(|target| target
+                    .trim_start_matches('_')
+                    .eq_ignore_ascii_case("chkstk_ms")),
+            "expected nir_options_with_recovery to apply cspec overrides: {:?}",
+            options.cspec_alloca_probe_targets
+        );
+    }
+
+    #[test]
+    fn preserving_options_returns_caller_userops_and_flags_on_error() {
+        let load_spec = BinaryLoadSpec {
+            format: "ELF".to_string(),
+            image_base: 0x1000,
+            pair: LanguageCompilerSpecPair {
+                language_id: GhidraLanguageId("x86:LE:64:default".to_string()),
+                compiler_spec_id: CompilerSpecId("default".to_string()),
+            },
+            preferred: true,
+            source: "test".to_string(),
+        };
+        let binary =
+            LoadedBinaryBuilder::new("test_bin".to_string(), DataBuffer::Heap(vec![0u8; 0x1000]))
+                .load_spec(load_spec)
+                .build()
+                .expect("build");
+        let decomp_ctx =
+            crate::context::DecompContext::from_facts(&binary, FactStore::default(), 0x1000);
+        let pcode = PcodeFunction { blocks: Vec::new() };
+        let mut custom = NirRenderOptions::default();
+        custom.userops.insert(42, "custom_barrier".to_string());
+        custom.cspec_param_offsets = Some(vec![0x99]);
+        let (returned_opts, err) = render_nir_from_pcode_with_decomp_context_preserving_options(
+            &pcode,
+            &binary,
+            0x1000,
+            "test_fn",
+            false,
+            Some(0),
+            decomp_ctx,
+            custom,
+            false,
+            false,
+        )
+        .expect_err("zero timeout should fail before render");
+        assert!(err.contains("nir_timeout"), "{err}");
+        assert_eq!(
+            returned_opts.userops.get(&42).map(String::as_str),
+            Some("custom_barrier")
+        );
+        assert_eq!(returned_opts.cspec_param_offsets, Some(vec![0x99]));
+    }
+
+    #[test]
+    fn optimize_pcode_with_backup_restores_raw_pcode_on_panic() {
+        let orig_op = fission_pcode::PcodeOp {
+            seq_num: 0,
+            opcode: fission_pcode::PcodeOpcode::Copy,
+            address: 0x1000,
+            output: Some(fission_pcode::Varnode {
+                space_id: 4,
+                offset: 0,
+                size: 8,
+                is_constant: false,
+                constant_val: 0,
+            }),
+            inputs: vec![fission_pcode::Varnode::constant(42, 8)],
+            asm_mnemonic: None,
+        };
+        let mut pcode = PcodeFunction {
+            blocks: vec![fission_pcode::PcodeBasicBlock {
+                index: 0,
+                start_address: 0x1000,
+                successors: vec![],
+                ops: vec![orig_op.clone()],
+            }],
+        };
+
+        let result = optimize_pcode_with_backup(&mut pcode, |fn_ir| {
+            fn_ir.blocks[0].ops.clear();
+            panic!("simulated optimizer panic");
+        });
+
+        assert!(result.is_err());
+        assert_eq!(pcode.blocks[0].ops, vec![orig_op]);
     }
 }
