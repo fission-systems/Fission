@@ -823,6 +823,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-causal"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "fission-emulator",
+ "fission-loader",
+ "fission-pcode-ir",
+ "fission-sleigh",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fission-cli"
 version = "0.4.0"
 dependencies = [

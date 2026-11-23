@@ -1,0 +1,25 @@
+[package]
+name = "fission-causal"
+version = "0.4.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Experimental CSIC: counterfactual machine-state interventions on reproducible emulator replays (RFC #1101, Track B). No production crate depends on this."
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+keywords = ["fission", "causality", "counterfactual", "emulator"]
+categories = ["development-tools::debugging"]
+publish = false
+
+[lib]
+name = "fission_causal"
+
+[dependencies]
+fission-emulator = { path = "../fission-emulator" }
+fission-loader = { path = "../fission-loader" }
+fission-sleigh = { path = "../fission-sleigh" }
+fission-pcode-ir = { path = "../fission-pcode-ir" }
+anyhow = "1.0"
+blake3 = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
