@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
 use fission_loader::LoadedBinary;
-use fission_sleigh::runtime::{
-    DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeSleighFrontend,
-};
+use fission_sleigh::runtime::{DecodedFlowKind, PackedContextOverride, RuntimeSleighFrontend};
 
+use super::coverage_decode::{
+    COVERAGE_WINDOW_BYTES, CoverageDecodes, CoverageFlow, CoverageInstruction,
+};
 use super::targets::{is_target_no_return, normalize_target, same_section};
 use super::thumb::{decode_context_for_address, image_decode_context};
 
@@ -39,11 +40,20 @@ impl InstructionCoverage {
         binary: &LoadedBinary,
         frontend: &RuntimeSleighFrontend,
         known_functions: &HashSet<u64>,
+        coverage_decodes: &CoverageDecodes,
     ) -> Self {
         use rayon::prelude::*;
         let boundaries: Vec<(u64, u64)> = known_functions
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known_functions))
+            .flat_map(|&addr| {
+                walk_function_boundaries(
+                    binary,
+                    frontend,
+                    addr,
+                    known_functions,
+                    Some(coverage_decodes),
+                )
+            })
             .collect();
 
         let intervals = merge_intervals(boundaries);
@@ -70,7 +80,7 @@ impl InstructionCoverage {
         let known = &self.known_functions;
         let new_boundaries: Vec<(u64, u64)> = addrs
             .par_iter()
-            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known))
+            .flat_map(|&addr| walk_function_boundaries(binary, frontend, addr, known, None))
             .collect();
 
         let mut all_intervals = std::mem::take(&mut self.intervals);
@@ -120,6 +130,7 @@ pub(super) fn walk_function_boundaries(
     frontend: &RuntimeSleighFrontend,
     addr: u64,
     known_functions: &HashSet<u64>,
+    coverage_decodes: Option<&CoverageDecodes>,
 ) -> Vec<(u64, u64)> {
     let mut boundaries = Vec::new();
     // The mode the function runs in: the image's, or its own when the loader
@@ -150,85 +161,52 @@ pub(super) fn walk_function_boundaries(
                 if !super::ranges::is_in_executable_ranges(ip, &exec_ranges) {
                     break;
                 }
-                let Some(bytes) = binary.view_bytes(ip, 15) else {
+                let Some(bytes) = binary.view_bytes(ip, COVERAGE_WINDOW_BYTES) else {
                     break;
                 };
-                let decoded = match mode_context {
-                    Some(context) => {
-                        frontend.decode_window_no_pcode_in_context(bytes, ip, 1, Some(context))
-                    }
-                    None => frontend.decode_window_no_pcode(bytes, ip, 1),
+                let reused = if mode_context.is_none() {
+                    coverage_decodes
+                        .and_then(|decodes| decodes.get(&(ip, bytes.as_ptr() as usize)))
+                        .filter(|(prefix, _)| *prefix <= bytes.len())
+                        .map(|(_, instruction)| *instruction)
+                } else {
+                    None
                 };
-                let Ok(decoded) = decoded else {
+                let instruction = reused.or_else(|| {
+                    let decoded = frontend
+                        .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                        .ok()?;
+                    CoverageInstruction::from_decoded(decoded.first()?)
+                });
+                let Some(instruction) = instruction else {
                     break;
                 };
-                if decoded.is_empty() {
-                    break;
-                }
-                let inst = &decoded[0];
-                if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
-                    break;
-                }
-
-                boundaries.push((ip, ip + inst.length as u64));
+                let next_ip = ip + instruction.length;
+                boundaries.push((ip, next_ip));
                 count += 1;
 
-                match inst.flow_kind {
-                    DecodedFlowKind::Return => {
-                        break;
-                    }
-                    DecodedFlowKind::Jump => {
-                        // Do not trace unconditional jumps to avoid enveloping tail call targets
-                        break;
-                    }
-                    DecodedFlowKind::Call => {
-                        let call_target = inst.direct_target.or_else(|| {
-                            inst.references.iter().find_map(|r| match r.kind {
-                                DecodedReferenceKind::CallTarget
-                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                                _ => None,
-                            })
-                        });
-                        let is_noreturn = if let Some(target) = call_target {
-                            let norm_target = normalize_target(binary, target);
-                            is_target_no_return(binary, norm_target)
-                        } else {
-                            false
-                        };
-                        if is_noreturn {
+                match instruction.flow {
+                    CoverageFlow::Stop => break,
+                    CoverageFlow::Call(target) => {
+                        if is_target_no_return(binary, normalize_target(binary, target)) {
                             break;
                         }
-                        ip += inst.length as u64;
                     }
-                    DecodedFlowKind::ConditionalJump => {
-                        let jump_target = inst.direct_target.or_else(|| {
-                            inst.references.iter().find_map(|r| match r.kind {
-                                DecodedReferenceKind::BranchTarget
-                                | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                                _ => None,
-                            })
-                        });
-                        if let Some(target) = jump_target {
-                            let norm_target = normalize_target(binary, target);
-                            let in_same_section =
-                                binary.sections.is_empty() || same_section(binary, ip, norm_target);
-                            if super::ranges::is_in_executable_ranges(norm_target, &exec_ranges)
-                                && !known_functions.contains(&norm_target)
-                                && !binary.function_addr_index.contains_key(&norm_target)
-                                && in_same_section
-                            {
-                                worklist.push(norm_target);
-                            }
+                    CoverageFlow::ConditionalJump(target) => {
+                        let target = normalize_target(binary, target);
+                        let in_same_section =
+                            binary.sections.is_empty() || same_section(binary, ip, target);
+                        if super::ranges::is_in_executable_ranges(target, &exec_ranges)
+                            && !known_functions.contains(&target)
+                            && !binary.function_addr_index.contains_key(&target)
+                            && in_same_section
+                        {
+                            worklist.push(target);
                         }
-                        ip += inst.length as u64;
                     }
-                    DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
-                        break;
-                    }
-                    _ => {
-                        ip += inst.length as u64;
-                    }
+                    CoverageFlow::Fallthrough => {}
                 }
+                ip = next_ip;
             }
         }
     }

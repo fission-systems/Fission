@@ -546,7 +546,24 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
 
     // 0x401012 is known as a separate function!
     let known_functions = HashSet::from([0x401000, 0x401012]);
-    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions, None);
+    let sweep = super::control_flow_scan::scan_executable_sections(&binary, &frontend);
+    let entry_bytes = binary.view_bytes(0x401000, 15).unwrap();
+    assert!(
+        sweep
+            .coverage_decodes
+            .contains_key(&(0x401000, entry_bytes.as_ptr() as usize))
+    );
+    assert_eq!(
+        walk_function_boundaries(
+            &binary,
+            &frontend,
+            0x401000,
+            &known_functions,
+            Some(&sweep.coverage_decodes),
+        ),
+        boundaries
+    );
 
     assert!(
         boundaries.contains(&(0x401000, 0x401002)),
@@ -606,7 +623,7 @@ fn walk_function_boundaries_terminates_on_noreturn_call() {
     let frontend = RuntimeSleighFrontend::new_for_load_spec(load_spec).expect("frontend");
 
     let known_functions = HashSet::from([0x401000]);
-    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions);
+    let boundaries = walk_function_boundaries(&binary, &frontend, 0x401000, &known_functions, None);
 
     assert!(
         boundaries.contains(&(0x401000, 0x401005)),
