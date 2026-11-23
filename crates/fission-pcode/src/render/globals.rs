@@ -5,7 +5,7 @@
 
 use super::{HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions};
 use fission_midend_core::ir::NirType;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Known globals by address, and the byte size of each named object.
 struct Globals {
@@ -92,9 +92,26 @@ fn recover_global_symbol_accesses_in_stmts(
             HirStmt::VaStart { va_list, .. } => {
                 recover_global_symbol_accesses_in_expr(va_list, globals, aliases);
             }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                let mut nested_aliases = aliases.clone();
-                recover_global_symbol_accesses_in_stmts(body, globals, &mut nested_aliases);
+            HirStmt::Block(body) => {
+                recover_global_symbol_accesses_in_stmts(body, globals, aliases);
+            }
+            HirStmt::While { cond, body } => {
+                let mut assigned = HashSet::new();
+                collect_assigned_vars_in_stmts(body, &mut assigned);
+                let mut loop_aliases = aliases.clone();
+                loop_aliases.retain(|name, _| !assigned.contains(name));
+                recover_global_symbol_accesses_in_expr(cond, globals, &loop_aliases);
+                recover_global_symbol_accesses_in_stmts(body, globals, &mut loop_aliases);
+                aliases.retain(|name, _| !assigned.contains(name));
+            }
+            HirStmt::DoWhile { body, cond } => {
+                let mut assigned = HashSet::new();
+                collect_assigned_vars_in_stmts(body, &mut assigned);
+                let mut loop_aliases = aliases.clone();
+                loop_aliases.retain(|name, _| !assigned.contains(name));
+                recover_global_symbol_accesses_in_stmts(body, globals, &mut loop_aliases);
+                recover_global_symbol_accesses_in_expr(cond, globals, &loop_aliases);
+                aliases.retain(|name, _| !assigned.contains(name));
             }
             HirStmt::Switch {
                 expr,
@@ -102,16 +119,30 @@ fn recover_global_symbol_accesses_in_stmts(
                 default,
             } => {
                 recover_global_symbol_accesses_in_expr(expr, globals, aliases);
+                let mut all_assigned = HashSet::new();
+                let mut fallthrough_assigned = HashSet::new();
                 for case in cases {
+                    let mut case_assigned = HashSet::new();
+                    collect_assigned_vars_in_stmts(&case.body, &mut case_assigned);
                     let mut case_aliases = aliases.clone();
+                    case_aliases.retain(|name, _| !fallthrough_assigned.contains(name));
                     recover_global_symbol_accesses_in_stmts(
                         &mut case.body,
                         globals,
                         &mut case_aliases,
                     );
+                    all_assigned.extend(case_assigned.iter().cloned());
+                    if stmts_end_unconditionally(&case.body) {
+                        fallthrough_assigned.clear();
+                    } else {
+                        fallthrough_assigned.extend(case_assigned);
+                    }
                 }
+                collect_assigned_vars_in_stmts(default, &mut all_assigned);
                 let mut default_aliases = aliases.clone();
+                default_aliases.retain(|name, _| !fallthrough_assigned.contains(name));
                 recover_global_symbol_accesses_in_stmts(default, globals, &mut default_aliases);
+                aliases.retain(|name, _| !all_assigned.contains(name));
             }
             HirStmt::If {
                 cond,
@@ -145,19 +176,26 @@ fn recover_global_symbol_accesses_in_stmts(
                         aliases,
                     );
                 }
+                let mut assigned = HashSet::new();
+                if let Some(update) = update.as_deref() {
+                    collect_assigned_vars_in_stmt(update, &mut assigned);
+                }
+                collect_assigned_vars_in_stmts(body, &mut assigned);
+                let mut loop_aliases = aliases.clone();
+                loop_aliases.retain(|name, _| !assigned.contains(name));
                 if let Some(cond) = cond {
-                    recover_global_symbol_accesses_in_expr(cond, globals, aliases);
+                    recover_global_symbol_accesses_in_expr(cond, globals, &loop_aliases);
                 }
                 if let Some(update) = update.as_mut() {
-                    let mut update_aliases = aliases.clone();
+                    let mut update_aliases = loop_aliases.clone();
                     recover_global_symbol_accesses_in_stmts(
                         std::slice::from_mut(update),
                         globals,
                         &mut update_aliases,
                     );
                 }
-                let mut body_aliases = aliases.clone();
-                recover_global_symbol_accesses_in_stmts(body, globals, &mut body_aliases);
+                recover_global_symbol_accesses_in_stmts(body, globals, &mut loop_aliases);
+                aliases.retain(|name, _| !assigned.contains(name));
             }
             HirStmt::Return(None)
             | HirStmt::Label(_)
@@ -284,4 +322,75 @@ pub(crate) fn is_c_identifier(name: &str) -> bool {
     };
     (first == '_' || first.is_ascii_alphabetic())
         && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn collect_assigned_vars_in_stmts(stmts: &[HirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        collect_assigned_vars_in_stmt(stmt, out);
+    }
+}
+
+fn collect_assigned_vars_in_stmt(stmt: &HirStmt, out: &mut HashSet<String>) {
+    match stmt {
+        HirStmt::Assign { lhs, .. } => {
+            if let HirLValue::Var(name) = lhs {
+                out.insert(name.clone());
+            }
+        }
+        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+            collect_assigned_vars_in_stmts(body, out);
+        }
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            collect_assigned_vars_in_stmts(then_body, out);
+            collect_assigned_vars_in_stmts(else_body, out);
+        }
+        HirStmt::For {
+            init, update, body, ..
+        } => {
+            if let Some(init) = init.as_deref() {
+                collect_assigned_vars_in_stmt(init, out);
+            }
+            if let Some(update) = update.as_deref() {
+                collect_assigned_vars_in_stmt(update, out);
+            }
+            collect_assigned_vars_in_stmts(body, out);
+        }
+        HirStmt::Switch { cases, default, .. } => {
+            for case in cases {
+                collect_assigned_vars_in_stmts(&case.body, out);
+            }
+            collect_assigned_vars_in_stmts(default, out);
+        }
+        HirStmt::Expr(_)
+        | HirStmt::Return(_)
+        | HirStmt::VaStart { .. }
+        | HirStmt::Label(_)
+        | HirStmt::Goto(_)
+        | HirStmt::Break
+        | HirStmt::Continue => {}
+    }
+}
+
+fn stmts_end_unconditionally(stmts: &[HirStmt]) -> bool {
+    let Some(last) = stmts.last() else {
+        return false;
+    };
+    match last {
+        HirStmt::Break | HirStmt::Continue | HirStmt::Return(_) | HirStmt::Goto(_) => true,
+        HirStmt::Block(body) => stmts_end_unconditionally(body),
+        HirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            !else_body.is_empty()
+                && stmts_end_unconditionally(then_body)
+                && stmts_end_unconditionally(else_body)
+        }
+        _ => false,
+    }
 }

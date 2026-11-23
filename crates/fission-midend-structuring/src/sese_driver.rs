@@ -1015,13 +1015,15 @@ fn reconstruct_sese_final_body_impl(
                 }
             }
             LoweredTerminator::Fallthrough(Some(target)) => {
-                if let Some(target_idx) = host.find_block_index_by_address(target) {
-                    if let Some(expr) =
+                if let Some(target_idx) = host.find_block_index_by_address(target)
+                    && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        node_body.push(PreHirStmt::Return(Some(expr)));
-                        explicit_edge_surface = true;
-                    }
+                {
+                    node_body.push(PreHirStmt::Return(Some(expr)));
+                    explicit_edge_surface = true;
+                } else if host.next_block_address(idx) != Some(target) {
+                    node_body.push(PreHirStmt::Goto(block_label(target)));
+                    explicit_edge_surface = true;
                 }
             }
             LoweredTerminator::Cond {

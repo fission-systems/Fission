@@ -5470,3 +5470,382 @@ fn a_global_read_after_storing_it_reads_memory_not_the_stored_expression() {
         "the read is the stored value:\n{code}"
     );
 }
+
+#[test]
+fn systemv_amd64_call_clobbers_rdi_and_rsi_unlike_win64() {
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![op(0, PcodeOpcode::Call, None, vec![constant(0x2000)])],
+    )]);
+    let call_op = &pcode.blocks[0].ops[0];
+    let rdi = register(0x38, 8);
+    let rsi = register(0x30, 8);
+    let rbx = register(0x18, 8);
+
+    let mut sysv_opts = test_options();
+    sysv_opts.pe_x64_only = false;
+    sysv_opts.format = "ELF64".to_string();
+    sysv_opts.calling_convention = CallingConvention::SystemVAmd64;
+    let sysv = PreviewBuilder::new(&pcode, &sysv_opts, None);
+    assert!(sysv.call_clobbers_register_varnode(&rdi, call_op));
+    assert!(sysv.call_clobbers_register_varnode(&rsi, call_op));
+    assert!(!sysv.call_clobbers_register_varnode(&rbx, call_op));
+
+    let mut win_opts = test_options();
+    win_opts.calling_convention = CallingConvention::WindowsX64;
+    let win = PreviewBuilder::new(&pcode, &win_opts, None);
+    assert!(!win.call_clobbers_register_varnode(&rdi, call_op));
+    assert!(!win.call_clobbers_register_varnode(&rsi, call_op));
+}
+
+#[test]
+fn x86_32_esp_staged_args_recover_constants_above_0x1000() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.is_64bit = false;
+    options.pointer_size = 4;
+    options.calling_convention = CallingConvention::X86_32;
+    apply_preview_cspec(&mut options);
+
+    let esp = register(0x10, 4);
+    let addr_tmp = Varnode {
+        space_id: UNIQUE_SPACE_ID,
+        offset: 0x300,
+        size: 4,
+        is_constant: false,
+        constant_val: 0,
+    };
+    let at = |seq, address, opcode, output, inputs| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let block = block_at(
+        0x1000,
+        0,
+        vec![
+            at(
+                0,
+                0x1000,
+                PcodeOpcode::Store,
+                None,
+                vec![
+                    constant_sized(3, 4),
+                    esp.clone(),
+                    constant_sized(0x402000, 4),
+                ],
+            ),
+            at(
+                1,
+                0x1004,
+                PcodeOpcode::IntAdd,
+                Some(addr_tmp.clone()),
+                vec![esp.clone(), constant_sized(4, 4)],
+            ),
+            at(
+                2,
+                0x1004,
+                PcodeOpcode::Store,
+                None,
+                vec![constant_sized(3, 4), addr_tmp, constant_sized(7, 4)],
+            ),
+            // Simulated CALL return-address store at call.address = 0x1008.
+            at(
+                3,
+                0x1008,
+                PcodeOpcode::Store,
+                None,
+                vec![constant_sized(3, 4), esp, constant_sized(0x100d, 4)],
+            ),
+            at(
+                4,
+                0x1008,
+                PcodeOpcode::Call,
+                None,
+                vec![constant_sized(0x2000, 4)],
+            ),
+        ],
+    );
+    let pcode = pcode_function(vec![block]);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let blk = &pcode.blocks[0];
+    assert!(builder.x86_32_store_is_esp_staged_call_arg(blk, 0));
+    assert!(builder.x86_32_store_is_esp_staged_call_arg(blk, 2));
+    assert!(!builder.x86_32_store_is_esp_staged_call_arg(blk, 3));
+
+    let args = builder
+        .recover_x86_32_esp_staged_args_from_block(blk, 4)
+        .expect("recover staged args");
+    assert_eq!(args.len(), 2, "{args:?}");
+    assert!(
+        matches!(args[0], PreHirExpr::Const(0x402000, _)),
+        "expected arg0 == 0x402000, got {:?}",
+        args[0]
+    );
+    assert!(
+        matches!(args[1], PreHirExpr::Const(7, _)),
+        "expected arg1 == 7, got {:?}",
+        args[1]
+    );
+}
+
+#[test]
+fn call_result_definition_varnodes_registers_both_int_and_float_return_slots() {
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+
+    let namer = crate::midend::cspec::RegisterNamer::from_options(&options);
+    let xmm0_model = namer
+        .float_return_registers()
+        .into_iter()
+        .next()
+        .expect("xmm0");
+    let xmm0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        ..xmm0_model
+    };
+    let rax = register(0, 8);
+    let out_xmm = varnode(0x400);
+    let out_rax = varnode(0x408);
+
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(xmm0.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(2, PcodeOpcode::Copy, Some(out_xmm), vec![xmm0.clone()]),
+            op(3, PcodeOpcode::Copy, Some(out_rax), vec![rax]),
+        ],
+    )]);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    let use_xmm_after_call = LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    };
+    builder.current_lowering_site = Some(use_xmm_after_call);
+    assert_eq!(
+        builder.lookup_def_site(&xmm0).map(|(site, _)| site),
+        Some(LoweringSite {
+            block_idx: 0,
+            op_idx: 1,
+        }),
+        "post-call XMM0 read must resolve to Call op (1), not pre-call staging op (0)"
+    );
+}
+
+#[test]
+fn integer_call_result_does_not_define_the_float_return_register() {
+    // call f; mov [out], rax; ... read xmm0: `f` returns through rax (its
+    // result is read there first), so the call is not a definition of
+    // xmm0. Declaring every call a definition of both families made an
+    // integer call's result the function's float return value (AArch64
+    // `return s0` printed `return x0`).
+    use crate::midend::cspec::test_maps::apply_preview_cspec;
+
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    apply_preview_cspec(&mut options);
+
+    let namer = crate::midend::cspec::RegisterNamer::from_options(&options);
+    let xmm0_model = namer
+        .float_return_registers()
+        .into_iter()
+        .next()
+        .expect("xmm0");
+    let xmm0 = Varnode {
+        space_id: RUST_SLEIGH_REGISTER_SPACE_ID,
+        ..xmm0_model
+    };
+    let rax = register(0, 8);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(0, PcodeOpcode::Copy, Some(xmm0.clone()), vec![constant(1)]),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::Copy,
+                Some(varnode(0x408)),
+                vec![rax.clone()],
+            ),
+            op(
+                3,
+                PcodeOpcode::Copy,
+                Some(varnode(0x400)),
+                vec![xmm0.clone()],
+            ),
+        ],
+    )]);
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    assert_eq!(
+        builder.lookup_def_site(&rax).map(|(site, _)| site.op_idx),
+        Some(1),
+        "the call defines its integer result"
+    );
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 3,
+    });
+    assert_ne!(
+        builder.lookup_def_site(&xmm0).map(|(site, _)| site.op_idx),
+        Some(1),
+        "a call whose result is read through rax does not define xmm0"
+    );
+}
+
+#[test]
+fn lower_register_subpiece_lane_returns_none_across_clobbering_call() {
+    let rax = register(0, 8);
+    let eax_sub = register(0, 4);
+    let pcode = pcode_function(vec![block_at(
+        0x1000,
+        0,
+        vec![
+            op(
+                0,
+                PcodeOpcode::Copy,
+                Some(rax.clone()),
+                vec![constant(0x55)],
+            ),
+            op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+            op(
+                2,
+                PcodeOpcode::SubPiece,
+                Some(eax_sub.clone()),
+                vec![rax.clone(), constant(0)],
+            ),
+        ],
+    )]);
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+    let mut builder = PreviewBuilder::new(&pcode, &options, None);
+    builder.current_lowering_site = Some(LoweringSite {
+        block_idx: 0,
+        op_idx: 2,
+    });
+    let mut visiting = HashSet::default();
+    let res = builder
+        .lower_register_subpiece_lane(&rax, &eax_sub, 0, &mut visiting)
+        .expect("subpiece lookup");
+    assert_eq!(
+        res, None,
+        "intervening clobbering call must block pre-call lane reuse"
+    );
+}
+
+#[test]
+fn systemv_join_restaged_rdi_recovers_after_dominating_call_and_rejects_unrestaged_arm() {
+    let rdi = register(0x38, 8);
+    let cond = varnode(0x500);
+    let mut options = test_options();
+    options.pe_x64_only = false;
+    options.format = "ELF64".to_string();
+    options.calling_convention = CallingConvention::SystemVAmd64;
+
+    let make_fn = |restage_arm2: bool| {
+        let arm2_ops = if restage_arm2 {
+            vec![
+                op(
+                    0,
+                    PcodeOpcode::Copy,
+                    Some(rdi.clone()),
+                    vec![constant(0x22)],
+                ),
+                op(1, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+            ]
+        } else {
+            vec![op(0, PcodeOpcode::Branch, None, vec![constant(0x1030)])]
+        };
+        let mut blocks = vec![
+            block_at(
+                0x1000,
+                0,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(rdi.clone()),
+                        vec![constant(0x11)],
+                    ),
+                    op(1, PcodeOpcode::Call, None, vec![constant(0x2000)]),
+                    op(
+                        2,
+                        PcodeOpcode::CBranch,
+                        None,
+                        vec![constant(0x1020), cond.clone()],
+                    ),
+                ],
+            ),
+            block_at(
+                0x1010,
+                1,
+                vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        Some(rdi.clone()),
+                        vec![constant(0x22)],
+                    ),
+                    op(1, PcodeOpcode::Branch, None, vec![constant(0x1030)]),
+                ],
+            ),
+            block_at(0x1020, 2, arm2_ops),
+            block_at(
+                0x1030,
+                3,
+                vec![op(0, PcodeOpcode::Call, None, vec![constant(0x3000)])],
+            ),
+        ];
+        blocks[0].successors = vec![1, 2];
+        blocks[1].successors = vec![3];
+        blocks[2].successors = vec![3];
+        pcode_function(blocks)
+    };
+
+    let pcode_both = make_fn(true);
+    let mut builder_both = PreviewBuilder::new(&pcode_both, &options, None);
+    builder_both.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+    assert!(
+        matches!(
+            builder_both.recover_unclobbered_predecessor_arg(&rdi, 3, 0),
+            Some(PreHirExpr::Const(0x22, _))
+        ),
+        "all join predecessors restaging rdi after dominating call must recover 0x22"
+    );
+
+    let pcode_partial = make_fn(false);
+    let mut builder_partial = PreviewBuilder::new(&pcode_partial, &options, None);
+    builder_partial.current_lowering_site = Some(LoweringSite {
+        block_idx: 3,
+        op_idx: 0,
+    });
+    assert_eq!(
+        builder_partial.recover_unclobbered_predecessor_arg(&rdi, 3, 0),
+        None,
+        "an unrestaged arm falling back to a clobbering call must reject rdi"
+    );
+}

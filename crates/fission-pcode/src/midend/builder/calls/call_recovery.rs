@@ -96,20 +96,36 @@ impl<'a> PreviewBuilder<'a> {
     }
 
     fn is_callee_saved_register_varnode(&self, vn: &Varnode) -> bool {
+        if is_register_varnode(vn) && !self.options.cspec_unaffected_offsets.is_empty() {
+            if self.options.cspec_unaffected_offsets.contains(&vn.offset) {
+                return true;
+            }
+            let namer = self.register_namer();
+            let Some(vn_family) = namer.gpr_family_index_at(vn.offset, vn.size) else {
+                return false;
+            };
+            return self.options.cspec_unaffected_offsets.iter().any(|&offset| {
+                namer
+                    .gpr_family_index_at(offset, self.options.pointer_size)
+                    .is_some_and(|fam| fam == vn_family)
+            });
+        }
         let reg_name = if is_register_varnode(vn) {
-            self.sla_hw_name(vn.offset, vn.size)
-                .unwrap_or_else(|| "reg".to_string())
+            self.sla_hw_name(vn.offset, vn.size).unwrap_or_default()
         } else if vn.space_id == UNIQUE_SPACE_ID {
             crate::arch::x86::unique_x86_register_name(vn.offset, vn.size)
                 .map(str::to_string)
                 .unwrap_or_default()
         } else {
-            String::new()
+            return false;
         };
-        matches!(
-            reg_name.as_str(),
-            "rbx" | "rbp" | "rsi" | "rdi" | "r12" | "r13" | "r14" | "r15"
-        )
+        // No cspec `<unaffected>` list was loaded: fall back to the
+        // convention's own table (ISA data lives with the convention, not in
+        // this builder).
+        self.options
+            .calling_convention
+            .callee_saved_register_names()
+            .contains(&reg_name.to_ascii_lowercase().as_str())
     }
 
     fn call_preserves_argument_register(&self, vn: &Varnode, call: &PcodeOp) -> bool {
@@ -131,7 +147,11 @@ impl<'a> PreviewBuilder<'a> {
         !written_slots.contains(&param_slot)
     }
 
-    fn call_clobbers_register_varnode(&self, vn: &Varnode, op: &PcodeOp) -> bool {
+    pub(in crate::midend) fn call_clobbers_register_varnode(
+        &self,
+        vn: &Varnode,
+        op: &PcodeOp,
+    ) -> bool {
         op.opcode.is_call()
             && !self.is_callee_saved_register_varnode(vn)
             && !self.call_preserves_argument_register(vn, op)
@@ -202,6 +222,367 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         true
+    }
+
+    fn collect_unclobbered_reaching_defs(
+        &self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> Option<Vec<LoweringSite>> {
+        const MAX_PREDECESSOR_BLOCKS: usize = 64;
+        let call_block = self.pcode.blocks.get(call_block_idx)?;
+        for (op_idx, op) in call_block
+            .ops
+            .iter()
+            .enumerate()
+            .take(call_idx.min(call_block.ops.len()))
+            .rev()
+        {
+            if Self::is_identity_copy_def(op) {
+                continue;
+            }
+            if op
+                .output
+                .as_ref()
+                .is_some_and(|out| Self::varnode_covers_or_aliases_register(out, vn))
+            {
+                return Some(vec![LoweringSite {
+                    block_idx: call_block_idx,
+                    op_idx,
+                }]);
+            }
+            if self.call_clobbers_register_varnode(vn, op) {
+                return None;
+            }
+        }
+
+        let initial_preds = self.predecessors.get(call_block_idx)?;
+        if initial_preds.is_empty() {
+            return None;
+        }
+        let mut queue: std::collections::VecDeque<usize> = initial_preds.iter().copied().collect();
+        let mut visited = HashSet::default();
+        let mut reached_defs: Vec<LoweringSite> = Vec::new();
+
+        while let Some(pred_idx) = queue.pop_front() {
+            if !visited.insert(pred_idx) {
+                continue;
+            }
+            if visited.len() > MAX_PREDECESSOR_BLOCKS {
+                return None;
+            }
+            let pred_pcode_idx = self.pcode_block_idx(pred_idx);
+            let pred_block = self.pcode.blocks.get(pred_pcode_idx)?;
+            let mut defined = false;
+            for (op_idx, op) in pred_block.ops.iter().enumerate().rev() {
+                if Self::is_identity_copy_def(op) {
+                    continue;
+                }
+                if self.call_clobbers_register_varnode(vn, op) {
+                    return None;
+                }
+                if op
+                    .output
+                    .as_ref()
+                    .is_some_and(|out| Self::varnode_covers_or_aliases_register(out, vn))
+                {
+                    reached_defs.push(LoweringSite {
+                        block_idx: pred_pcode_idx,
+                        op_idx,
+                    });
+                    defined = true;
+                    break;
+                }
+            }
+            if !defined {
+                let preds = self.predecessors.get(pred_idx)?;
+                if preds.is_empty() {
+                    return None;
+                }
+                queue.extend(preds.iter().copied());
+            }
+        }
+
+        if reached_defs.is_empty() {
+            return None;
+        }
+        reached_defs.sort_by_key(|site| (site.block_idx, site.op_idx));
+        reached_defs.dedup_by_key(|site| (site.block_idx, site.op_idx));
+        Some(reached_defs)
+    }
+
+    pub(in crate::midend::builder) fn recover_unclobbered_predecessor_arg(
+        &mut self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> Option<PreHirExpr> {
+        let reached_defs = self.collect_unclobbered_reaching_defs(vn, call_block_idx, call_idx)?;
+        if let Some(expr) = self.ssa_emitted_read(vn) {
+            return Some(self.normalize_recovered_call_arg(expr));
+        }
+
+        let mut shared_name: Option<String> = None;
+        for &site in &reached_defs {
+            let def_op = self
+                .pcode
+                .blocks
+                .get(site.block_idx)?
+                .ops
+                .get(site.op_idx)?;
+            let out = def_op.output.as_ref()?;
+            let key = MaterializedVarnodeKey::new(out, def_op);
+            let Some(name) = self.materialized_vns.get(&key) else {
+                shared_name = None;
+                break;
+            };
+            match &shared_name {
+                None => shared_name = Some(name.clone()),
+                Some(existing) if existing == name => {}
+                Some(_) => {
+                    shared_name = None;
+                    break;
+                }
+            }
+        }
+        if let Some(name) = shared_name {
+            return Some(PreHirExpr::Var(name));
+        }
+
+        let mut path_values: Vec<PreHirExpr> = Vec::with_capacity(reached_defs.len());
+        for &site in &reached_defs {
+            let def_op = self
+                .pcode
+                .blocks
+                .get(site.block_idx)?
+                .ops
+                .get(site.op_idx)?
+                .clone();
+            let expr = self
+                .with_lowering_site(site, |this| {
+                    this.lower_def_op(&def_op, &mut HashSet::default())
+                })
+                .ok()?;
+            if !path_values.contains(&expr) {
+                path_values.push(expr);
+            }
+        }
+        if path_values.len() > 1
+            && let Some(expr) = self.triangle_select_arg(&reached_defs, call_block_idx)
+        {
+            return Some(self.normalize_recovered_call_arg(expr));
+        }
+        let merged = writes_merge_at_call(reached_defs.len(), &path_values);
+        if merged {
+            // Every incoming path defines the register and no call clobbers
+            // it between that definition and this call (proved above), so the
+            // argument is the register's merged value at the call site: one
+            // value per path, joined. `lea rsi, msg_k; jmp join` on each edge
+            // into `join: call dcgettext` is the ordinary shape; dropping the
+            // slot printed `dcgettext(0)` and lost every message.
+            //
+            // The merged read must come from those definitions. A read equal
+            // to one path's value is that path alone, and a read of the
+            // register's entry value (its parameter) is a parameter the
+            // caller never received: the lowering found no definition at the
+            // call even though every path has one. Neither is the join, so
+            // the slot stays empty -- and a parameter binding the rejected
+            // read created is withdrawn with it. A read of the bare register
+            // (`rdx`) is the same entry value before parameter naming.
+            let live_in_name = if is_register_varnode(vn) {
+                self.sla_hw_name(vn.offset, vn.size)
+            } else {
+                None
+            };
+            let had_live_in = live_in_name
+                .as_ref()
+                .is_some_and(|name| self.temps.contains_key(name));
+            let entry_param = {
+                let abi = self.abi_state();
+                abi.param_slot_for_varnode(vn)
+                    .map(|slot| (slot, abi.param_name(slot)))
+            };
+            let had_binding = entry_param
+                .as_ref()
+                .is_some_and(|(slot, _)| self.params.contains_key(slot));
+            let had_name = entry_param
+                .as_ref()
+                .is_some_and(|(_, name)| self.used_param_local_names.contains(name));
+            let expr = self.lower_varnode(vn, &mut HashSet::default()).ok()?;
+            let mut bare = &expr;
+            while let PreHirExpr::Cast { expr: inner, .. } = bare {
+                bare = inner;
+            }
+            let reads_entry_value = matches!(bare, PreHirExpr::Var(var)
+                if entry_param.as_ref().is_some_and(|(_, name)| var == name)
+                    || live_in_name.as_ref().is_some_and(|name| var.eq_ignore_ascii_case(name)));
+            self.debug_call_recovery(&format!(
+                "join_arg vn=0x{:x}/{} merged={} entry={:?} rejected={}",
+                vn.offset,
+                vn.size,
+                print_prehir_expr(&expr),
+                entry_param,
+                reads_entry_value || path_values.contains(&expr)
+            ));
+            // A merged variable that is the emitted name of some of the
+            // writes reaching the call but not of the others stands for those
+            // writes only: the other paths' values never reach it
+            // (`target3(17, ...)` for a three-way merge whose only named
+            // write is 17). A name no reaching write owns -- a stack slot or
+            // join variable the merge itself is stored in -- is the merge.
+            let owners = reached_defs
+                .iter()
+                .map(|&site| {
+                    self.pcode
+                        .blocks
+                        .get(site.block_idx)
+                        .and_then(|block| block.ops.get(site.op_idx))
+                        .and_then(|op| self.name_emitted_for_definition(vn, site, op))
+                })
+                .collect::<Vec<_>>();
+            let named_by_some_paths_only = matches!(bare, PreHirExpr::Var(var)
+                if owners.iter().any(|owner| matches!(owner, Some(PreHirExpr::Var(name)) if name == var))
+                    && owners.iter().any(|owner| !matches!(owner, Some(PreHirExpr::Var(name)) if name == var)));
+            let rejected =
+                reads_entry_value || path_values.contains(&expr) || named_by_some_paths_only;
+            self.debug_call_recovery(&format!(
+                "join_arg named_by_some_paths_only={named_by_some_paths_only}"
+            ));
+            if rejected {
+                if let Some(name) = live_in_name
+                    && !had_live_in
+                {
+                    self.temps.remove(&name);
+                }
+                if let Some((slot, name)) = entry_param {
+                    if !had_binding {
+                        self.params.remove(&slot);
+                    }
+                    if !had_name {
+                        self.used_param_local_names.remove(&name);
+                    }
+                }
+                return None;
+            }
+            return Some(self.normalize_recovered_call_arg(expr));
+        }
+        path_values
+            .pop()
+            .map(|expr| self.normalize_recovered_call_arg(expr))
+    }
+
+    /// Whether more than one write reaches the call with `vn` intact: the
+    /// argument is then a merge, and any single write's value is the value on
+    /// its own paths only.
+    fn argument_register_merges(
+        &self,
+        vn: &Varnode,
+        call_block_idx: usize,
+        call_idx: usize,
+    ) -> bool {
+        self.collect_unclobbered_reaching_defs(vn, call_block_idx, call_idx)
+            .is_some_and(|defs| defs.len() > 1)
+    }
+
+    /// The merged argument of a conditional overwrite -- `x = a; if (c)
+    /// x = b; call(x)`, the shape of a predicated or conditional move -- as
+    /// `c ? b : a`.
+    ///
+    /// Exactly two writes reach the call: one in the branch block before its
+    /// conditional branch, one in the arm that branch enters. The arm is
+    /// entered only from the branch and leaves only to the call's block, which
+    /// the branch's other edge also reaches directly, so the branch condition
+    /// decides which write the call sees.
+    fn triangle_select_arg(
+        &mut self,
+        reached_defs: &[LoweringSite],
+        call_block_idx: usize,
+    ) -> Option<PreHirExpr> {
+        let [first, second] = reached_defs else {
+            return None;
+        };
+        let original_count = self.pcode.blocks.len();
+        if first.block_idx >= original_count
+            || second.block_idx >= original_count
+            || call_block_idx >= original_count
+            || !self.virtual_block_map.is_empty()
+        {
+            return None;
+        }
+        for (branch_def, arm_def) in [(*first, *second), (*second, *first)] {
+            let branch_idx = branch_def.block_idx;
+            let arm_idx = arm_def.block_idx;
+            let branch_succs = self.successors.get(branch_idx)?;
+            if branch_succs.len() != 2
+                || !branch_succs.contains(&arm_idx)
+                || !branch_succs.contains(&call_block_idx)
+                || self.predecessors.get(arm_idx).map(Vec::as_slice) != Some(&[branch_idx])
+                || self.successors.get(arm_idx).map(Vec::as_slice) != Some(&[call_block_idx])
+            {
+                continue;
+            }
+            let branch_block = self.pcode.blocks.get(branch_idx)?.clone();
+            let term_idx = self.block_terminator_index(&branch_block)?;
+            let term_op = branch_block.ops.get(term_idx)?.clone();
+            if term_op.opcode != PcodeOpcode::CBranch
+                || term_op.inputs.len() < 2
+                || branch_def.op_idx >= term_idx
+            {
+                continue;
+            }
+            // The branch's own recovered condition, as the printed `if` uses
+            // it: lowering the raw flag operand instead made every flag the
+            // condition reads a live variable (`cf = ...; zf = ...;`).
+            let LoweredTerminator::Cond {
+                cond, true_target, ..
+            } = self.lower_block_terminator(branch_idx).ok()?
+            else {
+                continue;
+            };
+            let arm_on_true = if true_target == self.block_target_key(arm_idx) {
+                true
+            } else if true_target == self.block_target_key(call_block_idx) {
+                false
+            } else {
+                continue;
+            };
+            let lower_def = |this: &mut Self, site: LoweringSite| -> Option<PreHirExpr> {
+                let def_op = this
+                    .pcode
+                    .blocks
+                    .get(site.block_idx)?
+                    .ops
+                    .get(site.op_idx)?
+                    .clone();
+                this.with_lowering_site(site, |this| {
+                    this.lower_def_op(&def_op, &mut HashSet::default())
+                })
+                .ok()
+            };
+            let branch_value = lower_def(self, branch_def)?;
+            let arm_value = lower_def(self, arm_def)?;
+            let (then_expr, else_expr) = if arm_on_true {
+                (arm_value, branch_value)
+            } else {
+                (branch_value, arm_value)
+            };
+            let def_out = self
+                .pcode
+                .blocks
+                .get(arm_def.block_idx)?
+                .ops
+                .get(arm_def.op_idx)?
+                .output
+                .clone()?;
+            return Some(PreHirExpr::Select {
+                cond: Box::new(cond),
+                then_expr: Box::new(then_expr),
+                else_expr: Box::new(else_expr),
+                ty: type_from_size(def_out.size, false),
+            });
+        }
+        None
     }
 
     fn resolve_call_store_stack_address(
@@ -478,7 +859,7 @@ impl<'a> PreviewBuilder<'a> {
 
     /// Recover cdecl args staged as `mov [esp+k], val` (k ≥ 0) before CallInd.
     /// Distinct from push-below-ESP (`offset < 0`) and from frame restage (`[ebp+8]`).
-    fn recover_x86_32_esp_staged_args_from_block(
+    pub(in crate::midend::builder) fn recover_x86_32_esp_staged_args_from_block(
         &mut self,
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
@@ -531,10 +912,6 @@ impl<'a> PreviewBuilder<'a> {
                 continue;
             }
             let rhs = prev.inputs.last().expect("store rhs");
-            // Retaddr-style absolute constants are not call arguments.
-            if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
-                continue;
-            }
             let stack_index = (offset / ptr_size) as usize;
             if recovered.contains_key(&stack_index) {
                 continue;
@@ -742,7 +1119,7 @@ impl<'a> PreviewBuilder<'a> {
         false
     }
 
-    fn x86_32_store_is_esp_staged_call_arg(
+    pub(in crate::midend::builder) fn x86_32_store_is_esp_staged_call_arg(
         &self,
         block: &crate::pcode::PcodeBasicBlock,
         op_idx: usize,
@@ -778,16 +1155,16 @@ impl<'a> PreviewBuilder<'a> {
         if ptr_size <= 0 || offset < 0 || offset % ptr_size != 0 {
             return false;
         }
-        let rhs = op.inputs.last().expect("store rhs");
-        if rhs.is_constant && const_offset(rhs).is_some_and(|v| v > 0x1000) {
-            return false;
-        }
-        block.ops.iter().skip(op_idx + 1).any(|candidate| {
-            matches!(
+        for candidate in block.ops.iter().skip(op_idx + 1) {
+            if matches!(
                 candidate.opcode,
                 PcodeOpcode::CallInd | PcodeOpcode::Call | PcodeOpcode::BranchInd
-            )
-        })
+            ) {
+                // Skip only the call instruction's own return-address push.
+                return candidate.address != op.address;
+            }
+        }
+        false
     }
 
     fn x86_32_store_is_frame_param_restage(
@@ -935,7 +1312,7 @@ impl<'a> PreviewBuilder<'a> {
         block: &crate::pcode::PcodeBasicBlock,
         call_idx: usize,
         param_count: usize,
-    ) -> Option<Vec<usize>> {
+    ) -> Option<ExactRegisterSlots> {
         let op = block.ops.get(call_idx)?;
         let target = match op.opcode {
             PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
@@ -988,12 +1365,27 @@ impl<'a> PreviewBuilder<'a> {
             // (soft-float ARM, for one) keep the declared arity.
             _ => (0..arity).collect(),
         };
-        Some(
-            slots
+        // Every declared parameter travels in a register: a locked (not
+        // variadic) declaration whose integer parameters all have a slot,
+        // under a convention that passes floating point in its own registers.
+        // Such a call takes nothing from the stack.
+        let register_only = summary.locked_exact_arity.is_some()
+            && slots.iter().all(|&slot| slot < param_count)
+            && matches!(
+                self.options.calling_convention,
+                CallingConvention::SystemVAmd64
+                    | CallingConvention::AArch64
+                    | CallingConvention::WindowsX64
+            )
+            && (self.options.calling_convention != CallingConvention::WindowsX64
+                || arity <= param_count);
+        Some(ExactRegisterSlots {
+            slots: slots
                 .into_iter()
                 .filter(|&slot| slot < param_count)
                 .collect(),
-        )
+            register_only,
+        })
     }
 
     /// An exact callee declaration can prove that an ABI register is read by
@@ -1345,13 +1737,15 @@ impl<'a> PreviewBuilder<'a> {
 
         // A locked declaration proves that every slot below its arity is a
         // real argument. Fill holes from the existing site-sensitive def-use
-        // lookup, but keep the same dominance/realism guard used by ordinary
-        // carrier recovery. This does not guess values at joins: when no
-        // single realistic reaching definition exists, the slot stays empty.
-        if let Some(exact_register_slots) =
-            self.exact_call_integer_register_slots(block, call_idx, param_count)
-        {
-            for param_index in exact_register_slots {
+        // lookup when the single realistic definition is the only write that
+        // reaches the call; otherwise from the CFG-sound unclobbered reaching
+        // definitions (a path-restaged register after an earlier call, or a
+        // merge of several writes). Only integer-register slots are filled:
+        // a floating-point parameter takes no integer slot on SysV/AArch64,
+        // and Windows leaves that slot unused.
+        let exact_slots = self.exact_call_integer_register_slots(block, call_idx, param_count);
+        if let Some(exact) = exact_slots.as_ref() {
+            for &param_index in &exact.slots {
                 if skip_param == Some(param_index) || recovered[param_index].is_some() {
                     continue;
                 }
@@ -1363,24 +1757,33 @@ impl<'a> PreviewBuilder<'a> {
                     is_constant: false,
                     constant_val: 0,
                 };
-                let Some((site, _)) = self.lookup_def_site(&vn) else {
-                    if let Some(expr) =
-                        self.entry_register_arg_at_exact_call(block, call_idx, &vn, param_index)
+                if let Some((site, _)) = self.lookup_def_site(&vn) {
+                    let def_site = crate::midend::support::DefSite {
+                        block_idx: site.block_idx,
+                        op_idx: site.op_idx,
+                        _marker: std::marker::PhantomData,
+                    };
+                    if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx)
+                        && !self.argument_register_merges(&vn, block.index as usize, call_idx)
                     {
+                        let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
+                        recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
+                    } else if let Some(expr) = self.recover_unclobbered_predecessor_arg(
+                        &vn,
+                        block.index as usize,
+                        call_idx,
+                    ) {
                         recovered[param_index] = Some(expr);
                     }
-                    continue;
-                };
-                let def_site = crate::midend::support::DefSite {
-                    block_idx: site.block_idx,
-                    op_idx: site.op_idx,
-                    _marker: std::marker::PhantomData,
-                };
-                if !self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
-                    continue;
+                } else if let Some(expr) =
+                    self.recover_unclobbered_predecessor_arg(&vn, block.index as usize, call_idx)
+                {
+                    recovered[param_index] = Some(expr);
+                } else if let Some(expr) =
+                    self.entry_register_arg_at_exact_call(block, call_idx, &vn, param_index)
+                {
+                    recovered[param_index] = Some(expr);
                 }
-                let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
-                recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
             }
         }
 
@@ -1403,23 +1806,61 @@ impl<'a> PreviewBuilder<'a> {
                 constant_val: 0,
             };
 
-            let key = VarnodeKey::from(&vn);
             if let Some((site, _)) = self.lookup_def_site(&vn) {
                 let def_site = crate::midend::support::DefSite {
                     block_idx: site.block_idx,
                     op_idx: site.op_idx,
                     _marker: std::marker::PhantomData,
                 };
-                if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx) {
+                if self.check_ancestor_realistic(&vn, &def_site, block.index as usize, call_idx)
+                    && !self.argument_register_merges(&vn, block.index as usize, call_idx)
+                {
                     let expr = self.lower_varnode(&vn, &mut HashSet::default())?;
                     recovered[param_index] = Some(self.normalize_recovered_call_arg(expr));
                     continue;
                 }
             }
+            if let Some(expr) =
+                self.recover_unclobbered_predecessor_arg(&vn, block.index as usize, call_idx)
+            {
+                recovered[param_index] = Some(expr);
+            }
         }
 
+        // A declared parameter the recovery could not name still precedes
+        // the ones it did: `__fwritex(s, len, f)` with `s` a merge of several
+        // writes the builder has no variable for dropped `len` and `f` with
+        // it, and printed a spill to `[rsp]` as a stack argument instead.
+        // Mark the hole explicitly instead of dropping what follows it (or
+        // guessing the register's entry value).
+        if let Some(exact) = exact_slots.as_ref()
+            && let Some(&last) = exact
+                .slots
+                .iter()
+                .rev()
+                .find(|&&slot| recovered.get(slot).is_some_and(Option::is_some))
+        {
+            for &slot in exact.slots.iter().filter(|&&slot| slot < last) {
+                if recovered[slot].is_none() && skip_param != Some(slot) {
+                    let size = param_slots[slot].1;
+                    recovered[slot] = Some(PreHirExpr::Call {
+                        origin: None,
+                        target: UNRECOVERED_ARGUMENT.to_string(),
+                        args: Vec::new(),
+                        ty: type_from_size(size, false),
+                    });
+                }
+            }
+        }
         let contiguous_reg_count = recovered.iter().take_while(|expr| expr.is_some()).count();
-        let stack_args = self.recover_call_stack_args_from_block(block, call_idx)?;
+        let stack_args = if exact_slots
+            .as_ref()
+            .is_some_and(|exact| exact.register_only)
+        {
+            Vec::new()
+        } else {
+            self.recover_call_stack_args_from_block(block, call_idx)?
+        };
         if contiguous_reg_count == 0 {
             if !stack_args.is_empty() {
                 self.debug_call_recovery(&format!("reg_args=0 total_args={}", stack_args.len()));
@@ -1501,4 +1942,70 @@ fn is_floating_point_surface_type(surface: &str) -> bool {
         .collect::<Vec<_>>()
         .join(" ");
     matches!(name.as_str(), "float" | "double" | "long double")
+}
+
+/// The integer-register slots an exact callee declaration fills, and whether
+/// the declaration leaves nothing to pass on the stack.
+struct ExactRegisterSlots {
+    slots: Vec<usize>,
+    register_only: bool,
+}
+
+/// Printed for a declared argument whose value the recovery could not name --
+/// typically a merge of several writes the builder has no variable for:
+/// visibly unrecovered, never a guess such as the register's entry value, and
+/// never dropped together with the declared arguments after it.
+pub(crate) const UNRECOVERED_ARGUMENT: &str = "__fission_unrecovered_arg";
+
+/// Whether the writes reaching a call carry more than one value, given how
+/// many writes reach it and their distinct printed expressions.
+///
+/// Different expressions are different values. Several writes spelled alike
+/// are one value only when the spelling reads nothing that can differ between
+/// them -- a constant or a global's address: two `lea rsi, msg` agree, but a
+/// loop's `rdi += 16` in the preheader and in the latch reads a different
+/// `rdi` each time. Passing that expression counted the increment twice
+/// (`pop_arg(p + 16)` where the call sees `p`).
+fn writes_merge_at_call(reaching_writes: usize, path_values: &[PreHirExpr]) -> bool {
+    let path_independent = |expr: &PreHirExpr| {
+        let mut bare = expr;
+        while let PreHirExpr::Cast { expr: inner, .. } = bare {
+            bare = inner;
+        }
+        matches!(bare, PreHirExpr::Const(..) | PreHirExpr::AddressOfGlobal(_))
+    };
+    path_values.len() > 1 || (reaching_writes > 1 && !path_values.iter().all(path_independent))
+}
+
+#[cfg(test)]
+mod writes_merge_tests {
+    use super::*;
+
+    fn u64_ty() -> NirType {
+        NirType::Int {
+            bits: 64,
+            signed: false,
+        }
+    }
+
+    #[test]
+    fn alike_writes_that_read_a_register_are_still_a_merge() {
+        let update = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("p".into())),
+            rhs: Box::new(PreHirExpr::Const(16, u64_ty())),
+            ty: u64_ty(),
+        };
+        assert!(
+            writes_merge_at_call(2, std::slice::from_ref(&update)),
+            "two `p + 16` writes read different `p`s"
+        );
+        assert!(!writes_merge_at_call(1, std::slice::from_ref(&update)));
+        let constant = PreHirExpr::AddressOfGlobal("\"msg\"".into());
+        assert!(!writes_merge_at_call(2, std::slice::from_ref(&constant)));
+        assert!(writes_merge_at_call(
+            2,
+            &[constant, PreHirExpr::Const(7, u64_ty())]
+        ));
+    }
 }

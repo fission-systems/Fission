@@ -3138,4 +3138,136 @@ mod global_decl_tests {
         );
         assert!(rendered.contains("xVar30 = __pcodeop_294();"), "{rendered}");
     }
+
+    #[test]
+    fn global_symbol_recovery_handles_blocks_loops_and_switch_invalidation() {
+        use crate::midend::HirSwitchCase;
+        use crate::render::recover_global_symbol_accesses;
+
+        let mut options = preview_options_with_global("g_val");
+        options.global_sizes.insert(0x2000, 4);
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32 = NirType::Ptr(Box::new(u32_ty.clone()));
+        let assign_global = |name: &str| HirStmt::Assign {
+            lhs: HirLValue::Var(name.into()),
+            rhs: HirExpr::Const(0x2000, u64_ty.clone()),
+        };
+        let deref_store = |name: &str, val: i64| HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::Var(name.into())),
+                ty: u32_ty.clone(),
+            },
+            rhs: HirExpr::Const(val, u32_ty.clone()),
+        };
+        let mut hir = HirFunction {
+            name: "f".into(),
+            params: vec![NirBinding {
+                name: "cond".into(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "p_block".into(),
+                    ty: ptr_u32.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "p_loop".into(),
+                    ty: ptr_u32.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "p_sw".into(),
+                    ty: ptr_u32,
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                // Block alias propagates out to subsequent deref.
+                HirStmt::Block(vec![assign_global("p_block")]),
+                deref_store("p_block", 1),
+                // Pre-loop alias invalidated because loop body reassigns p_loop.
+                assign_global("p_loop"),
+                HirStmt::While {
+                    cond: HirExpr::Var("cond".into()),
+                    body: vec![
+                        deref_store("p_loop", 2),
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("p_loop".into()),
+                            rhs: HirExpr::Const(0x3000, u64_ty.clone()),
+                        },
+                    ],
+                },
+                deref_store("p_loop", 3),
+                // Pre-switch alias invalidated when a case reassigns p_sw.
+                assign_global("p_sw"),
+                HirStmt::Switch {
+                    expr: HirExpr::Var("cond".into()),
+                    cases: vec![HirSwitchCase {
+                        values: vec![0],
+                        body: vec![
+                            HirStmt::Assign {
+                                lhs: HirLValue::Var("p_sw".into()),
+                                rhs: HirExpr::Const(0x4000, u64_ty),
+                            },
+                            HirStmt::Break,
+                        ],
+                    }],
+                    default: vec![],
+                },
+                deref_store("p_sw", 4),
+            ],
+            ..HirFunction::default()
+        };
+        recover_global_symbol_accesses(&mut hir, &options);
+        assert!(matches!(
+            &hir.body[1],
+            HirStmt::Assign { lhs: HirLValue::Var(name), .. } if name == "g_val"
+        ));
+        if let HirStmt::While { body, .. } = &hir.body[3] {
+            assert!(
+                matches!(
+                    &body[0],
+                    HirStmt::Assign {
+                        lhs: HirLValue::Deref { .. },
+                        ..
+                    }
+                ),
+                "loop body deref must not use invalidated alias: {:?}",
+                body[0]
+            );
+        } else {
+            panic!("expected While");
+        }
+        assert!(matches!(
+            &hir.body[4],
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &hir.body[7],
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. },
+                ..
+            }
+        ));
+    }
 }
