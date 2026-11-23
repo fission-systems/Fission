@@ -108,8 +108,19 @@ static HOST_CONTROL: AtomicU64 = AtomicU64::new(0);
 /// 1 after a clean run, minus the signal number after a fault.
 static STATUS: AtomicI32 = AtomicI32::new(0);
 /// Set while the stub runs: a fault anywhere then (an instruction that
-/// escaped the filters and jumped away) is the case's, not the host's.
+/// escaped the filters and jumped away) is the case's, not the host's --
+/// but only on [`STUB_THREAD`]; other threads keep their own signals.
 static IN_STUB: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// `pthread_self()` of the thread running the stub.
+static STUB_THREAD: AtomicU64 = AtomicU64::new(0);
+/// Watchdog signals that landed on another thread and were passed on.
+static FORWARDED: AtomicU64 = AtomicU64::new(0);
+
+/// How many watchdog signals were delivered to a thread other than the
+/// stub's and forwarded to it.
+pub fn forwarded_watchdog_signals() -> u64 {
+    FORWARDED.load(Ordering::Relaxed)
+}
 static FAULT_PC: AtomicU64 = AtomicU64::new(0);
 
 const SIGNALS: [i32; 6] = [
@@ -147,7 +158,21 @@ unsafe extern "C" fn handler(sig: i32, _info: *mut libc::siginfo_t, ctx: *mut c_
         let pc = arch::ctx_pc(ctx);
         let start = CODE_START.load(Ordering::Relaxed);
         let end = CODE_END.load(Ordering::Relaxed);
-        let ours = (start..end).contains(&pc) || IN_STUB.load(Ordering::Relaxed);
+        let stub_thread = STUB_THREAD.load(Ordering::Relaxed) as libc::pthread_t;
+        let on_stub_thread = libc::pthread_equal(libc::pthread_self(), stub_thread) != 0;
+        let running = IN_STUB.load(Ordering::Relaxed);
+        // ITIMER_REAL's SIGALRM is process-directed and may land on any
+        // thread (libtest's main thread, typically). Only the stub thread's
+        // context may be rewritten, so pass it on (pthread_kill is
+        // async-signal-safe) and leave this thread alone.
+        if sig == libc::SIGALRM && !on_stub_thread {
+            if running {
+                FORWARDED.fetch_add(1, Ordering::Relaxed);
+                libc::pthread_kill(stub_thread, libc::SIGALRM);
+            }
+            return;
+        }
+        let ours = on_stub_thread && ((start..end).contains(&pc) || running);
         if !ours {
             if sig == libc::SIGALRM {
                 return; // the watchdog fired after the stub had finished
@@ -295,6 +320,7 @@ impl NativeRunner {
             std::sync::atomic::compiler_fence(Ordering::SeqCst);
             let entry: unsafe extern "C" fn(*mut RawState, *mut u64) =
                 std::mem::transmute(self.code);
+            STUB_THREAD.store(libc::pthread_self() as u64, Ordering::Relaxed);
             arm_watchdog(WATCHDOG_US);
             IN_STUB.store(true, Ordering::Relaxed);
             entry(&mut *self.input, &mut *self.host_sp);

@@ -37,6 +37,8 @@
 //! Knobs (environment): `FISSION_NATIVE_DIFF_SEED`, `FISSION_NATIVE_DIFF_STATES`
 //! (states per curated instruction), `FISSION_NATIVE_DIFF_RANDOM` (random
 //! cases), `FISSION_NATIVE_DIFF_ONLY` (run only case ids containing this),
+//! `FISSION_NATIVE_DIFF_CASE` (run exactly one case id, e.g. `r:52993` or
+//! `c:add eax, ecx#100`, whatever the bounds; a reproducer prints it),
 //! `FISSION_NATIVE_DIFF_SHOW` (reproducers printed per new divergence),
 //! `FISSION_NATIVE_DIFF_PCODE` (print each reproducer's lifted p-code).
 
@@ -389,7 +391,7 @@ impl<'a> Harness<'a> {
             })
             .collect();
         format!(
-            "REPRO isa={} mnemonic={mnemonic} bytes={} text=\"{}\" seed={:#x} case=\"{}\" | {}| {} | rerun: FISSION_NATIVE_DIFF_SEED={:#x} FISSION_NATIVE_DIFF_ONLY='{}' cargo nextest run -p fission-emulator --test native_differential --no-capture",
+            "REPRO isa={} mnemonic={mnemonic} bytes={} text=\"{}\" seed={:#x} case=\"{}\" | {}| {} | rerun: FISSION_NATIVE_DIFF_SEED={:#x} FISSION_NATIVE_DIFF_CASE='{}' cargo nextest run -p fission-emulator --test native_differential --no-capture",
             isa.name,
             hex(&d.bytes),
             d.text,
@@ -526,6 +528,7 @@ fn run_all<'a>(
     states: u64,
     random: u64,
     only: Option<&str>,
+    exact: Option<&str>,
 ) -> (Stats, Harness<'a>) {
     let mut h = Harness::new(target, seed);
     let mut stats = Stats::default();
@@ -533,6 +536,30 @@ fn run_all<'a>(
     let hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
     let curated = (target.curated)();
+    if let Some(case_id) = exact {
+        // One case by its id, whatever the case-count bounds: a nightly
+        // reproducer (`r:52993`, `c:...#100`) must run at the PR defaults.
+        let mut rng = Rng::for_case(seed, &format!("{isa}:{case_id}"), 0);
+        if case_id
+            .strip_prefix("r:")
+            .is_some_and(|i| i.parse::<u64>().is_ok())
+        {
+            let bytes = (target.random_insn)(&mut rng);
+            let input = (target.state)(&mut rng, None);
+            h.run_case(&mut stats, case_id, &bytes, &input, false, None);
+        } else if let Some((name, _)) = case_id
+            .strip_prefix("c:")
+            .and_then(|c| c.rsplit_once('#'))
+            .filter(|(_, k)| k.parse::<u64>().is_ok())
+        {
+            if let Some(c) = curated.iter().find(|c| c.name == name) {
+                let input = (target.state)(&mut rng, Some(&c.name));
+                h.run_case(&mut stats, case_id, &c.bytes, &input, true, None);
+            }
+        }
+        std::panic::set_hook(hook);
+        return (stats, h);
+    }
     for c in &curated {
         for k in 0..states {
             let case_id = format!("c:{}#{k}", c.name);
@@ -568,10 +595,18 @@ fn native_differential() {
     let states = env_u64("FISSION_NATIVE_DIFF_STATES", DEFAULT_STATES);
     let random = env_u64("FISSION_NATIVE_DIFF_RANDOM", DEFAULT_RANDOM);
     let only = std::env::var("FISSION_NATIVE_DIFF_ONLY").ok();
+    let exact = std::env::var("FISSION_NATIVE_DIFF_CASE").ok();
     let isa = target.isa.name;
     let start = std::time::Instant::now();
     let curated_count = (target.curated)().len();
-    let (stats, h) = run_all(target, seed, states, random, only.as_deref());
+    let (stats, h) = run_all(
+        target,
+        seed,
+        states,
+        random,
+        only.as_deref(),
+        exact.as_deref(),
+    );
     let elapsed = start.elapsed();
 
     println!("== native differential: {isa}, seed {seed:#x}");
@@ -690,7 +725,14 @@ fn native_differential() {
     // An `@nightly` entry is rare enough that only the nightly case count is
     // sure to hit it; smaller runs do not call it stale.
     let nightly_size = states >= NIGHTLY_STATES && random >= NIGHTLY_RANDOM;
-    if only.is_none() {
+    // A filter that selects nothing would pass while checking nothing (a
+    // misspelt id, or a reproducer past the case-count bounds).
+    if (only.is_some() || exact.is_some()) && stats.cases == 0 {
+        failures.push(format!(
+            "FISSION_NATIVE_DIFF_ONLY={only:?} / FISSION_NATIVE_DIFF_CASE={exact:?} selected no case"
+        ));
+    }
+    if only.is_none() && exact.is_none() {
         for (i, e) in baseline.iter().enumerate() {
             if !used[i] && (nightly_size || !e.nightly) {
                 failures.push(format!(
@@ -763,4 +805,67 @@ fn a_corrupted_lift_is_caught() {
     );
     let caught: usize = corrupt.divergences.values().map(Vec::len).sum();
     assert_eq!(caught, 8, "every corrupted case must diverge");
+}
+
+/// The watchdog's SIGALRM is process-directed, so the kernel may hand it to
+/// any thread. An instruction that never finishes (`jmp $` / `b .`) must
+/// still be stopped on the thread running the stub, with every other thread
+/// left alone, and that thread must run the next case normally.
+#[test]
+fn a_looping_instruction_is_stopped_on_its_own_thread() {
+    let Some(target) = host_target() else {
+        return;
+    };
+    let _exclusive = EXCLUSIVE.lock().unwrap_or_else(|e| e.into_inner());
+    let (looping, nop): (&[u8], &[u8]) = match target.isa.name {
+        "x86_64" => (&[0xEB, 0xFE], &[0x90]),
+        _ => (&[0x00, 0x00, 0x00, 0x14], &[0x1F, 0x20, 0x03, 0xD5]),
+    };
+    // Two busy threads that do not block SIGALRM, so delivery elsewhere
+    // than the stub thread is likely.
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let spinners: Vec<_> = (0..2)
+        .map(|_| {
+            let stop = stop.clone();
+            std::thread::spawn(move || {
+                let mut n = 0u64;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    n = n.wrapping_add(1);
+                    std::hint::black_box(n);
+                }
+            })
+        })
+        .collect();
+    let stub_thread = std::thread::spawn(move || {
+        let mut runner = native::NativeRunner::new();
+        let mut rng = Rng::new(7);
+        let mut outcomes = Vec::new();
+        for _ in 0..4 {
+            let input = (target.state)(&mut rng, Some("loop"));
+            let (page, _, end, exit) = runner.page_for(looping);
+            outcomes.push(match runner.run(&page, end, exit, &input) {
+                Err(native::NativeFault::Signal { signal, .. }) => signal,
+                Ok(_) => 0,
+            });
+        }
+        let input = (target.state)(&mut rng, Some("nop"));
+        let (page, _, end, exit) = runner.page_for(nop);
+        let after = runner.run(&page, end, exit, &input).is_ok();
+        (outcomes, after)
+    });
+    let (outcomes, after) = stub_thread.join().expect("the stub thread survives");
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    for s in spinners {
+        s.join().expect("the other threads are untouched");
+    }
+    println!(
+        "watchdog: {outcomes:?}, {} signal(s) forwarded from another thread",
+        native::forwarded_watchdog_signals()
+    );
+    assert_eq!(
+        outcomes,
+        vec![libc::SIGALRM; 4],
+        "each loop ends by the watchdog on its own thread"
+    );
+    assert!(after, "the stub thread runs the next case normally");
 }
