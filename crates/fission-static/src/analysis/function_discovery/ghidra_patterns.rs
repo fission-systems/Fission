@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use fission_loader::LoadedBinary;
+use fission_signatures::ghidra_patterns::PatternByte;
 use fission_signatures::load_ghidra_patterns;
 use fission_sleigh::runtime::RuntimeSleighFrontend;
 
@@ -55,11 +56,38 @@ fn resolve_pattern_arch_tag(binary: &LoadedBinary) -> Option<String> {
     })
 }
 
+/// Index masked post-patterns in XML order and append pre-only patterns.
+/// Literal prefixes are searched by Aho-Corasick. This preserves the order
+/// in which the fallback scanner chooses a pattern at an address.
+fn masked_patterns_by_first_byte(
+    first_bytes: impl IntoIterator<Item = Option<PatternByte>>,
+) -> [Vec<usize>; 256] {
+    let mut by_byte: [Vec<usize>; 256] = std::array::from_fn(|_| Vec::new());
+    let mut pre_only = Vec::new();
+    for (index, first) in first_bytes.into_iter().enumerate() {
+        let Some(first) = first else {
+            pre_only.push(index);
+            continue;
+        };
+        if first.fixed().is_some() {
+            continue;
+        }
+        for (byte, indices) in by_byte.iter_mut().enumerate() {
+            if first.matches(byte as u8) {
+                indices.push(index);
+            }
+        }
+    }
+    for indices in &mut by_byte {
+        indices.extend_from_slice(&pre_only);
+    }
+    by_byte
+}
+
 /// Scan binary executable sections using Ghidra XML static patterns.
 ///
-/// **Two-phase approach (mirrors Ghidra's pipeline):**
-/// 1. Raw byte scan with first-byte index — O(section_size), no SLEIGH
-/// 2. SLEIGH validation on unique raw hits — O(hits), once per address
+/// Find matching byte patterns and check their boundaries, then validate
+/// each unique uncovered start in its selected decode mode.
 pub(super) fn scan_ghidra_patterns(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
@@ -76,20 +104,14 @@ pub(super) fn scan_ghidra_patterns(
     if patterns.is_empty() {
         return Vec::new();
     }
+    let pattern_scan_start = std::time::Instant::now();
 
-    // Pre-index by first fixed byte of post_bytes + whether each pattern has pre_bytes
-    let mut by_first_byte: HashMap<u8, Vec<usize>> = HashMap::new();
-    let mut wildcard_start: Vec<usize> = Vec::new();
-
-    for (i, pat) in patterns.iter().enumerate() {
-        if pat.post_bytes.is_empty() {
-            continue;
-        }
-        match pat.post_bytes[0].fixed() {
-            Some(b) => by_first_byte.entry(b).or_default().push(i),
-            None => wildcard_start.push(i),
-        }
-    }
+    let masked_by_byte = masked_patterns_by_first_byte(
+        patterns
+            .iter()
+            .map(|pattern| pattern.post_bytes.first().copied()),
+    );
+    let has_masked_patterns = masked_by_byte.iter().any(|indices| !indices.is_empty());
 
     // Phase 1: raw byte scan — collect (addr, (Option<usize>, bool)) where value is (min valid_code_min, requires_contiguous)
     let mut raw_hits: HashMap<(u64, bool), (Option<usize>, bool)> = HashMap::new();
@@ -110,17 +132,15 @@ pub(super) fn scan_ghidra_patterns(
         }
 
         if prefix.is_empty() {
-            // Pattern starts with a wildcard (rare, but possible)
-            wildcard_start.push(i);
+            continue;
+        }
+        // Find if this prefix already exists
+        if let Some(pos) = ac_patterns.iter().position(|p| p == &prefix) {
+            pattern_map.entry(pos).or_default().push(i);
         } else {
-            // Find if this prefix already exists
-            if let Some(pos) = ac_patterns.iter().position(|p| p == &prefix) {
-                pattern_map.entry(pos).or_default().push(i);
-            } else {
-                ac_patterns.push(prefix);
-                pattern_map.insert(current_ac_index, vec![i]);
-                current_ac_index += 1;
-            }
+            ac_patterns.push(prefix);
+            pattern_map.insert(current_ac_index, vec![i]);
+            current_ac_index += 1;
         }
     }
 
@@ -202,52 +222,57 @@ pub(super) fn scan_ghidra_patterns(
             })
             .collect();
 
-        // Sequential fallback for patterns that start with wildcard
-        let wildcard_hits: Vec<(u64, Option<usize>, bool, bool)> = (0..bytes.len())
-            .into_par_iter()
-            .filter_map(|offset| {
-                if wildcard_start.is_empty() {
-                    return None;
-                }
-                let addr = base + offset as u64;
-                if !is_in_executable_ranges(addr, executable_ranges) {
-                    return None;
-                }
+        let masked_hits: Vec<(u64, Option<usize>, bool, bool)> = if has_masked_patterns {
+            bytes
+                .par_iter()
+                .enumerate()
+                .filter_map(|(offset, &first)| {
+                    let indices = &masked_by_byte[usize::from(first)];
+                    if indices.is_empty() {
+                        return None;
+                    }
+                    let addr = base + offset as u64;
+                    if !is_in_executable_ranges(addr, executable_ranges) {
+                        return None;
+                    }
 
-                for &i in &wildcard_start {
-                    if patterns[i].matches(bytes, base, addr) {
-                        let pat = &patterns[i];
-                        let boundary_ok = if pat.pre_bytes.is_empty() {
-                            if let Some(cond) = &pat.after_cond {
-                                matches_pattern_after_condition(
-                                    binary,
-                                    addr,
-                                    cond,
-                                    executable_ranges,
-                                    global_references,
-                                )
+                    for &i in indices {
+                        if patterns[i].matches(bytes, base, addr) {
+                            let pat = &patterns[i];
+                            let boundary_ok = if pat.pre_bytes.is_empty() {
+                                if let Some(cond) = &pat.after_cond {
+                                    matches_pattern_after_condition(
+                                        binary,
+                                        addr,
+                                        cond,
+                                        executable_ranges,
+                                        global_references,
+                                    )
+                                } else {
+                                    is_plausible_function_boundary(binary, Some(frontend), addr)
+                                }
                             } else {
                                 is_plausible_function_boundary(binary, Some(frontend), addr)
-                            }
-                        } else {
-                            is_plausible_function_boundary(binary, Some(frontend), addr)
-                        };
+                            };
 
-                        if boundary_ok {
-                            return Some((
-                                addr,
-                                pat.valid_code_min,
-                                pat.contiguous,
-                                pattern_selects_low_bit_mode(pat),
-                            ));
+                            if boundary_ok {
+                                return Some((
+                                    addr,
+                                    pat.valid_code_min,
+                                    pat.contiguous,
+                                    pattern_selects_low_bit_mode(pat),
+                                ));
+                            }
                         }
                     }
-                }
-                None
-            })
-            .collect();
+                    None
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
-        for (addr, min_val, contiguous, low_bit) in section_hits.into_iter().chain(wildcard_hits) {
+        for (addr, min_val, contiguous, low_bit) in section_hits.into_iter().chain(masked_hits) {
             let entry = raw_hits
                 .entry((addr, low_bit))
                 .or_insert((None, contiguous));
@@ -263,6 +288,10 @@ pub(super) fn scan_ghidra_patterns(
     let raw_hit_count = raw_hits.len();
     raw_hits.retain(|(addr, _), _| !coverage.covers(*addr));
     if discovery_diag_enabled() {
+        eprintln!(
+            "DISCOVERY_DIAG: xml_pattern_scan={:?}",
+            pattern_scan_start.elapsed()
+        );
         eprintln!("[ghidra-patterns] {arch_tag}: raw hits = {}", raw_hit_count);
         eprintln!(
             "DISCOVERY_DIAG: xml_covered_hits={}",
@@ -397,5 +426,45 @@ pub(super) fn matches_pattern_after_condition(
         }
         "function" => is_plausible_function_boundary(binary, None, addr),
         _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn masked_pattern_index_preserves_fallback_match_order() {
+        let starts = [
+            None,
+            Some(PatternByte {
+                mask: 0xf0,
+                value: 0xa0,
+            }),
+            Some(PatternByte::exact(0xa4)),
+            Some(PatternByte::ANY),
+            None,
+            Some(PatternByte {
+                mask: 0x07,
+                value: 0x04,
+            }),
+        ];
+        let by_byte = masked_patterns_by_first_byte(starts);
+
+        assert_eq!(by_byte[0xa4], [1, 3, 5, 0, 4]);
+        assert_eq!(by_byte[0xa2], [1, 3, 0, 4]);
+        assert_eq!(by_byte[0x00], [3, 0, 4]);
+        for byte in u8::MIN..=u8::MAX {
+            let expected: Vec<_> = starts
+                .iter()
+                .enumerate()
+                .filter_map(|(i, first)| {
+                    let first = (*first)?;
+                    (first.fixed().is_none() && first.matches(byte)).then_some(i)
+                })
+                .chain([0, 4])
+                .collect();
+            assert_eq!(by_byte[usize::from(byte)], expected, "{byte:#04x}");
+        }
     }
 }
