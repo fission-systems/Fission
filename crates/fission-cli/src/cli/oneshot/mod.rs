@@ -694,6 +694,10 @@ fn report_tier(
     }
 }
 
+/// How many explored states the sandbox report lists with solved inputs;
+/// each one costs a solver query, and the counts per stash cover the rest.
+const SYMBOLIC_REPORT_STATE_CAP: usize = 64;
+
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Offline SRD diff: no guest execution required.
     if let Some(paths) = &args.srd_diff {
@@ -719,6 +723,35 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let binary_path = args.binary.as_ref().ok_or_else(|| {
         anyhow::anyhow!("sandbox requires BINARY (or use --srd-diff LEFT RIGHT for offline SRD)")
     })?;
+
+    // A loader or library directory that is not there would quietly fall back
+    // to emulated imports, and the run would not be the one asked for.
+    if let Some(path) = &args.ld_so {
+        anyhow::ensure!(
+            path.is_file(),
+            "--ld-so {} is not a file on this host",
+            path.display()
+        );
+    }
+    for dir in &args.lib_path {
+        anyhow::ensure!(
+            dir.is_dir(),
+            "--lib-path {} is not a directory",
+            dir.display()
+        );
+    }
+    // Dynamic linking is decided once for the process, before any image is
+    // mapped. Options left unset keep reading their environment variables.
+    if args.dynlink || args.ld_so.is_some() || !args.lib_path.is_empty() || args.lazy_bind {
+        fission_emulator::os::linux::dynlink::set_dynlink_options(
+            fission_emulator::os::linux::dynlink::DynlinkOptions {
+                host_interpreter: args.dynlink.then_some(true),
+                ld_so: args.ld_so.clone(),
+                lib_paths: args.lib_path.clone(),
+                lazy_bind: args.lazy_bind.then_some(true),
+            },
+        );
+    }
 
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
@@ -794,6 +827,10 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
 
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
+        .with_deadline(
+            args.timeout_ms
+                .map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms)),
+        )
         .with_max_inst(args.max_inst)
         // The guest's console reads reach this process's stdin only when a
         // person is at it. Piped or backgrounded, an open stdin that never
@@ -847,19 +884,45 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
 
+    if args.interp {
+        emu.force_interpreter = true;
+    }
+
+    let mut symbolic_report = None;
     if args.sym_explore {
-        let mut sym_runner = fission_emulator::sym::SymbolicExecutor::new(emu);
+        let mut sym_runner =
+            fission_emulator::sym::SymbolicExecutor::new(emu).with_max_steps(args.sym_max_steps);
+        if let Some(target) = args.find {
+            sym_runner.use_technique(Box::new(
+                fission_emulator::sym::exploration::DirectedSearch::new(target, args.avoid.clone()),
+            ));
+        }
         sym_runner.explore()?;
+        symbolic_report = Some(sym_runner.report(SYMBOLIC_REPORT_STATE_CAP));
         emu = sym_runner.emu;
     } else {
         emu.run()?;
     }
 
+    let mut ttd_state = None;
     if let Some(seek_step) = args.ttd_seek {
         tracing::info!("Seeking to TTD step {} after execution", seek_step);
         emu.ttd_seek(seek_step)?;
         tracing::info!("PC after seek: 0x{:X}", emu.pc);
-        // We could also dump registers here if requested, but for now we just seek.
+        ttd_state = Some(emu.machine_state_report(&args.ttd_read));
+    }
+
+    if let Some(path) = &args.snapshot_out {
+        let snapshot = emu.snapshots.first().ok_or_else(|| {
+            anyhow::anyhow!(
+                "the run never reached --snapshot-at 0x{:x}, so there is no snapshot to write",
+                args.snapshot_at.unwrap_or_default()
+            )
+        })?;
+        snapshot
+            .save_to_disk(path)
+            .with_context(|| format!("write snapshot to {}", path.display()))?;
+        tracing::info!("Wrote snapshot to {}", path.display());
     }
 
     if let Some(trace_path) = args.dump_trace {
@@ -931,6 +994,14 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let report = report
         .with_exit_code(emu.exit_code)
         .with_guest_output(&emu.vfs);
+    let report = match symbolic_report {
+        Some(symbolic) => report.with_symbolic(symbolic),
+        None => report,
+    };
+    let report = match ttd_state {
+        Some(state) => report.with_ttd_state(state),
+        None => report,
+    };
 
     if let Some(path) = args.metrics_out {
         let json = report

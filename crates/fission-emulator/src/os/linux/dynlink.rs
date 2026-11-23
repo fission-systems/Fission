@@ -81,12 +81,45 @@ pub const PLT_RESOLVER_STUB_32: u64 = 0x7FFF_FFF0;
 pub const PLT_LAZY_MARK: u64 = 0xFFFFFFF1_8000_0000;
 pub const PLT_LAZY_MARK_32: u64 = 0x7FFF_8000;
 
-/// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
-pub fn lazy_bind_enabled() -> bool {
+/// Dynamic-linking choices a caller makes for the whole process, in place of
+/// the `FISSION_ENABLE_DYNLINK` / `FISSION_LD_SO` / `FISSION_LIB_PATH` /
+/// `FISSION_LAZY_BIND` environment variables. Each option that is set wins
+/// over its variable; an unset one leaves the variable in charge.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DynlinkOptions {
+    /// Map the guest's own `PT_INTERP` loader from the host and let it bind
+    /// the GOT, instead of high-level emulation of the imports.
+    pub host_interpreter: Option<bool>,
+    /// The host `ld.so` to map in that mode.
+    pub ld_so: Option<PathBuf>,
+    /// Directories searched first for `DT_NEEDED` libraries.
+    pub lib_paths: Vec<PathBuf>,
+    /// Bind PLT slots on first call instead of at load.
+    pub lazy_bind: Option<bool>,
+}
+
+static DYNLINK_OPTIONS: std::sync::OnceLock<DynlinkOptions> = std::sync::OnceLock::new();
+
+/// Set the process's dynamic-linking options. Only the first call takes
+/// effect, like the environment it replaces, so every emulator in the
+/// process links the same way; returns `false` when options were already set.
+pub fn set_dynlink_options(options: DynlinkOptions) -> bool {
+    DYNLINK_OPTIONS.set(options).is_ok()
+}
+
+fn env_flag(name: &str) -> bool {
     matches!(
-        std::env::var("FISSION_LAZY_BIND").as_deref(),
+        std::env::var(name).as_deref(),
         Ok("1") | Ok("true") | Ok("yes")
     )
+}
+
+/// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
+pub fn lazy_bind_enabled() -> bool {
+    DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.lazy_bind)
+        .unwrap_or_else(|| env_flag("FISSION_LAZY_BIND"))
 }
 
 /// Decode a lazy GOT marker into a table index.
@@ -302,6 +335,14 @@ pub fn parse_pt_interp(data: &[u8]) -> Option<String> {
 }
 
 pub(crate) fn host_interp_candidate(guest_path: &str) -> Option<PathBuf> {
+    if let Some(pb) = DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.ld_so.clone())
+    {
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
     if let Ok(p) = std::env::var("FISSION_LD_SO") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
@@ -317,10 +358,10 @@ pub(crate) fn host_interp_candidate(guest_path: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn dynlink_enabled() -> bool {
-    matches!(
-        std::env::var("FISSION_ENABLE_DYNLINK").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    )
+    DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.host_interpreter)
+        .unwrap_or_else(|| env_flag("FISSION_ENABLE_DYNLINK"))
 }
 
 /// True when GOT should be left for a host-mapped ld.so (opt-in interpreter mode).
@@ -550,7 +591,10 @@ struct SharedLoadResult {
 }
 
 fn lib_search_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+    let mut paths: Vec<PathBuf> = DYNLINK_OPTIONS
+        .get()
+        .map(|options| options.lib_paths.clone())
+        .unwrap_or_default();
     if let Ok(p) = std::env::var("FISSION_LIB_PATH") {
         for part in p.split(':') {
             if !part.is_empty() {
@@ -1973,6 +2017,30 @@ fn sym_name(
 
 #[cfg(test)]
 mod tests {
+    /// A directory given through `DynlinkOptions` is searched before the
+    /// environment's and the system's. (Only `lib_paths` is set, so the
+    /// process-wide options cannot change what another test in the same
+    /// process sees about binding or the host interpreter.)
+    #[test]
+    fn option_lib_paths_are_searched_first() {
+        let first = PathBuf::from("/opt/fission-test-libs");
+        let set = super::set_dynlink_options(super::DynlinkOptions {
+            lib_paths: vec![first.clone()],
+            ..Default::default()
+        });
+        if set {
+            assert_eq!(super::lib_search_paths().first(), Some(&first));
+        } else {
+            // Another test in this process set them first; the order rule
+            // is still that options come before everything else.
+            let options = super::DYNLINK_OPTIONS.get().unwrap();
+            assert_eq!(
+                super::lib_search_paths()[..options.lib_paths.len()],
+                options.lib_paths[..]
+            );
+        }
+    }
+
     use super::*;
 
     /// Committed under `testdata/`; a missing copy is a broken checkout.
