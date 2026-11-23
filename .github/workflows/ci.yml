@@ -47,6 +47,7 @@ jobs:
       run_actionlint: ${{ steps.filter.outputs.run_actionlint }}
       run_platform_debugger: ${{ steps.filter.outputs.run_platform_debugger }}
       run_solver_diff: ${{ steps.filter.outputs.run_solver_diff }}
+      run_native_diff: ${{ steps.filter.outputs.run_native_diff }}
       run_loader_fixtures: ${{ steps.filter.outputs.run_loader_fixtures }}
       run_decomp_corpus: ${{ steps.filter.outputs.run_decomp_corpus }}
       run_package_check: ${{ steps.filter.outputs.run_package_check }}
@@ -427,6 +428,13 @@ jobs:
     with:
       suite: solver
 
+  native-diff:
+    needs: [changes]
+    if: needs.changes.outputs.run_native_diff == 'true'
+    uses: ./.github/workflows/reusable-premerge.yml
+    with:
+      suite: native-diff
+
   loader-fixtures:
     needs: [changes]
     if: needs.changes.outputs.run_loader_fixtures == 'true'
@@ -490,6 +498,7 @@ jobs:
         test-macos,
         platform-debugger,
         solver-diff,
+        native-diff,
         loader-fixtures,
         decomp-corpus,
         package-check,
@@ -550,6 +559,7 @@ jobs:
 
           require_if "${{ needs.changes.outputs.run_platform_debugger }}" "platform-debugger" "${{ needs.platform-debugger.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_solver_diff }}" "solver-diff" "${{ needs.solver-diff.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_native_diff }}" "native-diff" "${{ needs.native-diff.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_loader_fixtures }}" "loader-fixtures" "${{ needs.loader-fixtures.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1

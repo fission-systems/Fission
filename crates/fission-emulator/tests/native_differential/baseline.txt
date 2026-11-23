@@ -1,0 +1,116 @@
+# Known divergences between the host CPU and Fission's lift + interpreter.
+#
+# One line per instruction: <isa> <MNEMONIC> <fields|*> #<issue> <reason>
+#   isa       x86_64 | aarch64
+#   MNEMONIC  as Fission's disassembler prints it, upper case; `*` covers the
+#             listed fields for every instruction (a spec-wide gap), and a
+#             trailing `*` a family (`LDADD*`: LDADDB, LDADDAH, ...)
+#   fields    the comma-separated fields allowed to differ (register names,
+#             flags, `mem`, `fault`, `panic`, `decode`), `*`, or a tag:
+#             `~nan` (both sides NaN, payloads differ), `~fp16` (the
+#             instruction does half-precision float arithmetic)
+#   issue     the GitHub issue tracking the fix
+#
+# The gate fails on a divergence not covered here and on an entry that no
+# longer reproduces. A divergence found only by a long random run must get a
+# curated case before it is listed, so that the pull-request run reproduces it.
+# Where even the curated case hits it too rarely for the pull-request count
+# (a one-ulp fused-rounding difference), the reason says `@nightly`: smaller
+# runs then do not call the entry stale; the nightly run still does.
+
+# ── x86-64 ──────────────────────────────────────────────────────────────────
+# Spec: arithmetic never writes AF (SDM 2, ADD..CMPS "Flags Affected").
+x86_64 * AF #1048 arithmetic instructions leave AF unchanged
+# Spec: ties round away from zero, not by MXCSR.RC (#1049); NaN and
+# out-of-range inputs do not give the integer indefinite (#1050).
+x86_64 CVTSD2SI * #1049 rounding; also #1050
+x86_64 CVTSS2SI * #1049 rounding; also #1050
+x86_64 CVTPD2DQ * #1049 rounding; also #1050
+x86_64 CVTPS2DQ * #1049 rounding; also #1050
+x86_64 CVTTSD2SI * #1050 NaN/out-of-range is not the integer indefinite
+x86_64 CVTTSS2SI * #1050 NaN/out-of-range is not the integer indefinite
+x86_64 CVTTPD2DQ * #1050 NaN/out-of-range is not the integer indefinite
+x86_64 CVTTPS2DQ * #1050 NaN/out-of-range is not the integer indefinite
+# Spec: a masked count of 0 must leave the flags alone (SDM 2, SHR / SHRD).
+x86_64 SHR OF #1051 count 0 changes OF
+x86_64 SHRD OF #1051 count 0 changes OF
+# Spec: reserved RFLAGS bit 1 is stored as 0.
+x86_64 PUSHFQ mem #1052 stored RFLAGS bit 1 is 0
+x86_64 PUSHF mem #1052 stored FLAGS bit 1 is 0
+# Spec: the store re-reads an address register the instruction just wrote.
+x86_64 XADD mem,fault #1053 store address formed after the source register is written
+# Evaluator: INT_LEFT/INT_RIGHT on a >8-byte varnode shift a u64 by >= 64.
+x86_64 PALIGNR panic #1054 evaluator shift overflow on the 32-byte temporary
+# Evaluator: which NaN propagates is left to the host's float ops; x86
+# propagates the first source (`~nan`: both sides NaN, payloads differ).
+x86_64 * ~nan #1055 NaN payload / operand order
+# Decode: 0x90 ignores REX.B (f3 41 90 is xchg r8d, eax); 90 with REX is a NOP.
+x86_64 PAUSE * #1059 f3 41 90 decoded as PAUSE
+x86_64 XCHG * #1059 42 90 clears RAX[63:32]; also #1060 (xchg m32, r32 no zero-extension)
+x86_64 XCHG.XACQUIRE * #1060 xchg m32, r32 no zero-extension
+# Decode: 66 66 cancels the operand-size override.
+x86_64 ADD CF,PF,ZF,SF,OF,RBP #1061 66 66 03 e8 decoded as add ebp, eax (drop with #1061)
+# Lift: no LOAD for a bit range of a dynamic memory operand.
+x86_64 PUNPCKLQDQ * #1062 memory operand never loaded
+x86_64 PINSRB * #1062 memory operand never loaded
+
+# ── AArch64 ─────────────────────────────────────────────────────────────────
+# Spec: no FPToFixed saturation for NaN/out-of-range; unsigned forms convert as signed.
+aarch64 FCVTZS * #1056 no saturation
+aarch64 FCVTZU * #1056 no saturation; converts as signed
+aarch64 FCVTAS * #1056 no saturation
+aarch64 FCVTAU * #1056 no saturation; converts as signed
+aarch64 FCVTMS * #1056 no saturation
+aarch64 FCVTMU * #1056 no saturation; converts as signed
+aarch64 FCVTNS * #1056 no saturation
+aarch64 FCVTNU * #1056 no saturation; converts as signed
+aarch64 FCVTPS * #1056 no saturation
+aarch64 FCVTPU * #1056 no saturation; converts as signed
+# Evaluator: NaN propagation (operand order, sNaN priority and quieting).
+aarch64 * ~nan #1055 NaN payload / operand order
+# Evaluator: half-precision float varnodes read as 0.0 and are not written.
+aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
+# Spec: NaN handling of FMAX/FMIN (NaN wins) and FMAXNM/FMINNM (number wins).
+aarch64 FMAX * #1063 a NaN operand is ignored
+aarch64 FMIN * #1063 a NaN operand is ignored
+aarch64 FMAXNM * #1063 returns the NaN instead of the number
+# Spec: the local FRINT patch's approximations (ties away from zero; FRINTZ via an integer).
+aarch64 FRINTI * #1064 ties away from zero instead of FPCR rounding
+aarch64 FRINTX * #1064 ties away from zero instead of FPCR rounding
+aarch64 FRINTZ * #1064 loses -0.0, saturates at 2^63
+aarch64 FRINTN * #1064 ties away from zero instead of to even
+# Spec: fused multiply-adds round twice.
+aarch64 FMSUB * #1072 not fused @nightly
+aarch64 FMLA * #1072 not fused @nightly
+aarch64 FMLS * #1072 not fused @nightly
+# Spec: 32-bit sign-extending loads write the wrong upper bits of Xt.
+aarch64 LDRSB * #1057 Wt form sign-extends into bits 63:32
+aarch64 LDRSH * #1057 Wt form sign-extends into bits 63:32
+aarch64 LDURSH * #1057 Wt form sign-extends into bits 63:32
+aarch64 LDURSB * #1057 Wt form zero-extends the byte
+aarch64 LDLARH * #1057 leaves bits 63:32 of Xt unchanged
+# Spec: W and 64-bit vector destinations keep stale upper bits.
+aarch64 LDLAR * #1067 leaves bits 63:32 of Xt unchanged
+aarch64 LDLARB * #1067 leaves bits 63:32 of Xt unchanged
+aarch64 LDTRS* * #1067 Wt form zero-extends (as LDURSB, #1057)
+aarch64 LDADD* * #1067 Wt form leaves bits 63:32
+aarch64 LDCLR* * #1067 Wt form leaves bits 63:32
+aarch64 LDSET* * #1067 Wt form leaves bits 63:32
+aarch64 LDSMIN* * #1067 Wt form leaves bits 63:32
+aarch64 LDUMAX* * #1067 Wt form leaves bits 63:32
+aarch64 LDUMIN* * #1067 Wt form leaves bits 63:32
+aarch64 SWP* * #1067 Wt form leaves bits 63:32
+aarch64 LDSMAX* * #1067 Wt form leaves bits 63:32; also #1069 (byte max stores the register)
+aarch64 LD1 * #1067 64-bit arrangement leaves V[127:64]
+aarch64 LD1R * #1067 64-bit arrangement leaves V[127:64]
+aarch64 LD2 * #1067 64-bit arrangement leaves V[127:64]
+aarch64 LD3 * #1067 64-bit arrangement leaves V[127:64]
+aarch64 LD3R * #1067 64-bit arrangement leaves V[127:64]
+aarch64 LD4 * #1067 64-bit arrangement leaves V[127:64]
+# Spec: saturating NEON ops wrap, rounding ones truncate.
+aarch64 SUQADD * #1068 no saturation
+aarch64 SQDMLAL * #1068 no saturation
+aarch64 SQRDMULH * #1068 no rounding constant
+aarch64 SRSRA * #1068 no rounding constant
+# Spec: FRINT32Z computes nothing.
+aarch64 FRINT32Z * #1070 destination unchanged

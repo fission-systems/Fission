@@ -39,6 +39,20 @@ class ChangePlanTests(unittest.TestCase):
         for job in lanes:
             self.assertFalse(jobs[job], job)
 
+    def test_lift_and_interpreter_changes_run_the_native_differential(self):
+        for path in ("crates/fission-sleigh/src/runtime/lift.rs",
+                     "utils/sleigh-specs/languages/AARCH64/AARCH64instructions.sinc",
+                     "crates/fission-emulator/src/pcode/eval.rs",
+                     "crates/fission-emulator/src/interp.rs",
+                     "crates/fission-emulator/tests/native_differential/baseline.txt",
+                     ".github/workflows/native-differential.yml",
+                     ".github/workflows/reusable-premerge.yml"):
+            self.assertTrue(plan([path], "pull_request")[1]["run_native_diff"], path)
+            self.assertTrue(plan([path], "merge_group")[1]["run_native_diff"], path)
+            self.assertFalse(plan([path], "push")[1]["run_native_diff"], path)
+        for path in ("crates/fission-emulator/src/os/linux/mod.rs", "crates/fission-pcode/src/lib.rs"):
+            self.assertFalse(plan([path], "pull_request")[1]["run_native_diff"], path)
+
     def test_sweep_changes_run_the_sweep_smoke_before_merge(self):
         for path in (".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
                      "scripts/quality/decbench-ci-requirements.txt"):

@@ -4,3 +4,9 @@ retries = 0
 status-level = "fail"
 final-status-level = "slow"
 slow-timeout = { period = "60s", terminate-after = 2 }
+
+# The native differential runs ~25x its pull-request case count nightly
+# (.github/workflows/native-differential.yml): 50 s on a 4-vCPU x86-64 VM.
+[[profile.default.overrides]]
+filter = "binary(native_differential)"
+slow-timeout = { period = "120s", terminate-after = 5 }

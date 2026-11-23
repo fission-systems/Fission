@@ -28,7 +28,8 @@ enabled lane whose job is skipped, cancelled or failed makes `CI Summary` fail.
 The native debugger lane exercises Linux, Windows and macOS processes on hosted
 runners. The macOS job enables Developer Tools and signs the test executable.
 Run this job on a real PR before making the merge queue required. The solver
-lane uses a short differential suite with Z3 4.13.4. Loader changes cover ELF,
+lane uses a short differential suite with Z3 4.13.4. SLEIGH and interpreter
+changes run the native differential on x86-64 and AArch64 runners (below). Loader changes cover ELF,
 PE and Mach-O fixtures, and decompiler changes add a small checked-in corpus.
 Packaging changes rehearse all five targets on PRs and merge candidates.
 
@@ -93,12 +94,56 @@ setup fails open. Every push to main runs workspace fmt and clippy.
 
 ## Scheduled runs report into issues
 
-Heavy, fuzz, determinism and the DecBench sweep end with `reusable-report-red.yml`. While a
+Heavy, fuzz, determinism, the native differential and the DecBench sweep end with `reusable-report-red.yml`. While a
 workflow is red on main there is one open issue titled `CI red: <workflow>`
 with the `ci-red` label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
 on its schedule or by manual dispatch, restores its corpus from earlier runs,
 and attaches crash inputs to the run for 30 days.
+
+## Native differential (SLEIGH lift against the CPU)
+
+Fission lifts from Ghidra's SLEIGH specs, and its emulator and decompiler share
+that lift, so neither Ghidra nor `fission_cli verify` can see a wrong spec
+([ADR 0017](adr/0017-ghidra-is-not-an-oracle.md)). The native differential
+(`crates/fission-emulator/tests/native_differential/`) runs single
+instructions on the host CPU and through Fission's lift and p-code
+interpreter from the same random state, and compares every general-purpose
+register, flag, vector register and a 16 KiB scratch buffer.
+
+- **Cases.** A curated list per ISA (x86-64: integer ALU and flags, shifts and
+  rotates, MUL/DIV, bit scans, CMOVcc/SETcc, MOVSX/MOVZX, BT*, string
+  instructions, SSE/SSE2/SSE4.1 conversions, every ROUND* and CMP* immediate,
+  min/max, sqrt, shuffles, unpacks, packs; AArch64: integer and flags,
+  CSEL/CSINC/CCMP, loads, FCVT*, FRINT*, SCVTF/UCVTF, FMIN/FMAX, basic NEON)
+  from 24 states each, plus 3,000 random byte strings the decoder accepts.
+  Anything that branches, calls into the host, touches state the two sides
+  cannot share (FS/GS bases, x87/MMX, AVX, system registers, SVE) or is
+  privileged is skipped and counted.
+- **Masks.** Results the architecture manual leaves undefined are masked per
+  instruction, and each mask cites the manual section
+  (`target_x86_64.rs`, e.g. MUL's SF/ZF/AF/PF, BSF/BSR with a zero source,
+  shift and rotate OF). MXCSR and FPSR exception flags are set, not compared:
+  Fission does not model them.
+- **Gate.** `baseline.txt` lists every known divergence with its issue. The
+  test fails on a divergence not listed there and on a listed one that no
+  longer reproduces. Each failure prints a one-line `REPRO` with the seed,
+  case id, bytes, input state and both results, and the command that reruns
+  only that case.
+- **Where.** On pull requests and merge candidates that touch
+  `crates/fission-sleigh/`, `utils/sleigh-specs/`,
+  `crates/fission-emulator/src/pcode*`, `interp.rs`, `arch/vector.rs` or the
+  test itself, the `native-diff` pre-merge lane runs it on `ubuntu-24.04`
+  (x86-64) and `ubuntu-24.04-arm` (AArch64): about 10 s of test time after the
+  build. `native-differential.yml` runs it nightly with 128 states and 100,000
+  random cases per ISA and reports into a `ci-red` issue. The test also runs
+  in every Fast Gate test job that selects `fission-emulator`, and locally on
+  any x86-64 Linux or AArch64 Linux/macOS host
+  (`cargo nextest run -p fission-emulator --test native_differential`).
+
+The PR and nightly runs share the seed, so every PR case is also a nightly case.
+A divergence only the nightly finds gets a curated case before it is added to
+the baseline, so the PR run reproduces every entry.
 
 ## Nightly DecBench
 
