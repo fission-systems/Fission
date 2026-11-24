@@ -135,7 +135,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
         return 0;
     }
 
-    let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver);
+    let mut evaluator = crate::pcode::eval::Evaluator::concrete(&mut emu.state, &mut emu.solver);
     let handled = match evaluator.try_step_u128(op) {
         Ok(handled) => handled,
         Err(e) => {
@@ -949,6 +949,26 @@ pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
     let op = op as *const fission_pcode_ir::ir::PcodeOp;
     let op = unsafe { &*op };
     emu.apply_taint_to_op(op, None);
+}
+
+/// An instruction that can fault is about to start: note the registers it
+/// writes, so a fault can put them back.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_insn_checkpoint(emu_ptr: *mut Emulator, index: u64) {
+    let emu = unsafe { &mut *emu_ptr };
+    let Some(writes) = emu
+        .jit
+        .as_ref()
+        .and_then(|jit| jit.insn_reg_writes.get(index as usize))
+    else {
+        tracing::error!("jit_insn_checkpoint: no entry {index}");
+        return;
+    };
+    // Append-only, and nothing appends while a block runs: the same
+    // argument `jit_wide_op` makes for `wide_ops`.
+    let writes: *const Vec<(u64, u32)> = writes;
+    let writes = unsafe { &*writes };
+    emu.checkpoint_instruction(writes);
 }
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────
