@@ -5,7 +5,7 @@ It does not replace #1121 release gates, #1168 ownership or AGENTS.md.
 
 ## Managed labels
 
-The source of truth is [labels.json](../.github/labels.json). Prefer existing
+The source of truth is [`labels.json`](https://github.com/fission-systems/Fission/blob/main/.github/labels.json). Prefer existing
 GitHub `bug`, `enhancement`, and `documentation` labels over duplicate
 type aliases. New managed labels are additive. Unmanaged and legacy labels
 are never deleted or changed automatically.
