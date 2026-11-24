@@ -203,6 +203,9 @@ impl Emulator {
                 None
             };
             let taint_snapshot = self.snapshot_taint_op(op, control_mem);
+            let symbolic_snapshot =
+                matches!(self.shadow_mode, crate::observe::ShadowMode::Symbolic)
+                    .then(|| self.snapshot_symbolic_op(op));
 
             let (step, unimplemented) = {
                 let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
@@ -223,8 +226,8 @@ impl Emulator {
             }
 
             self.apply_taint_to_op_with_snapshot(op, control_mem, taint_snapshot.as_ref());
-            if matches!(self.shadow_mode, crate::observe::ShadowMode::Symbolic) {
-                self.apply_symbolic_shadow_to_op(op);
+            if let Some(snapshot) = &symbolic_snapshot {
+                self.apply_symbolic_shadow_to_op(op, snapshot);
             }
 
             match step {
@@ -389,12 +392,65 @@ impl Emulator {
         Ok(InterpExit::FallThrough(fallthrough))
     }
 
-    pub(crate) fn apply_symbolic_shadow_to_op(&mut self, op: &fission_pcode_ir::ir::PcodeOp) {
+    /// The inputs of `op` as they were before it ran: concrete values and
+    /// per-byte shadow nodes.
+    fn snapshot_symbolic_op(&mut self, op: &fission_pcode_ir::ir::PcodeOp) -> SymbolicOpSnapshot {
+        let values = op.inputs.iter().map(|vn| self.varnode_value(vn)).collect();
+        let shadows = op
+            .inputs
+            .iter()
+            .map(|vn| {
+                if vn.is_constant {
+                    return Vec::new();
+                }
+                (0..u64::from(vn.size).min(64))
+                    .map(|i| self.state.get_shadow_memory(vn.space_id, vn.offset + i))
+                    .collect()
+            })
+            .collect();
+        SymbolicOpSnapshot { values, shadows }
+    }
+
+    /// Propagate symbolic expressions through `op`, which has just run.
+    ///
+    /// The concrete step has already written the output, and a concrete
+    /// write clears the shadow it covers. So an op that reads what it writes
+    /// (`ZEXT RAX <- EAX`, `EAX = EAX + 1`) would read its own cleared
+    /// output as its input: the expression was lost at the first in-place
+    /// op and no branch after it was symbolic. The inputs are read from
+    /// `snapshot`, taken before the step, instead: their concrete values,
+    /// and the shadow of any input bytes the output overwrote, put back
+    /// before the expression is built (the output's shadow is then set or
+    /// cleared byte by byte, as always).
+    pub(crate) fn apply_symbolic_shadow_to_op(
+        &mut self,
+        op: &fission_pcode_ir::ir::PcodeOp,
+        snapshot: &SymbolicOpSnapshot,
+    ) {
         use crate::jit::callbacks::{
             SymBinOpKind, SymUnOpKind, jit_shadow_binop, jit_shadow_copy, jit_shadow_load,
             jit_shadow_store, jit_shadow_unop,
         };
 
+        if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+            let out_end = out.offset + u64::from(out.size);
+            for (vn, shadow) in op.inputs.iter().zip(&snapshot.shadows) {
+                if vn.is_constant || vn.space_id != out.space_id {
+                    continue;
+                }
+                for (i, node) in shadow.iter().enumerate() {
+                    let at = vn.offset + i as u64;
+                    if at < out.offset || at >= out_end {
+                        continue;
+                    }
+                    match node {
+                        Some(node) => self.state.set_shadow_memory(vn.space_id, at, *node),
+                        None => self.state.clear_shadow_memory(vn.space_id, at),
+                    }
+                }
+            }
+        }
+        let value = |k: usize| snapshot.values.get(k).copied().unwrap_or(0);
         let emu_ptr = self as *mut Emulator;
         match op.opcode {
             PcodeOpcode::Copy | PcodeOpcode::IntZExt | PcodeOpcode::IntSExt => {
@@ -417,7 +473,7 @@ impl Emulator {
                     if !out.is_constant && op.inputs.len() >= 2 {
                         let space_id = op.inputs[0].constant_val as u64;
                         let in1 = &op.inputs[1];
-                        let addr = self.varnode_value(in1);
+                        let addr = value(1);
                         jit_shadow_load(
                             emu_ptr,
                             out.space_id,
@@ -437,7 +493,7 @@ impl Emulator {
                     let space_id = op.inputs[0].constant_val as u64;
                     let in1 = &op.inputs[1];
                     let in2 = &op.inputs[2];
-                    let addr = self.varnode_value(in1);
+                    let addr = value(1);
                     jit_shadow_store(
                         emu_ptr,
                         space_id,
@@ -475,8 +531,8 @@ impl Emulator {
                     if !out.is_constant && op.inputs.len() >= 2 {
                         let in0 = &op.inputs[0];
                         let in1 = &op.inputs[1];
-                        let a_val = self.varnode_value(in0);
-                        let b_val = self.varnode_value(in1);
+                        let a_val = value(0);
+                        let b_val = value(1);
                         let kind = match op.opcode {
                             PcodeOpcode::IntAdd => SymBinOpKind::Add as u32,
                             PcodeOpcode::IntSub => SymBinOpKind::Sub as u32,
@@ -527,7 +583,7 @@ impl Emulator {
                 if let Some(out) = &op.output {
                     if !out.is_constant && !op.inputs.is_empty() {
                         let in0 = &op.inputs[0];
-                        let a_val = self.varnode_value(in0);
+                        let a_val = value(0);
                         let kind = match op.opcode {
                             PcodeOpcode::IntNegate => SymUnOpKind::Not as u32,
                             PcodeOpcode::Int2Comp => SymUnOpKind::Neg as u32,
@@ -554,6 +610,13 @@ impl Emulator {
             _ => {}
         }
     }
+}
+
+/// What [`Emulator::apply_symbolic_shadow_to_op`] needs of an op's inputs
+/// from before the op ran.
+pub(crate) struct SymbolicOpSnapshot {
+    values: Vec<u64>,
+    shadows: Vec<Vec<Option<u32>>>,
 }
 
 #[cfg(test)]
