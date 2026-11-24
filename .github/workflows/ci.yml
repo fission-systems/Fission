@@ -539,7 +539,8 @@ jobs:
   # Report-only, not part of CI Summary: what a Rust change does to decompile
   # cost (instructions executed) and, for decompiler changes, to output.
   # It holds a runner for ~40 min, so it runs only for decompiler changes or a
-  # PR labelled `type:performance` (label before pushing), and only after the
+  # PR labelled `type:performance` (label before pushing: a re-run replays the
+  # old payload, so a later label needs a new push), and only after the
   # required Linux tests pass, so required jobs claim runners first. On
   # 2026-11-24 it was 10-11 of 24 running jobs while required jobs queued.
   base-vs-head:
