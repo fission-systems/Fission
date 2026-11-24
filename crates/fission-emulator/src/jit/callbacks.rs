@@ -136,7 +136,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     }
 
     let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver);
-    let handled = match evaluator.try_step_u128(op) {
+    let handled = match evaluator.try_step_wide(op) {
         Ok(handled) => handled,
         Err(e) => {
             tracing::warn!("jit_wide_op: {:?} failed: {e:#}", op.opcode);
