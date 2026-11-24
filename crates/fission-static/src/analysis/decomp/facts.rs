@@ -131,7 +131,7 @@ fn is_libc_start_main_symbol(name: &str) -> bool {
 
 fn libc_start_main_import_slots(program: &ProgramSnapshot) -> HashSet<u64> {
     let mut slots = program
-        .symbols
+        .symbols()
         .iter()
         .filter(|symbol| {
             symbol.kind == SymbolKind::Import && is_libc_start_main_symbol(&symbol.name)
@@ -140,7 +140,7 @@ fn libc_start_main_import_slots(program: &ProgramSnapshot) -> HashSet<u64> {
         .collect::<HashSet<_>>();
     slots.extend(
         program
-            .relocations
+            .relocations()
             .iter()
             .filter(|relocation| {
                 relocation
@@ -262,13 +262,22 @@ fn runtime_callback_from_entry_pcode(
     (callbacks.len() == 1).then(|| *callbacks.first().expect("one callback"))
 }
 
+fn snapshot_for_fact_store(binary: &LoadedBinary) -> Arc<ProgramSnapshot> {
+    match ProgramSnapshot::publish_loaded_binary(binary) {
+        fission_analysis_db::SnapshotPublication::Valid(snapshot) => Arc::new(snapshot),
+        fission_analysis_db::SnapshotPublication::Partial(partial) => {
+            tracing::warn!(
+                issues = ?partial.integrity_report().issues,
+                "program snapshot failed integrity validation; falling back to empty snapshot"
+            );
+            Arc::new(ProgramSnapshot::empty())
+        }
+    }
+}
+
 impl FactStore {
     pub fn from_binary(binary: &LoadedBinary) -> Self {
-        Self::from_program_with_signature_matching(
-            binary,
-            Arc::new(ProgramSnapshot::from_loaded_binary(binary)),
-            true,
-        )
+        Self::from_program_with_signature_matching(binary, snapshot_for_fact_store(binary), true)
     }
 
     /// Build the per-function fact view without scanning and hashing every
@@ -276,11 +285,7 @@ impl FactStore {
     /// this path; whole-program inventory/decompilation keeps using
     /// [`Self::from_binary`] so its global signature facts remain available.
     pub fn from_binary_without_signature_matches(binary: &LoadedBinary) -> Self {
-        Self::from_program_with_signature_matching(
-            binary,
-            Arc::new(ProgramSnapshot::from_loaded_binary(binary)),
-            false,
-        )
+        Self::from_program_with_signature_matching(binary, snapshot_for_fact_store(binary), false)
     }
 
     pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
@@ -306,7 +311,7 @@ impl FactStore {
             decode_cache: DecodeCache::default(),
         };
 
-        for function in &program.functions {
+        for function in program.functions() {
             if function.name.trim().is_empty() {
                 continue;
             }
@@ -320,7 +325,7 @@ impl FactStore {
             store.ingest_name_fact(function.entry, function.name.clone(), provenance);
         }
 
-        for symbol in &program.symbols {
+        for symbol in program.symbols() {
             if !symbol.name.trim().is_empty() {
                 let provenance = match symbol.kind {
                     SymbolKind::Import | SymbolKind::Export => FactProvenance::ImportExport,
@@ -418,11 +423,11 @@ impl FactStore {
     fn ingest_elf_runtime_callback_hints(&mut self, binary: &LoadedBinary) {
         let program = self.program();
         if !program
-            .binary
+            .binary()
             .format
             .to_ascii_lowercase()
             .starts_with("elf")
-            || program.binary.entry_point == 0
+            || program.binary().entry_point == 0
         {
             return;
         }
@@ -460,13 +465,13 @@ impl FactStore {
         let Some(entry) = self.decode_runtime_contract_function(
             binary,
             &frontend,
-            program.binary.entry_point,
+            program.binary().entry_point,
             128,
         ) else {
             return;
         };
         let internal_entries = program
-            .functions
+            .functions()
             .iter()
             .filter(|function| !function.is_import && function.entry != 0)
             .map(|function| function.entry)
@@ -1666,7 +1671,9 @@ mod tests {
         })
         .build()
         .expect("build fixture");
-        let program = Arc::new(ProgramSnapshot::from_loaded_binary(&binary));
+        let program = Arc::new(
+            ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid snapshot from fixture"),
+        );
         let first = FactStore::from_program(&binary, Arc::clone(&program));
         let second = FactStore::from_program(&binary, Arc::clone(&program));
         let first_program = first.program_arc();

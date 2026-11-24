@@ -5,7 +5,7 @@
 //! provenance. It intentionally contains no binary parser or NIR pass.
 
 use fission_loader::{FunctionInfo, LoadedBinary, LoaderSymbolKind};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
 mod integrity;
@@ -17,7 +17,9 @@ pub const PROGRAM_SNAPSHOT_SCHEMA: &str = "fission-program-snapshot-v1";
 
 macro_rules! typed_id {
     ($name:ident) => {
-        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+        #[derive(
+            Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+        )]
         #[serde(transparent)]
         pub struct $name(pub u32);
     };
@@ -28,7 +30,7 @@ typed_id!(FunctionId);
 typed_id!(SymbolId);
 typed_id!(RelocationId);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactConfidence {
     Proven,
@@ -37,7 +39,7 @@ pub enum FactConfidence {
     Low,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactSource {
     Loader,
@@ -51,7 +53,7 @@ pub enum FactSource {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Provenance {
     pub source: FactSource,
     pub confidence: FactConfidence,
@@ -59,7 +61,7 @@ pub struct Provenance {
     pub detail: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BinaryMetadata {
     pub content_hash: String,
     pub format: String,
@@ -78,14 +80,14 @@ pub struct BinaryMetadata {
     pub compiler_spec_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Permissions {
     pub read: bool,
     pub write: bool,
     pub execute: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MemoryBlock {
     pub id: MemoryBlockId,
     pub name: String,
@@ -100,7 +102,7 @@ pub struct MemoryBlock {
     pub provenance: Provenance,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FunctionKind {
     Code,
@@ -113,7 +115,7 @@ pub enum FunctionKind {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FunctionRecord {
     pub id: FunctionId,
     pub name: String,
@@ -132,7 +134,7 @@ pub struct FunctionRecord {
     pub provenance: Provenance,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SymbolKind {
     Import,
@@ -143,7 +145,7 @@ pub enum SymbolKind {
     RelocationTarget,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SymbolRecord {
     pub id: SymbolId,
     pub name: String,
@@ -156,7 +158,7 @@ pub struct SymbolRecord {
     pub provenance: Provenance,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelocationRecord {
     pub id: RelocationId,
     pub address: u64,
@@ -254,22 +256,444 @@ impl AddressIntervalIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ProgramSnapshot {
-    pub schema: &'static str,
-    pub binary: BinaryMetadata,
-    pub memory_blocks: Vec<MemoryBlock>,
-    pub functions: Vec<FunctionRecord>,
-    pub symbols: Vec<SymbolRecord>,
-    pub relocations: Vec<RelocationRecord>,
+    schema: String,
+    binary: BinaryMetadata,
+    memory_blocks: Vec<MemoryBlock>,
+    functions: Vec<FunctionRecord>,
+    symbols: Vec<SymbolRecord>,
+    relocations: Vec<RelocationRecord>,
     #[serde(skip)]
     function_intervals: AddressIntervalIndex,
     #[serde(skip)]
     memory_block_intervals: AddressIntervalIndex,
 }
 
+#[derive(Deserialize)]
+struct RawProgramSnapshot {
+    schema: String,
+    binary: BinaryMetadata,
+    memory_blocks: Vec<MemoryBlock>,
+    functions: Vec<FunctionRecord>,
+    symbols: Vec<SymbolRecord>,
+    relocations: Vec<RelocationRecord>,
+}
+
+impl<'de> serde::Deserialize<'de> for ProgramSnapshot {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = RawProgramSnapshot::deserialize(deserializer)?;
+        ProgramSnapshotBuilder::from_raw_parts(
+            raw.schema,
+            raw.binary,
+            raw.memory_blocks,
+            raw.functions,
+            raw.symbols,
+            raw.relocations,
+        )
+        .build()
+        .map_err(serde::de::Error::custom)
+    }
+}
+
+pub(crate) fn build_memory_block_intervals(memory_blocks: &[MemoryBlock]) -> AddressIntervalIndex {
+    AddressIntervalIndex::from_items(memory_blocks, |block| {
+        block
+            .start
+            .checked_add(block.size)
+            .map(|end| (block.start, end))
+    })
+}
+
+pub(crate) fn build_function_intervals(functions: &[FunctionRecord]) -> AddressIntervalIndex {
+    AddressIntervalIndex::from_items(functions, |function| {
+        function
+            .entry
+            .checked_add(function.size)
+            .map(|end| (function.entry, end))
+    })
+}
+
+/// Diagnostic snapshot returned by [`SnapshotPublication::Partial`] when a staged
+/// snapshot fails integrity validation. Tables remain readable for diagnostics,
+/// while derived query indexes are withheld so an unvalidated snapshot cannot
+/// masquerade as authoritative.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialProgramSnapshot {
+    schema: String,
+    binary: BinaryMetadata,
+    memory_blocks: Vec<MemoryBlock>,
+    functions: Vec<FunctionRecord>,
+    symbols: Vec<SymbolRecord>,
+    relocations: Vec<RelocationRecord>,
+    report: SnapshotIntegrityReport,
+}
+
+impl PartialProgramSnapshot {
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    pub fn binary(&self) -> &BinaryMetadata {
+        &self.binary
+    }
+
+    pub fn memory_blocks(&self) -> &[MemoryBlock] {
+        &self.memory_blocks
+    }
+
+    pub fn functions(&self) -> &[FunctionRecord] {
+        &self.functions
+    }
+
+    pub fn symbols(&self) -> &[SymbolRecord] {
+        &self.symbols
+    }
+
+    pub fn relocations(&self) -> &[RelocationRecord] {
+        &self.relocations
+    }
+
+    pub fn integrity_report(&self) -> &SnapshotIntegrityReport {
+        &self.report
+    }
+
+    pub fn fact_inventory(&self) -> FactInventory {
+        integrity::fact_inventory_from_tables(
+            &self.memory_blocks,
+            &self.functions,
+            &self.symbols,
+            &self.relocations,
+        )
+    }
+
+    pub fn to_builder(&self) -> ProgramSnapshotBuilder {
+        ProgramSnapshotBuilder {
+            schema: self.schema.clone(),
+            binary: self.binary.clone(),
+            memory_blocks: self.memory_blocks.clone(),
+            functions: self.functions.clone(),
+            symbols: self.symbols.clone(),
+            relocations: self.relocations.clone(),
+        }
+    }
+}
+
+/// Outcome of the checked publication boundary on [`ProgramSnapshotBuilder::publish`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotPublication {
+    Valid(ProgramSnapshot),
+    Partial(PartialProgramSnapshot),
+}
+
+impl SnapshotPublication {
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid(_))
+    }
+
+    pub fn into_result(self) -> Result<ProgramSnapshot, SnapshotIntegrityReport> {
+        match self {
+            Self::Valid(snapshot) => Ok(snapshot),
+            Self::Partial(partial) => Err(partial.report),
+        }
+    }
+
+    pub fn integrity_report(&self) -> SnapshotIntegrityReport {
+        match self {
+            Self::Valid(snapshot) => snapshot.integrity_report(),
+            Self::Partial(partial) => partial.report.clone(),
+        }
+    }
+}
+
+/// Typed delta applied through [`ProgramSnapshotBuilder`] or
+/// [`ProgramSnapshot::apply_delta`] to construct a replacement snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProgramSnapshotDelta {
+    ReplaceBinaryMetadata(BinaryMetadata),
+    UpdateFunctionRange {
+        id: FunctionId,
+        entry: u64,
+        size: u64,
+    },
+    AddFunction(FunctionRecord),
+    RemoveFunction(FunctionId),
+    UpdateMemoryBlockRange {
+        id: MemoryBlockId,
+        start: u64,
+        size: u64,
+    },
+    AddMemoryBlock(MemoryBlock),
+    RemoveMemoryBlock(MemoryBlockId),
+    AddSymbol(SymbolRecord),
+    RemoveSymbol(SymbolId),
+    AddRelocation(RelocationRecord),
+    RemoveRelocation(RelocationId),
+}
+
+/// Staged builder used to construct or derive replacement snapshots prior to
+/// validation at [`Self::publish`] / [`Self::build`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProgramSnapshotBuilder {
+    schema: String,
+    binary: BinaryMetadata,
+    memory_blocks: Vec<MemoryBlock>,
+    functions: Vec<FunctionRecord>,
+    symbols: Vec<SymbolRecord>,
+    relocations: Vec<RelocationRecord>,
+}
+
+fn canonicalize_ids<T, K: Ord>(
+    rows: &mut [T],
+    key: impl Fn(&T) -> K,
+    get_id: impl Fn(&T) -> u32,
+    set_id: impl Fn(&mut T, u32),
+) -> HashMap<u32, u32> {
+    let mut id_counts: HashMap<u32, usize> = HashMap::with_capacity(rows.len());
+    for row in rows.iter() {
+        *id_counts.entry(get_id(row)).or_default() += 1;
+    }
+    rows.sort_by_key(key);
+    let mut old_to_new = HashMap::with_capacity(rows.len());
+    for (index, row) in rows.iter_mut().enumerate() {
+        let old_id = get_id(row);
+        let new_id = index as u32;
+        if id_counts.get(&old_id).copied() == Some(1) {
+            old_to_new.insert(old_id, new_id);
+        }
+        set_id(row, new_id);
+    }
+    old_to_new
+}
+
+impl ProgramSnapshotBuilder {
+    pub fn new(binary: BinaryMetadata) -> Self {
+        Self {
+            schema: PROGRAM_SNAPSHOT_SCHEMA.to_string(),
+            binary,
+            memory_blocks: Vec::new(),
+            functions: Vec::new(),
+            symbols: Vec::new(),
+            relocations: Vec::new(),
+        }
+    }
+
+    pub fn from_raw_parts(
+        schema: String,
+        binary: BinaryMetadata,
+        memory_blocks: Vec<MemoryBlock>,
+        functions: Vec<FunctionRecord>,
+        symbols: Vec<SymbolRecord>,
+        relocations: Vec<RelocationRecord>,
+    ) -> Self {
+        Self {
+            schema,
+            binary,
+            memory_blocks,
+            functions,
+            symbols,
+            relocations,
+        }
+    }
+
+    pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
+        let memory_blocks = build_memory_blocks(binary);
+        let memory_block_intervals = build_memory_block_intervals(&memory_blocks);
+        let functions = build_functions(&binary.functions, &memory_blocks, &memory_block_intervals);
+        let symbols = build_symbols(binary, &functions);
+        let relocations = build_relocations(binary, &symbols);
+        let architecture = binary.architecture.as_ref();
+        let load_spec = binary.load_spec.as_ref();
+
+        Self {
+            schema: PROGRAM_SNAPSHOT_SCHEMA.to_string(),
+            binary: BinaryMetadata {
+                content_hash: binary.hash.clone(),
+                format: binary.format.clone(),
+                bitness: if binary.is_64bit { 64 } else { 32 },
+                image_base: binary.image_base,
+                entry_point: binary.entry_point,
+                processor: architecture.map(|value| value.processor.clone()),
+                endian: architecture.map(|value| value.endian.clone()),
+                abi: architecture.and_then(|value| value.abi.clone()),
+                language_id: load_spec.map(|value| value.pair.language_id.as_str().to_string()),
+                compiler_spec_id: load_spec
+                    .map(|value| value.pair.compiler_spec_id.as_str().to_string()),
+            },
+            memory_blocks,
+            functions,
+            symbols,
+            relocations,
+        }
+    }
+
+    pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
+        self.schema = schema.into();
+        self
+    }
+
+    pub fn with_binary(mut self, binary: BinaryMetadata) -> Self {
+        self.binary = binary;
+        self
+    }
+
+    pub fn memory_blocks_mut(&mut self) -> &mut Vec<MemoryBlock> {
+        &mut self.memory_blocks
+    }
+
+    pub fn functions_mut(&mut self) -> &mut Vec<FunctionRecord> {
+        &mut self.functions
+    }
+
+    pub fn symbols_mut(&mut self) -> &mut Vec<SymbolRecord> {
+        &mut self.symbols
+    }
+
+    pub fn relocations_mut(&mut self) -> &mut Vec<RelocationRecord> {
+        &mut self.relocations
+    }
+
+    fn next_raw_id<T>(rows: &[T], get_id: impl Fn(&T) -> u32) -> u32 {
+        rows.iter()
+            .map(get_id)
+            .max()
+            .map_or(0, |id| id.saturating_add(1))
+    }
+
+    pub fn apply_delta(&mut self, delta: ProgramSnapshotDelta) -> &mut Self {
+        match delta {
+            ProgramSnapshotDelta::ReplaceBinaryMetadata(binary) => {
+                self.binary = binary;
+            }
+            ProgramSnapshotDelta::UpdateFunctionRange { id, entry, size } => {
+                if let Some(row) = self.functions.iter_mut().find(|row| row.id == id) {
+                    row.entry = entry;
+                    row.size = size;
+                }
+            }
+            ProgramSnapshotDelta::AddFunction(mut function) => {
+                function.id = FunctionId(Self::next_raw_id(&self.functions, |row| row.id.0));
+                self.functions.push(function);
+            }
+            ProgramSnapshotDelta::RemoveFunction(id) => {
+                self.functions.retain(|row| row.id != id);
+            }
+            ProgramSnapshotDelta::UpdateMemoryBlockRange { id, start, size } => {
+                if let Some(row) = self.memory_blocks.iter_mut().find(|row| row.id == id) {
+                    row.start = start;
+                    row.size = size;
+                }
+            }
+            ProgramSnapshotDelta::AddMemoryBlock(mut block) => {
+                block.id = MemoryBlockId(Self::next_raw_id(&self.memory_blocks, |row| row.id.0));
+                self.memory_blocks.push(block);
+            }
+            ProgramSnapshotDelta::RemoveMemoryBlock(id) => {
+                self.memory_blocks.retain(|row| row.id != id);
+            }
+            ProgramSnapshotDelta::AddSymbol(mut symbol) => {
+                symbol.id = SymbolId(Self::next_raw_id(&self.symbols, |row| row.id.0));
+                self.symbols.push(symbol);
+            }
+            ProgramSnapshotDelta::RemoveSymbol(id) => {
+                self.symbols.retain(|row| row.id != id);
+            }
+            ProgramSnapshotDelta::AddRelocation(mut relocation) => {
+                relocation.id = RelocationId(Self::next_raw_id(&self.relocations, |row| row.id.0));
+                self.relocations.push(relocation);
+            }
+            ProgramSnapshotDelta::RemoveRelocation(id) => {
+                self.relocations.retain(|row| row.id != id);
+            }
+        }
+        self
+    }
+
+    /// Sort all four tables into canonical order, reassign sequential row IDs,
+    /// and remap foreign keys (mapping deleted/ambiguous targets to `u32::MAX`
+    /// so validation detects dangling references instead of silently aliasing).
+    pub fn canonicalize(mut self) -> Self {
+        let block_map = canonicalize_ids(
+            &mut self.memory_blocks,
+            |row| (row.start, row.name.clone(), row.file_offset),
+            |row| row.id.0,
+            |row, id| row.id = MemoryBlockId(id),
+        );
+        for function in &mut self.functions {
+            function.memory_block = function
+                .memory_block
+                .map(|old| MemoryBlockId(block_map.get(&old.0).copied().unwrap_or(u32::MAX)));
+        }
+
+        let symbol_map = canonicalize_ids(
+            &mut self.symbols,
+            |row| (row.address, row.kind, row.name.clone()),
+            |row| row.id.0,
+            |row, id| row.id = SymbolId(id),
+        );
+        for relocation in &mut self.relocations {
+            relocation.symbol = relocation
+                .symbol
+                .map(|old| SymbolId(symbol_map.get(&old.0).copied().unwrap_or(u32::MAX)));
+        }
+
+        canonicalize_ids(
+            &mut self.functions,
+            |row| (row.entry, row.name.clone(), row.size),
+            |row| row.id.0,
+            |row, id| row.id = FunctionId(id),
+        );
+        canonicalize_ids(
+            &mut self.relocations,
+            |row| (row.address, row.relocation_type, row.symbol_name.clone()),
+            |row| row.id.0,
+            |row, id| row.id = RelocationId(id),
+        );
+        self
+    }
+
+    /// Checked publication boundary: builds derived interval indexes from the
+    /// staged rows and validates all snapshot invariants before exposing a
+    /// [`ProgramSnapshot`].
+    pub fn publish(self) -> SnapshotPublication {
+        let memory_block_intervals = build_memory_block_intervals(&self.memory_blocks);
+        let function_intervals = build_function_intervals(&self.functions);
+        let candidate = ProgramSnapshot {
+            schema: self.schema,
+            binary: self.binary,
+            memory_blocks: self.memory_blocks,
+            functions: self.functions,
+            symbols: self.symbols,
+            relocations: self.relocations,
+            function_intervals,
+            memory_block_intervals,
+        };
+        let report = candidate.integrity_report();
+        if report.is_valid() {
+            SnapshotPublication::Valid(candidate)
+        } else {
+            SnapshotPublication::Partial(PartialProgramSnapshot {
+                schema: candidate.schema,
+                binary: candidate.binary,
+                memory_blocks: candidate.memory_blocks,
+                functions: candidate.functions,
+                symbols: candidate.symbols,
+                relocations: candidate.relocations,
+                report,
+            })
+        }
+    }
+
+    pub fn build(self) -> Result<ProgramSnapshot, SnapshotIntegrityReport> {
+        self.publish().into_result()
+    }
+}
+
 impl ProgramSnapshot {
     pub fn empty() -> Self {
         Self {
-            schema: PROGRAM_SNAPSHOT_SCHEMA,
+            schema: PROGRAM_SNAPSHOT_SCHEMA.to_string(),
             binary: BinaryMetadata {
                 content_hash: String::new(),
                 format: String::new(),
@@ -291,58 +715,69 @@ impl ProgramSnapshot {
         }
     }
 
-    pub fn from_loaded_binary(binary: &LoadedBinary) -> Self {
-        let memory_blocks = build_memory_blocks(binary);
-        let memory_block_intervals = AddressIntervalIndex::from_items(&memory_blocks, |block| {
-            block
-                .start
-                .checked_add(block.size)
-                .map(|end| (block.start, end))
-        });
-        let functions = build_functions(&binary.functions, &memory_blocks, &memory_block_intervals);
-        let function_intervals = AddressIntervalIndex::from_items(&functions, |function| {
-            function
-                .entry
-                .checked_add(function.size)
-                .map(|end| (function.entry, end))
-        });
-        let symbols = build_symbols(binary, &functions);
-        let relocations = build_relocations(binary, &symbols);
-        let architecture = binary.architecture.as_ref();
-        let load_spec = binary.load_spec.as_ref();
+    pub fn builder(binary: BinaryMetadata) -> ProgramSnapshotBuilder {
+        ProgramSnapshotBuilder::new(binary)
+    }
 
-        Self {
-            schema: PROGRAM_SNAPSHOT_SCHEMA,
-            binary: BinaryMetadata {
-                content_hash: binary.hash.clone(),
-                format: binary.format.clone(),
-                bitness: if binary.is_64bit { 64 } else { 32 },
-                image_base: binary.image_base,
-                entry_point: binary.entry_point,
-                processor: architecture.map(|value| value.processor.clone()),
-                endian: architecture.map(|value| value.endian.clone()),
-                abi: architecture.and_then(|value| value.abi.clone()),
-                language_id: load_spec.map(|value| value.pair.language_id.as_str().to_string()),
-                compiler_spec_id: load_spec
-                    .map(|value| value.pair.compiler_spec_id.as_str().to_string()),
-            },
-            memory_blocks,
-            functions,
-            symbols,
-            relocations,
-            function_intervals,
-            memory_block_intervals,
+    pub fn to_builder(&self) -> ProgramSnapshotBuilder {
+        ProgramSnapshotBuilder {
+            schema: self.schema.clone(),
+            binary: self.binary.clone(),
+            memory_blocks: self.memory_blocks.clone(),
+            functions: self.functions.clone(),
+            symbols: self.symbols.clone(),
+            relocations: self.relocations.clone(),
         }
     }
 
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    pub fn binary(&self) -> &BinaryMetadata {
+        &self.binary
+    }
+
+    pub fn memory_blocks(&self) -> &[MemoryBlock] {
+        &self.memory_blocks
+    }
+
+    pub fn functions(&self) -> &[FunctionRecord] {
+        &self.functions
+    }
+
+    pub fn symbols(&self) -> &[SymbolRecord] {
+        &self.symbols
+    }
+
+    pub fn relocations(&self) -> &[RelocationRecord] {
+        &self.relocations
+    }
+
     pub fn try_from_loaded_binary(binary: &LoadedBinary) -> Result<Self, SnapshotIntegrityReport> {
-        let snapshot = Self::from_loaded_binary(binary);
-        let report = snapshot.integrity_report();
-        if report.is_valid() {
-            Ok(snapshot)
-        } else {
-            Err(report)
+        ProgramSnapshotBuilder::from_loaded_binary(binary).build()
+    }
+
+    pub fn publish_loaded_binary(binary: &LoadedBinary) -> SnapshotPublication {
+        ProgramSnapshotBuilder::from_loaded_binary(binary).publish()
+    }
+
+    pub fn apply_delta(
+        &self,
+        delta: ProgramSnapshotDelta,
+    ) -> Result<Self, SnapshotIntegrityReport> {
+        self.apply_deltas([delta])
+    }
+
+    pub fn apply_deltas(
+        &self,
+        deltas: impl IntoIterator<Item = ProgramSnapshotDelta>,
+    ) -> Result<Self, SnapshotIntegrityReport> {
+        let mut builder = self.to_builder();
+        for delta in deltas {
+            builder.apply_delta(delta);
         }
+        builder.canonicalize().build()
     }
 
     pub fn function_at(&self, entry: u64) -> Option<&FunctionRecord> {
@@ -875,8 +1310,8 @@ mod tests {
 
     #[test]
     fn snapshot_ids_are_deterministic() {
-        let left = ProgramSnapshot::from_loaded_binary(&fixture(false));
-        let right = ProgramSnapshot::from_loaded_binary(&fixture(true));
+        let left = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("left valid");
+        let right = ProgramSnapshot::try_from_loaded_binary(&fixture(true)).expect("right valid");
         assert_eq!(
             serde_json::to_string(&left).unwrap(),
             serde_json::to_string(&right).unwrap()
@@ -886,19 +1321,19 @@ mod tests {
             left.memory_block_containing(0x1010).unwrap().id,
             MemoryBlockId(0)
         );
-        assert_eq!(left.memory_blocks[0].size, 0x120);
-        assert_eq!(left.memory_blocks[0].virtual_size, 0x100);
+        assert_eq!(left.memory_blocks()[0].size, 0x120);
+        assert_eq!(left.memory_blocks()[0].virtual_size, 0x100);
     }
 
     #[test]
     fn snapshot_preserves_provenance_and_links() {
-        let snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
         let first = snapshot.function_at(0x1000).unwrap();
         assert_eq!(first.provenance.source, FactSource::ExportTable);
         assert_eq!(first.provenance.confidence, FactConfidence::Proven);
         assert_eq!(first.memory_block, Some(MemoryBlockId(0)));
-        assert_eq!(snapshot.relocations.len(), 1);
-        assert!(snapshot.relocations[0].symbol.is_some());
+        assert_eq!(snapshot.relocations().len(), 1);
+        assert!(snapshot.relocations()[0].symbol.is_some());
     }
 
     /// Two symbols named `dup` (static functions in different files); the
@@ -922,10 +1357,10 @@ mod tests {
             }])
             .build()
             .expect("fixture should build");
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
-        let bound = snapshot.relocations[0].symbol.expect("bound to a symbol");
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
+        let bound = snapshot.relocations()[0].symbol.expect("bound to a symbol");
         let symbol = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|symbol| symbol.id == bound)
             .expect("the bound symbol exists");
@@ -957,7 +1392,7 @@ mod tests {
 
     #[test]
     fn snapshot_range_queries_are_deterministic() {
-        let snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
         assert_eq!(snapshot.functions_at(0x1000).count(), 1);
         assert_eq!(
             snapshot
@@ -1013,7 +1448,7 @@ mod tests {
             }])
             .build()
             .expect("fixture should build");
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
         for address in [0x1000u64, 0x1004, 0x10ff] {
             assert_eq!(
                 snapshot
@@ -1032,7 +1467,8 @@ mod tests {
             .build()
             .expect("fixture should build");
         assert_eq!(
-            ProgramSnapshot::from_loaded_binary(&lone)
+            ProgramSnapshot::try_from_loaded_binary(&lone)
+                .expect("valid")
                 .function_containing(0x2000)
                 .map(|row| row.name.as_str()),
             Some("_label")
@@ -1061,7 +1497,7 @@ mod tests {
 
     #[test]
     fn snapshot_integrity_reports_corrupt_ids_links_and_ranges() {
-        let mut snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
+        let mut snapshot = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
         snapshot.functions[0].id = FunctionId(9);
         snapshot.functions[0].memory_block = Some(MemoryBlockId(9));
         snapshot.relocations[0].symbol = Some(SymbolId(9));
@@ -1131,7 +1567,7 @@ mod tests {
             .build()
             .expect("fixture should build");
 
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
         let imported = snapshot
             .function_at(0x3010)
             .expect("IAT import function should be retained in snapshot");
@@ -1141,7 +1577,7 @@ mod tests {
         assert_eq!(imported.provenance.source, FactSource::ImportTable);
         assert!(
             snapshot
-                .symbols
+                .symbols()
                 .iter()
                 .any(|symbol| { symbol.address == 0x3010 && symbol.kind == SymbolKind::Import })
         );
@@ -1173,9 +1609,9 @@ mod tests {
             .build()
             .expect("fixture should build");
 
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
         let label = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|symbol| symbol.address == 0x1020)
             .expect("loader label should reach the canonical symbol table");
@@ -1204,8 +1640,8 @@ mod tests {
             .build()
             .expect("fixture should build");
 
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
-        let headers = &snapshot.memory_blocks[0];
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
+        let headers = &snapshot.memory_blocks()[0];
         assert_eq!(headers.name, "Headers");
         assert_eq!(headers.start, 0x140000000);
         assert_eq!(headers.size, 0x600);
@@ -1219,7 +1655,7 @@ mod tests {
             }
         );
         assert_eq!(headers.provenance.source, FactSource::Loader);
-        assert_eq!(snapshot.memory_blocks[1].name, ".text");
+        assert_eq!(snapshot.memory_blocks()[1].name, ".text");
     }
 
     #[test]
@@ -1254,11 +1690,11 @@ mod tests {
                 .build()
                 .expect("binary should build");
 
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
 
         // 1. IAT symbol (puts at GOT slot 0x404018) should have version GLIBC_2.2.5
         let puts_sym = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|s| s.name == "puts")
             .expect("puts symbol must exist");
@@ -1267,7 +1703,7 @@ mod tests {
 
         // 2. Aliased functions sharing address 0x401000 should retain distinct versions
         let alias1 = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|s| s.name == "alias_v1")
             .expect("alias_v1 must exist");
@@ -1275,7 +1711,7 @@ mod tests {
         assert_eq!(alias1.version.as_deref(), Some("VER_1.0"));
 
         let alias2 = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|s| s.name == "alias_v2")
             .expect("alias_v2 must exist");
@@ -1311,9 +1747,9 @@ mod tests {
             .build()
             .expect("fixture should build");
 
-        let snapshot = ProgramSnapshot::from_loaded_binary(&binary);
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&binary).expect("valid");
         let sym = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|s| s.name == "external_printf")
             .expect("relocation target symbol must be in snapshot.symbols");
@@ -1321,20 +1757,26 @@ mod tests {
         assert_eq!(sym.kind, SymbolKind::RelocationTarget);
         assert_eq!(sym.provenance.source, FactSource::RelocationTable);
 
-        let reloc = &snapshot.relocations[0];
+        let reloc = &snapshot.relocations()[0];
         assert_eq!(reloc.symbol, Some(sym.id));
         assert_eq!(reloc.symbol_name.as_deref(), Some("external_printf"));
     }
 
     #[test]
     fn snapshot_integrity_detects_function_overflowing_memory_block() {
-        let mut snapshot = ProgramSnapshot::from_loaded_binary(&fixture(false));
-        let block = &snapshot.memory_blocks[0];
-        let block_end = block.start + block.size;
-        snapshot.functions[0].entry = block_end - 10;
-        snapshot.functions[0].size = 50;
+        let mut builder = ProgramSnapshot::try_from_loaded_binary(&fixture(false))
+            .expect("valid")
+            .to_builder();
+        let block_end = {
+            let block = &builder.memory_blocks[0];
+            block.start + block.size
+        };
+        builder.functions_mut()[0].entry = block_end - 10;
+        builder.functions_mut()[0].size = 50;
 
-        let report = snapshot.integrity_report();
+        let Err(report) = builder.build() else {
+            panic!("overflowing function must be rejected at publication");
+        };
         assert!(!report.is_valid());
         assert!(report.issues.iter().any(|issue| matches!(
             issue,
@@ -1406,18 +1848,375 @@ mod tests {
         assert_eq!(overflow_fn.memory_block, None);
 
         let import_sym = snapshot
-            .symbols
+            .symbols()
             .iter()
             .find(|s| s.address == 0x140002010 && s.kind == SymbolKind::Import)
             .expect("import symbol");
         assert_eq!(import_sym.size, Some(8));
         assert!(
             !snapshot
-                .symbols
+                .symbols()
                 .iter()
                 .any(|s| s.address == 0x140002010 && s.kind == SymbolKind::RelocationTarget),
             "existing import symbol should not gain duplicate RelocationTarget"
         );
-        assert_eq!(snapshot.relocations[0].symbol, Some(import_sym.id));
+        assert_eq!(snapshot.relocations()[0].symbol, Some(import_sym.id));
+    }
+
+    fn reference_function_containing<'a>(
+        snapshot: &'a ProgramSnapshot,
+        address: u64,
+    ) -> Option<&'a FunctionRecord> {
+        let sized = snapshot
+            .functions()
+            .iter()
+            .filter(|f| f.size > 0 && f.entry <= address && address < f.entry + f.size)
+            .min_by_key(|f| (f.size, f.entry, f.id));
+        sized.or_else(|| snapshot.functions().iter().find(|f| f.entry == address))
+    }
+
+    fn reference_memory_block_containing<'a>(
+        snapshot: &'a ProgramSnapshot,
+        address: u64,
+    ) -> Option<&'a MemoryBlock> {
+        snapshot
+            .memory_blocks()
+            .iter()
+            .filter(|b| b.start <= address && address < b.start + b.size)
+            .min_by_key(|b| (b.start, b.id))
+    }
+
+    fn assert_queries_match_reference_scan(snapshot: &ProgramSnapshot, probe_addrs: &[u64]) {
+        assert!(
+            snapshot.integrity_report().is_valid(),
+            "snapshot must satisfy integrity contract: {:?}",
+            snapshot.integrity_report().issues
+        );
+        for &addr in probe_addrs {
+            assert_eq!(
+                snapshot.function_at(addr),
+                snapshot.functions().iter().find(|f| f.entry == addr),
+                "function_at mismatch at 0x{addr:x}"
+            );
+            assert_eq!(
+                snapshot.functions_at(addr).collect::<Vec<_>>(),
+                snapshot
+                    .functions()
+                    .iter()
+                    .filter(|f| f.entry == addr)
+                    .collect::<Vec<_>>(),
+                "functions_at mismatch at 0x{addr:x}"
+            );
+            assert_eq!(
+                snapshot.function_containing(addr),
+                reference_function_containing(snapshot, addr),
+                "function_containing mismatch at 0x{addr:x}"
+            );
+            assert_eq!(
+                snapshot.memory_block_containing(addr),
+                reference_memory_block_containing(snapshot, addr),
+                "memory_block_containing mismatch at 0x{addr:x}"
+            );
+            assert_eq!(
+                snapshot.symbols_at(addr).collect::<Vec<_>>(),
+                snapshot
+                    .symbols()
+                    .iter()
+                    .filter(|s| s.address == addr)
+                    .collect::<Vec<_>>(),
+                "symbols_at mismatch at 0x{addr:x}"
+            );
+            assert_eq!(
+                snapshot.relocations_at(addr).collect::<Vec<_>>(),
+                snapshot
+                    .relocations()
+                    .iter()
+                    .filter(|r| r.address == addr)
+                    .collect::<Vec<_>>(),
+                "relocations_at mismatch at 0x{addr:x}"
+            );
+        }
+    }
+
+    #[test]
+    fn stale_derived_index_is_detected_by_integrity_report() {
+        let mut fn_corrupt =
+            ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
+        // Keep canonical order intact (`first` stays ahead of `second` at 0x1010)
+        // while breaking correspondence with the cached `function_intervals` index.
+        fn_corrupt.functions[0].entry = 0x1004;
+        let report = fn_corrupt.integrity_report();
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DerivedIndexMismatch {
+                table: SnapshotTable::Functions
+            }
+        )));
+
+        let mut block_corrupt =
+            ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
+        block_corrupt.memory_blocks[0].size = 0x200;
+        let report = block_corrupt.integrity_report();
+        assert!(report.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DerivedIndexMismatch {
+                table: SnapshotTable::MemoryBlocks
+            }
+        )));
+    }
+
+    #[test]
+    fn typed_deltas_and_builder_mutations_stay_query_consistent_with_reference_scan() {
+        let probes: Vec<u64> = (0x0ff0..=0x2100).step_by(4).collect();
+        let snapshot = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
+        assert_queries_match_reference_scan(&snapshot, &probes);
+
+        // 1. Update function range and move entry past `second` (triggers re-sort + ID remap).
+        let updated = snapshot
+            .apply_delta(ProgramSnapshotDelta::UpdateFunctionRange {
+                id: FunctionId(0),
+                entry: 0x1020,
+                size: 16,
+            })
+            .expect("range update should republish validly");
+        assert_eq!(updated.functions()[0].name, "second");
+        assert_eq!(updated.functions()[0].id, FunctionId(0));
+        assert_eq!(updated.functions()[1].name, "first");
+        assert_eq!(updated.functions()[1].id, FunctionId(1));
+        assert_eq!(updated.function_containing(0x1004), None);
+        assert_eq!(
+            updated.function_containing(0x1024).map(|f| f.name.as_str()),
+            Some("first")
+        );
+        assert_queries_match_reference_scan(&updated, &probes);
+
+        // 2. Append a new block, function, symbol, and relocation via typed deltas.
+        let with_append = updated
+            .apply_deltas([
+                ProgramSnapshotDelta::AddMemoryBlock(MemoryBlock {
+                    id: MemoryBlockId(99),
+                    name: ".extra".into(),
+                    start: 0x2000,
+                    size: 0x100,
+                    virtual_size: 0x100,
+                    file_offset: 0x400,
+                    file_size: 0x100,
+                    permissions: Permissions {
+                        read: true,
+                        write: false,
+                        execute: true,
+                    },
+                    provenance: Provenance {
+                        source: FactSource::StaticDiscovery,
+                        confidence: FactConfidence::Medium,
+                        detail: None,
+                    },
+                }),
+                ProgramSnapshotDelta::AddFunction(FunctionRecord {
+                    id: FunctionId(99),
+                    name: "appended_fn".into(),
+                    entry: 0x2010,
+                    size: 32,
+                    kind: FunctionKind::Discovered,
+                    is_import: false,
+                    is_export: false,
+                    is_thunk: false,
+                    thunk_target: None,
+                    memory_block: None,
+                    external_library: None,
+                    provenance: Provenance {
+                        source: FactSource::StaticDiscovery,
+                        confidence: FactConfidence::Medium,
+                        detail: None,
+                    },
+                }),
+                ProgramSnapshotDelta::AddSymbol(SymbolRecord {
+                    id: SymbolId(99),
+                    name: "appended_sym".into(),
+                    address: 0x2010,
+                    kind: SymbolKind::Function,
+                    size: Some(32),
+                    version: None,
+                    provenance: Provenance {
+                        source: FactSource::StaticDiscovery,
+                        confidence: FactConfidence::Medium,
+                        detail: None,
+                    },
+                }),
+                ProgramSnapshotDelta::AddRelocation(RelocationRecord {
+                    id: RelocationId(99),
+                    address: 0x2014,
+                    relocation_type: 1,
+                    size: 8,
+                    addend: 0,
+                    symbol: None,
+                    symbol_name: Some("appended_sym".into()),
+                    provenance: Provenance {
+                        source: FactSource::RelocationTable,
+                        confidence: FactConfidence::Proven,
+                        detail: None,
+                    },
+                }),
+            ])
+            .expect("appends should publish validly");
+        assert_queries_match_reference_scan(&with_append, &probes);
+
+        // 3. Reorder rows manually in builder, canonicalize, and publish.
+        let mut reordered_builder = with_append.to_builder();
+        reordered_builder.functions_mut().reverse();
+        reordered_builder.symbols_mut().reverse();
+        reordered_builder.relocations_mut().reverse();
+        let recanonical = reordered_builder.canonicalize().build().expect("valid");
+        assert_queries_match_reference_scan(&recanonical, &probes);
+
+        // 4. Delete rows via typed deltas and verify queries reflect deletions.
+        let deleted = recanonical
+            .apply_deltas([
+                ProgramSnapshotDelta::RemoveRelocation(RelocationId(1)),
+                ProgramSnapshotDelta::RemoveFunction(FunctionId(1)),
+            ])
+            .expect("deletions should publish validly");
+        assert_eq!(deleted.function_containing(0x1024), None);
+        assert_eq!(deleted.relocations_at(0x2014).count(), 0);
+        assert_queries_match_reference_scan(&deleted, &probes);
+    }
+
+    #[test]
+    fn invalid_publication_is_rejected_and_surfaces_explicit_partial_status() {
+        let valid = ProgramSnapshot::try_from_loaded_binary(&fixture(false)).expect("valid");
+
+        // Unsorted functions without canonicalize fail publication cleanly and expose Partial.
+        let mut unsorted = valid.to_builder();
+        unsorted.functions_mut().reverse();
+        let pub_outcome = unsorted.clone().publish();
+        assert!(!pub_outcome.is_valid());
+        let SnapshotPublication::Partial(partial) = pub_outcome else {
+            panic!("unsorted snapshot must surface Partial publication");
+        };
+        assert_eq!(partial.functions().len(), 2);
+        assert!(
+            partial
+                .integrity_report()
+                .issues
+                .iter()
+                .any(|issue| matches!(
+                    issue,
+                    SnapshotIntegrityIssue::NonCanonicalOrder {
+                        table: SnapshotTable::Functions,
+                        ..
+                    }
+                ))
+        );
+        // Partial snapshot can still be repaired cleanly through canonicalize().
+        assert!(partial.to_builder().canonicalize().build().is_ok());
+
+        // Removing a referenced block or symbol without updating dependents fails with DanglingReference.
+        let err = valid
+            .apply_delta(ProgramSnapshotDelta::RemoveMemoryBlock(MemoryBlockId(0)))
+            .expect_err("removing referenced block must fail validation");
+        assert!(err.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DanglingReference {
+                table: SnapshotTable::Functions,
+                target_table: SnapshotTable::MemoryBlocks,
+                ..
+            }
+        )));
+
+        let err = valid
+            .apply_delta(ProgramSnapshotDelta::RemoveSymbol(
+                valid.relocations()[0].symbol.expect("linked symbol"),
+            ))
+            .expect_err("removing referenced symbol must fail validation");
+        assert!(err.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::DanglingReference {
+                table: SnapshotTable::Relocations,
+                target_table: SnapshotTable::Symbols,
+                ..
+            }
+        )));
+
+        // Shrinking a memory block past a function that points to it fails with FunctionOutsideMemoryBlock.
+        let err = valid
+            .apply_delta(ProgramSnapshotDelta::UpdateMemoryBlockRange {
+                id: MemoryBlockId(0),
+                start: 0x1000,
+                size: 8,
+            })
+            .expect_err("shrinking block past functions must fail validation");
+        assert!(err.issues.iter().any(|issue| matches!(
+            issue,
+            SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
+        )));
+
+        // Schema mismatch is also rejected.
+        let err = valid
+            .to_builder()
+            .with_schema("bad-schema")
+            .build()
+            .expect_err("wrong schema must fail");
+        assert!(
+            err.issues
+                .iter()
+                .any(|issue| matches!(issue, SnapshotIntegrityIssue::SchemaMismatch { .. }))
+        );
+    }
+
+    #[test]
+    fn serialization_omits_ephemeral_indexes_and_deserialization_rebuilds_and_validates() {
+        let mut ver_builder = ProgramSnapshot::try_from_loaded_binary(&fixture(false))
+            .expect("valid")
+            .to_builder();
+        ver_builder.apply_delta(ProgramSnapshotDelta::AddFunction(FunctionRecord {
+            id: FunctionId(0),
+            name: "_alias".into(),
+            entry: 0x1000,
+            size: 0,
+            kind: FunctionKind::Code,
+            is_import: false,
+            is_export: false,
+            is_thunk: false,
+            thunk_target: None,
+            memory_block: Some(MemoryBlockId(0)),
+            external_library: None,
+            provenance: Provenance {
+                source: FactSource::SymbolTable,
+                confidence: FactConfidence::High,
+                detail: None,
+            },
+        }));
+        let original = ver_builder.canonicalize().build().expect("valid");
+        let mut value = serde_json::to_value(&original).expect("serialize snapshot");
+        let obj = value.as_object().expect("JSON object");
+        assert_eq!(obj.len(), 6);
+        for key in [
+            "schema",
+            "binary",
+            "memory_blocks",
+            "functions",
+            "symbols",
+            "relocations",
+        ] {
+            assert!(obj.contains_key(key), "missing key {key}");
+        }
+
+        let roundtrip: ProgramSnapshot =
+            serde_json::from_value(value.clone()).expect("valid JSON should rebuild indexes");
+        assert_eq!(roundtrip, original);
+        let probes: Vec<u64> = (0x0ff0..=0x1140).step_by(4).collect();
+        assert_queries_match_reference_scan(&roundtrip, &probes);
+
+        // Tampering serialized JSON rows out of order must be rejected on deserialization.
+        let funcs = value
+            .get_mut("functions")
+            .and_then(|v| v.as_array_mut())
+            .expect("functions array");
+        funcs.swap(0, 2);
+        assert!(serde_json::from_value::<ProgramSnapshot>(value.clone()).is_err());
+
+        // Tampering schema in JSON must be rejected.
+        value["schema"] = serde_json::json!("evil-schema");
+        assert!(serde_json::from_value::<ProgramSnapshot>(value).is_err());
     }
 }

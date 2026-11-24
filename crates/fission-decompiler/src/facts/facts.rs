@@ -180,7 +180,7 @@ pub(crate) fn build_nir_type_context(
     let program = fact_store.program();
 
     for function in program
-        .functions
+        .functions()
         .iter()
         .filter(|function| function.is_import)
     {
@@ -191,7 +191,7 @@ pub(crate) fn build_nir_type_context(
     }
 
     for symbol in program
-        .symbols
+        .symbols()
         .iter()
         .filter(|symbol| symbol.kind == SymbolKind::Import)
     {
@@ -211,7 +211,7 @@ pub(crate) fn build_nir_type_context(
         index.add(resolved_address, &fact.name, CandidateClass::Fact);
     }
 
-    for function in &program.functions {
+    for function in program.functions() {
         if function.name.is_empty() {
             continue;
         }
@@ -240,7 +240,7 @@ pub(crate) fn build_nir_type_context(
     }
 
     for symbol in program
-        .symbols
+        .symbols()
         .iter()
         .filter(|symbol| symbol.kind == SymbolKind::Data)
     {

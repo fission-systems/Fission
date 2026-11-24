@@ -1,8 +1,9 @@
 use super::{FactConfidence, FactSource, FunctionId, MemoryBlockId, ProgramSnapshot, SymbolId};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
+use std::fmt;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SnapshotTable {
     MemoryBlocks,
@@ -11,7 +12,7 @@ pub enum SnapshotTable {
     Relocations,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SnapshotIntegrityIssue {
     SchemaMismatch {
@@ -48,9 +49,12 @@ pub enum SnapshotIntegrityIssue {
         function: FunctionId,
         memory_block: MemoryBlockId,
     },
+    DerivedIndexMismatch {
+        table: SnapshotTable,
+    },
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SnapshotIntegrityReport {
     pub issues: Vec<SnapshotIntegrityIssue>,
 }
@@ -61,7 +65,18 @@ impl SnapshotIntegrityReport {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+impl fmt::Display for SnapshotIntegrityReport {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "program snapshot integrity check failed ({} issue(s)): {:?}",
+            self.issues.len(),
+            self.issues
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FactInventory {
     pub total: usize,
     pub memory_blocks: usize,
@@ -73,23 +88,36 @@ pub struct FactInventory {
 }
 
 pub(super) fn fact_inventory(snapshot: &ProgramSnapshot) -> FactInventory {
+    fact_inventory_from_tables(
+        &snapshot.memory_blocks,
+        &snapshot.functions,
+        &snapshot.symbols,
+        &snapshot.relocations,
+    )
+}
+
+pub(super) fn fact_inventory_from_tables(
+    memory_blocks: &[super::MemoryBlock],
+    functions: &[super::FunctionRecord],
+    symbols: &[super::SymbolRecord],
+    relocations: &[super::RelocationRecord],
+) -> FactInventory {
     let mut inventory = FactInventory {
-        memory_blocks: snapshot.memory_blocks.len(),
-        functions: snapshot.functions.len(),
-        symbols: snapshot.symbols.len(),
-        relocations: snapshot.relocations.len(),
+        memory_blocks: memory_blocks.len(),
+        functions: functions.len(),
+        symbols: symbols.len(),
+        relocations: relocations.len(),
         ..FactInventory::default()
     };
     inventory.total =
         inventory.memory_blocks + inventory.functions + inventory.symbols + inventory.relocations;
 
-    let provenances = snapshot
-        .memory_blocks
+    let provenances = memory_blocks
         .iter()
         .map(|row| &row.provenance)
-        .chain(snapshot.functions.iter().map(|row| &row.provenance))
-        .chain(snapshot.symbols.iter().map(|row| &row.provenance))
-        .chain(snapshot.relocations.iter().map(|row| &row.provenance));
+        .chain(functions.iter().map(|row| &row.provenance))
+        .chain(symbols.iter().map(|row| &row.provenance))
+        .chain(relocations.iter().map(|row| &row.provenance));
     for provenance in provenances {
         *inventory.by_source.entry(provenance.source).or_default() += 1;
         *inventory
@@ -105,7 +133,7 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
     if snapshot.schema != super::PROGRAM_SNAPSHOT_SCHEMA {
         report.issues.push(SnapshotIntegrityIssue::SchemaMismatch {
             expected: super::PROGRAM_SNAPSHOT_SCHEMA.to_string(),
-            actual: snapshot.schema.to_string(),
+            actual: snapshot.schema.clone(),
         });
     }
 
@@ -217,7 +245,27 @@ pub(super) fn integrity_report(snapshot: &ProgramSnapshot) -> SnapshotIntegrityR
     }
 
     validate_canonical_order(&mut report, snapshot);
+    validate_derived_indexes(&mut report, snapshot);
     report
+}
+
+fn validate_derived_indexes(report: &mut SnapshotIntegrityReport, snapshot: &ProgramSnapshot) {
+    if snapshot.memory_block_intervals
+        != crate::build_memory_block_intervals(&snapshot.memory_blocks)
+    {
+        report
+            .issues
+            .push(SnapshotIntegrityIssue::DerivedIndexMismatch {
+                table: SnapshotTable::MemoryBlocks,
+            });
+    }
+    if snapshot.function_intervals != crate::build_function_intervals(&snapshot.functions) {
+        report
+            .issues
+            .push(SnapshotIntegrityIssue::DerivedIndexMismatch {
+                table: SnapshotTable::Functions,
+            });
+    }
 }
 
 fn validate_id(
