@@ -208,7 +208,8 @@ impl Emulator {
                     .then(|| self.snapshot_symbolic_op(op));
 
             let (step, unimplemented) = {
-                let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
+                let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver)
+                    .with_nan_policy(self.arch.nan_policy);
                 let step = evaluator.step(op)?;
                 (step, evaluator.unimplemented)
             };
@@ -332,7 +333,7 @@ impl Emulator {
                     // Same function the compiled path calls, for the same
                     // reason: two implementations of one vector instruction
                     // are two chances to be wrong differently.
-                    if crate::arch::vector::is_wide_userop(&flat[idx]) {
+                    if crate::arch::vector::is_vector_userop(&flat[idx], &self.userop_map) {
                         let op = flat[idx].clone();
                         if !crate::arch::vector::answer_vector_userop(self, &op) {
                             let name = self

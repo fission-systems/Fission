@@ -27,6 +27,7 @@ members = [
     "crates/fission-dir",
     "crates/fission-causal",
     "crates/fission-quotient",
+    "xtask",
 ]
 
 [profile.release]
