@@ -1886,9 +1886,14 @@ fn arm32_r1_r0_pair_materializes_u64_return() {
         code.contains("unsigned long long u64_pair(int param_1, int param_2)"),
         "{code}"
     );
+    // The pair is two zero extensions (PIECE). `param_1 + 1` is an `int`, so
+    // a bare `(unsigned long long)` would sign-extend it and a negative low
+    // word would set every bit of the high one; the `(uint)` view keeps the
+    // halves apart.
     assert!(
         code.contains(
-            "return (unsigned long long)(param_2 + 2) << 32 | (unsigned long long)(param_1 + 1);"
+            "return (unsigned long long)(uint)(param_2 + 2) << 32 | \
+             (unsigned long long)(uint)(param_1 + 1);"
         ),
         "{code}"
     );
