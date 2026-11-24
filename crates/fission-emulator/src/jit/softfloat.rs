@@ -12,6 +12,7 @@
 
 fn bits_to_f64(bits: u64, size: u32) -> f64 {
     match size {
+        2 => crate::pcode::eval::f16_to_f64(bits as u16),
         4 => f32::from_bits(bits as u32) as f64,
         8 | 10 => f64::from_bits(bits),
         _ => f64::from_bits(bits),
@@ -20,6 +21,7 @@ fn bits_to_f64(bits: u64, size: u32) -> f64 {
 
 fn f64_to_bits(val: f64, size: u32) -> u64 {
     match size {
+        2 => u64::from(crate::pcode::eval::f64_to_f16(val)),
         4 => {
             let f = val as f32;
             // Quiet NaN if signaling.
@@ -95,10 +97,7 @@ pub fn soft_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
             // Truncate float → int bits in out_size.
             let a = bits_to_f64(a_bits, in_size);
             let i = a as i64;
-            match out_size {
-                4 => (i as i32 as u32) as u64,
-                _ => i as u64,
-            }
+            crate::jit::float_ops::mask_int(i as u64, out_size)
         }
         x if x == FloatUnOp::Int2Float as u32 => {
             // Signed, at the input's own width -- as the default path and the
@@ -139,5 +138,34 @@ mod tests {
         let r = soft_binop(FloatBinOp::Add as u32, 4, a, b);
         let f = f32::from_bits(r as u32);
         assert!((f - 3.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn soft_f16_ops() {
+        use crate::jit::float_ops::FloatUnOp;
+        // 1.5 + 2.25 = 3.75 (0x3e00 + 0x4080 = 0x4380)
+        assert_eq!(
+            soft_binop(FloatBinOp::Add as u32, 2, 0x3e00, 0x4080),
+            0x4380
+        );
+        // 2.0 * -1.5 = -3.0 (0x4000 * 0xbe00 = 0xc200)
+        assert_eq!(
+            soft_binop(FloatBinOp::Mul as u32, 2, 0x4000, 0xbe00),
+            0xc200
+        );
+        // sNaN quieting on f16 output
+        assert_eq!(
+            soft_unop(FloatUnOp::Float2Float as u32, 2, 2, 0x7c01),
+            0x7e01
+        );
+        assert_eq!(soft_unop(FloatUnOp::Nan as u32, 2, 1, 0x7c01), 1);
+        assert_eq!(
+            soft_unop(FloatUnOp::Int2Float as u32, 4, 2, (-2i32 as u32) as u64),
+            0xc000
+        );
+        assert_eq!(
+            soft_unop(FloatUnOp::Trunc as u32, 2, 2, 0xc300),
+            (-3i16 as u16) as u64
+        );
     }
 }
