@@ -691,7 +691,7 @@ Before is the P1 runner re-run on merged main; after is P2's default `Config` (i
 - **`carry`** shows the same layer's model reproducing when the shadow's coarseness does not matter. The sum is 257, so both bytes happen to fit.
 - **The value set alone would find none of these.**
   - The exhaustive single-byte sweep finds nothing in any of the six cases, as designed.
-  - P1's pair search tries the low-bit flip and zero, which cannot produce 'K' or 'E'. It ran on `carry_impossible` and found no pair.
+  - P1's pair search tries the low-bit flip and zero, which cannot produce 'K' or 'E'. On the deny cases it has no partners at all: it pairs bytes from the slices, and the slice of a sink that never happened is empty (`carry_impossible`: 0 pairs tried).
 - **The XOR and handler cases need no joint search.** Each has single-byte witnesses, so it was not run (`not_needed`).
 
 ### 8.6 New cases
@@ -732,7 +732,30 @@ Each case has a positive and an adversarial control. They come from the requeste
 
 ### 8.7 Native agreement
 
-NATIVE_PLACEHOLDER
+`testdata/native/verify_native.py` was extended for P2. For every joint witness it now checks:
+- the whole model;
+- each member alone;
+- each set one member smaller (for three or more members);
+- each member's contingency alone.
+
+It also checks every solver model the search replayed, rejected ones included (native Φ must equal the emulator replay's Φ), and every requested set. AArch64 runs natively on the host CPU in Docker's Linux VM; x86-64 runs under Docker's `linux/amd64` translation, which is independent of Fission's SLEIGH lift.
+
+**Result: 856 checks over the 25 cases, all agree.** No case failed.
+
+| Kind | Checks |
+|---|---|
+| recorded input | 23 |
+| refusal (both outcomes seen natively over 12 runs) | 2 |
+| input-byte single witnesses | 27 |
+| bytes CSIC did not name (two alternatives each) | 722 |
+| joint witnesses (model, members alone, one-smaller subsets) | 23 |
+| contingencies | 12 |
+| solver models replayed (including the 1 rejected) | 26 |
+| requested sets (positive and adversarial controls) | 21 |
+
+Of these, 313 checks are on the 9 new cases and 543 on the 16 P1 cases. P1 had 559 checks; fewer bytes are now unnamed, because the joint members are named.
+
+The rejected model's input (`carry_impossible`, `req[0] = 160`) does not grant natively. That matches the emulator replay that rejected it, so the rejection was about the symbolic layer, not the emulator.
 
 ### 8.8 Limits
 
