@@ -200,8 +200,8 @@ Follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/). Use `rust
 # Format code -- CI runs `cargo fmt --all --check`
 cargo fmt --all
 
-# Lint code -- CI's exact line
-cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
+# Lint code -- CI's exact command, via the script the Lint job runs
+CRATES= EXCLUDE_CRATES=fission-signatures bash scripts/ci/clippy.sh
 ```
 
 Run `cargo fmt --all` with your change, not as a separate sweep, and never
@@ -390,11 +390,17 @@ git commit -m "feat(cli): add --strings flag"
 4. **Write tests**
 5. **Run checks**
    ```bash
-   cargo fmt --all --check
-   cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
-   cargo nextest run -p <crates you touched>
+   cargo xtask preflight    # CI Fast Gate checks for your commits, CI's own commands
    cargo build -p fission-cli --release
    ```
+   `preflight` asks CI's classifiers (`scripts/ci/change_plan.py`,
+   `scripts/ci/select_affected_crates.py`) which checks and packages your
+   commits select, runs them through the scripts the workflows call (fmt,
+   clippy, pass-gate lint, owner boundaries, the targeted-test rule, nextest
+   in the debug profile, doctests, feature suites) and prints a pass/fail
+   table. `--fast` skips tests, `--full` checks the workspace, `--release`
+   tests in release. It does not run the jobs it lists at the end (security,
+   doc examples, pre-merge lanes, macOS).
 
 6. **Update documentation**
 7. **Commit with conventional format**

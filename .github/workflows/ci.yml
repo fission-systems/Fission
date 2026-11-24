@@ -179,29 +179,11 @@ jobs:
 
       - name: Python syntax (scripts/)
         shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t py < <(find scripts -type f -name '*.py' 2>/dev/null || true)
-          if [ "${#py[@]}" -eq 0 ]; then
-            echo "No Python scripts under scripts/"
-            exit 0
-          fi
-          python3 -m py_compile "${py[@]}"
-          echo "OK: py_compile ok (${#py[@]} files)"
+        run: bash scripts/ci/script_syntax.sh py
 
       - name: Shell syntax (scripts/**/*.sh)
         shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t shs < <(find scripts -type f -name '*.sh' 2>/dev/null || true)
-          if [ "${#shs[@]}" -eq 0 ]; then
-            echo "No shell scripts under scripts/"
-            exit 0
-          fi
-          for f in "${shs[@]}"; do
-            bash -n "$f"
-          done
-          echo "OK: bash -n ok (${#shs[@]} files)"
+        run: bash scripts/ci/script_syntax.sh sh
 
       - name: CI classifier and tooling tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
@@ -233,34 +215,10 @@ jobs:
           submodules: false
 
       - name: Check for function/address-specific patterns in NIR pipeline
-        run: |
-          set -euo pipefail
-          PATTERN_HITS=$(grep -rn \
-            -e 'func_name\s*==' \
-            -e 'func_name\.contains' \
-            -e 'function_name.*==\|==.*function_name' \
-            -e 'addr\s*==\s*0x[0-9a-fA-F]' \
-            crates/fission-pcode/src/midend/structuring/ \
-            crates/fission-pcode/src/midend/normalize/ \
-            crates/fission-midend-structuring/src/ \
-            crates/fission-midend-normalize/src/ 2>/dev/null || true)
-          if [ -n "$PATTERN_HITS" ]; then
-            echo "ERROR: Function/address-specific pattern detected in NIR pipeline:"
-            echo "$PATTERN_HITS"
-            exit 1
-          fi
-          echo "OK: No function/address-specific patterns found in NIR pipeline."
+        run: bash scripts/check/pass_gate_patterns.sh
 
       - name: Verify MAX_STRUCTURING_PASSES constant is declared
-        run: |
-          set -euo pipefail
-          if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/midend/pass/manager.rs; then
-            echo "ERROR: MAX_STRUCTURING_PASSES constant missing from midend/pass/manager.rs"
-            exit 1
-          fi
-          CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/midend/pass/manager.rs \
-                | grep -oE '[0-9]+' | head -1)
-          echo "OK: MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
+        run: bash scripts/check/max_structuring_passes.sh
 
       - name: Owner boundary scan (ADR 0008 / 0011 / 0012)
         run: |
@@ -280,74 +238,14 @@ jobs:
           # the base tip does not guarantee a merge base, so compare trees.
           git fetch --no-tags origin "$BASE_REF" --depth=1
           BASE_SHA=$(git rev-parse FETCH_HEAD)
-          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
-          echo "Changed paths relative to fetched base $BASE_SHA:"
-          printf '%s\n' "$CHANGED"
-
-          # Consume the complete input: grep -q can close the pipe early and
-          # make git diff fail with SIGPIPE under pipefail despite a match.
-          NIR_RENDER_MIDEND_CHANGED=false
-          HAS_TARGETED_TEST=false
-          SLEIGH_CHANGED=false
-
-          # Rust sources only: a manifest edit (a version bump, a dependency
-          # drop) changes no NIR semantics, and counting it blocked release
-          # PRs for want of a test there is nothing to write for.
-          if printf '%s\n' "$CHANGED" | grep '\.rs$' | grep -e "^crates/fission-pcode/src/midend/" \
-              -e "^crates/fission-pcode/src/render/" \
-              -e "^crates/fission-midend-structuring/" \
-              -e "^crates/fission-midend-normalize/" \
-              -e "^crates/fission-midend-core/" >/dev/null; then
-            NIR_RENDER_MIDEND_CHANGED=true
-            # Lines of code the change adds there, blank lines and comments
-            # aside. A change that only removes code (a duplicate definition,
-            # dead code) has nothing new for a test to target.
-            ADDED_CODE=$(git diff --unified=0 "$BASE_SHA" HEAD -- \
-                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
-                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
-                crates/fission-midend-core/ \
-                | grep '^+[^+]' | grep -cvE '^\+[[:space:]]*(//.*)?$' || true)
-            if [ "$ADDED_CODE" -eq 0 ]; then
-              echo "INFO: NIR/render/midend change adds no code; no targeted test required."
-              HAS_TARGETED_TEST=true
-            elif printf '%s\n' "$CHANGED" | grep -e "tests/" -e ".*test" -e ".*_tests\.rs" >/dev/null; then
-              HAS_TARGETED_TEST=true
-            elif git diff "$BASE_SHA" HEAD -- \
-                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
-                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
-                crates/fission-midend-core/ \
-                | grep "+.*#\[test\]" >/dev/null; then
-              HAS_TARGETED_TEST=true
-            fi
-          fi
-
-          if printf '%s\n' "$CHANGED" | grep -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/" >/dev/null; then
-            SLEIGH_CHANGED=true
-          fi
-
-          {
-            echo "nir_render_midend_changed=$NIR_RENDER_MIDEND_CHANGED"
-            echo "has_targeted_test=$HAS_TARGETED_TEST"
-            echo "sleigh_changed=$SLEIGH_CHANGED"
-          } >> "$GITHUB_OUTPUT"
+          bash scripts/ci/targeted_test_gate.sh collect "$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Enforce Targeted Tests for NIR/Render Changes
         if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
         env:
           NIR_RENDER_MIDEND_CHANGED: ${{ steps.pr_changes.outputs.nir_render_midend_changed }}
           HAS_TARGETED_TEST: ${{ steps.pr_changes.outputs.has_targeted_test }}
-        run: |
-          set -euo pipefail
-          if [ "$NIR_RENDER_MIDEND_CHANGED" = "true" ]; then
-            if [ "$HAS_TARGETED_TEST" = "true" ]; then
-              echo "OK: Targeted tests included."
-            else
-              echo "ERROR: Targeted test missing for NIR/render/midend changes."
-              exit 1
-            fi
-          else
-            echo "INFO: No NIR/render/midend changes detected."
-          fi
+        run: bash scripts/ci/targeted_test_gate.sh enforce
 
       - name: Enforce Sleigh Exact Match Parity
         if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
