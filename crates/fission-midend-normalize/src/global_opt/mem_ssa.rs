@@ -123,6 +123,9 @@ pub struct MemDef {
     pub use_count: usize,
     /// True if any address of this slot escapes to a `Call` argument.
     pub may_escape: bool,
+    /// True when emitted for a `FieldAccess` / `Index` store rather than a
+    /// `Deref` (heritage rewrites only `Deref` stores).
+    pub structured: bool,
 }
 
 /// A memory use (load or structured memory read operation).
@@ -189,6 +192,14 @@ impl Builder {
     }
 
     fn add_def(&mut self, key: AliasKey) -> usize {
+        self.record_def(key, false)
+    }
+
+    fn add_structured_def(&mut self, key: AliasKey) -> usize {
+        self.record_def(key, true)
+    }
+
+    fn record_def(&mut self, key: AliasKey, structured: bool) -> usize {
         let id = self.alloc_id();
         let may_escape = matches!(key, AliasKey::Unknown);
         self.reaching.insert(key.clone(), id);
@@ -197,6 +208,7 @@ impl Builder {
             key,
             use_count: 0,
             may_escape,
+            structured,
         });
         id
     }
@@ -259,7 +271,7 @@ impl Builder {
                         elem_ty,
                     } => {
                         let key = self.index_alias_key(base, index, elem_ty);
-                        self.add_def(key);
+                        self.add_structured_def(key);
                     }
                     PreHirLValue::Var(_) => {} // Not a memory write.
                     PreHirLValue::FieldAccess {
@@ -269,7 +281,7 @@ impl Builder {
                         ty,
                     } => {
                         let key = self.field_access_alias_key(base, field_name, *offset, ty);
-                        self.add_def(key);
+                        self.add_structured_def(key);
                     }
                 }
             }
@@ -469,10 +481,16 @@ impl Builder {
     }
 
     /// Whether the address expression is a pointer variable plus offsets.
+    ///
+    /// `Index` / `FieldAccess` address forms (see `index_access_ptr_expr`)
+    /// are offsets from their `base`, so a pointer variable under them names
+    /// the pointee too -- as the `base + index * size` form they replace did.
     fn is_based_on_pointer_variable(&self, expr: &PreHirExpr) -> bool {
         match expr {
             PreHirExpr::Var(name) => self.pointer_vars.contains(name),
-            PreHirExpr::Cast { expr, .. } => self.is_based_on_pointer_variable(expr),
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Index { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. } => self.is_based_on_pointer_variable(expr),
             PreHirExpr::Binary {
                 op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub,
                 lhs,

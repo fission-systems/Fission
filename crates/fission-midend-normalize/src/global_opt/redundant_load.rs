@@ -86,7 +86,10 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
                     });
                     if let PreHirExpr::Load { ptr, ty } = &*rhs {
                         let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(ty));
-                        if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
+                        // `p = *(p + 8)` reads through the old `p`; the key
+                        // names the new one, so it is not cached.
+                        if matches!(&key, AliasKey::Partition(partition)
+                            if partition.is_promotable_stack_like() && partition.base_object != *name)
                         {
                             cache.insert(key, name.clone());
                         }
@@ -504,6 +507,52 @@ mod tests {
             matches!(rhs, PreHirExpr::Var(name) if name == "v"),
             "{rhs:?}"
         );
+    }
+
+    /// `local_10 = *(local_10 + 8); w = *(local_10 + 8);` walks a list: the
+    /// second load reads through the *new* `local_10`. Caching the first load
+    /// under `local_10` would turn the second into `w = local_10`.
+    #[test]
+    fn load_through_its_own_destination_is_not_cached() {
+        let next = || PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("local_10".into())),
+                offset: 8,
+            }),
+            ty: u32_ty(),
+        };
+        let mut func = loop_fixture(vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("local_10".into()),
+                rhs: next(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("w".into()),
+                rhs: next(),
+            },
+        ]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
+            panic!()
+        };
+        assert!(matches!(rhs, PreHirExpr::Load { .. }), "{rhs:?}");
+
+        // Control: the same pair with a different destination is reused.
+        let mut func = loop_fixture(vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("w1".into()),
+                rhs: next(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("w".into()),
+                rhs: next(),
+            },
+        ]);
+        apply_redundant_load_elimination(&mut func);
+        let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
+            panic!()
+        };
+        assert!(matches!(rhs, PreHirExpr::Var(v) if v == "w1"), "{rhs:?}");
     }
 
     #[test]

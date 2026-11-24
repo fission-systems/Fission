@@ -29,6 +29,35 @@ pub fn apply_memory_heritage(func: &mut PreHirFunction) -> bool {
         }
     }
 
+    // Heritage rewrites `Deref` stores and `Load`s only. A slot that a
+    // `FieldAccess` / `Index` / `AggregateCopy` also writes or reads keeps that
+    // access as a memory op, so promoting the rest would split the slot's
+    // value between memory and the new names (and hand the structured def's
+    // name to the next `Deref` store of the same key).
+    let structured_keys: Vec<&AliasKey> = mem_ssa
+        .defs
+        .iter()
+        .filter(|def| def.structured)
+        .map(|def| &def.key)
+        .chain(
+            mem_ssa
+                .uses
+                .iter()
+                .filter(|use_node| !use_node.from_load)
+                .map(|use_node| &use_node.key),
+        )
+        .collect();
+    promotable_keys.retain(|key: &AliasKey| {
+        !structured_keys
+            .iter()
+            .any(|structured| match (structured, key) {
+                (AliasKey::Partition(s), AliasKey::Partition(k)) => {
+                    s.base_object == k.base_object && !structured.is_no_alias(key)
+                }
+                _ => false,
+            })
+    });
+
     if promotable_keys.is_empty() {
         return false;
     }
@@ -306,29 +335,6 @@ impl<'a> Rewriter<'a> {
                         let key = alias_key_for_ptr(ptr, size);
                         if self.promotable_keys.contains(&key) {
                             // Find the matching MemDef
-                            while self.current_def_idx < self.defs.len()
-                                && self.defs[self.current_def_idx].key != key
-                            {
-                                self.current_def_idx += 1;
-                            }
-                            if self.current_def_idx < self.defs.len() {
-                                let def = &self.defs[self.current_def_idx];
-                                if let Some(var_name) = self.var_names.get(&(key, def.id)) {
-                                    new_var_name = Some(var_name.clone());
-                                    is_promoted = true;
-                                }
-                                self.current_def_idx += 1;
-                            }
-                        }
-                    }
-                    PreHirLValue::Index {
-                        base,
-                        index: _,
-                        elem_ty,
-                    } => {
-                        let size = nir_byte_size(elem_ty);
-                        let key = alias_key_for_ptr(base, size);
-                        if self.promotable_keys.contains(&key) {
                             while self.current_def_idx < self.defs.len()
                                 && self.defs[self.current_def_idx].key != key
                             {
@@ -998,5 +1004,100 @@ mod tests {
         } else {
             panic!("expected Block");
         }
+    }
+
+    fn heritage_func(body: Vec<PreHirStmt>) -> PreHirFunction {
+        PreHirFunction {
+            variadic_fixed_arity: None,
+            name: "f".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            is_big_endian: false,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    /// Heritage rewrites only `Deref` stores and `Load`s. A slot that a
+    /// structured access (`FieldAccess` / `Index`) also writes or reads cannot
+    /// be promoted: the structured access stays a memory op, and the in-order
+    /// def cursor would hand the structured def's name to the next `Deref`.
+    #[test]
+    fn heritage_does_not_promote_a_slot_touched_by_structured_accesses() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let slot_plus_4 = || PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("local_20".to_string())),
+            offset: 4,
+        };
+        let deref_store = |v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(slot_plus_4()),
+                ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(v, u32_ty.clone()),
+        };
+        let field_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::FieldAccess {
+                base: Box::new(PreHirExpr::Var("local_20".to_string())),
+                field_name: "field_4".to_string(),
+                offset: 4,
+                ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(1, u32_ty.clone()),
+        };
+        let index_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Index {
+                base: Box::new(PreHirExpr::Var("local_20".to_string())),
+                index: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+                elem_ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(1, u32_ty.clone()),
+        };
+        let load = PreHirStmt::Return(Some(PreHirExpr::Load {
+            ptr: Box::new(slot_plus_4()),
+            ty: u32_ty.clone(),
+        }));
+        // The value returned must be the `Deref` store's 2, through memory or
+        // through a promoted name that is assigned 2.
+        let returns_two = |func: &PreHirFunction| {
+            match func.body.last() {
+            Some(PreHirStmt::Return(Some(PreHirExpr::Load { .. }))) => true,
+            Some(PreHirStmt::Return(Some(PreHirExpr::Var(v)))) => func.body.iter().any(|s| {
+                matches!(s, PreHirStmt::Assign { lhs: PreHirLValue::Var(n), rhs: PreHirExpr::Const(2, _) } if n == v)
+            }),
+            _ => false,
+        }
+        };
+
+        for (label, structured) in [("field", field_store), ("index", index_store)] {
+            let mut func = heritage_func(vec![structured, deref_store(2), load.clone()]);
+            apply_memory_heritage(&mut func);
+            assert!(returns_two(&func), "{label}: {:#?}", func.body);
+        }
+
+        // Control: with only `Deref`/`Load` accesses the slot is promoted.
+        let mut func = heritage_func(vec![deref_store(1), deref_store(2), load]);
+        assert!(apply_memory_heritage(&mut func));
+        assert!(
+            matches!(
+                func.body.last(),
+                Some(PreHirStmt::Return(Some(PreHirExpr::Var(_))))
+            ),
+            "{:#?}",
+            func.body
+        );
+        assert!(returns_two(&func), "{:#?}", func.body);
     }
 }

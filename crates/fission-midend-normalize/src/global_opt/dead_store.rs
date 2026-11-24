@@ -1087,6 +1087,64 @@ mod tests {
         assert_eq!(func.body.len(), 1, "{:?}", func.body);
     }
 
+    /// `local_18[1] = 1` where `local_18` holds a pointer writes the pointee,
+    /// not `local_18`'s own stack slot. Keying the `Index` as its own address
+    /// expression must still see the pointer variable underneath it, as the
+    /// `local_18 + 1 * 4` form it replaced did.
+    #[test]
+    fn dead_store_elimination_keeps_index_store_through_spilled_pointer() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = base_func(
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Index {
+                    base: Box::new(PreHirExpr::Var("local_18".to_string())),
+                    index: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+                    elem_ty: u32_ty.clone(),
+                },
+                rhs: PreHirExpr::Const(1, u32_ty),
+            }],
+            vec![ptr_binding("local_18")],
+        );
+        let changed = apply_dead_store_elimination(&mut func);
+        assert!(
+            !changed,
+            "index store through a spilled pointer must not be DSE'd: {:?}",
+            func.body
+        );
+        // Positive control: the same index store into a non-pointer local is a
+        // stack write and is removed when nothing reads it.
+        let mut func = base_func(
+            vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Index {
+                    base: Box::new(PreHirExpr::AddressOfLocal("local_18".to_string())),
+                    index: Box::new(PreHirExpr::Const(
+                        1,
+                        NirType::Int {
+                            bits: 32,
+                            signed: false,
+                        },
+                    )),
+                    elem_ty: NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                },
+                rhs: PreHirExpr::Const(
+                    1,
+                    NirType::Int {
+                        bits: 32,
+                        signed: false,
+                    },
+                ),
+            }],
+            vec![],
+        );
+        assert!(apply_dead_store_elimination(&mut func), "{:?}", func.body);
+    }
+
     #[test]
     fn alias_key_strided_or_unknown_is_conservative() {
         use super::super::mem_ssa::alias_key_for_pointer_expr;
