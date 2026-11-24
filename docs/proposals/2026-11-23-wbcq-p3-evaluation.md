@@ -999,3 +999,321 @@ python3 scripts/quality/wbcq/evaluate.py decbench \
 python3 scripts/quality/wbcq/evaluate.py compare-reach \
   --before ~/fission-benchmark/wbcq-p4/dirverify-merged --after ~/fission-benchmark/wbcq-p4s2/dirverify-step2
 ```
+
+## 12. P4 step 3: globals, hardening artefacts, and the decision
+
+Date: 2026-11-24. Status: **measured**. This is the last bounded measurement
+before the RFC's stop rule is applied (section 7):
+- **Continue WBCQ** if more than 40% of the step-shaped sample is inside the
+  model, and machines with more than one state reach double digits.
+- **Otherwise pivot to AEQ.**
+
+The step widens the model where section 11.7 ranked what remained:
+- globals: 29 first refusals (16%);
+- two compiler-hardening artefacts that no observation can see, together the
+  first refusal for 74 of 186 (40%).
+
+It also fixes 11.4's folding gap. Only `fission-quotient`, the `quotient`
+command, its schema, these scripts and two harness methods in `fission-dir`
+change.
+
+### 12.1 The model change
+
+**Global memory is a region anchored at its address.**
+- **Placing an access.** A load or store whose address is a constant plus an
+  optional index is placed in global memory when two things hold:
+  - the constant lies in an addressable section of the image (a loaded ELF
+    header is not a section);
+  - the rest of the address is not a pointer read out of memory, or a
+    register the caller set up. There the constant is an offset.
+- **The region.** It covers the bytes the step reaches. Nearby ranges in one
+  section share a region, so a table read at an index covers what the index
+  can reach.
+- **Initial bytes.** Its bytes are hidden state, starting as the emulator's
+  loaded baseline holds them (relocated, with `.bss` zeroed).
+- **The oracle.** It copies the region's bytes to their real address before
+  each step and reads them back after it.
+- **Pointers.** A pointer read out of a global and dereferenced is a nested
+  region, as in step 2.
+- **Budget.** At most 8 global regions of at most 4096 bytes.
+- **Fail closed:**
+  - an address stored to global memory;
+  - an absolute address outside the image's sections;
+  - an indexed global access that can run past its section.
+- **Assumption.** The global memory listed is state of this step function
+  alone: nothing else (no callee, no other thread, no signal handler) reads
+  or writes it between or during steps.
+
+**The thread pointer's block is a region anchored at the register.** An
+access at a non-negative constant offset from a register the caller set up
+and the step never writes (on x86-64, `FS_OFFSET`) makes that register
+anchor a region.
+- **The oracle.** It maps a block for the region and points the register at
+  it, through the new `install_register_block` harness method.
+- **The canary.** The stack protector's canary is then a slot of that block.
+  Its saved copy and its reload are the same value, so the check folds.
+- **Across calls.** A call keeps the register when the calling convention
+  does not list it as changed by a call. This is the same table step 1 reads
+  for caller-saved registers, now consulted for an anchoring register too.
+- **Assumption.** The block starts zeroed, so the canary is 0, and only this
+  step function writes it.
+- **Still refused:** a negative offset (a variable in the initial TLS block,
+  `fs:[-8]`).
+
+**Floating point and wide registers are poison until observed.**
+- A floating-point operation's result, and any register or temporary wider
+  than 8 bytes (x87), is now poison rather than an immediate refusal.
+- The `-fzero-call-used-regs` epilogue loads zeros onto the x87 stack and
+  pops them, and nothing observes that.
+- A result, branch, context field or call argument that depends on such a
+  value is still refused ("the result is a floating-point value").
+
+**Folding.** A constant mask that clears a concatenation's high part keeps
+only the low part. `and x10, x1, #0xff` of a 32-bit argument no longer names
+the register's undefined upper half (11.4).
+
+**`fission-dir` changes** (`EmulatorHarness`, two methods, nothing else):
+- `write_baseline(addr, bytes)`: write bytes into the restored baseline at a
+  mapped address, so every later call starts with them. It is skipped when
+  the bytes are already there, so read-only data passes through unchanged.
+- `install_register_block(register, contents)`: map a readable and writable
+  block, fill it, and point the register at it, all in the baseline.
+
+**Other changes.**
+- The summary's region retries rise from 64 to 256 (11.6).
+- **Schema:** regions gain `address` and `register`, and the budget gains
+  `max_global_regions`. These are additive.
+
+### 12.2 Corpus: machines whose state is global
+
+Three new machines are in `scripts/quality/wbcq/corpus/global_machines.c`.
+`ground_truth.py` explores them natively, keeping the globals the manifest
+lists as state: it restores them before every step and reads them back
+after, as the engine's oracle does.
+
+| function | global state | access | ground truth |
+|---|---|---|---|
+| `gcmd_step` | a command parser: its mode in `g_mode`, letters, digits and `;` classified by the constant table `g_kind[256]` (`.rodata`) | read-only table indexed by the input byte; writable scalar | 4 |
+| `abp_step` | an alternating-bit receiver: the expected bit in `g_expect` | writable scalar | 2 |
+| `gring_step` | a four-bit delay line behind the global pointer `g_ring`, its head in `g_head` | a region behind a pointer held in global memory; indexed write | 16 |
+
+**Positive controls.** The step-2 engine ran all 24 builds, and all 24 were
+`unsupported_semantics`:
+- 11: "absolute memory at ... (globals are outside the model)";
+- 11: "a load from absolute address ...";
+- 2: "a load through an address computed from data".
+
+The runs are in `~/fission-benchmark/wbcq-p4s3/controls-before/`.
+
+**The full evaluation.** 26 functions x 8 builds = 208 runs, with the corpus
+rebuilt from the same sources plus `global_machines.c`.
+
+| function | truth | a64 O0 | a64 O1 | a64 fla | a64 bcf+fla | x64 O0 | x64 O1 | x64 fla | x64 bcf+fla |
+|---|---|---|---|---|---|---|---|---|---|
+| `gcmd_step` | 4 | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= |
+| `abp_step` | 2 | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= | P 2= |
+| `gring_step` | 16 | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= |
+| `tdfa_step` | 5 | P 5= | **P 5=** (was U) | **P 5=** (was U) | **P 5=** (was U) | P 5= | P 5= | P 5= | P 5= |
+| `vending_step` | 5 | U | P 5= | P 5= | P 5= | U | **P 5=** (was U) | **P 5=** (was U) | **P 5=** (was U) |
+
+| | P4 step 2 | P4 step 3 |
+|---|---|---|
+| earlier 184 runs identical (status, states, transitions, witnesses, replay, conformance) | - | **178/184**. The other 6 went from `U` to a machine equal to the ground truth, and nothing went the other way. |
+| machines equal to the ground truth | 136/136 | **166/166** |
+| witnesses re-run on the emulator | all | all |
+| random replay | 27,200/27,200 | **33,200/33,200** (global machines: 4,800/4,800) |
+| W-method conformance | 106,334/106,334 | **108,514/108,514** (global machines: 1,600/1,600) |
+| negatives producing a machine | 0/32 | **0/32** |
+
+**The six changed runs:**
+- **`tdfa_step` on AArch64 at -O1, fla and bcf+fla.** These are the folding
+  gap of 11.4, now closed.
+- **`vending_step` on x86-64 at -O1, fla and bcf+fla.** Section 2 recorded
+  them as refused at a 128-bit multiply. The 16-byte value turned out to be
+  a temporary nothing observes. It is poison now, and the machines equal the
+  ground truth, with replay 200/200 each.
+
+`vending_step` at -O0 on both ISAs still refuses its division by a value the
+summary cannot prove non-zero.
+
+**Black box.** It finds `abp_step` and `gring_step` 8 of 8 times. It misses
+`gcmd_step` 8 of 8: the command classes sit behind specific letters.
+
+**Unit fixtures** (`testdata/quotient_fixture.S`):
+- `gcount_step`: a global counter over a `.rodata` class table, 3 states;
+- `gptr_step`: the context's address stored in a global, refused;
+- `canary_step`: a stack-protector check around a toggle, 2 states; the
+  canary is a slot of the thread pointer's block;
+- `tls_step`: `fs:[-8]`, refused;
+- `zeroed_step`: the `fldz`/`fstp` epilogue after a toggle, 2 states;
+- `float_step`: a result through `cvtsi2sd`/`cvttsd2si`, refused;
+- a CLI test that both kinds of anchored region conform to the schema.
+
+### 12.3 Real-binary reach (dir-verify GNU programs)
+
+These are the same 186 functions and flags. The DecBench-copy deviation of
+10.4 applies unchanged. "Before" is P4 step 2 (11.5).
+
+| first refusal | before | after |
+|---|---|---|
+| **`proved_under_model`** | 12 (6%) | **24 (13%)** |
+| thread-local storage (stack protector canary) | 47 (25%) | 0 |
+| globals (absolute memory) | 29 (16%) | 0 |
+| floating point | 27 (15%) | 0 |
+| call: unknown callee given an address of the context or frame | 18 (10%) | 38 (20%) |
+| call: library callee given an address of the frame | 2 (1%) | 16 (9%) |
+| call: more calls per step than ports | 1 (1%) | 11 (6%) |
+| call: indirect | 3 (2%) | 7 (4%) |
+| data-computed address | 16 (9%) | 22 (12%) |
+| branch on a pointer (`ctx == NULL`) | 13 (7%) | 22 (12%) |
+| a store or branch through a stack byte read before it is written | 0 | 14 (8%) |
+| an access past the context's declared size | 0 | 6 (3%) |
+| region refusals (all kinds) | 3 (2%) | 11 (6%) |
+| harness timeout (600 s) | 5 (3%) | 8 (4%) |
+| other (wide values, budget, division, indirect branch) | 10 (5%) | 7 (4%) |
+
+All three targeted buckets are empty:
+- 47 thread-local storage;
+- 29 globals;
+- 27 floating point.
+
+Of these 103 functions, **13 became machines**. The other 90 moved to the
+next blocker behind them:
+- calls handed an address of the context or the frame (31);
+- the frame read before it is written (13);
+- more calls than the step budget (10);
+- a branch on a pointer (9);
+- a data-computed address (7);
+- an access past the context's declared size (6);
+- the region budgets (6);
+- indirect calls or branches (5);
+- the rest (3).
+
+One machine was lost to timing: `check_identifier` at -O0, proved in 588 s
+in 11.3, hit the 600 s harness timeout here.
+
+**Newly supported (13):**
+
+| function | builds | states / transitions | replay | conformance | what unblocked it |
+|---|---|---|---|---|---|
+| `ssh_packet_set_maxsize` (openssh) | O2, O0 | **2** / 3 | 100/100 each | 8/8, 12/12 | the `fldz` epilogue |
+| `sshkey_enable_maxsign` | O2, O0 | 1 / 1 | 100/100 | 1/1 | globals, `fldz` |
+| `sshpkt_add_padding` | O2, O0 | 1 / 1 | 100/100 | 1/1 | `fldz` |
+| `bitmap_test_bit` | O2, O0 | 1 / 1 | 100/100 | 3/3 | `fldz` |
+| `sshpkt_put_u8` / `_u32` / `_u64` | O0 | 1 / 1 | 100/100 | 1/1 | `fldz` |
+| `reserve` (openssh) | O0 | 1 / 1 | 100/100 | 4/4 | `fldz` |
+| `should_optimize_fork` (bash) | O0 | 1 / 1 | 100/100 | 5/5 | globals |
+
+**Spot checks against the disassembly:**
+
+- **`ssh_packet_set_maxsize`** (`inlin_openssh-portable_sshd.elf` 0x80f60):
+  - If `state->set_maxsize_called` (`[rbp+0x1e8]`) is set, it logs and
+    returns -1.
+  - Otherwise, if `s - 0x1000 > 0xff000` (`lea eax,[rsi-0x1000]; cmp eax,
+    0xff000; ja`), it logs and returns -1.
+  - Otherwise it sets `set_maxsize_called = 1`, logs, stores `s` to
+    `max_packet_size` (`[rbp+0x138]`), and returns `s`. The `fldz` x8 /
+    `fstp` x8 epilogue follows.
+  - The quotient has 2 states:
+    - `0 -> 1` when `0x1000 <= in <= 0x100000`, returning `in` with
+      `ctx[0x0]->[0x138:4] := in`;
+    - `0 -> 0` otherwise, returning `0xffffffff`;
+    - `1 -> 1` always, returning `0xffffffff`.
+  - Each transition calls `sshlog(file, func, line, 1, level, 0)`. Lines
+    0x847, 0x843 and 0x83e are the three log sites.
+  - **Exact.** It is a one-shot setter: the only machine in this sample whose
+    state changes behaviour.
+- **`bitmap_test_bit`** (`unopt_openssh-portable_sshd.elf` 0xd537f): `if
+  (b->top >= b->len) return 0; if (b->len == 0 || n/32 > b->top) return 0;
+  return (b->d[n/32] >> (n & 31)) & 1;`, followed by the epilogue.
+  - From a zeroed bitmap `top >= len`, so the quotient is one state
+    returning 0.
+  - The region behind `b->d` was discovered and the indexed read was
+    modelled, but nothing reaches it.
+  - **Exact, and degenerate.**
+- **`sshpkt_add_padding`** (`inlin_openssh-portable_sshd.elf` 0x83f60):
+  `mov rax,[rdi]; mov [rax+0x1c0], sil; xor eax,eax`, then the epilogue.
+  That is `ssh->state->extra_pad = pad; return 0`.
+  - The quotient: one state, `returns 0; ctx[0x0]->[0x1c0:1] := in`.
+  - **Exact.**
+
+### 12.4 The decision
+
+The RFC's stop rule is set in section 7 and in this step's brief: continue
+WBCQ only if the share outside the model falls to 60% or less, and machines
+with more than one state reach double digits.
+
+| | needed to continue | after P4 steps 1-3 |
+|---|---|---|
+| share of the 186 step-shaped functions outside the model | at most 60% | **87%** (162 of 186) |
+| machines with more than one state | at least 10 | **2**: one function, `ssh_packet_set_maxsize`, at two optimisation levels, each with 2 states |
+| machines in all | - | 24 (13%), 22 of them single-state |
+
+**Verdict: pivot to AEQ.** Both conditions fail by a wide margin.
+
+The mechanism was never the problem:
+- every machine it built, on the corpus and on real code, was right;
+- 166/166 equal the native ground truth;
+- every one of 141,714 replayed corpus words agrees, and every real-binary
+  replay agrees.
+
+What fails is the premise that real step-shaped functions are state
+machines over their arguments:
+- **Each P4 step emptied its bucket and moved the functions to the next
+  blocker.** Steps 1, 2 and 3 converted 2, 1 and 13 functions respectively;
+  step 3 sent 90 of its 103 on to the next blocker.
+  The new blockers are the context or frame handed to callees, pointer
+  branches, and the caller's frame, none of them state-machine semantics.
+- **Of 24 machines, 22 have one state.** In those, the result is a function
+  of the input, or the interesting path is unreachable from a zeroed
+  context.
+- **The one real multi-state machine is a one-shot setter.**
+
+Real code in this sample keeps its state in heap structures it shares with
+callees. That is AEQ's territory, not WBCQ's.
+
+**AEQ, first step (outline only; not started).**
+
+AEQ characterises a data structure by the algebraic laws its operations
+satisfy, rather than by its byte layout.
+1. **Group operations by object.** Cluster entry points that act on the same
+   object type: functions sharing a pointer parameter whose dereferenced
+   fields overlap, found with this step's region discovery.
+2. **Probe the laws on the emulator.** For each pair of operations, run
+   concrete probes with WBCQ's stubbed calls and region layout:
+   - `pop(push(s, x)) = (s, x)`: inverse;
+   - `op_a; op_b = op_b; op_a`: commutation;
+   - `op; op = op`: idempotence;
+   - `size(insert(s, x)) = size(s) + 1`.
+3. **Corpus experiment, the RFC's own:** a ring buffer, a stack, a set and a
+   map, each compiled at -O0 and -O2 and with reordered fields, with native
+   ground truth for each law.
+4. **Criterion:** at least 80% of containers classified the same across
+   layouts. Check whether the dir-verify sample's context structs (`sshbuf`,
+   `re_node_set`, `bitmap`) fall into those classes.
+
+From WBCQ it would reuse:
+- the emulator oracle with stubbed calls;
+- pointer, global and register-anchored regions;
+- the native-ground-truth harness;
+- the fail-closed reasons.
+
+It would drop the automaton learner and the bounded-equivalence certificate.
+
+Reproduce (about 3 h on a loaded 14-core host):
+
+```bash
+python3 scripts/quality/wbcq/build_corpus.py --out ~/fission-benchmark/wbcq-p4s3/corpus
+python3 scripts/quality/wbcq/ground_truth.py ~/fission-benchmark/wbcq-p4s3/corpus/manifest.json \
+  --out ~/fission-benchmark/wbcq-p4s3/ground_truth.json
+python3 scripts/quality/wbcq/evaluate.py run --corpus ~/fission-benchmark/wbcq-p4s3/corpus \
+  --out ~/fission-benchmark/wbcq-p4s3/results --eval <p3_eval> --cli <fission_cli> -j 3
+python3 scripts/quality/wbcq/evaluate.py run --corpus ~/fission-benchmark/wbcq-p4s3/corpus \
+  --out ~/fission-benchmark/wbcq-p4s3/controls-before --eval <step-2 p3_eval> \
+  --cli <step-2 fission_cli> --only gcmd_step abp_step gring_step
+python3 scripts/quality/wbcq/evaluate.py decbench \
+  --candidates ~/fission-benchmark/wbcq-p4/dir_verify_candidates.json \
+  --out ~/fission-benchmark/wbcq-p4s3/dirverify-step3 --eval <p3_eval> -j 3
+python3 scripts/quality/wbcq/evaluate.py compare-reach \
+  --before ~/fission-benchmark/wbcq-p4s2/dirverify-step2 --after ~/fission-benchmark/wbcq-p4s3/dirverify-step3
+```
