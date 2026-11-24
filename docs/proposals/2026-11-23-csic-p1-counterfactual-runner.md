@@ -1,8 +1,8 @@
-# CSIC P0/P1: contract, fork reality and a one-variable counterfactual runner
+# CSIC P0/P1/P2: contract, fork reality, a counterfactual runner and a solver-backed joint search
 
 **RFC:** #1101, Track B (CSIC, counterfactual machine-state causality)
 **Crate:** `crates/fission-causal` (experimental; no production crate depends on it)
-**Status:** P0 and P1 done on this crate's own fixtures. Evidence is mechanical plus
+**Status:** P0, P1 and P2 done on this crate's own fixtures (P2: section 8). Evidence is mechanical plus
 native execution of the fixtures. Nothing here is adopted, and decompiler output
 does not change.
 
@@ -564,3 +564,197 @@ it grows. The numbers that drive that:
 - a refusal rate above 50% on real programs, which would make the determinism
   gate too blunt to be useful.
 
+
+
+## 8. P2: input-first candidates and a solver-backed joint search
+
+### 8.1 Setup on main
+
+`feat/csic-p0-p1` was merged with `origin/main`, which brought the emulator fixes P1 asked for (#1109–#1113). The crate was then adapted to them:
+
+- **Faults are a guest signal (#1112).** The recorder and both observers now read a fault from the emulator itself, through `metrics.memory_faults` and `last_fault`, instead of parsing an `Err`.
+  - An unhandled fault ends the run with `exit_signal = 11`. `last_fault.pc` names the instruction, which did not retire.
+  - A fault delivered to a handler is folded into the handler's first step. The faulting instruction's uses join that step, and the step opens an activation of its own, as a call would.
+  - Checkpoints carry `exit_signal` and `last_fault`. A `FaultAt` sink no longer single-steps on the fast path.
+- **Taint is reliable in both engines (#1111).** The taint baseline drops its JIT fallback and runs on the interpreter.
+- **Construction is cheap (#1113).** The case harness was left as it was.
+
+The **P1 evaluation was re-run unchanged** on the merged tree. On every case CSIC's explanations, TP/FP/FN and verdicts are identical to P1. Oracle counts differ by at most one per case: 35 246 in total, against 35 247 in P1. One baseline column moved: Fission's data+control taint now finds `req_buf[3]` in the x86-64 RFC cases (8/2/15 became 11/2/12), as #1111 predicted.
+
+### 8.2 Two more emulator defects (PR #1202)
+
+The joint search asks the solver about the symbolic branches an interpreter replay records. On the first fixture it recorded none. Both causes are in the interpreter's `ShadowMode::Symbolic` path:
+
+1. **In-place ops lost their expression.**
+   - The interpreter runs a p-code op concretely and builds its expression afterwards, and a concrete write clears the shadow it covers.
+   - An op whose output overlaps an input (`ZEXT RAX <- EAX`, which every x86-64 32-bit register write lifts to) read its own cleared output.
+   - The binop and load paths also read operand values after the op had overwritten them.
+2. **`STORE` passed its callback the wrong arguments.** The pointer's varnode went where the value's belongs, and the sizes were swapped. Every `-O0` stack spill dropped its expression.
+
+The fix is its own PR against main, **#1202**: inputs are snapshotted before the step, as the taint path already does, and the callback gets its arguments in the JIT's order. It has four tests:
+- a positive control that passed before the fix;
+- three regressions that failed before it.
+
+The full emulator suite passes (414 tests). The CSIC branch merges #1202, so PR #1106's diff shows those two files until #1202 lands.
+
+### 8.3 What changed in the runner (contract `csic/v2`)
+
+**Candidate tiers.**
+1. The input bytes the slice reaches, ranked by the slice step that last read them (nearest the sink first). Then the named variables (sized data symbols, at most 32) the slice reads.
+2. Delivered input bytes outside the slice, tried only if tier 1 has no input-byte witness. This tier means the explanation's recall is no longer the slice's recall.
+3. Internal registers and stack slots, P1's whole candidate set. They are tried only with `InternalPolicy::Always`, or when no input-level witness exists, whether single or joint. Their oracle executions are counted separately (`oracle_executions_internal`).
+
+**Joint search.** It runs when no single input byte is a witness. It is a generational search (SAGE-style) over the input bytes:
+- **Replay.** A symbolic replay runs on the interpreter with stdin bytes as 8-bit solver variables. Variables are renamed to canonical, offset-derived ids before any query, so models do not depend on the global variable counter.
+- **Queries.** From a path, the search asks to negate Φ itself (when Φ's operand is symbolic) and then each symbolic branch, nearest the sink first, keeping the branches before it.
+  - Each query states that at most k of the free bytes differ from the recorded input, with k ascending from the node's own change count, so the smallest change comes first.
+  - The other bytes are pinned to their recorded values. Each query uses a fresh solver with a conflict budget.
+- **Every model is replayed.** Each model is checked in order:
+  1. A model whose replay does not take its predicted path is **rejected** and logged.
+  2. A model that flips Φ must be confirmed by an intervention replay (fork, JIT), a fresh replay from step 0 and the JIT digest.
+  3. A model that leaves Φ alone has its own path searched past the negated branch.
+- **Blind spots end in Unknown.** If any model was rejected, or the recording has input-dependent branches the symbolic replay never saw, the search ends **Unknown**. Running out of paths proves nothing then. Input-dependent branches are found by a forward pass over the recorded uses and definitions.
+- **Statuses.** `JointStatus::SolverUnknown` is reported explicitly and is never "no cause". `NoWitnessWithinBudget{exhausted}` says whether paths or budget ran out.
+- **Fallback.** P1's pair search runs only if the solver finds nothing.
+- **A one-byte model** that the value set missed becomes a single witness with origin `SolverModel`.
+
+**Bounded minimality (`Minimality::MinimalWithinBudget`).** For a joint witness of k bytes, each (k−1)-subset is searched with the same search. That search may leave any byte at its recorded value, so it covers every smaller subset.
+- The verdict is given only if every subset search runs out of paths, with no Unknown, no rejected model and no budget hit.
+- A smaller witness replaces the set, and the check restarts.
+- The bound is written into the verdict:
+  - input bytes only, with the other bytes at their recorded values;
+  - 8 generations, at most 4 changed bytes and 100 000 SAT conflicts per query;
+  - complete only over what the interpreter's symbolic shadow models.
+- **This is not Halpern–Pearl minimality.** AC2(a/b) allows any contingency over all variables, internal state included; this check covers input bytes at their actual values only.
+
+**Contingencies (`ContingencyWitness`).** For each member X of a joint witness, the run checks:
+- that do(the other members) alone leaves Φ at its recorded value, on both a fork and a fresh replay;
+- that adding X flips it.
+
+That makes X a counterfactual witness under a bounded contingency (|W| ≤ k−1), at the model's values.
+
+**Requested sets.** `Case.requested_sets` are judged as one experiment each, on a fork and a fresh replay. The new cases use them for their positive and adversarial controls.
+
+### 8.4 Oracle executions, before and after (the 16 P1 cases)
+
+Before is the P1 runner re-run on merged main; after is P2's default `Config` (internal locations `Fallback`). Counts are deterministic.
+
+| Case | before | after | ratio | tested (tier 1 / 2 / internal) | CSIC explanation (TP/FP/FN), before → after |
+|---|---|---|---|---|---|
+| `rfc_auth_x64_O0` | 2589 | 34 | 76x | 4 / 0 / 0 | {3} 1/0/0 → same |
+| `rfc_auth_x64_O2` | 2518 | 34 | 74x | 4 / 0 / 0 | {3} 1/0/0 → same |
+| `rfc_auth_a64_O0` | 2433 | 19 | 128x | 3 / 0 / 0 | {3} 1/0/0 → same |
+| `invalid_interventions` | 2593 | 37 | 70x | 4 / 0 / 0 | {3} 1/0/0 → same |
+| `implicit_call_arg` | 2521 | 34 | 74x | 4 / 0 / 0 | {5} 1/0/0 → same |
+| `false_alias_ptr` | 2570 | 34 | 76x | 4 / 0 / 0 | {0} 1/0/0 → same |
+| `real_alias` | 2517 | 38 | 66x | 5 / 0 / 0 | {2,9} 2/0/0 → same |
+| `joint_or` | 2539 | 139 | 18x | 4 / 15 / 0 | joint {0,1} 2/0/0 → same (now by the solver) |
+| `joint_and` | 2514 | 36 | 70x | 5 / 0 / 0 | {0,1} 2/0/0 → same |
+| `nondet_time` | 52 | 19 | 3x | refused | refused → refused |
+| `nondet_random` | 50 | 18 | 3x | refused | refused → refused |
+| `crash_null_x64` | 2529 | 47 | 54x | 6 / 0 / 0 | {0} 1/0/0 → same |
+| `crash_null_a64` | 2266 | 32 | 71x | 5 / 0 / 0 | {0} 1/0/0 → same |
+| `password_x64` | 2530 | 43 | 59x | 8 / 0 / 0 | {0..3} 4/0/0 → same |
+| `password_a64` | 2503 | 28 | 89x | 7 / 0 / 0 | {0..3} 4/0/0 → same |
+| `branch_len` | 2522 | 35 | 72x | 4 / 0 / 0 | {0} 1/0/0 → same |
+| **total** | **35 246** | **627** | **56x** | | **23/0/0 → 23/0/0, both refusals kept** |
+
+**The reduction is 56x, against the 15–25x the P1 report estimated.**
+- The estimate assumed every delivered byte would be tried, as the exhaustive sweep does (1 431 oracles on the same cases).
+- In practice the slice ranks 3–8 primary candidates per case, the first input witness ends the search, and only about 5 checkpoints a case need capturing and validating, instead of about 37.
+- No case reached the internal tier. `oracle_executions_internal` is 0 everywhere.
+- `tests/csic_cases.rs::input_first_spends_no_oracles_on_internal_locations_once_an_input_witness_exists` keeps the positive control. With `InternalPolicy::Always`, internal locations are tested and cost oracles, and the explanation is the same.
+
+**Named variables are mostly libc's in a static binary.**
+- `__libc+16` is a witness in every case that reaches it: corrupting it changes how the program runs. `main_tls` and `__default_stacksize` are not.
+- The one program variable that mattered was `secret+3` in `password_*`, a witness.
+- `table+16` (the NULL slot) in the crash and handler cases is `NotACause`, but only for the tried values: every small pointer value faults too.
+- None of these are scored. They cost 2–4 oracles per case.
+
+### 8.5 Joint search results, with replay evidence
+
+| Case | Recorded Φ | Joint witness (model) | Found at | Minimality | Contingencies | Solver queries (sat/unsat/unknown) | Symbolic replays | Models (rejected) |
+|---|---|---|---|---|---|---|---|---|
+| `joint_or` (`A \|\| B`, both true) | grant | {0:'A'→'a', 1:'B'→'R'} | generation 1 | MinimalWithinBudget | 2/2 hold | 6 (3/3/0) | 4 | 3 (0) |
+| `joint_and_deny` (`K && Y`, both wrong) | deny | {0:'K', 1:'Y'} | generation 1 | MinimalWithinBudget | 2/2 hold | 6 (3/3/0) | 4 | 3 (0) |
+| `and3_x64` (all three wrong) | deny | {0:'K', 1:'E', 2:'Y'} | generation 2 | MinimalWithinBudget (3 subsets) | 3/3 hold | 23 (8/15/0) | 9 | 8 (0) |
+| `and3_a64` | deny | {0:'K', 1:'E', 2:'Y'} | generation 2 | MinimalWithinBudget (3 subsets) | 3/3 hold | 23 (8/15/0) | 9 | 8 (0) |
+| `carry` (high byte of a stored sum == 1, and 'W') | deny | {1: 160, 2:'W'} | generation 1 | MinimalWithinBudget | 2/2 hold | 6 (3/3/0) | 4 | 3 (0) |
+| `carry_impossible` (high byte == 2: unreachable) | deny | none: **SolverUnknown** ("1 solver model did not reproduce") | – | – | – | 1 (1/0/0) | 2 | 1 (**1**) |
+
+**How to read the table.**
+- **Replay evidence.** Every model above was replayed in the emulator before it was used (symbolic replays = 1 + distinct models). Each witness was then confirmed three ways: by an intervention fork on the JIT, by a fresh replay from step 0 on the interpreter, and by the JIT end-state digest.
+- **`carry_impossible`.**
+  - The symbolic shadow tags both bytes of the stored word with the whole sum's expression, so the solver was asked for "sum ≡ 2" where the program reads the high byte. Its model (`req[0] = 160`) gives a low byte of 2, and the replay takes the other way.
+  - It is logged as `Rejected { expected: [(…df, false)], observed: [(…df, true)] }`, and the case says Unknown.
+  - Without the rejection rule, running out of paths would have read as "no cause". The answer here happens to be no cause, but the search cannot know that.
+- **`carry`** shows the same layer's model reproducing when the shadow's coarseness does not matter. The sum is 257, so both bytes happen to fit.
+- **The value set alone would find none of these.**
+  - The exhaustive single-byte sweep finds nothing in any of the six cases, as designed.
+  - P1's pair search tries the low-bit flip and zero, which cannot produce 'K' or 'E'. It ran on `carry_impossible` and found no pair.
+- **The XOR and handler cases need no joint search.** Each has single-byte witnesses, so it was not run (`not_needed`).
+
+### 8.6 New cases
+
+Each case has a positive and an adversarial control. They come from the requested sets ("sets") or from the bytes a baseline blames.
+
+| Case | ISA/opt | Truth | Dynamic slice | Taint (data / +ctrl) | Static slice | CSIC | Controls (sets: Φ changed?) |
+|---|---|---|---|---|---|---|---|
+| `joint_and_deny` | x64 -O0 | joint {0,1} | 0/0/2 | 0/0/2 / 0/0/2 | 2/14/0 | **2/0/0** | {K,Y} yes; {K} no; {Y} no |
+| `and3_x64` | x64 -O0 | joint {0,1,2} | 0/0/3 | 0/0/3 / 0/0/3 | 3/13/0 | **3/0/0** | {K,E,Y} yes; {K,E} no; {K,E, decoy req[3]} no |
+| `and3_a64` | a64 -O0 | joint {0,1,2} | 0/0/3 | 0/0/3 / 0/0/3 | 3/13/0 | **3/0/0** | same |
+| `xor_gate_x64_O0` | x64 -O0 | {0,1} | 2/0/0 | 0/0/2 / 0/0/2 | 2/14/0 | **2/0/0** | flip bit 0 of both: **no** (adversarial); one byte: yes |
+| `xor_gate_x64_O2` | x64 -O2 | {0,1} | 2/0/0 | 0/0/2 / 0/0/2 | 2/14/0 | **2/0/0** | same |
+| `segv_grant_x64` | x64 -O0 | {0} | 1/**1**/0 | 0/0/1 / 0/0/1 | 0/0/**1** | **1/0/0** | req[0]:=1 yes; stored req[1]:=0 no |
+| `segv_grant_a64` | a64 -O0 | {0} | 1/**1**/0 | 0/0/1 / 0/0/1 | 0/0/**1** | **1/0/0** | same |
+| `carry` | x64 -O0 | joint {0,1,2} (two minimal witnesses: {0,2}, {1,2}) | 0/0/3 | 0/0/3 / 0/0/3 | 3/13/0 | 2/0/**1** | carry+'W' yes; low byte 1 without carry no |
+| `carry_impossible` | x64 -O0 | none | 0/0/0 | 0/0/0 | 0/16/0 | 0/0/0, **SolverUnknown** | low byte 2 (the rejected model) no; largest sum + 'W' no |
+
+**Totals over the 9 new cases.**
+- CSIC: **16 TP, 0 FP, 1 FN**.
+- Dynamic slice: 6/2/11. The slice of a sink that never happened is empty.
+- Taint: 0/0/17.
+- Static slice: 15/97/2.
+- Exhaustive single-byte sweep: 6/0/11.
+
+**What the new cases show.**
+- **The FN is a stated limit.** The search reports *one* minimal joint witness, not all of them. In `carry` it found {1,2} and not {0,2}.
+- **XOR.**
+  - Both bytes are single witnesses.
+  - The adversarial set flips the same bit in both, and Φ stays put. The union of two witnesses is not a joint cause, and the runner never builds joint claims from unions.
+  - The decoy `req[2]` is compared on the path and is not blamed.
+- **Signal handler.**
+  - `grant()` runs only inside the SIGSEGV handler. The recording passes through the delivered fault (`StepRecord::fault`, one per run).
+  - The dynamic slice reaches the handler's call through the folded fault. It blames both the selector and the stored value, because both are uses of the faulting store; CSIC keeps only the selector.
+  - The static slice misses the cause entirely: it has no edge from a faulting instruction to a signal handler.
+  - **Handler-frame limit (#1112):** the emulator's signal frame has no `ucontext_t` (the third argument is NULL) and no `rt_sigreturn`. A handler that returns re-runs the faulting store, natively as well as in the emulator, so the fixture's handler calls `_exit(3)`. A handler that resumes elsewhere through `ucontext` or `siglongjmp` is untested and not expected to work.
+  - The x86-64 and AArch64 builds agree.
+
+### 8.7 Native agreement
+
+NATIVE_PLACEHOLDER
+
+### 8.8 Limits
+
+- **One joint witness, not all.** The search stops at the first verified one (`carry`: {1,2} found, {0,2} not).
+- **The symbolic shadow is coarse.**
+  - A multi-byte store tags every byte with the whole value's expression.
+  - A widening copy reads its extension bytes from the source's neighbours.
+  - Unmodelled ops drop the expression (shifts, and the JIT, which records no branch events).
+  - The replay rule and the blind-branch check turn this into Unknown rather than into a wrong claim. They do not make the search complete.
+  - The blind-branch check runs on the recorded path only. A child path's unseen branches are not detected.
+- **Minimality and contingencies are input-level and bounded.**
+  - The other input bytes stay at their recorded values.
+  - No internal-state contingency is searched.
+  - The bound is the search's: 8 generations, ≤ 4 changed bytes, 100 000 conflicts per query.
+  - This is not HP AC2/AC3.
+- **Named variables are dominated by libc globals in static binaries**, and their `NotACause` holds only for the value set (`table+16`).
+- **The fixtures were written to separate the methods.** The totals are a mechanism check, not an accuracy estimate. Everything is still single-threaded, static Linux ELF.
+
+### 8.9 Recommendation for P3
+
+Continue, with the P1 stop triggers unchanged. The held-out step is now affordable: about 40 oracles a case when an input witness exists, and about 110–140 with a joint search. P3 should:
+1. Run input-first CSIC on `~/fission-benchmark/dir-verify/binaries` and on an independently written fixture set, with native execution as the check.
+2. Count `SolverUnknown` and `Rejected` models as first-class outcomes. **Add a stop trigger: Unknown on more than 30% of joint searches on real programs** means the symbolic shadow needs work before CSIC can rely on it.
+3. Compare against a stronger static slicer (points-to, libc models, signal edges) and a dual-slicing baseline.
+4. Enumerate all minimal joint witnesses within the budget. One is reported now.
