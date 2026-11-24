@@ -107,6 +107,7 @@ along the way go in their own PRs, or in an issue with a probe.
    measured before/after evidence when required, and limitations. Use the PR template.
 4. Mark ready for review when the applicable evidence is present. Independent
    reviewer checks ownership, correctness, failure paths, and compatibility.
+   Who reviews what, and the SHA-bound review record: [REVIEW_POLICY.md](REVIEW_POLICY.md).
 5. Resolve substantive review findings, then re-run applicable checks on the
    final head. GitHub branch protection and existing CI/release policies govern
    merging. Do not bypass them or assume a label proves CI passed.
