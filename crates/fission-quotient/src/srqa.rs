@@ -380,9 +380,10 @@ pub fn build(
                     };
                     return match least {
                         Ok(Some(symbol)) => Built::NeedSymbol(symbol),
-                        Ok(None) => Built::Unsupported(
-                            "a cell the guard folding kept has no input".to_string(),
-                        ),
+                        // The solver proved the cell empty: folding could not
+                        // see it (a table read through a region folds to a
+                        // lookup, not to a constant), but no input takes it.
+                        Ok(None) => continue,
                         Err(()) => Built::Unsupported(
                             "the solver could not produce an input for a cell".to_string(),
                         ),

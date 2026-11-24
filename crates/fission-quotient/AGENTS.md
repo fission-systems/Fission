@@ -16,14 +16,14 @@ reports is a DecBench or readability claim.
 
 | Module | Owns |
 |---|---|
-| `boundary.rs` | `QuotientBoundary` (inputs, hidden context, observed result), `QuotientBudget`, `AbiModel` read from the SLEIGH register/space tables and the emulator's calling-convention table (argument, return, preserved registers) |
+| `boundary.rs` | `QuotientBoundary` (inputs, hidden context, pointer regions, observed result) and the one byte space they are laid out in (`layout`), `QuotientBudget`, `AbiModel` read from the SLEIGH register/space tables and the emulator's calling-convention table (argument, return, preserved registers) |
 | `calls.rs` | Call facts per site (`fission_dir::call_sites` for no-return and tail jumps, symbol/PLT names, `fission-signatures` prototypes) and the `CallModel` both sides observe a call through |
-| `summary.rs` | One-step symbolic execution of the slice over a separated memory model (register file, stack frame, context region); per-path `(guard, result, context', calls, exit)`; solver-pruned dead branch sides; how each call site is observed |
+| `summary.rs` | One-step symbolic execution of the slice over a separated memory model (register file, stack frame, context, pointer regions); per-path `(guard, result, context', calls, exit)`; solver-pruned dead branch sides; how each call site is observed; pointer-field discovery and indexed (`buf[i]`) reads and writes within a region |
 | `expr.rs` | Folding `SymExpr` constructors, the concrete evaluator they fold with, substitution, rendering |
 | `learn.rs` | L# apartness tree, basis/frontier rules, Rivest-Schapire counterexample processing |
 | `srqa.rs` | Control/data slot factoring; the symbolic register quotient automaton built from a hypothesis and the summaries |
 | `certify.rs` | Bounded divergence query (slice vs automaton, `H` steps); deterministic probes |
-| `oracle.rs` | `MembershipOracle`; `EmulatorOracle` over `fission_dir::EmulatorHarness` (calls stubbed with `call_stubbed`, returns taken from the symbol) |
+| `oracle.rs` | `MembershipOracle`; `EmulatorOracle` over `fission_dir::EmulatorHarness` (calls stubbed with `call_stubbed`, returns taken from the symbol; the context and every pointer region mapped as one buffer, each region's address in its pointer field) |
 | `report.rs` | The `quotient.v1` JSON contract; its schema is `docs/schemas/cli-quotient-data.v1.schema.json` (`fission_cli schema quotient`) -- change both together |
 | `engine.rs` | `WBCQ_Synthesize`: the learn / build / refute loop and the final report |
 
@@ -41,7 +41,8 @@ reports is a DecBench or readability claim.
    refine anything. One the emulator does not reproduce means the P-code model
    and the machine disagree: `UnsupportedSemantics`, never a silent retry.
 4. **Fail closed at the boundary.** User-defined operations, indirect calls,
-   absolute or data-computed addresses, floating point, values wider than 8
+   absolute addresses, data-computed addresses outside a pointer region,
+   floating point, values wider than 8
    bytes, and results that read undeclared live-ins stop the summary with a
    reason.
 5. **Calls are effects, never run.** A direct call is observed as its target
@@ -55,14 +56,24 @@ reports is a DecBench or readability claim.
    register the boundary defines. An address of the context or the frame
    passed where the callee may write through it is unsupported. Every such
    choice is listed in the report's `assumptions`.
-6. **Deterministic output.** Alphabet symbols and counterexamples are least
+6. **Pointer fields are regions, never aliases.** A pointer the slice reads
+   out of the context (or out of a region) and dereferences is a region of
+   its own: declared with the boundary, or discovered and zeroed. Its base is
+   never known, only offsets in it; it aliases nothing, is not null and never
+   moves -- all reported in `assumptions`. An index computed from data reads
+   or writes every place it can take; the side of the path where it would
+   leave the region ends in `LeftRegion`, and a quotient in which a reachable
+   state takes it is unsupported. An overwritten pointer field, a stored
+   address, an indexed read of a pointer, a comparison between two regions'
+   addresses, and a region pointer given to a callee are unsupported.
+7. **Deterministic output.** Alphabet symbols and counterexamples are least
    solutions (port by port), never whichever model the solver found first;
    every collection is ordered. Same binary and budget, same JSON bytes.
-7. **ISA-neutral (ADR 0009).** No rule names an instruction or a register.
+8. **ISA-neutral (ADR 0009).** No rule names an instruction or a register.
    Register locations, endianness, the return-address convention and the
    address spaces come from the SLEIGH tables and the calling-convention
    table; the AArch64 fixture must keep producing the x86-64 quotient.
-8. **No quality claims.** Fixture results show the mechanism works; they are
+9. **No quality claims.** Fixture results show the mechanism works; they are
    not evidence about decompiler output (root `AGENTS.md`, Core Rule 10).
 
 ## Fixtures

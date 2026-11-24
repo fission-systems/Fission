@@ -175,6 +175,19 @@ def reason_bucket(reason: str) -> str:
 # Why a function has no machine, by what the slice does -- the categories the
 # P3 report ranks P4's steps by, plus the call outcomes P4 step 1 introduces.
 CATEGORIES = (
+    # P4 step 2: what the pointer-region model refuses.
+    ("region: a region's pointer given to a callee", ("an address of the region",)),
+    ("region: an index may leave its region", ("leaves its pointer region",
+                                               "whether an index stays inside")),
+    ("region: a pointer field overwritten", ("a store over the pointer to",)),
+    ("region: an address stored to memory", ("is stored in",)),
+    ("region: an indexed read of a pointer", ("an indexed read of a pointer",
+                                              "may overwrite a pointer")),
+    ("region: addresses of two regions compared", ("two regions",)),
+    ("region: past the region budget (count or depth)", ("more pointer regions than the budget",
+                                                         "pointers deep")),
+    ("region: an access outside a region's bytes", ("bytes of the region",)),
+    ("region: an indexed access with too many places", ("places (more than",)),
     ("call (refused outright, pre-P4)", ("the callee's effects are outside the slice",)),
     ("call: unknown callee given an address of the context or frame",
      ("an unknown callee that may write through it",)),
