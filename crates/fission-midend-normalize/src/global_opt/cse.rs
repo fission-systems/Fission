@@ -117,6 +117,9 @@ fn cse_stmt(
                 }
                 // Invalidate any cached expression that uses this variable.
                 invalidate_pure_map(map, target.as_str());
+                if expr_contains_call(rhs) {
+                    map.clear();
+                }
             } else {
                 // Memory write — invalidate everything conservatively
                 // (we can't know what a store through a pointer might alias).
@@ -126,10 +129,13 @@ fn cse_stmt(
         }
         // For branches: recurse with a fresh map clone (no propagation across arms).
         PreHirStmt::If {
-            cond: _,
+            cond,
             then_body,
             else_body,
         } => {
+            if expr_contains_call(cond) {
+                map.clear();
+            }
             let mut then_map = map.clone();
             let mut else_map = map.clone();
             let mut changed = cse_stmts(
@@ -189,7 +195,14 @@ fn cse_stmt(
             map.clear();
             changed
         }
-        PreHirStmt::Switch { cases, default, .. } => {
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            if expr_contains_call(expr) {
+                map.clear();
+            }
             let mut changed = false;
             for case in cases.iter_mut() {
                 let mut arm_map = map.clone();
@@ -217,9 +230,43 @@ fn cse_stmt(
             map,
             non_value_representatives,
         ),
-        PreHirStmt::Return(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+        PreHirStmt::Return(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Expr(_)
+        | PreHirStmt::VaStart { .. } => {
             map.clear();
             false
+        }
+    }
+}
+
+fn expr_contains_call(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => expr_contains_call(inner),
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_call(cond)
+                || expr_contains_call(then_expr)
+                || expr_contains_call(else_expr)
         }
         _ => false,
     }
@@ -371,5 +418,39 @@ mod tests {
             panic!("expected final assignment");
         };
         assert!(matches!(rhs, PreHirExpr::Var(name) if name == "param_1"));
+    }
+
+    #[test]
+    fn label_goto_and_call_expr_clear_cse_map() {
+        let mut func = PreHirFunction {
+            name: "cse_barriers".to_owned(),
+            int_param_offsets: Vec::new(),
+            body: vec![
+                assign("uVar1", PreHirExpr::Var("param_1".to_owned())),
+                PreHirStmt::Label("L1".to_owned()),
+                assign("uVar2", PreHirExpr::Var("param_1".to_owned())),
+                PreHirStmt::Goto("L2".to_owned()),
+                assign("uVar3", PreHirExpr::Var("param_1".to_owned())),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "mutate".to_owned(),
+                    args: vec![PreHirExpr::AddressOfLocal("uVar3".to_owned())],
+                    ty: NirType::Unknown,
+                }),
+                assign("uVar4", PreHirExpr::Var("param_1".to_owned())),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_cse_pass(&mut func));
+        for idx in [2, 4, 6] {
+            let PreHirStmt::Assign { rhs, .. } = &func.body[idx] else {
+                panic!("expected assignment at idx {idx}");
+            };
+            assert!(
+                matches!(rhs, PreHirExpr::Var(name) if name == "param_1"),
+                "stmt {idx} should retain param_1, got {rhs:?}"
+            );
+        }
     }
 }

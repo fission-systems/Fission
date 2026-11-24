@@ -1102,10 +1102,12 @@ fn visit_stmt(
                     binding_types,
                 );
             }
+            let mut def_env = env.clone();
+            let mut def_ranges = ranges.clone();
             changed |= visit_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
-                env,
-                ranges,
+                &mut def_env,
+                &mut def_ranges,
                 binding_types,
             );
             let mut written = HashSet::default();
@@ -1776,5 +1778,64 @@ mod tests {
             "{:?}",
             then_body[1]
         );
+    }
+
+    #[test]
+    fn switch_default_return_does_not_clear_outer_constants() {
+        let u32_ty = || NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            name: "switch_default_ret".to_string(),
+            params: vec![
+                PreHirBinding {
+                    name: "k".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "x".to_string(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(1)),
+                    initializer: None,
+                },
+            ],
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Eq,
+                    lhs: Box::new(PreHirExpr::Var("k".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(7, u32_ty())),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![
+                    PreHirStmt::Switch {
+                        expr: PreHirExpr::Var("x".to_string()),
+                        cases: vec![PreHirSwitchCase {
+                            values: vec![1],
+                            body: vec![PreHirStmt::Break].into(),
+                        }],
+                        default: vec![PreHirStmt::Return(Some(PreHirExpr::Const(0, u32_ty())))]
+                            .into(),
+                    },
+                    PreHirStmt::Return(Some(PreHirExpr::Var("k".to_string()))),
+                ]
+                .into(),
+                else_body: vec![].into(),
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_conditional_const_pass(&mut func));
+        let PreHirStmt::If { then_body, .. } = &func.body[0] else {
+            panic!("expected If");
+        };
+        assert!(matches!(
+            &then_body[1],
+            PreHirStmt::Return(Some(PreHirExpr::Const(7, _)))
+        ));
     }
 }
