@@ -80,7 +80,9 @@ still serves later steps; it runs when the setup or `ci.yml` changes.
 
 ## Checks on the checks
 
-- Speed: every Rust PR counts instructions executed by its base and head CLIs
+- Speed: a PR that changes the decompiler, or carries the `type:performance`
+  label when pushed, counts instructions executed by its base and head CLIs
+  after its Linux tests pass
   on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
   runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
   compares main with the last good night and fails at +3%. Dispatch it with

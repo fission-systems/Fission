@@ -4,7 +4,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, edited]
+    # No `edited`: a title or body edit restarted the whole PR run on the same
+    # SHA (4 cancelled runs in 24 h, 2026-11-24). A retargeted base is still
+    # tested by the merge queue, which runs on the real base.
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -535,9 +538,18 @@ jobs:
 
   # Report-only, not part of CI Summary: what a Rust change does to decompile
   # cost (instructions executed) and, for decompiler changes, to output.
+  # It holds a runner for ~40 min, so it runs only for decompiler changes or a
+  # PR labelled `type:performance` (label before pushing), and only after the
+  # required Linux tests pass, so required jobs claim runners first. On
+  # 2026-11-24 it was 10-11 of 24 running jobs while required jobs queued.
   base-vs-head:
-    needs: [changes]
-    if: needs.changes.outputs.run_tests == 'true' && github.event_name == 'pull_request'
+    needs: [changes, test-linux]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.changes.outputs.run_tests == 'true'
+      && needs.test-linux.result == 'success'
+      && (needs.changes.outputs.run_decomp_corpus == 'true'
+          || contains(github.event.pull_request.labels.*.name, 'type:performance'))
     uses: ./.github/workflows/reusable-base-head.yml
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
