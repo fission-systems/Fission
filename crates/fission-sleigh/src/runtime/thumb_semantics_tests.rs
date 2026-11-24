@@ -191,3 +191,139 @@ fn thumb_stmia_writes_the_base_back_even_when_the_base_is_listed() {
         );
     }
 }
+
+#[test]
+fn thumb2_logical_ops_set_carry_from_the_shifted_or_expanded_operand() {
+    // ARMv7-M ARM, AND/BIC/MOV/MVN (immediate) T1: `(imm32, carry) =
+    // ThumbExpandImm_C(i:imm3:imm8, APSR.C)`; AND/MVN (register) T2:
+    // `(shifted, carry) = Shift_C(R[m], shift_t, shift_n, APSR.C)`. With S set,
+    // `APSR.N = result<31>; APSR.Z = IsZeroBit(result); APSR.C = carry;` and V
+    // is unchanged. ThumbExpandImm_C keeps the input carry for the unrotated
+    // patterns and takes bit 31 of a rotated constant. Upstream set only N and
+    // Z in these six constructors. Expected values follow the pseudocode;
+    // Unicorn and VEX give the same for every case.
+    const ONES: u64 = 0xffff_ffff;
+    // name, bytes, r1, r2, C in, (r0, N, Z, C out)
+    type Case = (
+        &'static str,
+        &'static [u8],
+        u64,
+        u64,
+        u64,
+        (u64, bool, bool, bool),
+    );
+    let cases: [Case; 12] = [
+        (
+            "ands r0, r1, #0x80000000",
+            &[0x11, 0xf0, 0x00, 0x40],
+            ONES,
+            0,
+            0,
+            (0x8000_0000, true, false, true),
+        ),
+        (
+            "ands r0, r1, #0xff",
+            &[0x11, 0xf0, 0xff, 0x00],
+            ONES,
+            0,
+            1,
+            (0xff, false, false, true),
+        ),
+        (
+            "ands r0, r1, #0xff",
+            &[0x11, 0xf0, 0xff, 0x00],
+            ONES,
+            0,
+            0,
+            (0xff, false, false, false),
+        ),
+        (
+            "bics r0, r1, #0x80000000",
+            &[0x31, 0xf0, 0x00, 0x40],
+            ONES,
+            0,
+            0,
+            (0x7fff_ffff, false, false, true),
+        ),
+        (
+            "movs.w r0, #0x80000000",
+            &[0x5f, 0xf0, 0x00, 0x40],
+            0,
+            0,
+            0,
+            (0x8000_0000, true, false, true),
+        ),
+        (
+            "movs.w r0, #0x7f",
+            &[0x5f, 0xf0, 0x7f, 0x00],
+            0,
+            0,
+            1,
+            (0x7f, false, false, true),
+        ),
+        (
+            "mvns r0, #0x80000000",
+            &[0x7f, 0xf0, 0x00, 0x40],
+            0,
+            0,
+            0,
+            (0x7fff_ffff, false, false, true),
+        ),
+        (
+            "ands.w r0, r1, r2, lsl #1",
+            &[0x11, 0xea, 0x42, 0x00],
+            ONES,
+            0x8000_0000,
+            0,
+            (0, false, true, true),
+        ),
+        (
+            "ands.w r0, r1, r2, asr #32",
+            &[0x11, 0xea, 0x22, 0x00],
+            ONES,
+            0x8000_0000,
+            0,
+            (ONES, true, false, true),
+        ),
+        (
+            "ands.w r0, r1, r2, rrx",
+            &[0x11, 0xea, 0x32, 0x00],
+            ONES,
+            1,
+            0,
+            (0, false, true, true),
+        ),
+        (
+            "mvns.w r0, r2, lsr #1",
+            &[0x7f, 0xea, 0x52, 0x00],
+            0,
+            1,
+            0,
+            (ONES, true, false, true),
+        ),
+        // orrs already took C from the expansion upstream (control).
+        (
+            "orrs r0, r1, #0x80000000",
+            &[0x51, 0xf0, 0x00, 0x40],
+            0,
+            0,
+            0,
+            (0x8000_0000, true, false, true),
+        ),
+    ];
+    for (name, code, r1, r2, carry_in, expected) in cases {
+        let init = [
+            ("r0", 0x5555_5555),
+            ("r1", r1),
+            ("r2", r2),
+            ("NG", 0),
+            ("ZR", 0),
+            ("CY", carry_in),
+            ("OV", 1),
+        ];
+        let s = run_thumb("ARM8_le", code, &init);
+        let got = (s.reg("r0"), s.flag("NG"), s.flag("ZR"), s.flag("CY"));
+        assert_eq!(got, expected, "{name} with C={carry_in}: (r0, N, Z, C)");
+        assert!(s.flag("OV"), "{name} leaves V unchanged");
+    }
+}

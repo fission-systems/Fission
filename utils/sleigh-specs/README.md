@@ -45,6 +45,12 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   The 14 other ARM `.sla` reproduce byte for byte, and lifting every 16-bit Thumb halfword
   plus 300,000 random Thumb-2 and 365,536 ARM words with the released and the recompiled
   ARM8 files gives identical p-code, so the checked-in ARM8 files are plain recompiles.
+  The same file sets C from the shifter in the Thumb-2 `ands`/`bics`/`movs`/`mvns` with a
+  modified immediate and `ands`/`mvns` with a shifted register, as `ThumbExpandImm_C`/`Shift_C`
+  and `APSR.C = carry` define; upstream built `thSBIT_ZN` there and set only N and Z. They now
+  build a new flag table, `thSBIT_SCZN`, whose `s` form also does `CY = shift_carry`, so the
+  forms without S keep upstream's p-code exactly. Re-apply with
+  `scripts/sleigh/apply_thumb2_logical_carry.py`. Upstream: NationalSecurityAgency/ghidra#10274.
 - `x86/x86-64-swift.cspec` and its `<compiler id="swift">` entry in `x86/x86.ldefs`:
   Ghidra 12.2 removed them (Swift moved to cspec extensions under
   `Ghidra/Features/Swift/data/extensions`). They are kept from 12.0.4 so Swift x86-64

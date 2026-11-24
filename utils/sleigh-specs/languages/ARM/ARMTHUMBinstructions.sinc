@@ -379,6 +379,9 @@ thSBIT_CZN:      is thc0404=0   { }  # Do nothing to the flags bits
 thSBIT_CZN:  "s" is thc0404=1   {CY = tmpCY; ZR = tmpZR; NG = tmpNG;}
 thSBIT_ZN:     is thc0404=0	    { }   # Do nothing to the flag bits
 thSBIT_ZN: "s" is thc0404=1	    { ZR = tmpZR; NG = tmpNG; }
+# Fission: N, Z and the shifter's carry-out (see apply_thumb2_logical_carry.py).
+thSBIT_SCZN:     is thc0404=0	    { }   # Do nothing to the flag bits
+thSBIT_SCZN: "s" is thc0404=1	    { CY = shift_carry; ZR = tmpZR; NG = tmpNG; }
 
 @endif  # defined(VERSION_6T2) || defined(VERSION_7)
 
@@ -1269,22 +1272,22 @@ with : ARMcondCk=1 {
 
 @if defined(VERSION_6T2) || defined(VERSION_7)
 
-:and^thSBIT_ZN^ItCond	Rd0811,Rn0003,ThumbExpandImm12 		is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=0 & thSBIT_ZN & Rn0003; thc1515=0 & Rd0811) & ThumbExpandImm12
+:and^thSBIT_SCZN^ItCond	Rd0811,Rn0003,ThumbExpandImm12 		is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=0 & thSBIT_SCZN & Rn0003; thc1515=0 & Rd0811) & ThumbExpandImm12
 {
   build ItCond;
   build ThumbExpandImm12;
   Rd0811 = Rn0003 & ThumbExpandImm12;
   resflags(Rd0811);
-  build thSBIT_ZN;
+  build thSBIT_SCZN;
 }
 
-:and^thSBIT_ZN^ItCond^".w"	Rd0811,Rn0003,thshift2 		is TMode=1 & ItCond & op11=0x1d & thc0910=1 & sop0508=0 & thSBIT_ZN & Rn0003; thc1515=0 & Rd0811 & thshift2
+:and^thSBIT_SCZN^ItCond^".w"	Rd0811,Rn0003,thshift2 		is TMode=1 & ItCond & op11=0x1d & thc0910=1 & sop0508=0 & thSBIT_SCZN & Rn0003; thc1515=0 & Rd0811 & thshift2
 {
   build ItCond;
   build thshift2;
   Rd0811 = Rn0003 & thshift2;
   resflags(Rd0811);
-  build thSBIT_ZN;
+  build thSBIT_SCZN;
 }
 @endif # VERSION_6T2 || VERSION_7
 
@@ -1412,13 +1415,13 @@ macro th_set_carry_for_asr(op1,shift_count) {
 
 @if defined(VERSION_6T2) || defined(VERSION_7)
 
-:bic^thSBIT_ZN^ItCond   Rd0811,Rn0003,ThumbExpandImm12 		is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=1 & thSBIT_ZN & Rn0003; thc1515=0 & Rd0811) & ThumbExpandImm12
+:bic^thSBIT_SCZN^ItCond   Rd0811,Rn0003,ThumbExpandImm12 		is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=1 & thSBIT_SCZN & Rn0003; thc1515=0 & Rd0811) & ThumbExpandImm12
 {
   build ItCond;
   build ThumbExpandImm12;
   Rd0811 = Rn0003&(~ThumbExpandImm12);
   resflags(Rd0811);
-  build thSBIT_ZN;
+  build thSBIT_SCZN;
 }
 
 :bic^thSBIT_CZNO^ItCond^".w"	Rd0811,Rn0003,thshift2 		is TMode=1 & ItCond & op11=0x1d & thc0910=1 & sop0508=1 & thSBIT_CZNO & Rn0003; thc1515=0 & Rd0811 & thshift2
@@ -2680,12 +2683,12 @@ macro th_set_carry_for_lsr(op1,shift_count) {
 
 @if defined(VERSION_6T2) || defined(VERSION_7)
 
-:mov^thSBIT_ZN^ItCond^".w"  Rd0811,ThumbExpandImm12  is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=2 & thSBIT_ZN & sop0003=15; thc1515=0 & Rd0811) & ThumbExpandImm12 {
+:mov^thSBIT_SCZN^ItCond^".w"  Rd0811,ThumbExpandImm12  is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=2 & thSBIT_SCZN & sop0003=15; thc1515=0 & Rd0811) & ThumbExpandImm12 {
   build ItCond;
   build ThumbExpandImm12;
   Rd0811 = ThumbExpandImm12;
   resflags(Rd0811);
-  build thSBIT_ZN;
+  build thSBIT_SCZN;
 }
 
 :movw^ItCond	Rd0811,Immed16 		is TMode=1 & ItCond & (op11=0x1e & thc0909=1 & sop0508=2 & thc0404=0; thc1515=0 & Rd0811) & Immed16
@@ -3065,21 +3068,21 @@ thspsrmask: spsr^thpsrmask	is thpsrmask & spsr { export thpsrmask; }
   spsr = (spsr& ~thspsrmask) | (Rn0003 & thspsrmask);
 }
 
-:mvn^thSBIT_ZN^ItCond  Rd0811,ThumbExpandImm12  is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=3 & thSBIT_ZN & thc0003=15; thc1515=0 & Rd0811) & ThumbExpandImm12 {
+:mvn^thSBIT_SCZN^ItCond  Rd0811,ThumbExpandImm12  is TMode=1 & ItCond & (op11=0x1e & thc0909=0 & sop0508=3 & thSBIT_SCZN & thc0003=15; thc1515=0 & Rd0811) & ThumbExpandImm12 {
 	build ItCond;
 	build ThumbExpandImm12;
 	Rd0811 = ~ThumbExpandImm12;
 	resflags(Rd0811);
-	build thSBIT_ZN;
+	build thSBIT_SCZN;
 }
 
-:mvn^thSBIT_ZN^ItCond^".w"  Rd0811,thshift2 		is TMode=1 & ItCond & op11=0x1d & thc0910=1 & sop0508=3 & thSBIT_ZN & thc0003=15; thc1515=0 & Rd0811 & thshift2
+:mvn^thSBIT_SCZN^ItCond^".w"  Rd0811,thshift2 		is TMode=1 & ItCond & op11=0x1d & thc0910=1 & sop0508=3 & thSBIT_SCZN & thc0003=15; thc1515=0 & Rd0811 & thshift2
 {
   build ItCond;
   build thshift2;
   Rd0811 = ~thshift2;
   resflags(Rd0811);
-  build thSBIT_ZN;
+  build thSBIT_SCZN;
 }
 
 @endif # VERSION_6T2 || VERSION_7
