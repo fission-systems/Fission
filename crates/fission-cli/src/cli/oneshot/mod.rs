@@ -475,13 +475,14 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
             Ok(pair) => {
                 if run_concrete {
                     let samples = fission_dir::default_samples(pair.hir.params.len());
-                    let outcome = fission_dir::diff_prehir_hir(&pair.prehir, &pair.hir, &samples);
+                    let report =
+                        fission_dir::diff_prehir_hir_detailed(&pair.prehir, &pair.hir, &samples);
                     tiers.push((
                         "concrete",
-                        outcome.category().into(),
-                        format!("{outcome:?}"),
-                        verify_outcome_reason(&outcome),
-                        verify_outcome_fields(&outcome),
+                        report.outcome.category().into(),
+                        concrete_diff_detail(&report),
+                        concrete_diff_reason(&report),
+                        concrete_diff_fields(&report),
                     ));
                 }
                 if let Some(harness) = harness.as_mut() {
@@ -606,6 +607,76 @@ fn ground_truth_plan(args: &crate::cli::args::VerifyArgs) -> fission_dir::RunPla
         runs: args.runs,
         seed: args.seed,
     }
+}
+
+fn concrete_diff_detail(report: &fission_dir::ConcreteDiffReport) -> String {
+    let c = &report.counts;
+    match report.status {
+        fission_dir::ConcreteDiffStatus::CompleteSampledAgreement => format!(
+            "CompleteSampledAgreement ({}/{} samples agreed; not a universal proof)",
+            c.agreed, c.requested
+        ),
+        fission_dir::ConcreteDiffStatus::PartialSampledAgreement => format!(
+            "PartialSampledAgreement ({}/{} comparable samples agreed, {} symmetric errors; not a universal proof)",
+            c.agreed, c.requested, c.symmetric_errors
+        ),
+        fission_dir::ConcreteDiffStatus::Diverged => format!(
+            "Diverged ({} divergent out of {} requested samples; {} asymmetric errors, {} symmetric errors)",
+            c.divergent, c.requested, c.asymmetric_errors, c.symmetric_errors
+        ),
+        fission_dir::ConcreteDiffStatus::NoComparableEvidence => format!(
+            "NoComparableEvidence (0/{} comparable samples; {} symmetric errors)",
+            c.requested, c.symmetric_errors
+        ),
+    }
+}
+
+fn concrete_diff_reason(report: &fission_dir::ConcreteDiffReport) -> String {
+    match report.status {
+        fission_dir::ConcreteDiffStatus::PartialSampledAgreement => format!(
+            "partial sampled agreement: {} of {} samples failed symmetrically",
+            report.counts.symmetric_errors, report.counts.requested
+        ),
+        _ => verify_outcome_reason(&report.outcome),
+    }
+}
+
+fn concrete_diff_fields(report: &fission_dir::ConcreteDiffReport) -> serde_json::Value {
+    let mut obj = match verify_outcome_fields(&report.outcome) {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    let sym_reasons: serde_json::Map<String, serde_json::Value> = report
+        .counts
+        .symmetric_error_reasons
+        .iter()
+        .map(|(k, &v)| (k.as_str().to_string(), serde_json::json!(v)))
+        .collect();
+    let asym_reasons: serde_json::Map<String, serde_json::Value> = report
+        .counts
+        .asymmetric_error_reasons
+        .iter()
+        .map(|(k, &v)| (k.as_str().to_string(), serde_json::json!(v)))
+        .collect();
+    obj.insert(
+        "sample_status".into(),
+        serde_json::json!(report.status.as_str()),
+    );
+    obj.insert("proved".into(), serde_json::json!(false));
+    obj.insert(
+        "samples".into(),
+        serde_json::json!({
+            "requested": report.counts.requested,
+            "comparable": report.counts.comparable,
+            "agreed": report.counts.agreed,
+            "divergent": report.counts.divergent,
+            "symmetric_errors": report.counts.symmetric_errors,
+            "asymmetric_errors": report.counts.asymmetric_errors,
+            "symmetric_error_reasons": sym_reasons,
+            "asymmetric_error_reasons": asym_reasons,
+        }),
+    );
+    serde_json::Value::Object(obj)
 }
 
 /// A tier's outcome as fields, so a caller does not have to parse the
@@ -1554,5 +1625,60 @@ mod verify_fields_tests {
         let fields = verify_outcome_fields(&fission_dir::VerifyOutcome::Equivalent { checked: 9 });
         assert_eq!(fields["checked"], 9);
         assert!(fields.get("counterexamples").is_none());
+    }
+
+    #[test]
+    fn concrete_diff_projection_preserves_sample_denominator_and_no_universal_proof() {
+        use fission_dir::{
+            ConcreteDiffReport, ConcreteDiffStatus, ConcreteSampleCounts, SampleErrorKind,
+            UnsupportedReason, VerifyOutcome,
+        };
+        use std::collections::BTreeMap;
+
+        let partial = ConcreteDiffReport {
+            status: ConcreteDiffStatus::PartialSampledAgreement,
+            counts: ConcreteSampleCounts {
+                requested: 5,
+                comparable: 3,
+                agreed: 3,
+                divergent: 0,
+                symmetric_errors: 2,
+                asymmetric_errors: 0,
+                symmetric_error_reasons: BTreeMap::from([(
+                    SampleErrorKind::DivisionOrModuloByZero,
+                    2,
+                )]),
+                asymmetric_error_reasons: BTreeMap::new(),
+            },
+            outcome: VerifyOutcome::Equivalent { checked: 3 },
+        };
+        assert!(partial.counts.reconciles());
+        let fields = super::concrete_diff_fields(&partial);
+        assert_eq!(fields["proved"], false);
+        assert_eq!(fields["checked"], 3);
+        assert_eq!(fields["sample_status"], "partial_sampled_agreement");
+        assert_eq!(fields["samples"]["requested"], 5);
+        assert_eq!(fields["samples"]["comparable"], 3);
+        assert_eq!(fields["samples"]["agreed"], 3);
+        assert_eq!(fields["samples"]["symmetric_errors"], 2);
+        assert_eq!(
+            fields["samples"]["symmetric_error_reasons"]["division_or_modulo_by_zero"],
+            2
+        );
+        assert!(super::concrete_diff_reason(&partial).contains("2 of 5"));
+        assert!(super::concrete_diff_detail(&partial).contains("PartialSampledAgreement"));
+
+        let empty = ConcreteDiffReport {
+            status: ConcreteDiffStatus::NoComparableEvidence,
+            counts: ConcreteSampleCounts::default(),
+            outcome: VerifyOutcome::Unsupported(UnsupportedReason::Construct(
+                "no concrete samples were requested",
+            )),
+        };
+        assert!(empty.counts.reconciles());
+        let empty_fields = super::concrete_diff_fields(&empty);
+        assert_eq!(empty_fields["proved"], false);
+        assert_eq!(empty_fields["sample_status"], "no_comparable_evidence");
+        assert_eq!(empty_fields["samples"]["requested"], 0);
     }
 }
