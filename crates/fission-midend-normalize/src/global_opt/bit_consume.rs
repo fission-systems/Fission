@@ -1037,6 +1037,76 @@ mod tests {
         assert_eq!(consumed, vec![("x".to_string(), 1u64 << 63)]);
     }
 
+    /// `x = y | 1; foo(&x); return 0;` -- `foo` reads `x` through its
+    /// address, which no use-site seed sees, so `| 1` is live.
+    #[test]
+    fn keeps_or_bits_of_a_local_whose_address_is_taken() {
+        let binding = |name: &str, origin| PreHirBinding {
+            name: name.into(),
+            ty: uint(32),
+            surface_type_name: None,
+            origin,
+            initializer: None,
+        };
+        let body = |arg: PreHirExpr| {
+            vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: Box::new(PreHirExpr::Var("y".into())),
+                        rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "foo".into(),
+                    args: vec![arg],
+                    ty: NirType::Unknown,
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("r".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("x".into())),
+                        rhs: Box::new(PreHirExpr::Const(2, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("r".into()))),
+            ]
+        };
+        let func = |arg| PreHirFunction {
+            name: "addr_taken".into(),
+            params: vec![binding("y", Some(NirBindingOrigin::ParamIndex(0)))],
+            locals: vec![binding("x", None), binding("r", None)],
+            body: body(arg),
+            ..Default::default()
+        };
+        let keeps_or = |f: &PreHirFunction| {
+            matches!(
+                &f.body[0],
+                PreHirStmt::Assign {
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        ..
+                    },
+                    ..
+                }
+            )
+        };
+
+        let mut taken = func(PreHirExpr::AddressOfLocal("x".into()));
+        apply_bit_consume_dead_code_pass(&mut taken);
+        assert!(keeps_or(&taken), "{:#?}", taken.body);
+
+        // Control: without the address only bit 1 of `x` is read, so `| 1` goes.
+        let mut plain = func(PreHirExpr::Const(0, uint(32)));
+        assert!(apply_bit_consume_dead_code_pass(&mut plain));
+        assert!(!keeps_or(&plain), "{:#?}", plain.body);
+    }
+
     #[test]
     fn preserves_low_bits_feeding_add_carry_logical_not_and_param_multi_def() {
         // 1. `x = y | 1; z = (x + 1) & 2;`: bit 0 of x carries into bit 1 of (x + 1),
