@@ -283,6 +283,7 @@ pub struct RequestedSet {
 }
 
 /// How one solver search ended.
+#[derive(Debug)]
 enum SearchOutcome {
     Found {
         changes: BTreeMap<usize, u8>,
@@ -296,6 +297,66 @@ enum SearchOutcome {
     Exhausted,
     Unknown(String),
     Budget(String),
+}
+
+/// What a solver search saw besides witnesses, for deciding how it ended
+/// once its queue is empty.
+#[derive(Debug, Default)]
+struct SearchTally {
+    /// The first query the solver could not decide.
+    unknown: Option<String>,
+    /// Models whose replay did not take the predicted path.
+    rejected: usize,
+    /// Models whose symbolic replay flipped Φ but whose intervention
+    /// replays (fork, fresh, JIT) did not confirm the flip.
+    not_verified: usize,
+    /// Models whose replay hit the instruction budget before Φ was decided.
+    undecided: usize,
+    /// Input-dependent branches of the recording with no symbolic condition.
+    blind: Option<String>,
+    /// Paths left unsearched at the generation bound.
+    truncated: bool,
+}
+
+impl SearchTally {
+    /// An empty queue is `Exhausted` only if nothing the search saw could
+    /// hide a flip. A model the emulator did not reproduce, or one whose
+    /// flip two replays disagree on, shows the symbolic layer or the
+    /// oracles disagree here: that is Unknown. A model whose replay never
+    /// decided Φ, or a path left at the generation bound, is a budget.
+    fn conclude(self, max_generations: usize) -> SearchOutcome {
+        let mut unknown = self.unknown;
+        if unknown.is_none() && self.rejected > 0 {
+            unknown = Some(format!(
+                "{} solver model(s) did not reproduce in the emulator: the symbolic \
+                 shadow mis-models a path here",
+                self.rejected
+            ));
+        }
+        if unknown.is_none() && self.not_verified > 0 {
+            unknown = Some(format!(
+                "{} solver model(s) flipped Φ on the symbolic replay but the intervention \
+                 replays did not confirm it",
+                self.not_verified
+            ));
+        }
+        if unknown.is_none() {
+            unknown = self.blind;
+        }
+        if let Some(reason) = unknown {
+            return SearchOutcome::Unknown(reason);
+        }
+        if self.undecided > 0 {
+            return SearchOutcome::Budget(format!(
+                "{} model replay(s) hit the instruction budget before Φ was decided",
+                self.undecided
+            ));
+        }
+        if self.truncated {
+            return SearchOutcome::Budget(format!("{max_generations} generations"));
+        }
+        SearchOutcome::Exhausted
+    }
 }
 
 /// Emulator state outside `MachineState` that a checkpoint carries.
@@ -1290,9 +1351,7 @@ impl Runner<'_, '_> {
         let mut seen: BTreeSet<Vec<u8>> = BTreeSet::from([base.clone()]);
         let mut queue: VecDeque<(std::rc::Rc<SymPath>, usize, usize)> =
             VecDeque::from([(root, 0, 0)]);
-        let mut unknown: Option<String> = None;
-        let mut truncated = false;
-        let mut rejected = 0usize;
+        let mut tally = SearchTally::default();
         while let Some((path, bound, generation)) = queue.pop_front() {
             if !self.budget_left() {
                 return Ok(SearchOutcome::Budget("oracle budget".into()));
@@ -1352,7 +1411,7 @@ impl Runner<'_, '_> {
                                 self.config.max_solver_queries
                             )));
                         }
-                        unknown.get_or_insert(reason);
+                        tally.unknown.get_or_insert(reason);
                         continue;
                     }
                 };
@@ -1395,7 +1454,7 @@ impl Runner<'_, '_> {
                     observed.len() >= expected.len() && observed[..expected.len()] == expected[..];
                 let phi_ok = target.is_some() || child.holds() == phi0.map(|h| !h);
                 if !path_ok || !phi_ok {
-                    rejected += 1;
+                    tally.rejected += 1;
                     record.outcome = ModelOutcome::Rejected {
                         expected: format!(
                             "{expected:x?}{}",
@@ -1412,6 +1471,7 @@ impl Runner<'_, '_> {
                 }
                 match child.holds() {
                     None => {
+                        tally.undecided += 1;
                         record.outcome = ModelOutcome::Undecided;
                         self.solver_log.models.push(record);
                     }
@@ -1433,6 +1493,7 @@ impl Runner<'_, '_> {
                                 observation: fork.observation,
                             });
                         }
+                        tally.not_verified += 1;
                         record.outcome = ModelOutcome::NotVerified {
                             detail: format!(
                                 "symbolic replay Φ={h}, intervention replay {:?}",
@@ -1448,39 +1509,25 @@ impl Runner<'_, '_> {
                             if generation + 1 < self.config.max_generations {
                                 queue.push_back((std::rc::Rc::new(child), j + 1, generation + 1));
                             } else {
-                                truncated = true;
+                                tally.truncated = true;
                             }
                         }
                     }
                 }
             }
         }
-        // A model the emulator did not reproduce shows the symbolic layer
-        // mis-models this program: running out of paths then proves nothing.
-        if unknown.is_none() && rejected > 0 {
-            unknown = Some(format!(
-                "{rejected} solver model(s) did not reproduce in the emulator: the symbolic \
-                 shadow mis-models a path here"
-            ));
-        }
-        if unknown.is_none() && !blind.is_empty() {
+        if !blind.is_empty() {
             let pcs: BTreeSet<u64> = blind
                 .iter()
                 .filter_map(|s| self.trace.step(*s).map(|r| r.pc))
                 .collect();
-            unknown = Some(format!(
+            tally.blind = Some(format!(
                 "{} input-dependent branch(es) of the recording (at {pcs:x?}) have no symbolic \
                  condition: an unmodelled operation dropped it, so the search cannot see them",
                 blind.len()
             ));
         }
-        Ok(match (unknown, truncated) {
-            (Some(reason), _) => SearchOutcome::Unknown(reason),
-            (None, true) => {
-                SearchOutcome::Budget(format!("{} generations", self.config.max_generations))
-            }
-            (None, false) => SearchOutcome::Exhausted,
-        })
+        Ok(tally.conclude(self.config.max_generations))
     }
 
     /// Bounded minimality of a joint witness: search every proper subset
@@ -2064,4 +2111,55 @@ pub fn record_and_slice(
         potential.as_ref(),
     );
     Ok((recorded, slice))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_empty_queue_is_exhausted_only_when_no_model_left_doubt() {
+        // Positive control: nothing but Unsat and Φ-unchanged models.
+        assert!(matches!(
+            SearchTally::default().conclude(4),
+            SearchOutcome::Exhausted
+        ));
+        // A flip the intervention replays did not confirm is not "no flip".
+        let not_verified = SearchTally {
+            not_verified: 1,
+            ..SearchTally::default()
+        };
+        assert!(matches!(
+            not_verified.conclude(4),
+            SearchOutcome::Unknown(reason) if reason.contains("did not confirm")
+        ));
+        // A model whose replay never decided Φ is a budget, not exhaustion.
+        let undecided = SearchTally {
+            undecided: 2,
+            ..SearchTally::default()
+        };
+        assert!(matches!(
+            undecided.conclude(4),
+            SearchOutcome::Budget(reason) if reason.contains("2 model replay(s)")
+        ));
+        // Unknown outranks a budget.
+        let both = SearchTally {
+            rejected: 1,
+            undecided: 1,
+            truncated: true,
+            ..SearchTally::default()
+        };
+        assert!(matches!(
+            both.conclude(4),
+            SearchOutcome::Unknown(reason) if reason.contains("did not reproduce")
+        ));
+        let truncated = SearchTally {
+            truncated: true,
+            ..SearchTally::default()
+        };
+        assert!(matches!(
+            truncated.conclude(4),
+            SearchOutcome::Budget(reason) if reason == "4 generations"
+        ));
+    }
 }
