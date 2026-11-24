@@ -44,6 +44,10 @@ class ChangePlanTests(unittest.TestCase):
                      "utils/sleigh-specs/languages/AARCH64/AARCH64instructions.sinc",
                      "crates/fission-emulator/src/pcode/eval.rs",
                      "crates/fission-emulator/src/interp.rs",
+                     "crates/fission-emulator/src/arch/vector.rs",
+                     "crates/fission-emulator/src/arch/vector/x86.rs",
+                     "crates/fission-emulator/src/jit/float_ops.rs",
+                     "crates/fission-emulator/src/jit/softfloat.rs",
                      "crates/fission-emulator/tests/native_differential/baseline.txt",
                      ".github/workflows/native-differential.yml",
                      ".github/workflows/reusable-premerge.yml"):

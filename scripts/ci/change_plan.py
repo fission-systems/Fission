@@ -41,10 +41,15 @@ PREMERGE = (
     "scripts/ci/speed_compare.py",
 )
 # What the native single-instruction differential checks: the SLEIGH lift
-# (runtime and specs) and the p-code interpreter that executes it.
+# (runtime and specs) and the p-code interpreter that executes it, with what
+# the interpreter calls into -- the userop answers under `arch/` (vector ones
+# included, a file or a directory), the shared float helpers and the
+# CALLOTHER callbacks.
 NATIVE_DIFF = (
     "crates/fission-sleigh/", "utils/sleigh-specs/", "crates/fission-emulator/src/pcode",
-    "crates/fission-emulator/src/interp.rs", "crates/fission-emulator/src/arch/vector.rs",
+    "crates/fission-emulator/src/interp.rs", "crates/fission-emulator/src/arch/",
+    "crates/fission-emulator/src/jit/float_ops.rs", "crates/fission-emulator/src/jit/softfloat.rs",
+    "crates/fission-emulator/src/jit/callbacks.rs",
     "crates/fission-emulator/tests/native_differential/",
     ".github/workflows/native-differential.yml",
 )

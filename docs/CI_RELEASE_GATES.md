@@ -132,8 +132,9 @@ register, flag, vector register and a 16 KiB scratch buffer.
   only that case.
 - **Where.** On pull requests and merge candidates that touch
   `crates/fission-sleigh/`, `utils/sleigh-specs/`,
-  `crates/fission-emulator/src/pcode*`, `interp.rs`, `arch/vector.rs` or the
-  test itself, the `native-diff` pre-merge lane runs it on `ubuntu-24.04`
+  `crates/fission-emulator/src/pcode*`, `interp.rs`, `arch/`, the float
+  helpers and CALLOTHER callbacks under `jit/` that the interpreter calls, or
+  the test itself, the `native-diff` pre-merge lane runs it on `ubuntu-24.04`
   (x86-64) and `ubuntu-24.04-arm` (AArch64): about 10 s of test time after the
   build. `native-differential.yml` runs it nightly with 128 states and 100,000
   random cases per ISA and reports into a `ci-red` issue. The test also runs
