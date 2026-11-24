@@ -1,0 +1,230 @@
+name: Prepare Release PR
+
+# Opens, or updates in place, the one Release PR for a version: the workspace
+# version bump, the drafted notes (scripts/release/draft_notes.py) and the
+# pinned candidate (.github/release-candidate.json). It never tags or
+# publishes; release-tag.yml does that after the PR merges, and refuses a
+# commit that is not this PR's merge on top of the candidate.
+#
+# Only workflow_dispatch starts it. Nothing it pushes or opens can start it
+# again: pushes and PRs made with GITHUB_TOKEN start no workflow runs, which
+# is also why the maintainer starts CI on the PR (docs/CI_RELEASE_GATES.md).
+#
+# Trust: the `draft` job runs this workflow's own scripts (main's) over the
+# candidate's files with a read-only token; it runs no code from the
+# candidate. The `open-pr` job holds the write token and runs only git
+# plumbing and `gh api`. No cache is restored anywhere.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, vX.Y.Z (or vX.Y.Z-rc.N)"
+        required: true
+        type: string
+      ref:
+        description: "Candidate commit on main (default: main HEAD)"
+        required: false
+        default: main
+        type: string
+      dry_run:
+        description: "Draft the notes into the run summary only; push and open nothing"
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: prepare-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  draft:
+    name: Draft notes and version bump
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      sha: ${{ steps.candidate.outputs.sha }}
+      tag: ${{ steps.candidate.outputs.tag }}
+    steps:
+      - name: Check out the release tooling (this workflow's commit)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: tools
+          persist-credentials: false
+
+      - name: Check out the candidate with full history and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ inputs.ref }}
+          path: candidate
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Resolve and check the candidate
+        id: candidate
+        env:
+          VERSION: ${{ inputs.version }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "::error::version must be vX.Y.Z or vX.Y.Z-pre (got '$VERSION')"
+            exit 1
+          fi
+          if [[ "$DRY_RUN" != "true" && "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Dispatch from main, or set dry_run."
+            exit 1
+          fi
+          cd candidate
+          sha="$(git rev-parse HEAD)"
+          if [[ "$DRY_RUN" != "true" ]] && ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::Candidate $sha has not landed on main."
+            exit 1
+          fi
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "::error::$VERSION is already tagged."
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Bump the workspace version
+        env:
+          TAG: ${{ steps.candidate.outputs.tag }}
+        run: python3 tools/scripts/release/bump_version.py --root candidate --version "$TAG"
+
+      - name: Draft the notes, candidate record and PR description
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.candidate.outputs.tag }}
+          SHA: ${{ steps.candidate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          # A re-run keeps what the maintainer wrote in the notes' maintainer blocks.
+          git -C candidate show "origin/release/$TAG:docs/changelog/$TAG.md" > out/previous-notes.md 2>/dev/null \
+            || rm -f out/previous-notes.md
+          python3 tools/scripts/release/draft_notes.py draft \
+            --git-dir candidate --repo "$REPO" --version "$TAG" --target "$SHA" \
+            --previous-notes out/previous-notes.md \
+            --out "candidate/docs/changelog/$TAG.md" \
+            --candidate-out candidate/.github/release-candidate.json \
+            --pr-body-out out/pr-body.md \
+            --data-out out/prs.json
+          git -C candidate add -A
+          git -C candidate diff --cached --binary > out/release.patch
+          {
+            echo "## Release PR draft for $TAG"
+            echo
+            echo "Candidate \`$SHA\`."
+            echo
+            echo '```text'
+            git -C candidate diff --cached --stat
+            echo '```'
+            echo
+            cat "candidate/docs/changelog/$TAG.md"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-pr
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  open-pr:
+    name: Open or update the Release PR
+    needs: draft
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      TAG: ${{ needs.draft.outputs.tag }}
+      SHA: ${{ needs.draft.outputs.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.draft.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-pr
+          path: ${{ runner.temp }}/release-pr
+
+      # Git plumbing only: the tree is the candidate plus the drafted patch.
+      # An existing branch gets a new commit on top (a merge with the new
+      # candidate when it moved), so the push is always a fast-forward, and
+      # an identical tree pushes nothing.
+      - name: Commit to release/<tag> without force
+        id: branch
+        env:
+          PATCH: ${{ runner.temp }}/release-pr/release.patch
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SHA"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git apply --index "$PATCH"
+          tree="$(git write-tree)"
+          branch="release/$TAG"
+          if tip="$(git rev-parse -q --verify "refs/remotes/origin/$branch")"; then
+            if [[ "$(git rev-parse "$tip^{tree}")" == "$tree" ]]; then
+              echo "release/$TAG already has this content."
+              commit="$tip"
+            else
+              parents=(-p "$tip")
+              git merge-base --is-ancestor "$SHA" "$tip" || parents+=(-p "$SHA")
+              commit="$(git commit-tree "$tree" "${parents[@]}" -m "release: $TAG" -m "Candidate $SHA.")"
+            fi
+          else
+            commit="$(git commit-tree "$tree" -p "$SHA" -m "release: $TAG" -m "Candidate $SHA.")"
+          fi
+          git push origin "${commit}:refs/heads/${branch}"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open the Release PR, or update the open one
+        env:
+          BRANCH: ${{ steps.branch.outputs.branch }}
+          BODY: ${{ runner.temp }}/release-pr/pr-body.md
+        run: |
+          set -euo pipefail
+          owner="${REPO%%/*}"
+          number="$(gh api "repos/$REPO/pulls?state=open&base=main&head=$owner:$BRANCH" --jq '.[0].number // empty')"
+          if [[ -n "$number" ]]; then
+            gh api -X PATCH "repos/$REPO/pulls/$number" -f title="release: $TAG" -F body=@"$BODY" --silent
+            echo "Updated #$number in place." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if gh api -X POST "repos/$REPO/pulls" -f base=main -f head="$BRANCH" \
+               -f title="release: $TAG" -F body=@"$BODY" --jq .html_url > pr-url.txt 2> pr-error.txt; then
+            {
+              echo "Opened $(cat pr-url.txt)."
+              echo
+              echo "A PR opened with GITHUB_TOKEN starts no CI. Close and reopen it once to start the required checks."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cat pr-error.txt
+          # Repository setting "Allow GitHub Actions to create and approve pull
+          # requests" is off: the maintainer opens it, which also starts CI.
+          short="Release $TAG, candidate $SHA. The notes are docs/changelog/$TAG.md in this diff; re-run Prepare Release PR to copy them here."
+          query="$(jq -rn --arg t "release: $TAG" --arg b "$short" '"title=\($t|@uri)&body=\($b|@uri)"')"
+          {
+            echo "GitHub refused a PR from GITHUB_TOKEN. Open it here (one click; CI starts by itself):"
+            echo
+            echo "https://github.com/$REPO/compare/main...$BRANCH?expand=1&$query"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
