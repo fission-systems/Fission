@@ -41,8 +41,6 @@ x86_64 PUSHFQ mem #1052 stored RFLAGS bit 1 is 0
 x86_64 PUSHF mem #1052 stored FLAGS bit 1 is 0
 # Spec: the store re-reads an address register the instruction just wrote.
 x86_64 XADD mem,fault #1053 store address formed after the source register is written
-# Evaluator: INT_LEFT/INT_RIGHT on a >8-byte varnode shift a u64 by >= 64.
-x86_64 PALIGNR panic #1054 evaluator shift overflow on the 32-byte temporary
 # Evaluator: which NaN propagates is left to the host's float ops; x86
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
 x86_64 * ~nan #1055 NaN payload / operand order
