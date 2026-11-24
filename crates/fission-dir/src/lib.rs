@@ -49,7 +49,10 @@ pub mod symbolic;
 
 pub use call_sites::{MachineFlow, call_sites};
 pub use decompile::{DecompileError, PreHirHirPair, decompile_one};
-pub use diff::{default_samples, diff_prehir_hir};
+pub use diff::{
+    ConcreteDiffReport, ConcreteDiffStatus, ConcreteSampleCounts, SampleErrorKind, default_samples,
+    diff_prehir_hir, diff_prehir_hir_detailed,
+};
 pub use emu_driver::{
     CallOutcome, CallStub, EmulatorHarness, ObservedCall, StubbedEnd, StubbedRun,
 };
