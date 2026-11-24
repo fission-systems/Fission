@@ -16,6 +16,8 @@ pub use packed_decode::PackedDecodedPcodeFunction;
 pub use raw_decode_seed::RawDecodeSeed;
 mod registry;
 mod spine;
+#[cfg(test)]
+mod thumb_semantics_tests;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
