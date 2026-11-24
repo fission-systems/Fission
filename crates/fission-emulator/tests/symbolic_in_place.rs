@@ -172,3 +172,40 @@ fn a_branch_on_a_byte_spilled_through_a_pointer_is_symbolic() {
     assert_eq!(found.len(), 1, "one symbolic branch: {found:?}");
     assert!(mentions_stdin(&found[0].1), "{:?}", found[0].1);
 }
+
+/// An in-place op the symbolic path does not model (`shl eax, 1` lifts to
+/// `EAX = INT_LEFT EAX, 1`) must not leave the operand's old expression on
+/// its output: `eax` no longer equals the stdin byte. Any branch recorded
+/// after it must agree with the concrete run -- with the byte 'A', `eax` is
+/// 0x82 and the `jne` is taken, so its predicate must hold at 'A'.
+#[test]
+fn an_unmodelled_in_place_op_drops_the_stale_expression() {
+    let code = [
+        0x0F, 0xB6, 0x04, 0x24, // movzx eax, byte ptr [rsp]
+        0xD1, 0xE0, // shl eax, 1
+        0x83, 0xF8, 0x41, // cmp eax, 'A'
+        0x75, 0x00, // jne +0
+    ];
+    for (pc, cond) in branches(&code) {
+        let mut var = None;
+        cond.visit_preorder(&mut |e| {
+            if let SymExpr::Var { id, .. } = e {
+                var = Some((*id, e.get_bit_width(), e.clone()));
+            }
+        });
+        let Some((id, width, expr)) = var else {
+            continue;
+        };
+        let mut solver = fission_solver::Solver::new();
+        solver.nodes.insert(id, expr.clone());
+        let at_a = SymExpr::new_eq(expr, SymExpr::new_const(u64::from(b'A'), width));
+        let sat = solver
+            .check_sat_with_oracle(None, &[at_a, cond.clone()])
+            .expect("solve");
+        assert_eq!(
+            sat,
+            fission_solver::SatResult::Sat,
+            "branch at {pc:#x} disagrees with the concrete run at 'A': {cond:?}"
+        );
+    }
+}

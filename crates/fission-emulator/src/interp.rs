@@ -609,7 +609,18 @@ impl Emulator {
                     }
                 }
             }
-            _ => {}
+            // An op with no symbolic model ends with no expression on its
+            // output. Its concrete write cleared that shadow, but the restore
+            // above may have put an input's back on bytes the op overwrote
+            // (`EAX = INT_LEFT EAX, 1` would keep the old `EAX`'s
+            // expression), so clear it again.
+            _ => {
+                if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+                    for i in 0..u64::from(out.size).min(64) {
+                        self.state.clear_shadow_memory(out.space_id, out.offset + i);
+                    }
+                }
+            }
         }
     }
 }
