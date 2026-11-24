@@ -60,8 +60,12 @@ witness.
 
 **Results that are not a defect.** Triage closes or reclassifies these, and
 records the probe output either way:
-- Does not reproduce on current `main`: close as not planned, with the probe
-  output.
+- Does not reproduce on current `main`: first check that the probe ran under
+  the report's original conditions: the same ISA, OS, host architecture,
+  compiler and flags, input, and feature set. Only then close it as not
+  planned, with the probe output and the conditions used. If those conditions
+  are not available, the result is an environment gap: record it and keep
+  `status:needs-repro`.
 - Already fixed: close and reference the fixing PR.
 - Flaky: the probe passes sometimes. Keep `status:needs-repro` and record the
   pass rate. Never retry until green.
