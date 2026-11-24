@@ -625,8 +625,13 @@ pub fn canonicalize_unsigned_compare_binding_casts(func: &mut PreHirFunction) ->
 /// At the final cast boundary, a widening cast whose operand has the other
 /// signedness gets a same-width view of the destination's signedness
 /// underneath -- `(long long)(int)param_1` -- so both readings are one
-/// extension. Constants are left alone: their stored value already carries
-/// the extension the lowering meant (`eval_cast_const`).
+/// extension. Constants are left alone: the printer writes a constant's
+/// stored value, which already carries the extension the lowering meant.
+///
+/// Runs after normalize's type recovery. Passes the decompiler runs after
+/// normalize (post-structuring copy propagation, call-site type propagation)
+/// can still put an operand of the other signedness under a cast; the
+/// sibling compare canonicalization has the same limit.
 pub fn canonicalize_extension_binding_casts(func: &mut PreHirFunction) -> bool {
     let binding_types: HashMap<String, NirType> = func
         .params

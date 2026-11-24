@@ -604,7 +604,7 @@ pub fn build_normalize_pipeline() -> Pipeline {
                     concept,
                     canonicalize_unsigned_compare_binding_casts,
                 ))
-                // The same boundary for extensions: binding types are final
+                // The same boundary for extensions: type recovery is done
                 // here, so a widening cast whose operand ended up with the
                 // other signedness gets the view that keeps its extension.
                 .pass(fn_pass(
