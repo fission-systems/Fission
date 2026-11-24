@@ -1,4 +1,4 @@
-//! Symbolic expressions survive an op that reads what it writes.
+//! Symbolic expressions survive the interpreter's in-place ops and stores.
 //!
 //! The interpreter runs each p-code op concretely first and builds its
 //! symbolic expression after. A concrete write clears the shadow it covers,
@@ -8,6 +8,12 @@
 //! 'A'; jne` therefore recorded no symbolic branch at all, though the
 //! branch depends on the stdin byte. Found by CSIC's joint search (PR
 //! #1106), which asks the solver about exactly these branches.
+//!
+//! A second defect in the same path: the interpreter called the shadow
+//! `STORE` callback with its arguments in the wrong order (the pointer's
+//! varnode where the value's belongs, sizes swapped), so a value stored
+//! through a computed address -- every spill to the stack -- lost its
+//! expression.
 //!
 //! The programs run after the fixture's `read(0, rsp, 1)` of one stdin byte
 //! (`'A'`), so `[rsp]` is the symbolic source. Built from this repository's
@@ -149,4 +155,20 @@ fn an_in_place_add_keeps_its_expression() {
     assert_eq!(sat, fission_solver::SatResult::Sat, "{cond:?}");
     let value = solver.get_value(id).expect("model");
     assert_ne!(value as u8, b'A', "the model takes the other way");
+}
+
+/// The byte goes through a stack slot (`STORE` through `rsp + 8`, then a
+/// load back), as every `-O0` local does.
+#[test]
+fn a_branch_on_a_byte_spilled_through_a_pointer_is_symbolic() {
+    let code = [
+        0x0F, 0xB6, 0x04, 0x24, // movzx eax, byte ptr [rsp]
+        0x88, 0x44, 0x24, 0x08, // mov byte ptr [rsp+8], al
+        0x0F, 0xB6, 0x4C, 0x24, 0x08, // movzx ecx, byte ptr [rsp+8]
+        0x83, 0xF9, 0x41, // cmp ecx, 'A'
+        0x75, 0x00, // jne +0
+    ];
+    let found = branches(&code);
+    assert_eq!(found.len(), 1, "one symbolic branch: {found:?}");
+    assert!(mentions_stdin(&found[0].1), "{:?}", found[0].1);
 }
