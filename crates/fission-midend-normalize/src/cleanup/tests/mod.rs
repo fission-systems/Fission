@@ -6,6 +6,7 @@ mod call_targets;
 mod casts_and_subvars;
 mod conditions;
 mod direct_returns;
+mod extension_views;
 mod labels;
 mod loop_returns;
 mod switch_guards;
