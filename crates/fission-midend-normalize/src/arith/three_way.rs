@@ -210,16 +210,17 @@ fn detect_three_way(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, PreHir
         return None;
     }
 
-    // One must be less than, the other must be less-than-or-equal
-    let is_less = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Lt | PreHirBinaryOp::SLt);
-    let is_lesseq = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Le | PreHirBinaryOp::SLe);
-
-    if (is_less(op1) && is_lesseq(op2)) || (is_lesseq(op1) && is_less(op2)) {
-        let less_op = if is_less(op1) { op1 } else { op2 };
-        return Some((lhs1.clone(), rhs1.clone(), less_op));
-    }
-
-    None
+    // One must be strict less-than and the other less-than-or-equal with matching signedness.
+    let less_op = match (op1, op2) {
+        (PreHirBinaryOp::Lt, PreHirBinaryOp::Le) | (PreHirBinaryOp::Le, PreHirBinaryOp::Lt) => {
+            PreHirBinaryOp::Lt
+        }
+        (PreHirBinaryOp::SLt, PreHirBinaryOp::SLe) | (PreHirBinaryOp::SLe, PreHirBinaryOp::SLt) => {
+            PreHirBinaryOp::SLt
+        }
+        _ => return None,
+    };
+    Some((lhs1.clone(), rhs1.clone(), less_op))
 }
 
 enum TargetRelation {
@@ -337,15 +338,19 @@ fn try_simplify_three_way_cmp(
         }
     };
 
+    // X = -1 + (v < w) + (v <= w):
+    //   v < w  => X = +1
+    //   v == w => X = 0
+    //   v > w  => X = -1 (or uMAX in unsigned view)
     match normalized_op {
         // EQUAL
         PreHirBinaryOp::Eq => {
             if is_minus_one {
-                make_ret(TargetRelation::Lt) // X == -1 (or uMAX) => v < w
+                make_ret(TargetRelation::Gt) // X == -1 (or uMAX) => v > w
             } else {
                 match const_val {
                     0 => make_ret(TargetRelation::Eq), // X == 0  => v == w
-                    1 => make_ret(TargetRelation::Gt), // X == 1  => w < v (v > w)
+                    1 => make_ret(TargetRelation::Lt), // X == 1  => v < w
                     _ => None,
                 }
             }
@@ -353,11 +358,11 @@ fn try_simplify_three_way_cmp(
         // NOT EQUAL
         PreHirBinaryOp::Ne => {
             if is_minus_one {
-                make_ret(TargetRelation::Ge) // X != -1 (or uMAX) => v >= w
+                make_ret(TargetRelation::Le) // X != -1 (or uMAX) => X ∈ {0, 1} => v <= w
             } else {
                 match const_val {
                     0 => make_ret(TargetRelation::Ne), // X != 0  => v != w
-                    1 => make_ret(TargetRelation::Le), // X != 1  => v <= w
+                    1 => make_ret(TargetRelation::Ge), // X != 1  => X ∈ {-1, 0} => v >= w
                     _ => None,
                 }
             }
@@ -368,8 +373,8 @@ fn try_simplify_three_way_cmp(
                 None // X < -1 => always false
             } else {
                 match const_val {
-                    0 => make_ret(TargetRelation::Lt), // X < 0  => v < w
-                    1 => make_ret(TargetRelation::Le), // X < 1  => v <= w
+                    0 => make_ret(TargetRelation::Gt), // X < 0  => X == -1 => v > w
+                    1 => make_ret(TargetRelation::Ge), // X < 1  => X ∈ {-1, 0} => v >= w
                     _ => None,
                 }
             }
@@ -377,10 +382,10 @@ fn try_simplify_three_way_cmp(
         // SIGNED LESS OR EQUAL
         PreHirBinaryOp::SLe => {
             if is_minus_one {
-                make_ret(TargetRelation::Lt) // X <= -1 => v < w
+                make_ret(TargetRelation::Gt) // X <= -1 => X == -1 => v > w
             } else {
                 match const_val {
-                    0 => make_ret(TargetRelation::Le), // X <= 0 => v <= w
+                    0 => make_ret(TargetRelation::Ge), // X <= 0 => X ∈ {-1, 0} => v >= w
                     1 => None,                         // X <= 1 => always true
                     _ => None,
                 }
@@ -389,10 +394,10 @@ fn try_simplify_three_way_cmp(
         // SIGNED GREATER THAN
         PreHirBinaryOp::SGt => {
             if is_minus_one {
-                make_ret(TargetRelation::Ge) // X > -1 => v >= w
+                make_ret(TargetRelation::Le) // X > -1 => X ∈ {0, 1} => v <= w
             } else {
                 match const_val {
-                    0 => make_ret(TargetRelation::Gt), // X > 0  => v > w
+                    0 => make_ret(TargetRelation::Lt), // X > 0  => X == 1 => v < w
                     1 => None,                         // X > 1 => always false
                     _ => None,
                 }
@@ -404,8 +409,8 @@ fn try_simplify_three_way_cmp(
                 None // X >= -1 => always true
             } else {
                 match const_val {
-                    1 => make_ret(TargetRelation::Gt), // X >= 1  => v > w
-                    0 => make_ret(TargetRelation::Ge), // X >= 0  => v >= w
+                    1 => make_ret(TargetRelation::Lt), // X >= 1  => X == 1 => v < w
+                    0 => make_ret(TargetRelation::Le), // X >= 0  => X ∈ {0, 1} => v <= w
                     _ => None,
                 }
             }
@@ -413,7 +418,7 @@ fn try_simplify_three_way_cmp(
         // UNSIGNED LESS THAN: X ∈ {0, 1, uMAX}
         PreHirBinaryOp::Lt => {
             if is_minus_one {
-                make_ret(TargetRelation::Ge) // X <u uMAX => X ∈ {0, 1} => v >= w
+                make_ret(TargetRelation::Le) // X <u uMAX => X ∈ {0, 1} => v <= w
             } else {
                 match const_val {
                     0 => None,                         // X <u 0 => always false
@@ -429,7 +434,7 @@ fn try_simplify_three_way_cmp(
             } else {
                 match const_val {
                     0 => make_ret(TargetRelation::Eq), // X <=u 0 => X == 0 => v == w
-                    1 => make_ret(TargetRelation::Ge), // X <=u 1 => X ∈ {0, 1} => v >= w
+                    1 => make_ret(TargetRelation::Le), // X <=u 1 => X ∈ {0, 1} => v <= w
                     _ => None,
                 }
             }
@@ -441,7 +446,7 @@ fn try_simplify_three_way_cmp(
             } else {
                 match const_val {
                     0 => make_ret(TargetRelation::Ne), // X >u 0 => X ∈ {1, uMAX} => v != w
-                    1 => make_ret(TargetRelation::Lt), // X >u 1 => X == uMAX => v < w
+                    1 => make_ret(TargetRelation::Gt), // X >u 1 => X == uMAX => v > w
                     _ => None,
                 }
             }
@@ -449,7 +454,7 @@ fn try_simplify_three_way_cmp(
         // UNSIGNED GREATER OR EQUAL
         PreHirBinaryOp::Ge => {
             if is_minus_one {
-                make_ret(TargetRelation::Lt) // X >=u uMAX => X == uMAX => v < w
+                make_ret(TargetRelation::Gt) // X >=u uMAX => X == uMAX => v > w
             } else {
                 match const_val {
                     0 => None,                         // X >=u 0 => always true
@@ -524,7 +529,7 @@ mod tests {
         assert_eq!(lhs, PreHirExpr::Var("a".to_string()));
         assert_eq!(rhs, PreHirExpr::Var("b".to_string()));
 
-        // X >u 1 => a < b
+        // X >u 1 => X == uMAX => a > b (which is b < a)
         let (op, lhs, rhs) = try_simplify_three_way_cmp(
             PreHirBinaryOp::Gt,
             &three_way,
@@ -532,8 +537,8 @@ mod tests {
         )
         .expect("simplify >u 1");
         assert_eq!(op, PreHirBinaryOp::Lt);
-        assert_eq!(lhs, PreHirExpr::Var("a".to_string()));
-        assert_eq!(rhs, PreHirExpr::Var("b".to_string()));
+        assert_eq!(lhs, PreHirExpr::Var("b".to_string()));
+        assert_eq!(rhs, PreHirExpr::Var("a".to_string()));
 
         // X >u 0 => a != b
         let (op, lhs, rhs) = try_simplify_three_way_cmp(
@@ -546,7 +551,7 @@ mod tests {
         assert_eq!(lhs, PreHirExpr::Var("a".to_string()));
         assert_eq!(rhs, PreHirExpr::Var("b".to_string()));
 
-        // X <=u 1 => a >= b (which is b <= a)
+        // X <=u 1 => a <= b
         let (op, lhs, rhs) = try_simplify_three_way_cmp(
             PreHirBinaryOp::Le,
             &three_way,
@@ -554,7 +559,144 @@ mod tests {
         )
         .expect("simplify <=u 1");
         assert_eq!(op, PreHirBinaryOp::Le);
-        assert_eq!(lhs, PreHirExpr::Var("b".to_string()));
-        assert_eq!(rhs, PreHirExpr::Var("a".to_string()));
+        assert_eq!(lhs, PreHirExpr::Var("a".to_string()));
+        assert_eq!(rhs, PreHirExpr::Var("b".to_string()));
+    }
+
+    fn make_3way_with_ops(op1: PreHirBinaryOp, op2: PreHirBinaryOp, ty: NirType) -> PreHirExpr {
+        let a = PreHirExpr::Var("a".to_string());
+        let b = PreHirExpr::Var("b".to_string());
+        let term1 = PreHirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: op1,
+                lhs: Box::new(a.clone()),
+                rhs: Box::new(b.clone()),
+                ty: NirType::Bool,
+            }),
+        };
+        let term2 = PreHirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: op2,
+                lhs: Box::new(a),
+                rhs: Box::new(b),
+                ty: NirType::Bool,
+            }),
+        };
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(term1),
+                rhs: Box::new(term2),
+                ty: ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(-1, ty.clone())),
+            ty,
+        }
+    }
+
+    fn eval_cmp32(op: PreHirBinaryOp, x: u32, y: u32) -> bool {
+        match op {
+            PreHirBinaryOp::Eq => x == y,
+            PreHirBinaryOp::Ne => x != y,
+            PreHirBinaryOp::Lt => x < y,
+            PreHirBinaryOp::Le => x <= y,
+            PreHirBinaryOp::Gt => x > y,
+            PreHirBinaryOp::Ge => x >= y,
+            PreHirBinaryOp::SLt => (x as i32) < (y as i32),
+            PreHirBinaryOp::SLe => (x as i32) <= (y as i32),
+            PreHirBinaryOp::SGt => (x as i32) > (y as i32),
+            PreHirBinaryOp::SGe => (x as i32) >= (y as i32),
+            other => panic!("unexpected op {other:?}"),
+        }
+    }
+
+    #[test]
+    fn three_way_signed_and_unsigned_truth_table_is_exact() {
+        let s32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let ops = [
+            PreHirBinaryOp::Eq,
+            PreHirBinaryOp::Ne,
+            PreHirBinaryOp::Lt,
+            PreHirBinaryOp::Le,
+            PreHirBinaryOp::Gt,
+            PreHirBinaryOp::Ge,
+            PreHirBinaryOp::SLt,
+            PreHirBinaryOp::SLe,
+            PreHirBinaryOp::SGt,
+            PreHirBinaryOp::SGe,
+        ];
+        let consts = [-1i64, 0, 1];
+
+        for signed in [false, true] {
+            let expr = if signed {
+                make_3way_with_ops(PreHirBinaryOp::SLt, PreHirBinaryOp::SLe, s32_ty.clone())
+            } else {
+                make_3way_with_ops(PreHirBinaryOp::Lt, PreHirBinaryOp::Le, u32_ty())
+            };
+            let pairs: &[(u32, u32)] = if signed {
+                &[
+                    ((-5i32) as u32, 2),
+                    ((-5i32) as u32, (-5i32) as u32),
+                    (2, (-5i32) as u32),
+                ]
+            } else {
+                &[(1, 2), (2, 2), (3, 2)]
+            };
+            let cty = if signed { s32_ty.clone() } else { u32_ty() };
+
+            for &op in &ops {
+                for &c in &consts {
+                    let c_expr = PreHirExpr::Const(c, cty.clone());
+                    for three_way_lhs in [true, false] {
+                        let simplified = if three_way_lhs {
+                            try_simplify_three_way_cmp(op, &expr, &c_expr)
+                        } else {
+                            try_simplify_three_way_cmp(op, &c_expr, &expr)
+                        };
+                        let Some((new_op, new_lhs, new_rhs)) = simplified else {
+                            continue;
+                        };
+                        for &(a, b) in pairs {
+                            let (lt, le) = if signed {
+                                ((a as i32) < (b as i32), (a as i32) <= (b as i32))
+                            } else {
+                                (a < b, a <= b)
+                            };
+                            let x = (-1i32 + i32::from(lt) + i32::from(le)) as u32;
+                            let orig_res = if three_way_lhs {
+                                eval_cmp32(op, x, c as i32 as u32)
+                            } else {
+                                eval_cmp32(op, c as i32 as u32, x)
+                            };
+                            let val_of = |e: &PreHirExpr| match e {
+                                PreHirExpr::Var(n) if n == "a" => a,
+                                PreHirExpr::Var(n) if n == "b" => b,
+                                other => panic!("unexpected expr {other:?}"),
+                            };
+                            let new_res = eval_cmp32(new_op, val_of(&new_lhs), val_of(&new_rhs));
+                            assert_eq!(
+                                new_res, orig_res,
+                                "mismatch for signed={signed}, op={op:?}, c={c}, three_way_lhs={three_way_lhs}, a={a}, b={b}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn three_way_rejects_mismatched_signedness() {
+        let mixed1 = make_3way_with_ops(PreHirBinaryOp::Lt, PreHirBinaryOp::SLe, u32_ty());
+        assert!(detect_three_way(&mixed1).is_none());
+
+        let mixed2 = make_3way_with_ops(PreHirBinaryOp::SLt, PreHirBinaryOp::Le, u32_ty());
+        assert!(detect_three_way(&mixed2).is_none());
     }
 }
