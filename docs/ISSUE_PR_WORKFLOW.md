@@ -65,6 +65,18 @@ records the probe output either way:
 - Already fixed: close and reference the fixing PR.
 - Flaky: the probe passes sometimes. Keep `status:needs-repro` and record the
   pass rate. Never retry until green.
+- Environment error: the probe or check could not run, for example a missing
+  tool, a runner fault or a network failure. Record it and hold the verdict.
+  This is neither a reproduction nor a non-reproduction.
+
+**Defects no single run can show.** Some defects cannot be shown by running
+one test: a false proof, a vacuous verification, an ownership or architecture
+violation. These may reach `status:confirmed` through recorded evidence
+instead, such as a counterexample, a mutation that the check fails to catch,
+or a cited invariant with the code path that breaks it. That evidence must be
+reviewed by someone other than the reporter, and the review must be noted on
+the issue. The fixing PR still adds a test that fails on the base wherever one
+can be written.
 
 **Promotion.** The implementation PR commits the acceptance check as a
 regression test in the owning crate, so it stays in the suite permanently.
