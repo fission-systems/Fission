@@ -58,8 +58,25 @@ RustSec advisory database moves on its own schedule, so a PR checks advisories
 when it changes any `Cargo.toml`, `Cargo.lock`, `deny.toml`,
 `.cargo/audit.toml`, or `.cargo/config` / `.cargo/config.toml`. Manual Fast Gate
 dispatches and nightly Heavy also check advisories. The security lane checks
-bans, licenses and sources on Rust or security metadata changes. The sccache
-setup fails open. Every push to main runs workspace fmt and clippy.
+bans, licenses and sources on Rust or security metadata changes. Every push to
+main runs workspace fmt and clippy.
+
+The sccache setup fails open, decided before the build
+(`.github/actions/setup-sccache/probe.sh`). sccache checks its storage when its
+server starts, and a failed check kills the compile that started the server, so
+the setup starts the server the build will use, in the build's environment,
+and compiles one fixed crate through it. Only if that works does it export
+`RUSTC_WRAPPER=sccache`; otherwise the job builds uncached with a warning. The
+server then lives for the whole job (`SCCACHE_IDLE_TIMEOUT=0`), so no later
+cargo step repeats the check, and `SCCACHE_IGNORE_SERVER_IO_ERROR=1` compiles a
+unit locally if the server drops a connection. Once the server is up, storage
+errors are cache misses, not failures. There is no retry of a failed cargo
+step without the wrapper: the step cannot tell an sccache failure from a
+compile error without parsing its output, and a shell-script `RUSTC_WRAPPER`
+that could do it per `rustc` call does not run on the Windows runners. The
+`sccache outage fallback` job in `ci.yml` points the cache at an unresolvable
+host and requires a green uncached build, and requires that the probed server
+still serves later steps; it runs when the setup or `ci.yml` changes.
 
 ## Checks on the checks
 
