@@ -569,15 +569,30 @@ struct Clobbers {
     side_entry: bool,
 }
 
-fn stmt_clobbers(stmt: &PreHirStmt) -> Clobbers {
-    let stmt = std::slice::from_ref(stmt);
+fn stmt_clobbers_list(stmts: &[&PreHirStmt]) -> Clobbers {
     let mut vars = HashSet::default();
-    collect_written_vars(stmt, &mut vars);
+    let mut memory = false;
+    let mut side_entry = false;
+    for stmt in stmts {
+        let slice = std::slice::from_ref(*stmt);
+        collect_written_vars(slice, &mut vars);
+        if let PreHirStmt::While { cond, .. } | PreHirStmt::DoWhile { cond, .. } = stmt {
+            let cond_stmt = PreHirStmt::Expr(cond.clone());
+            collect_written_vars(std::slice::from_ref(&cond_stmt), &mut vars);
+            memory |= expr_has_side_effects(cond);
+        }
+        memory |= stmt_may_write_memory(stmt);
+        side_entry |= contains_label(slice);
+    }
     Clobbers {
         vars,
-        memory: stmt.iter().any(stmt_may_write_memory),
-        side_entry: contains_label(stmt),
+        memory,
+        side_entry,
     }
+}
+
+fn stmt_clobbers(stmt: &PreHirStmt) -> Clobbers {
+    stmt_clobbers_list(&[stmt])
 }
 
 fn contains_label(stmts: &[PreHirStmt]) -> bool {
@@ -755,17 +770,36 @@ fn recover_in_stmts_with_reaching_defs(
                 );
             }
             PreHirStmt::While { cond, body } => {
-                recover_in_cond(cond, defs, changed);
-                let mut body_defs = defs.clone();
-                recover_in_stmts_with_reaching_defs(
-                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
-                    &mut body_defs,
-                    escaped,
-                    changed,
-                );
+                if !defs.is_empty() && expr_has_side_effects(cond) {
+                    let cond_stmt = PreHirStmt::Expr(cond.clone());
+                    let cond_clobbers = stmt_clobbers(&cond_stmt);
+                    let mut body_defs = defs.clone();
+                    recover_in_cond(cond, defs, changed);
+                    kill_clobbered_defs(&mut body_defs, &cond_clobbers, escaped);
+                    recover_in_stmts_with_reaching_defs(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        &mut body_defs,
+                        escaped,
+                        changed,
+                    );
+                } else {
+                    recover_in_cond(cond, defs, changed);
+                    let mut body_defs = defs.clone();
+                    recover_in_stmts_with_reaching_defs(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                        &mut body_defs,
+                        escaped,
+                        changed,
+                    );
+                }
             }
             PreHirStmt::DoWhile { body, cond } => {
                 let mut body_defs = defs.clone();
+                if !body_defs.is_empty() && expr_has_side_effects(cond) {
+                    let cond_stmt = PreHirStmt::Expr(cond.clone());
+                    let cond_clobbers = stmt_clobbers(&cond_stmt);
+                    kill_clobbered_defs(&mut body_defs, &cond_clobbers, escaped);
+                }
                 recover_in_stmts_with_reaching_defs(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut body_defs,
@@ -783,6 +817,22 @@ fn recover_in_stmts_with_reaching_defs(
                 let mut loop_defs = defs.clone();
                 if let Some(init) = init {
                     recover_in_stmts_box_with_reaching_defs(init, &mut loop_defs, escaped, changed);
+                }
+                if !loop_defs.is_empty() {
+                    let mut loop_stmts: Vec<&PreHirStmt> = body.iter().collect();
+                    if let Some(update) = update.as_deref() {
+                        loop_stmts.push(update);
+                    }
+                    let mut loop_clobbers = stmt_clobbers_list(&loop_stmts);
+                    if let Some(cond) = cond.as_ref()
+                        && expr_has_side_effects(cond)
+                    {
+                        let cond_stmt = PreHirStmt::Expr(cond.clone());
+                        let cond_clobbers = stmt_clobbers(&cond_stmt);
+                        loop_clobbers.vars.extend(cond_clobbers.vars);
+                        loop_clobbers.memory |= cond_clobbers.memory;
+                    }
+                    kill_clobbered_defs(&mut loop_defs, &loop_clobbers, escaped);
                 }
                 if let Some(cond) = cond {
                     recover_in_cond(cond, &loop_defs, changed);
@@ -2007,5 +2057,47 @@ mod tests {
 
         assert!(apply_dead_flag_cleanup_pass(&mut func));
         assert_eq!(flag_assign_count(&func.body), 0);
+    }
+
+    #[test]
+    fn for_init_flag_def_is_killed_when_loop_update_clobbers_operand() {
+        let mut func = PreHirFunction {
+            body: vec![PreHirStmt::For {
+                init: Some(Box::new(assign("zf", eq(var("a"), int(0))))),
+                cond: Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Ne,
+                    lhs: Box::new(var("zf")),
+                    rhs: Box::new(int(0)),
+                    ty: NirType::Bool,
+                }),
+                update: Some(Box::new(assign(
+                    "a",
+                    PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(var("a")),
+                        rhs: Box::new(int(1)),
+                        ty: NirType::Int {
+                            bits: 32,
+                            signed: true,
+                        },
+                    },
+                ))),
+                body: vec![].into(),
+            }],
+            ..PreHirFunction::default()
+        };
+
+        assert!(!apply_flag_recovery_pass(&mut func));
+        let PreHirStmt::For { cond, .. } = &func.body[0] else {
+            panic!("expected For");
+        };
+        assert!(matches!(
+            cond,
+            Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Ne,
+                lhs,
+                ..
+            }) if matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "zf")
+        ));
     }
 }

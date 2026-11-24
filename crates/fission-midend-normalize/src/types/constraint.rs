@@ -37,16 +37,22 @@ pub fn apply_type_constraint_propagation(func: &mut PreHirFunction) -> bool {
         let current_ty = var_types.get(var_name).cloned().unwrap_or(NirType::Unknown);
         if let NirType::Unknown = current_ty {
             // Find max offset to determine aggregate size
-            let mut max_offset = 0;
+            let mut max_offset = 0u32;
             let mut struct_fields = Vec::new();
             for (&offset, ty) in fields {
                 let size = type_byte_size(ty).unwrap_or(1).max(1);
-                max_offset = max_offset.max(offset + size);
+                let Some(end) = offset.checked_add(size) else {
+                    continue;
+                };
+                max_offset = max_offset.max(end);
                 struct_fields.push(StructField {
                     offset,
                     ty: ty.clone(),
                     name: format!("field_{:x}", offset),
                 });
+            }
+            if struct_fields.is_empty() {
+                continue;
             }
             struct_fields.sort_by_key(|f| f.offset);
 
@@ -500,10 +506,12 @@ fn collect_constraints_lvalue(
             if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
                 if let PreHirExpr::Var(base_name) = base.as_ref() {
                     pointer_bases.insert(base_name.clone());
-                    field_accesses
-                        .entry(base_name.clone())
-                        .or_default()
-                        .insert(*offset as u32, ty.clone());
+                    if let Ok(off) = u32::try_from(*offset) {
+                        field_accesses
+                            .entry(base_name.clone())
+                            .or_default()
+                            .insert(off, ty.clone());
+                    }
                 }
             } else if let PreHirExpr::Var(base_name) = ptr.as_ref() {
                 pointer_bases.insert(base_name.clone());
@@ -543,10 +551,12 @@ fn collect_constraints_expr(
             if let PreHirExpr::PtrOffset { base, offset } = ptr.as_ref() {
                 if let PreHirExpr::Var(base_name) = base.as_ref() {
                     pointer_bases.insert(base_name.clone());
-                    field_accesses
-                        .entry(base_name.clone())
-                        .or_default()
-                        .insert(*offset as u32, ty.clone());
+                    if let Ok(off) = u32::try_from(*offset) {
+                        field_accesses
+                            .entry(base_name.clone())
+                            .or_default()
+                            .insert(off, ty.clone());
+                    }
                 }
             } else if let PreHirExpr::Var(base_name) = ptr.as_ref() {
                 pointer_bases.insert(base_name.clone());
@@ -1781,5 +1791,38 @@ mod tests {
                 ..
             } if *ty == u32_ty
         ));
+    }
+
+    #[test]
+    fn negative_ptr_offset_does_not_overflow_or_synthesize_huge_aggregate() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = PreHirFunction {
+            locals: vec![
+                binding("p", NirType::Unknown),
+                binding("out", NirType::Unknown),
+            ],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("out".to_owned()),
+                rhs: PreHirExpr::Load {
+                    ptr: Box::new(PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("p".to_owned())),
+                        offset: -4,
+                    }),
+                    ty: i32_ty,
+                },
+            }],
+            ..Default::default()
+        };
+
+        apply_type_constraint_propagation(&mut func);
+
+        let p_ty = &func.locals[0].ty;
+        assert!(
+            !matches!(p_ty, NirType::Ptr(inner) if matches!(inner.as_ref(), NirType::Aggregate { size, .. } if *size > 0x1000)),
+            "negative PtrOffset must not synthesize a ~4GB Aggregate: {p_ty:?}"
+        );
     }
 }

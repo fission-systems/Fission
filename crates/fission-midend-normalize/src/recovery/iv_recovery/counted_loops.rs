@@ -41,13 +41,39 @@ fn try_scev_upgrade(stmts: &mut Vec<PreHirStmt>, loop_idx: usize) -> bool {
             None => return false,
         };
 
-    // Update must be the last statement in body (or we'd change semantics).
+    // Update must be the last statement in body unless the trailing slice has
+    // no uses/writes of the IV, no control-flow transfers/labels, and no writes
+    // or memory effects that alter the update's RHS evaluation.
     let is_last = update_idx == body.len() - 1;
     if !is_last {
-        let has_subsequent_uses = body[update_idx + 1..]
+        let tail = &body[update_idx + 1..];
+        let PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(_),
+            rhs,
+        } = &body[update_idx]
+        else {
+            return false;
+        };
+        if crate::cleanup::expr_has_side_effects(rhs) {
+            return false;
+        }
+        let mut rhs_vars = crate::HashSet::default();
+        crate::analysis::defuse::collect_expr_vars(rhs, &mut rhs_vars);
+        let mut tail_written = crate::HashSet::default();
+        crate::global_opt::collect_written_vars(tail, &mut tail_written);
+        if tail_written.contains(&var) || !rhs_vars.is_disjoint(&tail_written) {
+            return false;
+        }
+        let addr_taken = crate::analysis::defuse::collect_address_taken_locals(stmts);
+        let rhs_touches_mem_or_escaped = crate::cleanup::expr_reads_memory(rhs)
+            || rhs_vars.iter().any(|v| addr_taken.contains(v));
+        if rhs_touches_mem_or_escaped && tail.iter().any(crate::cleanup::stmt_may_write_memory) {
+            return false;
+        }
+        let has_unsafe_tail = tail
             .iter()
-            .any(|stmt| count_var_uses_in_stmt(stmt, &var) > 0);
-        if has_subsequent_uses {
+            .any(|stmt| count_var_uses_in_stmt(stmt, &var) > 0 || stmt_has_loop_exit_or_jump(stmt));
+        if has_unsafe_tail {
             return false;
         }
     }
@@ -88,6 +114,86 @@ fn try_scev_upgrade(stmts: &mut Vec<PreHirStmt>, loop_idx: usize) -> bool {
             body: new_body,
         };
         return true;
+    }
+}
+
+fn stmt_has_loop_exit_or_jump(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Return(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body) => body.iter().any(stmt_has_loop_exit_or_jump),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_has_loop_exit_or_jump)
+                || else_body.iter().any(stmt_has_loop_exit_or_jump)
+        }
+        // Breaks inside Switch target the Switch, but Return/Goto/Continue inside Switch escape/target outer loop.
+        PreHirStmt::Switch { cases, default, .. } => cases
+            .iter()
+            .flat_map(|c| c.body.iter())
+            .chain(default.iter())
+            .any(stmt_has_non_break_exit_or_jump),
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => body.iter().any(stmt_has_return_goto_or_label),
+        _ => false,
+    }
+}
+
+fn stmt_has_non_break_exit_or_jump(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Return(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Continue
+        | PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body) => body.iter().any(stmt_has_non_break_exit_or_jump),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_has_non_break_exit_or_jump)
+                || else_body.iter().any(stmt_has_non_break_exit_or_jump)
+        }
+        PreHirStmt::Switch { cases, default, .. } => cases
+            .iter()
+            .flat_map(|c| c.body.iter())
+            .chain(default.iter())
+            .any(stmt_has_non_break_exit_or_jump),
+        PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => body.iter().any(stmt_has_return_goto_or_label),
+        _ => false,
+    }
+}
+
+fn stmt_has_return_goto_or_label(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Return(_) | PreHirStmt::Goto(_) | PreHirStmt::Label(_) => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => body.iter().any(stmt_has_return_goto_or_label),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_has_return_goto_or_label)
+                || else_body.iter().any(stmt_has_return_goto_or_label)
+        }
+        PreHirStmt::Switch { cases, default, .. } => cases
+            .iter()
+            .flat_map(|c| c.body.iter())
+            .chain(default.iter())
+            .any(stmt_has_return_goto_or_label),
+        _ => false,
     }
 }
 
