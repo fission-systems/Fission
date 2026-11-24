@@ -1782,6 +1782,48 @@ pub fn lower_loop_body_subgraph(
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RotatedLoopSkip {
+    BreakExit,
+    AdvanceTo(usize),
+}
+
+fn validate_rotated_loop_skip(
+    pos: usize,
+    skip_to: usize,
+    body_pos: &crate::HashMap<usize, usize>,
+    break_indices: &HashSet<usize>,
+) -> bool {
+    break_indices.contains(&skip_to)
+        || body_pos
+            .get(&skip_to)
+            .is_some_and(|&next_pos| next_pos > pos)
+}
+
+fn apply_rotated_loop_skip(
+    sorted_body: &[usize],
+    body_pos: &crate::HashMap<usize, usize>,
+    break_indices: &HashSet<usize>,
+    pos: usize,
+    skip_to: usize,
+    consumed_blocks: &mut HashSet<usize>,
+) -> Option<RotatedLoopSkip> {
+    if break_indices.contains(&skip_to) {
+        for &bi in &sorted_body[pos..] {
+            consumed_blocks.insert(bi);
+        }
+        return Some(RotatedLoopSkip::BreakExit);
+    }
+    let next_pos = *body_pos.get(&skip_to)?;
+    if next_pos <= pos {
+        return None;
+    }
+    for &bi in &sorted_body[pos..next_pos] {
+        consumed_blocks.insert(bi);
+    }
+    Some(RotatedLoopSkip::AdvanceTo(next_pos))
+}
+
 fn lower_loop_body_subgraph_unguarded(
     host: &mut impl StructuringHost,
     body_set: &HashSet<usize>,
@@ -1838,6 +1880,11 @@ fn lower_loop_body_subgraph_unguarded(
     // read them uninitialized).
     sorted_body.rotate_left(start_pos);
     let start_pos = 0;
+    let body_pos: crate::HashMap<usize, usize> = sorted_body
+        .iter()
+        .enumerate()
+        .map(|(p, &bi)| (bi, p))
+        .collect();
 
     let mut result_stmts: Vec<PreHirStmt> = Vec::new();
     let mut emitted_labels: HashSet<u64> = HashSet::default();
@@ -1876,20 +1923,6 @@ fn lower_loop_body_subgraph_unguarded(
     let mut last_structuring_failure = None;
     let mut pos = start_pos;
 
-    // Helper closure: is the skip_to index within the body set or equal to break_idx?
-    let is_valid_skip = |skip_to: usize| -> bool {
-        body_set.contains(&skip_to) || break_indices.contains(&skip_to)
-    };
-
-    // Tombstone every body_set member in the half-open index range [from, to).
-    let tombstone_range = |from: usize, to: usize, consumed: &mut HashSet<usize>| {
-        for &bi in body_set.iter() {
-            if bi >= from && bi < to {
-                consumed.insert(bi);
-            }
-        }
-    };
-
     while pos < sorted_body.len() {
         let idx = sorted_body[pos];
         if consumed_blocks.contains(&idx) {
@@ -1897,42 +1930,46 @@ fn lower_loop_body_subgraph_unguarded(
             continue;
         }
 
-        // --- Attempt structured reducers, but only accept if skip_to stays within bounds ---
+        // --- Attempt structured reducers, but only accept if skip_to advances in rotated order ---
         macro_rules! try_reducer {
             ($call:expr) => {{
                 if let Some((stmt, skip_to)) =
                     capture_structuring_failure($call, &mut last_structuring_failure)?
                 {
-                    if is_valid_skip(skip_to)
+                    if validate_rotated_loop_skip(pos, skip_to, &body_pos, &break_indices)
                         && host.accept_structured_region(idx, skip_to, &targeted)
                     {
                         result_stmts.push(stmt);
-                        // Exclusive emission: region owns body_set ∩ [idx, skip_to).
-                        if break_indices.contains(&skip_to) {
-                            for &bi in body_set.iter() {
-                                if bi >= idx {
-                                    consumed_blocks.insert(bi);
-                                }
+                        // Exclusive emission: region owns sorted_body[pos..next_pos]
+                        // in rotated loop coordinates, not raw block-ID inequalities.
+                        match apply_rotated_loop_skip(
+                            &sorted_body,
+                            &body_pos,
+                            &break_indices,
+                            pos,
+                            skip_to,
+                            &mut consumed_blocks,
+                        ) {
+                            Some(RotatedLoopSkip::BreakExit) => {
+                                return Ok(Some(finalize_loop_body_control(
+                                    host,
+                                    result_stmts,
+                                    break_idx,
+                                    head_idx,
+                                    continue_idx,
+                                )));
                             }
-                            return Ok(Some(finalize_loop_body_control(
-                                host,
-                                result_stmts,
-                                break_idx,
-                                head_idx,
-                                continue_idx,
-                            )));
+                            Some(RotatedLoopSkip::AdvanceTo(mut next_pos)) => {
+                                while next_pos < sorted_body.len()
+                                    && consumed_blocks.contains(&sorted_body[next_pos])
+                                {
+                                    next_pos += 1;
+                                }
+                                pos = next_pos;
+                                continue;
+                            }
+                            None => {}
                         }
-                        tombstone_range(idx, skip_to, &mut consumed_blocks);
-                        consumed_blocks.insert(idx);
-                        pos = sorted_body
-                            .iter()
-                            .position(|&i| i == skip_to)
-                            .unwrap_or(sorted_body.len());
-                        while pos < sorted_body.len() && consumed_blocks.contains(&sorted_body[pos])
-                        {
-                            pos += 1;
-                        }
-                        continue;
                     }
                 }
             }};
@@ -2556,5 +2593,725 @@ mod tests {
             else_body: Vec::new().into(),
         }];
         assert!(terminal_do_while_condition(&partial).is_none());
+    }
+
+    struct MockRotatedLoopHost {
+        options: fission_midend_core::ir::MlilPreviewOptions,
+        work_counter: std::rc::Rc<std::cell::Cell<u64>>,
+        resource_usage: std::rc::Rc<fission_midend_core::ir::ResourceUsage>,
+        successors: Vec<Vec<usize>>,
+        predecessors: Vec<Vec<usize>>,
+        cfg_facts: crate::cfg_analysis::CfgFactCache,
+        dom_tree: crate::cfg_analysis::DomTree,
+        fas_virtual_edges: Vec<(usize, usize)>,
+        irreducible_edges: HashSet<(usize, usize)>,
+        virtual_block_map: Vec<usize>,
+        loop_bodies: Vec<crate::loop_analysis::LoopBody>,
+        follow_blocks: Vec<Option<usize>>,
+        active_switch_targets: HashSet<usize>,
+        active_loops: HashSet<usize>,
+        extra_absorbed: Vec<usize>,
+        block_addrs: Vec<u64>,
+        stmts: Vec<Vec<PreHirStmt>>,
+        terminators: Vec<LoweredTerminator>,
+    }
+
+    impl MockRotatedLoopHost {
+        fn new(
+            successors: Vec<Vec<usize>>,
+            block_addrs: Vec<u64>,
+            stmts: Vec<Vec<PreHirStmt>>,
+            terminators: Vec<LoweredTerminator>,
+        ) -> Self {
+            let n = successors.len();
+            let mut predecessors = vec![Vec::new(); n];
+            for (u, succs) in successors.iter().enumerate() {
+                for &v in succs {
+                    if v < n {
+                        predecessors[v].push(u);
+                    }
+                }
+            }
+            let cfg_facts = crate::cfg_analysis::CfgFactCache::analyze(&successors, &predecessors);
+            let dom_tree = cfg_facts.dominators().clone();
+            Self {
+                options: fission_midend_core::ir::MlilPreviewOptions::default(),
+                work_counter: std::rc::Rc::new(std::cell::Cell::new(0)),
+                resource_usage: std::rc::Rc::new(fission_midend_core::ir::ResourceUsage::default()),
+                successors,
+                predecessors,
+                cfg_facts,
+                dom_tree,
+                fas_virtual_edges: Vec::new(),
+                irreducible_edges: HashSet::default(),
+                virtual_block_map: (0..n).collect(),
+                loop_bodies: Vec::new(),
+                follow_blocks: vec![None; n],
+                active_switch_targets: HashSet::default(),
+                active_loops: HashSet::default(),
+                extra_absorbed: Vec::new(),
+                block_addrs,
+                stmts,
+                terminators,
+            }
+        }
+    }
+
+    impl StructuringHost for MockRotatedLoopHost {
+        fn successors(&self) -> &[Vec<usize>] {
+            &self.successors
+        }
+        fn predecessors(&self) -> &[Vec<usize>] {
+            &self.predecessors
+        }
+        fn successors_mut(&mut self) -> &mut Vec<Vec<usize>> {
+            &mut self.successors
+        }
+        fn predecessors_mut(&mut self) -> &mut Vec<Vec<usize>> {
+            &mut self.predecessors
+        }
+        fn block_count(&self) -> usize {
+            self.successors.len()
+        }
+        fn cfg_facts(&self) -> &crate::cfg_analysis::CfgFactCache {
+            &self.cfg_facts
+        }
+        fn cfg_facts_mut(&mut self) -> &mut crate::cfg_analysis::CfgFactCache {
+            &mut self.cfg_facts
+        }
+        fn refresh_cfg_fact_cache(&mut self) {
+            self.cfg_facts =
+                crate::cfg_analysis::CfgFactCache::analyze(&self.successors, &self.predecessors);
+        }
+        fn dom_tree(&self) -> &crate::cfg_analysis::DomTree {
+            &self.dom_tree
+        }
+        fn set_dom_tree(&mut self, tree: crate::cfg_analysis::DomTree) {
+            self.dom_tree = tree;
+        }
+        fn fas_virtual_edges(&self) -> &[(usize, usize)] {
+            &self.fas_virtual_edges
+        }
+        fn fas_virtual_edges_mut(&mut self) -> &mut Vec<(usize, usize)> {
+            &mut self.fas_virtual_edges
+        }
+        fn irreducible_edges(&self) -> &HashSet<(usize, usize)> {
+            &self.irreducible_edges
+        }
+        fn irreducible_edges_mut(&mut self) -> &mut HashSet<(usize, usize)> {
+            &mut self.irreducible_edges
+        }
+        fn virtual_block_map(&self) -> &[usize] {
+            &self.virtual_block_map
+        }
+        fn loop_bodies(&self) -> &[crate::loop_analysis::LoopBody] {
+            &self.loop_bodies
+        }
+        fn set_loop_bodies(&mut self, bodies: Vec<crate::loop_analysis::LoopBody>) {
+            self.loop_bodies = bodies;
+        }
+        fn follow_blocks(&self) -> &[Option<usize>] {
+            &self.follow_blocks
+        }
+        fn set_follow_blocks(&mut self, blocks: Vec<Option<usize>>) {
+            self.follow_blocks = blocks;
+        }
+        fn active_switch_targets(&self) -> &HashSet<usize> {
+            &self.active_switch_targets
+        }
+        fn active_switch_targets_mut(&mut self) -> &mut HashSet<usize> {
+            &mut self.active_switch_targets
+        }
+        fn options(&self) -> &fission_midend_core::ir::MlilPreviewOptions {
+            &self.options
+        }
+        fn function_entry_address(&self) -> u64 {
+            self.block_addrs[0]
+        }
+        fn current_function_name(&self) -> Option<&str> {
+            Some("rotated_test")
+        }
+        fn structuring_start(&self) -> Option<std::time::Instant> {
+            None
+        }
+        fn set_structuring_start(&mut self, _t: Option<std::time::Instant>) {}
+        fn reset_sese_region_proof_budget(&mut self) {}
+        fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>> {
+            self.work_counter.clone()
+        }
+        fn resource_usage(&self) -> std::rc::Rc<fission_midend_core::ir::ResourceUsage> {
+            self.resource_usage.clone()
+        }
+        fn reset_structuring_total_work_counter(&mut self) {}
+        fn block_target_key(&self, idx: usize) -> u64 {
+            self.block_addrs[idx]
+        }
+        fn block_start_address(&self, idx: usize) -> u64 {
+            self.block_addrs[idx]
+        }
+        fn find_block_index_by_address(&self, address: u64) -> Option<usize> {
+            self.block_addrs.iter().position(|&a| a == address)
+        }
+        fn next_block_address(&self, idx: usize) -> Option<u64> {
+            self.block_addrs.get(idx + 1).copied()
+        }
+        fn fallthrough_index(&self, idx: usize) -> Option<usize> {
+            (idx + 1 < self.block_addrs.len()).then_some(idx + 1)
+        }
+        fn pcode_block_idx(&self, idx: usize) -> usize {
+            idx
+        }
+        fn lower_block_stmts(
+            &mut self,
+            block_idx: usize,
+        ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
+            Ok(self.stmts[block_idx].clone())
+        }
+        fn lower_block_terminator(
+            &mut self,
+            block_idx: usize,
+        ) -> Result<LoweredTerminator, MlilPreviewError> {
+            Ok(self.terminators[block_idx].clone())
+        }
+        fn lower_isolated<T, F>(&mut self, lower: F) -> Result<Option<T>, MlilPreviewError>
+        where
+            Self: Sized,
+            F: FnOnce(&mut Self) -> Result<Option<T>, MlilPreviewError>,
+        {
+            lower(self)
+        }
+        fn lower_observed<T, F>(&mut self, lower: F) -> Result<T, MlilPreviewError>
+        where
+            Self: Sized,
+            F: FnOnce(&mut Self) -> Result<T, MlilPreviewError>,
+        {
+            lower(self)
+        }
+        fn lower_virtual_exit_if_else_isolated(
+            &mut self,
+            _idx: usize,
+            _plan: crate::conditionals::VirtualExitIfElsePlan,
+            _first: crate::host::StructuredChildMap,
+            _second: crate::host::StructuredChildMap,
+        ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+            Ok(None)
+        }
+        fn lower_rotated_while_isolated(
+            &mut self,
+            _head_idx: usize,
+            _entry_pred_idx: usize,
+        ) -> Result<Option<(PreHirStmt, usize)>, MlilPreviewError> {
+            Ok(None)
+        }
+        fn lower_return_join_expr_for_predecessor(
+            &mut self,
+            _pred_idx: usize,
+            _join_idx: usize,
+        ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
+            Ok(None)
+        }
+        fn lower_linear_body(
+            &mut self,
+            start_idx: usize,
+            exit: LinearExit,
+        ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
+            self.lower_linear_body_with_budget(start_idx, exit, None)
+        }
+        fn lower_linear_body_with_budget(
+            &mut self,
+            start_idx: usize,
+            exit: LinearExit,
+            _budget: Option<&mut IfLoweringBudget>,
+        ) -> Result<Option<(std::rc::Rc<Vec<PreHirStmt>>, usize)>, MlilPreviewError> {
+            if let LinearExit::Join(join_idx) = exit {
+                Ok(Some((
+                    std::rc::Rc::new(self.stmts[start_idx].clone()),
+                    join_idx,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+        fn linear_exit(&mut self, idx: usize) -> Result<Option<LinearExit>, MlilPreviewError> {
+            self.linear_exit_with_budget(idx, None)
+        }
+        fn linear_exit_with_budget(
+            &mut self,
+            idx: usize,
+            _budget: Option<&mut IfLoweringBudget>,
+        ) -> Result<Option<LinearExit>, MlilPreviewError> {
+            match &self.terminators[idx] {
+                LoweredTerminator::Goto(target) | LoweredTerminator::Fallthrough(Some(target)) => {
+                    Ok(self
+                        .find_block_index_by_address(*target)
+                        .map(LinearExit::Join))
+                }
+                _ => Ok(None),
+            }
+        }
+        fn shared_linear_exit(
+            &mut self,
+            _lhs_idx: usize,
+            _rhs_idx: usize,
+        ) -> Result<Option<LinearExit>, MlilPreviewError> {
+            Ok(None)
+        }
+        fn has_linear_body_cache(&self, _start_idx: usize, _exit: LinearExit) -> bool {
+            false
+        }
+        fn linear_body_cache_get(
+            &self,
+            _key: &crate::linear_types::LinearBodyCacheKey,
+        ) -> Option<crate::linear_types::LinearBodyCachedOutcome> {
+            None
+        }
+        fn linear_body_cache_insert(
+            &mut self,
+            _key: crate::linear_types::LinearBodyCacheKey,
+            _value: crate::linear_types::LinearBodyCachedOutcome,
+        ) {
+        }
+        fn linear_body_active_insert(
+            &mut self,
+            _key: crate::linear_types::LinearBodyCacheKey,
+        ) -> bool {
+            true
+        }
+        fn linear_body_active_remove(&mut self, _key: &crate::linear_types::LinearBodyCacheKey) {}
+        fn conditional_tail_active_insert(
+            &mut self,
+            _key: crate::linear_types::ConditionalTailKey,
+        ) -> bool {
+            true
+        }
+        fn conditional_tail_active_remove(
+            &mut self,
+            _key: &crate::linear_types::ConditionalTailKey,
+        ) {
+        }
+        fn linear_exit_cache_get(&self, _idx: usize) -> Option<Option<LinearExit>> {
+            None
+        }
+        fn linear_exit_cache_insert(&mut self, _idx: usize, _exit: Option<LinearExit>) {}
+        fn can_inline_linear_successor(
+            &self,
+            _from_idx: usize,
+            _next_idx: usize,
+            _visited: &HashSet<usize>,
+        ) -> bool {
+            false
+        }
+        fn can_inline_linear_successor_for_region(
+            &self,
+            _from_idx: usize,
+            _next_idx: usize,
+            _visited: &HashSet<usize>,
+            _exit: LinearExit,
+        ) -> bool {
+            false
+        }
+        fn is_trivial_forwarding_block(&self, _idx: usize, _next_idx: usize) -> bool {
+            false
+        }
+        fn is_trivial_linear_tail(&self, _idx: usize) -> bool {
+            false
+        }
+        fn forwarding_block_defines_return_tail_live_in(
+            &self,
+            _idx: usize,
+            _join_idx: usize,
+        ) -> bool {
+            false
+        }
+        fn record_conditional_tail_mismatch_subtype(
+            &mut self,
+            _subtype: crate::linear_types::ConditionalTailMismatchSubtype,
+        ) {
+        }
+        fn record_conditional_tail_mismatch_sample(
+            &self,
+            _origin_idx: usize,
+            _true_idx: Option<usize>,
+            _false_idx: Option<usize>,
+            _exit: LinearExit,
+            _subtype: crate::linear_types::ConditionalTailMismatchSubtype,
+            _stage: &str,
+        ) {
+        }
+        fn bump_rule_block_if_no_exit(&mut self) {}
+        fn shared_exit_for_indices(
+            &mut self,
+            _indices: &[usize],
+        ) -> Result<Option<LinearExit>, MlilPreviewError> {
+            Ok(None)
+        }
+        fn collect_jump_targets(&mut self) -> Result<HashSet<u64>, MlilPreviewError> {
+            Ok(HashSet::default())
+        }
+        fn lsda_landing_pad_labels(&self) -> HashSet<String> {
+            HashSet::default()
+        }
+        fn accept_structured_region(
+            &mut self,
+            _start_idx: usize,
+            _skip_to: usize,
+            _targeted: &HashSet<u64>,
+        ) -> bool {
+            true
+        }
+        fn record_extra_absorbed_member(&mut self, block_idx: usize) {
+            self.extra_absorbed.push(block_idx);
+        }
+        fn take_extra_absorbed_members(&mut self) -> Vec<usize> {
+            std::mem::take(&mut self.extra_absorbed)
+        }
+        fn sese_region_proof_budget_exceeded(&self) -> bool {
+            false
+        }
+        fn region_has_external_entry(&self, _region: &HashSet<usize>, _header_idx: usize) -> bool {
+            false
+        }
+        fn block_writes_nothing(&self, _block_idx: usize) -> bool {
+            false
+        }
+        fn block_only_computes(&self, _block_idx: usize) -> bool {
+            false
+        }
+        fn head_has_only_discardable_pure_ops(&self, _block_idx: usize) -> bool {
+            false
+        }
+        fn cached_terminator_branch_targets(&self, _block_idx: usize) -> Option<Vec<u64>> {
+            None
+        }
+        fn lower_linear_body_for_region_recovery_detailed(
+            &mut self,
+            _start_idx: usize,
+            _exit: LinearExit,
+            _budget: Option<&mut IfLoweringBudget>,
+        ) -> Result<crate::linear_types::LinearBodyLoweringOutcome, MlilPreviewError> {
+            unimplemented!()
+        }
+        fn record_region_body_lowering_reject_reason(
+            &mut self,
+            _reason: crate::linear_types::LinearBodyRejectReason,
+        ) {
+        }
+        fn bump_region_linearize_rejected_irreducible_cfg(&mut self) {}
+        fn bump_region_linearize_rejected_non_structuring_failure(&mut self) {}
+        fn bump_region_linearize_rejected_no_exit(&mut self) {}
+        fn bump_region_linearize_rejected_body_lowering_failed(&mut self) {}
+        fn bump_region_linearize_rejected_non_advancing(&mut self) {}
+        fn bump_region_linearize_structuring(&mut self) {}
+        fn bump_region_proof_candidate(&mut self) {}
+        fn bump_region_proof_completed(&mut self) {}
+        fn record_region_candidate(&mut self, _proof: &crate::regions::RegionProof) {}
+        fn record_selected_region(&mut self, _node: &crate::graph::StructureNode) {}
+        fn bump_guarded_tail_candidate(&mut self) {}
+        fn bump_promotion_candidate(&mut self) {}
+        fn bump_promotion_rejected_by_shape(&mut self) {}
+        fn bump_promotion_rejected_by_gate(&mut self) {}
+        fn bump_region_emit_ready_failed(&mut self) {}
+        fn bump_fas_virtual_goto(&mut self) {}
+        fn bump_select_bad_edge(&mut self) {}
+        fn bump_condition_fold_and(&mut self, _fold_count: usize) {}
+        fn bump_condition_fold_or(&mut self, _fold_count: usize) {}
+        fn bump_condition_fold_rejected_side_effect(&mut self) {}
+        fn track_loop_control_rewrite_stats(
+            &mut self,
+            _break_rewrites: usize,
+            _continue_rewrites: usize,
+            _skipped_nested_scope_count: usize,
+        ) {
+        }
+        fn bump_loop_control_explicit_reducer(&mut self) {}
+        fn bump_loop_while_subgraph_lowered(&mut self) {}
+        fn enter_loop_lowering(&mut self, head: usize) -> bool {
+            self.active_loops.insert(head)
+        }
+        fn leave_loop_lowering(&mut self, head: usize) {
+            self.active_loops.remove(&head);
+        }
+        fn bump_loop_multi_tail_dowhile_lowered(&mut self) {}
+        fn bump_loop_for_lowered(&mut self) {}
+        fn bump_loop_multi_exit_break(&mut self) {}
+        fn bump_switch_fallthrough_detected(&mut self, _count: usize) {}
+        fn bump_switch_emit_ready_failed(&mut self) {}
+        fn bump_proof_payload_direct_emit(&mut self) {}
+        fn bump_sese_child_localized_linear(&mut self) {}
+        fn invalidate_terminator_cache(&mut self, _block_idx: usize) {}
+        fn emit_ready_trace_enabled(&self) -> bool {
+            false
+        }
+        fn emit_ready_trace(&self, _message: &str) {}
+        fn guarded_tail_trace_enabled(&self) -> bool {
+            false
+        }
+        fn log_try_lower_if_reject(&self, _idx: usize, _reason: &str) {}
+        fn try_build_guarded_tail_trial(
+            &mut self,
+            _body: &[PreHirStmt],
+            _idx: usize,
+            _referenced: &crate::HashMap<String, usize>,
+        ) -> Option<
+            Result<
+                crate::guarded_tail::types::GuardedTailTrial,
+                crate::guarded_tail::types::GuardedTailWitnessRejection,
+            >,
+        > {
+            None
+        }
+        fn verify_guarded_tail_trial(
+            &mut self,
+            _body: &[PreHirStmt],
+            _idx: usize,
+            _trial: &crate::guarded_tail::types::GuardedTailTrial,
+        ) -> crate::guarded_tail::types::GuardedTailVerification {
+            unimplemented!()
+        }
+        fn build_guarded_tail_execution_plan(
+            &mut self,
+            _body: &[PreHirStmt],
+            _idx: usize,
+            _trial: &crate::guarded_tail::types::GuardedTailTrial,
+            _verification: &crate::guarded_tail::types::GuardedTailVerification,
+        ) -> Result<
+            crate::guarded_tail::types::GuardedTailExecutionPlan,
+            crate::guarded_tail::types::GuardedTailExecutionRejection,
+        > {
+            unimplemented!()
+        }
+        fn execute_guarded_tail_plan(
+            &mut self,
+            _body: &mut Vec<PreHirStmt>,
+            _idx: usize,
+            _trial: crate::guarded_tail::types::GuardedTailTrial,
+            _plan: crate::guarded_tail::types::GuardedTailExecutionPlan,
+            _cond: PreHirExpr,
+        ) {
+        }
+        fn discover_guarded_tail_candidates_in_body(&mut self, _body: &[PreHirStmt]) {}
+        fn mark_promotion_shape_rejection(
+            &mut self,
+            _reason: crate::guarded_tail::types::PromotionShapeRejection,
+        ) {
+        }
+        fn mark_promotion_gate_rejection(
+            &mut self,
+            _reason: crate::guarded_tail::types::PromotionGateRejection,
+        ) {
+        }
+        fn mark_guarded_tail_execution_rejection(
+            &mut self,
+            _reason: crate::guarded_tail::types::GuardedTailExecutionRejection,
+        ) {
+        }
+        fn mark_guarded_tail_canonicalization_failure(
+            &mut self,
+            _failure: crate::guarded_tail::types::GuardedTailCanonicalizationFailure,
+        ) {
+        }
+        fn mark_alias_nonlocal_external_before(&mut self) {}
+        fn mark_alias_nonlocal_from_external_sites(
+            &mut self,
+            _external_top_level_before: usize,
+            _external_nested_before: usize,
+            _external_refs_after: usize,
+        ) {
+        }
+        fn resolve_terminal_join_target(
+            &mut self,
+            _body: &[PreHirStmt],
+            _anchor_idx: usize,
+            _target_label: &str,
+            _referenced: &crate::HashMap<String, usize>,
+        ) -> Option<(String, usize)> {
+            None
+        }
+        fn mark_noncanonical_layout_rejection(&mut self) {}
+        fn record_guarded_tail_blockgraph_proof(
+            &mut self,
+            _candidate_idx: usize,
+            _witness: &crate::guarded_tail::types::RegionShapeWitness,
+            _legality_reason: crate::regions::BlockGraphLegalityReason,
+        ) {
+        }
+        fn guarded_tail_function_address(&self) -> u64 {
+            self.block_addrs[0]
+        }
+        fn guarded_tail_trace_emit_snapshot(
+            &self,
+            _prefix: &str,
+            _stmts: &[PreHirStmt],
+            _limit: usize,
+        ) {
+        }
+        fn bump_structuring_counter(
+            &mut self,
+            _counter: crate::guarded_tail::bodies::StructuringCounter,
+            _amount: usize,
+        ) {
+        }
+        fn alloc_temp_binding(
+            &mut self,
+            _ty: NirType,
+            _origin: Option<fission_midend_core::ir::NirBindingOrigin>,
+        ) -> String {
+            "tmp".to_string()
+        }
+        fn find_earliest_owned_join_label_with_diag(
+            &mut self,
+            _body: &[PreHirStmt],
+            _anchor_idx: usize,
+            _terminal_label_idx: usize,
+            _referenced: &crate::HashMap<String, usize>,
+            _trace_enabled: bool,
+        ) -> Option<(String, usize)> {
+            None
+        }
+        fn suffix_call_uses_preview_unsafe_callee(&self, _stmt: &PreHirStmt) -> Option<String> {
+            None
+        }
+        fn trace_suffix_unknown_call_provenance(&self, _stmt_idx: usize, _stmt: &PreHirStmt) {}
+        fn call_effect_summary_for_target(
+            &self,
+            _target: &str,
+        ) -> Option<fission_midend_core::ir::NirCallEffectSummary> {
+            None
+        }
+        fn suffix_call_provenance_facts(
+            &self,
+            _target: &str,
+            _target_addr: Option<u64>,
+        ) -> crate::guarded_tail::suffix_window::SuffixCallProvenanceFacts {
+            crate::guarded_tail::suffix_window::SuffixCallProvenanceFacts::default()
+        }
+        fn note_unsupported_terminator_emit(&mut self, _block_addr: u64) {}
+        fn switch_recovery_cfg_admitted(&self, _idx: usize) -> bool {
+            false
+        }
+        fn has_same_start_address_peer(&self, _idx: usize) -> bool {
+            false
+        }
+        fn emit_unsupported_control_surface(
+            &mut self,
+            _evidence: fission_midend_core::ir::UnsupportedControlEvidence,
+            _target_expr: Option<PreHirExpr>,
+        ) -> PreHirStmt {
+            PreHirStmt::Break
+        }
+    }
+
+    #[test]
+    fn rotated_loop_skip_validates_and_tombstones_by_position() {
+        // Unrotated sorted order: [1, 2, 5, 6]. Rotated around head 5 -> [5, 6, 1, 2].
+        let sorted_body = [5usize, 6, 1, 2];
+        let body_pos: crate::HashMap<usize, usize> = sorted_body
+            .iter()
+            .enumerate()
+            .map(|(p, &b)| (b, p))
+            .collect();
+        let break_indices: HashSet<usize> = [7usize].into_iter().collect();
+
+        // 1. Forward skip across wrap boundary: from block 5 (pos 0) to block 2 (pos 3)
+        // must tombstone [5, 6, 1] and advance to pos 3 (`2`). Previously raw `5 <= bi < 2`
+        // was empty and missed tombstoning 6 and 1.
+        assert!(validate_rotated_loop_skip(0, 2, &body_pos, &break_indices));
+        let mut consumed = HashSet::default();
+        assert_eq!(
+            apply_rotated_loop_skip(&sorted_body, &body_pos, &break_indices, 0, 2, &mut consumed),
+            Some(RotatedLoopSkip::AdvanceTo(3))
+        );
+        assert!(consumed.contains(&5));
+        assert!(consumed.contains(&6));
+        assert!(consumed.contains(&1));
+        assert!(!consumed.contains(&2));
+
+        // 2. Backward skip in rotated order (raw `1 < 5`, rotated `pos 2 > pos 0`)
+        // must be rejected so the scanner cannot loop backwards or swallow `2`.
+        assert!(!validate_rotated_loop_skip(2, 5, &body_pos, &break_indices));
+        let mut consumed_back = HashSet::default();
+        assert_eq!(
+            apply_rotated_loop_skip(
+                &sorted_body,
+                &body_pos,
+                &break_indices,
+                2,
+                5,
+                &mut consumed_back
+            ),
+            None
+        );
+        assert!(consumed_back.is_empty());
+
+        // 3. Break from block 1 (pos 2) must tombstone only the remaining rotated suffix
+        // [1, 2], NOT already-visited blocks [5, 6].
+        assert!(validate_rotated_loop_skip(2, 7, &body_pos, &break_indices));
+        let mut consumed_brk = HashSet::default();
+        assert_eq!(
+            apply_rotated_loop_skip(
+                &sorted_body,
+                &body_pos,
+                &break_indices,
+                2,
+                7,
+                &mut consumed_brk
+            ),
+            Some(RotatedLoopSkip::BreakExit)
+        );
+        assert!(!consumed_brk.contains(&5));
+        assert!(!consumed_brk.contains(&6));
+        assert!(consumed_brk.contains(&1));
+        assert!(consumed_brk.contains(&2));
+    }
+
+    #[test]
+    fn lower_loop_body_subgraph_rejects_rotated_backward_skip_and_keeps_all_blocks() {
+        // Blocks 0..=6 where loop body is {1, 2, 5, 6} starting at head 5, continue=5:
+        // rotated order is [5, 6, 1, 2].
+        // Block 1 (`pos=2`) jumps to 2 (`pos=3`) or 5 (`pos=0`, raw 5 > 1!).
+        // Block 2 (`pos=3`) jumps to 5 (`continue_idx`).
+        // Previously `try_lower_if` at block 1 returned skip_to=5, raw `tombstone_range(1, 5)`
+        // tombstoned block 2 (`pos=3`), and `pos` rewound to 0. Now backward skip 1->5 is
+        // rejected and both block 1 and block 2 lower cleanly in rotated order.
+        let succs = vec![
+            vec![5],    // 0: preheader -> 5
+            vec![2, 5], // 1: cond jump to 5 (back-edge/continue) or fallthrough 2
+            vec![5],    // 2: tail -> continue 5
+            vec![],     // 3: unused
+            vec![],     // 4: unused
+            vec![6],    // 5: rotated head -> 6
+            vec![1],    // 6: body -> 1
+        ];
+        let addrs: Vec<u64> = (0..7).map(|i| 0x1000 + (i as u64) * 0x10).collect();
+        let stmts: Vec<Vec<PreHirStmt>> = (0..7)
+            .map(|i| vec![assign(&format!("b{i}"), u32_const(i as i64))])
+            .collect();
+        let terms = vec![
+            LoweredTerminator::Goto(addrs[5]),
+            LoweredTerminator::Cond {
+                cond: var("cond1"),
+                true_target: addrs[2],
+                false_target: Some(addrs[5]),
+            },
+            LoweredTerminator::Goto(addrs[5]),
+            LoweredTerminator::Fallthrough(None),
+            LoweredTerminator::Fallthrough(None),
+            LoweredTerminator::Goto(addrs[6]),
+            LoweredTerminator::Goto(addrs[1]),
+        ];
+
+        let mut host = MockRotatedLoopHost::new(succs, addrs, stmts, terms);
+        let body_set: HashSet<usize> = [1, 2, 5, 6].into_iter().collect();
+        let out = lower_loop_body_subgraph(&mut host, &body_set, 5, None, 5, 5)
+            .expect("lowering succeeds")
+            .expect("body lowered");
+
+        let rendered = format!("{out:?}");
+        for b in ["b5", "b6", "b1", "b2"] {
+            assert!(
+                rendered.contains(b),
+                "expected block {b} to be preserved in lowered rotated loop body: {rendered}"
+            );
+        }
     }
 }
