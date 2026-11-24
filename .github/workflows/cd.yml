@@ -17,6 +17,11 @@ env:
   CARGO_TERM_COLOR: always
   RELEASE_TAG: ${{ inputs.version }}
   SOURCE_SHA: ${{ inputs.source_sha }}
+  # Embedded in fission_cli (`--version`, `resources status`) and written into
+  # each bundle's fission-resources.json; the smokes below and release-tag.yml
+  # refuse a binary or bundle that names another release (#1208).
+  FISSION_BUILD_TAG: ${{ inputs.version }}
+  FISSION_BUILD_SHA: ${{ inputs.source_sha }}
 
 jobs:
   build-packages:
@@ -197,6 +202,8 @@ jobs:
           (cd "$(mktemp -d)" && env -u FISSION_ROOT "${root}/bin/fission_cli" \
             decomp "${GITHUB_WORKSPACE}/crates/fission-sleigh/testdata/a64_csel_select.so" --all \
             | grep -q "Function:")
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT "${root}/bin/fission_cli" resources status --json) \
+            | python3 scripts/release/check_identity.py status --tag "$RELEASE_TAG" --sha "$SOURCE_SHA"
 
       - name: Homebrew formula
         shell: bash

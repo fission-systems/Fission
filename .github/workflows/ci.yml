@@ -4,7 +4,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, edited]
+    # No `edited`: a title or body edit restarted the whole PR run on the same
+    # SHA (4 cancelled runs in 24 h, 2026-11-24). A retargeted base is still
+    # tested by the merge queue, which runs on the real base.
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -206,6 +209,9 @@ jobs:
       - name: CI classifier and tooling tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
 
+      - name: Release tooling tests
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py'
+
       - name: Install actionlint
         if: needs.changes.outputs.run_actionlint == 'true'
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -393,9 +399,11 @@ jobs:
       features: "fission-dynamic/interactive_runtime,fission-cli/debugger"
       profile: debug
 
+  # Smoke builds its own CLI and PE fixture; no artifacts from test-linux.
+  # Keep both lanes required in CI Summary, but do not serialize them.
   cli-smoke-linux:
     name: CLI Smoke (Linux · PE sample)
-    needs: [changes, test-linux]
+    needs: [changes]
     if: needs.changes.outputs.run_cli_smoke == 'true'
     uses: ./.github/workflows/reusable-cli-smoke.yml
     with:
@@ -535,9 +543,19 @@ jobs:
 
   # Report-only, not part of CI Summary: what a Rust change does to decompile
   # cost (instructions executed) and, for decompiler changes, to output.
+  # It holds a runner for ~40 min, so it runs only for decompiler changes or a
+  # PR labelled `type:performance` (label before pushing: a re-run replays the
+  # old payload, so a later label needs a new push), and only after the
+  # required Linux tests pass, so required jobs claim runners first. On
+  # 2026-11-24 it was 10-11 of 24 running jobs while required jobs queued.
   base-vs-head:
-    needs: [changes]
-    if: needs.changes.outputs.run_tests == 'true' && github.event_name == 'pull_request'
+    needs: [changes, test-linux]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.changes.outputs.run_tests == 'true'
+      && needs.test-linux.result == 'success'
+      && (needs.changes.outputs.run_decomp_corpus == 'true'
+          || contains(github.event.pull_request.labels.*.name, 'type:performance'))
     uses: ./.github/workflows/reusable-base-head.yml
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}

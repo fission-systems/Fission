@@ -194,6 +194,7 @@ struct CommonBinaryOutputArgs {
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(long_version = crate::cli::build_identity::long_version())]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
     long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli nir-stats binary.exe --addr 0x1400 --json\n  fission_cli pcode-topology binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n  fission_cli callgraph binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"

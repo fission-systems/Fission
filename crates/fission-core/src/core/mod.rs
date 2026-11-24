@@ -22,6 +22,7 @@ pub mod models;
 pub mod path_config;
 pub mod prelude;
 pub mod resource_layout;
+pub mod resource_manifest;
 pub mod resource_roots;
 pub mod resources;
 pub mod settings;

@@ -6,23 +6,30 @@ checks the candidate, calls [release E2E](https://github.com/fission-systems/Fis
 and [package verification](https://github.com/fission-systems/Fission/blob/main/.github/workflows/cd.yml), and publishes the
 verified artifacts.
 
-## 1. Select and verify the candidate
+## 1. Prepare, review and merge the Release PR
 
-- Choose the version following [Versioning](VERSIONING.md). Summarize visible
-  changes, compatibility changes and known issues in the release notes.
-- Choose an exact commit already included in `main`. Confirm a successful
-  Fast Gate run from a push to `main` (L0) and a successful scheduled or
-  manually dispatched Heavy run (L1) on that SHA.
-- Dispatch from `main` with that SHA and version tag.
+Follow the [release process](CI_RELEASE_GATES.md#release-process):
 
 ```bash
-gh workflow run "Release Tag (CI green)" --ref main -f tag=vX.Y.Z -f ref=<candidate-sha>
+gh workflow run "Prepare Release PR" --ref main -f version=vX.Y.Z
 ```
 
-A SemVer tag pushed directly triggers the same gates. In the dispatch path the
-workflow creates the tag only after release E2E (L2) and all package checks
-(L3) succeed. Retry a failed publication with the same SHA and tag. The
-workflow refuses to overwrite published releases.
+Choose the version following [Versioning](VERSIONING.md). The workflow
+bumps the version, drafts `docs/changelog/vX.Y.Z.md` from the merged PRs and
+opens `release: vX.Y.Z`. Review the notes, fill every `TODO(release)` block
+(the full-dataset DecBench table and, when no issue is labelled, the known
+limitations), and merge it. Then confirm a Fast Gate main push run (L0) and
+dispatch Heavy (L1) on the merge commit, and dispatch the tag:
+
+```bash
+gh workflow run "Release Tag (CI green)" --ref main -f ref=<merge-sha>
+```
+
+The tag defaults to the version the Release PR recorded. The workflow
+refuses a commit that is not the Release PR's merge on top of its candidate,
+and notes with an unfilled block. It creates the tag only after release E2E
+(L2) and all package checks (L3) succeed. Retry a failed publication with the
+same SHA. The workflow refuses to overwrite published releases.
 
 ## 2. Check the packages
 

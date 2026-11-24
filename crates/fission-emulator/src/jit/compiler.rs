@@ -1347,14 +1347,13 @@ impl JitCompiler {
                 op.opcode
             };
 
-            // 128-bit integer ops, and vector `CALLOTHER`s, go back to the
-            // evaluator rather than being lowered here. Cranelift has an `I128` and they could be lowered,
-            // but the reason not to is agreement: these are precisely the ops
-            // both engines used to truncate to eight bytes, and routing the
-            // compiled path through the interpreting one makes the two
-            // *unable* to disagree rather than merely tested for it.
+            // Wide (>8-byte) integer ops, and vector `CALLOTHER`s, go back to
+            // the evaluator rather than being lowered here. Cranelift handles
+            // scalar <=8B ops natively, while routing wider integer ops through
+            // the evaluator prevents eight-byte truncation and ensures both
+            // engines cannot disagree.
             //
-            // It costs a call per op, on 3.5% of instructions. That is the
+            // It costs a call per op, on ~3.5% of instructions. That is the
             // right trade for now -- a wrong answer arrives just as fast.
             let is_vector_userop = op.opcode == PcodeOpcode::CallOther
                 && (crate::arch::vector::is_wide_userop(op)
@@ -1362,7 +1361,7 @@ impl JitCompiler {
                         self.vector_userop_ids.contains(&(vn.constant_val as u32))
                     }));
             if !dead_ops[idx]
-                && (crate::pcode::eval::Evaluator::u128_handled(op) || is_vector_userop)
+                && (crate::pcode::eval::Evaluator::wide_handled(op) || is_vector_userop)
             {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());

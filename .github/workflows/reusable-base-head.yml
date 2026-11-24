@@ -1,6 +1,7 @@
 name: Reusable base-vs-head decompiler comparison
 
-# Fast Gate calls this on Rust changes. It builds the base and head CLIs once
+# Fast Gate calls this for decompiler changes, or a PR labelled
+# type:performance, after the Linux tests pass. It builds the base and head CLIs once
 # and, on a fixed DecBench sample, reports to the job summary:
 # - speed: instructions executed by each (scripts/ci/speed_compare.py),
 #   flagged at +3%;

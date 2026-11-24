@@ -31,6 +31,11 @@ pub mod evidence_policy {
     pub use crate::core::evidence_policy::*;
 }
 
+/// Release identity of the binary and of its resource bundle's manifest.
+pub mod resource_manifest {
+    pub use crate::core::resource_manifest::*;
+}
+
 /// Runtime resource bundle roots (`--resource-root`, `FISSION_RESOURCE_ROOT`, install layouts).
 pub mod resource_roots {
     pub use crate::core::resource_roots::*;

@@ -96,7 +96,8 @@ def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
         # the event's base, including when that base is another PR.
         git("merge-base", "--is-ancestor", head, checkout)
         if not is_ancestor(base, checkout):
-            # Retargeting a PR fires `edited` before GitHub recomputes the
+            # (Fast Gate no longer listens to `edited`; this still holds for a
+            # push that lands right after a retarget.) Retargeting fires `edited` before GitHub recomputes the
             # merge ref, so the checkout can still be the merge with the old
             # base. The changed paths below come from base and head alone, so
             # the plan is still right; the merge queue tests the new base.
