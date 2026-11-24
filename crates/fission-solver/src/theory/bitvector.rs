@@ -103,14 +103,15 @@ impl BvTheorySolver {
         }
     }
 
-    /// Given a satisfying assignment from the SAT solver, reconstructs the concrete
-    /// values for all bitvector variables.
-    pub fn extract_model(
+    /// Given a satisfying assignment from the SAT solver, reconstructs concrete
+    /// values for bitvector variables and registered array selects, tracking
+    /// whether each value came from SAT-assigned bits or default completion.
+    pub fn extract_model_with_status(
         &mut self,
         sat: &SatSolver,
         nodes: &HashMap<SymNodeId, SymExpr>,
-        model: &mut HashMap<SymNodeId, u64>,
-    ) {
+    ) -> HashMap<SymNodeId, crate::solver::ModelValue> {
+        let mut extracted = HashMap::new();
         let var_nodes: Vec<(SymNodeId, SymExpr)> = nodes
             .iter()
             .filter_map(|(&id, expr)| {
@@ -133,61 +134,84 @@ impl BvTheorySolver {
                 ));
                 continue;
             }
-            let bits_opt = match expr {
+            match expr {
                 SymExpr::Var {
                     id: ast_id, sort, ..
                 } => {
-                    let size = sort.expect_bv();
-                    Some(if let Some(b) = self.aig.get_var_bits(*ast_id) {
-                        b.clone()
-                    } else {
-                        self.aig.add_var(*ast_id, size)
-                    })
-                }
-                SymExpr::ArraySelect { .. } => self.aig.get_array_select_bits(expr).cloned(),
-                _ => None,
-            };
-
-            if let Some(bits) = bits_opt {
-                if bits.len() != width_bits as usize {
-                    self.aig
-                        .note_unsupported("model bit width differs from scalar sort".into());
-                    continue;
-                }
-                let size = width_bits;
-                let mut value: u64 = 0;
-                for (bit_idx, aig_lit) in bits.iter().enumerate() {
-                    let aig_node_idx = aig_lit.index();
-                    let cnf_var = self.cnf.get_cnf_var_for_aig(aig_node_idx);
-                    if cnf_var == 0 {
-                        let bit_val = u64::from(aig_lit.is_inverted());
-                        value |= bit_val << bit_idx;
+                    let expected_width = sort.expect_bv();
+                    let Some(bits) = self.aig.get_var_bits(*ast_id).cloned() else {
+                        if expected_width != width_bits {
+                            self.aig.note_unsupported(
+                                "model bit width differs from scalar sort".into(),
+                            );
+                            continue;
+                        }
+                        // Unconstrained variable never lowered into the AIG:
+                        // explicitly report default zero completion rather than
+                        // mutating AIG/CNF state.
+                        extracted.insert(*node_id, crate::solver::ModelValue::DefaultCompleted(0));
+                        continue;
+                    };
+                    if bits.len() != width_bits as usize || expected_width != width_bits {
+                        self.aig
+                            .note_unsupported("model bit width differs from scalar sort".into());
                         continue;
                     }
-
-                    let assignment = sat.get_var_value(cnf_var);
-                    let raw_bit = matches!(assignment, crate::sat::LBool::True);
-                    let bit_val = if aig_lit.is_inverted() {
-                        !raw_bit
+                    let (value, all_assigned) =
+                        read_bits_in_model(&self.cnf, sat, &bits, width_bits);
+                    let entry = if all_assigned {
+                        crate::solver::ModelValue::Assigned(value)
                     } else {
-                        raw_bit
-                    } as u64;
-                    value |= bit_val << bit_idx;
+                        crate::solver::ModelValue::DefaultCompleted(value)
+                    };
+                    extracted.insert(*node_id, entry);
                 }
-
-                let mask = if size >= 64 {
-                    u64::MAX
-                } else {
-                    (1u64 << size) - 1
-                };
-                model.insert(*node_id, value & mask);
+                SymExpr::ArraySelect { .. } => {
+                    let Some(bits) = self.aig.get_array_select_bits(expr).cloned() else {
+                        continue;
+                    };
+                    if bits.len() != width_bits as usize {
+                        self.aig
+                            .note_unsupported("model bit width differs from scalar sort".into());
+                        continue;
+                    }
+                    let (value, all_assigned) =
+                        read_bits_in_model(&self.cnf, sat, &bits, width_bits);
+                    let entry = if all_assigned {
+                        crate::solver::ModelValue::Assigned(value)
+                    } else {
+                        crate::solver::ModelValue::DefaultCompleted(value)
+                    };
+                    extracted.insert(*node_id, entry);
+                }
+                _ => {}
             }
+        }
+        extracted
+    }
+
+    /// Given a satisfying assignment from the SAT solver, reconstructs the concrete
+    /// values for all bitvector variables into `model`.
+    pub fn extract_model(
+        &mut self,
+        sat: &SatSolver,
+        nodes: &HashMap<SymNodeId, SymExpr>,
+        model: &mut HashMap<SymNodeId, u64>,
+    ) {
+        let extracted = self.extract_model_with_status(sat, nodes);
+        for (id, entry) in extracted {
+            model.insert(id, entry.raw_value());
         }
     }
 
-    /// Returns a scalar payload. The caller must check `unsupported()` before
-    /// treating the payload as a model value; unsupported shapes return zero.
-    pub fn evaluate_expr_in_model(&mut self, sat: &SatSolver, expr: &SymExpr) -> u64 {
+    /// Evaluates `expr` against the current SAT assignment and returns
+    /// `(value, exact)` where `exact` is true iff all scalar bits were driven by
+    /// SAT assignments or AIG constants (no unassigned/undefined bits).
+    pub fn evaluate_expr_in_model_with_status(
+        &mut self,
+        sat: &SatSolver,
+        expr: &SymExpr,
+    ) -> (u64, bool) {
         let width = match expr.get_sort() {
             crate::ast::Sort::BitVector(width) | crate::ast::Sort::Float(width)
                 if (1..=64).contains(&width) =>
@@ -197,41 +221,64 @@ impl BvTheorySolver {
             _ => {
                 self.aig
                     .note_unsupported("model evaluation requires a 1..=64-bit scalar".into());
-                return 0;
+                return (0, false);
             }
         };
         let bits = self.aig.lower_expr(expr);
         if bits.len() != width as usize {
             self.aig
                 .note_unsupported("model bit width differs from scalar sort".into());
-            return 0;
+            return (0, false);
         }
-        let mut value: u64 = 0;
-        for (bit_idx, aig_lit) in bits.iter().enumerate() {
-            let aig_node_idx = aig_lit.index();
-            let cnf_var = self.cnf.get_cnf_var_for_aig(aig_node_idx);
-            if cnf_var == 0 {
-                let bit_val = u64::from(aig_lit.is_inverted());
-                value |= bit_val << bit_idx;
-                continue;
-            }
-            let assignment = sat.get_var_value(cnf_var);
-            let raw_bit = matches!(assignment, crate::sat::LBool::True);
-            let bit_val = if aig_lit.is_inverted() {
-                !raw_bit
-            } else {
-                raw_bit
-            } as u64;
-            value |= bit_val << bit_idx;
-        }
-        let size = expr.get_bit_width();
-        let mask = if size >= 64 {
-            u64::MAX
-        } else {
-            (1u64 << size) - 1
-        };
-        value & mask
+        read_bits_in_model(&self.cnf, sat, &bits, width)
     }
+
+    /// Returns a scalar payload. The caller must check `unsupported()` before
+    /// treating the payload as a model value; unsupported shapes return zero.
+    pub fn evaluate_expr_in_model(&mut self, sat: &SatSolver, expr: &SymExpr) -> u64 {
+        self.evaluate_expr_in_model_with_status(sat, expr).0
+    }
+}
+
+fn read_bits_in_model(
+    cnf: &CnfBuilder,
+    sat: &SatSolver,
+    bits: &[AigLit],
+    width_bits: u32,
+) -> (u64, bool) {
+    let mut value: u64 = 0;
+    let mut all_assigned = true;
+    for (bit_idx, aig_lit) in bits.iter().enumerate() {
+        let aig_node_idx = aig_lit.index();
+        let cnf_var = cnf.get_cnf_var_for_aig(aig_node_idx);
+        let raw_bit = if cnf_var == 0 {
+            if aig_node_idx != 0 {
+                all_assigned = false;
+            }
+            false
+        } else {
+            match sat.get_var_value(cnf_var) {
+                crate::sat::LBool::True => true,
+                crate::sat::LBool::False => false,
+                crate::sat::LBool::Undef => {
+                    all_assigned = false;
+                    false
+                }
+            }
+        };
+        let bit_val = u64::from(if aig_lit.is_inverted() {
+            !raw_bit
+        } else {
+            raw_bit
+        });
+        value |= bit_val << bit_idx;
+    }
+    let mask = if width_bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << width_bits) - 1
+    };
+    (value & mask, all_assigned)
 }
 
 impl Theory for BvTheorySolver {
