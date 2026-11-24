@@ -76,6 +76,75 @@ Read the nearest child file before editing those areas.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
 10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)), measured on the **full dataset** (`~/fission-benchmark/decbench-full/sweep.py`, every config); the 250-function sample-set gate is only the quick pre-check. Caches are disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence. **DecBench measures similarity to the source, not correctness** ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)). It is reported for every output-changing PR, but a claim that output became *correct* needs correctness evidence: native replay, `fission_cli verify --tier ground-truth`, manuals, DWARF/PDB, call sites counted by instruction address, or the raw diff. A fix that makes wrong output right may land with a worse DecBench score when the PR shows that evidence and explains the regression.
 
+## Post-Audit Stabilization Workflow (Fission 1.0)
+
+The eleven-perspective audit is complete; its findings are not automatically
+reproduced or fixed. The development priority is now implementation,
+verification, and stabilization, coordinated by
+[#1293](https://github.com/fission-systems/Fission/issues/1293). Keep the
+architecture/ADR ownership in #1168 and the release go/no-go criteria in
+#1121. Do not treat this workflow as a new release gate replacing either one.
+
+### Priorities and scope
+
+- Correctness before Performance.
+- Evidence before Assumption.
+- Measurement before Optimization.
+- Isolation before Parallelization.
+- Validation before Publication.
+- Explicit Unknown before False Certainty.
+
+Prioritize reproduced false proofs, semantic corruption, evidence fabrication,
+data loss, hangs, and unbounded resource retention within supported workflows.
+Select work by risk and dependency, not issue number or closure count. Resolve
+soundness and essential reliability prerequisites before promoting dependent
+optimizations, experiments, or platform capabilities. Independent fixes can
+proceed in parallel. Defer unrelated feature expansion; keep explicitly approved
+research experiments isolated from the default production pipeline. Preserve
+the CLI-only, Rust-native, agent-first ownership boundaries.
+
+### Implementation and validation loop
+
+For each implementation task:
+
+1. **Inspect and scope.** Read the linked issue, current code, nearest child
+   AGENTS, and related ADRs. Check whether the finding still applies and whether
+   another change already addresses it. Record the base revision, canonical
+   owner, affected contracts, and relevant prerequisite issues.
+2. **Reproduce.** Capture the failing behavior with a minimal, deterministic
+   reproducer or failing regression test where feasible. For preventive work
+   or non-reproducible findings, state the evidence and limitation explicitly.
+   Do not invent a failure or mark an unconfirmed finding as reproduced.
+3. **Explain.** State the root cause, violated invariant, supported scope,
+   and expected failure behavior before editing production code.
+4. **Implement.** Fix at the canonical owner with the smallest coherent change.
+   Avoid unrelated refactors and duplicate state, preserve compatibility and
+   existing safeguards, and make partial/unsupported/cancelled outcomes explicit.
+5. **Verify independently.** Choose an oracle appropriate to the changed
+   contract (specification, native execution, independent reference model,
+   property/metamorphic test, or checked witness). Where applicable include
+   negative controls and ensure shared lifter/solver assumptions do not create
+   circular proof. A timeout, unsupported operation, or incomplete exploration
+   is not proof of equivalence.
+6. **Regress and measure.** Run the relevant crate and integration checks,
+   fault-injection tests for lifecycle changes, and the existing benchmark
+   gates when required. Performance changes require reproducible before/after
+   measurements on comparable configurations. The Decompiler Quality Loop,
+   full-dataset DecBench requirement, AI Overfit Firewall and CI/release gates
+   below remain in force.
+7. **Submit for review.** Link the issue and report the invariant, reproducer,
+   implementation scope, commands and actual results, remaining limitations,
+   and any observed regressions. Identify checks not run and why; do not
+   represent pending CI or unmeasured results as passed. Do not merge solely
+   because an AI-generated patch compiles.
+8. **Close only with evidence.** After the fix is merged and the applicable
+   acceptance criteria are verified, record the commit and validation evidence
+   on the issue. If a blocker remains, retain explicit partial status; do not
+   close the umbrella roadmap merely because this workflow has been adopted.
+
+The success criterion is a trustworthy, reproducible, bounded analysis core,
+not LOC, commit count, feature count, issue count, or benchmark rank alone.
+
 ## Anti-Patterns
 
 - Do not patch semantic gaps only in printer/UI output.
