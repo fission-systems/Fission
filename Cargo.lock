@@ -1112,6 +1112,7 @@ dependencies = [
 name = "fission-project"
 version = "0.4.0"
 dependencies = [
+ "blake3",
  "fission-loader",
  "serde",
  "serde_json",

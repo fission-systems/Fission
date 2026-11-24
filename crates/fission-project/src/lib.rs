@@ -24,12 +24,14 @@
 //! # Editing and history
 //!
 //! Hold [`ProjectLock`] across read, mutation, [`Project::record_edit`], and
-//! [`ProjectLock::write`] for a recorded edit. Low-level setters do not record
-//! revisions automatically. [`Project::undo`] and [`Project::redo`] preflight
-//! all touched decisions before applying a revision. Schema 1 files are read
-//! as a baseline with empty history and upgraded on the first recorded edit.
-//! [`Project::write`] locks and atomically replaces a file, but callers doing
-//! a read/edit/write cycle should acquire the lock before reading.
+//! [`ProjectLock::write_if_revision`] for a recorded edit, or use
+//! [`Project::commit_edit`] / [`Project::write_if_revision`] for optimistic
+//! compare-and-swap commits. Low-level setters do not record revisions
+//! automatically. [`Project::undo`] and [`Project::redo`] preflight all touched
+//! decisions before applying a revision. Schema 1 files are read as a baseline
+//! with empty history and upgraded on the first recorded edit.
+//! [`Project::write_unconditional`] replaces unconditionally when explicitly
+//! requested, while checked commits reject stale revisions without overwriting.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -40,7 +42,7 @@ use serde::{Deserialize, Serialize};
 mod history;
 mod storage;
 pub use history::{DecisionChange, EditHistory, Revision};
-pub use storage::ProjectLock;
+pub use storage::{CommitPrecondition, ProjectLock, ProjectRevision};
 
 /// The schema this crate writes. Bumped when a change would make an older
 /// reader misunderstand a file rather than merely miss a field.
@@ -181,6 +183,14 @@ pub enum ProjectError {
         "this project was written by a newer Fission (schema {found}, this one understands {known})"
     )]
     NewerSchema { found: u32, known: u32 },
+    #[error(
+        "project commit conflict at {path}: expected revision {expected}, persisted state is {current}"
+    )]
+    Conflict {
+        path: PathBuf,
+        expected: ProjectRevision,
+        current: ProjectRevision,
+    },
 }
 
 /// A function signature somebody chose.
@@ -332,26 +342,22 @@ impl Project {
         PathBuf::from(name)
     }
 
-    /// Read a project, or `Ok(None)` if there is no file there.
+    /// Read a project and its opaque persisted [`ProjectRevision`] token, or
+    /// `(None, ProjectRevision::absent())` if there is no file there.
     ///
-    /// A missing project is the ordinary case -- most binaries have never
-    /// been looked at -- so it is not an error; an unreadable or malformed
-    /// one is.
-    pub fn read(path: &Path) -> Result<Option<Self>, ProjectError> {
-        let text = match std::fs::read_to_string(path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(source) => {
-                return Err(ProjectError::Read {
-                    path: path.to_path_buf(),
-                    source,
-                });
-            }
+    /// A missing project is the ordinary case -- most binaries have never been
+    /// looked at -- so it is not an error; an unreadable or malformed one is.
+    pub fn read_with_revision(
+        path: &Path,
+    ) -> Result<(Option<Self>, ProjectRevision), ProjectError> {
+        let Some((bytes, revision)) = storage::read_persisted_bytes_and_revision(path)? else {
+            return Ok((None, ProjectRevision::absent()));
         };
-        let project: Self = serde_json::from_str(&text).map_err(|source| ProjectError::Parse {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        let project: Self =
+            serde_json::from_slice(&bytes).map_err(|source| ProjectError::Parse {
+                path: path.to_path_buf(),
+                source,
+            })?;
         if project.schema_version > SCHEMA_VERSION {
             return Err(ProjectError::NewerSchema {
                 found: project.schema_version,
@@ -359,15 +365,92 @@ impl Project {
             });
         }
         project.history.validate()?;
-        Ok(Some(project))
+        Ok((Some(project), revision))
     }
 
-    /// Write the project, creating the parent directory if needed.
+    /// Read a project, or `Ok(None)` if there is no file there.
+    pub fn read(path: &Path) -> Result<Option<Self>, ProjectError> {
+        Ok(Self::read_with_revision(path)?.0)
+    }
+
+    /// Commit `self` under [`ProjectLock`] only when `precondition` holds.
+    pub fn commit_checked(
+        &self,
+        path: &Path,
+        precondition: CommitPrecondition,
+    ) -> Result<ProjectRevision, ProjectError> {
+        ProjectLock::acquire(path)?.write_checked(self, precondition)
+    }
+
+    /// Create the project file only if it does not already exist.
+    pub fn create_if_absent(&self, path: &Path) -> Result<ProjectRevision, ProjectError> {
+        self.commit_checked(path, CommitPrecondition::IfAbsent)
+    }
+
+    /// Commit `self` only if the persisted state matches `expected`.
+    pub fn write_if_revision(
+        &self,
+        path: &Path,
+        expected: &ProjectRevision,
+    ) -> Result<ProjectRevision, ProjectError> {
+        self.commit_checked(path, CommitPrecondition::IfRevision(expected.clone()))
+    }
+
+    /// Explicitly overwrite any persisted state without comparing revisions.
     ///
     /// Pretty-printed on purpose: this file is meant to be read by people and
     /// to produce a legible diff when a name changes.
+    pub fn write_unconditional(&self, path: &Path) -> Result<(), ProjectError> {
+        self.commit_checked(path, CommitPrecondition::Unconditional)?;
+        Ok(())
+    }
+
+    /// Stage a decision edit, record history against `self`, and commit under
+    /// compare-and-swap in one transaction.
+    ///
+    /// On conflict or error, neither `self` nor the persisted file is altered.
+    pub fn commit_edit(
+        &self,
+        path: &Path,
+        expected: &ProjectRevision,
+        mutate: impl FnOnce(&mut Self) -> Result<(), ProjectError>,
+    ) -> Result<(Self, Option<u64>, ProjectRevision), ProjectError> {
+        let mut staged = self.clone();
+        mutate(&mut staged)?;
+        let recorded = staged.record_edit(self)?;
+        let committed_rev = staged.write_if_revision(path, expected)?;
+        Ok((staged, recorded, committed_rev))
+    }
+
+    /// Undo the latest applied revision and persist under compare-and-swap.
+    pub fn commit_undo(
+        &self,
+        path: &Path,
+        expected: &ProjectRevision,
+    ) -> Result<(Self, u64, ProjectRevision), ProjectError> {
+        let mut staged = self.clone();
+        let revision = staged.undo()?;
+        let committed_rev = staged.write_if_revision(path, expected)?;
+        Ok((staged, revision, committed_rev))
+    }
+
+    /// Redo the next undone revision and persist under compare-and-swap.
+    pub fn commit_redo(
+        &self,
+        path: &Path,
+        expected: &ProjectRevision,
+    ) -> Result<(Self, u64, ProjectRevision), ProjectError> {
+        let mut staged = self.clone();
+        let revision = staged.redo()?;
+        let committed_rev = staged.write_if_revision(path, expected)?;
+        Ok((staged, revision, committed_rev))
+    }
+
+    #[deprecated(
+        note = "use write_if_revision, create_if_absent, or commit_edit (or write_unconditional when overwriting unconditionally)"
+    )]
     pub fn write(&self, path: &Path) -> Result<(), ProjectError> {
-        ProjectLock::acquire(path)?.write(self)
+        self.write_unconditional(path)
     }
 
     /// Whether this project describes `binary`.
@@ -617,7 +700,7 @@ mod tests {
 
         let dir = tempfile::tempdir().expect("temp dir");
         let path = dir.path().join("sample.bin.fission.json");
-        project.write(&path).expect("write");
+        project.create_if_absent(&path).expect("write");
 
         let read = Project::read(&path).expect("read").expect("a project");
         assert_eq!(read, project);
