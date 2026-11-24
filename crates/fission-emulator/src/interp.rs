@@ -208,7 +208,8 @@ impl Emulator {
                     .then(|| self.snapshot_symbolic_op(op));
 
             let (step, unimplemented) = {
-                let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
+                let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver)
+                    .with_nan_policy(self.arch.nan_policy);
                 let step = evaluator.step(op)?;
                 (step, evaluator.unimplemented)
             };
