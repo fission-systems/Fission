@@ -28,17 +28,20 @@ WORKSPACE_WIDE_PATHS = {
 }
 
 
-def affected_packages(changed_paths: list[str]) -> set[str]:
-    metadata = json.loads(
-        subprocess.check_output(
-            ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"],
-            cwd=ROOT,
-            text=True,
+def affected_packages(
+    changed_paths: list[str], metadata: dict | None = None, root: Path = ROOT
+) -> set[str]:
+    if metadata is None:
+        metadata = json.loads(
+            subprocess.check_output(
+                ["cargo", "metadata", "--no-deps", "--format-version", "1", "--locked"],
+                cwd=root,
+                text=True,
+            )
         )
-    )
     packages = {package["name"]: package for package in metadata["packages"]}
     manifest_dirs = {
-        Path(package["manifest_path"]).parent.relative_to(ROOT).as_posix(): name
+        Path(package["manifest_path"]).parent.relative_to(root).as_posix(): name
         for name, package in packages.items()
     }
 

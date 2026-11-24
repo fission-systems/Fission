@@ -1,5 +1,9 @@
 # Cargo configuration for Fission development
 
+# `cargo xtask preflight`: run the CI Fast Gate checks for this branch locally.
+[alias]
+xtask = "run --package xtask --"
+
 # Use sccache for faster rebuilds
 #[build]
 #rustc-wrapper = "sccache"

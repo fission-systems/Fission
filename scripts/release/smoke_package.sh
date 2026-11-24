@@ -50,6 +50,14 @@ run() {
 
 run --version
 status=$(run resources status --json)
+# A release build (FISSION_BUILD_SHA set, as cd.yml does) must report the
+# release it was built from, and its bundle's manifest must name the same one.
+if [ -n "${FISSION_BUILD_SHA:-}" ]; then
+  py=python3
+  "$py" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1 || py=python
+  echo "$status" | "$py" "$(dirname "$0")/check_identity.py" status \
+    --tag "${FISSION_BUILD_TAG:-}" --sha "$FISSION_BUILD_SHA"
+fi
 # JSON escapes Windows separators as `\\`, hence `+`.
 echo "$status" | grep -Eq '"signatures_base": *"[^"]*share[/\\]+fission[/\\]+signatures"' || {
   echo "smoke: signatures did not resolve to the archive's share/fission" >&2

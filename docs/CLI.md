@@ -103,6 +103,21 @@ fission_cli --resource-root /path/to/fission-data resources status --json
 
 Use **`--json`** when automation needs stable fields (`resource_roots`, `resources`).
 
+`build` is the release this binary was built from: `version`, and `tag` and
+`sha` for a release build (`null` otherwise; `fission_cli --version` prints
+the same). `resource_manifest` compares that with `fission-resources.json` in
+the bundle the resources resolved from:
+
+| `state` | Meaning |
+|---|---|
+| `match` | The manifest names this version, and the same tag and commit where both sides record them |
+| `mismatch` | The bundle is from another version, tag or commit (`detail` says which) |
+| `missing` | No installed bundle resolved (a source checkout, custom resources) or it has no manifest |
+| `invalid` | The manifest is unreadable or has an unknown schema |
+
+The manifest also digests each resource directory; nothing hashes the bundle
+at run time.
+
 ---
 
 ## Common Patterns

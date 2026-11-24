@@ -4,7 +4,10 @@ on:
   push:
     branches: ["main"]
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review, edited]
+    # No `edited`: a title or body edit restarted the whole PR run on the same
+    # SHA (4 cancelled runs in 24 h, 2026-11-24). A retargeted base is still
+    # tested by the merge queue, which runs on the real base.
+    types: [opened, reopened, synchronize, ready_for_review]
   merge_group:
     types: [checks_requested]
   workflow_dispatch:
@@ -51,6 +54,7 @@ jobs:
       run_decomp_corpus: ${{ steps.filter.outputs.run_decomp_corpus }}
       run_package_check: ${{ steps.filter.outputs.run_package_check }}
       run_sweep_smoke: ${{ steps.filter.outputs.run_sweep_smoke }}
+      run_sccache_fallback: ${{ steps.filter.outputs.run_sccache_fallback }}
       test_crates: ${{ steps.impact.outputs.crates }}
       run_interactive_runtime_tests: ${{ steps.impact.outputs.run_interactive_runtime_tests }}
       run_script_emulator_tests: ${{ steps.impact.outputs.run_script_emulator_tests }}
@@ -178,32 +182,17 @@ jobs:
 
       - name: Python syntax (scripts/)
         shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t py < <(find scripts -type f -name '*.py' 2>/dev/null || true)
-          if [ "${#py[@]}" -eq 0 ]; then
-            echo "No Python scripts under scripts/"
-            exit 0
-          fi
-          python3 -m py_compile "${py[@]}"
-          echo "OK: py_compile ok (${#py[@]} files)"
+        run: bash scripts/ci/script_syntax.sh py
 
       - name: Shell syntax (scripts/**/*.sh)
         shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t shs < <(find scripts -type f -name '*.sh' 2>/dev/null || true)
-          if [ "${#shs[@]}" -eq 0 ]; then
-            echo "No shell scripts under scripts/"
-            exit 0
-          fi
-          for f in "${shs[@]}"; do
-            bash -n "$f"
-          done
-          echo "OK: bash -n ok (${#shs[@]} files)"
+        run: bash scripts/ci/script_syntax.sh sh
 
       - name: CI classifier and tooling tests
         run: python3 -m unittest discover -s scripts/ci -p 'test_*.py'
+
+      - name: Release tooling tests
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py'
 
       - name: Install actionlint
         if: needs.changes.outputs.run_actionlint == 'true'
@@ -232,34 +221,10 @@ jobs:
           submodules: false
 
       - name: Check for function/address-specific patterns in NIR pipeline
-        run: |
-          set -euo pipefail
-          PATTERN_HITS=$(grep -rn \
-            -e 'func_name\s*==' \
-            -e 'func_name\.contains' \
-            -e 'function_name.*==\|==.*function_name' \
-            -e 'addr\s*==\s*0x[0-9a-fA-F]' \
-            crates/fission-pcode/src/midend/structuring/ \
-            crates/fission-pcode/src/midend/normalize/ \
-            crates/fission-midend-structuring/src/ \
-            crates/fission-midend-normalize/src/ 2>/dev/null || true)
-          if [ -n "$PATTERN_HITS" ]; then
-            echo "ERROR: Function/address-specific pattern detected in NIR pipeline:"
-            echo "$PATTERN_HITS"
-            exit 1
-          fi
-          echo "OK: No function/address-specific patterns found in NIR pipeline."
+        run: bash scripts/check/pass_gate_patterns.sh
 
       - name: Verify MAX_STRUCTURING_PASSES constant is declared
-        run: |
-          set -euo pipefail
-          if ! grep -q 'MAX_STRUCTURING_PASSES' crates/fission-pcode/src/midend/pass/manager.rs; then
-            echo "ERROR: MAX_STRUCTURING_PASSES constant missing from midend/pass/manager.rs"
-            exit 1
-          fi
-          CAP=$(grep 'MAX_STRUCTURING_PASSES.*usize.*=' crates/fission-pcode/src/midend/pass/manager.rs \
-                | grep -oE '[0-9]+' | head -1)
-          echo "OK: MAX_STRUCTURING_PASSES = ${CAP} (current cap)."
+        run: bash scripts/check/max_structuring_passes.sh
 
       - name: Owner boundary scan (ADR 0008 / 0011 / 0012)
         run: |
@@ -279,74 +244,14 @@ jobs:
           # the base tip does not guarantee a merge base, so compare trees.
           git fetch --no-tags origin "$BASE_REF" --depth=1
           BASE_SHA=$(git rev-parse FETCH_HEAD)
-          CHANGED=$(git diff --name-only "$BASE_SHA" HEAD)
-          echo "Changed paths relative to fetched base $BASE_SHA:"
-          printf '%s\n' "$CHANGED"
-
-          # Consume the complete input: grep -q can close the pipe early and
-          # make git diff fail with SIGPIPE under pipefail despite a match.
-          NIR_RENDER_MIDEND_CHANGED=false
-          HAS_TARGETED_TEST=false
-          SLEIGH_CHANGED=false
-
-          # Rust sources only: a manifest edit (a version bump, a dependency
-          # drop) changes no NIR semantics, and counting it blocked release
-          # PRs for want of a test there is nothing to write for.
-          if printf '%s\n' "$CHANGED" | grep '\.rs$' | grep -e "^crates/fission-pcode/src/midend/" \
-              -e "^crates/fission-pcode/src/render/" \
-              -e "^crates/fission-midend-structuring/" \
-              -e "^crates/fission-midend-normalize/" \
-              -e "^crates/fission-midend-core/" >/dev/null; then
-            NIR_RENDER_MIDEND_CHANGED=true
-            # Lines of code the change adds there, blank lines and comments
-            # aside. A change that only removes code (a duplicate definition,
-            # dead code) has nothing new for a test to target.
-            ADDED_CODE=$(git diff --unified=0 "$BASE_SHA" HEAD -- \
-                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
-                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
-                crates/fission-midend-core/ \
-                | grep '^+[^+]' | grep -cvE '^\+[[:space:]]*(//.*)?$' || true)
-            if [ "$ADDED_CODE" -eq 0 ]; then
-              echo "INFO: NIR/render/midend change adds no code; no targeted test required."
-              HAS_TARGETED_TEST=true
-            elif printf '%s\n' "$CHANGED" | grep -e "tests/" -e ".*test" -e ".*_tests\.rs" >/dev/null; then
-              HAS_TARGETED_TEST=true
-            elif git diff "$BASE_SHA" HEAD -- \
-                crates/fission-pcode/src/midend/ crates/fission-pcode/src/render/ \
-                crates/fission-midend-structuring/ crates/fission-midend-normalize/ \
-                crates/fission-midend-core/ \
-                | grep "+.*#\[test\]" >/dev/null; then
-              HAS_TARGETED_TEST=true
-            fi
-          fi
-
-          if printf '%s\n' "$CHANGED" | grep -e "^crates/fission-sleigh/" -e "^utils/sleigh-specs/" >/dev/null; then
-            SLEIGH_CHANGED=true
-          fi
-
-          {
-            echo "nir_render_midend_changed=$NIR_RENDER_MIDEND_CHANGED"
-            echo "has_targeted_test=$HAS_TARGETED_TEST"
-            echo "sleigh_changed=$SLEIGH_CHANGED"
-          } >> "$GITHUB_OUTPUT"
+          bash scripts/ci/targeted_test_gate.sh collect "$BASE_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Enforce Targeted Tests for NIR/Render Changes
         if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
         env:
           NIR_RENDER_MIDEND_CHANGED: ${{ steps.pr_changes.outputs.nir_render_midend_changed }}
           HAS_TARGETED_TEST: ${{ steps.pr_changes.outputs.has_targeted_test }}
-        run: |
-          set -euo pipefail
-          if [ "$NIR_RENDER_MIDEND_CHANGED" = "true" ]; then
-            if [ "$HAS_TARGETED_TEST" = "true" ]; then
-              echo "OK: Targeted tests included."
-            else
-              echo "ERROR: Targeted test missing for NIR/render/midend changes."
-              exit 1
-            fi
-          else
-            echo "INFO: No NIR/render/midend changes detected."
-          fi
+        run: bash scripts/ci/targeted_test_gate.sh enforce
 
       - name: Enforce Sleigh Exact Match Parity
         if: github.event_name == 'pull_request' && needs.changes.outputs.run_tests == 'true'
@@ -392,9 +297,11 @@ jobs:
       features: "fission-dynamic/interactive_runtime,fission-cli/debugger"
       profile: debug
 
+  # Smoke builds its own CLI and PE fixture; no artifacts from test-linux.
+  # Keep both lanes required in CI Summary, but do not serialize them.
   cli-smoke-linux:
     name: CLI Smoke (Linux · PE sample)
-    needs: [changes, test-linux]
+    needs: [changes]
     if: needs.changes.outputs.run_cli_smoke == 'true'
     uses: ./.github/workflows/reusable-cli-smoke.yml
     with:
@@ -462,11 +369,91 @@ jobs:
     with:
       only: binaries/O0/base-passwd/update-passwd
 
+  # ADR 0016 rule 1, caches fail open, tested rather than assumed. The cache
+  # service failed three required jobs on 2026-11-23/24 ("Server startup
+  # failed: cache storage failed to read"). The first half points sccache at
+  # a host that cannot resolve and requires an uncached, green build. The
+  # second half uses the real service and requires that the server the probe
+  # started is still the one serving a later step: a new server would repeat
+  # the storage check inside the build, which is the failure being fixed. If
+  # the real service is down, that half is skipped, not red.
+  sccache-fallback:
+    name: sccache outage fallback
+    needs: [changes]
+    if: needs.changes.outputs.run_sccache_fallback == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+
+      - name: Set up sccache against an unreachable cache service
+        id: outage
+        uses: ./.github/actions/setup-sccache
+        with:
+          simulate-outage: "true"
+      - name: The setup fell back and exported no wrapper
+        env:
+          ENABLED: ${{ steps.outage.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          if [ "$ENABLED" != "false" ]; then
+            echo "::error::setup-sccache reported enabled='${ENABLED}' with the cache service unreachable"
+            exit 1
+          fi
+          if [ -n "${RUSTC_WRAPPER:-}" ]; then
+            echo "::error::RUSTC_WRAPPER='${RUSTC_WRAPPER}' with the cache service unreachable"
+            exit 1
+          fi
+          echo "OK: no RUSTC_WRAPPER; the build runs uncached"
+      - name: A build passes without the cache
+        run: cargo build --locked -p fission-pcode-ir
+
+      - name: Set up sccache against the real cache service
+        id: real
+        uses: ./.github/actions/setup-sccache
+      - name: The probed server still serves later steps
+        if: steps.real.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          # The probe compiled one crate. A server started since then (the
+          # probe's having died) would report no compile requests.
+          requests="$(sccache --show-stats | sed -n 's/^Compile requests[[:space:]]*\([0-9]*\)$/\1/p')"
+          if [ "${requests:-0}" -lt 1 ]; then
+            echo "::error::the server setup-sccache started is gone; the build would start another and repeat the storage check"
+            exit 1
+          fi
+          echo "OK: same server, ${requests} compile request(s) so far"
+      - name: A build passes through the cache
+        if: steps.real.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          cargo clean -p fission-pcode-ir
+          cargo build --locked -p fission-pcode-ir
+          sccache --show-stats
+      - name: Cache service unavailable
+        if: steps.real.outputs.enabled != 'true'
+        run: echo "::notice::the real cache service is unavailable; only the outage half ran"
+
   # Report-only, not part of CI Summary: what a Rust change does to decompile
   # cost (instructions executed) and, for decompiler changes, to output.
+  # It holds a runner for ~40 min, so it runs only for decompiler changes or a
+  # PR labelled `type:performance` (label before pushing: a re-run replays the
+  # old payload, so a later label needs a new push), and only after the
+  # required Linux tests pass, so required jobs claim runners first. On
+  # 2026-11-24 it was 10-11 of 24 running jobs while required jobs queued.
   base-vs-head:
-    needs: [changes]
-    if: needs.changes.outputs.run_tests == 'true' && github.event_name == 'pull_request'
+    needs: [changes, test-linux]
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.changes.outputs.run_tests == 'true'
+      && needs.test-linux.result == 'success'
+      && (needs.changes.outputs.run_decomp_corpus == 'true'
+          || contains(github.event.pull_request.labels.*.name, 'type:performance'))
     uses: ./.github/workflows/reusable-base-head.yml
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
@@ -494,6 +481,7 @@ jobs:
         decomp-corpus,
         package-check,
         sweep-smoke,
+        sccache-fallback,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -554,6 +542,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "DecBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_sccache_fallback }}" "sccache outage fallback" "${{ needs.sccache-fallback.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             exit 1

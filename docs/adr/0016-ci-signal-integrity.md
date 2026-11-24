@@ -71,6 +71,7 @@ cost and what it catches are known rather than assumed.
 | Overflow checks and debug assertions in release builds | 0 panics over the same 2,868 functions; the 83 errors are lift failures on PE data symbols. Kept because the class has occurred (four panic sites from a debug sweep, the `align_up` fuzz crash) and costs little on the fixture lane | PR fixture lane |
 | Retry masking | 0 tests passed only on retry in 59 recent green test jobs | Not changed |
 | Hangs | nextest already terminates a test after 120 s | Not changed |
+| sccache decided before the build | 3 required jobs on 2026-11-23/24 (one in the merge queue, run 45302835263) failed at the build's first `rustc -vV` with `Server startup failed: cache storage failed to read`. The old check (`--show-stats`) ran before `SCCACHE_GHA_ENABLED` was set, so it started a local-disk server that never touched the cache service; the real server, and its storage check, started inside the build | `setup-sccache` starts the build's server and compiles through it before exporting `RUSTC_WRAPPER`; `sccache outage fallback` in Fast Gate proves an unreachable service builds uncached and green |
 
 ## Further tests, and what each found or measured first
 
@@ -81,7 +82,7 @@ cost and what it catches are known rather than assumed.
 | Engine differential with real fixtures | Three JIT-vs-interpreter tests (PE32, AArch64, DC ZVA) skipped wherever a local dev corpus was absent, which was everywhere; they now use checked-in fixtures built from `testdata/src/control_flow.c` and fail without them | Every emulator change (Fast Gate) |
 | Mutation testing | 5,448 mutants in one week of main; at one to two minutes each this is sampled: four of 48 rotating slices a week | Weekly `mutants.yml`, report-only |
 | CLI JSON contracts | (assigned to the CLI exposure work, which changes those outputs) | Fast Gate, with the CLI |
-| Decompile speed | Wall time on shared runners moves 10-20%, so cost is counted as instructions executed (valgrind cachegrind, one thread). Eight identical runs: first ~3% high, the rest within 1.3%. Under valgrind 40 functions take 25-76 s per binary and CLI start-up alone is ~3.7e9 instructions (kept: every call pays it). Sample: six hash-ordered binaries, 15 functions each, warm-up plus minimum of two | PR (every Rust change): base vs head on one runner, flagged at +3%, report-only. Nightly `speed.yml`: main vs the last good night's CLI, fails at +3%; `accept_baseline` dispatch accepts a deliberate slowdown |
+| Decompile speed | Wall time on shared runners moves 10-20%, so cost is counted as instructions executed (valgrind cachegrind, one thread). Eight identical runs: first ~3% high, the rest within 1.3%. Under valgrind 40 functions take 25-76 s per binary and CLI start-up alone is ~3.7e9 instructions (kept: every call pays it). Sample: six hash-ordered binaries, 15 functions each, warm-up plus minimum of two | PR (decompiler changes, or a `type:performance` label; after the Linux tests, since 2026-11-24 to relieve runner contention): base vs head on one runner, flagged at +3%, report-only. Nightly `speed.yml` (catches any slowdown that skipped the PR job): main vs the last good night's CLI, fails at +3%; `accept_baseline` dispatch accepts a deliberate slowdown |
 
 ## Phases
 

@@ -166,15 +166,10 @@ impl WindowsDebugger {
         Ok(())
     }
 
-    pub(super) fn detach(&mut self) -> FissionResult<()> {
-        let pid = self
-            .state
-            .attached_pid
-            .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
-
-        // Leave no breakpoint instruction behind in a process we let go of: it
-        // would die on the first one it reached, with no debugger to take the
-        // exception.
+    /// Leave no breakpoint instruction behind in a process we let go of: it
+    /// would die on the first one it reached, with no debugger to take the
+    /// exception.
+    pub(super) fn restore_armed_software_breakpoints(&mut self) -> FissionResult<()> {
         let armed: Vec<(u64, u8)> = self
             .state
             .breakpoints
@@ -182,11 +177,31 @@ impl WindowsDebugger {
             .filter(|bp| bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software)
             .map(|bp| (bp.address, bp.original_byte))
             .collect();
+        let mut first_err = None;
         for (address, original_byte) in armed {
-            self.write_memory(address, &[original_byte])?;
+            if let Err(err) = self.write_memory(address, &[original_byte]) {
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            } else if let Some(bp) = self.state.breakpoints.get_mut(&address) {
+                bp.enabled = false;
+            }
         }
-        self.state.breakpoints.clear();
         self.step_off = None;
+        if let Some(err) = first_err {
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    pub(super) fn detach(&mut self) -> FissionResult<()> {
+        let pid = self
+            .state
+            .attached_pid
+            .ok_or_else(|| FissionError::debug("Not attached to any process"))?;
+
+        self.restore_armed_software_breakpoints()?;
+        self.state.breakpoints.clear();
 
         if self.pending_continue_status.is_some() {
             self.continue_pending_debug_event()?;

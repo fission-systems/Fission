@@ -115,6 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -160,34 +161,9 @@ jobs:
         env:
           CRATES: ${{ inputs.crates }}
           FEATURES: ${{ inputs.features }}
-        run: |
-          set -euo pipefail
-          crates="$CRATES"
-          package_flags=()
-          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
-          for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
-            crate="$(echo "$crate" | tr -d '[:space:]')"
-            [ -z "$crate" ] && continue
-            package_flags+=(-p "$crate")
-          done
-          if [ "${#package_flags[@]}" -eq 0 ]; then
-            echo "No crates specified"
-            exit 1
-          fi
-          echo "Testing packages: ${package_flags[*]}"
-          features="$FEATURES"
-          feature_flags=()
-          if [ -n "$features" ]; then
-            feature_flags+=(--features "$features")
-          fi
-          cargo nextest run \
-            "${package_flags[@]}" \
-            "${feature_flags[@]+"${feature_flags[@]}"}" \
-            --locked \
-            --no-tests=fail \
-            --no-fail-fast \
-            --retries ${FISSION_IN_RETRIES} \
-            ${{ inputs.profile == 'release' && '--release' || '' }}
+          RETRIES: ${{ inputs.retries }}
+          PROFILE: ${{ inputs.profile }}
+        run: bash scripts/ci/test_crates.sh nextest
 
       # Doctests: nextest does not run doctests — run once with multi -p
       - name: Run Doctests (Specific Crates)
@@ -196,26 +172,8 @@ jobs:
         env:
           CRATES: ${{ inputs.crates }}
           FEATURES: ${{ inputs.features }}
-        run: |
-          set -euo pipefail
-          crates="$CRATES"
-          package_flags=()
-          IFS=',' read -ra CRATE_ARRAY <<< "$crates"
-          for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
-            crate="$(echo "$crate" | tr -d '[:space:]')"
-            [ -z "$crate" ] && continue
-            package_flags+=(-p "$crate")
-          done
-          features="$FEATURES"
-          feature_flags=()
-          if [ -n "$features" ]; then
-            feature_flags+=(--features "$features")
-          fi
-          # A doctest that fails must fail the job; `|| true` here meant no
-          # doctest could ever fail CI.
-          cargo test --doc "${package_flags[@]+"${package_flags[@]}"}" \
-            "${feature_flags[@]+"${feature_flags[@]}"}" --locked \
-            ${{ inputs.profile == 'release' && '--release' || '' }}
+          PROFILE: ${{ inputs.profile }}
+        run: bash scripts/ci/test_crates.sh doc
 
       # --- Full workspace mode ---
       - name: Run Full Test Suite (All Crates) [nextest]
@@ -270,29 +228,30 @@ jobs:
       - name: Test optional features (interactive_runtime)
         if: ${{ inputs.run_interactive_runtime_tests && matrix.lane != 'core' }}
         shell: bash
-        run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features interactive_runtime
+        run: bash scripts/ci/feature_suite.sh interactive_runtime
 
       - name: Test optional features (script emulator)
         if: ${{ inputs.run_script_emulator_tests && matrix.lane != 'core' }}
         shell: bash
-        run: cargo nextest run --locked --no-tests=fail -p fission-script --features emulator
+        run: bash scripts/ci/feature_suite.sh script_emulator
 
       - name: Check optional feature (emulator softfloat)
         if: ${{ inputs.run_emulator_softfloat_check && matrix.lane != 'core' }}
-        run: cargo check -p fission-emulator --features softfloat --all-targets --locked
+        shell: bash
+        run: bash scripts/ci/feature_suite.sh emulator_softfloat
 
       - name: Check optional feature (plugin interactive_runtime)
         if: ${{ inputs.run_plugin_interactive_check && matrix.lane != 'core' }}
-        run: cargo check -p fission-plugin --features interactive_runtime --all-targets --locked
+        shell: bash
+        run: bash scripts/ci/feature_suite.sh plugin_interactive
 
       - name: Check alternate CLI feature configurations
         if: ${{ inputs.run_cli_alt_feature_checks && matrix.lane != 'core' }}
         shell: bash
-        run: |
-          cargo check -p fission-cli --no-default-features --locked
-          cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
+        run: bash scripts/ci/feature_suite.sh cli_alt
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true

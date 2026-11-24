@@ -1,0 +1,51 @@
+name: Development flow report
+
+# Daily: who acts next on each open PR, and the last day's flow (about 130
+# API calls). Mondays: the 7-day window with runner metrics, one call per
+# workflow run (about 800 calls, under GITHUB_TOKEN's 1,000 an hour). Writes
+# only to the job summary: no issues, comments, commits or artifacts.
+on:
+  schedule:
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Metrics window in days (empty: 7 on Mondays, else 1)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+  checks: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: dev-metrics
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Report
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/report
+      - name: Write the report to the job summary
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          set -euo pipefail
+          args=(--repo "$GH_REPO")
+          if [ -z "$DAYS" ]; then
+            if [ "$(date -u +%u)" = "1" ]; then DAYS=7; else DAYS=1; fi
+          fi
+          args+=(--days "$DAYS")
+          if [ "$DAYS" -ge 7 ]; then args+=(--runner-metrics); fi
+          python3 scripts/report/dev_metrics.py "${args[@]}" >> "$GITHUB_STEP_SUMMARY"

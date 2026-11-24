@@ -1,0 +1,99 @@
+# Path -> area:* labels for pull requests (actions/labeler, .github/workflows/label-areas.yml).
+# Only objective area labels from changed paths. Type, risk, status, phase and
+# priority stay manual (docs/ISSUE_PR_WORKFLOW.md). Labels are added, never
+# removed. scripts/ci/test_labeler.py checks that every glob matches a tracked
+# file and every label exists in .github/labels.json.
+
+area:solver:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-solver/**
+
+area:verify:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-dir/**
+
+area:midend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-pcode/**
+          - crates/fission-pcode-ir/**
+          - crates/fission-midend-*/**
+
+area:sleigh:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-sleigh/**
+          - crates/fission-cspec/**
+          - utils/sleigh-specs/**
+
+area:emulator:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-emulator/**
+
+area:dynamic:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-dynamic/**
+          - crates/fission-ttd/**
+
+area:loader:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-loader/**
+
+area:static:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-static/**
+          - crates/fission-signatures/**
+
+area:analysis-db:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-analysis-db/**
+          - crates/fission-analysis-protocol/**
+          - crates/fission-project/**
+
+area:decompiler:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-decompiler/**
+
+area:cli:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-cli/**
+
+area:plugin:
+  - changed-files:
+      - any-glob-to-any-file:
+          - crates/fission-plugin/**
+          - crates/fission-script/**
+
+area:qa:
+  - changed-files:
+      - any-glob-to-any-file:
+          - scripts/quality/**
+          - scripts/corpus/**
+          - scripts/benchmark/**
+          - scripts/test/**
+          - bench/**
+
+area:ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/workflows/**
+          - .github/actions/**
+          - scripts/ci/**
+          - scripts/check/**
+          - scripts/release/**
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - docs/**
+          - "*.md"
+          - mkdocs.yml

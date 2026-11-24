@@ -1,7 +1,9 @@
 name: Setup sccache
 description: >
-  Install mozilla sccache with GitHub Actions backend and export RUSTC_WRAPPER.
-  Pair with Swatinem/rust-cache for registry/git cache; sccache speeds recompiles.
+  Install mozilla sccache with the GitHub Actions cache backend, prove the
+  cache works by starting its server and compiling through it, and only then
+  export RUSTC_WRAPPER. Any failure builds without the cache (ADR 0016: caches
+  fail open). Pair with Swatinem/rust-cache for registry/git cache.
 
 inputs:
   version:
@@ -10,6 +12,18 @@ inputs:
     description: sccache GitHub release tag (e.g. v0.10.0)
     required: false
     default: "v0.10.0"
+  simulate-outage:
+    description: >
+      "true" points the cache service at an unresolvable host before the probe,
+      to prove the job builds without the cache. Only the fallback self-test
+      in ci.yml sets it.
+    required: false
+    default: "false"
+
+outputs:
+  enabled:
+    description: '"true" when RUSTC_WRAPPER=sccache was exported, "false" when the job builds uncached'
+    value: ${{ steps.probe.outputs.enabled }}
 
 runs:
   using: composite
@@ -23,16 +37,14 @@ runs:
       with:
         version: ${{ inputs.version }}
 
-    - name: Export Rust wrapper env
-      if: steps.install.outcome == 'success'
+    # The server checks its storage when it starts, and a failed check kills
+    # the compile that started it. probe.sh starts the server the build will
+    # use, with the build's environment, and compiles through it; the wrapper
+    # is exported only if that works. See probe.sh for the failure it fixes.
+    - name: Probe sccache storage
+      id: probe
       shell: bash
-      run: |
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        # Avoid noisy stats failures if sccache dies mid-job
-        echo "SCCACHE_ERROR_LOG=${{ runner.temp }}/sccache.log" >> "$GITHUB_ENV"
-        if sccache --version && sccache --show-stats; then
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-        else
-          echo "::warning::sccache is installed but not answering; building without it"
-        fi
+      env:
+        INSTALL_OUTCOME: ${{ steps.install.outcome }}
+        SIMULATE_OUTAGE: ${{ inputs.simulate-outage }}
+      run: bash "$GITHUB_ACTION_PATH/probe.sh"

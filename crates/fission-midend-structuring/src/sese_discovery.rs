@@ -288,18 +288,31 @@ pub fn sese_structure_region(
 
 /// A recursively structured non-contiguous child can absorb part or all of a
 /// sibling region beyond its lexical `child_exit`. A prebuilt sibling body is
-/// indivisible, so discard any later child that overlaps such an owner. Blocks
-/// not owned by the earlier proof remain in the parent CFG and are reconstructed
-/// from their raw nodes; owned blocks are already present in the earlier body.
+/// indivisible, so the two cannot both stay: discard the sibling. Blocks the
+/// owner does not hold remain in the parent CFG and are reconstructed from
+/// their raw nodes; owned blocks are already present in the owner's body.
+///
+/// The sibling is discarded whichever side of the owner it starts on. A loop
+/// laid out rotated owns body blocks *above* its head (the block that reloads
+/// loop-carried values and jumps back), and the SESE tree can hand those to an
+/// earlier, contiguous sibling; keeping that sibling gave the block two owners
+/// and failed the whole parent region at final reconstruction. Between two
+/// non-contiguous owners the earlier one is kept, as before.
 fn prune_children_overlapping_non_contiguous_owner(
     child_map: &mut HashMap<usize, (Vec<PreHirStmt>, usize, RegionProof)>,
 ) {
     let mut starts: Vec<_> = child_map.keys().copied().collect();
     starts.sort_unstable();
+    let is_non_contiguous = |start: usize, child_exit: usize, proof: &RegionProof| {
+        proof
+            .members
+            .iter()
+            .any(|member| *member < start || *member >= child_exit)
+    };
     let mut non_contiguous_owners: Vec<HashSet<usize>> = Vec::new();
-    let mut remove = Vec::new();
+    let mut remove: HashSet<usize> = HashSet::default();
 
-    for start in starts {
+    for &start in &starts {
         let Some((_, child_exit, proof)) = child_map.get(&start) else {
             continue;
         };
@@ -307,16 +320,30 @@ fn prune_children_overlapping_non_contiguous_owner(
             .iter()
             .any(|owner| proof.members.iter().any(|member| owner.contains(member)))
         {
-            remove.push(start);
+            remove.insert(start);
             continue;
         }
-        if proof
-            .members
-            .iter()
-            .any(|member| *member < start || *member >= *child_exit)
-        {
-            non_contiguous_owners.push(proof.members.iter().copied().collect());
+        if !is_non_contiguous(start, *child_exit, proof) {
+            continue;
         }
+        let owner: HashSet<usize> = proof.members.iter().copied().collect();
+        for &earlier in starts.iter().take_while(|earlier| **earlier < start) {
+            if remove.contains(&earlier) {
+                continue;
+            }
+            let Some((_, earlier_exit, earlier_proof)) = child_map.get(&earlier) else {
+                continue;
+            };
+            if !is_non_contiguous(earlier, *earlier_exit, earlier_proof)
+                && earlier_proof
+                    .members
+                    .iter()
+                    .any(|member| owner.contains(member))
+            {
+                remove.insert(earlier);
+            }
+        }
+        non_contiguous_owners.push(owner);
     }
     for start in remove {
         child_map.remove(&start);
@@ -433,5 +460,62 @@ mod tests {
         assert!(child_map.contains_key(&0));
         assert!(!child_map.contains_key(&2));
         assert!(!child_map.contains_key(&4));
+    }
+
+    #[test]
+    fn prunes_earlier_contiguous_child_overlapping_rotated_owner() {
+        // A rotated loop starting at 3 owns body block 2, laid out above its
+        // head; the earlier contiguous sibling [1, 3) covers that block too.
+        let mut child_map = HashMap::default();
+        child_map.insert(
+            1,
+            (
+                Vec::new(),
+                3,
+                RegionProof::structured(RegionKind::Sequence, 1, 3, None),
+            ),
+        );
+        let mut rotated_loop = RegionProof::structured(RegionKind::Loop, 3, 8, None);
+        rotated_loop.members.push(2);
+        rotated_loop.members.sort_unstable();
+        child_map.insert(3, (Vec::new(), 8, rotated_loop));
+        // Positive control: a contiguous sibling that shares no block stays.
+        child_map.insert(
+            8,
+            (
+                Vec::new(),
+                10,
+                RegionProof::structured(RegionKind::Sequence, 8, 10, None),
+            ),
+        );
+
+        prune_children_overlapping_non_contiguous_owner(&mut child_map);
+
+        assert!(
+            !child_map.contains_key(&1),
+            "earlier sibling shares block 2"
+        );
+        assert!(child_map.contains_key(&3), "the loop keeps its body");
+        assert!(
+            child_map.contains_key(&8),
+            "a disjoint sibling is untouched"
+        );
+    }
+
+    #[test]
+    fn keeps_earlier_non_contiguous_owner_over_later_one() {
+        let mut first = RegionProof::structured(RegionKind::Sequence, 0, 3, None);
+        first.members.push(6);
+        let mut second = RegionProof::structured(RegionKind::Loop, 5, 8, None);
+        second.members.push(4);
+        second.members.sort_unstable();
+        let mut child_map = HashMap::default();
+        child_map.insert(0, (Vec::new(), 3, first));
+        child_map.insert(5, (Vec::new(), 8, second));
+
+        prune_children_overlapping_non_contiguous_owner(&mut child_map);
+
+        assert!(child_map.contains_key(&0));
+        assert!(!child_map.contains_key(&5));
     }
 }

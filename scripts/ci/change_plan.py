@@ -49,6 +49,11 @@ SWEEP = (
     "scripts/quality/decbench-ci-requirements.txt",
 )
 
+# The sccache fallback self-test: an unreachable cache service must leave the
+# build uncached and green (ADR 0016, rule 1). It runs when the setup it tests,
+# or the job that tests it, changes.
+SCCACHE_FALLBACK = (".github/actions/setup-sccache/", ".github/workflows/ci.yml")
+
 
 DOC_CHECKS = (
     "docs/", "scripts/ci/check_docs.py", "scripts/ci/check_contract_schemas.py",
@@ -91,7 +96,8 @@ def event_paths(event: str, payload: dict, checkout: str) -> list[str]:
         # the event's base, including when that base is another PR.
         git("merge-base", "--is-ancestor", head, checkout)
         if not is_ancestor(base, checkout):
-            # Retargeting a PR fires `edited` before GitHub recomputes the
+            # (Fast Gate no longer listens to `edited`; this still holds for a
+            # push that lands right after a retarget.) Retargeting fires `edited` before GitHub recomputes the
             # merge ref, so the checkout can still be the merge with the old
             # base. The changed paths below come from base and head alone, so
             # the plan is still right; the merge queue tests the new base.
@@ -178,13 +184,29 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
         "run_decomp_corpus": lanes or before_merge and (full or any(path.startswith(DECOMPILER) for path in paths)),
         "run_package_check": before_merge and any(path.startswith(RELEASE) for path in paths),
         "run_sweep_smoke": before_merge and any(path.startswith(SWEEP) for path in paths),
+        "run_sccache_fallback": event == "workflow_dispatch" or any(
+            path.startswith(SCCACHE_FALLBACK) for path in paths
+        ),
     }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--paths", required=True, type=Path)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--paths", type=Path, help="CI: write the event's changed paths here")
+    group.add_argument(
+        "--classify", type=Path,
+        help="Local (cargo xtask preflight): plan for the changed paths listed in this file",
+    )
+    parser.add_argument("--event", default="pull_request", help="event to plan for with --classify")
     args = parser.parse_args()
+    if args.classify is not None:
+        paths = [line for line in args.classify.read_text().splitlines() if line]
+        lane, jobs = plan(paths or ["Cargo.toml"], args.event)
+        print(f"lane={lane}")
+        for name, enabled in jobs.items():
+            print(f"{name}={str(enabled).lower()}")
+        return
     event = os.environ["GITHUB_EVENT_NAME"]
     payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     paths = event_paths(event, payload, os.environ["GITHUB_SHA"])
