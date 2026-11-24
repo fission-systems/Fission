@@ -1,0 +1,207 @@
+[
+  {
+    "name": "priority:P0",
+    "color": "b60205",
+    "description": "Potential critical correctness, integrity or release risk; triage required"
+  },
+  {
+    "name": "priority:P1",
+    "color": "b60205",
+    "description": "High-priority correctness or reliability improvement"
+  },
+  {
+    "name": "priority:P2",
+    "color": "b60205",
+    "description": "Normal improvement or research"
+  },
+  {
+    "name": "priority:P3",
+    "color": "b60205",
+    "description": "Deferred or low-priority work"
+  },
+  {
+    "name": "area:solver",
+    "color": "1d76db",
+    "description": "Native SAT/SMT and symbolic reasoning"
+  },
+  {
+    "name": "area:verify",
+    "color": "1d76db",
+    "description": "DIR and verification"
+  },
+  {
+    "name": "area:midend",
+    "color": "1d76db",
+    "description": "IR, SSA, normalization, structuring and rendering"
+  },
+  {
+    "name": "area:sleigh",
+    "color": "1d76db",
+    "description": "ISA lifting, SLEIGH and cspec"
+  },
+  {
+    "name": "area:emulator",
+    "color": "1d76db",
+    "description": "Guest execution and JIT"
+  },
+  {
+    "name": "area:dynamic",
+    "color": "1d76db",
+    "description": "Debugger, TTD and forensic acquisition"
+  },
+  {
+    "name": "area:loader",
+    "color": "1d76db",
+    "description": "Binary formats, symbols and relocations"
+  },
+  {
+    "name": "area:static",
+    "color": "1d76db",
+    "description": "Static analysis and fact extraction"
+  },
+  {
+    "name": "area:analysis-db",
+    "color": "1d76db",
+    "description": "Canonical snapshots and project storage"
+  },
+  {
+    "name": "area:decompiler",
+    "color": "1d76db",
+    "description": "Decompiler orchestration and worker lifecycle"
+  },
+  {
+    "name": "area:cli",
+    "color": "1d76db",
+    "description": "CLI and machine-readable contract"
+  },
+  {
+    "name": "area:plugin",
+    "color": "1d76db",
+    "description": "Plugin SDK, scripting and agent integration"
+  },
+  {
+    "name": "area:qa",
+    "color": "1d76db",
+    "description": "Tests, corpus and benchmarks"
+  },
+  {
+    "name": "area:ci",
+    "color": "1d76db",
+    "description": "Build, CI and release"
+  },
+  {
+    "name": "area:docs",
+    "color": "1d76db",
+    "description": "Documentation and project governance"
+  },
+  {
+    "name": "phase:1-correctness",
+    "color": "5319e7",
+    "description": "Soundness and correctness"
+  },
+  {
+    "name": "phase:2-reliability",
+    "color": "5319e7",
+    "description": "Reliability and isolation"
+  },
+  {
+    "name": "phase:3-performance",
+    "color": "5319e7",
+    "description": "Measured performance engineering"
+  },
+  {
+    "name": "phase:4-research",
+    "color": "5319e7",
+    "description": "Isolated advanced research"
+  },
+  {
+    "name": "phase:5-agent-platform",
+    "color": "5319e7",
+    "description": "Agent-first platform"
+  },
+  {
+    "name": "type:refactor",
+    "color": "c5def5",
+    "description": "Mechanical refactoring without intended semantic change"
+  },
+  {
+    "name": "type:performance",
+    "color": "c5def5",
+    "description": "Measured optimization"
+  },
+  {
+    "name": "type:test",
+    "color": "c5def5",
+    "description": "Test and validation infrastructure"
+  },
+  {
+    "name": "type:research",
+    "color": "c5def5",
+    "description": "Experimental research"
+  },
+  {
+    "name": "type:maintenance",
+    "color": "c5def5",
+    "description": "Maintenance and governance"
+  },
+  {
+    "name": "status:needs-repro",
+    "color": "fbca04",
+    "description": "Reported defect candidate not yet reproduced"
+  },
+  {
+    "name": "status:confirmed",
+    "color": "fbca04",
+    "description": "Reproduced or independently established with recorded evidence"
+  },
+  {
+    "name": "status:blocked",
+    "color": "fbca04",
+    "description": "Explicit prerequisite or blocker"
+  },
+  {
+    "name": "status:ready",
+    "color": "fbca04",
+    "description": "Triaged with actionable scope and acceptance criteria"
+  },
+  {
+    "name": "risk:semantic",
+    "color": "d93f0b",
+    "description": "May change semantic results or verification claims"
+  },
+  {
+    "name": "risk:data-loss",
+    "color": "d93f0b",
+    "description": "May affect persistence or evidence integrity"
+  },
+  {
+    "name": "risk:concurrency",
+    "color": "d93f0b",
+    "description": "May affect liveness or concurrent state"
+  },
+  {
+    "name": "risk:breaking",
+    "color": "d93f0b",
+    "description": "Potentially incompatible public contract change"
+  },
+  {
+    "name": "release:blocker",
+    "color": "006b75",
+    "description": "Maintainer-confirmed blocker for a promised release capability"
+  },
+  {
+    "name": "bug",
+    "color": "d73a4a",
+    "description": "Something isn't working"
+  },
+  {
+    "name": "enhancement",
+    "color": "a2eeef",
+    "description": "New feature or request"
+  },
+  {
+    "name": "documentation",
+    "color": "0075ca",
+    "description": "Improvements or additions to documentation"
+  }
+]
