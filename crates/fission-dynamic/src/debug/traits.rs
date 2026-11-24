@@ -125,17 +125,34 @@ pub trait ExecutionBackend: Send {
     /// Remove a software breakpoint at the given address
     fn remove_sw_breakpoint(&mut self, address: u64) -> FissionResult<()>;
 
-    /// Read memory from the target process
+    /// Read memory from the target process as an exact, unpadded slice.
+    ///
+    /// Fails if any requested byte cannot be read; never pads unread tail bytes
+    /// with zeros.
     fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>>;
 
     /// Read memory from the target process up to `size` bytes.
     ///
     /// If an unmapped or unreadable boundary is encountered before `size` bytes,
-    /// returns the contiguous bytes available up to that boundary. Returns an error
-    /// only if zero bytes could be read.
+    /// returns the contiguous prefix bytes available up to that boundary without
+    /// zero padding. Returns an error only if zero bytes could be read.
     fn read_memory_partial(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        if size == 0 {
+            return Ok(Vec::new());
+        }
         match self.read_memory(address, size) {
-            Ok(bytes) => Ok(bytes),
+            Ok(bytes) => {
+                if bytes.len() != size {
+                    return Err(fission_core::err!(
+                        debug,
+                        "short memory read at 0x{:x}: expected {}, got {}",
+                        address,
+                        size,
+                        bytes.len()
+                    ));
+                }
+                Ok(bytes)
+            }
             Err(e) => {
                 let page_size = 4096usize;
                 let page_offset = (address as usize) % page_size;
@@ -147,6 +164,156 @@ pub trait ExecutionBackend: Send {
                 }
             }
         }
+    }
+
+    /// Perform a bounded sparse acquisition over `[address, address + size)`.
+    ///
+    /// Preserves genuinely observed `0x00` bytes inside
+    /// [`crate::debug::memory::ObservedMemoryRun`] while recording unreadable
+    /// intervals as explicit [`crate::debug::memory::MemoryGap`] segments rather
+    /// than padding unread bytes with zeros.
+    fn read_memory_sparse(
+        &self,
+        address: u64,
+        size: usize,
+        options: super::memory::SparseReadOptions,
+    ) -> FissionResult<super::memory::SparseMemoryCapture> {
+        use super::memory::{
+            MemoryGap, MemoryGapReason, MemorySegment, ObservedMemoryRun, SparseMemoryCapture,
+        };
+
+        let size_u64 = u64::try_from(size)
+            .map_err(|_| fission_core::err!(debug, "sparse read size out of range"))?;
+        let end = address.checked_add(size_u64).ok_or_else(|| {
+            fission_core::err!(
+                debug,
+                "sparse read range overflows address space at 0x{address:x}"
+            )
+        })?;
+        if options.page_size == 0 {
+            return Err(fission_core::err!(
+                debug,
+                "sparse read page_size must be non-zero"
+            ));
+        }
+        if size == 0 {
+            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new()));
+        }
+
+        let page_size_u64 = options.page_size as u64;
+        let mut cursor = address;
+        let mut observed_total = 0usize;
+        let mut probed_span = 0usize;
+        let mut segments = Vec::new();
+
+        while cursor < end {
+            if observed_total >= options.max_bytes || probed_span >= options.max_span_bytes {
+                segments.push(MemorySegment::Gap(MemoryGap {
+                    start: cursor,
+                    len: end - cursor,
+                    reason: MemoryGapReason::Budget,
+                }));
+                break;
+            }
+            let offset_in_page = (cursor % page_size_u64) as usize;
+            let to_page_end = options.page_size - offset_in_page;
+            let remaining_req = usize::try_from(end - cursor).unwrap_or(usize::MAX);
+            let remaining_obs_budget = options.max_bytes.saturating_sub(observed_total);
+            let remaining_span_budget = options.max_span_bytes.saturating_sub(probed_span);
+            let chunk_len = to_page_end
+                .min(remaining_req)
+                .min(remaining_obs_budget)
+                .min(remaining_span_budget);
+            if chunk_len == 0 {
+                segments.push(MemorySegment::Gap(MemoryGap {
+                    start: cursor,
+                    len: end - cursor,
+                    reason: MemoryGapReason::Budget,
+                }));
+                break;
+            }
+
+            match self.read_memory(cursor, chunk_len) {
+                Ok(bytes) => {
+                    if bytes.len() > chunk_len {
+                        return Err(fission_core::err!(
+                            debug,
+                            "backend returned oversized transfer at 0x{cursor:x}: requested {chunk_len}, got {}",
+                            bytes.len()
+                        ));
+                    }
+                    let got = bytes.len();
+                    observed_total = observed_total.saturating_add(got);
+                    if got > 0 {
+                        segments.push(MemorySegment::Observed(ObservedMemoryRun {
+                            start: cursor,
+                            bytes,
+                        }));
+                    }
+                    if got < chunk_len {
+                        segments.push(MemorySegment::Gap(MemoryGap {
+                            start: cursor.saturating_add(got as u64),
+                            len: (chunk_len - got) as u64,
+                            reason: MemoryGapReason::Partial,
+                        }));
+                    }
+                }
+                Err(err) => {
+                    if let Ok(prefix) = self.read_memory_partial(cursor, chunk_len) {
+                        if !prefix.is_empty() && prefix.len() <= chunk_len {
+                            let got = prefix.len();
+                            observed_total = observed_total.saturating_add(got);
+                            segments.push(MemorySegment::Observed(ObservedMemoryRun {
+                                start: cursor,
+                                bytes: prefix,
+                            }));
+                            if got < chunk_len {
+                                segments.push(MemorySegment::Gap(MemoryGap {
+                                    start: cursor.saturating_add(got as u64),
+                                    len: (chunk_len - got) as u64,
+                                    reason: MemoryGapReason::Partial,
+                                }));
+                            }
+                            cursor = cursor.saturating_add(chunk_len as u64);
+                            probed_span = probed_span.saturating_add(chunk_len);
+                            continue;
+                        }
+                    }
+
+                    let msg = err.to_string();
+                    let lower = msg.to_ascii_lowercase();
+                    if lower.contains("exited") || lower.contains("not attached") {
+                        segments.push(MemorySegment::Gap(MemoryGap {
+                            start: cursor,
+                            len: end - cursor,
+                            reason: MemoryGapReason::ProcessExited,
+                        }));
+                        break;
+                    }
+                    let reason = if lower.contains("denied") || lower.contains("permission") {
+                        MemoryGapReason::Denied
+                    } else if lower.contains("unmapped")
+                        || lower.contains("cannot access memory")
+                        || lower.contains("no memory is mapped")
+                    {
+                        MemoryGapReason::Unmapped
+                    } else {
+                        MemoryGapReason::ReadError { detail: msg }
+                    };
+                    segments.push(MemorySegment::Gap(MemoryGap {
+                        start: cursor,
+                        len: chunk_len as u64,
+                        reason,
+                    }));
+                }
+            }
+            cursor = cursor.saturating_add(chunk_len as u64);
+            probed_span = probed_span.saturating_add(chunk_len);
+        }
+
+        Ok(SparseMemoryCapture::from_segments(
+            address, size_u64, segments,
+        ))
     }
 
     /// Write memory to the target process

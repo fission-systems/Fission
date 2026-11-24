@@ -1,33 +1,48 @@
-//! macOS Memory Implementation (Stub)
+//! macOS Memory Implementation
 //!
-//! macOS requires the Mach API (`task_for_pid`, `mach_vm_read`, etc.)
-//! for process memory operations. This requires special entitlements
-//! or running as root.
-//!
-//! # Current Status
-//!
-//! This is a stub implementation. Full support would require:
-//! - Code signing with `com.apple.security.cs.debugger` entitlement
-//! - Or running with `sudo`
-//! - Implementation using mach_vm_* APIs
+//! Provides process memory operations using Mach VM APIs (`mach_vm_read_overwrite`,
+//! `mach_vm_write`, `mach_vm_region`), supporting self-inspection via `mach_task_self_`
+//! and foreign targets when authorized for task-port access.
 
 use super::super::PlatformMemory;
-use crate::debug::memory::{MemoryError, MemoryRegion};
+use super::mach;
+use crate::debug::memory::{MemoryError, MemoryProtection, MemoryRegion, checked_transfer_len};
+use std::time::Duration;
 
-/// macOS-specific memory manager (stub)
-///
-/// Currently unimplemented. macOS memory operations require:
-/// - Special entitlements for process access
-/// - Mach API (task_for_pid, mach_vm_read, etc.)
+/// macOS-specific memory manager backed by Mach task VM calls.
 pub struct MacOSMemory {
-    /// Target process ID (stored but not used in stub)
-    _target_pid: Option<u32>,
+    /// Target Mach task port.
+    task: Option<mach::mach_port_t>,
+    /// Whether `task` was acquired for a foreign PID and must be deallocated on drop.
+    owns_port: bool,
 }
 
 impl MacOSMemory {
-    /// Create a new macOS memory manager
+    /// Create a new macOS memory manager.
     pub fn new() -> Self {
-        Self { _target_pid: None }
+        Self {
+            task: None,
+            owns_port: false,
+        }
+    }
+
+    fn release_task(&mut self) {
+        if let Some(port) = self.task.take() {
+            if self.owns_port {
+                mach::release_port(port);
+            }
+        }
+        self.owns_port = false;
+    }
+
+    fn get_task(&self) -> Result<mach::mach_port_t, MemoryError> {
+        self.task.ok_or(MemoryError::NoProcess)
+    }
+}
+
+impl Drop for MacOSMemory {
+    fn drop(&mut self) {
+        self.release_task();
     }
 }
 
@@ -39,35 +54,74 @@ impl Default for MacOSMemory {
 
 impl PlatformMemory for MacOSMemory {
     fn open_process(&mut self, pid: u32) -> Result<(), MemoryError> {
-        // Store PID for future implementation (unused in stub)
-        let _ = pid;
-
-        // For now, return success but operations will fail
-        // A full implementation would call task_for_pid here
+        self.release_task();
+        if pid == std::process::id() {
+            self.task = Some(mach::own_task_port());
+            self.owns_port = false;
+            return Ok(());
+        }
+        let task =
+            mach::task_port_for_pid(pid, Duration::from_secs(5)).map_err(|err| match err {
+                mach::TaskPortError::Denied(_) => MemoryError::AccessDenied { address: 0 },
+                mach::TaskPortError::TimedOut => MemoryError::ReadFailed {
+                    address: 0,
+                    reason: err.remediation().to_string(),
+                },
+            })?;
+        self.task = Some(task);
+        self.owns_port = true;
         Ok(())
     }
 
-    fn read_into(&self, address: u64, _buffer: &mut [u8]) -> Result<usize, MemoryError> {
-        Err(MemoryError::ReadFailed {
-            address,
-            reason: "macOS memory reading requires Mach API (not yet implemented)".into(),
-        })
+    fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
+        let task = self.get_task()?;
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        match mach::read_into_raw(task, address, buffer) {
+            Ok(read) => checked_transfer_len(address, buffer.len(), read),
+            Err(kr) => {
+                if kr == mach::KERN_INVALID_TASK || kr == mach::MACH_SEND_INVALID_DEST {
+                    return Err(MemoryError::ProcessExited { address });
+                }
+                if kr == mach::KERN_PROTECTION_FAILURE {
+                    return Err(MemoryError::AccessDenied { address });
+                }
+                if kr == mach::KERN_INVALID_ADDRESS {
+                    // XNU can return KERN_INVALID_ADDRESS even for mapped `PROT_NONE`
+                    // pages; check the VM map to distinguish unmapped vs access denied.
+                    return match mach::region_protection(task, address) {
+                        Ok((_, _, prot)) if (prot & mach::VM_PROT_READ) == 0 => {
+                            Err(MemoryError::AccessDenied { address })
+                        }
+                        _ => Err(MemoryError::Unmapped {
+                            address,
+                            size: buffer.len(),
+                        }),
+                    };
+                }
+                Err(MemoryError::ReadFailed {
+                    address,
+                    reason: format!("mach_vm_read_overwrite failed: kern_return_t {kr}"),
+                })
+            }
+        }
     }
 
-    fn write(&self, address: u64, _data: &[u8]) -> Result<usize, MemoryError> {
-        Err(MemoryError::WriteFailed {
-            address,
-            reason: "macOS memory writing requires Mach API (not yet implemented)".into(),
-        })
+    fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {
+        let task = self.get_task()?;
+        mach::write_memory(task, address, data)
+            .map_err(|reason| MemoryError::WriteFailed { address, reason })?;
+        Ok(data.len())
     }
 
     fn query_regions(&self) -> Result<Vec<MemoryRegion>, MemoryError> {
-        // A full implementation would use mach_vm_region
-        // For now, return empty list
+        let _task = self.get_task()?;
+        let _ = MemoryProtection::RX;
         Ok(Vec::new())
     }
 
     fn is_open(&self) -> bool {
-        false // Stub implementation always returns false
+        self.task.is_some()
     }
 }

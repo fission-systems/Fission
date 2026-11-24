@@ -592,6 +592,9 @@ impl ExecutionBackend for EmulatorBackend {
     }
 
     fn read_memory_partial(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        if size == 0 {
+            return Ok(Vec::new());
+        }
         let Some(emu) = &self.emulator else {
             return Err(fission_core::err!(debug, "Emulator not running"));
         };
@@ -608,6 +611,125 @@ impl ExecutionBackend for EmulatorBackend {
         emu.state
             .read_space_readonly(emu.state.ram_space(), address, available)
             .map_err(|e| fission_core::err!(debug, "Memory read failed at 0x{:x}: {}", address, e))
+    }
+
+    fn read_memory_sparse(
+        &self,
+        address: u64,
+        size: usize,
+        options: crate::debug::memory::SparseReadOptions,
+    ) -> FissionResult<crate::debug::memory::SparseMemoryCapture> {
+        use crate::debug::memory::{
+            MemoryGap, MemoryGapReason, MemorySegment, ObservedMemoryRun, SparseMemoryCapture,
+        };
+        use fission_emulator::pcode::page_map::{AccessKind, PageFault};
+
+        let Some(emu) = &self.emulator else {
+            return Err(fission_core::err!(debug, "Emulator not running"));
+        };
+        let size_u64 = u64::try_from(size)
+            .map_err(|_| fission_core::err!(debug, "sparse read size out of range"))?;
+        let end = address.checked_add(size_u64).ok_or_else(|| {
+            fission_core::err!(
+                debug,
+                "sparse read range overflows address space at 0x{address:x}"
+            )
+        })?;
+        if options.page_size == 0 {
+            return Err(fission_core::err!(
+                debug,
+                "sparse read page_size must be non-zero"
+            ));
+        }
+        if size == 0 {
+            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new()));
+        }
+
+        let mut cursor = address;
+        let mut observed_total = 0usize;
+        let mut segments = Vec::new();
+        let ram = emu.state.ram_space();
+
+        while cursor < end {
+            if observed_total >= options.max_bytes {
+                segments.push(MemorySegment::Gap(MemoryGap {
+                    start: cursor,
+                    len: end - cursor,
+                    reason: MemoryGapReason::Budget,
+                }));
+                break;
+            }
+            let remaining_req = usize::try_from(end - cursor).unwrap_or(usize::MAX);
+            let remaining_obs = options.max_bytes.saturating_sub(observed_total);
+
+            match emu.state.page_map.check_range(cursor, 1, AccessKind::Read) {
+                Ok(()) => {
+                    let max_chunk = remaining_req.min(remaining_obs);
+                    let readable = emu.state.page_map.readable_extent(cursor, max_chunk);
+                    if readable == 0 {
+                        segments.push(MemorySegment::Gap(MemoryGap {
+                            start: cursor,
+                            len: 1,
+                            reason: MemoryGapReason::Partial,
+                        }));
+                        cursor = cursor.saturating_add(1);
+                        continue;
+                    }
+                    let bytes = emu
+                        .state
+                        .read_space_readonly(ram, cursor, readable)
+                        .map_err(|e| {
+                            fission_core::err!(debug, "Memory read failed at 0x{cursor:x}: {e}")
+                        })?;
+                    observed_total = observed_total.saturating_add(bytes.len());
+                    cursor = cursor.saturating_add(bytes.len() as u64);
+                    segments.push(MemorySegment::Observed(ObservedMemoryRun {
+                        start: cursor - bytes.len() as u64,
+                        bytes,
+                    }));
+                }
+                Err(PageFault::NotMapped { .. }) => {
+                    let next_mapping = emu
+                        .state
+                        .page_map
+                        .mappings()
+                        .iter()
+                        .find(|m| m.end > cursor && m.start > cursor)
+                        .map(|m| m.start)
+                        .unwrap_or(end);
+                    let gap_end = next_mapping.min(end);
+                    let gap_len = gap_end.saturating_sub(cursor).max(1);
+                    segments.push(MemorySegment::Gap(MemoryGap {
+                        start: cursor,
+                        len: gap_len,
+                        reason: MemoryGapReason::Unmapped,
+                    }));
+                    cursor = cursor.saturating_add(gap_len);
+                }
+                Err(PageFault::Prot { .. }) => {
+                    let mapping_end = emu
+                        .state
+                        .page_map
+                        .mappings()
+                        .iter()
+                        .find(|m| m.contains(cursor))
+                        .map(|m| m.end)
+                        .unwrap_or_else(|| cursor.saturating_add(1));
+                    let gap_end = mapping_end.min(end);
+                    let gap_len = gap_end.saturating_sub(cursor).max(1);
+                    segments.push(MemorySegment::Gap(MemoryGap {
+                        start: cursor,
+                        len: gap_len,
+                        reason: MemoryGapReason::Denied,
+                    }));
+                    cursor = cursor.saturating_add(gap_len);
+                }
+            }
+        }
+
+        Ok(SparseMemoryCapture::from_segments(
+            address, size_u64, segments,
+        ))
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {

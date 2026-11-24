@@ -100,7 +100,18 @@ impl WindowsDebugger {
                 ))
             })?;
 
-            buffer.truncate(bytes_read);
+            if bytes_read > size {
+                return Err(FissionError::debug(format!(
+                    "ReadProcessMemory returned oversized count at 0x{:x}: requested {}, got {}",
+                    address, size, bytes_read
+                )));
+            }
+            if bytes_read != size {
+                return Err(FissionError::debug(format!(
+                    "Short ReadProcessMemory at 0x{:x}: expected {}, got {}",
+                    address, size, bytes_read
+                )));
+            }
             Ok(buffer)
         }
     }

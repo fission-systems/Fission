@@ -13,6 +13,10 @@ pub type mach_port_t = u32;
 pub type kern_return_t = i32;
 
 pub const KERN_SUCCESS: kern_return_t = 0;
+pub(crate) const KERN_INVALID_ADDRESS: kern_return_t = 1;
+pub(crate) const KERN_PROTECTION_FAILURE: kern_return_t = 2;
+pub(crate) const KERN_INVALID_TASK: kern_return_t = 16;
+pub(crate) const MACH_SEND_INVALID_DEST: kern_return_t = 0x1000_0003u32 as i32;
 
 pub const VM_PROT_READ: i32 = 0x1;
 pub const VM_PROT_WRITE: i32 = 0x2;
@@ -165,6 +169,12 @@ pub fn task_port_for_pid(pid: u32, timeout: Duration) -> Result<mach_port_t, Tas
     }
 }
 
+/// Borrow this process's Mach task port (never deallocate via `release_port`).
+pub(crate) fn own_task_port() -> mach_port_t {
+    // SAFETY: `mach_task_self_` is a read-only process-wide task port constant.
+    unsafe { mach_task_self_ }
+}
+
 /// Release a send right obtained from this module.
 pub fn release_port(port: mach_port_t) {
     // SAFETY: deallocating a right this process holds; failure is not actionable.
@@ -237,6 +247,30 @@ pub fn suspend_thread(thread: mach_port_t) -> Result<(), String> {
 pub fn resume_thread(thread: mach_port_t) -> Result<(), String> {
     // SAFETY: plain value argument; the kernel validates the port.
     check("thread_resume", unsafe { thread_resume(thread) })
+}
+
+/// Read into `buffer` via `mach_vm_read_overwrite`, returning the transferred byte count.
+pub(crate) fn read_into_raw(
+    task: mach_port_t,
+    address: u64,
+    buffer: &mut [u8],
+) -> Result<usize, kern_return_t> {
+    let size = buffer.len() as u64;
+    if address.checked_add(size).is_none() {
+        return Err(KERN_INVALID_ADDRESS);
+    }
+    if buffer.is_empty() {
+        return Ok(0);
+    }
+    let mut read: u64 = 0;
+    // SAFETY: `buffer` is `buffer.len()` writable bytes.
+    let kr = unsafe {
+        mach_vm_read_overwrite(task, address, size, buffer.as_mut_ptr() as u64, &mut read)
+    };
+    if kr != KERN_SUCCESS {
+        return Err(kr);
+    }
+    Ok(read as usize)
 }
 
 /// Read `size` bytes at `address`; fails if any part is unreadable.
