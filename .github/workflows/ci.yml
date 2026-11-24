@@ -51,6 +51,7 @@ jobs:
       run_decomp_corpus: ${{ steps.filter.outputs.run_decomp_corpus }}
       run_package_check: ${{ steps.filter.outputs.run_package_check }}
       run_sweep_smoke: ${{ steps.filter.outputs.run_sweep_smoke }}
+      run_sccache_fallback: ${{ steps.filter.outputs.run_sccache_fallback }}
       test_crates: ${{ steps.impact.outputs.crates }}
       run_interactive_runtime_tests: ${{ steps.impact.outputs.run_interactive_runtime_tests }}
       run_script_emulator_tests: ${{ steps.impact.outputs.run_script_emulator_tests }}
@@ -462,6 +463,76 @@ jobs:
     with:
       only: binaries/O0/base-passwd/update-passwd
 
+  # ADR 0016 rule 1, caches fail open, tested rather than assumed. The cache
+  # service failed three required jobs on 2026-11-23/24 ("Server startup
+  # failed: cache storage failed to read"). The first half points sccache at
+  # a host that cannot resolve and requires an uncached, green build. The
+  # second half uses the real service and requires that the server the probe
+  # started is still the one serving a later step: a new server would repeat
+  # the storage check inside the build, which is the failure being fixed. If
+  # the real service is down, that half is skipped, not red.
+  sccache-fallback:
+    name: sccache outage fallback
+    needs: [changes]
+    if: needs.changes.outputs.run_sccache_fallback == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+
+      - name: Set up sccache against an unreachable cache service
+        id: outage
+        uses: ./.github/actions/setup-sccache
+        with:
+          simulate-outage: "true"
+      - name: The setup fell back and exported no wrapper
+        env:
+          ENABLED: ${{ steps.outage.outputs.enabled }}
+        run: |
+          set -euo pipefail
+          if [ "$ENABLED" != "false" ]; then
+            echo "::error::setup-sccache reported enabled='${ENABLED}' with the cache service unreachable"
+            exit 1
+          fi
+          if [ -n "${RUSTC_WRAPPER:-}" ]; then
+            echo "::error::RUSTC_WRAPPER='${RUSTC_WRAPPER}' with the cache service unreachable"
+            exit 1
+          fi
+          echo "OK: no RUSTC_WRAPPER; the build runs uncached"
+      - name: A build passes without the cache
+        run: cargo build --locked -p fission-pcode-ir
+
+      - name: Set up sccache against the real cache service
+        id: real
+        uses: ./.github/actions/setup-sccache
+      - name: The probed server still serves later steps
+        if: steps.real.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          # The probe compiled one crate. A server started since then (the
+          # probe's having died) would report no compile requests.
+          requests="$(sccache --show-stats | sed -n 's/^Compile requests[[:space:]]*\([0-9]*\)$/\1/p')"
+          if [ "${requests:-0}" -lt 1 ]; then
+            echo "::error::the server setup-sccache started is gone; the build would start another and repeat the storage check"
+            exit 1
+          fi
+          echo "OK: same server, ${requests} compile request(s) so far"
+      - name: A build passes through the cache
+        if: steps.real.outputs.enabled == 'true'
+        run: |
+          set -euo pipefail
+          cargo clean -p fission-pcode-ir
+          cargo build --locked -p fission-pcode-ir
+          sccache --show-stats
+      - name: Cache service unavailable
+        if: steps.real.outputs.enabled != 'true'
+        run: echo "::notice::the real cache service is unavailable; only the outage half ran"
+
   # Report-only, not part of CI Summary: what a Rust change does to decompile
   # cost (instructions executed) and, for decompiler changes, to output.
   base-vs-head:
@@ -494,6 +565,7 @@ jobs:
         decomp-corpus,
         package-check,
         sweep-smoke,
+        sccache-fallback,
       ]
     runs-on: ubuntu-latest
     if: always()
@@ -554,6 +626,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "DecBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_sccache_fallback }}" "sccache outage fallback" "${{ needs.sccache-fallback.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then
             exit 1
