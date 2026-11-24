@@ -6,8 +6,8 @@ use crate::cli::args::QuotientArgs;
 use anyhow::{Context, Result};
 use fission_quotient::report::CertifiedQuotient;
 use fission_quotient::{
-    ContextRegion, InputPort, QuotientBoundary, QuotientBudget, QuotientEngine, QuotientStatus,
-    Wbcq,
+    ContextRegion, InputPort, PointerRegion, QuotientBoundary, QuotientBudget, QuotientEngine,
+    QuotientStatus, Wbcq,
 };
 
 fn boundary(args: &QuotientArgs, entry: u64) -> QuotientBoundary {
@@ -39,6 +39,16 @@ fn boundary(args: &QuotientArgs, entry: u64) -> QuotientBoundary {
             initial,
         },
         output_bits: args.output_bits,
+        regions: args
+            .regions
+            .iter()
+            .map(|region| PointerRegion {
+                parent: None,
+                field: region.field,
+                initial: region.initial.clone(),
+                discovered: false,
+            })
+            .collect(),
     }
 }
 
@@ -148,6 +158,18 @@ fn print_text(report: &CertifiedQuotient) {
             .collect::<Vec<_>>();
         println!("  context: {}", slots.join(", "));
     }
+    for (index, region) in report.boundary.regions.iter().enumerate() {
+        println!(
+            "  region {}: {} bytes{}",
+            report.boundary.region_name(index),
+            region.initial.len(),
+            if region.discovered {
+                ", found dereferenced (starts zeroed)"
+            } else {
+                ""
+            }
+        );
+    }
     for call in &report.calls {
         let class = match call.class {
             fission_quotient::calls::CalleeClass::NoReturn => "does not return",
@@ -177,11 +199,22 @@ fn print_text(report: &CertifiedQuotient) {
         "  {} states, {} transitions",
         metrics.quotient_states, metrics.quotient_transitions
     );
+    // A region's bytes no step changes (a lookup table) are the same in
+    // every state; listing them per state says nothing.
+    let varies = |index: usize| {
+        let first = report.states[0].control_valuation.get(index);
+        report
+            .states
+            .iter()
+            .any(|state| state.control_valuation.get(index) != first)
+    };
     for state in &report.states {
         let valuation = state
             .control_valuation
             .iter()
-            .map(|value| format!("{}=0x{:x}", value.slot, value.value))
+            .enumerate()
+            .filter(|(index, value)| !value.slot.contains("->") || varies(*index))
+            .map(|(_, value)| format!("{}=0x{:x}", value.slot, value.value))
             .collect::<Vec<_>>();
         println!(
             "  state {}: reached by {}{}",

@@ -521,6 +521,10 @@ pub(crate) fn render(expr: &SymExpr, names: &BTreeMap<SymNodeId, String>) -> Str
         SymExpr::Ule(a, b) => infix("<=", a, b),
         SymExpr::Slt(a, b) => infix("<s", a, b),
         SymExpr::Sle(a, b) => infix("<=s", a, b),
+        SymExpr::Ite { .. } if lookup_arms(expr).is_some() => {
+            let (key, arms, otherwise) = lookup_arms(expr).expect("checked");
+            render_lookup(key, &arms, otherwise, names)
+        }
         SymExpr::Ite { cond, t, f } => format!("({} ? {} : {})", r(cond), r(t), r(f)),
         SymExpr::Extract { expr, lsb, size } => {
             if *size == 1 {
@@ -538,6 +542,73 @@ pub(crate) fn render(expr: &SymExpr, names: &BTreeMap<SymNodeId, String>) -> Str
         }
         other => format!("{other:?}"),
     }
+}
+
+/// Arms a chain of `key == c ? v : ...` needs before it reads as a lookup
+/// (an indexed read of a region) rather than as nested conditionals.
+const LOOKUP_ARMS: usize = 4;
+
+/// `(key == c0) ? v0 : (key == c1) ? v1 : ... : otherwise`, one key against
+/// distinct constants: the key, the `(c, v)` arms and the last value.
+type Lookup<'e> = (&'e SymExpr, Vec<(u64, &'e SymExpr)>, &'e SymExpr);
+
+fn lookup_arms(expr: &SymExpr) -> Option<Lookup<'_>> {
+    let mut arms = Vec::new();
+    let mut key: Option<&SymExpr> = None;
+    let mut at = expr;
+    while let SymExpr::Ite { cond, t, f } = at {
+        let SymExpr::Eq(a, b) = cond.as_ref() else {
+            break;
+        };
+        let Some(constant) = as_const(b) else {
+            break;
+        };
+        if key.is_some_and(|key| key != a.as_ref()) {
+            break;
+        }
+        key = Some(a);
+        arms.push((constant, t.as_ref()));
+        at = f;
+    }
+    (arms.len() >= LOOKUP_ARMS).then(|| (key.expect("arms have a key"), arms, at))
+}
+
+/// `lookup(key; 0x2e: 2, 0x30-0x39: 1; else 0)`: the arms whose value is not
+/// the last one, runs of consecutive keys with one value as ranges.
+fn render_lookup(
+    key: &SymExpr,
+    arms: &[(u64, &SymExpr)],
+    otherwise: &SymExpr,
+    names: &BTreeMap<SymNodeId, String>,
+) -> String {
+    let otherwise_text = render(otherwise, names);
+    let mut runs: Vec<(u64, u64, String)> = Vec::new();
+    for (constant, value) in arms {
+        let text = render(value, names);
+        if text == otherwise_text {
+            continue;
+        }
+        match runs.last_mut() {
+            Some((_, end, last)) if *end + 1 == *constant && *last == text => *end = *constant,
+            _ => runs.push((*constant, *constant, text)),
+        }
+    }
+    let shown = runs
+        .iter()
+        .map(|(start, end, text)| {
+            if start == end {
+                format!("{start:#x}: {text}")
+            } else {
+                format!("{start:#x}-{end:#x}: {text}")
+            }
+        })
+        .collect::<Vec<_>>();
+    format!(
+        "lookup({}; {}{}else {otherwise_text})",
+        render(key, names),
+        shown.join(", "),
+        if shown.is_empty() { "" } else { "; " }
+    )
 }
 
 #[cfg(test)]
@@ -638,6 +709,36 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// An indexed read of a table is a chain of `key == c ? v : ...`; it
+    /// renders as the table's non-default entries, runs of keys as ranges.
+    #[test]
+    fn a_chain_over_one_key_renders_as_a_lookup() {
+        let (x, x_id) = var("x", 8);
+        let values = [0u64, 1, 1, 1, 0, 2, 0];
+        let chain = values[..values.len() - 1].iter().enumerate().rev().fold(
+            konst(values[values.len() - 1], 8),
+            |otherwise, (key, value)| {
+                ite(
+                    bin(Bin::Eq, x.clone(), konst(key as u64, 8)),
+                    konst(*value, 8),
+                    otherwise,
+                )
+            },
+        );
+        let names = BTreeMap::from([(x_id, "in".to_string())]);
+        assert_eq!(
+            render(&chain, &names),
+            "lookup(in; 0x1-0x3: 1, 0x5: 2; else 0)"
+        );
+        // Fewer arms stay conditionals.
+        let short = ite(
+            bin(Bin::Eq, x.clone(), konst(1, 8)),
+            konst(1, 8),
+            konst(0, 8),
+        );
+        assert_eq!(render(&short, &names), "((in == 1) ? 1 : 0)");
     }
 
     #[test]

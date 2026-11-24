@@ -26,6 +26,11 @@ not return) together with the calls made, each as (callee, argument). After a
 step that does not return the machine is halted: every later step observes
 only that.
 
+Machines whose context holds pointers (`region_machines.c`, P4 step 2) get a
+buffer per pointer field holding the manifest's named table
+(`region_tables.py`), the same bytes the engine is given; a context is then
+its bytes together with every buffer's.
+
   python3 scripts/quality/wbcq/ground_truth.py ~/fission-benchmark/wbcq-p3/corpus/manifest.json
 """
 
@@ -37,6 +42,8 @@ import itertools
 import json
 from collections import deque
 from pathlib import Path
+
+from region_tables import region_bytes
 
 INPUTS = range(256)
 RETURNS = (0, 1, 0xFFFFFFFF)
@@ -121,6 +128,46 @@ def explore_calls(library, step, size: int, calls: int, limit: int):
     return rows
 
 
+def explore_regions(step, size: int, regions: list[tuple[int, bytes]], limit: int):
+    """`explore` for a step whose context holds pointers (`region_machines.c`,
+    P4 step 2): each pointer field gets a buffer of its own holding the
+    named table, and a context's identity is its bytes together with every
+    buffer's. The pointers themselves never change."""
+    buffers = [ctypes.create_string_buffer(len(initial)) for _, initial in regions]
+    pointer = ctypes.sizeof(ctypes.c_void_p)
+    context = bytearray(size)
+    for (field, _), buffer in zip(regions, buffers):
+        context[field:field + pointer] = ctypes.addressof(buffer).to_bytes(pointer, "little")
+    start = (bytes(context), *(initial for _, initial in regions))
+    index = {start: 0}
+    contexts = [start]
+    rows: list[list[tuple[int, int]]] = []
+    queue = deque([start])
+    ctx = ctypes.create_string_buffer(size)
+    while queue:
+        state = queue.popleft()
+        row = []
+        for value in INPUTS:
+            ctypes.memmove(ctx, state[0], size)
+            for buffer, content in zip(buffers, state[1:]):
+                ctypes.memmove(buffer, content, len(content))
+            result = step(ctx, value)
+            successor = (ctx.raw[:size], *(buffer.raw[:len(content)]
+                                           for buffer, content in zip(buffers, state[1:])))
+            if successor[0] != state[0] and any(
+                    successor[0][f:f + pointer] != state[0][f:f + pointer] for f, _ in regions):
+                raise SystemExit(f"{step}: a step moved a region pointer")
+            if successor not in index:
+                if len(contexts) >= limit:
+                    return None
+                index[successor] = len(contexts)
+                contexts.append(successor)
+                queue.append(successor)
+            row.append((result, index[successor]))
+        rows.append(row)
+    return rows
+
+
 def minimize(rows: list[list[tuple[int, int]]]) -> int:
     """Moore refinement: start from classes of equal results, split by the
     class each input leads to, until stable."""
@@ -148,7 +195,14 @@ def main() -> None:
     calls_library = ctypes.CDLL(manifest["native_calls"]) if "native_calls" in manifest else None
     truth = {}
     for entry in manifest["functions"]:
-        if entry["source"] == "state_machines.c":
+        if entry["source"] == "region_machines.c":
+            step = getattr(library, entry["name"])
+            step.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            step.restype = ctypes.c_uint
+            regions = [(region["field"], region_bytes(region["table"]))
+                       for region in entry["regions"]]
+            rows = explore_regions(step, entry["context_bytes"], regions, args.max_contexts)
+        elif entry["source"] == "state_machines.c":
             step = getattr(library, entry["name"])
             step.argtypes = [ctypes.c_void_p, ctypes.c_uint]
             step.restype = ctypes.c_uint

@@ -213,3 +213,67 @@ fn the_context_can_start_from_given_bytes() {
     assert_eq!(data["states"].as_array().map(Vec::len), Some(1));
     assert_eq!(data["transitions"][0]["output"], "1");
 }
+
+/// A context pointer field declared with `--region` gets that region: the
+/// lexer's class table is read through it, the payload carries the region
+/// and the slots inside it, and both conform to the schema.
+#[test]
+fn a_declared_region_is_reported_with_its_slots() {
+    let mut classes = vec![0u8; 256];
+    classes[b'0' as usize..=b'9' as usize].fill(1);
+    classes[b'.' as usize] = 2;
+    let table = format!(
+        "0={}",
+        classes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
+    let (output, body) = contract(&[
+        FIXTURE,
+        "--name",
+        "table_step",
+        "--context-bytes",
+        "12",
+        "--region",
+        &table,
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{body}");
+    let data = &body["data"];
+    assert_conforms(&payload_schema(), data, "data");
+    assert_eq!(data["status"]["kind"], "proved_under_model");
+    assert_eq!(data["states"].as_array().map(Vec::len), Some(3));
+    assert_eq!(data["boundary"]["regions"][0]["field"], 0);
+    assert_eq!(data["boundary"]["regions"][0]["discovered"], false);
+    let in_region = data["slots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|slot| slot["region"] == 0)
+        .count();
+    assert_eq!(in_region, 256);
+
+    // Undeclared, the field is found and given a zeroed region.
+    let text = cli(&[
+        "quotient",
+        FIXTURE,
+        "--name",
+        "table_step",
+        "--context-bytes",
+        "12",
+    ]);
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        text.contains("region ctx[0x0]: 256 bytes, found dereferenced (starts zeroed)"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_malformed_region_is_a_usage_error() {
+    for region in ["0", "0=abc", "x:8", "0:0"] {
+        let (output, body) = contract(&[FIXTURE, "--addr", "0x201122", "--region", region]);
+        assert_eq!(output.status.code(), Some(2), "{region}: {body}");
+        assert_eq!(body["error"]["code"], "usage_error");
+    }
+}

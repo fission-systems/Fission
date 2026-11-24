@@ -7,8 +7,8 @@ use fission_loader::loader::LoadedBinary;
 use fission_quotient::calls::CalleeClass;
 use fission_quotient::report::{SlotRole, TransitionReport};
 use fission_quotient::{
-    CertifiedQuotient, ContextRegion, Exit, InputPort, QuotientBoundary, QuotientBudget,
-    QuotientEngine, QuotientStatus, Wbcq,
+    CertifiedQuotient, ContextRegion, Exit, InputPort, PointerRegion, QuotientBoundary,
+    QuotientBudget, QuotientEngine, QuotientStatus, Wbcq,
 };
 
 const X86_64: &str = "testdata/quotient_fixture.elf";
@@ -30,6 +30,18 @@ fn address_of(file: &str, name: &str) -> u64 {
 
 /// `int step(struct ctx *ctx, unsigned cmd)` with an 8-byte zeroed context.
 fn quotient_in(file: &str, name: &str, budget: QuotientBudget) -> CertifiedQuotient {
+    quotient_over(file, name, 8, Vec::new(), budget)
+}
+
+/// The same, over a `context`-byte zeroed context with declared pointer
+/// regions.
+fn quotient_over(
+    file: &str,
+    name: &str,
+    context: usize,
+    regions: Vec<PointerRegion>,
+    budget: QuotientBudget,
+) -> CertifiedQuotient {
     let boundary = QuotientBoundary {
         entry: address_of(file, name),
         inputs: vec![InputPort {
@@ -39,9 +51,10 @@ fn quotient_in(file: &str, name: &str, budget: QuotientBudget) -> CertifiedQuoti
         }],
         context: ContextRegion {
             arg_index: 0,
-            initial: vec![0; 8],
+            initial: vec![0; context],
         },
         output_bits: 32,
+        regions,
     };
     let (mut engine, foundation) =
         Wbcq::for_binary(&fixture(file), boundary, 100_000).expect("engine over the fixture");
@@ -397,4 +410,192 @@ fn a_branch_to_an_instruction_without_pcode_falls_through_it() {
     assert_proved(&report);
     assert_eq!(report.states.len(), 2);
     assert_eq!(transition(&report, 0, "(cmd == 7)").to, 1);
+}
+
+/// A context pointer field with a region of its own, `bytes` long.
+fn region(field: u32, initial: Vec<u8>) -> PointerRegion {
+    PointerRegion {
+        parent: None,
+        field,
+        initial,
+        discovered: false,
+    }
+}
+
+fn unsupported_reason(report: &CertifiedQuotient) -> &str {
+    match &report.status {
+        QuotientStatus::UnsupportedSemantics { reason } => reason,
+        other => panic!("expected unsupported, got {other:?}"),
+    }
+}
+
+/// A lexer whose character classes live in a table behind the context: the
+/// table read is an array read in its own region, indexed by the input. With
+/// the table declared the machine is the lexer's three states; the null
+/// check on the table's pointer folds away, because a region is never null.
+#[test]
+fn a_table_behind_a_context_pointer_is_a_region_read_by_index() {
+    let mut classes = vec![0u8; 256];
+    classes[b'0' as usize..=b'9' as usize].fill(1);
+    classes[b'.' as usize] = 2;
+    let report = quotient_over(
+        X86_64,
+        "table_step",
+        12,
+        vec![region(0, classes)],
+        QuotientBudget::default(),
+    );
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 3);
+    assert!(matches!(
+        &report.status,
+        QuotientStatus::ProvedUnderModel { model_id, .. } if model_id.contains("regions")
+    ));
+    assert_eq!(report.boundary.regions.len(), 1);
+    assert!(!report.boundary.regions[0].discovered);
+    // The table is read, never written: every one of its bytes is a slot of
+    // the region, the same in every state.
+    let table = report
+        .slots
+        .iter()
+        .filter(|slot| slot.region == Some(0))
+        .count();
+    assert_eq!(table, 256);
+    assert!(
+        report
+            .transitions
+            .iter()
+            .all(|t| !t.output.contains("0xffffffff"))
+    );
+    assert!(
+        report
+            .assumptions
+            .iter()
+            .any(|a| a.description.contains("aliases nothing else"))
+    );
+    // A token ends on a class-0 byte and returns what it was.
+    let ended = report
+        .transitions
+        .iter()
+        .filter(|t| t.output == "2")
+        .count();
+    assert_eq!(ended, 1);
+}
+
+/// The same lexer with nothing declared: the dereferenced field is found and
+/// given a zeroed region, so every byte is class 0 and the lexer never
+/// leaves its first state. The report says the region was discovered.
+#[test]
+fn a_dereferenced_pointer_field_is_discovered_with_a_zeroed_region() {
+    let report = quotient_over(
+        X86_64,
+        "table_step",
+        12,
+        Vec::new(),
+        QuotientBudget::default(),
+    );
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 1);
+    let [found] = report.boundary.regions.as_slice() else {
+        panic!("one region: {:?}", report.boundary.regions);
+    };
+    assert!(found.discovered);
+    assert_eq!((found.parent, found.field), (None, 0));
+    assert_eq!(found.initial.len(), 256, "grown to the input byte's reach");
+    assert!(
+        report
+            .assumptions
+            .iter()
+            .any(|a| a.description.contains("found dereferenced"))
+    );
+}
+
+/// A ring buffer written through a context pointer at a data index (the
+/// head): a four-step delay line has the last four bits as its state. The
+/// unmasked head could leave the ring, but no state the machine reaches
+/// lets it.
+#[test]
+fn a_ring_buffer_written_at_a_data_index_is_state() {
+    let report = quotient_over(
+        X86_64,
+        "ring_step",
+        12,
+        vec![region(0, vec![0; 4])],
+        QuotientBudget::default(),
+    );
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 16);
+}
+
+/// A pointer read out of a region is a region too, up to the depth budget;
+/// each is named by the path of fields that reaches it.
+#[test]
+fn a_pointer_inside_a_region_is_a_nested_region() {
+    let report = quotient_over(
+        X86_64,
+        "nested_step",
+        8,
+        Vec::new(),
+        QuotientBudget::default(),
+    );
+    assert_proved(&report);
+    let names = (0..report.boundary.regions.len())
+        .map(|index| report.boundary.region_name(index))
+        .collect::<Vec<_>>();
+    assert_eq!(names, ["ctx[0x0]", "ctx[0x0]->[0x8]"]);
+    let shallow = quotient_over(
+        X86_64,
+        "nested_step",
+        8,
+        Vec::new(),
+        QuotientBudget {
+            max_region_depth: 1,
+            ..QuotientBudget::default()
+        },
+    );
+    assert!(unsupported_reason(&shallow).contains("pointers deep"));
+}
+
+/// What the region model cannot vouch for stays unsupported, with the
+/// reason: an index nothing keeps inside the region, a pointer field
+/// overwritten with another region's pointer, and a comparison that asks
+/// whether two regions alias.
+#[test]
+fn what_the_region_model_cannot_vouch_for_is_unsupported() {
+    let escape = quotient_over(
+        X86_64,
+        "escape_step",
+        8,
+        vec![region(0, vec![0; 16])],
+        QuotientBudget::default(),
+    );
+    assert!(
+        unsupported_reason(&escape).contains("leaves its pointer region"),
+        "{:?}",
+        escape.status
+    );
+    let retarget = quotient_over(
+        X86_64,
+        "retarget_step",
+        16,
+        Vec::new(),
+        QuotientBudget::default(),
+    );
+    assert!(
+        unsupported_reason(&retarget).contains("is stored in the context"),
+        "{:?}",
+        retarget.status
+    );
+    let alias = quotient_over(
+        X86_64,
+        "alias_step",
+        16,
+        Vec::new(),
+        QuotientBudget::default(),
+    );
+    assert!(
+        unsupported_reason(&alias).contains("two regions"),
+        "{:?}",
+        alias.status
+    );
 }

@@ -330,3 +330,120 @@ padded_select_step:
         mov     dword ptr [rdi], eax
         ret
         .size   padded_select_step, .-padded_select_step
+
+/*
+ * Pointer regions (RFC #1093, P4 step 2): a context field that holds a
+ * pointer is a region of its own. Each of these steps reads or writes
+ * through one.
+ *
+ * A table-driven number lexer. ctx->classes (offset 0) points to a 256-byte
+ * class table (1 digit, 2 '.', 0 anything else); ctx->state (offset 8) is
+ * 0 between tokens, 1 in an integer, 2 in a fraction. A class-0 byte ends
+ * the token and returns what it was (0 none, 1 integer, 2 fraction). A null
+ * table returns -1: the region's pointer is never null, so that side is
+ * never taken.
+ */
+        .globl  table_step
+        .type   table_step,@function
+table_step:
+        mov     rax, qword ptr [rdi]
+        test    rax, rax
+        je      .Ltable_null
+        movzx   ecx, sil
+        movzx   ecx, byte ptr [rax + rcx]
+        mov     edx, dword ptr [rdi + 8]
+        xor     eax, eax
+        test    ecx, ecx
+        je      .Ltable_end
+        cmp     ecx, 1
+        jne     .Ltable_dot
+        test    edx, edx
+        jne     .Ltable_keep
+        mov     dword ptr [rdi + 8], 1
+.Ltable_keep:
+        ret
+.Ltable_dot:
+        cmp     edx, 1
+        jne     .Ltable_reset
+        mov     dword ptr [rdi + 8], 2
+        ret
+.Ltable_end:
+        mov     eax, edx
+.Ltable_reset:
+        mov     dword ptr [rdi + 8], 0
+        ret
+.Ltable_null:
+        mov     eax, -1
+        ret
+        .size   table_step, .-table_step
+
+/*
+ * A four-cell delay line over a ring buffer: ctx->ring (offset 0) points
+ * to 4 bytes, ctx->head (offset 8) is the next cell. Each step returns the
+ * bit stored four steps ago and stores cmd & 1 in its place. The index is
+ * the head itself, not masked: only the states the machine reaches keep it
+ * inside the ring.
+ */
+        .globl  ring_step
+        .type   ring_step,@function
+ring_step:
+        mov     rax, qword ptr [rdi]
+        mov     ecx, dword ptr [rdi + 8]
+        movzx   edx, byte ptr [rax + rcx]
+        and     esi, 1
+        mov     byte ptr [rax + rcx], sil
+        inc     ecx
+        and     ecx, 3
+        mov     dword ptr [rdi + 8], ecx
+        mov     eax, edx
+        ret
+        .size   ring_step, .-ring_step
+
+/*
+ * Two pointers deep: ctx->outer (offset 0) points to a struct whose field
+ * at 8 points to a byte array; the step returns array[cmd & 3].
+ */
+        .globl  nested_step
+        .type   nested_step,@function
+nested_step:
+        mov     rax, qword ptr [rdi]
+        mov     rax, qword ptr [rax + 8]
+        and     esi, 3
+        movzx   eax, byte ptr [rax + rsi]
+        ret
+        .size   nested_step, .-nested_step
+
+/* Fail closed: an index nothing bounds, ctx->buf[cmd]. */
+        .globl  escape_step
+        .type   escape_step,@function
+escape_step:
+        mov     rax, qword ptr [rdi]
+        mov     ecx, esi
+        movzx   eax, byte ptr [rax + rcx]
+        ret
+        .size   escape_step, .-escape_step
+
+/* Fail closed: one pointer field copied over another (ctx->a = ctx->b). */
+        .globl  retarget_step
+        .type   retarget_step,@function
+retarget_step:
+        mov     rax, qword ptr [rdi + 8]
+        mov     qword ptr [rdi], rax
+        movzx   eax, byte ptr [rax]
+        ret
+        .size   retarget_step, .-retarget_step
+
+/* Fail closed: whether two regions are the same is asked of the machine. */
+        .globl  alias_step
+        .type   alias_step,@function
+alias_step:
+        mov     rax, qword ptr [rdi]
+        mov     rcx, qword ptr [rdi + 8]
+        mov     byte ptr [rax], sil
+        movzx   edx, byte ptr [rcx]
+        xor     r8d, r8d
+        cmp     rax, rcx
+        cmove   r8d, edx
+        mov     eax, r8d
+        ret
+        .size   alias_step, .-alias_step

@@ -166,6 +166,7 @@ pub fn path_exit(exit: PathExit) -> Exit {
     match exit {
         PathExit::Returned => Exit::Returned,
         PathExit::NoReturn => Exit::NoReturn,
+        PathExit::LeftRegion { .. } => Exit::LeftRegion,
     }
 }
 
@@ -314,6 +315,26 @@ pub fn build(
                 return Built::Unsupported(
                     "a guard still reads the context once the control state is fixed".to_string(),
                 );
+            }
+            // A path that leaves a pointer region is outside the model: if
+            // any input takes it from a state the machine reaches, there is
+            // no quotient to build.
+            if let PathExit::LeftRegion { site } = path.exit {
+                match minimal_input(&guard, &summary.inputs, budget) {
+                    Ok(None) => continue,
+                    Ok(Some(symbol)) => {
+                        return Built::Unsupported(format!(
+                            "at {site:#x}: an index leaves its pointer region's bytes (state \
+                             {state}, input {symbol:?})"
+                        ));
+                    }
+                    Err(()) => {
+                        return Built::Unsupported(format!(
+                            "at {site:#x}: the solver could not tell whether an index stays \
+                             inside its pointer region"
+                        ));
+                    }
+                }
             }
             let next = roles
                 .control

@@ -154,6 +154,13 @@ pub struct QuotientArgs {
     #[arg(long, default_value_t = 32)]
     pub output_bits: u32,
 
+    /// A context pointer field with a memory region of its own:
+    /// `FIELD=HEX` (the region's initial bytes) or `FIELD:SIZE` (zeroed);
+    /// repeatable. Fields the step dereferences without one are found and
+    /// given a zeroed region automatically.
+    #[arg(long = "region", value_name = "FIELD=HEX|FIELD:SIZE", value_parser = parse_region)]
+    pub regions: Vec<QuotientRegionArg>,
+
     /// Shortest input words the certificate covers (H); the result check is
     /// deepened from here towards states + --max-states
     #[arg(long, default_value_t = 4)]
@@ -174,6 +181,40 @@ pub struct QuotientArgs {
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,
+}
+
+/// One `--region` of `quotient`: a context pointer field and its region's
+/// initial bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientRegionArg {
+    pub field: u32,
+    pub initial: Vec<u8>,
+}
+
+/// `FIELD=HEX` or `FIELD:SIZE`; FIELD and SIZE are decimal or `0x` hex.
+pub fn parse_region(s: &str) -> Result<QuotientRegionArg, String> {
+    let number = |text: &str| -> Result<u32, String> {
+        let t = text.trim();
+        match t.strip_prefix("0x") {
+            Some(hex) => u32::from_str_radix(hex, 16),
+            None => t.parse::<u32>(),
+        }
+        .map_err(|e| format!("`{s}`: {e}"))
+    };
+    let (field, initial) = if let Some((field, hex)) = s.split_once('=') {
+        (number(field)?, parse_hex_bytes(hex)?.0)
+    } else if let Some((field, size)) = s.split_once(':') {
+        let size = number(size)?;
+        if size == 0 || size > 1 << 16 {
+            return Err(format!("`{s}`: a region holds 1 to 65536 bytes"));
+        }
+        (number(field)?, vec![0; size as usize])
+    } else {
+        return Err(format!(
+            "`{s}`: expected FIELD=HEX or FIELD:SIZE, e.g. 8:256"
+        ));
+    };
+    Ok(QuotientRegionArg { field, initial })
 }
 
 /// One `--input` port of `quotient`.

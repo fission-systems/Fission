@@ -28,7 +28,9 @@ use fission_pcode_ir::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_solver::{SatResult, Solver, SymExpr, SymNodeId};
 use serde::Serialize;
 
-use crate::boundary::{AbiModel, QuotientBoundary, QuotientBudget, ReturnAddress};
+use crate::boundary::{
+    AbiModel, MemoryLayout, PointerRegion, QuotientBoundary, QuotientBudget, ReturnAddress,
+};
 use crate::calls::{CallFact, CallFacts, CallModel, CallSiteModel, MAX_CALLS_PER_STEP};
 use crate::expr::{
     Bin, and_all, as_const, bin, concat, extract, free_vars, ite, konst, mask, not, resize, sext,
@@ -43,15 +45,38 @@ pub enum SummaryError {
     Unsupported { address: u64, reason: String },
     #[error("budget: {0}")]
     Budget(String),
+    /// Internal: the slice dereferences a pointer field that has no region
+    /// yet, or reads a discovered region past its end. [`summarize`] applies
+    /// the change and runs again; it never leaves this module.
+    #[error("the pointer regions change: {0:?}")]
+    Regions(RegionChange),
 }
 
-/// A contiguous piece of the context the slice reads or writes as a unit.
+/// A change to the boundary's pointer regions the summary asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegionChange {
+    /// The pointer at `field` of `parent` (the context when `None`) is
+    /// dereferenced: give it a region.
+    Discover { parent: Option<usize>, field: u32 },
+    /// A discovered region must hold at least `bytes`.
+    Grow { region: usize, bytes: u32 },
+}
+
+/// A contiguous piece of memory -- the context or a pointer region -- the
+/// slice reads or writes as a unit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Slot {
+    /// Where the piece starts in the byte space of [`QuotientBoundary::layout`]
+    /// (the context first, then each region).
     pub offset: u32,
     pub size: u32,
     /// The slot's value at the start of a step.
     pub var: SymExpr,
+    /// The pointer region it lies in; `None` for the context.
+    pub region: Option<usize>,
+    /// Its name in reports: `ctx[0x4:4]`, or `ctx[0x8]->[0x10:1]` in a
+    /// region.
+    pub label: String,
 }
 
 impl Slot {
@@ -62,7 +87,7 @@ impl Slot {
 
     #[must_use]
     pub fn name(&self) -> String {
-        format!("ctx[{:#x}:{}]", self.offset, self.size)
+        self.label.clone()
     }
 }
 
@@ -72,6 +97,12 @@ pub enum PathExit {
     Returned,
     /// At a call proven not to return; no later step runs.
     NoReturn,
+    /// An access at `site` would leave its region's bytes. Not behaviour of
+    /// the machine -- the model has nothing to say about it -- so a quotient
+    /// in which this path can run is unsupported.
+    LeftRegion {
+        site: u64,
+    },
 }
 
 /// One call a path makes, as observed: its target and the argument
@@ -129,6 +160,9 @@ pub struct SliceSummary {
     /// Feasibility questions the solver could not decide; both sides were
     /// kept, which over-approximates the path set but never loses one.
     pub solver_unknowns: u32,
+    /// The pointer regions the summary was computed over: the boundary's
+    /// declared ones, then those it discovered.
+    pub regions: Vec<PointerRegion>,
 }
 
 impl SliceSummary {
@@ -158,7 +192,45 @@ pub(crate) fn var_id(var: &SymExpr) -> SymNodeId {
 
 /// Summarize one step of `function` over `boundary`; `calls` says what is
 /// known about each call it makes.
+///
+/// A pointer field the slice dereferences gets a region of its own (zeroed,
+/// `budget.region_bytes` long, grown to cover the constant offsets read),
+/// and the summary is computed again over it, until no new field turns up.
+/// The regions used are in the result.
 pub fn summarize(
+    function: &PcodeFunction,
+    abi: &AbiModel,
+    boundary: &QuotientBoundary,
+    budget: &QuotientBudget,
+    calls: &CallFacts,
+) -> Result<SliceSummary, SummaryError> {
+    let mut boundary = boundary.clone();
+    // Each change adds a region (bounded by the budget) or grows one
+    // (bounded by its size cap), so this ends; the cap is a backstop.
+    for _ in 0..64 {
+        match summarize_over(function, abi, &boundary, budget, calls) {
+            Err(SummaryError::Regions(change)) => match change {
+                RegionChange::Discover { parent, field } => {
+                    boundary.regions.push(PointerRegion {
+                        parent,
+                        field,
+                        initial: vec![0; budget.region_bytes as usize],
+                        discovered: true,
+                    });
+                }
+                RegionChange::Grow { region, bytes } => {
+                    boundary.regions[region].initial.resize(bytes as usize, 0);
+                }
+            },
+            other => return other,
+        }
+    }
+    Err(SummaryError::Budget(
+        "the pointer regions did not settle".to_string(),
+    ))
+}
+
+fn summarize_over(
     function: &PcodeFunction,
     abi: &AbiModel,
     boundary: &QuotientBoundary,
@@ -179,26 +251,28 @@ pub fn summarize(
         .collect::<Vec<_>>();
     let with_returns = inputs.iter().chain(&returns).cloned().collect::<Vec<_>>();
 
-    // First pass: byte-granular context, to learn which pieces the slice
+    // First pass: byte-granular memory, to learn which pieces the slice
     // reads and writes as units. Second pass: one variable per piece, so
     // summaries name `ctx[0x4:4]` rather than four bytes.
-    let size = boundary.context.initial.len() as u32;
+    let layout = boundary.layout();
+    let size = layout.len as u32;
+    // A region's pointer is where state lives, not state: its bytes are
+    // never a slot.
+    let pointer = abi.pointer_bits / 8;
     let bytes = (0..size)
-        .map(|offset| Slot {
-            offset,
-            size: 1,
-            var: SymExpr::new_var(&format!("ctx_byte_{offset:x}"), 8),
+        .filter(|offset| {
+            !layout
+                .fields
+                .iter()
+                .any(|field| (*field..*field + pointer).contains(offset))
         })
+        .map(|offset| slot_at(boundary, &layout, offset, 1, "byte_"))
         .collect::<Vec<_>>();
     let probe = Executor::new(function, abi, boundary, budget, &with_returns, bytes, calls)
         .run(declared_inputs)?;
     let slots = merge_ranges(&probe.context_accesses)
         .into_iter()
-        .map(|(offset, size)| Slot {
-            offset,
-            size,
-            var: SymExpr::new_var(&format!("ctx_{offset:x}"), size * 8),
-        })
+        .map(|(offset, size)| slot_at(boundary, &layout, offset, size, ""))
         .collect::<Vec<_>>();
     let run = Executor::new(
         function,
@@ -215,7 +289,7 @@ pub fn summarize(
         .map(var_id)
         .chain(slots.iter().map(Slot::id))
         .collect::<BTreeSet<_>>();
-    let (paths, model) = observe_calls(abi, run.paths, &allowed)?;
+    let (paths, model) = observe_calls(abi, boundary, run.paths, &allowed)?;
     let used = paths.iter().map(|path| path.calls.len()).max().unwrap_or(0);
     inputs.extend(returns.into_iter().take(used));
     Ok(SliceSummary {
@@ -226,7 +300,46 @@ pub fn summarize(
         paths,
         pruned: run.pruned.into_iter().collect(),
         solver_unknowns: run.solver_unknowns,
+        regions: boundary.regions.clone(),
     })
+}
+
+/// The slot `[offset, +size)` of the byte space, named after the region it
+/// lies in.
+fn slot_at(
+    boundary: &QuotientBoundary,
+    layout: &MemoryLayout,
+    offset: u32,
+    size: u32,
+    prefix: &str,
+) -> Slot {
+    let region = layout
+        .bases
+        .iter()
+        .zip(&boundary.regions)
+        .rposition(|(base, region)| {
+            *base <= offset && offset < *base + region.initial.len() as u32
+        });
+    let (label, var) = match region {
+        None => (
+            format!("ctx[{offset:#x}:{size}]"),
+            format!("ctx_{prefix}{offset:x}"),
+        ),
+        Some(index) => {
+            let within = offset - layout.bases[index];
+            (
+                format!("{}->[{within:#x}:{size}]", boundary.region_name(index)),
+                format!("r{index}_{prefix}{within:x}"),
+            )
+        }
+    };
+    Slot {
+        offset,
+        size,
+        var: SymExpr::new_var(&var, size * 8),
+        region,
+        label,
+    }
 }
 
 /// A path as the executor leaves it: calls with their raw argument values,
@@ -273,6 +386,7 @@ fn defined_bits(value: &SymExpr, allowed: &BTreeSet<SymNodeId>) -> u32 {
 /// register -- stops the summary: the callee may write through it.
 fn observe_calls(
     abi: &AbiModel,
+    boundary: &QuotientBoundary,
     raw: Vec<RawPath>,
     allowed: &BTreeSet<SymNodeId>,
 ) -> Result<(Vec<PathSummary>, CallModel), SummaryError> {
@@ -315,10 +429,7 @@ fn observe_calls(
             address: *site,
             reason,
         };
-        let region = |region: Region| match region {
-            Region::Stack => "the stack frame",
-            Region::Context => "the context",
-        };
+        let region = |region: Region| region.describe(boundary);
         let arity = call
             .fact
             .prototype
@@ -466,6 +577,32 @@ fn validate_boundary(abi: &AbiModel, boundary: &QuotientBoundary) -> Result<(), 
     if boundary.context.initial.is_empty() {
         return Err(unsupported("the context region is empty".to_string()));
     }
+    let pointer = abi.pointer_bits / 8;
+    let mut fields: Vec<(Option<usize>, u32)> = Vec::new();
+    for (index, region) in boundary.regions.iter().enumerate() {
+        let parent_len = match region.parent {
+            None => boundary.context.initial.len(),
+            Some(parent) if parent < index => boundary.regions[parent].initial.len(),
+            Some(_) => {
+                return Err(unsupported(format!(
+                    "region {index} is listed before the region holding its pointer"
+                )));
+            }
+        };
+        if region.initial.is_empty() || region.field as usize + pointer as usize > parent_len {
+            return Err(unsupported(format!(
+                "region {index}: its pointer does not fit its parent, or it has no bytes"
+            )));
+        }
+        if fields.iter().any(|(parent, field)| {
+            *parent == region.parent && field.abs_diff(region.field) < pointer
+        }) {
+            return Err(unsupported(format!(
+                "region {index}: its pointer overlaps another region's"
+            )));
+        }
+        fields.push((region.parent, region.field));
+    }
     Ok(())
 }
 
@@ -505,17 +642,32 @@ fn merge_ranges(accesses: &BTreeSet<(u32, u32)>) -> Vec<(u32, u32)> {
 enum Region {
     Stack,
     Context,
+    /// The region behind pointer field `n` of the boundary.
+    Pointee(usize),
+}
+
+impl Region {
+    fn describe(self, boundary: &QuotientBoundary) -> String {
+        match self {
+            Region::Stack => "the stack frame".to_string(),
+            Region::Context => "the context".to_string(),
+            Region::Pointee(index) => format!("the region {}", boundary.region_name(index)),
+        }
+    }
 }
 
 /// A value in the separated memory model.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Val {
     Bits(SymExpr),
-    /// An address `region + offset`, `bits` wide. Its absolute value is
-    /// never known; only offsets within one region are compared.
+    /// An address `region + offset (+ index)`, `bits` wide. Its absolute
+    /// value is never known; only offsets within one region are compared.
+    /// `index` is a part of the offset the slice computed from data
+    /// (`buf[i]`); a stack address never has one.
     Ptr {
         region: Region,
         offset: i64,
+        index: Option<SymExpr>,
         bits: u32,
     },
     /// A value the model cannot give meaning to (a pointer's flags, a read
@@ -681,6 +833,11 @@ struct Executor<'a> {
     live_ins: BTreeMap<u64, SymExpr>,
     return_address: SymExpr,
     allowed: BTreeSet<SymNodeId>,
+    /// Where the context and each region sit in the byte space.
+    layout: MemoryLayout,
+    /// Each slot variable's `(offset, size)` in the byte space, to recognize
+    /// a pointer read straight out of memory.
+    var_ranges: BTreeMap<SymNodeId, (u32, u32)>,
     result: RunResult,
 }
 
@@ -708,6 +865,10 @@ impl<'a> Executor<'a> {
             .map(var_id)
             .chain(slots.iter().map(Slot::id))
             .collect();
+        let var_ranges = slots
+            .iter()
+            .map(|slot| (slot.id(), (slot.offset, slot.size)))
+            .collect();
         Self {
             function,
             abi,
@@ -721,6 +882,8 @@ impl<'a> Executor<'a> {
             live_ins: BTreeMap::new(),
             return_address: SymExpr::new_var("return_address", abi.pointer_bits),
             allowed,
+            layout: boundary.layout(),
+            var_ranges,
             result: RunResult {
                 paths: Vec::new(),
                 pruned: BTreeSet::new(),
@@ -748,6 +911,7 @@ impl<'a> Executor<'a> {
             Val::Ptr {
                 region: Region::Stack,
                 offset: 0,
+                index: None,
                 bits: sp.size * 8,
             },
             big,
@@ -759,10 +923,26 @@ impl<'a> Executor<'a> {
             Val::Ptr {
                 region: Region::Context,
                 offset: 0,
+                index: None,
                 bits: context.size * 8,
             },
             big,
         );
+        // Each region's pointer, where its parent holds it.
+        let mut memory = Cells::default();
+        for (index, field) in self.layout.fields.iter().enumerate() {
+            memory.write(
+                i64::from(*field),
+                abi.pointer_bits / 8,
+                Val::Ptr {
+                    region: Region::Pointee(index),
+                    offset: 0,
+                    index: None,
+                    bits: abi.pointer_bits,
+                },
+                big,
+            );
+        }
         for (port, var) in self
             .boundary
             .inputs
@@ -788,7 +968,7 @@ impl<'a> Executor<'a> {
         PathState {
             spaces: BTreeMap::from([(abi.register_space, registers)]),
             stack: Cells::default(),
-            context: Cells::default(),
+            context: memory,
             conjuncts: Vec::new(),
             blocks: Vec::new(),
             ops: 0,
@@ -945,7 +1125,9 @@ impl<'a> Executor<'a> {
                     return self.unsupported(op, "an indirect branch");
                 }
                 _ => {
-                    self.step(&mut state, op)?;
+                    if !self.step(&mut state, op)? {
+                        return Ok(());
+                    }
                     op_index += 1;
                 }
             }
@@ -1074,10 +1256,12 @@ impl<'a> Executor<'a> {
                 Val::Ptr {
                     region: Region::Stack,
                     offset,
+                    index: None,
                     bits,
                 } => Val::Ptr {
                     region: Region::Stack,
                     offset: offset + i64::from(abi.pointer_bits / 8),
+                    index: None,
                     bits,
                 },
                 _ => {
@@ -1295,24 +1479,455 @@ impl<'a> Executor<'a> {
         })
     }
 
-    /// Read the context, recording the access so the second pass makes it a
-    /// slot.
+    /// Where `region` starts in the byte space, and its length.
+    fn span(&self, region: Region) -> (i64, i64) {
+        match region {
+            Region::Context => (0, self.boundary.context.initial.len() as i64),
+            Region::Pointee(index) => (
+                i64::from(self.layout.bases[index]),
+                self.boundary.regions[index].initial.len() as i64,
+            ),
+            Region::Stack => unreachable!("the frame is not part of the byte space"),
+        }
+    }
+
+    /// The region whose pointer overlaps `[start, +size)` of the byte space.
+    fn field_in(&self, start: i64, size: u32) -> Option<usize> {
+        let pointer = i64::from(self.abi.pointer_bits / 8);
+        self.layout.fields.iter().position(|field| {
+            let field = i64::from(*field);
+            start < field + pointer && field < start + i64::from(size)
+        })
+    }
+
+    /// Check that `[offset, +size)` lies inside `region`, and give its place
+    /// in the byte space. A discovered region grows to cover a constant
+    /// offset past its end, up to the budget.
+    fn place_access(&self, op: &PcodeOp, region: Region, offset: i64, size: u32) -> Step<i64> {
+        let (base, len) = self.span(region);
+        let end = offset + i64::from(size);
+        if offset >= 0 && end <= len {
+            return Ok(base + offset);
+        }
+        if let Region::Pointee(index) = region
+            && offset >= 0
+            && self.boundary.regions[index].discovered
+            && end <= i64::from(self.budget.max_region_bytes)
+        {
+            let bytes = (end as u32).div_ceil(64) * 64;
+            return Err(SummaryError::Regions(RegionChange::Grow {
+                region: index,
+                bytes: bytes.min(self.budget.max_region_bytes),
+            }));
+        }
+        self.unsupported(
+            op,
+            format!(
+                "an access [{offset:#x}, +{size}) outside the {len} bytes of {}",
+                region.describe(self.boundary)
+            ),
+        )
+    }
+
+    /// Read memory, recording the access so the second pass makes it a
+    /// slot. A region's pointer reads as that pointer and is never a slot:
+    /// it is not state, it is where the state is.
     fn read_context(
         &mut self,
         state: &PathState,
         op: &PcodeOp,
-        start: i64,
+        region: Region,
+        offset: i64,
         size: u32,
     ) -> Step<Val> {
-        let limit = self.boundary.context.initial.len() as i64;
-        if start < 0 || start + i64::from(size) > limit {
+        let start = self.place_access(op, region, offset, size)?;
+        if self.field_in(start, size).is_none() {
+            self.result.context_accesses.insert((start as u32, size));
+        }
+        Ok(self.context_value(state, start, size))
+    }
+
+    /// Write memory at a constant place. A region's pointer is never
+    /// overwritten (the region would move), and no address is ever stored:
+    /// a stored pointer would be an alias the model cannot follow.
+    fn write_context(
+        &mut self,
+        state: &mut PathState,
+        op: &PcodeOp,
+        region: Region,
+        offset: i64,
+        size: u32,
+        value: Val,
+    ) -> Step<()> {
+        let start = self.place_access(op, region, offset, size)?;
+        if let Some(index) = self.field_in(start, size) {
             return self.unsupported(
                 op,
-                format!("context access [{start:#x}, +{size}) outside its {limit} bytes"),
+                format!(
+                    "a store over the pointer to {}: the region would move",
+                    Region::Pointee(index).describe(self.boundary)
+                ),
             );
         }
+        match &value {
+            Val::Bits(_) => {}
+            Val::Ptr { region: at, .. } => {
+                return self.unsupported(
+                    op,
+                    format!(
+                        "an address of {} is stored in {}",
+                        at.describe(self.boundary),
+                        region.describe(self.boundary)
+                    ),
+                );
+            }
+            Val::Poison(reason) => {
+                return self.unsupported(
+                    op,
+                    format!("{} is given {reason}", region.describe(self.boundary)),
+                );
+            }
+        }
+        // Recording first, so a write-only piece still becomes a slot.
         self.result.context_accesses.insert((start as u32, size));
-        Ok(self.context_value(state, start, size))
+        state.context.write(start, size, value, self.abi.big_endian);
+        Ok(())
+    }
+
+    /// An access through `region + offset + index`, `size` bytes: split the
+    /// path where the index leaves the region (that side ends in
+    /// [`PathExit::LeftRegion`]), and list the offsets it can take inside.
+    /// `None` when no input and no state keeps it inside.
+    fn indexed_places(
+        &mut self,
+        state: &mut PathState,
+        op: &PcodeOp,
+        region: Region,
+        offset: i64,
+        index: &SymExpr,
+        size: u32,
+    ) -> Step<Option<(SymExpr, Vec<i64>)>> {
+        let bits = width(index);
+        let at = bin(Bin::Add, konst(offset as u64, bits), index.clone());
+        self.check_vars(op, &at, "an index")?;
+        let (_, len) = self.span(region);
+        // A discovered region grows to what the index can reach, when the
+        // inputs and the path bound it within the budget: its footprint.
+        if let Region::Pointee(number) = region
+            && self.boundary.regions[number].discovered
+        {
+            let mut solver = Solver::new();
+            solver.set_conflict_budget(self.budget.conflict_budget);
+            for conjunct in &state.conjuncts {
+                solver.assert(conjunct.clone());
+            }
+            if let Some(high) = solver.max(&at)
+                && high < u64::from(self.budget.max_region_bytes)
+            {
+                let end = high as i64 + i64::from(size);
+                if end > len && end <= i64::from(self.budget.max_region_bytes) {
+                    return Err(SummaryError::Regions(RegionChange::Grow {
+                        region: number,
+                        bytes: ((end as u32).div_ceil(64) * 64).min(self.budget.max_region_bytes),
+                    }));
+                }
+            }
+        }
+        let last = len - i64::from(size);
+        let inside = if last < 0 {
+            konst(0, 1)
+        } else {
+            bin(Bin::Ule, at.clone(), konst(last as u64, bits))
+        };
+        let can_stay = self.feasible(&state.conjuncts, &inside);
+        let can_leave = self.feasible(&state.conjuncts, &not(inside.clone()));
+        if can_leave != SatResult::Unsat {
+            let mut conjuncts = state.conjuncts.clone();
+            conjuncts.push(not(inside.clone()));
+            for conjunct in &conjuncts {
+                self.check_vars(op, conjunct, "a branch condition")?;
+            }
+            self.result.paths.push(RawPath {
+                guard: and_all(conjuncts),
+                output: konst(0, self.boundary.output_bits),
+                post: self.slots.iter().map(|slot| slot.var.clone()).collect(),
+                blocks: state.blocks.clone(),
+                calls: state.calls.clone(),
+                exit: PathExit::LeftRegion { site: op.address },
+            });
+        }
+        if can_stay == SatResult::Unsat {
+            return Ok(None);
+        }
+        if can_leave != SatResult::Unsat {
+            state.conjuncts.push(inside);
+        }
+        // The offsets the index can take there, as a range and a stride.
+        let mut solver = Solver::new();
+        solver.set_conflict_budget(self.budget.conflict_budget);
+        for conjunct in &state.conjuncts {
+            solver.assert(conjunct.clone());
+        }
+        let low = solver.min(&at).map_or(0, |value| value as i64);
+        let high = solver.max(&at).map_or(last, |value| value as i64).min(last);
+        let mut stride = 1;
+        for candidate in [8u64, 4, 2] {
+            if candidate > u64::from(size) {
+                continue;
+            }
+            let misaligned = bin(
+                Bin::Neq,
+                bin(
+                    Bin::And,
+                    bin(Bin::Sub, at.clone(), konst(low as u64, bits)),
+                    konst(candidate - 1, bits),
+                ),
+                konst(0, bits),
+            );
+            if self.feasible(&state.conjuncts, &misaligned) == SatResult::Unsat {
+                stride = candidate as i64;
+                break;
+            }
+        }
+        let places = (low..=high).step_by(stride as usize).collect::<Vec<_>>();
+        if places.len() > self.budget.max_indexed_positions as usize {
+            return self.unsupported(
+                op,
+                format!(
+                    "an indexed access into {} that can reach {} places (more than {})",
+                    region.describe(self.boundary),
+                    places.len(),
+                    self.budget.max_indexed_positions
+                ),
+            );
+        }
+        Ok(Some((at, places)))
+    }
+
+    /// `buf[i]`: the value at every place the index can take, chosen by it.
+    fn indexed_load(
+        &mut self,
+        state: &mut PathState,
+        op: &PcodeOp,
+        region: Region,
+        offset: i64,
+        index: &SymExpr,
+        size: u32,
+    ) -> Step<Option<Val>> {
+        let Some((at, places)) = self.indexed_places(state, op, region, offset, index, size)?
+        else {
+            return Ok(None);
+        };
+        let bits = width(&at);
+        let mut values = Vec::with_capacity(places.len());
+        for place in &places {
+            match self.read_context(state, op, region, *place, size)? {
+                Val::Bits(value) => values.push(value),
+                Val::Ptr { .. } => {
+                    return self.unsupported(
+                        op,
+                        format!(
+                            "an indexed read of a pointer in {}: which region it names is data",
+                            region.describe(self.boundary)
+                        ),
+                    );
+                }
+                poison @ Val::Poison(_) => return Ok(Some(poison)),
+            }
+        }
+        let last = values.pop().expect("at least one place");
+        let value = places
+            .iter()
+            .zip(values)
+            .rev()
+            .fold(last, |otherwise, (place, value)| {
+                ite(
+                    bin(Bin::Eq, at.clone(), konst(*place as u64, bits)),
+                    value,
+                    otherwise,
+                )
+            });
+        Ok(Some(Val::Bits(value)))
+    }
+
+    /// `buf[i] = v`: every place the index can take keeps its value unless
+    /// the index chose it. Returns whether the path goes on.
+    #[allow(clippy::too_many_arguments)]
+    fn indexed_store(
+        &mut self,
+        state: &mut PathState,
+        op: &PcodeOp,
+        region: Region,
+        offset: i64,
+        index: &SymExpr,
+        size: u32,
+        value: Val,
+    ) -> Step<bool> {
+        let Some((at, places)) = self.indexed_places(state, op, region, offset, index, size)?
+        else {
+            return Ok(false);
+        };
+        let Val::Bits(value) = value else {
+            // Refused the way a constant-offset store of it is.
+            self.write_context(state, op, region, places[0], size, value)?;
+            unreachable!("a pointer or poison store is refused");
+        };
+        let bits = width(&at);
+        let chosen = |place: i64| bin(Bin::Eq, at.clone(), konst(place as u64, bits));
+        let big = self.abi.big_endian;
+        let stride = places
+            .get(1)
+            .map_or(i64::from(size), |next| next - places[0]);
+        if stride >= i64::from(size) {
+            // The places do not overlap: one piece each.
+            for place in &places {
+                let old = match self.read_context(state, op, region, *place, size)? {
+                    Val::Bits(old) => old,
+                    _ => return self.refuse_indexed_store(op, region),
+                };
+                let new = Val::Bits(ite(chosen(*place), value.clone(), old));
+                self.write_context(state, op, region, *place, size, new)?;
+            }
+            return Ok(true);
+        }
+        // Overlapping places: byte by byte, each byte taking the stored
+        // value's byte at its distance from the chosen place.
+        let first = places[0];
+        let end = places[places.len() - 1] + i64::from(size);
+        for byte in first..end {
+            let mut new = match self.read_context(state, op, region, byte, 1)? {
+                Val::Bits(old) => old,
+                _ => return self.refuse_indexed_store(op, region),
+            };
+            for place in places.iter().rev() {
+                let distance = byte - place;
+                if !(0..i64::from(size)).contains(&distance) {
+                    continue;
+                }
+                let lsb = if big {
+                    (i64::from(size) - 1 - distance) * 8
+                } else {
+                    distance * 8
+                };
+                new = ite(chosen(*place), extract(value.clone(), lsb as u32, 8), new);
+            }
+            self.write_context(state, op, region, byte, 1, Val::Bits(new))?;
+        }
+        Ok(true)
+    }
+
+    fn refuse_indexed_store<T>(&self, op: &PcodeOp, region: Region) -> Step<T> {
+        self.unsupported(
+            op,
+            format!(
+                "an indexed store into {} may overwrite a pointer",
+                region.describe(self.boundary)
+            ),
+        )
+    }
+
+    /// A load or store through `address`, computed from data: when it is a
+    /// pointer read straight out of memory plus an offset, the pointer's
+    /// field needs a region of its own.
+    fn discover(&self, op: &PcodeOp, address: &SymExpr, what: &str) -> Step<()> {
+        let pointer = self.abi.pointer_bits / 8;
+        let fields = addends(address)
+            .into_iter()
+            .filter_map(|term| self.memory_read(&term))
+            .filter(|(_, size)| *size == pointer)
+            .collect::<Vec<_>>();
+        let [(start, _)] = fields.as_slice() else {
+            return Ok(());
+        };
+        let start = *start;
+        let regions = &self.boundary.regions;
+        let parent = self
+            .layout
+            .bases
+            .iter()
+            .zip(regions)
+            .position(|(base, region)| {
+                *base <= start && start < *base + region.initial.len() as u32
+            });
+        let field = start - parent.map_or(0, |index| self.layout.bases[index]);
+        let place = match parent {
+            None => format!("ctx[{field:#x}]"),
+            Some(index) => format!("{}->[{field:#x}]", self.boundary.region_name(index)),
+        };
+        let discovered = regions.iter().filter(|region| region.discovered).count();
+        if discovered >= self.budget.max_regions {
+            return self.unsupported(
+                op,
+                format!(
+                    "{what} through the pointer at {place}: more pointer regions than the budget \
+                     ({})",
+                    self.budget.max_regions
+                ),
+            );
+        }
+        let depth = 1 + parent.map_or(0, |index| self.boundary.region_depth(index));
+        if depth > self.budget.max_region_depth {
+            return self.unsupported(
+                op,
+                format!(
+                    "{what} through the pointer at {place}: {depth} pointers deep, past the \
+                     budget ({})",
+                    self.budget.max_region_depth
+                ),
+            );
+        }
+        Err(SummaryError::Regions(RegionChange::Discover {
+            parent,
+            field,
+        }))
+    }
+
+    /// Whether `value` is memory read as it was when the step began --
+    /// one slot variable, or adjacent pieces of them in byte order -- and
+    /// if so, the `(offset, size)` it was read from.
+    fn memory_read(&self, value: &SymExpr) -> Option<(u32, u32)> {
+        let big = self.abi.big_endian;
+        let mut pieces = Vec::new();
+        flatten_concat(value, &mut pieces);
+        // Least significant first.
+        pieces.reverse();
+        let mut bytes: Vec<u32> = Vec::new();
+        for piece in pieces {
+            let (var, lsb, size) = match piece {
+                SymExpr::Var { id, .. } => (*id, 0, width(piece)),
+                SymExpr::Extract { expr, lsb, size } => match expr.as_ref() {
+                    SymExpr::Var { id, .. } => (*id, *lsb, *size),
+                    _ => return None,
+                },
+                _ => return None,
+            };
+            let (offset, slot_size) = *self.var_ranges.get(&var)?;
+            if lsb % 8 != 0 || size % 8 != 0 {
+                return None;
+            }
+            let (first, count) = (lsb / 8, size / 8);
+            for k in 0..count {
+                let significance = first + k;
+                let byte = if big {
+                    offset + slot_size - 1 - significance
+                } else {
+                    offset + significance
+                };
+                bytes.push(byte);
+            }
+        }
+        let step = |a: u32, b: u32| {
+            if big {
+                a.checked_sub(1) == Some(b)
+            } else {
+                a + 1 == b
+            }
+        };
+        if bytes.is_empty() || !bytes.windows(2).all(|pair| step(pair[0], pair[1])) {
+            return None;
+        }
+        let start = *bytes.iter().min().expect("non-empty");
+        Some((start, bytes.len() as u32))
     }
 
     /// The context's current value at `[start, +size)`, without recording
@@ -1383,7 +1998,9 @@ impl<'a> Executor<'a> {
         Ok(())
     }
 
-    fn step(&mut self, state: &mut PathState, op: &PcodeOp) -> Step<()> {
+    /// Execute `op`; whether the path goes on (an indexed access may find
+    /// no place inside its region).
+    fn step(&mut self, state: &mut PathState, op: &PcodeOp) -> Step<bool> {
         match op.opcode {
             PcodeOpcode::Load => {
                 let output = op.output.as_ref().expect("validated: LOAD has an output");
@@ -1394,11 +2011,22 @@ impl<'a> Executor<'a> {
                         ..
                     } => self.read_stack(state, offset, output.size),
                     Val::Ptr {
-                        region: Region::Context,
+                        region,
                         offset,
+                        index: None,
                         ..
-                    } => self.read_context(state, op, offset, output.size)?,
+                    } => self.read_context(state, op, region, offset, output.size)?,
+                    Val::Ptr {
+                        region,
+                        offset,
+                        index: Some(index),
+                        ..
+                    } => match self.indexed_load(state, op, region, offset, &index, output.size)? {
+                        Some(value) => value,
+                        None => return Ok(false),
+                    },
                     Val::Bits(address) => {
+                        self.discover(op, &address, "a load")?;
                         return self.unsupported(
                             op,
                             match as_const(&address) {
@@ -1411,7 +2039,8 @@ impl<'a> Executor<'a> {
                         return self.unsupported(op, format!("a load through {reason}"));
                     }
                 };
-                self.write(state, op, output, value)
+                self.write(state, op, output, value)?;
+                Ok(true)
             }
             PcodeOpcode::Store => {
                 let value = self.read(state, op, &op.inputs[2])?;
@@ -1423,38 +2052,33 @@ impl<'a> Executor<'a> {
                         ..
                     } => {
                         state.stack.write(offset, size, value, self.abi.big_endian);
-                        Ok(())
+                        Ok(true)
                     }
                     Val::Ptr {
-                        region: Region::Context,
+                        region,
                         offset,
+                        index: None,
                         ..
                     } => {
-                        match &value {
-                            Val::Bits(_) => {}
-                            Val::Ptr { .. } => {
-                                return self.unsupported(op, "an address is stored in the context");
-                            }
-                            Val::Poison(reason) => {
-                                return self
-                                    .unsupported(op, format!("the context is given {reason}"));
-                            }
-                        }
-                        // Reading first checks the bounds and records the
-                        // access, so a write-only piece still becomes a slot.
-                        self.read_context(state, op, offset, size)?;
-                        state
-                            .context
-                            .write(offset, size, value, self.abi.big_endian);
-                        Ok(())
+                        self.write_context(state, op, region, offset, size, value)?;
+                        Ok(true)
                     }
-                    Val::Bits(address) => self.unsupported(
-                        op,
-                        match as_const(&address) {
-                            Some(at) => format!("a store to absolute address {at:#x}"),
-                            None => "a store through an address computed from data".to_string(),
-                        },
-                    ),
+                    Val::Ptr {
+                        region,
+                        offset,
+                        index: Some(index),
+                        ..
+                    } => self.indexed_store(state, op, region, offset, &index, size, value),
+                    Val::Bits(address) => {
+                        self.discover(op, &address, "a store")?;
+                        self.unsupported(
+                            op,
+                            match as_const(&address) {
+                                Some(at) => format!("a store to absolute address {at:#x}"),
+                                None => "a store through an address computed from data".to_string(),
+                            },
+                        )
+                    }
                     Val::Poison(reason) => {
                         self.unsupported(op, format!("a store through {reason}"))
                     }
@@ -1467,7 +2091,8 @@ impl<'a> Executor<'a> {
             {
                 let output = op.output.as_ref().expect("validated: has an output");
                 let zero = Val::Bits(konst(0, output.size * 8));
-                self.write(state, op, output, zero)
+                self.write(state, op, output, zero)?;
+                Ok(true)
             }
             _ => {
                 let Some(output) = op.output.as_ref() else {
@@ -1479,7 +2104,8 @@ impl<'a> Executor<'a> {
                     .map(|input| self.read(state, op, input))
                     .collect::<Step<Vec<_>>>()?;
                 let value = self.apply(op, output.size * 8, inputs)?;
-                self.write(state, op, output, value)
+                self.write(state, op, output, value)?;
+                Ok(true)
             }
         }
     }
@@ -1512,7 +2138,11 @@ impl<'a> Executor<'a> {
             return Ok(Val::Poison(reason));
         }
         if inputs.iter().any(|v| matches!(v, Val::Ptr { .. })) {
-            return Ok(pointer_op(op.opcode, out_bits, &inputs));
+            let region_len = |region: Region| match region {
+                Region::Stack => None,
+                other => Some(self.span(other).1),
+            };
+            return Ok(pointer_op(op.opcode, out_bits, &inputs, &region_len));
         }
         let bits: Vec<SymExpr> = inputs
             .into_iter()
@@ -1672,109 +2302,172 @@ fn shift(kind: Bin, value: SymExpr, amount: SymExpr) -> SymExpr {
     )
 }
 
-/// Operations with an address operand. Offsets within one region are known;
-/// anything that would need the region's absolute address is poison.
-fn pointer_op(opcode: PcodeOpcode, out_bits: u32, inputs: &[Val]) -> Val {
+/// The terms of a sum, flattened.
+fn addends(value: &SymExpr) -> Vec<SymExpr> {
+    match value {
+        SymExpr::Add(a, b) => {
+            let mut terms = addends(a);
+            terms.extend(addends(b));
+            terms
+        }
+        other => vec![other.clone()],
+    }
+}
+
+/// The leaves of a concatenation, most significant first.
+fn flatten_concat<'e>(value: &'e SymExpr, out: &mut Vec<&'e SymExpr>) {
+    match value {
+        SymExpr::Concat(hi, lo) => {
+            flatten_concat(hi, out);
+            flatten_concat(lo, out);
+        }
+        other => out.push(other),
+    }
+}
+
+/// A pointer's offset within its region, as one term `bits` wide.
+fn offset_term(offset: i64, index: Option<&SymExpr>, bits: u32) -> SymExpr {
+    let constant = konst(offset as u64, bits);
+    match index {
+        Some(index) => bin(Bin::Add, constant, resize(index.clone(), bits)),
+        None => constant,
+    }
+}
+
+/// Operations with an address operand. Offsets within one region are known
+/// or computed from data; anything that would need a region's absolute
+/// address -- or would say whether two regions alias -- is poison.
+/// `region_len` gives a pointer region's length.
+fn pointer_op(
+    opcode: PcodeOpcode,
+    out_bits: u32,
+    inputs: &[Val],
+    region_len: &dyn Fn(Region) -> Option<i64>,
+) -> Val {
+    use PcodeOpcode as O;
     let constant = |v: &Val| match v {
         Val::Bits(value) => as_const(value).map(|c| signed_of(c, width(value))),
         _ => None,
     };
-    match (opcode, inputs) {
-        (
-            PcodeOpcode::Copy,
-            [
-                Val::Ptr {
-                    region,
-                    offset,
-                    bits,
+    // Add `delta` (data) to a pointer's offset.
+    let shift = |ptr: &Val, delta: &SymExpr, negate: bool| -> Val {
+        let Val::Ptr {
+            region,
+            offset,
+            index,
+            bits,
+        } = ptr
+        else {
+            unreachable!("called on a pointer")
+        };
+        if let Some(c) = as_const(delta) {
+            let c = signed_of(c, width(delta));
+            return Val::Ptr {
+                region: *region,
+                offset: if negate {
+                    offset.wrapping_sub(c)
+                } else {
+                    offset.wrapping_add(c)
                 },
-            ],
-        ) if *bits == out_bits => Val::Ptr {
+                index: index.clone(),
+                bits: *bits,
+            };
+        }
+        if *region == Region::Stack {
+            return Val::Poison("an address offset by data");
+        }
+        let delta = resize(delta.clone(), *bits);
+        let delta = if negate {
+            bin(Bin::Sub, konst(0, *bits), delta)
+        } else {
+            delta
+        };
+        Val::Ptr {
             region: *region,
             offset: *offset,
+            index: Some(match index {
+                Some(index) => bin(Bin::Add, index.clone(), delta),
+                None => delta,
+            }),
             bits: *bits,
-        },
+        }
+    };
+    let compare = |kind: Bin, a: &SymExpr, b: &SymExpr| {
+        Val::Bits(widen_bool(bin(kind, a.clone(), b.clone()), out_bits))
+    };
+    match (opcode, inputs) {
+        (O::Copy, [ptr @ Val::Ptr { bits, .. }]) if *bits == out_bits => ptr.clone(),
+        (O::IntAdd, [ptr @ Val::Ptr { .. }, Val::Bits(delta)])
+        | (O::IntAdd, [Val::Bits(delta), ptr @ Val::Ptr { .. }]) => shift(ptr, delta, false),
+        (O::IntSub, [ptr @ Val::Ptr { .. }, Val::Bits(delta)]) => shift(ptr, delta, true),
+        // `x & x` and `x | x` are x: how a register is tested against zero.
+        (O::IntAnd | O::IntOr, [a @ Val::Ptr { .. }, b]) if a == b => a.clone(),
         (
-            PcodeOpcode::IntAdd,
+            O::IntSub | O::IntEqual | O::IntNotEqual | O::IntLess | O::IntLessEqual,
             [
                 Val::Ptr {
-                    region,
+                    region: a,
+                    offset: x,
+                    index: xi,
+                    ..
+                },
+                Val::Ptr {
+                    region: b,
+                    offset: y,
+                    index: yi,
+                    ..
+                },
+            ],
+        ) => {
+            if a != b {
+                return Val::Poison(
+                    "a comparison of addresses in two regions (whether they alias is assumed,                      not known)",
+                );
+            }
+            // Offsets within one allocation: the region does not wrap the
+            // address space, so they order the way the addresses do.
+            let bits = out_bits.max(64);
+            let (x, y) = (
+                offset_term(*x, xi.as_ref(), bits),
+                offset_term(*y, yi.as_ref(), bits),
+            );
+            match opcode {
+                O::IntSub => Val::Bits(resize(bin(Bin::Sub, x, y), out_bits)),
+                O::IntEqual => compare(Bin::Eq, &x, &y),
+                O::IntNotEqual => compare(Bin::Neq, &x, &y),
+                O::IntLess => compare(Bin::Ult, &x, &y),
+                _ => compare(Bin::Ule, &x, &y),
+            }
+        }
+        // A region's pointer is not null: the boundary gives every region an
+        // allocation of its own, and an address inside one is never zero.
+        (
+            O::IntEqual | O::IntNotEqual,
+            [
+                Val::Ptr {
+                    region: region @ Region::Pointee(_),
                     offset,
-                    bits,
+                    index: None,
+                    ..
                 },
                 other,
             ],
         )
         | (
-            PcodeOpcode::IntAdd,
+            O::IntEqual | O::IntNotEqual,
             [
                 other,
                 Val::Ptr {
-                    region,
+                    region: region @ Region::Pointee(_),
                     offset,
-                    bits,
-                },
-            ],
-        ) => match constant(other) {
-            Some(delta) => Val::Ptr {
-                region: *region,
-                offset: offset.wrapping_add(delta),
-                bits: *bits,
-            },
-            None => Val::Poison("an address offset by data"),
-        },
-        (
-            PcodeOpcode::IntSub,
-            [
-                Val::Ptr {
-                    region,
-                    offset,
-                    bits,
-                },
-                other,
-            ],
-        ) if constant(other).is_some() => Val::Ptr {
-            region: *region,
-            offset: offset.wrapping_sub(constant(other).expect("checked")),
-            bits: *bits,
-        },
-        (
-            PcodeOpcode::IntSub,
-            [
-                Val::Ptr {
-                    region: a,
-                    offset: x,
-                    ..
-                },
-                Val::Ptr {
-                    region: b,
-                    offset: y,
+                    index: None,
                     ..
                 },
             ],
-        ) if a == b => Val::Bits(konst(x.wrapping_sub(*y) as u64, out_bits)),
-        (
-            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual,
-            [
-                Val::Ptr {
-                    region: a,
-                    offset: x,
-                    ..
-                },
-                Val::Ptr {
-                    region: b,
-                    offset: y,
-                    ..
-                },
-            ],
-        ) if a == b => {
-            let equal = x == y;
-            let truth = if opcode == PcodeOpcode::IntEqual {
-                equal
-            } else {
-                !equal
-            };
-            Val::Bits(konst(u64::from(truth), out_bits))
+        ) if constant(other) == Some(0)
+            && region_len(*region).is_some_and(|len| (0..=len).contains(offset)) =>
+        {
+            Val::Bits(konst(u64::from(opcode == O::IntNotEqual), out_bits))
         }
         _ => Val::Poison("arithmetic on an address the model cannot place"),
     }
@@ -1850,6 +2543,7 @@ mod tests {
         let pointer = Val::Ptr {
             region: Region::Context,
             offset: 4,
+            index: None,
             bits: 64,
         };
         cells.write(-8, 8, pointer.clone(), false);

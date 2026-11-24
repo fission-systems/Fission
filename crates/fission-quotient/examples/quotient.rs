@@ -50,6 +50,7 @@ fn main() -> anyhow::Result<()> {
             initial: vec![0; context_bytes],
         },
         output_bits,
+        regions: Vec::new(),
     };
     let (mut engine, foundation) = Wbcq::for_binary(&path, boundary, 1_000_000)?;
     let report = engine.synthesize(&foundation, budget)?;

@@ -8,7 +8,7 @@ use fission_dir::{CallOutcome, EmulatorHarness, MachineFlow, StubbedEnd};
 use fission_loader::loader::LoadedBinary;
 use serde::Serialize;
 
-use crate::boundary::QuotientBoundary;
+use crate::boundary::{AbiModel, QuotientBoundary};
 use crate::calls::CallModel;
 use crate::expr::mask;
 
@@ -29,6 +29,10 @@ pub enum Exit {
     Halted,
     /// Ended in a call proven not to return; no later step runs.
     NoReturn,
+    /// The model's own: an access the P-code summary cannot keep inside its
+    /// pointer region. The machine never shows it, so a quotient in which
+    /// it can happen is unsupported, never built.
+    LeftRegion,
 }
 
 /// One call a step made: where to, with which observed arguments.
@@ -99,6 +103,14 @@ pub trait MembershipOracle {
     /// How the slice's calls are observed, once the summary has decided it.
     /// An oracle whose slices make no calls can ignore it.
     fn observe_calls(&mut self, _model: &CallModel) {}
+
+    /// Give every pointer region of `boundary` an allocation of its own and
+    /// return the memory a word starts from: the context, then each region,
+    /// laid out as [`QuotientBoundary::layout`] says. `StepRecord::context`
+    /// is that byte space too.
+    fn place_regions(&mut self, boundary: &QuotientBoundary) -> Result<Vec<u8>> {
+        Ok(boundary.initial_memory())
+    }
 }
 
 /// Membership through the real emulator: each step is one call of the
@@ -114,6 +126,11 @@ pub struct EmulatorOracle {
     harness: EmulatorHarness,
     boundary: QuotientBoundary,
     context_address: u64,
+    /// The context and the pointer regions behind it, as one buffer, with
+    /// each region's real address in its pointer field.
+    memory: Vec<u8>,
+    pointer_bytes: usize,
+    big_endian: bool,
     arg_count: usize,
     steps: u64,
     /// The function's calls and tail jumps, when it has any and they could
@@ -128,10 +145,15 @@ impl EmulatorOracle {
         boundary: &QuotientBoundary,
         max_instructions: u64,
     ) -> Result<Self> {
-        let mut harness = EmulatorHarness::build(binary_path, Some(max_instructions))?;
-        let context_address = harness
-            .install_scratch(&boundary.context.initial)
-            .context("failed to map the context buffer")?;
+        let harness = EmulatorHarness::build(binary_path, Some(max_instructions))?;
+        let loaded = LoadedBinary::from_file(binary_path).ok();
+        let (pointer_bytes, big_endian) = match &loaded {
+            Some(binary) => {
+                let abi = AbiModel::for_binary(binary)?;
+                ((abi.pointer_bits / 8) as usize, abi.big_endian)
+            }
+            None => (8, false),
+        };
         let arg_count = boundary
             .inputs
             .iter()
@@ -142,19 +164,52 @@ impl EmulatorOracle {
         // A function whose calls cannot all be listed is run unstubbed: the
         // summary refuses any call it makes, so a call that runs here only
         // ever shows up as a disagreement.
-        let flow = LoadedBinary::from_file(binary_path)
-            .ok()
-            .and_then(|binary| fission_dir::call_sites(&binary, boundary.entry).ok())
+        let flow = loaded
+            .as_ref()
+            .and_then(|binary| fission_dir::call_sites(binary, boundary.entry).ok())
             .filter(|flow| !flow.calls.is_empty() || !flow.tail_jumps.is_empty());
-        Ok(Self {
+        let mut oracle = Self {
             harness,
             boundary: boundary.clone(),
-            context_address,
+            context_address: 0,
+            memory: Vec::new(),
+            pointer_bytes,
+            big_endian,
             arg_count,
             steps: 0,
             flow,
             calls: CallModel::default(),
-        })
+        };
+        oracle.lay_out(boundary)?;
+        Ok(oracle)
+    }
+
+    /// Map the context and its regions as one buffer and write each
+    /// region's address into its pointer field.
+    fn lay_out(&mut self, boundary: &QuotientBoundary) -> Result<()> {
+        let layout = boundary.layout();
+        let address = self
+            .harness
+            .install_scratch(&vec![0; layout.len])
+            .context("failed to map the context buffer")?;
+        let mut memory = boundary.initial_memory();
+        for (base, field) in layout.bases.iter().zip(&layout.fields) {
+            let pointer = address + u64::from(*base);
+            let bytes = if self.big_endian {
+                pointer.to_be_bytes()[8 - self.pointer_bytes..].to_vec()
+            } else {
+                pointer.to_le_bytes()[..self.pointer_bytes].to_vec()
+            };
+            let field = *field as usize;
+            memory[field..field + self.pointer_bytes].copy_from_slice(&bytes);
+        }
+        if self.harness.install_scratch(&memory)? != address {
+            bail!("the context buffer moved while its regions were laid out");
+        }
+        self.boundary = boundary.clone();
+        self.context_address = address;
+        self.memory = memory;
+        Ok(())
     }
 
     /// Run one step with calls stubbed: the `n`th call returns
@@ -202,7 +257,7 @@ impl EmulatorOracle {
 
 impl MembershipOracle for EmulatorOracle {
     fn run(&mut self, word: &[Symbol]) -> Result<Vec<StepRecord>> {
-        let mut context = self.boundary.context.initial.clone();
+        let mut context = self.memory.clone();
         let mut halted = false;
         let mut records = Vec::with_capacity(word.len());
         for symbol in word {
@@ -266,5 +321,12 @@ impl MembershipOracle for EmulatorOracle {
 
     fn observe_calls(&mut self, model: &CallModel) {
         self.calls = model.clone();
+    }
+
+    fn place_regions(&mut self, boundary: &QuotientBoundary) -> Result<Vec<u8>> {
+        if *boundary != self.boundary {
+            self.lay_out(boundary)?;
+        }
+        Ok(self.memory.clone())
     }
 }

@@ -26,6 +26,29 @@ pub struct ContextRegion {
     pub initial: Vec<u8>,
 }
 
+/// A memory region of its own behind a pointer field: the bytes the pointer
+/// stored at `field` of its parent (the context, or an earlier region) points
+/// to. The region's address is never known to the model -- only offsets
+/// within it are -- and it aliases nothing else: not the context, not the
+/// frame, not any other region (an assumption every quotient over one
+/// reports). Its bytes are hidden state like the context's, `initial.len()`
+/// of them; an access the model cannot keep inside them stops the quotient.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PointerRegion {
+    /// Index of the region holding the pointer; `None` for the context.
+    pub parent: Option<usize>,
+    /// Byte offset of the pointer within its parent.
+    pub field: u32,
+    /// The region's bytes at the start of the first step. Bytes where a
+    /// nested region's pointer lives are filled in by whoever lays the
+    /// regions out.
+    #[serde(serialize_with = "crate::report::hex_bytes")]
+    pub initial: Vec<u8>,
+    /// Found by the summary (a pointer field the slice dereferences), not
+    /// declared with the boundary; its bytes start zeroed.
+    pub discovered: bool,
+}
+
 /// The observational contract of one quotient: inputs `X`, the hidden
 /// context, and the observed result `Y` (the low `output_bits` of the return
 /// register, plus how each step ended).
@@ -36,6 +59,79 @@ pub struct QuotientBoundary {
     pub inputs: Vec<InputPort>,
     pub context: ContextRegion,
     pub output_bits: u32,
+    /// Pointer fields with regions of their own, declared or discovered.
+    /// Nested regions come after their parent.
+    pub regions: Vec<PointerRegion>,
+}
+
+/// Regions are laid out one after another behind the context, each starting
+/// on a multiple of this. The model addresses all of them as one byte space
+/// ("memory"); a slot is a piece of it.
+const REGION_ALIGN: usize = 16;
+
+/// Where the context and each region sit in the one byte space the model
+/// and the oracle share.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryLayout {
+    /// The start of each region, in `QuotientBoundary::regions` order.
+    pub bases: Vec<u32>,
+    /// Where each region's pointer lives in that space.
+    pub fields: Vec<u32>,
+    /// Bytes in all.
+    pub len: usize,
+}
+
+impl QuotientBoundary {
+    /// The context and every region, laid out in one byte space.
+    #[must_use]
+    pub fn layout(&self) -> MemoryLayout {
+        let mut len = self.context.initial.len();
+        let mut bases = Vec::with_capacity(self.regions.len());
+        let mut fields = Vec::with_capacity(self.regions.len());
+        for region in &self.regions {
+            len = len.div_ceil(REGION_ALIGN) * REGION_ALIGN;
+            bases.push(len as u32);
+            len += region.initial.len();
+        }
+        for region in &self.regions {
+            let parent = region.parent.map_or(0, |index| bases[index]);
+            fields.push(parent + region.field);
+        }
+        MemoryLayout { bases, fields, len }
+    }
+
+    /// The byte space at the start of the first step, pointer fields left
+    /// zero: the model never reads a pointer's bytes as data.
+    #[must_use]
+    pub fn initial_memory(&self) -> Vec<u8> {
+        let layout = self.layout();
+        let mut memory = vec![0; layout.len];
+        memory[..self.context.initial.len()].copy_from_slice(&self.context.initial);
+        for (region, base) in self.regions.iter().zip(&layout.bases) {
+            let base = *base as usize;
+            memory[base..base + region.initial.len()].copy_from_slice(&region.initial);
+        }
+        memory
+    }
+
+    /// How a region is named in reports: the path of pointer fields that
+    /// reaches it, e.g. `ctx[0x8]` or `ctx[0x8]->[0x10]`.
+    #[must_use]
+    pub fn region_name(&self, index: usize) -> String {
+        let region = &self.regions[index];
+        match region.parent {
+            None => format!("ctx[{:#x}]", region.field),
+            Some(parent) => format!("{}->[{:#x}]", self.region_name(parent), region.field),
+        }
+    }
+
+    /// How many pointers lie between the context and a region.
+    #[must_use]
+    pub fn region_depth(&self, index: usize) -> usize {
+        1 + self.regions[index]
+            .parent
+            .map_or(0, |parent| self.region_depth(parent))
+    }
 }
 
 /// Resource bounds. Every bound that is hit is reported in the result's
@@ -59,6 +155,17 @@ pub struct QuotientBudget {
     pub max_rounds: usize,
     /// Input symbols the alphabet may grow to.
     pub max_alphabet: usize,
+    /// Pointer-field regions the summary may discover (declared ones do not
+    /// count), and how many pointers deep one may lie.
+    pub max_regions: usize,
+    pub max_region_depth: usize,
+    /// The bytes a discovered region starts with; it grows, up to
+    /// `max_region_bytes`, to cover a constant offset the slice reads.
+    pub region_bytes: u32,
+    pub max_region_bytes: u32,
+    /// Positions one indexed access (`buf[i]`) may reach; past it the access
+    /// is unsupported rather than expanded.
+    pub max_indexed_positions: u32,
 }
 
 impl Default for QuotientBudget {
@@ -72,6 +179,11 @@ impl Default for QuotientBudget {
             probes: 64,
             max_rounds: 64,
             max_alphabet: 64,
+            max_regions: 4,
+            max_region_depth: 2,
+            region_bytes: 64,
+            max_region_bytes: 4096,
+            max_indexed_positions: 512,
         }
     }
 }

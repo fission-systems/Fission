@@ -16,7 +16,7 @@ pipeline and lowered with `llc` only, so no IR optimization runs over the
 obfuscated code to undo it -- the order OLLVM uses.
 
 Also builds the positive state machines natively as shared libraries for
-`ground_truth.py`: `state_machines.c` alone, and `call_machines.c` with
+`ground_truth.py`: `state_machines.c` with `region_machines.c`, and `call_machines.c` with
 `call_env_native.c` standing in for every callee. The corpus ELF links
 `call_env.c` for the callees' definitions; nothing ever runs them. Outputs go
 under --out, outside the repository.
@@ -130,7 +130,7 @@ def main() -> None:
     suffix = ".dylib" if platform.system() == "Darwin" else ".so"
     native = out / f"corpus_native{suffix}"
     run(tool(args.llvm_bin, "clang"), "-O1", "-shared", "-fPIC", "-o", native,
-        CORPUS / "state_machines.c")
+        CORPUS / "state_machines.c", CORPUS / "region_machines.c")
     # The callees must bind to the stand-ins, not the C library's.
     native_calls = out / f"corpus_calls_native{suffix}"
     run(tool(args.llvm_bin, "clang"), "-O1", "-fno-builtin", "-shared", "-fPIC", "-o",

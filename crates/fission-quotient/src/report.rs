@@ -35,6 +35,10 @@ pub(crate) fn hex_address<S: serde::Serializer>(
 /// The memory model a `ProvedUnderModel` certificate is relative to.
 pub const MODEL_ID: &str = "separated-registers-frame-context.v1";
 
+/// The memory model once the boundary has pointer regions: the same
+/// separation, with each region one more separate piece.
+pub const MODEL_ID_WITH_REGIONS: &str = "separated-registers-frame-context-regions.v1";
+
 /// How far the quotient's claim reaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -87,6 +91,10 @@ pub enum SlotRole {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SlotReport {
     pub name: String,
+    /// The pointer region the slot lies in (an index into the boundary's
+    /// `regions`); `None` for the context.
+    pub region: Option<usize>,
+    /// Offset within the context, or within its region.
     pub offset: u32,
     pub size: u32,
     pub role: SlotRole,

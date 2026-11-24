@@ -44,6 +44,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from statistics import median
 
+from region_tables import region_bytes
+
 VARIANT_ORDER = ("O0", "O1", "O1-fla", "O1-bcf-fla")
 
 
@@ -69,8 +71,12 @@ def run_one(task: dict, args) -> dict:
     started = time.time()
     row = {**task}
     try:
+        regions = [] if args.no_regions else [
+            flag for region in task.get("regions", [])
+            for flag in ("--region",
+                         f"{region['field']}={region_bytes(region['table']).hex()}")]
         out = subprocess.run(
-            [args.eval, task["binary"], task["function"], str(task["context_bytes"])],
+            [args.eval, task["binary"], task["function"], str(task["context_bytes"]), *regions],
             capture_output=True, text=True, timeout=args.timeout)
         if out.returncode != 0:
             row["error"] = (out.stderr.strip().splitlines() or ["failed"])[-1]
@@ -105,7 +111,7 @@ def run(args) -> None:
                 continue
             tasks.append({"isa": isa, "variant": variant, "binary": binary,
                           "function": entry["name"], "context_bytes": entry["context_bytes"],
-                          "expect": entry["expect"]})
+                          "regions": entry.get("regions", []), "expect": entry["expect"]})
     lock = threading.Lock()
     with ThreadPoolExecutor(max_workers=args.jobs) as pool, rows_path.open("a") as sink:
         for row in pool.map(lambda t: run_one(t, args), tasks):
@@ -492,6 +498,9 @@ def main() -> None:
     r.add_argument("-j", "--jobs", type=int, default=4)
     r.add_argument("--timeout", type=int, default=1800)
     r.add_argument("--only", nargs="*")
+    r.add_argument("--no-regions", action="store_true",
+                   help="do not declare the manifest's pointer regions (an engine from before "
+                        "P4 step 2, for the positive controls)")
     s = sub.add_parser("summarize")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--truth", type=Path)

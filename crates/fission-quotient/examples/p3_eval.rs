@@ -5,7 +5,7 @@
 //! Usage:
 //!   cargo run --release -p fission-quotient --example p3_eval -- \
 //!     <binary> <function-name | 0xADDRESS> <context-bytes> [--input-arg I] [--input-bits B]
-//!     [--output-bits B] [--replay-words N] [--replay-length L]
+//!     [--output-bits B] [--replay-words N] [--replay-length L] [--region FIELD=HEX | FIELD:SIZE]...
 //!
 //! Driven over the corpus by `scripts/quality/wbcq/evaluate.py`.
 
@@ -15,8 +15,8 @@ use std::time::Instant;
 use fission_loader::loader::LoadedBinary;
 use fission_quotient::learn::{Learned, Learner};
 use fission_quotient::{
-    ContextRegion, EmulatorOracle, InputPort, MembershipOracle, QuotientBoundary, QuotientBudget,
-    ReplayVerdict, Symbol, Wbcq,
+    ContextRegion, EmulatorOracle, InputPort, MembershipOracle, PointerRegion, QuotientBoundary,
+    QuotientBudget, ReplayVerdict, Symbol, Wbcq,
 };
 use serde_json::json;
 
@@ -70,6 +70,34 @@ fn mask(bits: u32) -> u64 {
     }
 }
 
+/// `FIELD=HEX` (a context pointer field and its region's bytes) or
+/// `FIELD:SIZE` (zeroed); FIELD is decimal or `0x` hex.
+fn parse_region(spec: &str) -> anyhow::Result<PointerRegion> {
+    let number = |text: &str| -> anyhow::Result<usize> {
+        Ok(match text.strip_prefix("0x") {
+            Some(hex) => usize::from_str_radix(hex, 16)?,
+            None => text.parse()?,
+        })
+    };
+    let initial = if let Some((field, hex)) = spec.split_once('=') {
+        let bytes = (0..hex.len())
+            .step_by(2)
+            .map(|at| u8::from_str_radix(&hex[at..at + 2], 16))
+            .collect::<Result<Vec<_>, _>>()?;
+        (number(field)?, bytes)
+    } else if let Some((field, size)) = spec.split_once(':') {
+        (number(field)?, vec![0; number(size)?])
+    } else {
+        anyhow::bail!("--region wants FIELD=HEX or FIELD:SIZE, not {spec}");
+    };
+    Ok(PointerRegion {
+        parent: None,
+        field: initial.0 as u32,
+        initial: initial.1,
+        discovered: false,
+    })
+}
+
 fn address_of(path: &PathBuf, name: &str) -> anyhow::Result<u64> {
     let binary = LoadedBinary::from_file(path)?;
     let inner = binary.inner();
@@ -87,7 +115,12 @@ fn main() -> anyhow::Result<()> {
     let context_bytes: usize = args.next().expect("context bytes").parse()?;
     let (mut replay_words, mut replay_length) = (200usize, 24usize);
     let (mut input_arg, mut input_bits, mut output_bits) = (1usize, 32u32, 32u32);
+    let mut regions = Vec::new();
     while let Some(flag) = args.next() {
+        if flag == "--region" {
+            regions.push(parse_region(&args.next().expect("--region FIELD=HEX"))?);
+            continue;
+        }
         let value: usize = args.next().expect("flag value").parse()?;
         match flag.as_str() {
             "--replay-words" => replay_words = value,
@@ -114,6 +147,7 @@ fn main() -> anyhow::Result<()> {
             initial: vec![0; context_bytes],
         },
         output_bits,
+        regions,
     };
     let budget = QuotientBudget::default();
 
@@ -122,6 +156,9 @@ fn main() -> anyhow::Result<()> {
     let (mut engine, foundation) = Wbcq::for_binary(&path, boundary.clone(), 1_000_000)?;
     let (report, model) = engine.synthesize_with_model(&foundation, budget)?;
     let white_ms = started.elapsed().as_millis();
+    // Replay and the black box run over the same memory the quotient is
+    // relative to: the declared regions and the ones the summary found.
+    let boundary = report.boundary.clone();
 
     // Independent replay: long words the learner never chose.
     let mut words = Words(0x51_7e_c0de);
@@ -218,7 +255,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
     let mut oracle = EmulatorOracle::new(&path, &boundary, 1_000_000)?;
-    let mut learner = Learner::new(black_alphabet, boundary.context.initial.clone());
+    let mut learner = Learner::new(black_alphabet, boundary.initial_memory());
     let mut black = json!(null);
     // A query the oracle refuses (a nondeterministic step) ends the black
     // box with that reason; it is a result of the ablation, not a failure.
@@ -283,6 +320,17 @@ fn main() -> anyhow::Result<()> {
                 "alphabet": report.evidence.alphabet.len(),
             },
             "slots": report.slots,
+            "regions": report
+                .boundary
+                .regions
+                .iter()
+                .enumerate()
+                .map(|(index, region)| json!({
+                    "name": report.boundary.region_name(index),
+                    "bytes": region.initial.len(),
+                    "discovered": region.discovered,
+                }))
+                .collect::<Vec<_>>(),
             "calls": report.calls,
             "ports": ports,
             "witnesses_verified": report.apartness_witnesses.iter().all(|w| w.verified_by_emulator),

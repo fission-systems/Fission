@@ -14,8 +14,8 @@ use crate::learn::{Hypothesis, Learned, Learner};
 use crate::oracle::{EmulatorOracle, MembershipOracle, Symbol};
 use crate::report::{
     ApartnessWitness, Assumption, AssumptionKind, CertifiedQuotient, Evidence, FoundationRef,
-    MODEL_ID, Metrics, QuotientStatus, SCHEMA_VERSION, SlotReport, SlotRole, SlotValue,
-    StateReport, TransitionReport, UpdateReport,
+    MODEL_ID, MODEL_ID_WITH_REGIONS, Metrics, QuotientStatus, SCHEMA_VERSION, SlotReport, SlotRole,
+    SlotValue, StateReport, TransitionReport, UpdateReport,
 };
 use crate::srqa::{Built, SlotRoles, Srqa, build, factor, minimal_input, slot_value};
 use crate::summary::{SliceSummary, summarize};
@@ -208,13 +208,22 @@ impl<O: MembershipOracle> Wbcq<O> {
             }
         };
         self.oracle.observe_calls(&summary.calls);
+        // The pointer regions the summary used -- declared, then discovered --
+        // are part of the boundary the quotient is relative to, and the
+        // oracle gives each one its allocation.
+        self.boundary.regions.clone_from(&summary.regions);
+        let initial = self.oracle.place_regions(&self.boundary)?;
+        report.boundary = self.boundary.clone();
         report.calls = summary.calls.sites.values().cloned().collect();
         report
             .assumptions
             .extend(call_assumptions(&summary.calls, &self.abi));
+        report
+            .assumptions
+            .extend(region_assumptions(&self.boundary, &budget));
         let roles = factor(&summary);
         let big = self.abi.big_endian;
-        let initial = self.boundary.context.initial.clone();
+        let layout = self.boundary.layout();
         let initial_slots = summary
             .slots
             .iter()
@@ -226,7 +235,8 @@ impl<O: MembershipOracle> Wbcq<O> {
             .enumerate()
             .map(|(index, slot)| SlotReport {
                 name: slot.name(),
-                offset: slot.offset,
+                region: slot.region,
+                offset: slot.offset - slot.region.map_or(0, |region| layout.bases[region]),
                 size: slot.size,
                 role: if roles.control.contains(&index) {
                     SlotRole::Control
@@ -396,7 +406,12 @@ impl<O: MembershipOracle> Wbcq<O> {
                     built = Some(srqa.clone());
                     break QuotientStatus::ProvedUnderModel {
                         horizon: proved_horizon,
-                        model_id: MODEL_ID.to_string(),
+                        model_id: if self.boundary.regions.is_empty() {
+                            MODEL_ID
+                        } else {
+                            MODEL_ID_WITH_REGIONS
+                        }
+                        .to_string(),
                     };
                 }
                 Refutation::Candidate(word) => Some(word),
@@ -743,6 +758,62 @@ fn assumptions(
             ),
         },
     ]
+}
+
+/// What a quotient over pointer regions assumes about them.
+fn region_assumptions(boundary: &QuotientBoundary, budget: &QuotientBudget) -> Vec<Assumption> {
+    if boundary.regions.is_empty() {
+        return Vec::new();
+    }
+    let names = (0..boundary.regions.len())
+        .map(|index| boundary.region_name(index))
+        .collect::<Vec<_>>();
+    let mut out = vec![
+        Assumption {
+            kind: AssumptionKind::Memory,
+            description: format!(
+                "{} each point to a region of their own that aliases nothing else: not the \
+                 context, not the stack frame, not another region, and no callee holds an \
+                 alias of it; the pointers are not null and never change",
+                names.join(", ")
+            ),
+        },
+        Assumption {
+            kind: AssumptionKind::Bound,
+            description: format!(
+                "each region is exactly as long as its initial bytes ({}); an access the model \
+                 cannot keep inside them stops the quotient",
+                boundary
+                    .regions
+                    .iter()
+                    .zip(&names)
+                    .map(|(region, name)| format!("{name}: {} bytes", region.initial.len()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        },
+    ];
+    let discovered = boundary
+        .regions
+        .iter()
+        .zip(&names)
+        .filter(|(region, _)| region.discovered)
+        .map(|(_, name)| name.as_str())
+        .collect::<Vec<_>>();
+    if !discovered.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::Environment,
+            description: format!(
+                "{} were found dereferenced by the slice, not declared: their regions start \
+                 zeroed ({} bytes, grown to cover every constant offset read, at most {}), so the \
+                 quotient holds for that initial memory only",
+                discovered.join(", "),
+                budget.region_bytes,
+                budget.max_region_bytes
+            ),
+        });
+    }
+    out
 }
 
 /// What a quotient over a slice that makes calls assumes about its callees.

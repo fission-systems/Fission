@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Fission quotient data v1",
-  "description": "The minimal observable state machine of one step function (`fission-quotient`, experimental). `status` says how far the claim reaches. `transitions` and `apartness_witnesses` are filled only when a machine was built; with `partial_frontier`, `states` lists the states found before the budget ran out. A call the slice makes is an observed effect (`calls` lists every call site and how it is observed); what it returns is an extra input port per call (`retN`), so symbols carry one value per boundary port and then one per call.",
+  "description": "The minimal observable state machine of one step function (`fission-quotient`, experimental). `status` says how far the claim reaches. `transitions` and `apartness_witnesses` are filled only when a machine was built; with `partial_frontier`, `states` lists the states found before the budget ran out. A call the slice makes is an observed effect (`calls` lists every call site and how it is observed); what it returns is an extra input port per call (`retN`), so symbols carry one value per boundary port and then one per call. A pointer field of the context (or of a region) that the slice dereferences is a region of its own (`boundary.regions`): declared with the boundary or found dereferenced and given zeroed bytes; its bytes are hidden state like the context's, its slots name it (`ctx[0x8]->[0x10:1]`), and the no-alias and footprint assumptions it rests on are in `assumptions`.",
   "type": "object",
   "required": [
     "schema_version",
@@ -56,7 +56,8 @@
         "entry",
         "inputs",
         "context",
-        "output_bits"
+        "output_bits",
+        "regions"
       ],
       "properties": {
         "entry": {
@@ -107,6 +108,43 @@
         "output_bits": {
           "type": "integer",
           "minimum": 0
+        },
+        "regions": {
+          "type": "array",
+          "description": "Pointer fields with a memory region of their own, declared or discovered; a nested region comes after the region holding its pointer. Each aliases nothing else, and its bytes are exactly `initial`.",
+          "items": {
+            "type": "object",
+            "required": [
+              "parent",
+              "field",
+              "initial",
+              "discovered"
+            ],
+            "properties": {
+              "parent": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0,
+                "description": "Index of the region holding the pointer; null for the context."
+              },
+              "field": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Byte offset of the pointer within its parent."
+              },
+              "initial": {
+                "type": "string",
+                "pattern": "^([0-9a-f]{2})+$",
+                "description": "The region's bytes at the start of the first step."
+              },
+              "discovered": {
+                "type": "boolean",
+                "description": "Found dereferenced by the slice rather than declared; its bytes start zeroed."
+              }
+            }
+          }
         }
       }
     },
@@ -120,7 +158,12 @@
         "max_path_ops",
         "probes",
         "max_rounds",
-        "max_alphabet"
+        "max_alphabet",
+        "max_regions",
+        "max_region_depth",
+        "region_bytes",
+        "max_region_bytes",
+        "max_indexed_positions"
       ],
       "properties": {
         "max_states": {
@@ -157,6 +200,31 @@
         "max_alphabet": {
           "type": "integer",
           "minimum": 0
+        },
+        "max_regions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Pointer regions the summary may discover."
+        },
+        "max_region_depth": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many pointers deep a region may lie."
+        },
+        "region_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes a discovered region starts with."
+        },
+        "max_region_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes a discovered region may grow to."
+        },
+        "max_indexed_positions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Places one indexed access may reach."
         }
       }
     },
@@ -272,6 +340,7 @@
         "type": "object",
         "required": [
           "name",
+          "region",
           "offset",
           "size",
           "role",
@@ -281,9 +350,18 @@
           "name": {
             "type": "string"
           },
+          "region": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "The pointer region the slot lies in (an index into `boundary.regions`); null for the context."
+          },
           "offset": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "description": "Offset within the context, or within its region."
           },
           "size": {
             "type": "integer",

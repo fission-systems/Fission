@@ -36,6 +36,9 @@ fn exit_code(exit: Exit) -> SymExpr {
         match exit {
             Exit::Returned => 0,
             Exit::NoReturn => 1,
+            // No transition of an automaton ends this way, so a word that
+            // takes the slice out of a region always tells the two apart.
+            Exit::LeftRegion => 3,
             _ => 2,
         },
         EXIT_BITS,

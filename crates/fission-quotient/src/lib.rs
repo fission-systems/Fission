@@ -36,7 +36,10 @@ pub mod report;
 pub mod srqa;
 pub mod summary;
 
-pub use boundary::{AbiModel, ContextRegion, InputPort, QuotientBoundary, QuotientBudget};
+pub use boundary::{
+    AbiModel, ContextRegion, InputPort, MemoryLayout, PointerRegion, QuotientBoundary,
+    QuotientBudget,
+};
 pub use calls::{CallFacts, CallModel};
 pub use engine::{QuotientEngine, QuotientModel, ReplayVerdict, Wbcq};
 pub use oracle::{
