@@ -193,6 +193,9 @@ pub fn float_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
     }
     match op {
         x if x == FloatUnOp::Neg as u32 => {
+            if in_size == out_size && in_size == 2 {
+                return (a_bits ^ 0x8000) & 0xffff;
+            }
             if in_size == out_size && in_size == 4 {
                 return (a_bits ^ 0x8000_0000) & 0xffff_ffff;
             }
@@ -203,6 +206,9 @@ pub fn float_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
             f64_to_bits(-a, out_size)
         }
         x if x == FloatUnOp::Abs as u32 => {
+            if in_size == out_size && in_size == 2 {
+                return a_bits & 0x7fff;
+            }
             if in_size == out_size && in_size == 4 {
                 return a_bits & 0x7fff_ffff;
             }

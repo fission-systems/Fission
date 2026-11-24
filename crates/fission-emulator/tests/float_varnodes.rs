@@ -796,3 +796,67 @@ fn aarch64_float_nan_propagation_matches_arm_fpprocessnans_in_both_engines() {
         );
     }
 }
+
+/// Half precision follows the guest's NaN policy in the interpreter too, the
+/// way the JIT's float callout does, rather than the host CPU's own rule.
+///
+/// Both policies are checked so the test fails on either host: an x86 host
+/// propagates the first operand, an Arm host the signaling one, and only one
+/// of them is the guest's. Negation and absolute value only touch the sign
+/// bit, so a signaling NaN stays signaling (as `FNEG`/`FABS` leave it).
+#[test]
+fn half_precision_nan_propagation_follows_the_policy_in_the_interpreter() {
+    let mut state = MachineState::new();
+    let (a, b, out) = (slot(0x100, 2), slot(0x110, 2), slot(0x120, 2));
+    let qnan = 0x7e01u16; // quiet, payload 1
+    let snan = 0xfd02u16; // signaling, negative, payload 0x102
+    write_u16_slot(&mut state, &a, qnan);
+    write_u16_slot(&mut state, &b, snan);
+    for opcode in [
+        PcodeOpcode::FloatAdd,
+        PcodeOpcode::FloatSub,
+        PcodeOpcode::FloatMult,
+        PcodeOpcode::FloatDiv,
+    ] {
+        run_with_policy(
+            &mut state,
+            NanPolicy::FirstOperand,
+            opcode,
+            &[a.clone(), b.clone()],
+            &out,
+        );
+        assert_eq!(
+            read_u16_slot(&mut state, &out),
+            qnan,
+            "FirstOperand {opcode:?}"
+        );
+        run_with_policy(
+            &mut state,
+            NanPolicy::SignalingFirst,
+            opcode,
+            &[a.clone(), b.clone()],
+            &out,
+        );
+        assert_eq!(
+            read_u16_slot(&mut state, &out),
+            snan | 0x0200,
+            "SignalingFirst {opcode:?}"
+        );
+    }
+
+    let snan_pos = 0x7d01u16;
+    write_u16_slot(&mut state, &a, snan_pos);
+    for (opcode, want) in [
+        (PcodeOpcode::FloatNeg, 0xfd01u16),
+        (PcodeOpcode::FloatAbs, 0x7d01u16),
+    ] {
+        run_with_policy(
+            &mut state,
+            NanPolicy::SignalingFirst,
+            opcode,
+            std::slice::from_ref(&a),
+            &out,
+        );
+        assert_eq!(read_u16_slot(&mut state, &out), want, "{opcode:?}");
+    }
+}

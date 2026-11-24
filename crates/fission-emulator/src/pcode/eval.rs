@@ -1496,7 +1496,11 @@ impl<'a> Evaluator<'a> {
             .output
             .as_ref()
             .expect("Float binary op must have output");
-        if (out.size == 4 || out.size == 8)
+        // Half, single and double precision go through the helper the JIT
+        // calls, so the two engines apply the same NaN policy. Two bytes
+        // falling back to host `f64` arithmetic left fp16 NaN propagation to
+        // the host CPU's rule while the JIT applied the guest's.
+        if matches!(out.size, 2 | 4 | 8)
             && op.inputs[0].size == out.size
             && op.inputs[1].size == out.size
         {
@@ -1523,7 +1527,7 @@ impl<'a> Evaluator<'a> {
         fallback: impl FnOnce(f64) -> f64,
     ) -> Result<()> {
         let out = op.output.as_ref().expect("Float unary op must have output");
-        if (out.size == 4 || out.size == 8) && op.inputs[0].size == out.size {
+        if matches!(out.size, 2 | 4 | 8) && op.inputs[0].size == out.size {
             let a_bits = self.read_varnode_u64(&op.inputs[0])?;
             let res = crate::jit::float_ops::float_unop(fop as u32, out.size, out.size, a_bits);
             return self.write_varnode_u64(out, res);
