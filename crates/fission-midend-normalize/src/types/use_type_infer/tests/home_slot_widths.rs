@@ -355,3 +355,34 @@ fn formal_read_as_both_signed_and_unsigned_bytes_keeps_its_width() {
     apply_use_driven_type_infer_pass(&mut func);
     assert_eq!(param_2_bits(&func), Some(32));
 }
+
+#[test]
+fn home_slot_read_as_sign_extended_and_unsigned_keeps_the_formal_width() {
+    // Thumb -O0 `DCD_EP_Stall(pdev, uint8_t epnum)`: `local_3 = (uchar)param_2;
+    // if ((int)local_3 < 0) ...; *dst = (uchar)local_3 % 128;` -- the slot is
+    // sign-extended in one read and read unsigned in another. A `char` formal
+    // turns the `%` signed; a `uchar` one the sign test always false.
+    let mut func = truncating_reads_func(
+        vec![home_slot("local_3", -0x3, 8)],
+        vec![
+            set("local_3", cast(8, false, var("param_2"))),
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLt,
+                    lhs: Box::new(cast(32, true, var("local_3"))),
+                    rhs: Box::new(PreHirExpr::Const(0, int_ty(32, true))),
+                    ty: NirType::Bool,
+                },
+                then_body: std::rc::Rc::new(vec![byte_store_of(binary(
+                    PreHirBinaryOp::Mod,
+                    cast(8, false, var("local_3")),
+                    PreHirExpr::Const(128, int_ty(32, false)),
+                ))]),
+                else_body: std::rc::Rc::new(vec![]),
+            },
+        ],
+    );
+
+    apply_use_driven_type_infer_pass(&mut func);
+    assert_eq!(param_2_bits(&func), Some(32));
+}
