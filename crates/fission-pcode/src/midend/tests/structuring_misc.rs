@@ -799,3 +799,75 @@ fn match_fold_keeps_the_return_of_a_terminal_block() {
         "a committed fold concedes no jumps"
     );
 }
+
+/// Trial forks share the builder's scalar SSA and lowered block statements
+/// instead of copying them, so the sharing must stay invisible: an edit made
+/// through a fork reaches neither the builder it was forked from nor another
+/// fork.
+#[test]
+fn a_fork_edits_its_own_copy_of_shared_lowered_blocks() {
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x6000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Copy,
+                    address: 0x6000,
+                    output: Some(reg(0x0, 8)),
+                    inputs: vec![cst(7, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x6004,
+                    output: None,
+                    inputs: vec![cst(0, 8), reg(0x0, 8)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let options = preview_options();
+    let mut builder = PreviewBuilder::new(&func, &options, None);
+    let block = &func.blocks[0];
+    let lowered = builder.lower_block_stmts(block).expect("block lowers");
+
+    let mut fork = builder.clone();
+    let mut sibling = builder.clone();
+    assert!(
+        std::rc::Rc::ptr_eq(&builder.scalar_ssa, &fork.scalar_ssa),
+        "a fork shares the scalar SSA"
+    );
+    assert!(
+        std::rc::Rc::ptr_eq(
+            &builder.lowered_block_stmts_cache[&0],
+            &fork.lowered_block_stmts_cache[&0]
+        ),
+        "a fork shares a lowered block until it edits it"
+    );
+
+    crate::midend::pass::NirFunc::new(&mut fork)
+        .lowered_block_stmts_mut(0)
+        .push(PreHirStmt::Label("fork_only".to_string()));
+
+    assert_eq!(
+        builder.lower_block_stmts(block).expect("cached"),
+        lowered,
+        "the fork's edit must not reach the builder it came from"
+    );
+    assert_eq!(
+        sibling.lower_block_stmts(block).expect("cached"),
+        lowered,
+        "nor a sibling fork"
+    );
+    let edited = fork.lower_block_stmts(block).expect("cached");
+    assert_eq!(edited.len(), lowered.len() + 1);
+    assert_eq!(
+        edited.last(),
+        Some(&PreHirStmt::Label("fork_only".to_string()))
+    );
+}
