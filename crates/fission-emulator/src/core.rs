@@ -12,6 +12,12 @@ use std::sync::Arc;
 pub static IS_INTERRUPTED: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Aggregate cap on symbolic stdin byte variables registered across an emulator run.
+pub const MAX_SYMBOLIC_STDIN_BYTES: usize = 64 * 1024;
+
+/// Aggregate cap on bytes marked as taint sources across an emulator run.
+pub const MAX_TAINT_MARKED_BYTES: u64 = 4 << 20;
+
 /// Arch-agnostic emulator.
 ///
 /// `pc` is the architecture-independent program counter.
@@ -55,6 +61,10 @@ pub struct Emulator {
     /// Taint sources, interned label sets, and what reached a sink. Only
     /// meaningful under [`crate::observe::ShadowMode::Taint`].
     pub taint: crate::taint::TaintState,
+    /// Aggregate count of symbolic stdin bytes registered across this run.
+    pub(crate) symbolic_stdin_bytes: usize,
+    /// Aggregate count of bytes marked through [`Self::taint_range`] across this run.
+    pub(crate) taint_marked_bytes: u64,
     /// Force every block through the interpreter, never the JIT.
     ///
     /// Exists so the two engines can be run against each other on the same
@@ -439,6 +449,8 @@ impl Emulator {
             pcode_ops: 0,
             shadow_mode: crate::observe::ShadowMode::Off,
             taint: crate::taint::TaintState::new(),
+            symbolic_stdin_bytes: 0,
+            taint_marked_bytes: 0,
             force_interpreter: std::env::var_os("FISSION_EMU_INTERP").is_some(),
             interpreted_blocks: 0,
             observers: Vec::new(),
@@ -868,21 +880,66 @@ impl Emulator {
     ///
     /// Turns the shadow layer on if it is off: marking a source and then not
     /// propagating it would report nothing and look like a clean run, which is
-    /// the worst answer available.
+    /// the worst answer available. Honors [`MAX_TAINT_MARKED_BYTES`] and checked
+    /// guest-width address bounds.
     pub fn taint_range(&mut self, addr: u64, len: u64, label: impl Into<String>) {
         if !matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) {
             self.set_shadow_mode(crate::observe::ShadowMode::Taint);
+        }
+        let budget = MAX_TAINT_MARKED_BYTES.saturating_sub(self.taint_marked_bytes);
+        let span = crate::pcode::page_map::guest_addr_span(addr, self.state.page_map.is_64bit);
+        let to_mark = len.min(budget).min(span);
+        if to_mark == 0 {
+            return;
         }
         let set = self.taint.add_source(crate::taint::TaintSource {
             label: label.into(),
             pc: self.pc,
             addr,
-            len,
+            len: to_mark,
         });
         let ram = self.state.ram_space();
-        for i in 0..len {
-            self.state.set_shadow_memory(ram, addr.wrapping_add(i), set);
+        let mut marked = 0u64;
+        for i in 0..to_mark {
+            let Some(at) = addr.checked_add(i) else {
+                break;
+            };
+            self.state.set_shadow_memory(ram, at, set);
+            marked += 1;
         }
+        self.taint_marked_bytes = self.taint_marked_bytes.saturating_add(marked);
+    }
+
+    /// Mark transferred stdin bytes in symbolic shadow memory (when not in
+    /// pure taint mode, which owns shadow slots via [`Self::taint_range`]),
+    /// honoring [`MAX_SYMBOLIC_STDIN_BYTES`] and guest address bounds.
+    pub(crate) fn mark_symbolic_stdin_range(&mut self, addr: u64, len: usize) {
+        if matches!(self.shadow_mode, crate::observe::ShadowMode::Taint) || len == 0 {
+            return;
+        }
+        let budget = MAX_SYMBOLIC_STDIN_BYTES.saturating_sub(self.symbolic_stdin_bytes);
+        let span = usize::try_from(crate::pcode::page_map::guest_addr_span(
+            addr,
+            self.state.page_map.is_64bit,
+        ))
+        .unwrap_or(usize::MAX);
+        let to_mark = len.min(budget).min(span);
+        if to_mark == 0 {
+            return;
+        }
+        let ram = self.state.ram_space();
+        let mut marked = 0usize;
+        for i in 0..to_mark {
+            let Some(at) = addr.checked_add(i as u64) else {
+                break;
+            };
+            let node = self
+                .solver
+                .register_var(format!("stdin_{at}"), crate::bit_width_from_byte_size(1));
+            self.state.set_shadow_memory(ram, at, node);
+            marked += 1;
+        }
+        self.symbolic_stdin_bytes = self.symbolic_stdin_bytes.saturating_add(marked);
     }
 
     /// The taint set on a register's first byte, if any.

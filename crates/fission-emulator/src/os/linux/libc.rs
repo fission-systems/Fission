@@ -324,52 +324,14 @@ impl SimProcedure for Read {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
         let fd = emu.read_arg(0).unwrap_or(0);
         let buf = emu.read_arg(1).unwrap_or(0);
-        let count = emu.read_arg(2).unwrap_or(0) as usize;
+        let count = emu.read_arg(2).unwrap_or(0);
 
-        if fd == 0 {
-            // What standard input holds decides how much host memory this
-            // takes, not `count`, which is the guest's: a buffer of `count`
-            // bytes was built here first, and `read(0, buf, (size_t)-1)`
-            // took the host down with it.
-            // Prefer VFS stdin (seeded by with_stdin_mock / seed_stdin).
-            let data = if let Ok(v) = emu.vfs.read(0, count) {
-                if let Some(ref mut mock_buf) = emu.stdin_buffer {
-                    let drop = v.len().min(mock_buf.len());
-                    mock_buf.drain(..drop);
-                }
-                v
-            } else {
-                emu.guest_stdin(count)
-            };
-            let bytes_read = data.len();
-            if bytes_read > 0 {
-                emu.state.write_space(emu.state.ram_space(), buf, &data)?;
-                // Taint stdin bytes for concolic exploration.
-                for i in 0..bytes_read {
-                    let node = emu.solver.register_var(
-                        format!("stdin_{}", buf + i as u64),
-                        crate::bit_width_from_byte_size(1),
-                    );
-                    emu.state
-                        .set_shadow_memory(emu.state.ram_space(), buf + i as u64, node);
-                }
-            }
-            emu.write_return_val(bytes_read as u64)?;
-        } else {
-            tracing::info!("SimProcedure: read({}, 0x{:X}, {})", fd, buf, count);
-            // Every other fd is a VFS file, the same ones the `read` syscall
-            // serves. Answering 0 for all of them made an opened file look
-            // empty to a guest that reads through libc.
-            match emu.vfs.read(fd, count) {
-                Ok(data) => {
-                    if !data.is_empty() {
-                        emu.state.write_space(emu.state.ram_space(), buf, &data)?;
-                    }
-                    emu.write_return_val(data.len() as u64)?;
-                }
-                Err(_) => emu.write_return_val((-1i64) as u64)?,
-            }
+        let result = crate::os::linux::syscall::read_to_guest(emu, fd, buf, count);
+        if result > 0 && matches!(emu.shadow_mode(), crate::observe::ShadowMode::Taint) {
+            emu.taint_range(buf, (result as u64).min(1 << 20), "read");
         }
+        tracing::info!("SimProcedure: read({fd}, 0x{buf:X}, {count}) -> {result}");
+        emu.write_return_val(if result < 0 { u64::MAX } else { result as u64 })?;
         Ok(HleResult::Continue)
     }
 }
@@ -1293,5 +1255,63 @@ mod tests {
         // Third call: true EOF, nothing read at all.
         let (ret, _ptr) = call(&mut emu);
         assert_eq!(ret, -1);
+    }
+
+    #[test]
+    fn libc_read_preserves_cursor_on_fault_and_commits_partial_crossing() {
+        let mut emu = tiny_emu();
+        let ram = emu.state.ram_space();
+        let ro_page = 0x5000_0000u64;
+        let rw_page = 0x5100_0000u64;
+        emu.state
+            .page_map
+            .map_region(ro_page, 0x1000, crate::pcode::page_map::prot::READ, true);
+        emu.state
+            .page_map
+            .map_region(rw_page, 0x1000, crate::pcode::page_map::prot::RW, true);
+
+        let fd = emu.vfs.open("libc_cross.txt", b"0123456789".to_vec());
+        assert_eq!(libc_read(&mut emu, fd, ro_page, 10), -1);
+        assert_eq!(libc_read(&mut emu, fd, 0, 10), -1);
+        assert_eq!(emu.vfs.files[&fd].cursor, 0);
+
+        let partial = rw_page + 0x1000 - 4;
+        assert_eq!(libc_read(&mut emu, fd, partial, 10), 4);
+        assert_eq!(emu.vfs.files[&fd].cursor, 4);
+        assert_eq!(emu.state.read_space(ram, partial, 4).unwrap(), b"0123");
+
+        assert_eq!(libc_read(&mut emu, fd, rw_page, 10), 6);
+        assert_eq!(emu.state.read_space(ram, rw_page, 6).unwrap(), b"456789");
+        assert!(emu.vfs.files[&fd].eof);
+    }
+
+    #[test]
+    fn libc_read_fd0_fault_preserves_stdin_and_marks_taint_only_when_transferred() {
+        let mut emu = tiny_emu();
+        emu.set_shadow_mode(crate::observe::ShadowMode::Taint);
+        emu.seed_stdin(b"hello");
+        let ro_page = 0x5000_0000u64;
+        let rw_page = 0x5100_0000u64;
+        emu.state
+            .page_map
+            .map_region(ro_page, 0x1000, crate::pcode::page_map::prot::READ, true);
+        emu.state
+            .page_map
+            .map_region(rw_page, 0x1000, crate::pcode::page_map::prot::RW, true);
+
+        assert_eq!(libc_read(&mut emu, 0, ro_page, 5), -1);
+        assert_eq!(emu.stdin_buffer.as_deref(), Some(b"hello".as_slice()));
+        assert!(emu.taint.is_empty());
+
+        assert_eq!(libc_read(&mut emu, 0, rw_page, 5), 5);
+        assert_eq!(
+            emu.state
+                .read_space(emu.state.ram_space(), rw_page, 5)
+                .unwrap(),
+            b"hello"
+        );
+        assert_eq!(emu.taint.sources().len(), 1);
+        assert_eq!(emu.taint.sources()[0].label, "read");
+        assert_eq!(emu.taint.sources()[0].len, 5);
     }
 }
