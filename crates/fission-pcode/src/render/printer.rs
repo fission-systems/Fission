@@ -1823,8 +1823,11 @@ fn try_elide_hir_cast(
             });
         }
     }
-    // (ulonglong)(uint)x / nested same-family integer casts → peel outer when
-    // outer is wider unsigned and inner is already an integer cast/var.
+    // (ulonglong)(uint)x / nested same-family integer casts → drop the inner
+    // cast when outer is wider unsigned and inner is already an integer
+    // cast/var. The outer cast stays: it sets the width the surrounding
+    // operator works in, and `(unsigned __int128)(ulonglong)x * k` printed
+    // as `x * k` is a 64-bit multiply.
     if let (
         NirType::Int {
             bits: outer_bits,
@@ -1848,7 +1851,18 @@ fn try_elide_hir_cast(
         if *outer_bits >= *inner_bits
             && expr_unsigned_integer_width(inner, ctx).is_some_and(|bits| bits <= *inner_bits)
         {
-            return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
+            if *outer_bits == *inner_bits {
+                return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
+            }
+            return Some(print_expr_prec_ctx(
+                &HirExpr::Cast {
+                    ty: ty.clone(),
+                    expr: inner.clone(),
+                },
+                parent_prec,
+                depth + 1,
+                ctx,
+            ));
         }
     }
     None
@@ -2729,6 +2743,62 @@ pub fn render_contracted_wrapper_summary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hir_print_keeps_the_widening_cast_that_sets_a_wide_multiply() {
+        // `(unsigned __int128)(ulonglong)(n / 8) * k >> 64`: the inner cast
+        // is width sugar over an unsigned 64-bit quotient, but the outer one
+        // makes the multiply 128 bits wide. Eliding both printed
+        // `n / 8 * k >> 64`, a 64-bit multiply shifted by its own width.
+        use super::*;
+        let int = |bits, signed| NirType::Int { bits, signed };
+        let quotient = HirExpr::Binary {
+            op: HirBinaryOp::Div,
+            lhs: Box::new(HirExpr::Var("n".into())),
+            rhs: Box::new(HirExpr::Const(8, int(64, false))),
+            ty: int(64, false),
+        };
+        let product = HirExpr::Binary {
+            op: HirBinaryOp::Mul,
+            lhs: Box::new(HirExpr::Cast {
+                ty: int(128, false),
+                expr: Box::new(HirExpr::Cast {
+                    ty: int(64, false),
+                    expr: Box::new(quotient),
+                }),
+            }),
+            rhs: Box::new(HirExpr::Const(0x20c4_9ba5_e353_f7cf, int(128, false))),
+            ty: int(128, false),
+        };
+        let mut function = HirFunction {
+            name: "wide_mul_high".into(),
+            return_type: int(64, true),
+            ..Default::default()
+        };
+        function.params.push(NirBinding {
+            name: "n".into(),
+            ty: int(64, false),
+            surface_type_name: None,
+            origin: Some(NirBindingOrigin::ParamIndex(0)),
+            initializer: None,
+        });
+        function.body = vec![HirStmt::Return(Some(HirExpr::Cast {
+            ty: int(64, true),
+            expr: Box::new(HirExpr::Binary {
+                op: HirBinaryOp::Shr,
+                lhs: Box::new(product),
+                rhs: Box::new(HirExpr::Const(64, int(32, false))),
+                ty: int(128, false),
+            }),
+        }))];
+
+        let printed = print_hir_function_with_profile(&function, None, PrintProfile::Hir);
+
+        assert!(
+            printed.contains("(unsigned __int128)"),
+            "the multiply must stay 128 bits wide:\n{printed}"
+        );
+    }
+
     #[test]
     fn nested_unary_minus_is_not_printed_as_a_decrement() {
         use super::*;

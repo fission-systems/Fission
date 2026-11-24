@@ -608,6 +608,239 @@ pub fn canonicalize_unsigned_compare_binding_casts(func: &mut PreHirFunction) ->
     canonicalize_unsigned_compare_binding_casts_in_stmts(&mut func.body, &binding_types)
 }
 
+/// Make every widening integer cast say, in C, the extension the IR means.
+///
+/// The builder lowers `INT_SEXT` to a cast to the *signed* wider type and
+/// `INT_ZEXT` to one to the *unsigned* wider type: in this IR the cast's
+/// destination carries the extension kind, the way `SLt` and `Sar` carry
+/// theirs. C extends by the *source* type instead, and so does everything
+/// that reads the tree as C -- the printer, and the evaluator `verify`
+/// checks the printed tree with. The two readings agree only while the
+/// operand's binding has the destination's signedness. Type recovery sets
+/// that binding from all of its uses and can settle on the other one, which
+/// turns `INT_SEXT(param_1)` into `(long long)param_1` with `param_1: uint`:
+/// a zero extension in the printed C of a value the machine sign-extends
+/// (`movsxd`).
+///
+/// At the final cast boundary, a widening cast whose operand has the other
+/// signedness gets a same-width view of the destination's signedness
+/// underneath -- `(long long)(int)param_1` -- so both readings are one
+/// extension. Constants are left alone: the printer writes a constant's
+/// stored value, which already carries the extension the lowering meant.
+///
+/// Runs after normalize's type recovery. Passes the decompiler runs after
+/// normalize (post-structuring copy propagation, call-site type propagation)
+/// can still put an operand of the other signedness under a cast; the
+/// sibling compare canonicalization has the same limit.
+pub fn canonicalize_extension_binding_casts(func: &mut PreHirFunction) -> bool {
+    let binding_types: HashMap<String, NirType> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect();
+    rewrite_exprs_in_stmts(&mut func.body, &mut |expr| {
+        canonicalize_extension_cast(expr, &binding_types)
+    })
+}
+
+fn canonicalize_extension_cast(
+    expr: &mut PreHirExpr,
+    binding_types: &HashMap<String, NirType>,
+) -> bool {
+    let mut changed = false;
+    for_each_child_expr_mut(expr, &mut |child| {
+        changed |= canonicalize_extension_cast(child, binding_types);
+    });
+    let PreHirExpr::Cast {
+        ty: NirType::Int {
+            bits: dst_bits,
+            signed: dst_signed,
+        },
+        expr: inner,
+    } = expr
+    else {
+        return changed;
+    };
+    if matches!(inner.as_ref(), PreHirExpr::Const(..)) {
+        return changed;
+    }
+    let NirType::Int {
+        bits: src_bits,
+        signed: src_signed,
+    } = unsigned_compare_binding_type(inner, binding_types)
+    else {
+        return changed;
+    };
+    if src_bits >= *dst_bits || src_signed == *dst_signed {
+        return changed;
+    }
+    let view = NirType::Int {
+        bits: src_bits,
+        signed: *dst_signed,
+    };
+    // `(uint)wide` read as `(int)wide` truncates to the same bits, so a
+    // cast that does not extend can take the view's signedness itself
+    // rather than gain another layer. One that extends keeps its own kind.
+    if let PreHirExpr::Cast {
+        ty: inner_ty,
+        expr: deeper,
+    } = inner.as_mut()
+        && matches!(
+            unsigned_compare_binding_type(deeper, binding_types),
+            NirType::Int { bits, .. } if bits >= src_bits
+        )
+    {
+        *inner_ty = view;
+        return true;
+    }
+    let operand = std::mem::replace(inner.as_mut(), PreHirExpr::Const(0, NirType::Unknown));
+    **inner = PreHirExpr::Cast {
+        ty: view,
+        expr: Box::new(operand),
+    };
+    true
+}
+
+/// Apply `rewrite` to every top-level expression a statement list holds,
+/// including the pointer and index expressions of stored-to lvalues.
+fn rewrite_exprs_in_stmts(
+    stmts: &mut [PreHirStmt],
+    rewrite: &mut dyn FnMut(&mut PreHirExpr) -> bool,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts.iter_mut() {
+        changed |= rewrite_exprs_in_stmt(stmt, rewrite);
+    }
+    changed
+}
+
+fn rewrite_exprs_in_stmt(
+    stmt: &mut PreHirStmt,
+    rewrite: &mut dyn FnMut(&mut PreHirExpr) -> bool,
+) -> bool {
+    let mut changed = false;
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            match lhs {
+                PreHirLValue::Var(_) => {}
+                PreHirLValue::Deref { ptr, .. } | PreHirLValue::FieldAccess { base: ptr, .. } => {
+                    changed |= rewrite(ptr);
+                }
+                PreHirLValue::Index { base, index, .. } => {
+                    changed |= rewrite(base);
+                    changed |= rewrite(index);
+                }
+            }
+            changed |= rewrite(rhs);
+        }
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::VaStart { va_list: expr, .. }
+        | PreHirStmt::Return(Some(expr)) => changed |= rewrite(expr),
+        PreHirStmt::Block(body) => {
+            changed |=
+                rewrite_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rewrite);
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            changed |= rewrite(cond);
+            changed |=
+                rewrite_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rewrite);
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            changed |= rewrite(cond);
+            changed |= rewrite_exprs_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                rewrite,
+            );
+            changed |= rewrite_exprs_in_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                rewrite,
+            );
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                changed |= rewrite_exprs_in_stmt(init, rewrite);
+            }
+            if let Some(cond) = cond {
+                changed |= rewrite(cond);
+            }
+            if let Some(update) = update {
+                changed |= rewrite_exprs_in_stmt(update, rewrite);
+            }
+            changed |=
+                rewrite_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rewrite);
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            changed |= rewrite(expr);
+            for case in cases {
+                changed |= rewrite_exprs_in_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                    rewrite,
+                );
+            }
+            changed |=
+                rewrite_exprs_in_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rewrite);
+        }
+        PreHirStmt::Return(None)
+        | PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue => {}
+    }
+    changed
+}
+
+fn for_each_child_expr_mut(expr: &mut PreHirExpr, visit: &mut dyn FnMut(&mut PreHirExpr)) {
+    match expr {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => visit(inner),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            visit(lhs);
+            visit(rhs);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args.iter_mut() {
+                visit(arg);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            visit(base);
+            visit(index);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            visit(cond);
+            visit(then_expr);
+            visit(else_expr);
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
+    }
+}
+
 fn canonicalize_unsigned_compare_binding_casts_in_stmts(
     stmts: &mut [PreHirStmt],
     binding_types: &HashMap<String, NirType>,
