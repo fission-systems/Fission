@@ -71,6 +71,7 @@ cost and what it catches are known rather than assumed.
 | Overflow checks and debug assertions in release builds | 0 panics over the same 2,868 functions; the 83 errors are lift failures on PE data symbols. Kept because the class has occurred (four panic sites from a debug sweep, the `align_up` fuzz crash) and costs little on the fixture lane | PR fixture lane |
 | Retry masking | 0 tests passed only on retry in 59 recent green test jobs | Not changed |
 | Hangs | nextest already terminates a test after 120 s | Not changed |
+| sccache decided before the build | 3 required jobs on 2026-11-23/24 (one in the merge queue, run 45302835263) failed at the build's first `rustc -vV` with `Server startup failed: cache storage failed to read`. The old check (`--show-stats`) ran before `SCCACHE_GHA_ENABLED` was set, so it started a local-disk server that never touched the cache service; the real server, and its storage check, started inside the build | `setup-sccache` starts the build's server and compiles through it before exporting `RUSTC_WRAPPER`; `sccache outage fallback` in Fast Gate proves an unreachable service builds uncached and green |
 
 ## Further tests, and what each found or measured first
 

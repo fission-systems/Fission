@@ -115,6 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -292,7 +293,8 @@ jobs:
           cargo check -p fission-cli --no-default-features --locked
           cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true

@@ -132,16 +132,26 @@ impl<'a> PreviewBuilder<'a> {
         let Some(param_slot) = self.param_index_for_varnode(vn, true) else {
             return false;
         };
-        let Some(symbol) =
-            super::super::resolve_lifted_direct_call_target(call, self.options, self.type_context)
-        else {
-            return false;
+        let written_slots = match super::super::resolve_lifted_direct_call_target(
+            call,
+            self.options,
+            self.type_context,
+        ) {
+            Some(symbol) => self
+                .type_context
+                .and_then(|context| context.call_effect_summaries.get(&symbol))
+                .and_then(|summary| summary.modified_argument_register_slots.as_ref()),
+            // A local callee with no symbol: its proven writes by address.
+            None => (call.opcode == PcodeOpcode::Call)
+                .then(|| call.inputs.first())
+                .flatten()
+                .and_then(|target| {
+                    self.type_context.and_then(|context| {
+                        context.callee_argument_register_writes.get(&target.offset)
+                    })
+                }),
         };
-        let Some(written_slots) = self
-            .type_context
-            .and_then(|context| context.call_effect_summaries.get(&symbol))
-            .and_then(|summary| summary.modified_argument_register_slots.as_ref())
-        else {
+        let Some(written_slots) = written_slots else {
             return false;
         };
         !written_slots.contains(&param_slot)
@@ -1315,11 +1325,21 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<ExactRegisterSlots> {
         let op = block.ops.get(call_idx)?;
         let target = match op.opcode {
-            PcodeOpcode::Call => super::super::resolve_lifted_direct_call_target(
-                op,
-                self.options,
-                self.type_context,
-            )?,
+            // A direct call to a function with no symbol (every internal
+            // callee of a stripped binary) resolves to no name here, but its
+            // body was still summarised: the facts layer keys that summary,
+            // and the call is printed, as `sub_<address>`. Without this the
+            // callee's proven arity never reached its callers, and a caller
+            // that hands its own argument register straight on (`f(x) {
+            // return g(x); }`) printed `g()` and lost the parameter.
+            PcodeOpcode::Call => {
+                super::super::resolve_lifted_direct_call_target(op, self.options, self.type_context)
+                    .or_else(|| {
+                        let address = branch_target_address(op.inputs.first()?)?;
+                        (!self.address_to_index.contains_key(&address))
+                            .then(|| format!("sub_{address:x}"))
+                    })?
+            }
             // Rust-Sleigh represents an IAT-backed Windows call as
             // `Copy unique <- ram:IAT_slot; CallInd unique`. The existing
             // target resolver already proves that shape and returns the

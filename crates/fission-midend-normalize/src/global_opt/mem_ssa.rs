@@ -102,6 +102,8 @@ pub struct MemPhi {
     pub key: AliasKey,
     pub inputs: Vec<usize>, // MemDef/MemPhi ids
     pub use_count: usize,
+    /// Preorder index of the structured control-flow merge node that emitted this phi.
+    pub merge_site_id: usize,
 }
 
 /// Complete MemSSA for a function.
@@ -119,6 +121,7 @@ struct Builder {
     /// Map from AliasKey → latest MemDef id at current linear point.
     reaching: HashMap<AliasKey, usize>,
     next_id: usize,
+    next_merge_site: usize,
     /// Set of variable names whose address has been observed as a Call arg.
     escaped: crate::HashSet<String>,
     /// Variables that hold a pointer. A write through one reaches its pointee,
@@ -135,6 +138,7 @@ impl Builder {
             phis: Vec::new(),
             reaching: HashMap::default(),
             next_id: 0,
+            next_merge_site: 0,
             escaped: crate::HashSet::default(),
             pointer_vars,
         }
@@ -143,6 +147,12 @@ impl Builder {
     fn alloc_id(&mut self) -> usize {
         let id = self.next_id;
         self.next_id += 1;
+        id
+    }
+
+    fn alloc_merge_site(&mut self) -> usize {
+        let id = self.next_merge_site;
+        self.next_merge_site += 1;
         id
     }
 
@@ -267,6 +277,7 @@ impl Builder {
                 then_body,
                 else_body,
             } => {
+                let site_id = self.alloc_merge_site();
                 self.scan_expr_uses(cond);
                 // Fork reaching map.
                 let saved = self.reaching.clone();
@@ -275,14 +286,15 @@ impl Builder {
                 self.scan_stmts(else_body);
                 let else_reaching = std::mem::take(&mut self.reaching);
                 // Merge: emit MemPhi where defs differ.
-                self.merge_reaching(then_reaching, else_reaching);
+                self.merge_reaching(site_id, then_reaching, else_reaching);
             }
             PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                let site_id = self.alloc_merge_site();
                 self.scan_expr_uses(cond);
                 let saved = self.reaching.clone();
                 self.scan_stmts(body);
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
-                self.merge_reaching(body_reaching, saved);
+                self.merge_reaching(site_id, body_reaching, saved);
             }
             PreHirStmt::For {
                 init,
@@ -290,6 +302,7 @@ impl Builder {
                 update,
                 body,
             } => {
+                let site_id = self.alloc_merge_site();
                 if let Some(s) = init {
                     self.scan_stmt(s);
                 }
@@ -302,13 +315,14 @@ impl Builder {
                     self.scan_stmt(s);
                 }
                 let body_reaching = std::mem::replace(&mut self.reaching, saved.clone());
-                self.merge_reaching(body_reaching, saved);
+                self.merge_reaching(site_id, body_reaching, saved);
             }
             PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
+                let site_id = self.alloc_merge_site();
                 self.scan_expr_uses(expr);
                 let saved = self.reaching.clone();
                 let mut arm_reachings = Vec::new();
@@ -324,7 +338,7 @@ impl Builder {
                 self.reaching = saved;
                 for arm in arm_reachings {
                     let curr = std::mem::take(&mut self.reaching);
-                    self.merge_reaching(curr, arm);
+                    self.merge_reaching(site_id, curr, arm);
                 }
             }
             PreHirStmt::Block(stmts) => self.scan_stmts(stmts),
@@ -422,7 +436,12 @@ impl Builder {
         }
     }
 
-    fn merge_reaching(&mut self, a: HashMap<AliasKey, usize>, b: HashMap<AliasKey, usize>) {
+    fn merge_reaching(
+        &mut self,
+        merge_site_id: usize,
+        a: HashMap<AliasKey, usize>,
+        b: HashMap<AliasKey, usize>,
+    ) {
         // Union of all keys.
         let mut all_keys: crate::HashSet<AliasKey> = a.keys().cloned().collect();
         all_keys.extend(b.keys().cloned());
@@ -441,6 +460,7 @@ impl Builder {
                         key: key.clone(),
                         inputs: vec![da, db],
                         use_count: 0,
+                        merge_site_id,
                     });
                     self.reaching.insert(key, phi_id);
                 }
