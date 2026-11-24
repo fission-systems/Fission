@@ -49,6 +49,7 @@ fission-sleigh = { path = "../fission-sleigh" }
 
 fission-emulator = { path = "../fission-emulator" }
 fission-dir = { path = "../fission-dir" }
+fission-quotient = { path = "../fission-quotient" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, features = ["interactive_runtime"] }
 tracing = "0.1"
 anyhow = "1.0"

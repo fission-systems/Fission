@@ -854,6 +854,7 @@ dependencies = [
  "fission-emulator",
  "fission-loader",
  "fission-project",
+ "fission-quotient",
  "fission-script",
  "fission-signatures",
  "fission-sleigh",
@@ -1116,6 +1117,24 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror",
+]
+
+[[package]]
+name = "fission-quotient"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "fission-decompiler",
+ "fission-dir",
+ "fission-emulator",
+ "fission-loader",
+ "fission-pcode-ir",
+ "fission-signatures",
+ "fission-sleigh",
+ "fission-solver",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

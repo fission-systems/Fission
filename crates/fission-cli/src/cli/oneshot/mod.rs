@@ -26,6 +26,7 @@ mod patch;
 mod pcode_diagnostics;
 mod pcode_stages;
 mod pcode_topology;
+mod quotient;
 mod raw_pcode;
 mod rust_decomp;
 mod script;
@@ -360,6 +361,7 @@ fn run() -> Result<()> {
         ParsedInvocation::Skill => crate::cli::skill::run_skill(),
         ParsedInvocation::Languages(args) => languages::run(&args),
         ParsedInvocation::Call(args) => call::run(&args),
+        ParsedInvocation::Quotient(args) => quotient::run(&args),
         ParsedInvocation::Api(args) => lookup::run_api(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }

@@ -58,6 +58,8 @@ SCCACHE_FALLBACK = (".github/actions/setup-sccache/", ".github/workflows/ci.yml"
 DOC_CHECKS = (
     "docs/", "scripts/ci/check_docs.py", "scripts/ci/check_contract_schemas.py",
     "scripts/ci/doc-check-requirements.txt", "crates/fission-cli/", ".github/workflows/ci.yml",
+    # Its report is the payload `check_contract_schemas.py` validates.
+    "crates/fission-quotient/",
 )
 DOC_ROOT = {"README.md", "CONTRIBUTING.md", "mkdocs.yml"}
 REPLAY_CHECKS = (

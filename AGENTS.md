@@ -42,6 +42,7 @@ Fission/
 - `crates/fission-cli/AGENTS.md`
 - `crates/fission-loader/AGENTS.md`
 - `crates/fission-causal/AGENTS.md` (experimental CSIC; no production dependents)
+- `crates/fission-quotient/AGENTS.md`
 
 Read the nearest child file before editing those areas.
 
