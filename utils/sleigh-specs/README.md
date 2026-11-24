@@ -26,6 +26,9 @@ tooling should use this directory.
 Upstream specs are not ground truth ([ADR 0017](../../docs/adr/0017-ghidra-is-not-an-oracle.md)).
 A semantic fix needs architecture-manual or native-execution evidence, a re-apply script,
 a byte-for-byte recompile control, and a test that fails with the upstream `.sla`.
+Recompile with the release's Java compiler, `support/sleigh` (run from the `.slaspec`'s
+directory): it reproduces the checked-in AArch64 `.sla` byte for byte, while the native
+`Ghidra/Features/Decompiler/os/*/sleigh` builds a different `AARCH64_AppleSilicon.sla`.
 
 `languages/` is upstream `Ghidra/Processors/<P>/data/languages/` verbatim (the `.sla`
 files go to `compiled/`), except for the following. Re-apply them when upgrading;
@@ -52,6 +55,15 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `floor` for M, `ceil` for P, `round` for A/I/N/X (approximations: no ties-to-even or
   ties-away, FPCR mode not modelled) and `int2float(trunc(x))` for Z (loses precision for
   magnitudes at or above 2^63). Re-apply with `scripts/sleigh/apply_aarch64_frint_rounding.py`.
+- `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): the sign-extending byte
+  and halfword loads into a `W` register (`ldrsb`/`ldrsh` in every addressing form,
+  `ldursb`/`ldursh`, `ldtrsb`/`ldtrsh`) sign-extend to 32 bits and zero bits 63:32, as the
+  Arm ARM's `X[t, 32] = SignExtend(data, 32)` does and an Apple M4 does when run natively.
+  Upstream sign-extended them into all 64 bits, and zero-extended the `ldursb`/`ldtrsb`
+  byte. Each of the eight `Rt_GPR32` constructors now lifts as
+  `local tmp:4 = sext(*:N addr); Rt_GPR64 = zext(tmp);`; the `X` forms, `ldrsw` and
+  `ldapursb`/`ldapursh` were already right. Re-apply with
+  `scripts/sleigh/apply_aarch64_w_signed_loads.py`. Upstream: NationalSecurityAgency/ghidra#6471.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 
