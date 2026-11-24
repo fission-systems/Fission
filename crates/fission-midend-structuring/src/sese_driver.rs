@@ -20,7 +20,8 @@ use crate::linear_types::structuring_diag_enabled;
 use crate::loop_analysis::LoopBody;
 use crate::loops::{
     try_lower_dowhile, try_lower_for, try_lower_infloop, try_lower_infloop_with_break,
-    try_lower_multiblock_dowhile, try_lower_multiblock_infloop, try_lower_while,
+    try_lower_multiblock_dowhile, try_lower_multiblock_infloop, try_lower_single_exit_loop,
+    try_lower_while,
 };
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
@@ -104,6 +105,9 @@ pub fn apply_collapse_rule(
             let mut inf = try_lower_infloop(host, idx);
             if inf.is_err() || matches!(inf, Ok(None)) {
                 inf = try_lower_multiblock_infloop(host, idx);
+            }
+            if inf.is_err() || matches!(inf, Ok(None)) {
+                inf = try_lower_single_exit_loop(host, idx);
             }
             inf
         }
