@@ -1,3 +1,4 @@
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
 
 /// Simplifies comparisons involving 3-way comparisons.
@@ -173,10 +174,12 @@ fn detect_three_way(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, PreHir
     if terms.len() != 3 {
         return None;
     }
-    // Find the constant -1
+    // Find the constant -1 (requires at least a 2-bit integer type; on 1-bit types +1 == -1 mod 2)
     let const_idx = terms.iter().position(|t| {
         if let PreHirExpr::Const(val, ty) = t {
             let mask = match ty {
+                NirType::Bool => return false,
+                NirType::Int { bits, .. } if *bits < 2 => return false,
                 NirType::Int { bits, .. } => {
                     (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1)) as i64
                 }
@@ -205,21 +208,22 @@ fn detect_three_way(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, PreHir
     let (op1, lhs1, rhs1) = comparisons[0];
     let (op2, lhs2, rhs2) = comparisons[1];
 
-    // Check if lhs1 == lhs2 and rhs1 == rhs2
-    if lhs1 != lhs2 || rhs1 != rhs2 {
+    // Check if lhs1 == lhs2 and rhs1 == rhs2 and neither operand has side effects
+    if lhs1 != lhs2 || rhs1 != rhs2 || expr_has_side_effects(lhs1) || expr_has_side_effects(rhs1) {
         return None;
     }
 
-    // One must be less than, the other must be less-than-or-equal
-    let is_less = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Lt | PreHirBinaryOp::SLt);
-    let is_lesseq = |op: PreHirBinaryOp| matches!(op, PreHirBinaryOp::Le | PreHirBinaryOp::SLe);
-
-    if (is_less(op1) && is_lesseq(op2)) || (is_lesseq(op1) && is_less(op2)) {
-        let less_op = if is_less(op1) { op1 } else { op2 };
-        return Some((lhs1.clone(), rhs1.clone(), less_op));
-    }
-
-    None
+    // One must be strict less-than and the other less-than-or-equal with matching signedness.
+    let less_op = match (op1, op2) {
+        (PreHirBinaryOp::Lt, PreHirBinaryOp::Le) | (PreHirBinaryOp::Le, PreHirBinaryOp::Lt) => {
+            PreHirBinaryOp::Lt
+        }
+        (PreHirBinaryOp::SLt, PreHirBinaryOp::SLe) | (PreHirBinaryOp::SLe, PreHirBinaryOp::SLt) => {
+            PreHirBinaryOp::SLt
+        }
+        _ => return None,
+    };
+    Some((lhs1.clone(), rhs1.clone(), less_op))
 }
 
 enum TargetRelation {
@@ -264,13 +268,15 @@ fn try_simplify_three_way_cmp(
         _ => return None,
     };
 
-    let is_minus_one = const_val == -1
-        || match const_ty {
-            NirType::Int { bits, .. } if *bits < 64 => {
-                const_val as u64 == (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1))
-            }
-            _ => false,
-        };
+    let is_minus_one = match const_ty {
+        NirType::Bool => return None,
+        NirType::Int { bits, .. } if *bits < 2 => return None,
+        NirType::Int { bits, .. } if *bits < 64 => {
+            const_val == -1
+                || const_val as u64 == (1u64.checked_shl(*bits).unwrap_or(0).wrapping_sub(1))
+        }
+        _ => const_val == -1,
+    };
 
     let (v, w, less_op) = detect_three_way(three_way_expr)?;
 
@@ -556,5 +562,105 @@ mod tests {
         assert_eq!(op, PreHirBinaryOp::Le);
         assert_eq!(lhs, PreHirExpr::Var("b".to_string()));
         assert_eq!(rhs, PreHirExpr::Var("a".to_string()));
+    }
+
+    #[test]
+    fn three_way_rejects_one_bit_mixed_signedness_and_side_effects() {
+        let u1_ty = NirType::Int {
+            bits: 1,
+            signed: false,
+        };
+        let a = PreHirExpr::Var("a".to_string());
+        let b = PreHirExpr::Var("b".to_string());
+        let mk_bin = |op, ty: NirType, l: PreHirExpr, r: PreHirExpr| PreHirExpr::Cast {
+            ty: ty.clone(),
+            expr: Box::new(PreHirExpr::Binary {
+                op,
+                lhs: Box::new(l),
+                rhs: Box::new(r),
+                ty: NirType::Bool,
+            }),
+        };
+
+        // 1-bit constant `-1`/`1` ambiguity must not be simplified.
+        let one_bit_3way = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(mk_bin(
+                    PreHirBinaryOp::Lt,
+                    u1_ty.clone(),
+                    a.clone(),
+                    b.clone(),
+                )),
+                rhs: Box::new(mk_bin(
+                    PreHirBinaryOp::Le,
+                    u1_ty.clone(),
+                    a.clone(),
+                    b.clone(),
+                )),
+                ty: u1_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(1, u1_ty.clone())),
+            ty: u1_ty.clone(),
+        };
+        assert!(detect_three_way(&one_bit_3way).is_none());
+
+        let valid_3way = make_3way_expr();
+        assert!(
+            try_simplify_three_way_cmp(
+                PreHirBinaryOp::Eq,
+                &valid_3way,
+                &PreHirExpr::Const(1, u1_ty)
+            )
+            .is_none()
+        );
+        assert!(
+            try_simplify_three_way_cmp(
+                PreHirBinaryOp::Eq,
+                &valid_3way,
+                &PreHirExpr::Const(1, NirType::Bool)
+            )
+            .is_none()
+        );
+
+        // Mixed signedness (Lt + SLe) must be rejected.
+        let mixed = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(mk_bin(PreHirBinaryOp::Lt, u32_ty(), a.clone(), b.clone())),
+                rhs: Box::new(mk_bin(PreHirBinaryOp::SLe, u32_ty(), a.clone(), b.clone())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(-1, u32_ty())),
+            ty: u32_ty(),
+        };
+        assert!(detect_three_way(&mixed).is_none());
+
+        // Side-effecting operand (e.g., Call) must not be duplicated into detect_three_way.
+        let effect = PreHirExpr::Call {
+            origin: None,
+            target: "side_effect".to_string(),
+            args: Vec::new(),
+            ty: u32_ty(),
+        };
+        let effect_3way = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(mk_bin(
+                    PreHirBinaryOp::Lt,
+                    u32_ty(),
+                    effect.clone(),
+                    b.clone(),
+                )),
+                rhs: Box::new(mk_bin(PreHirBinaryOp::Le, u32_ty(), effect, b)),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(-1, u32_ty())),
+            ty: u32_ty(),
+        };
+        assert!(detect_three_way(&effect_3way).is_none());
     }
 }

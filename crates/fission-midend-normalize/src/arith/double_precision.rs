@@ -300,6 +300,12 @@ fn rewrite_recombine_exprs(
                     defs.remove(v);
                 }
             }
+            PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {
+                defs.clear();
+            }
             _ => {}
         }
     }
@@ -433,6 +439,10 @@ fn get_var_name(expr: &PreHirExpr) -> Option<String> {
         PreHirExpr::Var(name) => Some(name.clone()),
         _ => None,
     }
+}
+
+fn same_var(a: &PreHirExpr, b: &PreHirExpr) -> bool {
+    matches!((get_var_name(a), get_var_name(b)), (Some(x), Some(y)) if x == y)
 }
 
 fn try_reconstruct(
@@ -727,25 +737,22 @@ fn is_carry_of_depth(
     }
     let expr = strip_casts(carry_expr);
     if let PreHirExpr::Binary {
-        op: PreHirBinaryOp::Lt | PreHirBinaryOp::SLt,
+        op: PreHirBinaryOp::Lt,
         lhs,
         rhs,
         ..
     } = expr
     {
         let l = get_var_name(lhs);
-        let r = get_var_name(rhs);
-        if l.as_deref() == Some(lo_name) && (r == get_var_name(lo1) || r == get_var_name(lo2)) {
+        if l.as_deref() == Some(lo_name) && (same_var(rhs, lo1) || same_var(rhs, lo2)) {
             return true;
         }
     }
     if let PreHirExpr::Call { target, args, .. } = expr {
         if target == "__carry" && args.len() >= 2 {
-            let a = get_var_name(&args[0]);
-            let b = get_var_name(&args[1]);
-            let lo1_var = get_var_name(lo1);
-            let lo2_var = get_var_name(lo2);
-            if (a == lo1_var && b == lo2_var) || (a == lo2_var && b == lo1_var) {
+            if (same_var(&args[0], lo1) && same_var(&args[1], lo2))
+                || (same_var(&args[0], lo2) && same_var(&args[1], lo1))
+            {
                 return true;
             }
         }
@@ -808,25 +815,14 @@ fn is_borrow_of_depth(
     }
     let expr = strip_casts(borrow_expr);
     if let PreHirExpr::Binary {
-        op: PreHirBinaryOp::Lt | PreHirBinaryOp::SLt,
+        op: PreHirBinaryOp::Lt,
         lhs,
         rhs,
         ..
     } = expr
     {
-        let l = get_var_name(lhs);
-        let r = get_var_name(rhs);
-        if l == get_var_name(lo1) && r == get_var_name(lo2) {
+        if same_var(lhs, lo1) && same_var(rhs, lo2) {
             return true;
-        }
-    }
-    if let PreHirExpr::Call { target, args, .. } = expr {
-        if target == "__sborrow" && args.len() >= 2 {
-            let a = get_var_name(&args[0]);
-            let b = get_var_name(&args[1]);
-            if a == get_var_name(lo1) && b == get_var_name(lo2) {
-                return true;
-            }
         }
     }
     if let PreHirExpr::Var(name) = expr {
@@ -886,7 +882,7 @@ fn match_hi_shl_mix(
             if let Some((lo_src, shr_amt)) = match_shr(rhs) {
                 if shl_amt + shr_amt == 32
                     && shl_amt == expected_shift
-                    && get_var_name(&lo_src) == get_var_name(expected_lo_src)
+                    && same_var(&lo_src, expected_lo_src)
                 {
                     return Some((hi_src, shl_amt));
                 }
@@ -896,7 +892,7 @@ fn match_hi_shl_mix(
             if let Some((lo_src, shr_amt)) = match_shr(lhs) {
                 if shl_amt + shr_amt == 32
                     && shl_amt == expected_shift
-                    && get_var_name(&lo_src) == get_var_name(expected_lo_src)
+                    && same_var(&lo_src, expected_lo_src)
                 {
                     return Some((hi_src, shl_amt));
                 }
@@ -923,7 +919,7 @@ fn match_lo_shr_mix(
             if let Some((hi_src, shl_amt)) = match_shl(rhs) {
                 if shl_amt + shr_amt == 32
                     && shr_amt == expected_shift
-                    && get_var_name(&hi_src) == get_var_name(expected_hi_src)
+                    && same_var(&hi_src, expected_hi_src)
                 {
                     return Some((lo_src, shr_amt));
                 }
@@ -933,7 +929,7 @@ fn match_lo_shr_mix(
             if let Some((hi_src, shl_amt)) = match_shl(lhs) {
                 if shl_amt + shr_amt == 32
                     && shr_amt == expected_shift
-                    && get_var_name(&hi_src) == get_var_name(expected_hi_src)
+                    && same_var(&hi_src, expected_hi_src)
                 {
                     return Some((lo_src, shr_amt));
                 }
@@ -1473,5 +1469,200 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn non_var_expressions_and_signed_carry_borrow_do_not_match() {
+        let lo1 = PreHirExpr::Const(1, u32_ty());
+        let lo2 = PreHirExpr::Const(2, u32_ty());
+        let defs = HashMap::default();
+
+        // None == None must NOT trigger on non-Var expressions in borrow, __carry, or shift mixes.
+        let non_var_lt = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Const(9, u32_ty())),
+            rhs: Box::new(PreHirExpr::Const(10, u32_ty())),
+            ty: NirType::Bool,
+        };
+        assert!(!is_borrow_of(&non_var_lt, &lo1, &lo2, "lo", &defs));
+
+        let non_var_carry_call = PreHirExpr::Call {
+            origin: None,
+            target: "__carry".to_string(),
+            args: vec![
+                PreHirExpr::Const(5, u32_ty()),
+                PreHirExpr::Const(6, u32_ty()),
+            ],
+            ty: NirType::Bool,
+        };
+        assert!(!is_carry_of(&non_var_carry_call, &lo1, &lo2, "lo", &defs));
+
+        let non_var_carry_lt = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(var("lo")),
+            rhs: Box::new(PreHirExpr::Const(7, u32_ty())),
+            ty: NirType::Bool,
+        };
+        assert!(!is_carry_of(&non_var_carry_lt, &lo1, &lo2, "lo", &defs));
+
+        // Signed SLt and __sborrow must NOT match unsigned carry/borrow.
+        let slt_borrow = PreHirExpr::Binary {
+            op: PreHirBinaryOp::SLt,
+            lhs: Box::new(var("a")),
+            rhs: Box::new(var("b")),
+            ty: NirType::Bool,
+        };
+        assert!(!is_borrow_of(
+            &slt_borrow,
+            &var("a"),
+            &var("b"),
+            "lo",
+            &defs
+        ));
+        assert!(!is_carry_of(
+            &PreHirExpr::Binary {
+                op: PreHirBinaryOp::SLt,
+                lhs: Box::new(var("lo")),
+                rhs: Box::new(var("a")),
+                ty: NirType::Bool,
+            },
+            &var("a"),
+            &var("b"),
+            "lo",
+            &defs,
+        ));
+        let sborrow_call = PreHirExpr::Call {
+            origin: None,
+            target: "__sborrow".to_string(),
+            args: vec![var("a"), var("b")],
+            ty: NirType::Bool,
+        };
+        assert!(!is_borrow_of(
+            &sborrow_call,
+            &var("a"),
+            &var("b"),
+            "lo",
+            &defs
+        ));
+
+        // match_hi_shl_mix / match_lo_shr_mix must not match when expected src is a non-Var.
+        let mix_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(var("hi")),
+                rhs: Box::new(PreHirExpr::Const(4, u32_ty())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Const(99, u32_ty())),
+                rhs: Box::new(PreHirExpr::Const(28, u32_ty())),
+                ty: u32_ty(),
+            }),
+            ty: u32_ty(),
+        };
+        assert!(match_hi_shl_mix(&mix_expr, &PreHirExpr::Const(1, u32_ty()), 4).is_none());
+        assert!(match_lo_shr_mix(&mix_expr, &PreHirExpr::Const(1, u32_ty()), 28).is_none());
+    }
+
+    #[test]
+    fn label_and_goto_clear_defs_in_rewrite_recombine_exprs() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let shl_expr = |src: PreHirExpr, amt: i64| PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shl,
+            lhs: Box::new(src),
+            rhs: Box::new(PreHirExpr::Const(amt, u32_ty())),
+            ty: u32_ty(),
+        };
+        let shr_expr = |src: PreHirExpr, amt: i64| PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(src),
+            rhs: Box::new(PreHirExpr::Const(amt, u32_ty())),
+            ty: u32_ty(),
+        };
+
+        let mut func = PreHirFunction {
+            name: "dp_label_clears_defs".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "lo".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "hi".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "lo1".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "hi1".into(),
+                    ty: u32_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "res".into(),
+                    ty: u64_ty.clone(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("lo".into()),
+                    rhs: shl_expr(var("lo1"), 4),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("hi".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: Box::new(shl_expr(var("hi1"), 4)),
+                        rhs: Box::new(shr_expr(var("lo1"), 28)),
+                        ty: u32_ty(),
+                    },
+                },
+                PreHirStmt::Label("join".into()),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("res".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shl,
+                            lhs: Box::new(PreHirExpr::Cast {
+                                ty: u64_ty.clone(),
+                                expr: Box::new(var("hi")),
+                            }),
+                            rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                            ty: u64_ty.clone(),
+                        }),
+                        rhs: Box::new(PreHirExpr::Cast {
+                            ty: u64_ty.clone(),
+                            expr: Box::new(var("lo")),
+                        }),
+                        ty: u64_ty,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_double_precision_reconstruction_pass(&mut func));
     }
 }
