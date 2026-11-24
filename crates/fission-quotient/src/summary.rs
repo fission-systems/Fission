@@ -1882,6 +1882,30 @@ impl<'a> Executor<'a> {
         }))
     }
 
+    /// Whether `address` is a register the caller set up and the slice
+    /// never wrote (a whole word) plus a constant: the thread pointer of
+    /// thread-local storage, where the stack protector keeps its canary.
+    /// Not a pointer field and not a region; refused with its own reason.
+    fn environment_place(&self, address: &SymExpr) -> Option<(u64, i64)> {
+        let mut base = None;
+        let mut offset = 0i64;
+        for term in addends(address) {
+            if let Some(constant) = as_const(&term) {
+                offset = offset.wrapping_add(signed_of(constant, width(&term)));
+                continue;
+            }
+            let register = self
+                .live_ins
+                .iter()
+                .find(|(_, var)| **var == term)
+                .map(|(register, _)| *register)?;
+            if base.replace(register).is_some() {
+                return None;
+            }
+        }
+        base.map(|base| (base, offset))
+    }
+
     /// Whether `value` is memory read as it was when the step began --
     /// one slot variable, or adjacent pieces of them in byte order -- and
     /// if so, the `(offset, size)` it was read from.
@@ -2027,6 +2051,9 @@ impl<'a> Executor<'a> {
                     },
                     Val::Bits(address) => {
                         self.discover(op, &address, "a load")?;
+                        if self.environment_place(&address).is_some() {
+                            return self.unsupported(op, ENVIRONMENT_READ);
+                        }
                         return self.unsupported(
                             op,
                             match as_const(&address) {
@@ -2069,6 +2096,9 @@ impl<'a> Executor<'a> {
                         index: Some(index),
                         ..
                     } => self.indexed_store(state, op, region, offset, &index, size, value),
+                    Val::Bits(address) if self.environment_place(&address).is_some() => {
+                        self.unsupported(op, ENVIRONMENT_READ)
+                    }
                     Val::Bits(address) => {
                         self.discover(op, &address, "a store")?;
                         self.unsupported(
@@ -2301,6 +2331,13 @@ fn shift(kind: Bin, value: SymExpr, amount: SymExpr) -> SymExpr {
         bin(kind, value, extract(amount, 0, bits)),
     )
 }
+
+/// Why a load or store at a constant offset from a register the caller set
+/// up is refused. That memory is the environment's (thread-local storage;
+/// on x86-64 the stack protector's `fs:[0x28]`), outside every boundary, and
+/// the emulator's call harness gives the thread pointer nothing to point at.
+const ENVIRONMENT_READ: &str = "an access at a constant offset from a register the caller set up \
+     (thread-local storage, such as the stack protector's canary)";
 
 /// The terms of a sum, flattened.
 fn addends(value: &SymExpr) -> Vec<SymExpr> {

@@ -199,6 +199,7 @@ CATEGORIES = (
                                               "decode does not list")),
     ("call: more calls per step than ports", ("calls in one step",)),
     ("call: parameters past the argument registers", ("do not all fit the",)),
+    ("thread-local storage (stack protector canary)", ("thread-local storage",)),
     ("data-computed address", ("through an address computed from data",
                                "through an address offset by data",
                                "an address offset by data")),

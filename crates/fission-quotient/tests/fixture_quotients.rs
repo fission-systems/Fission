@@ -586,6 +586,14 @@ fn what_the_region_model_cannot_vouch_for_is_unsupported() {
         "{:?}",
         retarget.status
     );
+    // Thread-local storage is reached from a register, not a field: not a
+    // region, and said so.
+    let tls = quotient("tls_step");
+    assert!(
+        unsupported_reason(&tls).contains("thread-local storage"),
+        "{:?}",
+        tls.status
+    );
     let alias = quotient_over(
         X86_64,
         "alias_step",

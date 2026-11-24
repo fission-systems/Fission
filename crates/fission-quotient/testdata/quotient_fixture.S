@@ -447,3 +447,16 @@ alias_step:
         mov     eax, r8d
         ret
         .size   alias_step, .-alias_step
+
+/*
+ * Thread-local storage: the stack protector's canary at a constant offset
+ * from the thread pointer, a register the caller set up. Not a pointer
+ * field, so not a region: refused with its own reason.
+ */
+        .globl  tls_step
+        .type   tls_step,@function
+tls_step:
+        mov     rax, qword ptr fs:[0x28]
+        xor     eax, eax
+        ret
+        .size   tls_step, .-tls_step
