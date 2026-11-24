@@ -534,6 +534,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 "counterexamples": [{
                                     // Numbers, as the ground-truth tier's are.
                                     "args": cx.args,
+                                    "arg_widths": cx.arg_widths,
                                 }],
                             }),
                         ),
@@ -541,6 +542,12 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                             "unsupported",
                             format!("Unsupported({reason})"),
                             reason.to_string(),
+                            serde_json::json!({}),
+                        ),
+                        fission_dir::symbolic::SymbolicOutcome::Inconclusive { reason } => (
+                            "inconclusive",
+                            format!("Inconclusive({reason})"),
+                            reason,
                             serde_json::json!({}),
                         ),
                     };
