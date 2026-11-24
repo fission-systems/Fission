@@ -149,8 +149,7 @@ impl<'a> Evaluator<'a> {
     /// A varnode's value as a `u128`, zero-extended from its own width.
     ///
     /// Meaningful up to sixteen bytes. Wider than that -- a YMM at 32, a ZMM at
-    /// 64 -- still has to go a byte at a time, but nothing arithmetic reaches
-    /// those: the vector ops on them lift to `CALLOTHER`.
+    /// 64 -- goes through `try_step_wide_bytes` one little-endian byte at a time.
     pub(crate) fn read_varnode_u128(&mut self, vn: &Varnode) -> Result<u128> {
         if vn.is_constant {
             return Ok(truncate_u128(vn.constant_val as i128 as u128, vn.size));
@@ -171,63 +170,122 @@ impl<'a> Evaluator<'a> {
             .write_space(vn.space_id, vn.offset, &bytes[..size])
     }
 
-    /// Does this op have an operand that is too wide for `u64` and narrow
-    /// enough for `u128`?
-    ///
-    /// The comparison ops are why the *inputs* are checked and not just the
-    /// output: `IntNotEqual` on two XMM halves produces one byte, and doing it
-    /// in `u64` compares half of each.
-    fn needs_u128(op: &PcodeOp) -> bool {
-        let wide = |vn: &Varnode| vn.size > 8 && vn.size <= 16;
-        op.output.as_ref().is_some_and(wide) || op.inputs.iter().any(wide)
+    fn max_varnode_size(op: &PcodeOp) -> u32 {
+        let out_size = op.output.as_ref().map_or(0, |vn| vn.size);
+        op.inputs.iter().fold(out_size, |acc, vn| acc.max(vn.size))
     }
 
-    /// Which opcodes the 128-bit path implements.
+    /// Does this op belong in the 128-bit fast path (max operand in 9..=16 bytes)?
     ///
-    /// One list, read by two callers: the evaluator, to decide whether to take
-    /// the path, and the JIT compiler, to decide whether to hand the op back
-    /// to the evaluator instead of emitting its own eight-byte version of it.
-    /// A wide op the two engines lower differently is exactly the kind of
-    /// disagreement the differential gate exists to catch, so they read the
-    /// same list rather than each keeping one.
-    pub(crate) fn u128_handled(op: &PcodeOp) -> bool {
+    /// Mixed 16- and 32-byte ops (such as `t:32 = INT_ZEXT xmm:16` or
+    /// `xmm:16 = SUBPIECE t:32, 16`) must NOT enter `try_step_u128`, because
+    /// `read_varnode_u128` truncates any operand wider than 16 bytes.
+    fn needs_u128(op: &PcodeOp) -> bool {
+        let max = Self::max_varnode_size(op);
+        max > 8 && max <= 16
+    }
+
+    fn u128_opcode(opcode: PcodeOpcode) -> bool {
         use PcodeOpcode as Op;
-        Self::needs_u128(op)
-            && op.output.is_some()
-            && matches!(
-                op.opcode,
-                Op::IntAdd
-                    | Op::PtrAdd
-                    | Op::IntSub
-                    | Op::PtrSub
-                    | Op::IntMult
-                    | Op::IntAnd
-                    | Op::IntOr
-                    | Op::IntXor
-                    | Op::IntDiv
-                    | Op::IntRem
-                    | Op::IntSDiv
-                    | Op::IntSRem
-                    | Op::IntLeft
-                    | Op::IntRight
-                    | Op::IntSRight
-                    | Op::IntNegate
-                    | Op::Int2Comp
-                    | Op::IntEqual
-                    | Op::IntNotEqual
-                    | Op::IntLess
-                    | Op::IntLessEqual
-                    | Op::IntSLess
-                    | Op::IntSLessEqual
-                    | Op::IntZExt
-                    | Op::IntSExt
-                    | Op::SubPiece
-                    | Op::Piece
-                    | Op::IntCarry
-                    | Op::IntSCarry
-                    | Op::IntSBorrow
-                    | Op::LzCount
-            )
+        matches!(
+            opcode,
+            Op::IntAdd
+                | Op::PtrAdd
+                | Op::IntSub
+                | Op::PtrSub
+                | Op::IntMult
+                | Op::IntAnd
+                | Op::IntOr
+                | Op::IntXor
+                | Op::IntDiv
+                | Op::IntRem
+                | Op::IntSDiv
+                | Op::IntSRem
+                | Op::IntLeft
+                | Op::IntRight
+                | Op::IntSRight
+                | Op::IntNegate
+                | Op::Int2Comp
+                | Op::IntEqual
+                | Op::IntNotEqual
+                | Op::IntLess
+                | Op::IntLessEqual
+                | Op::IntSLess
+                | Op::IntSLessEqual
+                | Op::IntZExt
+                | Op::IntSExt
+                | Op::SubPiece
+                | Op::Piece
+                | Op::IntCarry
+                | Op::IntSCarry
+                | Op::IntSBorrow
+                | Op::LzCount
+        )
+    }
+
+    fn wide_bytes_opcode(opcode: PcodeOpcode) -> bool {
+        use PcodeOpcode as Op;
+        matches!(
+            opcode,
+            Op::IntLeft
+                | Op::IntRight
+                | Op::IntSRight
+                | Op::IntAnd
+                | Op::IntOr
+                | Op::IntXor
+                | Op::IntNegate
+                | Op::IntZExt
+                | Op::IntSExt
+                | Op::SubPiece
+                | Op::Piece
+                | Op::IntAdd
+                | Op::IntSub
+                | Op::Int2Comp
+                | Op::IntEqual
+                | Op::IntNotEqual
+                | Op::IntLess
+                | Op::IntLessEqual
+                | Op::IntSLess
+                | Op::IntSLessEqual
+                | Op::LzCount
+                | Op::PopCount
+        )
+    }
+
+    /// Which wide (>8-byte) integer ops the evaluator implements.
+    ///
+    /// One predicate, read by two callers: `try_step_wide` here, and the JIT
+    /// compiler to hand the op back to the evaluator instead of emitting an
+    /// 8-byte lowering that drops the upper bytes.
+    pub(crate) fn wide_handled(op: &PcodeOp) -> bool {
+        if op.output.is_none() {
+            return false;
+        }
+        let max_size = Self::max_varnode_size(op);
+        if max_size > 16 {
+            Self::wide_bytes_opcode(op.opcode)
+        } else if max_size > 8 {
+            Self::u128_opcode(op.opcode)
+        } else {
+            false
+        }
+    }
+
+    /// Wide integer dispatch (>8 bytes): routes 9..=16-byte ops through `u128`
+    /// and >16-byte ops (e.g., 32-byte temporaries from `PALIGNR` or AVX/SVE
+    /// extensions) through arbitrary-width little-endian byte evaluation.
+    pub(crate) fn try_step_wide(&mut self, op: &PcodeOp) -> Result<bool> {
+        if op.output.is_none() {
+            return Ok(false);
+        }
+        let max_size = Self::max_varnode_size(op);
+        if max_size > 16 {
+            self.try_step_wide_bytes(op)
+        } else if max_size > 8 {
+            self.try_step_u128(op)
+        } else {
+            Ok(false)
+        }
     }
 
     /// The 128-bit integer path.
@@ -247,10 +305,10 @@ impl<'a> Evaluator<'a> {
     /// program, right only while `RDX` happens to be zero.
     pub(crate) fn try_step_u128(&mut self, op: &PcodeOp) -> Result<bool> {
         use PcodeOpcode as Op;
-        if !Self::u128_handled(op) {
+        if !(op.output.is_some() && Self::needs_u128(op) && Self::u128_opcode(op.opcode)) {
             return Ok(false);
         }
-        let out = op.output.clone().expect("checked by u128_handled");
+        let out = op.output.clone().expect("checked above");
 
         // Signed operands are sign-extended from their own varnode width, not
         // from 128 bits: `IntSLess` on two 16-byte values is already full
@@ -430,9 +488,221 @@ impl<'a> Evaluator<'a> {
                 self.write_varnode_u128(&out, value)?;
             }
 
-            // Unreachable while this and `u128_handled` agree. If they ever
+            // Unreachable while this and `wide_handled` agree. If they ever
             // stop agreeing, the JIT will have handed the op here expecting it
             // to be done -- so say so rather than dropping it silently.
+            other => {
+                self.unimplemented = Some(other);
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn read_shift_count(&mut self, vn: &Varnode) -> Result<Option<usize>> {
+        let bytes = self.read_varnode_bytes(vn)?;
+        if bytes.iter().skip(8).any(|&b| b != 0) {
+            return Ok(None);
+        }
+        Ok(usize::try_from(le_bytes_to_u64(&bytes)).ok())
+    }
+
+    fn write_le_u64_to_wide(&mut self, vn: &Varnode, val: u64) -> Result<()> {
+        let mut res = vec![0u8; vn.size as usize];
+        let bytes = val.to_le_bytes();
+        let take = res.len().min(8);
+        res[..take].copy_from_slice(&bytes[..take]);
+        self.write_varnode_bytes(vn, &res)
+    }
+
+    /// Arbitrary-width little-endian integer evaluation for ops with any
+    /// operand wider than 16 bytes (such as 32-byte `PALIGNR` temporaries or
+    /// 32/64-byte AVX/SVE extensions and slices).
+    pub(crate) fn try_step_wide_bytes(&mut self, op: &PcodeOp) -> Result<bool> {
+        use PcodeOpcode as Op;
+        use std::cmp::Ordering;
+        if !(op.output.is_some()
+            && Self::max_varnode_size(op) > 16
+            && Self::wide_bytes_opcode(op.opcode))
+        {
+            return Ok(false);
+        }
+        let out = op.output.clone().expect("checked above");
+        let out_len = out.size as usize;
+
+        match op.opcode {
+            Op::IntLeft => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let shift = self.read_shift_count(&op.inputs[1])?;
+                let res = shift_left_bytes(&a, out_len, shift);
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntRight => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let shift = self.read_shift_count(&op.inputs[1])?;
+                let res = shift_right_bytes(&a, out_len, shift, 0);
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntSRight => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let shift = self.read_shift_count(&op.inputs[1])?;
+                let fill = if a.last().is_some_and(|&b| (b & 0x80) != 0) {
+                    0xFF
+                } else {
+                    0x00
+                };
+                let res = shift_right_bytes(&a, out_len, shift, fill);
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntAnd | Op::IntOr | Op::IntXor => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let b = self.read_varnode_bytes(&op.inputs[1])?;
+                let res: Vec<u8> = (0..out_len)
+                    .map(|i| {
+                        let x = a.get(i).copied().unwrap_or(0);
+                        let y = b.get(i).copied().unwrap_or(0);
+                        match op.opcode {
+                            Op::IntAnd => x & y,
+                            Op::IntOr => x | y,
+                            Op::IntXor => x ^ y,
+                            _ => unreachable!(),
+                        }
+                    })
+                    .collect();
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntNegate => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let res: Vec<u8> = (0..out_len)
+                    .map(|i| !a.get(i).copied().unwrap_or(0))
+                    .collect();
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntZExt => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let mut res = vec![0u8; out_len];
+                let take = a.len().min(out_len);
+                res[..take].copy_from_slice(&a[..take]);
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntSExt => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let fill = if a.last().is_some_and(|&b| (b & 0x80) != 0) {
+                    0xFF
+                } else {
+                    0x00
+                };
+                let mut res = vec![fill; out_len];
+                let take = a.len().min(out_len);
+                res[..take].copy_from_slice(&a[..take]);
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::SubPiece => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let byte_offset = self.read_shift_count(&op.inputs[1])?;
+                let mut res = vec![0u8; out_len];
+                if let Some(off) = byte_offset
+                    && off < a.len()
+                {
+                    let take = (a.len() - off).min(out_len);
+                    res[..take].copy_from_slice(&a[off..off + take]);
+                }
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::Piece => {
+                let hi = self.read_varnode_bytes(&op.inputs[0])?;
+                let lo = self.read_varnode_bytes(&op.inputs[1])?;
+                let mut res = vec![0u8; out_len];
+                let lo_take = lo.len().min(out_len);
+                res[..lo_take].copy_from_slice(&lo[..lo_take]);
+                if lo.len() < out_len {
+                    let hi_take = hi.len().min(out_len - lo.len());
+                    res[lo.len()..lo.len() + hi_take].copy_from_slice(&hi[..hi_take]);
+                }
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntAdd => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let b = self.read_varnode_bytes(&op.inputs[1])?;
+                let mut res = vec![0u8; out_len];
+                let mut carry = 0u16;
+                for (i, slot) in res.iter_mut().enumerate() {
+                    let av = u16::from(a.get(i).copied().unwrap_or(0));
+                    let bv = u16::from(b.get(i).copied().unwrap_or(0));
+                    let sum = av + bv + carry;
+                    *slot = sum as u8;
+                    carry = sum >> 8;
+                }
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntSub => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let b = self.read_varnode_bytes(&op.inputs[1])?;
+                let mut res = vec![0u8; out_len];
+                let mut borrow = 0i16;
+                for (i, slot) in res.iter_mut().enumerate() {
+                    let av = i16::from(a.get(i).copied().unwrap_or(0));
+                    let bv = i16::from(b.get(i).copied().unwrap_or(0));
+                    let diff = av - bv - borrow;
+                    if diff < 0 {
+                        *slot = (diff + 256) as u8;
+                        borrow = 1;
+                    } else {
+                        *slot = diff as u8;
+                        borrow = 0;
+                    }
+                }
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::Int2Comp => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let mut res = vec![0u8; out_len];
+                let mut carry = 1u16;
+                for (i, slot) in res.iter_mut().enumerate() {
+                    let av = u16::from(!a.get(i).copied().unwrap_or(0));
+                    let sum = av + carry;
+                    *slot = sum as u8;
+                    carry = sum >> 8;
+                }
+                self.write_varnode_bytes(&out, &res)?;
+            }
+            Op::IntEqual
+            | Op::IntNotEqual
+            | Op::IntLess
+            | Op::IntLessEqual
+            | Op::IntSLess
+            | Op::IntSLessEqual => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let b = self.read_varnode_bytes(&op.inputs[1])?;
+                let signed = matches!(op.opcode, Op::IntSLess | Op::IntSLessEqual);
+                let ord = cmp_le_bytes(&a, &b, signed);
+                let pred = match op.opcode {
+                    Op::IntEqual => ord == Ordering::Equal,
+                    Op::IntNotEqual => ord != Ordering::Equal,
+                    Op::IntLess | Op::IntSLess => ord == Ordering::Less,
+                    Op::IntLessEqual | Op::IntSLessEqual => ord != Ordering::Greater,
+                    _ => unreachable!(),
+                };
+                self.write_le_u64_to_wide(&out, u64::from(pred))?;
+            }
+            Op::PopCount => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let ones: u64 = a.iter().map(|b| u64::from(b.count_ones())).sum();
+                self.write_le_u64_to_wide(&out, ones)?;
+            }
+            Op::LzCount => {
+                let a = self.read_varnode_bytes(&op.inputs[0])?;
+                let mut lz = 0u64;
+                for &b in a.iter().rev() {
+                    if b == 0 {
+                        lz += 8;
+                    } else {
+                        lz += u64::from(b.leading_zeros());
+                        break;
+                    }
+                }
+                self.write_le_u64_to_wide(&out, lz)?;
+            }
             other => {
                 self.unimplemented = Some(other);
                 return Ok(false);
@@ -467,13 +737,14 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// Read a float value from a varnode. Returns (bits, size_bytes).
+    /// Read a float value from a varnode.
     fn read_varnode_f64(&mut self, vn: &Varnode) -> Result<f64> {
         if vn.is_constant {
             // The constant is the raw bits of a float of the varnode's size: a
-            // four-byte one is a single-precision value, not the low half of a
-            // double (which reads as a denormal near zero).
+            // two- or four-byte one is a half- or single-precision value, not
+            // the low bits of a double (which reads as zero or a subnormal).
             return Ok(match vn.size {
+                2 => f16_to_f64(vn.constant_val as u16),
                 4 => f32::from_bits(vn.constant_val as u32) as f64,
                 _ => f64::from_bits(vn.constant_val as u64),
             });
@@ -482,6 +753,7 @@ impl<'a> Evaluator<'a> {
             .state
             .read_space(vn.space_id, vn.offset, vn.size as usize)?;
         Ok(match vn.size {
+            2 => f16_to_f64(u16::from_le_bytes(data[..2].try_into().unwrap())),
             4 => f32::from_bits(u32::from_le_bytes(data[..4].try_into().unwrap())) as f64,
             8 => f64::from_bits(u64::from_le_bytes(data[..8].try_into().unwrap())),
             10 => x87_to_f64(&data[..10]),
@@ -494,6 +766,10 @@ impl<'a> Evaluator<'a> {
 
     fn write_varnode_f64(&mut self, vn: &Varnode, val: f64) -> Result<()> {
         match vn.size {
+            2 => {
+                let bits = f64_to_f16(val).to_le_bytes();
+                self.state.write_space(vn.space_id, vn.offset, &bits)
+            }
             4 => {
                 let bits = (val as f32).to_bits().to_le_bytes();
                 self.state.write_space(vn.space_id, vn.offset, &bits)
@@ -516,9 +792,9 @@ impl<'a> Evaluator<'a> {
 
     /// Evaluates a single P-Code operation against the current machine state.
     pub fn step(&mut self, op: &PcodeOp) -> Result<StepResult> {
-        // Anything with a varnode between nine and sixteen bytes goes through
-        // the 128-bit path first. See `try_step_u128`.
-        if self.try_step_u128(op)? {
+        // Anything with a varnode wider than eight bytes goes through the wide
+        // path first (`u128` up to 16 bytes, byte slices beyond that).
+        if self.try_step_wide(op)? {
             return Ok(StepResult::Next);
         }
 
@@ -721,56 +997,20 @@ impl<'a> Evaluator<'a> {
 
             // ── Bitwise ───────────────────────────────────────────────────────
             PcodeOpcode::IntAnd => {
-                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
-                    let out = out.clone();
-                    let a = self.read_varnode_bytes(&op.inputs[0])?;
-                    let b = self.read_varnode_bytes(&op.inputs[1])?;
-                    let merged: Vec<u8> = a
-                        .iter()
-                        .zip(b.iter().chain(std::iter::repeat(&0)))
-                        .map(|(x, y)| x & y)
-                        .collect();
-                    self.write_varnode_bytes(&out, &merged)?;
-                } else {
-                    let (a, b, o) = self.int_binary(&op)?;
-                    self.write_varnode_u64(o, a & b)?;
-                }
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, a & b)?;
             }
             PcodeOpcode::IntOr => {
-                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
-                    let out = out.clone();
-                    let a = self.read_varnode_bytes(&op.inputs[0])?;
-                    let b = self.read_varnode_bytes(&op.inputs[1])?;
-                    let merged: Vec<u8> = a
-                        .iter()
-                        .zip(b.iter().chain(std::iter::repeat(&0)))
-                        .map(|(x, y)| x | y)
-                        .collect();
-                    self.write_varnode_bytes(&out, &merged)?;
-                } else {
-                    let (a, b, o) = self.int_binary(&op)?;
-                    self.write_varnode_u64(o, a | b)?;
-                }
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, a | b)?;
             }
             PcodeOpcode::IntXor => {
-                if let Some(out) = op.output.as_ref().filter(|o| Self::is_wide(o)) {
-                    let out = out.clone();
-                    let a = self.read_varnode_bytes(&op.inputs[0])?;
-                    let b = self.read_varnode_bytes(&op.inputs[1])?;
-                    let merged: Vec<u8> = a
-                        .iter()
-                        .zip(b.iter().chain(std::iter::repeat(&0)))
-                        .map(|(x, y)| x ^ y)
-                        .collect();
-                    self.write_varnode_bytes(&out, &merged)?;
-                } else {
-                    let (a, b, o) = self.int_binary(&op)?;
-                    self.write_varnode_u64(o, a ^ b)?;
-                }
+                let (a, b, o) = self.int_binary(&op)?;
+                self.write_varnode_u64(o, a ^ b)?;
             }
             PcodeOpcode::IntLeft => {
                 let (a, b, o) = self.int_binary(&op)?;
-                let bit_width = op.inputs[0].size.saturating_mul(8);
+                let bit_width = op.inputs[0].size.saturating_mul(8).min(64);
                 let value = if b >= u64::from(bit_width) {
                     0
                 } else {
@@ -780,7 +1020,7 @@ impl<'a> Evaluator<'a> {
             }
             PcodeOpcode::IntRight => {
                 let (a, b, o) = self.int_binary(&op)?;
-                let bit_width = op.inputs[0].size.saturating_mul(8);
+                let bit_width = op.inputs[0].size.saturating_mul(8).min(64);
                 let value = if b >= u64::from(bit_width) {
                     0
                 } else {
@@ -794,7 +1034,7 @@ impl<'a> Evaluator<'a> {
                 let out = op.output.as_ref().expect("INT_SRIGHT must have output");
                 let sz = op.inputs[0].size;
                 let a = sign_extend(a_raw, sz);
-                let bit_width = sz.saturating_mul(8);
+                let bit_width = sz.saturating_mul(8).min(64);
                 let res = if b_raw >= u64::from(bit_width) {
                     if a < 0 { -1i64 } else { 0i64 }
                 } else {
@@ -803,19 +1043,9 @@ impl<'a> Evaluator<'a> {
                 self.write_varnode_u64(out, res as u64)?;
             }
             PcodeOpcode::IntNegate => {
-                let out = op
-                    .output
-                    .as_ref()
-                    .expect("INT_NEGATE must have output")
-                    .clone();
-                if Self::is_wide(&out) {
-                    let data = self.read_varnode_bytes(&op.inputs[0])?;
-                    let flipped: Vec<u8> = data.iter().map(|b| !b).collect();
-                    self.write_varnode_bytes(&out, &flipped)?;
-                } else {
-                    let val = self.read_varnode_u64(&op.inputs[0])?;
-                    self.write_varnode_u64(&out, !val)?;
-                }
+                let val = self.read_varnode_u64(&op.inputs[0])?;
+                let out = op.output.as_ref().expect("INT_NEGATE must have output");
+                self.write_varnode_u64(out, !val)?;
             }
             PcodeOpcode::Int2Comp => {
                 let val = self.read_varnode_u64(&op.inputs[0])?;
@@ -1358,6 +1588,79 @@ fn size_mask_u64(size: u32) -> u64 {
 /// report its value -- shifted past sixty-three. In a debug build that panics;
 /// in a release build it wraps, and the observer reports a number that is
 /// quietly wrong.
+/// Decode an IEEE 754 binary16 (half-precision) value into `f64`.
+///
+/// Every binary16 value — including subnormals, signed zero, infinities, and
+/// NaN payloads — is exactly representable in `f64`.
+pub(crate) fn f16_to_f64(bits: u16) -> f64 {
+    let sign = u64::from(bits >> 15) << 63;
+    let exp = (bits >> 10) & 0x1f;
+    let frac = bits & 0x03ff;
+    if exp == 0 {
+        if frac == 0 {
+            return f64::from_bits(sign);
+        }
+        // Subnormal: normalize the 10-bit significand into IEEE binary64.
+        let shift = frac.leading_zeros() - 5;
+        let exp64 = u64::from(1023 - 14 - shift) << 52;
+        let frac64 = u64::from((frac << shift) & 0x03ff) << 42;
+        return f64::from_bits(sign | exp64 | frac64);
+    }
+    if exp == 0x1f {
+        let frac64 = if frac == 0 { 0 } else { u64::from(frac) << 42 };
+        return f64::from_bits(sign | (0x7ffu64 << 52) | frac64);
+    }
+    let exp64 = (u64::from(exp) + 1023 - 15) << 52;
+    let frac64 = u64::from(frac) << 42;
+    f64::from_bits(sign | exp64 | frac64)
+}
+
+/// Encode an `f64` as IEEE 754 binary16 (half-precision) using round-to-nearest,
+/// ties-to-even directly from `f64` (avoiding double rounding via `f32`).
+pub(crate) fn f64_to_f16(val: f64) -> u16 {
+    let bits = val.to_bits();
+    let sign = ((bits >> 48) as u16) & 0x8000;
+    let exp11 = ((bits >> 52) & 0x7ff) as i32;
+    let mant52 = bits & 0x000f_ffff_ffff_ffff;
+    if exp11 == 0x7ff {
+        if mant52 == 0 {
+            return sign | 0x7c00;
+        }
+        // Quiet NaN, preserving sign and the top 10 payload bits. Setting the
+        // quiet bit guarantees a NaN with only low payload bits stays NaN.
+        return sign | 0x7e00 | (((mant52 >> 42) as u16) & 0x03ff);
+    }
+    if exp11 == 0 {
+        // Zero and f64 subnormals underflow to signed binary16 zero.
+        return sign;
+    }
+    let unbiased = exp11 - 1023;
+    let exp16 = unbiased + 15;
+    if exp16 >= 31 {
+        return sign | 0x7c00;
+    }
+    if exp16 >= 1 {
+        let frac10 = (mant52 >> 42) as u16;
+        let rem = mant52 & ((1u64 << 42) - 1);
+        let half = 1u64 << 41;
+        let round_up = rem > half || (rem == half && (frac10 & 1) != 0);
+        let mag = ((exp16 as u16) << 10) | frac10;
+        return sign | if round_up { mag + 1 } else { mag };
+    }
+    if unbiased < -25 {
+        return sign;
+    }
+    // Subnormal binary16 (value = sig53 * 2^(unbiased - 52) -> frac10 * 2^-24).
+    let shift = (28 - unbiased) as u32;
+    let sig53 = (1u64 << 52) | mant52;
+    let frac10 = (sig53 >> shift) as u16;
+    let rem = sig53 & ((1u64 << shift) - 1);
+    let half = 1u64 << (shift - 1);
+    let round_up = rem > half || (rem == half && (frac10 & 1) != 0);
+    let mag = if round_up { frac10 + 1 } else { frac10 };
+    sign | mag
+}
+
 /// Decode an x87 80-bit extended value: a 64-bit significand with an explicit
 /// integer bit, then a sign bit and a 15-bit exponent (bias 16383). Values
 /// outside `f64`'s range become infinity or zero.
@@ -1420,6 +1723,90 @@ fn f64_to_x87(val: f64) -> [u8; 10] {
     out
 }
 
+fn shift_left_bytes(a: &[u8], out_len: usize, shift: Option<usize>) -> Vec<u8> {
+    let mut res = vec![0u8; out_len];
+    let Some(shift) = shift else {
+        return res;
+    };
+    if shift >= out_len.saturating_mul(8) {
+        return res;
+    }
+    let byte_shift = shift / 8;
+    let bit_shift = (shift % 8) as u32;
+    for (i, slot) in res.iter_mut().enumerate() {
+        let Some(src) = i.checked_sub(byte_shift) else {
+            continue;
+        };
+        let lo = a.get(src).copied().unwrap_or(0);
+        *slot = if bit_shift == 0 {
+            lo
+        } else {
+            let prev = src
+                .checked_sub(1)
+                .and_then(|k| a.get(k))
+                .copied()
+                .unwrap_or(0);
+            (lo << bit_shift) | (prev >> (8 - bit_shift))
+        };
+    }
+    res
+}
+
+fn shift_right_bytes(a: &[u8], out_len: usize, shift: Option<usize>, fill: u8) -> Vec<u8> {
+    let mut res = vec![fill; out_len];
+    let Some(shift) = shift else {
+        return res;
+    };
+    if shift >= a.len().saturating_mul(8) {
+        return res;
+    }
+    let byte_shift = shift / 8;
+    let bit_shift = (shift % 8) as u32;
+    for (i, slot) in res.iter_mut().enumerate() {
+        let lo = i
+            .checked_add(byte_shift)
+            .and_then(|k| a.get(k))
+            .copied()
+            .unwrap_or(fill);
+        *slot = if bit_shift == 0 {
+            lo
+        } else {
+            let hi = i
+                .checked_add(byte_shift)
+                .and_then(|k| k.checked_add(1))
+                .and_then(|k| a.get(k))
+                .copied()
+                .unwrap_or(fill);
+            (lo >> bit_shift) | (hi << (8 - bit_shift))
+        };
+    }
+    res
+}
+
+fn cmp_le_bytes(a: &[u8], b: &[u8], signed: bool) -> std::cmp::Ordering {
+    let a_neg = signed && a.last().is_some_and(|&x| (x & 0x80) != 0);
+    let b_neg = signed && b.last().is_some_and(|&x| (x & 0x80) != 0);
+    if a_neg != b_neg {
+        return if a_neg {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        };
+    }
+    let a_fill = if a_neg { 0xFF } else { 0 };
+    let b_fill = if b_neg { 0xFF } else { 0 };
+    let max_len = a.len().max(b.len());
+    for i in (0..max_len).rev() {
+        let av = a.get(i).copied().unwrap_or(a_fill);
+        let bv = b.get(i).copied().unwrap_or(b_fill);
+        match av.cmp(&bv) {
+            std::cmp::Ordering::Equal => continue,
+            ord => return ord,
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 fn le_bytes_to_u64(bytes: &[u8]) -> u64 {
     let mut v = 0u64;
     for (i, &b) in bytes.iter().take(8).enumerate() {
@@ -1455,5 +1842,94 @@ mod x87_tests {
             assert_eq!(x87_to_f64(&f64_to_x87(v)).to_bits(), v.to_bits(), "{v:e}");
         }
         assert!(x87_to_f64(&f64_to_x87(f64::NAN)).is_nan());
+    }
+}
+
+#[cfg(test)]
+mod f16_tests {
+    use super::*;
+
+    #[test]
+    fn f16_exhaustive_round_trip() {
+        for bits in 0u16..=u16::MAX {
+            let val = f16_to_f64(bits);
+            let exp = (bits >> 10) & 0x1f;
+            let frac = bits & 0x03ff;
+            if exp == 0x1f && frac != 0 {
+                assert!(val.is_nan(), "0x{bits:04x} must decode as NaN");
+                assert_eq!(f64_to_f16(val), bits | 0x0200, "NaN 0x{bits:04x}");
+            } else {
+                assert_eq!(
+                    f64_to_f16(val),
+                    bits,
+                    "0x{bits:04x} ({val:e}) failed round-trip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn f16_known_values_match_ieee_binary16() {
+        assert_eq!(f16_to_f64(0x0000).to_bits(), 0.0f64.to_bits());
+        assert_eq!(f16_to_f64(0x8000).to_bits(), (-0.0f64).to_bits());
+        assert_eq!(f16_to_f64(0x3c00), 1.0);
+        assert_eq!(f16_to_f64(0xbc00), -1.0);
+        assert_eq!(f16_to_f64(0x3e00), 1.5);
+        assert_eq!(f16_to_f64(0x7bff), 65504.0);
+        assert_eq!(f16_to_f64(0x0400), 2f64.powi(-14));
+        assert_eq!(f16_to_f64(0x0001), 2f64.powi(-24));
+        assert_eq!(f16_to_f64(0x03ff), 1023.0 * 2f64.powi(-24));
+        assert_eq!(f16_to_f64(0x7c00), f64::INFINITY);
+        assert_eq!(f16_to_f64(0xfc00), f64::NEG_INFINITY);
+
+        assert_eq!(f64_to_f16(0.0), 0x0000);
+        assert_eq!(f64_to_f16(-0.0), 0x8000);
+        assert_eq!(f64_to_f16(1.0), 0x3c00);
+        assert_eq!(f64_to_f16(-1.0), 0xbc00);
+        assert_eq!(f64_to_f16(1.5), 0x3e00);
+        assert_eq!(f64_to_f16(65504.0), 0x7bff);
+        assert_eq!(f64_to_f16(2f64.powi(-14)), 0x0400);
+        assert_eq!(f64_to_f16(2f64.powi(-24)), 0x0001);
+        assert_eq!(f64_to_f16(1023.0 * 2f64.powi(-24)), 0x03ff);
+        assert_eq!(f64_to_f16(f64::INFINITY), 0x7c00);
+        assert_eq!(f64_to_f16(f64::NEG_INFINITY), 0xfc00);
+    }
+
+    #[test]
+    fn f16_rounding_boundaries_and_nan_payloads() {
+        // Overflow threshold at 65520.0 (halfway between 65504 and 2^16).
+        assert_eq!(f64_to_f16(65520.0), 0x7c00);
+        assert_eq!(f64_to_f16(65519.999), 0x7bff);
+        assert_eq!(f64_to_f16(-65520.0), 0xfc00);
+        assert_eq!(f64_to_f16(-65519.999), 0xfbff);
+
+        // Underflow / subnormal ties-to-even.
+        let half_subnormal = 2f64.powi(-25);
+        assert_eq!(f64_to_f16(half_subnormal), 0x0000);
+        assert_eq!(
+            f64_to_f16(f64::from_bits(half_subnormal.to_bits() + 1)),
+            0x0001
+        );
+        assert_eq!(f64_to_f16(3.0 * half_subnormal), 0x0002);
+        assert_eq!(f64_to_f16(5.0 * half_subnormal), 0x0002);
+        assert_eq!(f64_to_f16(-2f64.powi(-26)), 0x8000);
+        assert_eq!(f64_to_f16(-f64::MIN_POSITIVE), 0x8000);
+
+        // Subnormal-to-normal carry at 2^-14 - 2^-25.
+        assert_eq!(f64_to_f16(2f64.powi(-14) - half_subnormal), 0x0400);
+        assert_eq!(
+            f64_to_f16(2f64.powi(-14) - half_subnormal - 2f64.powi(-26)),
+            0x03ff
+        );
+
+        // Direct f64 -> f16 must not double-round through f32.
+        let just_below_mid_even = 1.0 + 2f64.powi(-11) - 2f64.powi(-25);
+        let just_below_mid_odd = (1.0 + 2f64.powi(-10)) + 2f64.powi(-11) - 2f64.powi(-25);
+        assert_eq!(f64_to_f16(just_below_mid_even), 0x3c00);
+        assert_eq!(f64_to_f16(just_below_mid_odd), 0x3c01);
+
+        // A double NaN whose only set payload bit is below bit 42 must stay NaN.
+        assert_eq!(f64_to_f16(f64::from_bits(0x7ff0_0000_0000_0001)), 0x7e00);
+        assert_eq!(f64_to_f16(f64::from_bits(0xfff0_0000_0000_0001)), 0xfe00);
     }
 }

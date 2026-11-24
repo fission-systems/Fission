@@ -6,11 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "SemVer to promote (e.g. v0.1.4 or v0.1.4-rc.1)"
-        required: true
+        description: "SemVer to promote (default: the tag the merged Release PR recorded)"
+        required: false
+        default: ""
         type: string
       ref:
-        description: "Candidate ref on main history (default main; use the same SHA when retrying)"
+        description: "The Release PR's merge commit on main (default main; use the same SHA when retrying)"
         required: false
         default: main
         type: string
@@ -44,13 +45,27 @@ jobs:
             if (manual && context.ref !== "refs/heads/main") {
               throw Error("Dispatch the release workflow on main.");
             }
-            const tag = manual ? process.env.INPUT_TAG.trim() : context.ref.replace(/^refs\/tags\//, "");
-            if (!/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\da-zA-Z-]+(\.[\da-zA-Z-]+)*)?$/.test(tag)) {
-              throw Error("A SemVer release tag is required.");
-            }
             const target = manual ? (process.env.INPUT_REF.trim() || "main") : context.ref;
             const { data: commit } = await github.rest.repos.getCommit({ ...repo, ref: target });
             const sha = commit.sha;
+            const readAtSha = async (path) => {
+              try {
+                const { data } = await github.rest.repos.getContent({ ...repo, path, ref: sha });
+                return Buffer.from(data.content, data.encoding).toString("utf8");
+              } catch (error) {
+                if (error.status === 404) return null;
+                throw error;
+              }
+            };
+            // Written by prepare-release.yml on the Release PR.
+            const recordText = await readAtSha(".github/release-candidate.json");
+            const record = recordText ? JSON.parse(recordText) : null;
+            const tag = manual
+              ? (process.env.INPUT_TAG.trim() || (record && record.tag) || "")
+              : context.ref.replace(/^refs\/tags\//, "");
+            if (!/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[\da-zA-Z-]+(\.[\da-zA-Z-]+)*)?$/.test(tag)) {
+              throw Error("A SemVer release tag is required.");
+            }
             const { data: ancestry } = await github.rest.repos.compareCommitsWithBasehead({
               ...repo, basehead: `main...${sha}`,
             });
@@ -73,6 +88,41 @@ jobs:
               core.info(`${workflow_id}: ${run.html_url}`);
             }
 
+            // The commit L0/L1 verified (and L2 will) must be the merged
+            // Release PR, on top of the candidate its notes were drafted from.
+            if (!record || record.tag !== tag) {
+              throw Error(`${sha} records no Release PR for ${tag}; run "Prepare Release PR" and merge it.`);
+            }
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              ...repo, commit_sha: sha,
+            });
+            const releasePr = prs.find(pr =>
+              pr.merged_at && pr.merge_commit_sha === sha && pr.head.ref === `release/${tag}`
+            );
+            if (!releasePr) {
+              throw Error(`${sha} is not the merge commit of the ${tag} Release PR (branch release/${tag}).`);
+            }
+            const { data: drift } = await github.rest.repos.compareCommitsWithBasehead({
+              ...repo, basehead: `${record.candidate_sha}...${sha}`, per_page: 100,
+            });
+            const releaseFile = f =>
+              ["Cargo.lock", "mkdocs.yml", ".github/release-candidate.json"].includes(f) ||
+              /^crates\/[^/]+\/Cargo\.toml$/.test(f) ||
+              /^docs\/changelog\/[^/]+\.md$/.test(f);
+            const foreign = (drift.files || []).map(f => f.filename).filter(f => !releaseFile(f));
+            if (drift.status !== "ahead" || (drift.files || []).length >= 300 || foreign.length) {
+              throw Error(
+                `main moved past the candidate ${record.candidate_sha} before the Release PR merged ` +
+                `(${foreign.slice(0, 5).join(", ") || drift.status}); re-run "Prepare Release PR".`
+              );
+            }
+            const notes = await readAtSha(record.notes);
+            if (notes === null) throw Error(`${record.notes} is missing at ${sha}.`);
+            if (notes.includes("TODO(release)")) {
+              throw Error(`${record.notes} still has a TODO(release) block to fill.`);
+            }
+            core.info(`Release PR: ${releasePr.html_url}; candidate ${record.candidate_sha}`);
+
             try {
               const { data: old } = await github.rest.git.getRef({ ...repo, ref: `tags/${tag}` });
               const { data: tagged } = await github.rest.repos.getCommit({ ...repo, ref: old.ref });
@@ -89,6 +139,20 @@ jobs:
 
             core.setOutput("tag", tag);
             core.setOutput("sha", sha);
+
+      # Before any build: the tag is the version the binary will report.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.gate.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            crates/fission-cli/Cargo.toml
+            scripts/release
+          sparse-checkout-cone-mode: false
+      - name: Tag equals the CLI version
+        env:
+          TAG: ${{ steps.gate.outputs.tag }}
+        run: python3 scripts/release/check_identity.py source --tag "$TAG"
 
   release-e2e:
     name: L2 Release E2E
@@ -132,6 +196,20 @@ jobs:
           cd dist
           jq -e --arg tag "$TAG" --arg sha "$SHA" '.tag == $tag and .sha == $sha' release.json
           sha256sum -c SHA256SUMS
+      - name: Verify tag, packaged binary and resource manifests agree
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          python3 scripts/release/check_identity.py source --tag "$TAG"
+          work="$(mktemp -d)"
+          tar -C "$work" -xzf dist/fission-x86_64-unknown-linux-gnu.tar.gz
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT -u FISSION_RESOURCE_ROOT \
+            "$work/fission-x86_64-unknown-linux-gnu/bin/fission_cli" resources status --json) \
+            | python3 scripts/release/check_identity.py status --tag "$TAG" --sha "$SHA" --version "$version"
+          mkdir "$work/resources"
+          tar -C "$work/resources" -xzf dist/fission-resources.tar.gz fission-resources.json
+          python3 scripts/release/check_identity.py manifest "$work/resources/fission-resources.json" \
+            --tag "$TAG" --sha "$SHA" --version "$version"
       - name: Attest the verified archives, CLI and manifests
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:
@@ -152,12 +230,15 @@ jobs:
             git fetch --no-tags origin "$tag_ref"
             test "$(git rev-parse 'FETCH_HEAD^{commit}')" = "$SHA"
           fi
+          notes="docs/changelog/$TAG.md"
+          test -s "$notes"
           if gh release view "$TAG" --json isDraft > release-state.json; then
             jq -e '.isDraft == true' release-state.json
+            gh release edit "$TAG" --notes-file "$notes"
           else
             flags=()
             if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
-            gh release create "$TAG" --verify-tag --draft --generate-notes "${flags[@]}"
+            gh release create "$TAG" --verify-tag --draft --notes-file "$notes" "${flags[@]}"
           fi
           gh release upload "$TAG" --clobber dist/*
           mkdir attached

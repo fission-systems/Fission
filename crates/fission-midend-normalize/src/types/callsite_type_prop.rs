@@ -320,12 +320,32 @@ pub fn apply_callsite_type_prop_pass(func: &mut PreHirFunction) -> bool {
                     pointer_bits,
                 );
             }
+            // A declared pointer parameter proves the value passed is a pointer.
+            // A specific declaration (`char *`, `RECT *`) reaches the argument
+            // as its surface type below; a generic object pointer (`free`'s
+            // `void *`, `memcpy`'s) is deliberately not surfaced, so without
+            // this the argument stayed the pointer-width integer its register
+            // gave it. A name that holds one value (a formal, or a local
+            // defined once and not from itself) is that pointer, so that
+            // integer is replaced; a name reused for several values keeps the
+            // weaker monotone rule.
+            let holds_one_value =
+                call_target_surface::is_generic_void_pointer_type_name(&param.type_name)
+                    && super::type_flow::binding_is_safe_for_backward_refine(
+                        arg_var,
+                        &definition_counts,
+                        &self_referential,
+                    );
             if let Some(b) = binding_by_name_mut(&mut func.locals, arg_var)
                 .or_else(|| binding_by_name_mut(&mut func.params, arg_var))
             {
-                let tightened = param_ty
-                    .as_ref()
-                    .is_some_and(|param_ty| tighten_binding_ty(b, param_ty));
+                let tightened = param_ty.as_ref().is_some_and(|param_ty| {
+                    if holds_one_value && matches!(param_ty, NirType::Ptr(_)) {
+                        tighten_binding_ty_from_pointer_contract(b, param_ty, pointer_bits)
+                    } else {
+                        tighten_binding_ty(b, param_ty)
+                    }
+                });
                 changed |= tightened;
                 refined_here |= tightened;
                 if !matches!(b.origin, Some(NirBindingOrigin::ParamIndex(_)))
@@ -1877,6 +1897,54 @@ mod tests {
         assert!(func.params[0].surface_type_name.is_none());
         assert_eq!(func.locals[0].ty, specific_pointer);
         assert_eq!(func.params[0].ty, specific_pointer);
+    }
+
+    /// `free(param_1)`: `void *` names no declaration to surface, but it does
+    /// prove the formal is a pointer, not the integer its register made it.
+    #[test]
+    fn generic_pointer_parameter_makes_a_single_value_argument_a_pointer() {
+        let uint64 = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let free_call = |arg: &str| {
+            PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "free".to_string(),
+                args: vec![PreHirExpr::Var(arg.to_string())],
+                ty: NirType::Unknown,
+            })
+        };
+        let mut func = PreHirFunction {
+            name: "release".to_string(),
+            params: vec![unsigned_binding(
+                "param_1",
+                64,
+                Some(NirBindingOrigin::ParamIndex(0)),
+            )],
+            locals: vec![unsigned_binding("rax", 64, Some(NirBindingOrigin::Temp))],
+            body: vec![
+                free_call("param_1"),
+                // `rax` holds two values; the call proves only the second is
+                // a pointer.
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rax".to_string()),
+                    rhs: PreHirExpr::Const(1, uint64.clone()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rax".to_string()),
+                    rhs: PreHirExpr::Const(2, uint64.clone()),
+                },
+                free_call("rax"),
+            ],
+            is_64bit: true,
+            ..Default::default()
+        };
+
+        assert!(apply_callsite_type_prop_pass(&mut func));
+        assert_eq!(func.params[0].ty, NirType::Ptr(Box::new(NirType::Unknown)));
+        assert!(func.params[0].surface_type_name.is_none());
+        assert_eq!(func.locals[0].ty, uint64);
     }
 
     #[test]
