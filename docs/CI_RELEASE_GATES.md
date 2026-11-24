@@ -190,7 +190,8 @@ Rules:
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
 2. `utils/` reaches consumers through the clone, the platform archive, or `fission-resources.tar.gz`; all three are cut from the same tagged checkout.
 3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](https://github.com/fission-systems/Fission/tree/main/scripts) and commit them; there is no separate publish step for CI to pick them up.
-4. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](https://github.com/fission-systems/Fission/blob/main/scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
+4. Every bundle carries `fission-resources.json`: the Fission version, tag and commit it was cut from, and a digest of each directory. A release binary embeds the same tag and commit. The package smokes and the publish job refuse a release whose tag, binary identity (`resources status --json`) and manifests disagree, and the tag must equal the CLI's Cargo version before anything builds ([`check_identity.py`](https://github.com/fission-systems/Fission/blob/main/scripts/release/check_identity.py)).
+5. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](https://github.com/fission-systems/Fission/blob/main/scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
 
 ## Related files
 

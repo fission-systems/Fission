@@ -90,6 +90,20 @@ jobs:
             core.setOutput("tag", tag);
             core.setOutput("sha", sha);
 
+      # Before any build: the tag is the version the binary will report.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ steps.gate.outputs.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            crates/fission-cli/Cargo.toml
+            scripts/release
+          sparse-checkout-cone-mode: false
+      - name: Tag equals the CLI version
+        env:
+          TAG: ${{ steps.gate.outputs.tag }}
+        run: python3 scripts/release/check_identity.py source --tag "$TAG"
+
   release-e2e:
     name: L2 Release E2E
     needs: verify-gates
@@ -132,6 +146,20 @@ jobs:
           cd dist
           jq -e --arg tag "$TAG" --arg sha "$SHA" '.tag == $tag and .sha == $sha' release.json
           sha256sum -c SHA256SUMS
+      - name: Verify tag, packaged binary and resource manifests agree
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          python3 scripts/release/check_identity.py source --tag "$TAG"
+          work="$(mktemp -d)"
+          tar -C "$work" -xzf dist/fission-x86_64-unknown-linux-gnu.tar.gz
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT -u FISSION_RESOURCE_ROOT \
+            "$work/fission-x86_64-unknown-linux-gnu/bin/fission_cli" resources status --json) \
+            | python3 scripts/release/check_identity.py status --tag "$TAG" --sha "$SHA" --version "$version"
+          mkdir "$work/resources"
+          tar -C "$work/resources" -xzf dist/fission-resources.tar.gz fission-resources.json
+          python3 scripts/release/check_identity.py manifest "$work/resources/fission-resources.json" \
+            --tag "$TAG" --sha "$SHA" --version "$version"
       - name: Attest the verified archives, CLI and manifests
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with:

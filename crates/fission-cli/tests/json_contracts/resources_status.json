@@ -8,6 +8,23 @@
   ],
   "shape": {
     "object": {
+      "build": {
+        "object": {
+          "sha": "null",
+          "tag": "null",
+          "version": "string"
+        }
+      },
+      "resource_manifest": {
+        "object": {
+          "detail": "string",
+          "path": "null",
+          "sha": "null",
+          "state": "string",
+          "tag": "null",
+          "version": "null"
+        }
+      },
       "resource_roots": {
         "array": {
           "object": {
