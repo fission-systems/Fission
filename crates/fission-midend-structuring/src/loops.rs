@@ -3314,4 +3314,55 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn rotated_raw_forward_join_does_not_drop_a_block_outside_the_region() {
+        // Body {1, 2, 3, 5, 6} rotated around head 5 -> [5, 6, 1, 2, 3].
+        // Block 1 is `if (c1) { b2 }` joining at 5: raw-forward (5 > 1), but
+        // backward in rotated order. Block 3 is reached only from 6 and is not
+        // part of that region; a raw `[1, 5)` tombstone would swallow it.
+        let succs = vec![
+            vec![5],    // 0: preheader -> 5
+            vec![2, 5], // 1: if (c1) fall into 2, else join at head 5
+            vec![5],    // 2: then-arm -> 5
+            vec![5],    // 3: other path -> 5
+            vec![],     // 4: unused
+            vec![6],    // 5: head -> 6
+            vec![1, 3], // 6: cond -> 1 or 3
+        ];
+        let addrs: Vec<u64> = (0..7).map(|i| 0x1000 + (i as u64) * 0x10).collect();
+        let stmts: Vec<Vec<PreHirStmt>> = (0..7)
+            .map(|i| vec![assign(&format!("b{i}"), u32_const(i as i64))])
+            .collect();
+        let terms = vec![
+            LoweredTerminator::Goto(addrs[5]),
+            LoweredTerminator::Cond {
+                cond: var("c1"),
+                true_target: addrs[2],
+                false_target: Some(addrs[5]),
+            },
+            LoweredTerminator::Goto(addrs[5]),
+            LoweredTerminator::Goto(addrs[5]),
+            LoweredTerminator::Fallthrough(None),
+            LoweredTerminator::Goto(addrs[6]),
+            LoweredTerminator::Cond {
+                cond: var("c6"),
+                true_target: addrs[1],
+                false_target: Some(addrs[3]),
+            },
+        ];
+
+        let mut host = MockRotatedLoopHost::new(succs, addrs, stmts, terms);
+        let body_set: HashSet<usize> = [1, 2, 3, 5, 6].into_iter().collect();
+        let out = lower_loop_body_subgraph(&mut host, &body_set, 5, None, 5, 5)
+            .expect("lowering succeeds")
+            .expect("body lowered");
+
+        let rendered = format!("{out:?}");
+        for b in ["b5", "b6", "b1", "b2", "b3"] {
+            assert!(
+                rendered.contains(&format!("\"{b}\"")),
+                "block {b} missing from lowered rotated loop body: {rendered}"
+            );
+        }
+    }
 }
