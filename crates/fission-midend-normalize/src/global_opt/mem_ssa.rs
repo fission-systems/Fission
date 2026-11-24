@@ -35,7 +35,7 @@
 /// - LLVM `MemorySSA.h`: `MemoryDef`/`MemoryUse`/`MemoryPhi` design
 /// - RetDec `reaching_definitions.h`: UD/DU chains
 /// - LLVM `BasicAliasAnalysis.cpp`: stack-slot no-alias rule
-use super::super::memory::{PartitionKey, partition_key_for_pointer_expr};
+use super::super::memory::{MemoryAccessClass, PartitionKey, partition_key_for_pointer_expr};
 use crate::HashMap;
 use crate::prelude::*;
 
@@ -49,11 +49,18 @@ pub enum AliasKey {
 }
 
 impl AliasKey {
+    fn is_precise_unstrided(p: &PartitionKey) -> bool {
+        p.stride.is_none() && !matches!(p.effect_class, MemoryAccessClass::Unknown)
+    }
+
     /// Return `true` if two keys definitely refer to the same location.
     pub fn is_must_alias(&self, other: &AliasKey) -> bool {
         match (self, other) {
             (AliasKey::Partition(a), AliasKey::Partition(b)) => {
-                a.base_object == b.base_object && a.offset_interval == b.offset_interval
+                Self::is_precise_unstrided(a)
+                    && Self::is_precise_unstrided(b)
+                    && a.base_object == b.base_object
+                    && a.offset_interval == b.offset_interval
             }
             _ => false,
         }
@@ -62,14 +69,47 @@ impl AliasKey {
     /// Return `true` if two keys definitely do NOT alias.
     pub fn is_no_alias(&self, other: &AliasKey) -> bool {
         match (self, other) {
-            (AliasKey::Partition(a), AliasKey::Partition(b)) if a.base_object == b.base_object => {
-                // Non-overlapping intervals.
+            (AliasKey::Partition(a), AliasKey::Partition(b))
+                if Self::is_precise_unstrided(a)
+                    && Self::is_precise_unstrided(b)
+                    && a.base_object == b.base_object =>
+            {
+                // Non-overlapping constant byte intervals on the same base object.
                 a.offset_interval.1 <= b.offset_interval.0
                     || b.offset_interval.1 <= a.offset_interval.0
             }
-            (AliasKey::Unknown, _) | (_, AliasKey::Unknown) => false,
             _ => false,
         }
+    }
+}
+
+/// Build an address expression representing an indexed element access so
+/// partition-based alias analysis preserves constant or strided index offsets.
+pub(crate) fn index_access_ptr_expr(
+    base: &PreHirExpr,
+    index: &PreHirExpr,
+    elem_ty: &NirType,
+) -> PreHirExpr {
+    PreHirExpr::Index {
+        base: Box::new(base.clone()),
+        index: Box::new(index.clone()),
+        elem_ty: elem_ty.clone(),
+    }
+}
+
+/// Build an address expression representing a struct/field access so
+/// partition-based alias analysis preserves byte `offset`.
+pub(crate) fn field_access_ptr_expr(
+    base: &PreHirExpr,
+    field_name: &str,
+    offset: u32,
+    ty: &NirType,
+) -> PreHirExpr {
+    PreHirExpr::FieldAccess {
+        base: Box::new(base.clone()),
+        field_name: field_name.to_string(),
+        offset,
+        ty: ty.clone(),
     }
 }
 
@@ -85,13 +125,15 @@ pub struct MemDef {
     pub may_escape: bool,
 }
 
-/// A memory use (load operation).
+/// A memory use (load or structured memory read operation).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct MemUse {
     pub id: usize,
     pub key: AliasKey,
     pub reaching_def: Option<usize>,
+    /// True when emitted for a `PreHirExpr::Load` (heritage consumes these in order).
+    pub from_load: bool,
 }
 
 /// A virtual phi node at a CFG join point.
@@ -160,6 +202,14 @@ impl Builder {
     }
 
     fn add_use(&mut self, key: AliasKey) {
+        self.record_use(key, true);
+    }
+
+    fn add_structured_use(&mut self, key: AliasKey) {
+        self.record_use(key, false);
+    }
+
+    fn record_use(&mut self, key: AliasKey, from_load: bool) {
         let id = self.alloc_id();
         let reaching_def = self.reaching.get(&key).copied();
         let mut matched_defs: Vec<usize> = Vec::new();
@@ -182,6 +232,7 @@ impl Builder {
             id,
             key,
             reaching_def,
+            from_load,
         });
     }
 
@@ -207,57 +258,17 @@ impl Builder {
                         index,
                         elem_ty,
                     } => {
-                        // Runtime-indexed element stores must not be keyed as a
-                        // write to the *base pointer's own stack slot*.
-                        //
-                        // `ptr_arith` recovers `*(local_XX + i * stride)` into
-                        // `local_XX[i]` before dead-store runs. Keying only
-                        // `base` drops the index and classifies `local_XX` as a
-                        // promotable stack partition — then DSE deletes the
-                        // store when no load targets that same (wrong) key.
-                        // That dropped matrix/out-param stores of the form
-                        // `c[i*n+j] = sum` where `c` is a stack-spilled pointer.
-                        // Build the equivalent address expression so partition
-                        // sees a runtime stride (or falls back to Unknown).
-                        let ptr = PreHirExpr::Binary {
-                            op: PreHirBinaryOp::Add,
-                            lhs: base.clone(),
-                            rhs: Box::new(PreHirExpr::Binary {
-                                op: PreHirBinaryOp::Mul,
-                                lhs: index.clone(),
-                                rhs: Box::new(PreHirExpr::Const(
-                                    i64::from(nir_byte_size(elem_ty)),
-                                    NirType::Int {
-                                        bits: 64,
-                                        signed: true,
-                                    },
-                                )),
-                                ty: NirType::Int {
-                                    bits: 64,
-                                    signed: true,
-                                },
-                            }),
-                            ty: NirType::Ptr(Box::new(elem_ty.clone())),
-                        };
-                        let key = self.alias_key_for_ptr(&ptr, nir_byte_size(elem_ty));
+                        let key = self.index_alias_key(base, index, elem_ty);
                         self.add_def(key);
                     }
                     PreHirLValue::Var(_) => {} // Not a memory write.
-                    PreHirLValue::FieldAccess { base, ty, .. } => {
-                        // `p->field` where `p` is a pointer variable writes
-                        // *p's pointee*. Keying it by `p` (as for an aggregate
-                        // local) names the stack slot `p` is stored in, and an
-                        // unread "stack write" there is then deleted -- along
-                        // with a store the caller reads.
-                        let through_pointer = matches!(
-                            fission_midend_prehir::util::strip_casts(base),
-                            PreHirExpr::Var(ref name) if self.pointer_vars.contains(name)
-                        );
-                        let key = if through_pointer {
-                            AliasKey::Unknown
-                        } else {
-                            self.alias_key_for_ptr(base, nir_byte_size(ty))
-                        };
+                    PreHirLValue::FieldAccess {
+                        base,
+                        field_name,
+                        offset,
+                        ty,
+                    } => {
+                        let key = self.field_access_alias_key(base, field_name, *offset, ty);
                         self.add_def(key);
                     }
                 }
@@ -375,12 +386,31 @@ impl Builder {
             }
             PreHirExpr::Cast { expr: inner, .. } => self.scan_expr_uses(inner),
             PreHirExpr::PtrOffset { base, .. } => self.scan_expr_uses(base),
-            PreHirExpr::Index { base, index, .. } => {
+            PreHirExpr::Index {
+                base,
+                index,
+                elem_ty,
+            } => {
+                let key = self.index_alias_key(base, index, elem_ty);
+                self.add_structured_use(key);
                 self.scan_expr_uses(base);
                 self.scan_expr_uses(index);
             }
-            PreHirExpr::AggregateCopy { src, .. } => self.scan_expr_uses(src),
-            PreHirExpr::FieldAccess { base, .. } => self.scan_expr_uses(base),
+            PreHirExpr::AggregateCopy { src, size } => {
+                let key = self.alias_key_for_ptr(src, *size);
+                self.add_structured_use(key);
+                self.scan_expr_uses(src);
+            }
+            PreHirExpr::FieldAccess {
+                base,
+                field_name,
+                offset,
+                ty,
+            } => {
+                let key = self.field_access_alias_key(base, field_name, *offset, ty);
+                self.add_structured_use(key);
+                self.scan_expr_uses(base);
+            }
             PreHirExpr::Select {
                 cond,
                 then_expr,
@@ -405,6 +435,37 @@ impl Builder {
             return AliasKey::Unknown;
         }
         alias_key_for_pointer_expr(ptr, size)
+    }
+
+    fn index_alias_key(
+        &self,
+        base: &PreHirExpr,
+        index: &PreHirExpr,
+        elem_ty: &NirType,
+    ) -> AliasKey {
+        let ptr = index_access_ptr_expr(base, index, elem_ty);
+        self.alias_key_for_ptr(&ptr, nir_byte_size(elem_ty))
+    }
+
+    fn field_access_alias_key(
+        &self,
+        base: &PreHirExpr,
+        field_name: &str,
+        offset: u32,
+        ty: &NirType,
+    ) -> AliasKey {
+        // `p->field` where `p` is a pointer variable reads/writes `*p`'s pointee
+        // rather than `p`'s own stack slot.
+        let through_pointer = matches!(
+            fission_midend_prehir::util::strip_casts(base),
+            PreHirExpr::Var(ref name) if self.pointer_vars.contains(name)
+        );
+        if through_pointer {
+            AliasKey::Unknown
+        } else {
+            let ptr = field_access_ptr_expr(base, field_name, offset, ty);
+            self.alias_key_for_ptr(&ptr, nir_byte_size(ty))
+        }
     }
 
     /// Whether the address expression is a pointer variable plus offsets.

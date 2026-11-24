@@ -661,9 +661,10 @@ impl<'a> Rewriter<'a> {
                 let mut promoted_var = None;
 
                 if self.promotable_keys.contains(&key) {
-                    // Find the matching MemUse
+                    // Find the matching MemUse (skip structured non-Load memory reads).
                     while self.current_use_idx < self.uses.len()
-                        && self.uses[self.current_use_idx].key != key
+                        && (!self.uses[self.current_use_idx].from_load
+                            || self.uses[self.current_use_idx].key != key)
                     {
                         self.current_use_idx += 1;
                     }

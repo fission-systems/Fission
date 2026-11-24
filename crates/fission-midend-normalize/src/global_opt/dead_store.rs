@@ -1086,4 +1086,115 @@ mod tests {
         );
         assert_eq!(func.body.len(), 1, "{:?}", func.body);
     }
+
+    #[test]
+    fn alias_key_strided_or_unknown_is_conservative() {
+        use super::super::mem_ssa::alias_key_for_pointer_expr;
+
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let fixed = alias_key_for_pointer_expr(
+            &PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::AddressOfLocal("local_20".to_string())),
+                offset: 4,
+            },
+            4,
+        );
+        let dyn_ptr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::AddressOfLocal("local_20".to_string())),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mul,
+                lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                rhs: Box::new(PreHirExpr::Const(4, i32_ty)),
+                ty: NirType::Int {
+                    bits: 64,
+                    signed: true,
+                },
+            }),
+            ty: NirType::Ptr(Box::new(NirType::Int {
+                bits: 32,
+                signed: false,
+            })),
+        };
+        let strided = alias_key_for_pointer_expr(&dyn_ptr, 4);
+        assert!(!strided.is_no_alias(&fixed));
+        assert!(!fixed.is_no_alias(&strided));
+        assert!(!strided.is_must_alias(&strided));
+    }
+
+    #[test]
+    fn dse_preserves_stores_observed_by_dynamic_load_index_field_and_agg_copy() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let store_plus_4 = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("local_20".to_string())),
+                    offset: 4,
+                }),
+                ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(42, u32_ty.clone()),
+        };
+
+        // 1. Dynamic strided load: *(local_20 + i * 4)
+        let dyn_load = PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::Var("local_20".to_string())),
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(4, u32_ty.clone())),
+                    ty: NirType::Int {
+                        bits: 64,
+                        signed: true,
+                    },
+                }),
+                ty: NirType::Ptr(Box::new(u32_ty.clone())),
+            }),
+            ty: u32_ty.clone(),
+        };
+        // 2. Const Index read: local_20[1]
+        let const_index_read = PreHirExpr::Index {
+            base: Box::new(PreHirExpr::Var("local_20".to_string())),
+            index: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+            elem_ty: u32_ty.clone(),
+        };
+        // 3. FieldAccess read: local_20.field_4
+        let field_read = PreHirExpr::FieldAccess {
+            base: Box::new(PreHirExpr::Var("local_20".to_string())),
+            field_name: "field_4".to_string(),
+            offset: 4,
+            ty: u32_ty.clone(),
+        };
+        // 4. AggregateCopy read covering bytes 0..16 of local_20
+        let agg_copy = PreHirExpr::AggregateCopy {
+            src: Box::new(PreHirExpr::Var("local_20".to_string())),
+            size: 16,
+        };
+
+        for (label, read_expr) in [
+            ("dynamic load", dyn_load),
+            ("const index", const_index_read),
+            ("field access", field_read),
+            ("aggregate copy", agg_copy),
+        ] {
+            let mut func = base_func(
+                vec![store_plus_4.clone(), PreHirStmt::Return(Some(read_expr))],
+                vec![],
+            );
+            let changed = apply_dead_store_elimination(&mut func);
+            assert!(
+                !changed,
+                "{label} must keep *(local_20 + 4) = 42 live: {:?}",
+                func.body
+            );
+        }
+    }
 }

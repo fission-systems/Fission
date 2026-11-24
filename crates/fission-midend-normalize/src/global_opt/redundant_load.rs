@@ -11,7 +11,10 @@
 //!
 //! At `if` / `while` / `switch` boundaries the cache is conservatively reset
 //! (or forked empty) so we do not assume memory state merges across joins.
-use super::mem_ssa::{AliasKey, alias_key_for_pointer_expr, nir_byte_size};
+use super::mem_ssa::{
+    AliasKey, alias_key_for_pointer_expr, field_access_ptr_expr, index_access_ptr_expr,
+    nir_byte_size,
+};
 use crate::HashMap;
 use crate::prelude::*;
 
@@ -43,34 +46,44 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
             }
             match lhs {
                 PreHirLValue::Deref { ptr, ty } => {
-                    let key = alias_key_for_pointer_expr(ptr, nir_byte_size(ty));
-                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
-                    {
-                        cache.retain(|k, _| k.is_no_alias(&key));
-                    } else {
+                    if expr_has_call(ptr) {
                         cache.clear();
+                    } else {
+                        let key = alias_key_for_pointer_expr(ptr, nir_byte_size(ty));
+                        invalidate_load_cache(cache, &key);
                     }
                 }
-                PreHirLValue::FieldAccess { base, ty, .. } => {
-                    let key = alias_key_for_pointer_expr(base, nir_byte_size(ty));
-                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
-                    {
-                        cache.retain(|k, _| k.is_no_alias(&key));
-                    } else {
+                PreHirLValue::FieldAccess {
+                    base,
+                    field_name,
+                    offset,
+                    ty,
+                } => {
+                    if expr_has_call(base) {
                         cache.clear();
+                    } else {
+                        let ptr = field_access_ptr_expr(base, field_name, *offset, ty);
+                        let key = alias_key_for_pointer_expr(&ptr, nir_byte_size(ty));
+                        invalidate_load_cache(cache, &key);
                     }
                 }
-                PreHirLValue::Index { base, elem_ty, .. } => {
-                    let key = alias_key_for_pointer_expr(base, nir_byte_size(elem_ty));
-                    if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
-                    {
-                        cache.retain(|k, _| k.is_no_alias(&key));
-                    } else {
+                PreHirLValue::Index {
+                    base,
+                    index,
+                    elem_ty,
+                } => {
+                    if expr_has_call(base) || expr_has_call(index) {
                         cache.clear();
+                    } else {
+                        let ptr = index_access_ptr_expr(base, index, elem_ty);
+                        let key = alias_key_for_pointer_expr(&ptr, nir_byte_size(elem_ty));
+                        invalidate_load_cache(cache, &key);
                     }
                 }
                 PreHirLValue::Var(name) => {
-                    cache.retain(|_, v| v != name);
+                    cache.retain(|k, v| {
+                        v != name && !matches!(k, AliasKey::Partition(p) if p.base_object == *name)
+                    });
                     if let PreHirExpr::Load { ptr, ty } = &*rhs {
                         let key = alias_key_for_pointer_expr(ptr.as_ref(), nir_byte_size(ty));
                         if matches!(&key, AliasKey::Partition(partition) if partition.is_promotable_stack_like())
@@ -184,6 +197,14 @@ fn rle_stmt(stmt: &mut PreHirStmt, cache: &mut LoadCache) -> bool {
         }
     }
     changed
+}
+
+fn invalidate_load_cache(cache: &mut LoadCache, key: &AliasKey) {
+    if matches!(key, AliasKey::Partition(partition) if partition.is_promotable_stack_like()) {
+        cache.retain(|k, _| k.is_no_alias(key));
+    } else {
+        cache.clear();
+    }
 }
 
 fn expr_has_call(expr: &PreHirExpr) -> bool {
@@ -483,5 +504,82 @@ mod tests {
             matches!(rhs, PreHirExpr::Var(name) if name == "v"),
             "{rhs:?}"
         );
+    }
+
+    #[test]
+    fn field_access_and_index_stores_invalidate_overlapping_or_dynamic_cached_loads() {
+        let local_20_plus_4 = || PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::AddressOfLocal("local_20".into())),
+            offset: 4,
+        };
+        let load_plus_4 = |dst: &str| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(dst.into()),
+            rhs: PreHirExpr::Load {
+                ptr: Box::new(local_20_plus_4()),
+                ty: u32_ty(),
+            },
+        };
+
+        // Case 1: local_20.field_4 = 99 overlaps *(local_20 + 4), whereas local_20.field_0 does not.
+        for (offset, expect_cached) in [(0u32, true), (4u32, false)] {
+            let mut func = loop_fixture(vec![
+                load_plus_4("w1"),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::FieldAccess {
+                        base: Box::new(PreHirExpr::AddressOfLocal("local_20".into())),
+                        field_name: format!("field_{offset}"),
+                        offset,
+                        ty: u32_ty(),
+                    },
+                    rhs: PreHirExpr::Const(99, u32_ty()),
+                },
+                load_plus_4("w2"),
+            ]);
+            apply_redundant_load_elimination(&mut func);
+            let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+                panic!()
+            };
+            if expect_cached {
+                assert!(matches!(rhs, PreHirExpr::Var(v) if v == "w1"), "{rhs:?}");
+            } else {
+                assert!(
+                    matches!(rhs, PreHirExpr::Load { .. }),
+                    "field_4 store must invalidate *(local_20 + 4): {rhs:?}"
+                );
+            }
+        }
+
+        // Case 2: local_20[1] = 99 (const index overlapping +4) and local_20[i] = 99 (dynamic index)
+        // both invalidate *(local_20 + 4), whereas local_20[0] = 99 preserves it.
+        for (index, expect_cached) in [
+            (PreHirExpr::Const(0, u32_ty()), true),
+            (PreHirExpr::Const(1, u32_ty()), false),
+            (PreHirExpr::Var("i".into()), false),
+        ] {
+            let mut func = loop_fixture(vec![
+                load_plus_4("w1"),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Index {
+                        base: Box::new(PreHirExpr::AddressOfLocal("local_20".into())),
+                        index: Box::new(index.clone()),
+                        elem_ty: u32_ty(),
+                    },
+                    rhs: PreHirExpr::Const(99, u32_ty()),
+                },
+                load_plus_4("w2"),
+            ]);
+            apply_redundant_load_elimination(&mut func);
+            let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+                panic!()
+            };
+            if expect_cached {
+                assert!(matches!(rhs, PreHirExpr::Var(v) if v == "w1"), "{rhs:?}");
+            } else {
+                assert!(
+                    matches!(rhs, PreHirExpr::Load { .. }),
+                    "index {index:?} store must invalidate *(local_20 + 4): {rhs:?}"
+                );
+            }
+        }
     }
 }
