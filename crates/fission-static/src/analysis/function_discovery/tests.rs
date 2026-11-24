@@ -901,3 +901,89 @@ fn scan_data_references_decodes_big_endian_pointers() {
         "expected big-endian .rodata pointer 0x1004 in {found:?}"
     );
 }
+
+#[test]
+fn the_executable_sweep_finds_the_same_targets_at_every_rayon_pool_size() {
+    // The sweep splits each section into chunks and decodes them in parallel,
+    // each from its own first byte, so the partition decides what it finds.
+    // It must not follow the pool size. This image is sized so that the old
+    // `total / (4 * threads)` rule made 65,537-byte chunks at one thread: on
+    // Thumb, which steps by two bytes, the chunks starting at odd addresses
+    // decoded nothing real, and one thread found half the calls three did.
+    use fission_loader::loader::types::ArchitectureDescriptor;
+    use fission_sleigh::runtime::RuntimeSleighFrontend;
+
+    const TEXT: u64 = 0x0800_0000;
+    const SIZE: usize = 4 * 65_537;
+    // `bl` to the next instruction (T1: S=0, J1=J2=1, imm=0), so every
+    // instruction has a call target of its own.
+    let bytes: Vec<u8> = std::iter::repeat([0x00, 0xf0, 0x00, 0xf8])
+        .take(SIZE / 4)
+        .flatten()
+        .collect();
+    let binary = LoadedBinaryBuilder::new("thumb-sweep.bin".to_string(), DataBuffer::Heap(bytes))
+        .format("ELF")
+        .entry_point(TEXT | 1) // the ABI's Thumb bit: a Thumb image
+        .arch_spec("ARM:LE:32:v8")
+        .architecture(ArchitectureDescriptor {
+            processor: "ARM".to_string(),
+            endian: "little".to_string(),
+            bitness: 32,
+            variant: "v8".to_string(),
+            abi: None,
+            raw_machine: "EM_ARM".to_string(),
+        })
+        .add_section(SectionInfo {
+            name: ".text".to_string(),
+            virtual_address: TEXT,
+            virtual_size: SIZE as u64,
+            file_offset: 0,
+            file_size: SIZE as u64,
+            is_executable: true,
+            is_readable: true,
+            is_writable: false,
+        })
+        .build()
+        .expect("Thumb image");
+
+    let _guard = sleigh_runtime_discovery_lock();
+    let frontend = RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().expect("load spec"))
+        .expect("ARM runtime");
+    let sweep = |threads: usize| {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads)
+            .build()
+            .expect("rayon pool");
+        let found =
+            pool.install(|| super::control_flow_scan::scan_executable_sections(&binary, &frontend));
+        (
+            found.decoded_instruction_count,
+            found.call_targets,
+            found.jump_targets,
+            found.jump_edges,
+        )
+    };
+    let one = sweep(1);
+    let expected: Vec<u64> = (1..=SIZE as u64 / 4).map(|i| TEXT + 4 * i).collect();
+    let missed: Vec<_> = expected
+        .iter()
+        .filter(|t| one.1.binary_search(t).is_err())
+        .collect();
+    let extra: Vec<_> = one
+        .1
+        .iter()
+        .filter(|t| expected.binary_search(t).is_err())
+        .collect();
+    assert!(
+        missed.is_empty() && extra.is_empty(),
+        "one thread: {} calls missed (first {:x?}), {} extra (first {:x?})",
+        missed.len(),
+        missed.first(),
+        extra.len(),
+        extra.first()
+    );
+    assert!(
+        one == sweep(3),
+        "one and three threads found different targets"
+    );
+}
