@@ -405,6 +405,7 @@ impl Emulator {
         }
 
         let snapshot_registers = Self::snapshot_register_names(&register_map);
+        let nan_policy = arch.nan_policy;
 
         let mut emu = Self {
             state,
@@ -442,7 +443,10 @@ impl Emulator {
             concolic_stop_on_branch: false,
             vfs: crate::os::vfs::SimVFS::new(),
             solver: fission_solver::Solver::new(),
-            jit: crate::jit::JitCompiler::new().ok(),
+            jit: crate::jit::JitCompiler::new().ok().map(|mut jit| {
+                jit.nan_policy = nan_policy;
+                jit
+            }),
             jit_cache: crate::jit::cache::JitCache::new(),
             chain_depth: 0,
             single_step: false,

@@ -51,6 +51,8 @@ pub struct Evaluator<'a> {
     /// the evaluator reporting it -- and something must, or the run produces a
     /// wrong answer without saying so.
     pub unimplemented: Option<PcodeOpcode>,
+    /// Architectural NaN payload propagation rule for binary float ops.
+    pub nan_policy: crate::arch::NanPolicy,
 }
 
 impl<'a> Evaluator<'a> {
@@ -59,7 +61,13 @@ impl<'a> Evaluator<'a> {
             state,
             solver,
             unimplemented: None,
+            nan_policy: crate::arch::NanPolicy::FirstOperand,
         }
+    }
+
+    pub fn with_nan_policy(mut self, policy: crate::arch::NanPolicy) -> Self {
+        self.nan_policy = policy;
+        self
     }
 
     // ── Varnode I/O ───────────────────────────────────────────────────────────
@@ -992,58 +1000,34 @@ impl<'a> Evaluator<'a> {
 
             // ── Float arithmetic ──────────────────────────────────────────────
             PcodeOpcode::FloatAdd => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let b = self.read_varnode_f64(&op.inputs[1])?;
-                let o = op.output.as_ref().expect("FLOAT_ADD must have output");
-                self.write_varnode_f64(o, a + b)?;
+                self.eval_float_binop(op, crate::jit::float_ops::FloatBinOp::Add, |a, b| a + b)?;
             }
             PcodeOpcode::FloatSub => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let b = self.read_varnode_f64(&op.inputs[1])?;
-                let o = op.output.as_ref().expect("FLOAT_SUB must have output");
-                self.write_varnode_f64(o, a - b)?;
+                self.eval_float_binop(op, crate::jit::float_ops::FloatBinOp::Sub, |a, b| a - b)?;
             }
             PcodeOpcode::FloatMult => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let b = self.read_varnode_f64(&op.inputs[1])?;
-                let o = op.output.as_ref().expect("FLOAT_MULT must have output");
-                self.write_varnode_f64(o, a * b)?;
+                self.eval_float_binop(op, crate::jit::float_ops::FloatBinOp::Mul, |a, b| a * b)?;
             }
             PcodeOpcode::FloatDiv => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let b = self.read_varnode_f64(&op.inputs[1])?;
-                let o = op.output.as_ref().expect("FLOAT_DIV must have output");
-                self.write_varnode_f64(o, a / b)?; // NaN/Inf handled by IEEE-754
+                self.eval_float_binop(op, crate::jit::float_ops::FloatBinOp::Div, |a, b| a / b)?;
             }
             PcodeOpcode::FloatNeg => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_NEG must have output");
-                self.write_varnode_f64(o, -a)?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Neg, |a| -a)?;
             }
             PcodeOpcode::FloatAbs => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_ABS must have output");
-                self.write_varnode_f64(o, a.abs())?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Abs, |a| a.abs())?;
             }
             PcodeOpcode::FloatSqrt => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_SQRT must have output");
-                self.write_varnode_f64(o, a.sqrt())?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Sqrt, |a| a.sqrt())?;
             }
             PcodeOpcode::FloatCeil => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_CEIL must have output");
-                self.write_varnode_f64(o, a.ceil())?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Ceil, |a| a.ceil())?;
             }
             PcodeOpcode::FloatFloor => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_FLOOR must have output");
-                self.write_varnode_f64(o, a.floor())?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Floor, |a| a.floor())?;
             }
             PcodeOpcode::FloatRound => {
-                let a = self.read_varnode_f64(&op.inputs[0])?;
-                let o = op.output.as_ref().expect("FLOAT_ROUND must have output");
-                self.write_varnode_f64(o, a.round())?;
+                self.eval_float_unop(op, crate::jit::float_ops::FloatUnOp::Round, |a| a.round())?;
             }
 
             // ── Float comparison ──────────────────────────────────────────────
@@ -1246,6 +1230,52 @@ impl<'a> Evaluator<'a> {
         let b = self.read_varnode_u64(&op.inputs[1])?;
         let out = op.output.as_ref().expect("Binary op must have output");
         Ok((a, b, out))
+    }
+
+    fn eval_float_binop(
+        &mut self,
+        op: &PcodeOp,
+        fop: crate::jit::float_ops::FloatBinOp,
+        fallback: impl FnOnce(f64, f64) -> f64,
+    ) -> Result<()> {
+        let out = op
+            .output
+            .as_ref()
+            .expect("Float binary op must have output");
+        if (out.size == 4 || out.size == 8)
+            && op.inputs[0].size == out.size
+            && op.inputs[1].size == out.size
+        {
+            let a_bits = self.read_varnode_u64(&op.inputs[0])?;
+            let b_bits = self.read_varnode_u64(&op.inputs[1])?;
+            let res = crate::jit::float_ops::float_binop_with_policy(
+                fop as u32,
+                out.size,
+                self.nan_policy,
+                a_bits,
+                b_bits,
+            );
+            return self.write_varnode_u64(out, res);
+        }
+        let a = self.read_varnode_f64(&op.inputs[0])?;
+        let b = self.read_varnode_f64(&op.inputs[1])?;
+        self.write_varnode_f64(out, fallback(a, b))
+    }
+
+    fn eval_float_unop(
+        &mut self,
+        op: &PcodeOp,
+        fop: crate::jit::float_ops::FloatUnOp,
+        fallback: impl FnOnce(f64) -> f64,
+    ) -> Result<()> {
+        let out = op.output.as_ref().expect("Float unary op must have output");
+        if (out.size == 4 || out.size == 8) && op.inputs[0].size == out.size {
+            let a_bits = self.read_varnode_u64(&op.inputs[0])?;
+            let res = crate::jit::float_ops::float_unop(fop as u32, out.size, out.size, a_bits);
+            return self.write_varnode_u64(out, res);
+        }
+        let a = self.read_varnode_f64(&op.inputs[0])?;
+        self.write_varnode_f64(out, fallback(a))
     }
 }
 

@@ -9,7 +9,7 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 use crate::core::Emulator;
-use crate::jit::float_ops::{float_binop, float_unop};
+use crate::jit::float_ops::{float_binop_with_policy, float_unop};
 use crate::os::env::{HleResult, OsEnvironment};
 use crate::pcode::page_map::page_align_down;
 
@@ -135,7 +135,8 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
         return 0;
     }
 
-    let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver);
+    let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver)
+        .with_nan_policy(emu.arch.nan_policy);
     let handled = match evaluator.try_step_u128(op) {
         Ok(handled) => handled,
         Err(e) => {
@@ -217,8 +218,8 @@ pub extern "C" fn jit_write_bytes(
 // ── Float callouts ──────────────────────────────────────────────────────────
 
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_float_binop(op: u32, size: u32, a: u64, b: u64) -> u64 {
-    float_binop(op, size, a, b)
+pub extern "C" fn jit_float_binop(op: u32, size: u32, policy: u32, a: u64, b: u64) -> u64 {
+    float_binop_with_policy(op, size, crate::arch::NanPolicy::from_u32(policy), a, b)
 }
 
 #[unsafe(no_mangle)]

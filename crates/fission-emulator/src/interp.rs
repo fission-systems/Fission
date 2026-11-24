@@ -187,7 +187,8 @@ impl Emulator {
             let taint_snapshot = self.snapshot_taint_op(op, control_mem);
 
             let (step, unimplemented) = {
-                let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver);
+                let mut evaluator = Evaluator::new(&mut self.state, &mut self.solver)
+                    .with_nan_policy(self.arch.nan_policy);
                 let step = evaluator.step(op)?;
                 (step, evaluator.unimplemented)
             };

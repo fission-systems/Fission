@@ -43,6 +43,8 @@ pub struct JitCompiler {
     /// block until an observer is registered, and registering one flushes the
     /// cache anyway ([`crate::observe`]).
     pub observe: crate::observe::ObserveMask,
+    /// Architectural NaN propagation policy passed to `jit_float_binop`.
+    pub nan_policy: crate::arch::NanPolicy,
     /// Opcodes this compiler met and did not implement, by name.
     ///
     /// An unimplemented op lowers to nothing, so the block compiles, runs, and
@@ -190,6 +192,7 @@ impl JitCompiler {
             builder_ctx,
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
+            nan_policy: crate::arch::NanPolicy::FirstOperand,
             unimplemented_ops: std::collections::BTreeMap::new(),
             shadow: crate::observe::ShadowMode::Off,
         })
@@ -370,6 +373,7 @@ impl JitCompiler {
 
         let mut sig_fbin = self.module.make_signature();
         sig_fbin.params.extend([
+            AbiParam::new(types::I32),
             AbiParam::new(types::I32),
             AbiParam::new(types::I32),
             AbiParam::new(types::I64),
@@ -2149,7 +2153,8 @@ impl JitCompiler {
                         };
                         let opi = builder.ins().iconst(types::I32, fop as i64);
                         let szi = builder.ins().iconst(types::I32, size as i64);
-                        let call = builder.ins().call(float_binop_ref, &[opi, szi, a, b]);
+                        let pol = builder.ins().iconst(types::I32, self.nan_policy as i64);
+                        let call = builder.ins().call(float_binop_ref, &[opi, szi, pol, a, b]);
                         store_vn!(out, builder.inst_results(call)[0]);
                         let sk = match op.opcode {
                             PcodeOpcode::FloatAdd => SymBinOpKind::FloatAdd as u32,
