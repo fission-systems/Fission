@@ -85,16 +85,12 @@ aarch64 FRINTN * #1064 ties away from zero instead of to even
 aarch64 FMSUB * #1072 not fused @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
-# Spec: 32-bit sign-extending loads write the wrong upper bits of Xt.
-aarch64 LDRSB * #1057 Wt form sign-extends into bits 63:32
-aarch64 LDRSH * #1057 Wt form sign-extends into bits 63:32
-aarch64 LDURSH * #1057 Wt form sign-extends into bits 63:32
-aarch64 LDURSB * #1057 Wt form zero-extends the byte
+# Spec: LDLARH writes the wrong upper bits of Xt (the sign-extending loads
+# of #1057 were fixed by #1148).
 aarch64 LDLARH * #1057 leaves bits 63:32 of Xt unchanged
 # Spec: W and 64-bit vector destinations keep stale upper bits.
 aarch64 LDLAR * #1067 leaves bits 63:32 of Xt unchanged
 aarch64 LDLARB * #1067 leaves bits 63:32 of Xt unchanged
-aarch64 LDTRS* * #1067 Wt form zero-extends (as LDURSB, #1057)
 aarch64 LDADD* * #1067 Wt form leaves bits 63:32
 aarch64 LDCLR* * #1067 Wt form leaves bits 63:32
 aarch64 LDSET* * #1067 Wt form leaves bits 63:32
