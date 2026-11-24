@@ -14,7 +14,7 @@ nondeterminism cheaply.
 |-------|------|
 | This tool | Broad-coverage local byte-diff + determinism gate, minutes not tens-of-minutes |
 | `local_decomp_observe.py` | Deep single-function before/after investigation |
-| `fission-benchmark` docker | Official semantic oracle / ranking / Ghidra parity (required for quality claims) |
+| DecBench full-dataset sweep ([`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md)) | The measurement quality claims cite (replaces the retired `fission-benchmark` docker loop, whose GitHub repository was deleted on 2026-11-24) |
 
 ### Workflow
 
@@ -37,10 +37,10 @@ stays fast enough to run on every slice.
 
 ### Policy
 
-Same as `local_decomp_observe.py` below: not a substitute for the Docker
-ranking/parity oracle. A clean `golden_corpus_check.py check` says "this
+Same as `local_decomp_observe.py` below: not a substitute for the DecBench
+full-dataset sweep. A clean `golden_corpus_check.py check` says "this
 change didn't move anything in the curated corpus," not "this change is
-correct" -- it does not replace the fission-benchmark loop for quality
+correct" -- it does not replace the DecBench measurement for quality
 claims (Core Rule 10).
 
 ## `local_decomp_observe.py`
@@ -50,7 +50,7 @@ Focused **before / after** decompilation capture for one function.
 | Layer | Role |
 |-------|------|
 | This tool | Cheap local NIR/HIR text + structural metrics + unified diff |
-| `fission-benchmark` docker | Official semantic oracle / ranking (required for quality claims) |
+| DecBench full-dataset sweep ([`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md)) | The measurement quality claims cite |
 
 Artifacts (gitignored): `benchmark/artifacts/local_observe/<session>/`
 
@@ -104,8 +104,8 @@ benchmark/artifacts/local_observe/<session>/
 
 ### Policy
 
-- Local observe is **not** a substitute for the docker ranking / oracle loop.
-- Do not promote `local_observe` results to Pages or official latest.
+- Local observe is **not** a substitute for the DecBench full-dataset sweep.
+- Do not promote `local_observe` results to an official ranking.
 - Prefer invariant language in commits; keep row identity in proposal docs only.
 
 ## `decbench_sample_set_gate.py`
