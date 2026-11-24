@@ -543,7 +543,9 @@ fn sat_add_sub(dst: &[u8], src: &[u8], op: &str) -> Option<Vec<u8>> {
     }
     let esize = if op.ends_with('w') { 2 } else { 1 };
     let is_sub = op.starts_with("psub");
-    let is_unsigned = op.contains('u');
+    // `paddus*` / `psubus*`. Not `contains('u')`: `psubsw` has a `u` in `sub`,
+    // which made the signed subtractions saturate as unsigned.
+    let is_unsigned = op.starts_with("paddus") || op.starts_with("psubus");
     let lanes = dst.len() / esize;
     let mut out = vec![0u8; dst.len()];
     for i in 0..lanes {
@@ -1187,6 +1189,35 @@ fn f32_rsqrt(a: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// SDM 2, PSUBSB/PSUBSW: signed saturation. Lanes from a case the native
+    /// differential caught: 0x1310 - 0x9376 is 32666 (0x7f9a), not the
+    /// unsigned floor 0; 0xc90c - 0x708f saturates to 0x8000.
+    #[test]
+    fn signed_saturating_subtract_is_signed() {
+        let words = |w: &[u16]| w.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
+        let a = words(&[0x7506, 0x1310, 0xc90c, 0x9acb]);
+        let b = words(&[0x30d8, 0x9376, 0x708f, 0x5cb9]);
+        assert_eq!(
+            sat_add_sub(&a, &b, "psubsw").unwrap(),
+            words(&[0x442e, 0x7f9a, 0x8000, 0x8000])
+        );
+        // The unsigned form still floors at zero.
+        assert_eq!(
+            sat_add_sub(&a, &b, "psubusw").unwrap(),
+            words(&[0x442e, 0x0000, 0x587d, 0x3e12])
+        );
+        // Bytes: 0x10 - 0x90 is 16 - (-112) = 127 signed, 0 unsigned.
+        assert_eq!(sat_add_sub(&[0x10], &[0x90], "psubsb"), None);
+        assert_eq!(
+            sat_add_sub(&[0x10, 0x00], &[0x90, 0x00], "psubsb").unwrap(),
+            vec![0x7f, 0x00]
+        );
+        assert_eq!(
+            sat_add_sub(&[0x10, 0x00], &[0x90, 0x00], "psubusb").unwrap(),
+            vec![0x00, 0x00]
+        );
+    }
 
     #[test]
     fn roundsd_preserves_upper_lane_and_signed_zero() {
