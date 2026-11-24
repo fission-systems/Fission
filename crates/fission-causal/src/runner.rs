@@ -31,13 +31,15 @@ use fission_emulator::os::vfs::SimVFS;
 use serde::{Deserialize, Serialize};
 
 use crate::contract::{
-    CONTRACT_VERSION, CandidateOrigin, CandidateResult, EnvClass, EnvSource, EnvSourceStatus,
-    Intervention, InterventionWitness, InvalidReason, JointStatus, Location, ReplayFingerprint,
-    SinkObservation, SinkSpec, Verdict,
+    CONTRACT_VERSION, CandidateOrigin, CandidateResult, ContingencyWitness, EnvClass, EnvSource,
+    EnvSourceStatus, Intervention, InterventionWitness, InvalidReason, JointSearch, JointStatus,
+    Location, Minimality, ReplayFingerprint, SinkObservation, SinkSpec, Verdict,
 };
 use crate::machine::{Engine, Program, Run};
 use crate::slice::{self, Candidate, Slice};
+use crate::symbolic::{self, QueryResult, SymPath};
 use crate::trace::{self, Access, EndState, SinkMonitor, Trace};
+use fission_solver::ast as symbolic_expr;
 
 /// Budgets and switches for one case.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +61,38 @@ pub struct Config {
     pub use_checkpoints: bool,
     /// Minimum distance in steps between two checkpoints.
     pub checkpoint_spacing: u64,
+    /// When internal locations (registers, stack slots, unnamed memory the
+    /// slice reads) are tried.
+    pub internal_locations: InternalPolicy,
+    /// Named variables tried in the primary tier, at most.
+    pub max_named_variables: usize,
+    /// Run the solver-backed joint search.
+    pub solver: bool,
+    /// Bytes a joint intervention may change, at most.
+    pub max_joint_size: usize,
+    /// Solver queries per search (the main search, and each subset of a
+    /// minimality check).
+    pub max_solver_queries: u64,
+    /// SAT conflicts per query before it answers Unknown.
+    pub solver_conflicts: u64,
+    /// Generations of the solver search: how many times a replayed model's
+    /// own path is searched again.
+    pub max_generations: usize,
+    /// Check a joint witness's proper subsets (bounded minimality).
+    pub minimality: bool,
+}
+
+/// When internal locations are tried.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InternalPolicy {
+    /// Never.
+    Never,
+    /// Only when no input-level witness (single or joint) was found.
+    Fallback,
+    /// Always, after the input tiers (P1's behaviour, for localising a
+    /// mechanism).
+    Always,
 }
 
 impl Default for Config {
@@ -73,6 +107,14 @@ impl Default for Config {
             potential_dependence: true,
             use_checkpoints: true,
             checkpoint_spacing: 16,
+            internal_locations: InternalPolicy::Fallback,
+            max_named_variables: 32,
+            solver: true,
+            max_joint_size: 4,
+            max_solver_queries: 256,
+            solver_conflicts: 100_000,
+            max_generations: 8,
+            minimality: true,
         }
     }
 }
@@ -84,6 +126,9 @@ pub struct Case<'p> {
     pub program: &'p Program,
     pub sink: SinkSpec,
     pub requested: Vec<Intervention>,
+    /// Sets of interventions the caller wants judged together (one oracle
+    /// each), e.g. an adversarial "flip both" control.
+    pub requested_sets: Vec<Vec<Intervention>>,
 }
 
 /// Reproducibility evidence gathered before any candidate is tried.
@@ -107,7 +152,16 @@ pub struct Counts {
     pub slice_input_bytes: usize,
     pub candidates_generated: usize,
     pub candidates_tested: usize,
+    /// Candidates tested per tier: slice input bytes and named variables,
+    /// input bytes outside the slice, internal locations.
+    pub tested_primary: usize,
+    pub tested_outside_slice: usize,
+    pub tested_internal: usize,
+    /// Replays that evaluated Φ: forks, fresh verifications, checkpoint
+    /// validations, environment perturbations, pair and symbolic replays.
     pub oracle_executions: u64,
+    /// Of `oracle_executions`, those spent on internal locations.
+    pub oracle_executions_internal: u64,
     pub fresh_verifications: u64,
     pub checkpoints: usize,
     pub checkpoints_invalid: usize,
@@ -143,6 +197,10 @@ pub struct CaseReport {
     pub candidates: Vec<CandidateResult>,
     pub requested: Vec<CandidateResult>,
     pub joint: JointStatus,
+    /// Every solver query and replayed model of the joint search.
+    pub solver: SolverLog,
+    /// The caller's intervention sets, each judged as one experiment.
+    pub requested_sets: Vec<RequestedSet>,
     /// Input offsets with a single-byte counterfactual witness.
     pub witness_inputs: Vec<usize>,
     pub counts: Counts,
@@ -159,6 +217,82 @@ impl CaseReport {
         copy.timing = None;
         serde_json::to_string_pretty(&copy).unwrap_or_default()
     }
+}
+
+/// The joint search's ledger.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SolverLog {
+    pub queries: u64,
+    pub sat: u64,
+    pub unsat: u64,
+    pub unknown: u64,
+    pub symbolic_replays: u64,
+    /// Distinct reasons a query answered Unknown, sorted.
+    pub unknown_reasons: Vec<String>,
+    /// Every model the solver produced, and what its replay showed.
+    pub models: Vec<ModelRecord>,
+}
+
+/// One solver model and its replay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelRecord {
+    /// `search`, or `minimality {..}` with the subset searched.
+    pub purpose: String,
+    pub generation: usize,
+    /// What the model was solved to negate.
+    pub negated: String,
+    /// `(input offset, value)` where the model differs from the recorded
+    /// input.
+    pub changes: Vec<(usize, u8)>,
+    pub outcome: ModelOutcome,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ModelOutcome {
+    /// The replay did not take the path the model was solved for: the
+    /// model is rejected and nothing is concluded from it.
+    Rejected { expected: String, observed: String },
+    /// Reproduced, Φ unchanged; its path is searched in turn.
+    PhiUnchanged,
+    /// Reproduced, Φ flipped, and the intervention replay, a fresh replay
+    /// and the JIT agreed.
+    Witness,
+    /// Φ flipped on the symbolic replay but the intervention replays did
+    /// not confirm it.
+    NotVerified { detail: String },
+    /// The replay hit the instruction budget before Φ was decided.
+    Undecided,
+    /// Already seen (the same input from another path).
+    Duplicate,
+}
+
+/// A caller's intervention set, judged as one experiment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RequestedSet {
+    pub interventions: Vec<Intervention>,
+    pub input_offsets: Vec<Option<usize>>,
+    pub fork: SinkObservation,
+    pub fresh: SinkObservation,
+    /// Φ differs from the recorded run, and the two replays agree.
+    pub changes_sink: bool,
+    pub replays_agree: bool,
+}
+
+/// How one solver search ended.
+enum SearchOutcome {
+    Found {
+        changes: BTreeMap<usize, u8>,
+        negated: String,
+        generation: usize,
+        observation: SinkObservation,
+    },
+    /// Every symbolic branch reachable over the free bytes was negated or
+    /// proved infeasible, within the generation bound, and no model flipped
+    /// Φ.
+    Exhausted,
+    Unknown(String),
+    Budget(String),
 }
 
 /// Emulator state outside `MachineState` that a checkpoint carries.
@@ -517,6 +651,16 @@ struct Runner<'c, 'p> {
     oracle_us: Vec<u128>,
     fresh_us: Vec<u128>,
     original_digest: String,
+    solver_log: SolverLog,
+    /// The symbolic replay of the recorded input, shared by every search.
+    root_path: Option<std::rc::Rc<SymPath>>,
+    /// Input offset -> (address it was delivered to, step right after the
+    /// read that delivered it).
+    input_sites: BTreeMap<usize, (u64, u64)>,
+    /// Oracles now spent count against internal locations.
+    internal_phase: bool,
+    /// Checkpoints already validated by a null replay.
+    validated: BTreeSet<u64>,
 }
 
 /// Outcome of one oracle execution.
@@ -546,6 +690,9 @@ impl Runner<'_, '_> {
     ) -> Result<Oracle> {
         let started = Instant::now();
         self.counts.oracle_executions += 1;
+        if self.internal_phase {
+            self.counts.oracle_executions_internal += 1;
+        }
         let program = self.case.program;
         let prefix_len = self.prefix_len(step);
         let result = if fresh && self.new_emulator_checks == 0 {
@@ -633,14 +780,26 @@ impl Runner<'_, '_> {
         Ok((agrees, fresh.digest, fresh.observation))
     }
 
+    /// Capture checkpoints at `steps` and validate the new ones.
     fn capture_checkpoints(&mut self, steps: &BTreeSet<u64>) -> Result<()> {
         let started = Instant::now();
-        self.replay.capture(steps)?;
-        self.timing.checkpoint_capture_us = started.elapsed().as_micros();
+        let before: BTreeSet<u64> = self.replay.checkpoint_steps().into_iter().collect();
+        let fresh: BTreeSet<u64> = steps.difference(&before).copied().collect();
+        if !fresh.is_empty() {
+            self.replay.capture(&fresh)?;
+        }
+        self.timing.checkpoint_capture_us += started.elapsed().as_micros();
         // A checkpoint is trusted only if restoring it and running on
         // unchanged reproduces the recorded run's Φ and end state.
         let original = self.trace.observation.holds();
-        for step in self.replay.checkpoint_steps() {
+        let added: Vec<u64> = self
+            .replay
+            .checkpoint_steps()
+            .into_iter()
+            .filter(|s| !self.validated.contains(s))
+            .collect();
+        self.validated.extend(added.iter().copied());
+        for step in added {
             let null = self.oracle(step, &[], false, true)?;
             if null.observation.holds() != original || null.digest != self.original_digest {
                 self.replay.forget(step);
@@ -777,6 +936,7 @@ impl Runner<'_, '_> {
             location: iv.location.clone(),
             origin: CandidateOrigin::Requested,
             input_offset,
+            variable: None,
             verdict,
         })
     }
@@ -853,6 +1013,7 @@ impl Runner<'_, '_> {
                 location,
                 origin: CandidateOrigin::EnvironmentSource,
                 input_offset: None,
+                variable: None,
             };
             if let Verdict::CounterfactualWitness { .. } = self.test_candidate(&cand, &[])? {
                 return Ok(true);
@@ -864,7 +1025,7 @@ impl Runner<'_, '_> {
     /// Bounded pair search over input bytes. Partners come from the
     /// recorded slice and from the slice of each single counterfactual
     /// run (dual slicing), so a byte the recorded run never read can pair.
-    fn joint_search(&mut self, singles: &[CandidateResult], slice: &Slice) -> Result<JointStatus> {
+    fn pair_search(&mut self, singles: &[CandidateResult], slice: &Slice) -> Result<JointStatus> {
         let inputs: Vec<&CandidateResult> = singles
             .iter()
             .filter(|c| c.origin == CandidateOrigin::InputByte)
@@ -932,7 +1093,11 @@ impl Runner<'_, '_> {
                 let original = read_location(program, probe, &location)?;
                 for value in slice::alternatives(&original, &[], 2) {
                     if pairs_tried >= self.config.max_pairs || !self.budget_left() {
-                        return Ok(JointStatus::NoWitnessWithinBudget { pairs_tried });
+                        return Ok(JointStatus::NoWitnessWithinBudget {
+                            pairs_tried,
+                            solver_queries: 0,
+                            exhausted: false,
+                        });
                     }
                     pairs_tried += 1;
                     let second_iv = Intervention {
@@ -951,13 +1116,584 @@ impl Runner<'_, '_> {
                             return Ok(JointStatus::JointWitness {
                                 interventions: ivs,
                                 input_offsets: vec![first.input_offset, Some(offset)],
+                                found_by: JointSearch::PairSearch,
+                                minimality: Minimality::NotChecked {
+                                    reason: "pending".into(),
+                                },
+                                contingencies: Vec::new(),
                             });
                         }
                     }
                 }
             }
         }
-        Ok(JointStatus::NoWitnessWithinBudget { pairs_tried })
+        Ok(JointStatus::NoWitnessWithinBudget {
+            pairs_tried,
+            solver_queries: 0,
+            exhausted: false,
+        })
+    }
+
+    /// Test `cands` in order; returns their results.
+    fn test_tier(
+        &mut self,
+        cands: &[Candidate],
+        pool: &[u64],
+        tested: fn(&mut Counts) -> &mut usize,
+    ) -> Result<Vec<CandidateResult>> {
+        let mut out = Vec::new();
+        for cand in cands {
+            let verdict = self
+                .test_candidate(cand, pool)
+                .with_context(|| format!("candidate {cand:?}"))?;
+            self.counts.candidates_tested += 1;
+            *tested(&mut self.counts) += 1;
+            out.push(CandidateResult {
+                step: cand.step,
+                pc: self.trace.step(cand.step).map_or(0, |s| s.pc),
+                location: cand.location.clone(),
+                origin: cand.origin,
+                input_offset: cand.input_offset,
+                variable: cand.variable.clone(),
+                verdict,
+            });
+        }
+        Ok(out)
+    }
+
+    /// The interventions that turn the recorded input into one with
+    /// `changes`: each byte set right after the read that delivered it.
+    fn input_interventions(&self, changes: &BTreeMap<usize, u8>) -> Vec<Intervention> {
+        changes
+            .iter()
+            .filter_map(|(offset, value)| {
+                let (addr, step) = self.input_sites.get(offset)?;
+                Some(Intervention {
+                    step: *step,
+                    location: Location::Memory {
+                        addr: *addr,
+                        len: 1,
+                    },
+                    value: vec![*value],
+                })
+            })
+            .collect()
+    }
+
+    /// A symbolic replay on `input` (one oracle execution).
+    fn symbolic_replay(&mut self, input: &[u8]) -> Result<SymPath> {
+        self.counts.oracle_executions += 1;
+        self.solver_log.symbolic_replays += 1;
+        symbolic::replay(
+            self.case.program,
+            input,
+            &self.case.sink,
+            self.config.max_steps,
+        )
+    }
+
+    fn root(&mut self) -> Result<std::rc::Rc<SymPath>> {
+        if let Some(root) = &self.root_path {
+            return Ok(std::rc::Rc::clone(root));
+        }
+        let input = self.case.program.input.clone();
+        let root = std::rc::Rc::new(self.symbolic_replay(&input)?);
+        self.root_path = Some(std::rc::Rc::clone(&root));
+        Ok(root)
+    }
+
+    /// One query, smallest change first: at most `k` of the `free` bytes
+    /// differ from the recorded input, for `k` from `min_k` up.
+    fn ask(
+        &mut self,
+        constraints: &[symbolic_expr::SymExpr],
+        free: &[usize],
+        min_k: usize,
+        oracle: &fission_emulator::MachineState,
+        queries_left: &mut u64,
+    ) -> QueryResult {
+        let base = self.case.program.input.clone();
+        let top = self.config.max_joint_size.min(free.len()).max(1);
+        let mut last = QueryResult::Unsat;
+        for k in min_k.max(1)..=top {
+            if *queries_left == 0 {
+                return QueryResult::Unknown("query budget".into());
+            }
+            *queries_left -= 1;
+            self.solver_log.queries += 1;
+            let answer = symbolic::solve(
+                constraints,
+                &base,
+                free,
+                k,
+                self.config.solver_conflicts,
+                oracle,
+            );
+            match &answer {
+                QueryResult::Sat(_) => {
+                    self.solver_log.sat += 1;
+                    return answer;
+                }
+                QueryResult::Unsat => self.solver_log.unsat += 1,
+                QueryResult::Unknown(reason) => {
+                    self.solver_log.unknown += 1;
+                    if !self.solver_log.unknown_reasons.contains(reason) {
+                        self.solver_log.unknown_reasons.push(reason.clone());
+                        self.solver_log.unknown_reasons.sort();
+                    }
+                    return answer;
+                }
+            }
+            last = answer;
+        }
+        last
+    }
+
+    /// Generational search over the `free` input bytes (the others held at
+    /// their recorded values) for an input that flips Φ.
+    ///
+    /// From the recorded input's symbolic path, ask the solver to negate Φ
+    /// itself (when it is symbolic) and each symbolic branch, nearest the
+    /// sink first, keeping the branches before it. Every model is replayed:
+    /// one that does not take the predicted path is rejected and logged; one
+    /// that does and flips Φ is confirmed by an intervention replay, a fresh
+    /// replay and the JIT; one that does and leaves Φ alone has its own path
+    /// searched past the negated branch (SAGE's generational search).
+    fn solver_search(&mut self, free: &[usize], purpose: &str) -> Result<SearchOutcome> {
+        use std::collections::VecDeque;
+        let phi0 = self.trace.observation.holds();
+        let base = self.case.program.input.clone();
+        let root = self.root()?;
+        if root.holds() != phi0 {
+            return Ok(SearchOutcome::Unknown(format!(
+                "the symbolic replay of the recorded input decided Φ as {:?}, the recording as {:?}",
+                root.observation, self.trace.observation
+            )));
+        }
+        let mut queries_left = self.config.max_solver_queries;
+        let mut seen: BTreeSet<Vec<u8>> = BTreeSet::from([base.clone()]);
+        let mut queue: VecDeque<(std::rc::Rc<SymPath>, usize, usize)> =
+            VecDeque::from([(root, 0, 0)]);
+        let mut unknown: Option<String> = None;
+        let mut truncated = false;
+        while let Some((path, bound, generation)) = queue.pop_front() {
+            if !self.budget_left() {
+                return Ok(SearchOutcome::Budget("oracle budget".into()));
+            }
+            let changed = path.input.iter().zip(&base).filter(|(a, b)| a != b).count();
+            // Targets: Φ itself under the whole path, then each branch from
+            // the sink back to `bound`.
+            let mut targets: Vec<(Option<usize>, String)> = Vec::new();
+            if path.phi.is_some() && generation == 0 {
+                targets.push((None, "phi".into()));
+            }
+            for j in (bound..path.branches.len()).rev() {
+                targets.push((Some(j), format!("branch at 0x{:x}", path.branches[j].pc)));
+            }
+            for (target, negated) in targets {
+                let (prefix_len, goal) = match target {
+                    Some(j) => {
+                        let b = &path.branches[j];
+                        let flipped = symbolic::PathBranch {
+                            taken: !b.taken,
+                            ..b.clone()
+                        };
+                        (j, flipped.as_taken())
+                    }
+                    None => {
+                        let phi = path.phi.clone().expect("checked");
+                        let goal = if phi0 == Some(true) {
+                            symbolic_expr::SymExpr::Eq(
+                                Box::new(phi),
+                                Box::new(symbolic_expr::SymExpr::Const { val: 0, size: 1 }),
+                            )
+                        } else {
+                            phi
+                        };
+                        (path.branches.len(), goal)
+                    }
+                };
+                let mut constraints: Vec<_> = path.branches[..prefix_len]
+                    .iter()
+                    .map(symbolic::PathBranch::as_taken)
+                    .collect();
+                constraints.push(goal);
+                let answer = self.ask(
+                    &constraints,
+                    free,
+                    changed.max(1),
+                    &path.state,
+                    &mut queries_left,
+                );
+                let model = match answer {
+                    QueryResult::Sat(model) => model,
+                    QueryResult::Unsat => continue,
+                    QueryResult::Unknown(reason) => {
+                        if reason == "query budget" {
+                            return Ok(SearchOutcome::Budget(format!(
+                                "{} solver queries",
+                                self.config.max_solver_queries
+                            )));
+                        }
+                        unknown.get_or_insert(reason);
+                        continue;
+                    }
+                };
+                let mut input = base.clone();
+                for (o, v) in &model {
+                    if let Some(slot) = input.get_mut(*o) {
+                        *slot = *v;
+                    }
+                }
+                let changes: BTreeMap<usize, u8> = input
+                    .iter()
+                    .zip(&base)
+                    .enumerate()
+                    .filter(|(_, (a, b))| a != b)
+                    .map(|(o, (a, _))| (o, *a))
+                    .collect();
+                let mut record = ModelRecord {
+                    purpose: purpose.to_string(),
+                    generation,
+                    negated: negated.clone(),
+                    changes: changes.iter().map(|(o, v)| (*o, *v)).collect(),
+                    outcome: ModelOutcome::Duplicate,
+                };
+                if !seen.insert(input.clone()) {
+                    self.solver_log.models.push(record);
+                    continue;
+                }
+                let child = self.symbolic_replay(&input)?;
+                // What the model predicts: the prefix as it was, then the
+                // negated branch the other way (or, for Φ, the same path
+                // and Φ flipped).
+                let mut expected: Vec<(u64, bool)> = path.signature()[..prefix_len].to_vec();
+                if let Some(j) = target {
+                    expected.push((path.branches[j].pc, !path.branches[j].taken));
+                }
+                let observed = child.signature();
+                let path_ok =
+                    observed.len() >= expected.len() && observed[..expected.len()] == expected[..];
+                let phi_ok = target.is_some() || child.holds() == phi0.map(|h| !h);
+                if !path_ok || !phi_ok {
+                    record.outcome = ModelOutcome::Rejected {
+                        expected: format!(
+                            "{expected:x?}{}",
+                            if target.is_none() {
+                                " and Φ flipped"
+                            } else {
+                                ""
+                            }
+                        ),
+                        observed: format!("{:x?} Φ={:?}", &observed, child.holds()),
+                    };
+                    self.solver_log.models.push(record);
+                    continue;
+                }
+                match child.holds() {
+                    None => {
+                        record.outcome = ModelOutcome::Undecided;
+                        self.solver_log.models.push(record);
+                    }
+                    Some(h) if Some(h) != phi0 => {
+                        let ivs = self.input_interventions(&changes);
+                        let start = ivs.iter().map(|iv| iv.step).min().unwrap_or(0);
+                        let fork = self.oracle(start, &ivs, false, false)?;
+                        let confirmed = fork.observation.holds() == Some(h) && {
+                            let (agrees, _, _) = self.verify(start, &ivs, &fork.observation)?;
+                            agrees
+                        };
+                        if confirmed {
+                            record.outcome = ModelOutcome::Witness;
+                            self.solver_log.models.push(record);
+                            return Ok(SearchOutcome::Found {
+                                changes,
+                                negated,
+                                generation,
+                                observation: fork.observation,
+                            });
+                        }
+                        record.outcome = ModelOutcome::NotVerified {
+                            detail: format!(
+                                "symbolic replay Φ={h}, intervention replay {:?}",
+                                fork.observation
+                            ),
+                        };
+                        self.solver_log.models.push(record);
+                    }
+                    Some(_) => {
+                        record.outcome = ModelOutcome::PhiUnchanged;
+                        self.solver_log.models.push(record);
+                        if let Some(j) = target {
+                            if generation + 1 < self.config.max_generations {
+                                queue.push_back((std::rc::Rc::new(child), j + 1, generation + 1));
+                            } else {
+                                truncated = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(match (unknown, truncated) {
+            (Some(reason), _) => SearchOutcome::Unknown(reason),
+            (None, true) => {
+                SearchOutcome::Budget(format!("{} generations", self.config.max_generations))
+            }
+            (None, false) => SearchOutcome::Exhausted,
+        })
+    }
+
+    /// Bounded minimality of a joint witness: search every proper subset
+    /// one byte smaller (which covers all smaller ones: a subset search may
+    /// leave any of its bytes at the recorded value). A smaller witness
+    /// replaces the set and the check starts again.
+    fn minimality(
+        &mut self,
+        mut set: BTreeMap<usize, u8>,
+    ) -> Result<(BTreeMap<usize, u8>, Minimality)> {
+        if !self.config.minimality {
+            return Ok((
+                set,
+                Minimality::NotChecked {
+                    reason: "minimality checks are off".into(),
+                },
+            ));
+        }
+        if set.len() < 2 {
+            return Ok((
+                set,
+                Minimality::NotChecked {
+                    reason: "one member".into(),
+                },
+            ));
+        }
+        let queries_before = self.solver_log.queries;
+        let mut checked = 0usize;
+        'restart: for _ in 0..=self.config.max_joint_size {
+            checked = 0;
+            let members: Vec<usize> = set.keys().copied().collect();
+            for &drop in &members {
+                let subset: Vec<usize> = members.iter().copied().filter(|o| *o != drop).collect();
+                let purpose = format!("minimality {subset:?}");
+                match self.solver_search(&subset, &purpose)? {
+                    SearchOutcome::Exhausted => checked += 1,
+                    SearchOutcome::Found { changes, .. } if changes.len() < set.len() => {
+                        set = changes;
+                        if set.len() < 2 {
+                            return Ok((
+                                set,
+                                Minimality::NotChecked {
+                                    reason: "shrank to one member".into(),
+                                },
+                            ));
+                        }
+                        continue 'restart;
+                    }
+                    SearchOutcome::Found { .. } => checked += 1,
+                    SearchOutcome::Unknown(reason) | SearchOutcome::Budget(reason) => {
+                        return Ok((
+                            set,
+                            Minimality::Unknown {
+                                reason: format!("subset {subset:?}: {reason}"),
+                            },
+                        ));
+                    }
+                }
+            }
+            break;
+        }
+        let bound = format!(
+            "input bytes only, other bytes held at their recorded values; every symbolic \
+             branch reachable over each subset negated, {} generations, at most {} changed \
+             bytes and {} SAT conflicts per query; complete only over what the interpreter's \
+             symbolic shadow models (concretised addresses and unmodelled ops are outside it)",
+            self.config.max_generations, self.config.max_joint_size, self.config.solver_conflicts
+        );
+        Ok((
+            set,
+            Minimality::MinimalWithinBudget {
+                subsets_checked: checked,
+                solver_queries: self.solver_log.queries - queries_before,
+                bound,
+            },
+        ))
+    }
+
+    /// Each member of a joint witness under the others as its contingency.
+    fn contingencies(&mut self, ivs: &[Intervention]) -> Result<Vec<ContingencyWitness>> {
+        let phi0 = self.trace.observation.holds();
+        let mut out = Vec::new();
+        let start_all = ivs.iter().map(|iv| iv.step).min().unwrap_or(0);
+        let all = self
+            .oracle(start_all, ivs, false, false)?
+            .observation
+            .holds();
+        for (i, cause) in ivs.iter().enumerate() {
+            let contingency: Vec<Intervention> = ivs
+                .iter()
+                .enumerate()
+                .filter(|(k, _)| *k != i)
+                .map(|(_, iv)| iv.clone())
+                .collect();
+            let start = contingency.iter().map(|iv| iv.step).min().unwrap_or(0);
+            let fork = self.oracle(start, &contingency, false, false)?;
+            let fresh = self.oracle(start, &contingency, true, true)?;
+            let under = fork.observation.holds();
+            let agree = under == fresh.observation.holds();
+            let cause_offset = match cause.location {
+                Location::Memory { addr, len: 1 } => {
+                    slice::input_offset_at(&self.trace, addr, cause.step)
+                }
+                _ => None,
+            };
+            out.push(ContingencyWitness {
+                cause: cause.clone(),
+                cause_offset,
+                contingency,
+                phi_under_contingency: under,
+                phi_with_cause: all,
+                holds: agree && under == phi0 && all.is_some() && all != phi0,
+            });
+        }
+        Ok(out)
+    }
+
+    /// A caller's set of interventions, as one experiment.
+    fn judge_set(&mut self, ivs: &[Intervention]) -> Result<RequestedSet> {
+        let start = ivs.iter().map(|iv| iv.step).min().unwrap_or(0);
+        let fork = self.oracle(start, ivs, false, false)?;
+        let fresh = self.oracle(start, ivs, true, true)?;
+        let agree = fork.observation.holds() == fresh.observation.holds();
+        Ok(RequestedSet {
+            interventions: ivs.to_vec(),
+            input_offsets: ivs
+                .iter()
+                .map(|iv| match iv.location {
+                    Location::Memory { addr, len: 1 } => {
+                        slice::input_offset_at(&self.trace, addr, iv.step)
+                    }
+                    _ => None,
+                })
+                .collect(),
+            changes_sink: agree
+                && fork.observation.holds().is_some()
+                && fork.observation.holds() != self.trace.observation.holds(),
+            replays_agree: agree,
+            fork: fork.observation,
+            fresh: fresh.observation,
+        })
+    }
+
+    /// Joint search when no single input byte is a witness: the solver
+    /// first, then P1's pair search. Returns the status and, when the
+    /// solver's witness is a single byte the value set missed, that
+    /// candidate.
+    fn joint(
+        &mut self,
+        singles: &[CandidateResult],
+        slice: &Slice,
+    ) -> Result<(JointStatus, Option<CandidateResult>)> {
+        let delivered: Vec<usize> = self.input_sites.keys().copied().collect();
+        let mut found: Option<(BTreeMap<usize, u8>, JointSearch)> = None;
+        let mut unknown = None;
+        let mut exhausted = false;
+        if self.config.solver && !delivered.is_empty() {
+            match self.solver_search(&delivered, "search")? {
+                SearchOutcome::Found {
+                    changes,
+                    negated,
+                    generation,
+                    observation,
+                } if changes.len() == 1 => {
+                    let ivs = self.input_interventions(&changes);
+                    let iv = ivs[0].clone();
+                    let (offset, _) = changes.iter().next().map(|(o, v)| (*o, *v)).unwrap();
+                    let original = vec![self.case.program.input[offset]];
+                    let verdict = self.witness(&iv, original, observation)?;
+                    let _ = (negated, generation);
+                    return Ok((
+                        JointStatus::NotNeeded,
+                        Some(CandidateResult {
+                            step: iv.step,
+                            pc: self.trace.step(iv.step).map_or(0, |s| s.pc),
+                            location: iv.location.clone(),
+                            origin: CandidateOrigin::SolverModel,
+                            input_offset: Some(offset),
+                            variable: None,
+                            verdict,
+                        }),
+                    ));
+                }
+                SearchOutcome::Found {
+                    changes,
+                    negated,
+                    generation,
+                    ..
+                } => {
+                    found = Some((
+                        changes,
+                        JointSearch::Solver {
+                            negated,
+                            generation,
+                        },
+                    ))
+                }
+                SearchOutcome::Unknown(reason) => unknown = Some(reason),
+                SearchOutcome::Budget(_) => {}
+                SearchOutcome::Exhausted => exhausted = true,
+            }
+        }
+        let mut pairs_tried = 0;
+        if found.is_none() {
+            match self.pair_search(singles, slice)? {
+                JointStatus::JointWitness {
+                    interventions,
+                    input_offsets,
+                    ..
+                } => {
+                    let changes = interventions
+                        .iter()
+                        .zip(&input_offsets)
+                        .filter_map(|(iv, o)| Some(((*o)?, *iv.value.first()?)))
+                        .collect();
+                    found = Some((changes, JointSearch::PairSearch));
+                }
+                JointStatus::NoWitnessWithinBudget { pairs_tried: p, .. } => pairs_tried = p,
+                _ => {}
+            }
+        }
+        let solver_queries = self.solver_log.queries;
+        let Some((changes, found_by)) = found else {
+            return Ok((
+                match unknown {
+                    Some(reason) => JointStatus::SolverUnknown {
+                        reason,
+                        solver_queries,
+                        pairs_tried,
+                    },
+                    None => JointStatus::NoWitnessWithinBudget {
+                        pairs_tried,
+                        solver_queries,
+                        exhausted,
+                    },
+                },
+                None,
+            ));
+        };
+        let (changes, minimality) = self.minimality(changes)?;
+        let interventions = self.input_interventions(&changes);
+        let contingencies = self.contingencies(&interventions)?;
+        Ok((
+            JointStatus::JointWitness {
+                input_offsets: changes.keys().map(|o| Some(*o)).collect(),
+                interventions,
+                found_by,
+                minimality,
+                contingencies,
+            },
+            None,
+        ))
     }
 }
 
@@ -1050,9 +1786,20 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         slice_input_bytes: slice.input_offsets.len(),
         ..Counts::default()
     };
-    let mut generated = slice::candidates(program, &recorded, &slice);
-    counts.candidates_generated = generated.len();
-    generated.truncate(config.max_candidates);
+    // Input-first tiers: the slice's input bytes (ranked by the slice) and
+    // the named variables it reads; then the delivered bytes outside the
+    // slice; internal locations only on request or as a last resort.
+    let mut primary = slice::slice_inputs(&recorded, &slice);
+    primary.extend(slice::named_variables(
+        program,
+        &recorded,
+        &slice,
+        config.max_named_variables,
+    ));
+    let outside = slice::unsliced_inputs(&recorded, &slice);
+    let mut internal = slice::internal_candidates(program, &recorded, &slice);
+    counts.candidates_generated = primary.len() + outside.len() + internal.len();
+    internal.truncate(config.max_candidates);
     let mut pool: Vec<u64> = slice
         .steps
         .iter()
@@ -1062,6 +1809,12 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
     pool.sort_unstable();
     pool.dedup();
     pool.truncate(8);
+    let mut input_sites = BTreeMap::new();
+    for s in &recorded.steps {
+        for b in &s.input {
+            input_sites.entry(b.offset).or_insert((b.addr, s.step + 1));
+        }
+    }
 
     // Forks finish on the JIT and verifications on the interpreter, so a
     // verified witness has been seen by both engines.
@@ -1083,6 +1836,11 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         oracle_us: Vec::new(),
         fresh_us: Vec::new(),
         original_digest: recorded_digest.clone(),
+        solver_log: SolverLog::default(),
+        root_path: None,
+        input_sites,
+        internal_phase: false,
+        validated: BTreeSet::new(),
     };
 
     let mut refusal = None;
@@ -1099,22 +1857,33 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         ));
     }
 
-    if config.use_checkpoints && refusal.is_none() {
-        let mut wanted: BTreeSet<u64> = generated.iter().map(|c| c.step).collect();
-        // Thin to at most one checkpoint per `checkpoint_spacing` steps;
-        // the rest of the way is replayed from the closest one.
+    // Thin to at most one checkpoint per `checkpoint_spacing` steps; the
+    // rest of the way is replayed from the closest one.
+    let thin = |cands: &[Candidate], extra: &[u64], len: u64| {
         let mut steps: BTreeSet<u64> = BTreeSet::new();
         let mut last: Option<u64> = None;
-        for s in std::mem::take(&mut wanted) {
+        for s in cands.iter().map(|c| c.step).collect::<BTreeSet<_>>() {
             if last.is_none_or(|l| s >= l + config.checkpoint_spacing) {
                 steps.insert(s);
                 last = Some(s);
             }
         }
-        steps.extend(case.requested.iter().map(|iv| iv.step));
-        steps.retain(|s| *s < runner.trace.steps.len() as u64);
+        steps.extend(extra.iter().copied());
+        steps.retain(|s| *s < len);
+        steps
+    };
+    let trace_len = runner.trace.steps.len() as u64;
+    if config.use_checkpoints && refusal.is_none() {
+        let mut first: Vec<Candidate> = primary.clone();
+        first.extend(outside.iter().cloned());
+        let requested_steps: Vec<u64> = case
+            .requested
+            .iter()
+            .chain(case.requested_sets.iter().flatten())
+            .map(|iv| iv.step)
+            .collect();
         runner
-            .capture_checkpoints(&steps)
+            .capture_checkpoints(&thin(&first, &requested_steps, trace_len))
             .context("capturing checkpoints")?;
     }
 
@@ -1129,6 +1898,7 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
 
     let mut candidates = Vec::new();
     let mut requested = Vec::new();
+    let mut requested_sets = Vec::new();
     let joint;
     if let Some(reason) = &refusal {
         for iv in &case.requested {
@@ -1138,6 +1908,7 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
                 location: iv.location.clone(),
                 origin: CandidateOrigin::Requested,
                 input_offset: None,
+                variable: None,
                 verdict: Verdict::NonDeterministic {
                     reason: reason.clone(),
                 },
@@ -1145,19 +1916,42 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         }
         joint = JointStatus::Refused;
     } else {
-        for cand in &generated {
-            let verdict = runner
-                .test_candidate(cand, &pool)
-                .with_context(|| format!("candidate {cand:?}"))?;
-            runner.counts.candidates_tested += 1;
-            candidates.push(CandidateResult {
-                step: cand.step,
-                pc: runner.trace.step(cand.step).map_or(0, |s| s.pc),
-                location: cand.location.clone(),
-                origin: cand.origin,
-                input_offset: cand.input_offset,
-                verdict,
-            });
+        let input_witness = |cands: &[CandidateResult]| {
+            cands.iter().any(|c| {
+                c.input_offset.is_some()
+                    && matches!(c.verdict, Verdict::CounterfactualWitness { .. })
+            })
+        };
+        candidates.extend(runner.test_tier(&primary, &pool, |c| &mut c.tested_primary)?);
+        if !input_witness(&candidates) {
+            candidates.extend(runner.test_tier(&outside, &pool, |c| &mut c.tested_outside_slice)?);
+        }
+        // Explanations are scored at input-byte granularity, so the joint
+        // search runs whenever no single input byte is a witness, even if a
+        // named variable is.
+        joint = if input_witness(&candidates) {
+            JointStatus::NotNeeded
+        } else {
+            let (status, single) = runner.joint(&candidates, &slice).context("joint search")?;
+            candidates.extend(single);
+            status
+        };
+        let input_level =
+            input_witness(&candidates) || matches!(joint, JointStatus::JointWitness { .. });
+        let internal_wanted = match config.internal_locations {
+            InternalPolicy::Never => false,
+            InternalPolicy::Fallback => !input_level,
+            InternalPolicy::Always => true,
+        };
+        if internal_wanted {
+            runner.internal_phase = true;
+            if config.use_checkpoints {
+                runner
+                    .capture_checkpoints(&thin(&internal, &[], trace_len))
+                    .context("capturing internal checkpoints")?;
+            }
+            candidates.extend(runner.test_tier(&internal, &pool, |c| &mut c.tested_internal)?);
+            runner.internal_phase = false;
         }
         for iv in &case.requested {
             requested.push(
@@ -1166,19 +1960,9 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
                     .with_context(|| format!("requested {iv:?}"))?,
             );
         }
-        // Explanations are scored at input-byte granularity, so the pair
-        // search runs whenever no single input byte is a witness, even if
-        // some internal location (a read length, a saved register) is.
-        let any_witness = candidates.iter().any(|c| {
-            c.input_offset.is_some() && matches!(c.verdict, Verdict::CounterfactualWitness { .. })
-        });
-        joint = if any_witness {
-            JointStatus::NotNeeded
-        } else {
-            runner
-                .joint_search(&candidates, &slice)
-                .context("joint search")?
-        };
+        for set in &case.requested_sets {
+            requested_sets.push(runner.judge_set(set).context("requested set")?);
+        }
     }
 
     let witness_inputs: Vec<usize> = candidates
@@ -1214,6 +1998,8 @@ pub fn run_case(case: &Case<'_>, config: &Config) -> Result<CaseReport> {
         candidates,
         requested,
         joint,
+        solver: runner.solver_log.clone(),
+        requested_sets,
         witness_inputs,
         counts: runner.counts.clone(),
         config: config.clone(),

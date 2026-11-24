@@ -92,9 +92,9 @@ fn cell(s: &eval::Score) -> String {
 
 fn print_table(rows: &[(Evaluation, Child)]) {
     println!(
-        "| case | truth | SS nodes | SS TP/FP/FN | DS nodes | DS TP/FP/FN | DT-data TP/FP/FN | DT-ctl TP/FP/FN | CSIC cands | CSIC TP/FP/FN | joint | refused | oracles | ckpt capture ms | restore us | replay-to-step us | fresh emulator ms | oracle us | peak RSS MiB | total ms | exhaustive TP/FP/FN |"
+        "| case | truth | SS nodes | SS TP/FP/FN | DS nodes | DS TP/FP/FN | DT-data TP/FP/FN | DT-ctl TP/FP/FN | CSIC cands | CSIC TP/FP/FN | joint | refused | oracles | tested primary/outside/internal | internal oracles | solver queries | symbolic replays | models (rejected) | sets changing Φ | ckpt capture ms | restore us | replay-to-step us | fresh emulator ms | oracle us | peak RSS MiB | total ms | exhaustive TP/FP/FN | exhaustive oracles |"
     );
-    println!("|{}", "---|".repeat(21));
+    println!("|{}", "---|".repeat(29));
     for (e, c) in rows {
         let r = &e.report;
         let t = r.timing.clone().unwrap_or_default();
@@ -107,16 +107,58 @@ fn print_table(rows: &[(Evaluation, Child)]) {
         };
         let joint = match &r.joint {
             fission_causal::contract::JointStatus::NotNeeded => "-".to_string(),
-            fission_causal::contract::JointStatus::JointWitness { input_offsets, .. } => {
-                format!("pair{input_offsets:?}")
+            fission_causal::contract::JointStatus::JointWitness {
+                input_offsets,
+                found_by,
+                minimality,
+                ..
+            } => {
+                let offsets: Vec<usize> = input_offsets.iter().flatten().copied().collect();
+                let by = match found_by {
+                    fission_causal::contract::JointSearch::Solver { .. } => "solver",
+                    fission_causal::contract::JointSearch::PairSearch => "pairs",
+                };
+                let min = match minimality {
+                    fission_causal::contract::Minimality::MinimalWithinBudget { .. } => {
+                        "minimal-within-budget"
+                    }
+                    fission_causal::contract::Minimality::Unknown { .. } => "minimality-unknown",
+                    fission_causal::contract::Minimality::NotChecked { .. } => {
+                        "minimality-not-checked"
+                    }
+                };
+                format!("joint{offsets:?} by {by}, {min}")
             }
-            fission_causal::contract::JointStatus::NoWitnessWithinBudget { pairs_tried } => {
-                format!("none({pairs_tried})")
+            fission_causal::contract::JointStatus::NoWitnessWithinBudget {
+                pairs_tried,
+                solver_queries,
+                exhausted,
+            } => format!(
+                "none(pairs {pairs_tried}, queries {solver_queries}, exhausted {exhausted})"
+            ),
+            fission_causal::contract::JointStatus::SolverUnknown { reason, .. } => {
+                format!("solver-unknown({reason})")
             }
             fission_causal::contract::JointStatus::Refused => "refused".to_string(),
         };
+        let rejected = r
+            .solver
+            .models
+            .iter()
+            .filter(|m| {
+                matches!(
+                    m.outcome,
+                    fission_causal::runner::ModelOutcome::Rejected { .. }
+                )
+            })
+            .count();
+        let sets: Vec<String> = r
+            .requested_sets
+            .iter()
+            .map(|s| if s.changes_sink { "yes" } else { "no" }.to_string())
+            .collect();
         println!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.1} | {:.0} | {:.0} | {:.1} | {:.0} | {:.1} | {:.0} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {}/{}/{} | {} | {} | {} | {} ({}) | {} | {:.1} | {:.0} | {:.0} | {:.1} | {:.0} | {:.1} | {:.0} | {} | {} |",
             e.name,
             truth,
             e.static_slice.nodes,
@@ -130,6 +172,19 @@ fn print_table(rows: &[(Evaluation, Child)]) {
             joint,
             if e.refused { "yes" } else { "no" },
             r.counts.oracle_executions,
+            r.counts.tested_primary,
+            r.counts.tested_outside_slice,
+            r.counts.tested_internal,
+            r.counts.oracle_executions_internal,
+            r.solver.queries,
+            r.solver.symbolic_replays,
+            r.solver.models.len(),
+            rejected,
+            if sets.is_empty() {
+                "-".to_string()
+            } else {
+                sets.join(",")
+            },
             t.checkpoint_capture_us as f64 / 1000.0,
             t.checkpoint_restore_us_mean,
             t.replay_to_step_us_mean,
@@ -138,6 +193,7 @@ fn print_table(rows: &[(Evaluation, Child)]) {
             c.max_rss_bytes as f64 / (1024.0 * 1024.0),
             t.total_us as f64 / 1000.0,
             cell(&e.exhaustive),
+            e.exhaustive_oracles,
         );
     }
 }

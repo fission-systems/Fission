@@ -44,6 +44,9 @@ pub struct CaseSpec {
     pub input: Vec<u8>,
     pub sink: SinkFn,
     pub requested: RequestFn,
+    /// Input edits `(offset, value)` judged together, one experiment per
+    /// set: positive and adversarial controls for joint claims.
+    pub sets: Vec<Vec<(usize, u8)>>,
     pub truth: Truth,
 }
 
@@ -259,6 +262,44 @@ fn invalid_requests(program: &Program, discovery: &Trace) -> Result<Vec<Interven
     ])
 }
 
+/// Positive control (all three right) and adversarial controls (two of
+/// three right; two right plus the decoy) for the three-way AND.
+fn and3_sets() -> Vec<Vec<(usize, u8)>> {
+    vec![
+        vec![(0, b'K'), (1, b'E'), (2, b'Y')],
+        vec![(0, b'K'), (1, b'E')],
+        vec![(0, b'K'), (1, b'E'), (3, b'R')],
+    ]
+}
+
+/// `req[0] ^ req[1] == 0x5a`, granted.
+fn xor_input() -> Vec<u8> {
+    let mut v = vec![b'a', b'a' ^ 0x5a, b'D'];
+    v.resize(16, b'x');
+    v
+}
+
+/// Adversarial: the same bit flipped in both bytes leaves the XOR (and Φ)
+/// alone. Positive: one byte alone.
+fn xor_sets() -> Vec<Vec<(usize, u8)>> {
+    vec![
+        vec![(0, b'a' ^ 1), (1, (b'a' ^ 0x5a) ^ 1)],
+        vec![(0, b'a' ^ 1)],
+    ]
+}
+
+fn segv_input() -> Vec<u8> {
+    let mut v = vec![2u8, b'A'];
+    v.resize(8, b'x');
+    v
+}
+
+/// Positive: a valid slot (no fault, no handler). Adversarial: another
+/// stored value (still faults).
+fn segv_sets() -> Vec<Vec<(usize, u8)>> {
+    vec![vec![(0, 1)], vec![(1, 0)]]
+}
+
 /// The controlled cases.
 pub fn cases() -> Vec<CaseSpec> {
     let rfc_truth = Truth {
@@ -273,6 +314,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: rfc_input(),
             sink: is_admin_eq_1,
             requested: none,
+            sets: Vec::new(),
             truth: rfc_truth.clone(),
         },
         CaseSpec {
@@ -282,6 +324,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: rfc_input(),
             sink: is_admin_eq_1,
             requested: none,
+            sets: Vec::new(),
             truth: rfc_truth.clone(),
         },
         CaseSpec {
@@ -291,6 +334,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: rfc_input(),
             sink: is_admin_eq_1,
             requested: none,
+            sets: Vec::new(),
             truth: rfc_truth.clone(),
         },
         CaseSpec {
@@ -300,6 +344,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: rfc_input(),
             sink: is_admin_eq_1,
             requested: invalid_requests,
+            sets: Vec::new(),
             truth: rfc_truth,
         },
         CaseSpec {
@@ -309,6 +354,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"abcdeZgh", 16),
             sink: grant7,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![5],
                 ..Truth::default()
@@ -321,6 +367,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"1bcdPTR!", 16),
             sink: cfg_flag,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0],
                 ..Truth::default()
@@ -338,6 +385,7 @@ pub fn cases() -> Vec<CaseSpec> {
             },
             sink: account_admin,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![2, 9],
                 ..Truth::default()
@@ -350,6 +398,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"AB", 16),
             sink: grant_any,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 joint: vec![0, 1],
                 ..Truth::default()
@@ -362,6 +411,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"KY", 16),
             sink: grant_any,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0, 1],
                 ..Truth::default()
@@ -374,6 +424,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"T", 16),
             sink: grant_any,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0],
                 refuse: true,
@@ -387,6 +438,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"R", 16),
             sink: grant_any,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0],
                 refuse: true,
@@ -404,6 +456,7 @@ pub fn cases() -> Vec<CaseSpec> {
             },
             sink: observed_fault,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0],
                 ..Truth::default()
@@ -420,6 +473,7 @@ pub fn cases() -> Vec<CaseSpec> {
             },
             sink: observed_fault,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0],
                 ..Truth::default()
@@ -432,6 +486,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"s3crXYZW", 16),
             sink: grant_admin,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0, 1, 2, 3],
                 ..Truth::default()
@@ -444,6 +499,7 @@ pub fn cases() -> Vec<CaseSpec> {
             input: pad(b"s3crXYZW", 16),
             sink: grant_admin,
             requested: none,
+            sets: Vec::new(),
             truth: Truth {
                 causes: vec![0, 1, 2, 3],
                 ..Truth::default()
@@ -461,6 +517,101 @@ pub fn cases() -> Vec<CaseSpec> {
             },
             sink: classify_branch,
             requested: none,
+            sets: Vec::new(),
+            truth: Truth {
+                causes: vec![0],
+                ..Truth::default()
+            },
+        },
+        // P2: joint causes the value set cannot reach, an XOR whose union is
+        // not a joint cause, and a sink reached only through a signal
+        // handler.
+        CaseSpec {
+            name: "joint_and_deny",
+            fixture: "x64_joint_and.elf",
+            property: "conjunctive grant (K && Y), both wrong: only the joint intervention with the exact values grants",
+            input: pad(b"ab", 16),
+            sink: grant_any,
+            requested: none,
+            sets: vec![vec![(0, b'K'), (1, b'Y')], vec![(0, b'K')], vec![(1, b'Y')]],
+            truth: Truth {
+                joint: vec![0, 1],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "and3_x64",
+            fixture: "x64_and3.elf",
+            property: "three-way AND, all wrong: a 3-byte joint cause; req[3] is a decoy compared on the path",
+            input: pad(b"abcQ", 16),
+            sink: grant_any,
+            requested: none,
+            sets: and3_sets(),
+            truth: Truth {
+                joint: vec![0, 1, 2],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "and3_a64",
+            fixture: "a64_and3.elf",
+            property: "the three-way AND on AArch64",
+            input: pad(b"abcQ", 16),
+            sink: grant_any,
+            requested: none,
+            sets: and3_sets(),
+            truth: Truth {
+                joint: vec![0, 1, 2],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "xor_gate_x64_O0",
+            fixture: "x64_xor_gate.elf",
+            property: "XOR cause: each byte alone flips Φ, flipping the same bit in both restores it",
+            input: xor_input(),
+            sink: grant_any,
+            requested: none,
+            sets: xor_sets(),
+            truth: Truth {
+                causes: vec![0, 1],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "xor_gate_x64_O2",
+            fixture: "x64_xor_gate_o2.elf",
+            property: "the XOR cause at -O2",
+            input: xor_input(),
+            sink: grant_any,
+            requested: none,
+            sets: xor_sets(),
+            truth: Truth {
+                causes: vec![0, 1],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "segv_grant_x64",
+            fixture: "x64_segv_grant.elf",
+            property: "sink reached only in a SIGSEGV handler: req[0] selects the NULL slot; the stored req[1] is not a cause",
+            input: segv_input(),
+            sink: grant_any,
+            requested: none,
+            sets: segv_sets(),
+            truth: Truth {
+                causes: vec![0],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "segv_grant_a64",
+            fixture: "a64_segv_grant.elf",
+            property: "the signal-handler sink on AArch64",
+            input: segv_input(),
+            sink: grant_any,
+            requested: none,
+            sets: segv_sets(),
             truth: Truth {
                 causes: vec![0],
                 ..Truth::default()
@@ -579,11 +730,25 @@ pub fn evaluate(spec: &CaseSpec, config: &Config) -> Result<Evaluation> {
     let discovery = trace::record(&program, &placeholder, &[], config.max_steps)?;
     let sink = (spec.sink)(&program, &discovery)?;
     let requested = (spec.requested)(&program, &discovery)?;
+    let mut requested_sets = Vec::new();
+    for set in &spec.sets {
+        let mut ivs = Vec::new();
+        for &(offset, value) in set {
+            let (step, addr) = input_step(&discovery, offset)?;
+            ivs.push(Intervention {
+                step,
+                location: Location::Memory { addr, len: 1 },
+                value: vec![value],
+            });
+        }
+        requested_sets.push(ivs);
+    }
     let case = Case {
         name: spec.name.to_string(),
         program: &program,
         sink: sink.clone(),
         requested,
+        requested_sets,
     };
     let report = runner::run_case(&case, config).context("csic runner")?;
 

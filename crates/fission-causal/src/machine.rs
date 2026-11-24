@@ -205,6 +205,12 @@ impl Program {
 
     /// A new emulator at the initial state, with the input stream seeded.
     pub fn fresh(&self, engine: Engine) -> Result<Run> {
+        self.fresh_with_input(engine, &self.input)
+    }
+
+    /// [`Self::fresh`] with another input stream: the same binary, image
+    /// and environment, a different standard input.
+    pub fn fresh_with_input(&self, engine: Engine, input: &[u8]) -> Result<Run> {
         let arch = ArchInfo::from_language_id(&self.language, Some(&self.binary))
             .map_err(|e| anyhow!("no arch info for {}: {e}", self.language))?;
         let mut emu = Emulator::new(
@@ -216,7 +222,7 @@ impl Program {
         )?;
         emu.force_interpreter = engine == Engine::Interpreter;
         emu.apply_linux_image(self.image.clone())?;
-        emu.seed_stdin(&self.input);
+        emu.seed_stdin(input);
         emu.set_host_stdout_echo(false);
         let syscalls = Arc::new(Mutex::new(Vec::new()));
         emu.add_observer(Box::new(SyscallTap {

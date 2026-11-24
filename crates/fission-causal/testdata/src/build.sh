@@ -21,3 +21,11 @@ build x86_64-linux-musl -O2 rfc_auth x64_rfc_auth_o2.elf
 for c in rfc_auth crash_null password; do
     build aarch64-linux-musl -O0 "$c" "a64_${c}.elf"
 done
+# P2 cases.
+for c in and3 xor_gate segv_grant; do
+    build x86_64-linux-musl -O0 "$c" "x64_${c}.elf"
+done
+build x86_64-linux-musl -O2 xor_gate x64_xor_gate_o2.elf
+for c in and3 segv_grant; do
+    build aarch64-linux-musl -O0 "$c" "a64_${c}.elf"
+done

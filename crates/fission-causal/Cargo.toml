@@ -19,6 +19,7 @@ fission-emulator = { path = "../fission-emulator" }
 fission-loader = { path = "../fission-loader" }
 fission-sleigh = { path = "../fission-sleigh" }
 fission-pcode-ir = { path = "../fission-pcode-ir" }
+fission-solver = { path = "../fission-solver" }
 anyhow = "1.0"
 blake3 = "1.5"
 serde = { version = "1.0", features = ["derive"] }

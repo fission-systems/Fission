@@ -228,6 +228,9 @@ pub struct Candidate {
     pub location: Location,
     pub origin: CandidateOrigin,
     pub input_offset: Option<usize>,
+    /// The program variable the location belongs to, when the binary names
+    /// one (`symbol` or `symbol+offset`).
+    pub variable: Option<String>,
 }
 
 /// The input offset `addr` holds just before `step`, if its last writer was
@@ -291,6 +294,7 @@ pub fn candidates(program: &Program, trace: &Trace, slice: &Slice) -> Vec<Candid
                 location,
                 origin: CandidateOrigin::InputByte,
                 input_offset: Some(offset),
+                variable: None,
             });
         }
     }
@@ -324,11 +328,160 @@ pub fn candidates(program: &Program, trace: &Trace, slice: &Slice) -> Vec<Candid
                     location,
                     origin,
                     input_offset,
+                    variable: None,
                 });
             }
         }
     }
     out
+}
+
+/// Every input byte the slice reaches, ranked by the slice: the byte whose
+/// value the slice last read (nearest the sink) first, then by offset. Each
+/// is intervened on right after the read that delivered it.
+pub fn slice_inputs(trace: &Trace, slice: &Slice) -> Vec<Candidate> {
+    let mut nearest: BTreeMap<usize, u64> = BTreeMap::new();
+    for (&step, uses) in &slice.uses {
+        for u in uses {
+            let Access::Mem { addr, len } = *u else {
+                continue;
+            };
+            for a in (0..u64::from(len)).map(|i| addr.wrapping_add(i)) {
+                if let Some(offset) = input_offset_at(trace, a, step)
+                    && slice.input_offsets.contains(&offset)
+                {
+                    let e = nearest.entry(offset).or_insert(step);
+                    *e = (*e).max(step);
+                }
+            }
+        }
+    }
+    let mut out: Vec<(std::cmp::Reverse<u64>, usize, Candidate)> = Vec::new();
+    for s in &trace.steps {
+        for b in &s.input {
+            if !slice.input_offsets.contains(&b.offset) {
+                continue;
+            }
+            let rank = nearest.get(&b.offset).copied().unwrap_or(s.step);
+            out.push((
+                std::cmp::Reverse(rank),
+                b.offset,
+                Candidate {
+                    step: s.step + 1,
+                    location: Location::Memory {
+                        addr: b.addr,
+                        len: 1,
+                    },
+                    origin: CandidateOrigin::InputByte,
+                    input_offset: Some(b.offset),
+                    variable: None,
+                },
+            ));
+        }
+    }
+    out.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    out.dedup_by(|a, b| a.1 == b.1);
+    out.into_iter().map(|(_, _, c)| c).collect()
+}
+
+/// Delivered input bytes the slice does not reach, by offset: the second
+/// tier, tried when no slice byte is a witness, so the explanation's recall
+/// is not the slice's.
+pub fn unsliced_inputs(trace: &Trace, slice: &Slice) -> Vec<Candidate> {
+    let mut out: Vec<Candidate> = Vec::new();
+    let mut seen = BTreeSet::new();
+    for s in &trace.steps {
+        for b in &s.input {
+            if slice.input_offsets.contains(&b.offset) || !seen.insert(b.offset) {
+                continue;
+            }
+            out.push(Candidate {
+                step: s.step + 1,
+                location: Location::Memory {
+                    addr: b.addr,
+                    len: 1,
+                },
+                origin: CandidateOrigin::InputByteOutsideSlice,
+                input_offset: Some(b.offset),
+                variable: None,
+            });
+        }
+    }
+    out.sort_by_key(|c| c.input_offset);
+    out
+}
+
+/// Named program variables the slice reads: for each data symbol (with a
+/// size) a slice step reads, one candidate at the read nearest the sink,
+/// covering the bytes that step read. Input bytes are left to the input
+/// tiers. At most `max`.
+pub fn named_variables(
+    program: &Program,
+    trace: &Trace,
+    slice: &Slice,
+    max: usize,
+) -> Vec<Candidate> {
+    let mut symbols: Vec<(u64, u64, &str)> = program
+        .binary
+        .global_symbols
+        .iter()
+        .filter_map(|(addr, name)| {
+            let size = *program.binary.global_symbol_sizes.get(addr)?;
+            (size > 0).then_some((*addr, addr.wrapping_add(size), name.as_str()))
+        })
+        .collect();
+    symbols.sort_unstable();
+    let containing = |a: u64| {
+        let i = symbols.partition_point(|(start, _, _)| *start <= a);
+        i.checked_sub(1)
+            .map(|i| symbols[i])
+            .filter(|(_, end, _)| a < *end)
+    };
+    let mut out = Vec::new();
+    let mut seen: BTreeSet<u64> = BTreeSet::new();
+    for (&step, uses) in slice.uses.iter().rev() {
+        for u in uses {
+            let Access::Mem { addr, len } = *u else {
+                continue;
+            };
+            let Some((start, _, name)) = containing(addr) else {
+                continue;
+            };
+            if (0..u64::from(len))
+                .any(|i| input_offset_at(trace, addr.wrapping_add(i), step).is_some())
+                || !seen.insert(start)
+            {
+                continue;
+            }
+            let variable = if addr == start {
+                name.to_string()
+            } else {
+                format!("{name}+{}", addr - start)
+            };
+            out.push(Candidate {
+                step,
+                location: Location::Memory { addr, len },
+                origin: CandidateOrigin::NamedVariable,
+                input_offset: None,
+                variable: Some(variable),
+            });
+            if out.len() >= max {
+                return out;
+            }
+        }
+    }
+    out
+}
+
+/// Internal locations: every register and memory location a slice step
+/// read (P1's candidate set minus the input bytes at their reads), nearest
+/// the sink first. Tried only on request or when no input-level
+/// witness exists.
+pub fn internal_candidates(program: &Program, trace: &Trace, slice: &Slice) -> Vec<Candidate> {
+    candidates(program, trace, slice)
+        .into_iter()
+        .filter(|c| c.origin != CandidateOrigin::InputByte)
+        .collect()
 }
 
 /// Deterministic alternative values for a location holding `original`:

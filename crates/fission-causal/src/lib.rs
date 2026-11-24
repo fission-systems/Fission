@@ -21,6 +21,7 @@ pub mod machine;
 pub mod runner;
 pub mod slice;
 pub mod static_slice;
+pub mod symbolic;
 pub mod trace;
 
 pub use contract::{

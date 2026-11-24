@@ -12,11 +12,16 @@
 //! agreed. It is not a Halpern-Pearl actual-cause claim: no contingency set
 //! was searched and nothing about minimality is asserted. Likewise
 //! [`Verdict::NotACause`] holds only for the values that were tried.
+//!
+//! v2 adds the input-first tiers ([`CandidateOrigin`]), the solver-backed
+//! joint search ([`JointStatus::JointWitness`] with its model, a bounded
+//! [`Minimality`] verdict and [`ContingencyWitness`]es) and
+//! [`JointStatus::SolverUnknown`], which is never "no cause".
 
 use serde::{Deserialize, Serialize};
 
 /// Contract version carried by every report.
-pub const CONTRACT_VERSION: &str = "csic/v1";
+pub const CONTRACT_VERSION: &str = "csic/v2";
 
 /// The sink predicate Φ.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -283,8 +288,18 @@ pub struct InterventionWitness {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CandidateOrigin {
-    /// An input byte, intervened on right after the read that delivered it.
+    /// An input byte the sink's slice reaches, intervened on right after
+    /// the read that delivered it. The primary tier.
     InputByte,
+    /// A delivered input byte the slice does not reach. Tried when no
+    /// slice byte is a witness.
+    InputByteOutsideSlice,
+    /// A named program variable (a sized data symbol) a slice step reads.
+    /// Primary tier, with the slice's input bytes.
+    NamedVariable,
+    /// An input byte whose witness value the solver found (one byte, one
+    /// specific value the value set does not hold).
+    SolverModel,
     /// A value the sink's backward dynamic data slice reads.
     DynamicData,
     /// A value a dynamically control-dependent branch reads (control
@@ -306,6 +321,9 @@ pub struct CandidateResult {
     /// The input-stream offset this location held at `step`, when it held
     /// exactly one unmodified input byte.
     pub input_offset: Option<usize>,
+    /// The named program variable the location belongs to, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variable: Option<String>,
     pub verdict: Verdict,
 }
 
@@ -313,20 +331,94 @@ pub struct CandidateResult {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JointStatus {
-    /// At least one single input-byte witness exists; no joint search ran.
+    /// A single input-byte witness exists (from the value set, or a solver
+    /// model of one byte); no joint search was needed.
     NotNeeded,
-    /// No single input-byte witness; this pair of interventions together
-    /// changed Φ (verified by a fresh replay). The cause needs a joint
-    /// intervention. Not a minimality claim beyond "no single member of the
-    /// tried candidates sufficed".
+    /// No single input-byte witness; these interventions together changed Φ,
+    /// verified by a fresh replay. See `minimality` for what is (and is
+    /// not) claimed about smaller sets.
     JointWitness {
         interventions: Vec<Intervention>,
         input_offsets: Vec<Option<usize>>,
+        found_by: JointSearch,
+        minimality: Minimality,
+        /// Each member as a counterfactual witness under a contingency: the
+        /// other members' values set and Φ unchanged, then this member's
+        /// set too and Φ flipped.
+        contingencies: Vec<ContingencyWitness>,
     },
-    /// No single input-byte witness and the bounded pair search found none.
-    /// This is not "no cause": a larger set, or other values, may still
-    /// change Φ.
-    NoWitnessWithinBudget { pairs_tried: u64 },
+    /// No single input-byte witness, and the search ended without one
+    /// because the solver could not decide a query it needed. This is
+    /// explicitly not "no cause".
+    SolverUnknown {
+        reason: String,
+        solver_queries: u64,
+        pairs_tried: u64,
+    },
+    /// No single input-byte witness and the bounded searches found none.
+    /// `exhausted` says the solver search ran out of paths rather than
+    /// budget (every reachable branch over the input was negated or proved
+    /// infeasible). Even then this is not "no cause": the symbolic layer
+    /// sees only what it models.
+    NoWitnessWithinBudget {
+        pairs_tried: u64,
+        solver_queries: u64,
+        exhausted: bool,
+    },
     /// The case was refused before any search.
     Refused,
+}
+
+/// Which search produced a joint witness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum JointSearch {
+    /// A solver model over the input bytes, replayed in the emulator.
+    Solver {
+        /// The negated constraint the model satisfied (`branch at 0x..`
+        /// or `phi`).
+        negated: String,
+        /// Generational depth of the path the model came from.
+        generation: usize,
+    },
+    /// P1's bounded pair search with the value set.
+    PairSearch,
+}
+
+/// What is claimed about smaller joint interventions. Never a
+/// Halpern-Pearl minimality claim: the search is over input bytes only,
+/// with the other bytes held at their recorded values, on the paths the
+/// symbolic layer models.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Minimality {
+    /// For every proper subset of the witness's bytes (others held at
+    /// their recorded values), the solver search ran out of paths without
+    /// a Φ-flipping model that replayed. `bound` states the search's
+    /// limits.
+    MinimalWithinBudget {
+        subsets_checked: usize,
+        solver_queries: u64,
+        bound: String,
+    },
+    /// A subset search hit the solver's Unknown or the budget: nothing is
+    /// claimed.
+    Unknown { reason: String },
+    /// Not checked (one-member witness, or checking was switched off).
+    NotChecked { reason: String },
+}
+
+/// `cause` is a counterfactual witness under the contingency
+/// `do(contingency)`: with those interventions alone Φ keeps its recorded
+/// value; adding `cause` flips it. Both runs replayed in the emulator.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContingencyWitness {
+    pub cause: Intervention,
+    pub cause_offset: Option<usize>,
+    pub contingency: Vec<Intervention>,
+    /// Φ under the contingency alone (must equal the recorded Φ).
+    pub phi_under_contingency: Option<bool>,
+    /// Φ under contingency plus cause (must differ from it).
+    pub phi_with_cause: Option<bool>,
+    pub holds: bool,
 }
