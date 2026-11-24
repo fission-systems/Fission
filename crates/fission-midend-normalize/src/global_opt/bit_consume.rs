@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::analysis::defuse::collect_address_taken_locals;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
 
@@ -39,6 +40,23 @@ pub fn apply_bit_consume_dead_code_pass(func: &mut PreHirFunction) -> bool {
     let mut def_map: HashMap<String, PreHirExpr> = HashMap::default();
     let mut multi_def: crate::HashSet<String> = crate::HashSet::default();
     collect_definitions(&func.body, &mut def_map, &mut multi_def);
+    for param in &func.params {
+        multi_def.insert(param.name.clone());
+    }
+    for local in &func.locals {
+        if local.initializer.is_some() {
+            multi_def.insert(local.name.clone());
+        }
+    }
+    multi_def.extend(collect_address_taken_locals(&func.body));
+    let init_stmts: Vec<PreHirStmt> = func
+        .locals
+        .iter()
+        .filter_map(|local| local.initializer.clone().map(PreHirStmt::Expr))
+        .collect();
+    if !init_stmts.is_empty() {
+        multi_def.extend(collect_address_taken_locals(&init_stmts));
+    }
 
     // --- Phase 2: build initial consumed seeds from all use sites ---
     let mut consumed: HashMap<String, u64> = HashMap::default();
@@ -118,6 +136,26 @@ fn collect_def_stmt(
                 def_map.insert(name.clone(), rhs.clone());
             }
         }
+        PreHirStmt::Assign { lhs, .. } => {
+            let mut root = match lhs {
+                PreHirLValue::FieldAccess { base, .. } | PreHirLValue::Index { base, .. } => {
+                    Some(base.as_ref())
+                }
+                PreHirLValue::Var(_) | PreHirLValue::Deref { .. } => None,
+            };
+            while let Some(expr) = root {
+                match expr {
+                    PreHirExpr::Var(name) => {
+                        multi_def.insert(name.clone());
+                        break;
+                    }
+                    PreHirExpr::FieldAccess { base, .. } | PreHirExpr::Index { base, .. } => {
+                        root = Some(base.as_ref());
+                    }
+                    _ => break,
+                }
+            }
+        }
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. } => {
@@ -149,6 +187,14 @@ fn collect_def_stmt(
             collect_definitions(default, def_map, multi_def);
         }
         _ => {}
+    }
+}
+
+fn low_bits_through_highest(mask: u64) -> u64 {
+    if mask == 0 {
+        0
+    } else {
+        u64::MAX >> mask.leading_zeros()
     }
 }
 
@@ -486,23 +532,44 @@ fn backward_propagate_inner(expr: &PreHirExpr, out_consume: u64, result: &mut Ve
             backward_propagate_inner(inner, src_mask, result);
         }
 
-        // x = -y  or  x = ~y → consumed[y] |= consumed[x]
-        PreHirExpr::Unary { expr: inner, .. } => {
+        // x = ~y -> bit-local; x = -y -> borrows/carries from 0..=highest_bit;
+        // x = !y -> depends on whether any bit of y is non-zero.
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::BitNot,
+            expr: inner,
+            ..
+        } => {
             backward_propagate_inner(inner, out_consume, result);
+        }
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Neg,
+            expr: inner,
+            ..
+        } => {
+            backward_propagate_inner(inner, low_bits_through_highest(out_consume), result);
+        }
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr: inner,
+            ..
+        } => {
+            let need = if out_consume == 0 { 0 } else { u64::MAX };
+            backward_propagate_inner(inner, need, result);
         }
         PreHirExpr::FieldAccess { base, .. } => {
             backward_propagate_inner(base, out_consume, result);
         }
 
-        // x = y + z  → conservative (carry propagation makes it hard to be precise)
+        // x = y + z / y - z / y * z -> bit k depends on all low bits 0..=k via carry/borrow.
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Add | PreHirBinaryOp::Sub | PreHirBinaryOp::Mul,
             lhs,
             rhs,
             ..
         } => {
-            backward_propagate_inner(lhs, out_consume, result);
-            backward_propagate_inner(rhs, out_consume, result);
+            let need = low_bits_through_highest(out_consume);
+            backward_propagate_inner(lhs, need, result);
+            backward_propagate_inner(rhs, need, result);
         }
 
         // Comparisons, div, mod: treat all inputs as fully consumed
@@ -968,5 +1035,206 @@ mod tests {
         };
         let consumed = backward_propagate(&expr, 1u64 << 63);
         assert_eq!(consumed, vec![("x".to_string(), 1u64 << 63)]);
+    }
+
+    #[test]
+    fn preserves_low_bits_feeding_add_carry_logical_not_and_param_multi_def() {
+        // 1. `x = y | 1; z = (x + 1) & 2;`: bit 0 of x carries into bit 1 of (x + 1),
+        // so `| 1` must be preserved.
+        let mut add_carry_func = PreHirFunction {
+            name: "add_carry".into(),
+            params: vec![PreHirBinding {
+                name: "y".into(),
+                ty: uint(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "z".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: Box::new(PreHirExpr::Var("y".into())),
+                        rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("z".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("x".into())),
+                            rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                            ty: uint(32),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(2, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("z".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_bit_consume_dead_code_pass(&mut add_carry_func);
+        assert!(matches!(
+            &add_carry_func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    ..
+                },
+                ..
+            }
+        ));
+
+        // 2. `x = y | 2; z = (!x) & 1;`: `!x` reads all bits of `x`, so `| 2` must stay.
+        let mut not_func = PreHirFunction {
+            name: "logical_not".into(),
+            params: vec![PreHirBinding {
+                name: "y".into(),
+                ty: uint(32),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                PreHirBinding {
+                    name: "x".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "z".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Or,
+                        lhs: Box::new(PreHirExpr::Var("y".into())),
+                        rhs: Box::new(PreHirExpr::Const(2, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("z".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Unary {
+                            op: PreHirUnaryOp::Not,
+                            expr: Box::new(PreHirExpr::Var("x".into())),
+                            ty: uint(32),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("z".into()))),
+            ],
+            ..Default::default()
+        };
+        apply_bit_consume_dead_code_pass(&mut not_func);
+        assert!(matches!(
+            &not_func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    ..
+                },
+                ..
+            }
+        ));
+
+        // 3. A parameter assigned once inside a branch must be treated as multi_def,
+        // so `if (c) p = q | 2; return p & 1;` must NOT strip `| 2`.
+        let mut param_func = PreHirFunction {
+            name: "param_redef".into(),
+            params: vec![
+                PreHirBinding {
+                    name: "c".into(),
+                    ty: NirType::Bool,
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(0)),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "p".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(1)),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "q".into(),
+                    ty: uint(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::ParamIndex(2)),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c".into()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("p".into()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Or,
+                            lhs: Box::new(PreHirExpr::Var("q".into())),
+                            rhs: Box::new(PreHirExpr::Const(2, uint(32))),
+                            ty: uint(32),
+                        },
+                    }]
+                    .into(),
+                    else_body: vec![].into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs: Box::new(PreHirExpr::Var("p".into())),
+                    rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                    ty: uint(32),
+                })),
+            ],
+            ..Default::default()
+        };
+        apply_bit_consume_dead_code_pass(&mut param_func);
+        let PreHirStmt::If { then_body, .. } = &param_func.body[0] else {
+            panic!("expected If");
+        };
+        assert!(matches!(
+            &then_body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    ..
+                },
+                ..
+            }
+        ));
     }
 }

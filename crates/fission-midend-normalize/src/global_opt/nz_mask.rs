@@ -1,4 +1,5 @@
 use crate::HashMap;
+use crate::analysis::defuse::collect_address_taken_locals;
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
 
@@ -183,6 +184,17 @@ fn collect_assignments_in_stmt(
                 changed = true;
             }
         }
+        PreHirStmt::Assign { lhs, .. } => {
+            if let Some(base_name) = lvalue_root_var(lhs) {
+                let full_mask = type_map.get(base_name).map_or(u64::MAX, type_mask);
+                let old_mask = var_masks.get(base_name).copied().unwrap_or(0);
+                let merged = old_mask | full_mask;
+                if merged != old_mask {
+                    var_masks.insert(base_name.to_string(), merged);
+                    changed = true;
+                }
+            }
+        }
         PreHirStmt::Block(stmts)
         | PreHirStmt::While { body: stmts, .. }
         | PreHirStmt::DoWhile { body: stmts, .. } => {
@@ -230,6 +242,28 @@ fn collect_assignments_in_stmt(
     changed
 }
 
+fn lvalue_root_var(lhs: &PreHirLValue) -> Option<&str> {
+    fn expr_root_var(mut expr: &PreHirExpr) -> Option<&str> {
+        loop {
+            match expr {
+                PreHirExpr::Var(name) => return Some(name.as_str()),
+                PreHirExpr::FieldAccess { base, .. } | PreHirExpr::Index { base, .. } => {
+                    expr = base;
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    match lhs {
+        PreHirLValue::Var(name) => Some(name.as_str()),
+        PreHirLValue::FieldAccess { base, .. } | PreHirLValue::Index { base, .. } => {
+            expr_root_var(base)
+        }
+        PreHirLValue::Deref { .. } => None,
+    }
+}
+
 pub fn compute_nz_masks(func: &PreHirFunction) -> HashMap<String, u64> {
     let mut type_map = HashMap::default();
     for binding in func.params.iter().chain(func.locals.iter()) {
@@ -242,6 +276,15 @@ pub fn compute_nz_masks(func: &PreHirFunction) -> HashMap<String, u64> {
     // written through its address. Those hold any value of their type, like
     // a parameter.
     let mut entry_values = crate::analysis::entry_values::names_reading_entry_values(&func.body);
+    entry_values.extend(collect_address_taken_locals(&func.body));
+    let init_stmts: Vec<PreHirStmt> = func
+        .locals
+        .iter()
+        .filter_map(|local| local.initializer.clone().map(PreHirStmt::Expr))
+        .collect();
+    if !init_stmts.is_empty() {
+        entry_values.extend(collect_address_taken_locals(&init_stmts));
+    }
     // A global also changes where no assignment here shows it: in a callee,
     // in another thread, before any read.
     entry_values.extend(crate::pipeline::global_storage_names());
@@ -261,6 +304,17 @@ pub fn compute_nz_masks(func: &PreHirFunction) -> HashMap<String, u64> {
     let mut iterations = 0;
     while iterations < 20 {
         let mut changed = false;
+        for local in &func.locals {
+            if let Some(init) = &local.initializer {
+                let init_mask = eval_expr_nz_mask(init, &var_masks, &type_map);
+                let old_mask = var_masks.get(&local.name).copied().unwrap_or(0);
+                let merged = old_mask | init_mask;
+                if merged != old_mask {
+                    var_masks.insert(local.name.clone(), merged);
+                    changed = true;
+                }
+            }
+        }
         for stmt in &func.body {
             changed |= collect_assignments_in_stmt(stmt, &mut var_masks, &type_map);
         }
@@ -554,5 +608,73 @@ mod tests {
             let types: HashMap<String, NirType> = [("x".to_string(), inner)].into_iter().collect();
             let _ = eval_expr_nz_mask(&expr, &masks, &types);
         }
+    }
+
+    #[test]
+    fn keeps_and_mask_for_initialized_address_taken_and_partial_written_locals() {
+        let u32_ty = int(32, false);
+        let mask_255 = |name: &str| PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(var(name)),
+            rhs: Box::new(PreHirExpr::Const(0xFF, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+
+        // 1. Local initialized with 0x100 must retain `& 0xFF`.
+        let mut init_func = PreHirFunction {
+            locals: vec![PreHirBinding {
+                name: "x".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(PreHirExpr::Const(0x100, u32_ty.clone())),
+            }],
+            body: vec![PreHirStmt::Return(Some(mask_255("x")))],
+            ..Default::default()
+        };
+        assert!(!apply_nz_mask_simplification_pass(&mut init_func));
+
+        // 2. Local assigned 0 then passed by address to `foo(&x)` must retain `& 0xFF`.
+        let mut addr_func = PreHirFunction {
+            locals: vec![local("x", u32_ty.clone())],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, u32_ty.clone()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "foo".to_string(),
+                    args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                    ty: NirType::Unknown,
+                }),
+                PreHirStmt::Return(Some(mask_255("x"))),
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_nz_mask_simplification_pass(&mut addr_func));
+
+        // 3. Local written via FieldAccess/Index after zero-init must retain `& 0xFF`.
+        let mut field_func = PreHirFunction {
+            locals: vec![local("x", u32_ty.clone())],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, u32_ty.clone()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::FieldAccess {
+                        base: Box::new(var("x")),
+                        field_name: "hi".to_string(),
+                        offset: 2,
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::Const(1, u32_ty.clone()),
+                },
+                PreHirStmt::Return(Some(mask_255("x"))),
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_nz_mask_simplification_pass(&mut field_func));
     }
 }
