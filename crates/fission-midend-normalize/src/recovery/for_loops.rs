@@ -140,10 +140,8 @@ fn try_collapse_while_to_for_algorithmic(
             if vars.contains(name) {
                 let is_iv = if let Some(ref iv) = update_var {
                     name == iv
-                } else if vars.len() > 1 {
-                    body_writes.contains(name)
                 } else {
-                    true
+                    body_writes.contains(name)
                 };
 
                 if is_iv {
@@ -227,7 +225,23 @@ fn collect_cond_vars(expr: &PreHirExpr, vars: &mut HashSet<String>) {
             collect_cond_vars(lhs, vars);
             collect_cond_vars(rhs, vars);
         }
-        PreHirExpr::PtrOffset { base, .. } => collect_cond_vars(base, vars),
+        PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
+            collect_cond_vars(base, vars)
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_cond_vars(base, vars);
+            collect_cond_vars(index, vars);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_cond_vars(cond, vars);
+            collect_cond_vars(then_expr, vars);
+            collect_cond_vars(else_expr, vars);
+        }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
                 collect_cond_vars(arg, vars);
@@ -412,5 +426,71 @@ mod tests {
             panic!("expected for loop");
         };
         assert!(init.is_some(), "matching iv init should be folded");
+    }
+
+    #[test]
+    fn for_loop_recovery_does_not_steal_invariant_bound_with_indexed_lhs() {
+        let mut func = PreHirFunction {
+            name: "test_invariant_bound_indexed".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "i".to_string(),
+                    ty: int_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "limit".to_string(),
+                    ty: int_ty(),
+                    surface_type_name: None,
+                    origin: None,
+                    initializer: None,
+                },
+            ],
+            return_type: int_ty(),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("limit".to_string()),
+                    rhs: PreHirExpr::Const(10, int_ty()),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::SLt,
+                        lhs: Box::new(PreHirExpr::Index {
+                            base: Box::new(PreHirExpr::Var("arr".to_string())),
+                            index: Box::new(PreHirExpr::Var("i".to_string())),
+                            elem_ty: int_ty(),
+                        }),
+                        rhs: Box::new(PreHirExpr::Var("limit".to_string())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                            rhs: Box::new(PreHirExpr::Const(1, int_ty())),
+                            ty: int_ty(),
+                        },
+                    }]
+                    .into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let _ = apply_for_loop_folding(&mut func.body);
+        assert!(
+            matches!(
+                &func.body[0],
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(n),
+                    ..
+                } if n == "limit"
+            ),
+            "invariant `limit = 10` must stay outside For.init: {:?}",
+            func.body
+        );
     }
 }

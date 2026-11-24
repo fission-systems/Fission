@@ -278,15 +278,63 @@ fn collect_accesses_from_stmts(
                     pointer_bytes,
                 );
             }
-            PreHirStmt::Block(body)
-            | PreHirStmt::While { body, .. }
-            | PreHirStmt::DoWhile { body, .. }
-            | PreHirStmt::For { body, .. } => collect_accesses_from_stmts(
+            PreHirStmt::Block(body) => collect_accesses_from_stmts(
                 body,
                 accesses,
                 include_structured_accesses,
                 pointer_bytes,
             ),
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                collect_accesses_from_expr(
+                    cond,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
+                collect_accesses_from_stmts(
+                    body,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_accesses_from_stmts(
+                        std::slice::from_ref(init.as_ref()),
+                        accesses,
+                        include_structured_accesses,
+                        pointer_bytes,
+                    );
+                }
+                if let Some(cond) = cond {
+                    collect_accesses_from_expr(
+                        cond,
+                        accesses,
+                        include_structured_accesses,
+                        pointer_bytes,
+                    );
+                }
+                collect_accesses_from_stmts(
+                    body,
+                    accesses,
+                    include_structured_accesses,
+                    pointer_bytes,
+                );
+                if let Some(update) = update {
+                    collect_accesses_from_stmts(
+                        std::slice::from_ref(update.as_ref()),
+                        accesses,
+                        include_structured_accesses,
+                        pointer_bytes,
+                    );
+                }
+            }
             PreHirStmt::Switch {
                 expr,
                 cases,
@@ -896,5 +944,45 @@ mod tests {
         assert_eq!(load_64.pointer_bytes, 8);
         let key_64 = load_64.partition_key();
         assert_eq!(key_64.offset_interval, (0, 8));
+    }
+
+    #[test]
+    fn collects_accesses_inside_loop_conditions_and_for_headers() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32 = |off: i64| PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::PtrOffset {
+                base: Box::new(PreHirExpr::Var("rbp".to_string())),
+                offset: off,
+            }),
+            ty: u32_ty.clone(),
+        };
+        let stmts = vec![
+            PreHirStmt::While {
+                cond: ptr_u32(-8),
+                body: vec![].into(),
+            },
+            PreHirStmt::DoWhile {
+                body: vec![].into(),
+                cond: ptr_u32(-12),
+            },
+            PreHirStmt::For {
+                init: Some(Box::new(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("a".to_string()),
+                    rhs: ptr_u32(-16),
+                })),
+                cond: Some(ptr_u32(-20)),
+                update: Some(Box::new(PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("b".to_string()),
+                    rhs: ptr_u32(-24),
+                })),
+                body: vec![].into(),
+            },
+        ];
+        let accesses = collect_partitioned_memory_accesses(&stmts, true);
+        let offsets: Vec<i64> = accesses.iter().map(|a| a.const_offset).collect();
+        assert_eq!(offsets, vec![-8, -12, -16, -20, -24]);
     }
 }

@@ -57,7 +57,7 @@ pub fn type_key(ty: &NirType) -> String {
         NirType::Unknown => "?".to_string(),
         NirType::Bool => "b".to_string(),
         NirType::Int { bits, signed } => format!("i{}s{}", bits, if *signed { 1 } else { 0 }),
-        NirType::Ptr(_) => "p".to_string(),
+        NirType::Ptr(inner) => format!("p({})", type_key(inner)),
         NirType::Aggregate { size, .. } => format!("a{}", size),
         NirType::Float { bits } => format!("f{}", bits),
     }
@@ -82,4 +82,52 @@ pub fn is_commutative(op: PreHirBinaryOp) -> bool {
 pub fn invalidate_pure_map(map: &mut PureExprMap, defined_var: &str) {
     let marker = format!("V({})", defined_var);
     map.retain(|k, _| !k.contains(&marker));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_key_distinguishes_pointer_pointee_types() {
+        let ptr_u8 = NirType::Ptr(Box::new(NirType::Int {
+            bits: 8,
+            signed: false,
+        }));
+        let ptr_u64 = NirType::Ptr(Box::new(NirType::Int {
+            bits: 64,
+            signed: false,
+        }));
+        let expr_u8 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: ptr_u8.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: ptr_u8,
+        };
+        let expr_u64 = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: ptr_u64.clone(),
+                expr: Box::new(PreHirExpr::Var("x".to_string())),
+            }),
+            rhs: Box::new(PreHirExpr::Const(
+                1,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+            ty: ptr_u64,
+        };
+        assert_ne!(pure_expr_key(&expr_u8), pure_expr_key(&expr_u64));
+    }
 }
