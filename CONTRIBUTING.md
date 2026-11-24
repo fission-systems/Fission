@@ -378,6 +378,11 @@ git commit -m "feat(cli): add --strings flag"
 
 ## Pull Request Process
 
+See [Issue and PR governance](docs/ISSUE_PR_WORKFLOW.md) for the managed
+label taxonomy, stabilization priorities, evidence requirements and PR
+lifecycle. Existing CI and release gates remain authoritative.
+
+
 ### Before Submitting
 
 1. **Fork the repository**
