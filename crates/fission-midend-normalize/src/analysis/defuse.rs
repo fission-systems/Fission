@@ -2391,6 +2391,25 @@ mod tests {
         assert!(fold_expr_hir(&mut ult));
         assert!(matches!(ult, PreHirExpr::Const(0, NirType::Bool)));
 
+        // The same u32 value held masked (0xFFFF_FFFF) and sign-extended (-1)
+        // compares equal, and neither is below the other.
+        let mut ult_mixed = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Const(0xFFFF_FFFF, u32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(-1, u32_ty.clone())),
+            ty: NirType::Bool,
+        };
+        assert!(fold_expr_hir(&mut ult_mixed));
+        assert!(matches!(ult_mixed, PreHirExpr::Const(0, NirType::Bool)));
+        let mut eq_mixed = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(PreHirExpr::Const(0xFFFF_FFFF, u32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(-1, u32_ty.clone())),
+            ty: NirType::Bool,
+        };
+        assert!(fold_expr_hir(&mut eq_mixed));
+        assert!(matches!(eq_mixed, PreHirExpr::Const(1, NirType::Bool)));
+
         let mut udiv = PreHirExpr::Binary {
             op: PreHirBinaryOp::Div,
             lhs: Box::new(PreHirExpr::Const(-2, u32_ty.clone())),
