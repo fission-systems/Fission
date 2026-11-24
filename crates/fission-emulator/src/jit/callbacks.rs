@@ -135,7 +135,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
         return 0;
     }
 
-    let mut evaluator = crate::pcode::eval::Evaluator::new(&mut emu.state, &mut emu.solver)
+    let mut evaluator = crate::pcode::eval::Evaluator::concrete(&mut emu.state, &mut emu.solver)
         .with_nan_policy(emu.arch.nan_policy);
     let handled = match evaluator.try_step_u128(op) {
         Ok(handled) => handled,
@@ -313,11 +313,22 @@ pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
     0
 }
 
+/// Whether a block exit must return to the dispatcher instead of chaining.
+///
+/// Not just "is the budget spent": a compiled block runs whole, so entering
+/// one with fewer instructions left than it holds overran the budget -- by
+/// one in 16-26% of sampled budgets, since most blocks end at a memory access
+/// and the p-code fuse there let one more instruction count. Chaining is only
+/// safe while at least `MAX_TB_INSNS` remain, which is the same test the
+/// dispatcher applies before running a block (`Emulator::run_instruction`);
+/// below it, the dispatcher runs exactly what is left.
 #[inline]
-fn max_inst_reached(emu: &Emulator) -> bool {
+fn must_return_to_dispatcher(emu: &Emulator) -> bool {
     emu.halt_requested
         || emu.memory_fault.is_some()
-        || emu.max_inst.is_some_and(|m| emu.inst_count >= m)
+        || emu
+            .max_inst
+            .is_some_and(|m| m.saturating_sub(emu.inst_count) < crate::core::MAX_TB_INSNS as u64)
 }
 
 /// Soft direct chaining: if `next_pc` is already compiled, enter it (bounded depth).
@@ -325,7 +336,7 @@ fn max_inst_reached(emu: &Emulator) -> bool {
 #[unsafe(no_mangle)]
 pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
-    if max_inst_reached(emu) || emu.halt_requested || emu.sym_stop_requested {
+    if must_return_to_dispatcher(emu) || emu.halt_requested || emu.sym_stop_requested {
         return next_pc;
     }
     if emu.chain_depth >= MAX_CHAIN_DEPTH {
@@ -356,7 +367,7 @@ pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
 pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     let emu = unsafe { &mut *emu_ptr };
 
-    if emu.halt_requested || max_inst_reached(emu) {
+    if emu.halt_requested || must_return_to_dispatcher(emu) {
         return next_pc;
     }
     // Honor PC rewrite from syscalls like rt_sigreturn.
@@ -391,7 +402,7 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
         return next_pc;
     }
     // A budget does *not* mean returning to the dispatcher after every block.
-    // `max_inst_reached` is checked on the way in above and again before each
+    // `must_return_to_dispatcher` is checked on the way in above and again before each
     // hard-chain dive, so the budget is honoured either way -- but returning
     // unconditionally meant every analysis run, which always sets `--max-inst`,
     // paid a full dispatcher round trip and a `jit_cache` hash lookup per
@@ -403,7 +414,7 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     // Hard chain: any published host for next_pc (absolute branch/call or fallthrough).
     if let Some(host) = emu.jit_cache.hard_chain_host(next_pc) {
         // Re-check budget before diving into another TB (tight loops).
-        if max_inst_reached(emu) {
+        if must_return_to_dispatcher(emu) {
             return next_pc;
         }
         emu.metrics.hard_chains += 1;
@@ -939,6 +950,26 @@ pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
     let op = op as *const fission_pcode_ir::ir::PcodeOp;
     let op = unsafe { &*op };
     emu.apply_taint_to_op(op, None);
+}
+
+/// An instruction that can fault is about to start: note the registers it
+/// writes, so a fault can put them back.
+#[unsafe(no_mangle)]
+pub extern "C" fn jit_insn_checkpoint(emu_ptr: *mut Emulator, index: u64) {
+    let emu = unsafe { &mut *emu_ptr };
+    let Some(writes) = emu
+        .jit
+        .as_ref()
+        .and_then(|jit| jit.insn_reg_writes.get(index as usize))
+    else {
+        tracing::error!("jit_insn_checkpoint: no entry {index}");
+        return;
+    };
+    // Append-only, and nothing appends while a block runs: the same
+    // argument `jit_wide_op` makes for `wide_ops`.
+    let writes: *const Vec<(u64, u32)> = writes;
+    let writes = unsafe { &*writes };
+    emu.checkpoint_instruction(writes);
 }
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────

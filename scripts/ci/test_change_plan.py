@@ -47,6 +47,15 @@ class ChangePlanTests(unittest.TestCase):
             self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)
         self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
 
+    def test_sccache_setup_changes_run_the_outage_fallback_self_test(self):
+        for path in (".github/actions/setup-sccache/action.yml", ".github/actions/setup-sccache/probe.sh",
+                     ".github/workflows/ci.yml"):
+            for event in ("pull_request", "merge_group", "push"):
+                self.assertTrue(plan([path], event)[1]["run_sccache_fallback"], (path, event))
+        self.assertTrue(plan([], "workflow_dispatch")[1]["run_sccache_fallback"])
+        self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sccache_fallback"])
+        self.assertFalse(plan([".github/workflows/fuzz.yml"], "pull_request")[1]["run_sccache_fallback"])
+
     def test_advisories_gate_a_pr_only_when_it_changes_dependencies(self):
         for path in ("Cargo.lock", "Cargo.toml", "crates/fission-cli/Cargo.toml",
                      "deny.toml", ".cargo/audit.toml", ".cargo/config.toml"):

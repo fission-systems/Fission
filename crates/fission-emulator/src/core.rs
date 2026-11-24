@@ -230,6 +230,21 @@ pub struct Emulator {
     pub callother_result: u64,
     /// First memory fault raised by a compiled JIT block, if any.
     pub(crate) memory_fault: Option<String>,
+    /// The guest-visible part of [`Self::memory_fault`]: a page fault, as
+    /// opposed to a host-side failure with no guest meaning.
+    pub(crate) memory_fault_guest: Option<GuestFault>,
+    /// The last guest memory access that faulted, as delivered to the guest.
+    pub last_fault: Option<GuestFault>,
+    /// The signal that terminated the guest, when one did (`SIGSEGV` for an
+    /// unhandled fault). Set alongside `halt_requested`; `exit_code` stays
+    /// `None`, as a wait status distinguishes the two.
+    pub exit_signal: Option<i32>,
+    /// Registers the instruction now running writes, as they were before it
+    /// started: (offset, size, bytes, per-byte shadow). Taken at the start of
+    /// every instruction that accesses memory while faults are enforced, so
+    /// a fault can leave the instruction un-retired -- see
+    /// [`Self::deliver_memory_fault`].
+    pub(crate) insn_checkpoint: Vec<(u64, u32, [u8; 8], [Option<u32>; 8])>,
     /// Execution deadline, after which run loops halt with `RunOutcome::Interrupted`.
     pub deadline: Option<std::time::Instant>,
 }
@@ -477,6 +492,10 @@ impl Emulator {
             current_tid: 1000,
             callother_result: 0,
             memory_fault: None,
+            memory_fault_guest: None,
+            last_fault: None,
+            exit_signal: None,
+            insn_checkpoint: Vec::new(),
             deadline: None,
         };
 
@@ -731,6 +750,7 @@ impl Emulator {
             }
             DeliverResult::Terminate { signo } => {
                 tracing::warn!("Signal {} → process terminate", signo);
+                self.exit_signal = Some(signo);
                 self.halt_requested = true;
                 Ok(false)
             }
@@ -898,15 +918,156 @@ impl Emulator {
         space_id: u64,
         offset: u64,
         size: usize,
-        error: impl std::fmt::Display,
+        error: anyhow::Error,
     ) {
         if self.memory_fault.is_none() {
             self.metrics.memory_faults = self.metrics.memory_faults.saturating_add(1);
             let guest_pc = self.current_instruction_pc();
+            self.memory_fault_guest = GuestFault::from_error(guest_pc, &error);
             self.memory_fault = Some(format!(
                 "memory {operation} failed at guest PC 0x{guest_pc:X}, space {space_id} offset 0x{offset:X} size {size}: {error}"
             ));
         }
+    }
+
+    /// Note the pre-instruction value of every register in `writes`, so a
+    /// fault inside the instruction can put them back.
+    pub(crate) fn checkpoint_instruction(&mut self, writes: &[(u64, u32)]) {
+        self.insn_checkpoint.clear();
+        let reg = self.state.register_space();
+        for &(offset, size) in writes {
+            let size = size.min(8);
+            let mut bytes = [0u8; 8];
+            if self
+                .state
+                .read_into(reg, offset, &mut bytes[..size as usize])
+                .is_err()
+            {
+                continue;
+            }
+            let mut shadow = [None; 8];
+            for (i, slot) in shadow.iter_mut().enumerate().take(size as usize) {
+                *slot = self.state.get_shadow_memory(reg, offset + i as u64);
+            }
+            self.insn_checkpoint.push((offset, size, bytes, shadow));
+        }
+    }
+
+    /// Undo the register writes of the instruction that faulted. Latest
+    /// first, so where two entries overlap the older value wins.
+    fn restore_instruction_checkpoint(&mut self) {
+        let reg = self.state.register_space();
+        for (offset, size, bytes, shadow) in
+            std::mem::take(&mut self.insn_checkpoint).into_iter().rev()
+        {
+            let _ = self.state.write_space(reg, offset, &bytes[..size as usize]);
+            for (i, set) in shadow.iter().enumerate().take(size as usize) {
+                match set {
+                    Some(set) => self.state.set_shadow_memory(reg, offset + i as u64, *set),
+                    None => self.state.clear_shadow_memory(reg, offset + i as u64),
+                }
+            }
+        }
+    }
+
+    /// A guest memory access faulted in the instruction at `fault.pc`.
+    ///
+    /// The instruction does not retire: its register writes are undone, the
+    /// count drops it again and the PC is left on it, which is what a CPU
+    /// reports for a synchronous fault. A guest whose OS delivers fault
+    /// signals (Linux) then gets `SIGSEGV` -- its handler if it installed
+    /// one, otherwise the default action, which terminates the process
+    /// (`exit_signal`). Elsewhere it is an error naming the instruction.
+    ///
+    /// Stores the instruction made before the faulting one are not undone;
+    /// re-running it after a handler returns writes them again from the same
+    /// registers.
+    ///
+    /// Returns what `run_instruction` returns: `Ok(false)` when the run must
+    /// stop.
+    pub(crate) fn deliver_memory_fault(
+        &mut self,
+        fault: GuestFault,
+        message: String,
+    ) -> Result<bool> {
+        self.restore_instruction_checkpoint();
+        self.inst_count = self.inst_count.saturating_sub(1);
+        self.pc = fault.pc;
+        self.metrics.stop_pc = fault.pc;
+        self.last_fault = Some(fault);
+        if !self.os.delivers_fault_signals() {
+            self.metrics.exit_reason = Some("memory_fault".into());
+            return Err(anyhow::anyhow!(message));
+        }
+        use crate::os::linux::signal::{SA_SIGINFO, SigAction, sig};
+        let signo = sig::SIGSEGV;
+        // Linux `force_sig_fault`: a synchronous fault cannot be blocked or
+        // ignored away -- either resets the signal to its default action.
+        let blocked = self.signals.blocked_mask() & (1u64 << (signo - 1)) != 0;
+        if blocked || self.signals.action(signo) == SigAction::Ignore {
+            self.signals.set_action(signo, SigAction::Default, 0);
+            let mask = self.signals.blocked_mask() & !(1u64 << (signo - 1));
+            self.signals.set_blocked_mask(mask);
+        }
+        match self.signals.action(signo) {
+            SigAction::Handler(_) => {
+                let siginfo = self.signals.flags[signo as usize] & SA_SIGINFO != 0;
+                self.raise_signal(signo);
+                // Delivered now, not between blocks: the handler runs before
+                // anything else does, as it would on hardware.
+                self.process_pending_signals()?;
+                if siginfo && self.write_fault_siginfo(signo, &fault).is_err() {
+                    // No room for the frame: the kernel kills the process.
+                    self.signals.pop_frame();
+                    return Ok(self.terminate_by_fault(signo, &message));
+                }
+                Ok(!self.halt_requested)
+            }
+            _ => Ok(self.terminate_by_fault(signo, &message)),
+        }
+    }
+
+    fn terminate_by_fault(&mut self, signo: i32, message: &str) -> bool {
+        tracing::info!("{message}: signal {signo}, default action terminates the process");
+        self.metrics.exit_reason = Some("memory_fault".into());
+        self.exit_signal = Some(signo);
+        self.halt_requested = true;
+        false
+    }
+
+    /// Give an `SA_SIGINFO` handler the fault's `siginfo_t`: below the frame
+    /// delivery built, second argument. The third (`ucontext_t *`) is null:
+    /// the signal frame does not model one.
+    fn write_fault_siginfo(&mut self, signo: i32, fault: &GuestFault) -> Result<()> {
+        const SIGINFO_SIZE: u64 = 128;
+        let ptr_size = u64::from(self.arch.pointer_size);
+        let sp = self.read_register_u64(self.arch.sp_reg)?;
+        // Above it the frame `process_pending_signals` pushed; keep the
+        // handler's stack aligned the way it set it up.
+        let info = sp.wrapping_sub(SIGINFO_SIZE) & !0xF;
+        let mut bytes = vec![0u8; SIGINFO_SIZE as usize];
+        bytes[0..4].copy_from_slice(&signo.to_le_bytes());
+        bytes[8..12].copy_from_slice(&fault.si_code().to_le_bytes());
+        // `si_addr` follows three ints, aligned to a pointer.
+        let addr_at = if ptr_size == 8 { 16 } else { 12 };
+        bytes[addr_at..addr_at + ptr_size as usize]
+            .copy_from_slice(&fault.addr.to_le_bytes()[..ptr_size as usize]);
+        // The return address `process_pending_signals` put at `sp` moves
+        // down with the stack, so a handler that returns still finds it.
+        let ram = self.state.ram_space();
+        let ret = self.state.read_space(ram, sp, ptr_size as usize)?;
+        self.state.write_space(ram, info, &bytes)?;
+        let frame = info.wrapping_sub(ptr_size);
+        self.state.write_space(ram, frame, &ret)?;
+        self.write_register_u64(self.arch.sp_reg, frame)?;
+        let regs: Vec<_> = self.arch.cc.arg_regs().iter().take(3).copied().collect();
+        if let Some(reg) = regs.get(1) {
+            self.write_register_u64(reg, info)?;
+        }
+        if let Some(reg) = regs.get(2) {
+            self.write_register_u64(reg, 0)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn current_instruction_pc(&self) -> u64 {
@@ -2425,8 +2586,7 @@ impl Emulator {
                 let next_pc = func(self as *mut _);
                 self.pc = next_pc;
                 if let Some(error) = self.memory_fault.take() {
-                    self.metrics.exit_reason = Some("memory_fault".into());
-                    return Err(anyhow::anyhow!(error));
+                    return self.memory_fault_after_block(error);
                 }
                 return Ok(!self.halt_requested);
             }
@@ -2535,10 +2695,20 @@ impl Emulator {
         let next_pc = func(self as *mut _);
         self.pc = next_pc;
         if let Some(error) = self.memory_fault.take() {
-            self.metrics.exit_reason = Some("memory_fault".into());
-            return Err(anyhow::anyhow!(error));
+            return self.memory_fault_after_block(error);
         }
         Ok(!self.halt_requested)
+    }
+
+    /// A block stopped on a memory fault a callback recorded.
+    fn memory_fault_after_block(&mut self, message: String) -> Result<bool> {
+        match self.memory_fault_guest.take() {
+            Some(fault) => self.deliver_memory_fault(fault, message),
+            None => {
+                self.metrics.exit_reason = Some("memory_fault".into());
+                Err(anyhow::anyhow!(message))
+            }
+        }
     }
 
     /// Interpret one block and settle `pc`, matching `run_instruction`'s
@@ -2546,10 +2716,25 @@ impl Emulator {
     fn run_block_interpreted(&mut self, insns: &[crate::jit::compiler::GuestInsn]) -> Result<bool> {
         use crate::interp::InterpExit;
         self.interpreted_blocks = self.interpreted_blocks.saturating_add(1);
-        let exit = self.interpret_translation_block(insns)?;
+        let exit = match self.interpret_translation_block(insns) {
+            Ok(exit) => exit,
+            Err(error) => {
+                // The evaluator's own access failed. Name the instruction,
+                // as the JIT's callbacks do.
+                let pc = self.current_instruction_pc();
+                if self.memory_fault.is_none() {
+                    if let Some(fault) = GuestFault::from_error(pc, &error) {
+                        self.metrics.memory_faults = self.metrics.memory_faults.saturating_add(1);
+                        let message =
+                            format!("memory access failed at guest PC 0x{pc:X}: {error:#}");
+                        return self.deliver_memory_fault(fault, message);
+                    }
+                }
+                return Err(error.context(format!("at guest PC 0x{pc:X}")));
+            }
+        };
         if let Some(error) = self.memory_fault.take() {
-            self.metrics.exit_reason = Some("memory_fault".into());
-            return Err(anyhow::anyhow!(error));
+            return self.memory_fault_after_block(error);
         }
         let pc_override = self.pc_override.take();
         match exit {
@@ -2600,6 +2785,7 @@ impl Emulator {
         tracing::info!("Sandbox execution started at PC=0x{:X}", self.pc);
         self.halt_requested = false;
         self.memory_fault = None;
+        self.memory_fault_guest = None;
         self.chain_depth = 0;
         self.pcode_budget_pc = None;
         self.watch_hit = None;
@@ -2748,7 +2934,7 @@ impl Emulator {
                 // signal that this was a real process exit rather than some
                 // other halt_requested trigger with no captured code.
                 break if self.halt_requested {
-                    if self.exit_code.is_some() {
+                    if self.exit_code.is_some() || self.exit_signal.is_some() {
                         RunOutcome::ProcessExited
                     } else {
                         RunOutcome::Halted
@@ -2760,7 +2946,11 @@ impl Emulator {
 
             // ── Pending Linux signals (between TBs) ───────────────────────────
             if !self.process_pending_signals()? {
-                break RunOutcome::LoopExit;
+                break if self.exit_signal.is_some() {
+                    RunOutcome::ProcessExited
+                } else {
+                    RunOutcome::LoopExit
+                };
             }
             if self.halt_requested {
                 break RunOutcome::Halted;
@@ -2818,6 +3008,53 @@ impl Emulator {
         );
         tracing::info!("Emulator metrics: {}", self.metrics.summary_line());
         Ok(outcome)
+    }
+}
+
+/// A guest memory access that faulted: what a CPU reports and what Linux
+/// puts in the `siginfo_t` of the `SIGSEGV` it delivers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuestFault {
+    /// The instruction that faulted. It did not retire.
+    pub pc: u64,
+    /// The first byte of the access that could not be made (`si_addr`).
+    pub addr: u64,
+    pub access: crate::pcode::page_map::AccessKind,
+    /// Whether a page was mapped there: a protection fault
+    /// (`SEGV_ACCERR`) rather than a missing page (`SEGV_MAPERR`).
+    pub mapped: bool,
+}
+
+impl GuestFault {
+    /// The fault a failed access means to the guest, if it is a page fault
+    /// at all -- a host-side failure has no guest meaning.
+    pub(crate) fn from_error(pc: u64, error: &anyhow::Error) -> Option<Self> {
+        use crate::pcode::page_map::PageFault;
+        match error.downcast_ref::<PageFault>()? {
+            PageFault::NotMapped { addr, kind } => Some(Self {
+                pc,
+                addr: *addr,
+                access: *kind,
+                mapped: false,
+            }),
+            PageFault::Prot { addr, kind, .. } => Some(Self {
+                pc,
+                addr: *addr,
+                access: *kind,
+                mapped: true,
+            }),
+        }
+    }
+
+    /// `si_code` for the `SIGSEGV`.
+    pub fn si_code(&self) -> i32 {
+        const SEGV_MAPERR: i32 = 1;
+        const SEGV_ACCERR: i32 = 2;
+        if self.mapped {
+            SEGV_ACCERR
+        } else {
+            SEGV_MAPERR
+        }
     }
 }
 
