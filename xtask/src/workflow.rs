@@ -120,6 +120,9 @@ pub struct Step {
     pub run: Vec<String>,
     /// `env:` keys and their (unevaluated) values.
     pub env: Vec<(String, String)>,
+    /// `continue-on-error:` is set to anything but `false`: the step's
+    /// failure no longer fails the job.
+    pub continue_on_error: bool,
 }
 
 pub fn step(yaml: &str, name: &str) -> Result<Step, String> {
@@ -139,6 +142,7 @@ pub fn step(yaml: &str, name: &str) -> Result<Step, String> {
     let mut condition = String::new();
     let mut run = None;
     let mut env = Vec::new();
+    let mut continue_on_error = false;
     for (i, line) in body.iter().enumerate() {
         if is_blank(line) || indent(line) != key_col {
             continue;
@@ -146,6 +150,8 @@ pub fn step(yaml: &str, name: &str) -> Result<Step, String> {
         let t = line.trim();
         if let Some(v) = t.strip_prefix("if:") {
             condition = v.trim().to_string();
+        } else if let Some(v) = t.strip_prefix("continue-on-error:") {
+            continue_on_error = scalar(v) != "false";
         } else if t == "env:" {
             env = mapping(&children(&body, i));
         } else if let Some(v) = t.strip_prefix("run:") {
@@ -182,6 +188,7 @@ pub fn step(yaml: &str, name: &str) -> Result<Step, String> {
         condition,
         run,
         env,
+        continue_on_error,
     })
 }
 
@@ -214,6 +221,7 @@ jobs:
         run: bash scripts/ci/clippy.sh
 
       - name: Block
+        continue-on-error: true
         run: |
           set -euo pipefail
           ./scripts/check/x.sh
@@ -261,6 +269,11 @@ jobs:
             block.run,
             vec!["set -euo pipefail", "./scripts/check/x.sh"],
             "a block scalar stops at the next step"
+        );
+        assert!(block.continue_on_error);
+        assert!(
+            !one.continue_on_error,
+            "absent means the step fails the job"
         );
         assert!(step(SAMPLE, "Nope").is_err());
     }

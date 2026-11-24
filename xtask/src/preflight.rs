@@ -139,7 +139,8 @@ impl Options {
 pub struct CiConfig {
     /// `jobs.lint-format.with.exclude_crates` in ci.yml.
     pub clippy_exclude: String,
-    /// `inputs.retries.default` in the test workflow.
+    /// `jobs.test-linux.with.retries` in ci.yml, else `inputs.retries.default`
+    /// in the test workflow.
     pub retries: String,
     /// [`TEST_ENV_KEYS`] as the test workflow sets them.
     pub test_env: Vec<(String, String)>,
@@ -153,8 +154,12 @@ impl CiConfig {
         let tests = read(TEST_WORKFLOW)?;
         let clippy_exclude = workflow::job_input(&ci, "lint-format", "exclude_crates")
             .map_err(|e| format!("{CI_WORKFLOW}: {e}"))?;
-        let retries = workflow::input_default(&tests, "retries")
-            .map_err(|e| format!("{TEST_WORKFLOW}: {e}"))?;
+        // What the Linux test job passes, else the reusable workflow's default.
+        let retries = match workflow::job_input(&ci, "test-linux", "retries") {
+            Ok(value) => value,
+            Err(_) => workflow::input_default(&tests, "retries")
+                .map_err(|e| format!("{TEST_WORKFLOW}: {e}"))?,
+        };
         let env = workflow::workflow_env(&tests).map_err(|e| format!("{TEST_WORKFLOW}: {e}"))?;
         let mut test_env = Vec::new();
         for key in TEST_ENV_KEYS {
@@ -243,6 +248,10 @@ pub struct CiRef {
     /// for the targeted-test steps: `BASE_REF` feeds CI's own fetch (preflight
     /// uses the merge base) and `enforce` gets `collect`'s outputs.
     pub check_env: bool,
+    /// Other command lines the step may run besides `invocation` (CI-only
+    /// setup preflight does differently). Any other line is drift: the step
+    /// would run something preflight does not.
+    pub setup: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,6 +319,7 @@ impl Check {
             step,
             invocation,
             check_env: true,
+            setup: Vec::new(),
         });
         self
     }
@@ -428,8 +438,14 @@ pub fn plan(options: &Options, ci: &CiConfig, selection: &Selection, base: &str)
             step: "Enforce Targeted Tests for NIR/Render Changes",
             invocation: "bash scripts/ci/targeted_test_gate.sh enforce".to_string(),
             check_env: false,
+            setup: Vec::new(),
         });
         targeted.ci[0].check_env = false;
+        // CI fetches the base tip itself; preflight passes the merge base.
+        targeted.ci[0].setup = vec![
+            r#"git fetch --no-tags origin "$BASE_REF" --depth=1"#,
+            "BASE_SHA=$(git rev-parse FETCH_HEAD)",
+        ];
         // CI passes the fetched base tip as "$BASE_SHA"; preflight passes the
         // merge base. Compare the command with CI's spelling of the argument.
         let mut ci_args = targeted.clone();
@@ -539,13 +555,31 @@ pub fn drift(check: &Check, files: &BTreeMap<&str, String>) -> Vec<String> {
             }
         };
         let want = unquote(&r.invocation);
-        let runs = commands(&step).iter().any(|line| {
+        let is_invocation = |line: &str| {
             let line = unquote(line);
             line == want
                 || line
                     .strip_prefix(&want)
                     .is_some_and(|rest| rest.starts_with(" >>"))
-        });
+        };
+        let lines = commands(&step);
+        let runs = lines.iter().any(|line| is_invocation(line));
+        // Lines beside the invocation (a changed invocation is reported
+        // once, below, with the whole `run:`).
+        for line in lines.iter().filter(|_| runs) {
+            if !is_invocation(line) && !r.setup.contains(&line.as_str()) {
+                problems.push(format!(
+                    "{}: `{}` / `{}` also runs `{line}`, which preflight does not",
+                    check.name, r.workflow, r.step
+                ));
+            }
+        }
+        if step.continue_on_error {
+            problems.push(format!(
+                "{}: `{}` / `{}` has continue-on-error, so its failure no longer fails CI",
+                check.name, r.workflow, r.step
+            ));
+        }
         if !runs {
             problems.push(format!(
                 "{}: `{}` / `{}` runs {:?}, preflight runs `{}`",
@@ -1215,6 +1249,72 @@ mod tests {
             ),
         );
         assert_eq!(drift(clippy, &files).len(), 1, "a new env input is drift");
+
+        // The step keeps the script line but also runs something else.
+        files.insert(
+            LINT_WORKFLOW,
+            lint.replace(
+                "        run: bash scripts/ci/clippy.sh\n",
+                "        run: |\n          bash scripts/ci/clippy.sh\n          cargo clippy --workspace\n",
+            ),
+        );
+        assert_ne!(files[LINT_WORKFLOW], lint);
+        assert_eq!(drift(clippy, &files).len(), 1, "an extra command is drift");
+
+        // The step still runs the script, but its failure no longer fails CI.
+        files.insert(
+            LINT_WORKFLOW,
+            lint.replace(
+                "      - name: Lint with Clippy (Deny Warnings)\n",
+                "      - name: Lint with Clippy (Deny Warnings)\n        continue-on-error: true\n",
+            ),
+        );
+        assert_ne!(files[LINT_WORKFLOW], lint);
+        assert_eq!(drift(clippy, &files).len(), 1, "continue-on-error is drift");
+    }
+
+    /// The targeted-test step's CI-only fetch is allowed; anything else added
+    /// to it is drift.
+    #[test]
+    fn drift_check_allows_only_the_declared_setup_lines() {
+        let checks = every_check();
+        let targeted = checks.iter().find(|c| c.name == "targeted-tests").unwrap();
+        let mut files = workflow_files();
+        assert!(drift(targeted, &files).is_empty());
+        let ci = files[CI_WORKFLOW].clone();
+        let fetch = "          BASE_SHA=$(git rev-parse FETCH_HEAD)\n";
+        assert_eq!(ci.matches(fetch).count(), 1);
+        files.insert(
+            CI_WORKFLOW,
+            ci.replace(
+                fetch,
+                &format!("{fetch}          git checkout FETCH_HEAD\n"),
+            ),
+        );
+        assert_eq!(drift(targeted, &files).len(), 1);
+    }
+
+    /// Retries are what the Linux test job passes, not only the default.
+    #[test]
+    fn retries_follow_what_the_test_job_passes() {
+        let dir = std::env::temp_dir().join(format!("xtask-retries-{}", std::process::id()));
+        let wf = dir.join(".github/workflows");
+        std::fs::create_dir_all(&wf).unwrap();
+        for f in [CI_WORKFLOW, LINT_WORKFLOW, TEST_WORKFLOW] {
+            std::fs::copy(root().join(f), dir.join(f)).unwrap();
+        }
+        let default = CiConfig::load(&dir).unwrap().retries;
+        let tests = std::fs::read_to_string(root().join(TEST_WORKFLOW)).unwrap();
+        assert_eq!(default, workflow::input_default(&tests, "retries").unwrap());
+
+        let ci = std::fs::read_to_string(root().join(CI_WORKFLOW)).unwrap();
+        let anchor =
+            "      crates: ${{ needs.changes.outputs.test_crates }}\n      profile: debug\n";
+        assert!(ci.contains(anchor));
+        let passed = ci.replacen(anchor, &format!("{anchor}      retries: 7\n"), 2);
+        std::fs::write(dir.join(CI_WORKFLOW), passed).unwrap();
+        assert_eq!(CiConfig::load(&dir).unwrap().retries, "7");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The clippy command itself: the Lint job's two shapes (affected
