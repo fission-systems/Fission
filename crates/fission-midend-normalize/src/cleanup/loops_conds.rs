@@ -1602,28 +1602,29 @@ fn expr_nir_type(expr: &PreHirExpr) -> Option<NirType> {
     }
 }
 
-/// Match-path recovery: when a loop is followed by `return SENTINEL` (const)
-/// and the body has `result = value; break;`, rewrite the found-path break to
-/// `return result` so search/lookup helpers don't fall through to the not-found
-/// sentinel (`find_pair_value` / `kv_lookup`-class).
+/// Match-path recovery: when a loop is immediately followed by `return result`
+/// and the loop body has `result = value; break;` targeting that same returned
+/// variable, rewrite the break to `return result`.
 ///
-/// Only rewrites a break that is immediately preceded (same statement list)
-/// by a non-induction assignment to a local. Exit breaks like
-/// `if (i >= n) break;` are left alone.
+/// Only rewrites a break that assigns the exact variable returned immediately
+/// after the loop (`stmts[idx + 1] == Return(Some(Var(ret_var)))`), and only
+/// when preceded (same statement list) by a non-induction assignment to it.
+/// Loops followed by a constant sentinel (`return -1;`) are never rewritten,
+/// because doing so would change the return value.
 pub fn rewrite_found_path_break_to_return(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
     let mut idx = 0usize;
     while idx < stmts.len() {
-        let has_sentinel = matches!(
-            stmts.get(idx + 1),
-            Some(PreHirStmt::Return(Some(PreHirExpr::Const(_, _))))
-        );
+        let ret_var = match stmts.get(idx + 1) {
+            Some(PreHirStmt::Return(Some(PreHirExpr::Var(name)))) => Some(name.clone()),
+            _ => None,
+        };
         let is_loop = matches!(
             stmts.get(idx),
             Some(PreHirStmt::While { .. } | PreHirStmt::DoWhile { .. } | PreHirStmt::For { .. })
         );
-        if is_loop && has_sentinel {
-            if rewrite_found_breaks_in_stmt(&mut stmts[idx]) {
+        if is_loop && let Some(ret_var) = ret_var {
+            if rewrite_found_breaks_in_stmt(&mut stmts[idx], &ret_var) {
                 changed = true;
             }
         } else {
@@ -1680,18 +1681,18 @@ fn rewrite_found_path_break_to_return_in_stmt(stmt: &mut PreHirStmt) -> bool {
     }
 }
 
-fn rewrite_found_breaks_in_stmt(stmt: &mut PreHirStmt) -> bool {
+fn rewrite_found_breaks_in_stmt(stmt: &mut PreHirStmt, ret_var: &str) -> bool {
     match stmt {
         PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. }
         | PreHirStmt::For { body, .. } => {
-            rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body))
+            rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), ret_var)
         }
         _ => false,
     }
 }
 
-fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
+fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>, ret_var: &str) -> bool {
     let mut changed = false;
     // Nested regions in the same break scope (If and Block).
     // Break inside nested loops (While, DoWhile, For) or Switch belong to those scopes
@@ -1703,16 +1704,20 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
-                    then_body,
-                ));
-                changed |= rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(
-                    else_body,
-                ));
+                changed |= rewrite_found_breaks_in_body(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    ret_var,
+                );
+                changed |= rewrite_found_breaks_in_body(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    ret_var,
+                );
             }
             PreHirStmt::Block(inner) => {
-                changed |=
-                    rewrite_found_breaks_in_body(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner));
+                changed |= rewrite_found_breaks_in_body(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(inner),
+                    ret_var,
+                );
             }
             _ => {}
         }
@@ -1722,6 +1727,7 @@ fn rewrite_found_breaks_in_body(body: &mut Vec<PreHirStmt>) -> bool {
     while i + 1 < body.len() {
         if matches!(&body[i + 1], PreHirStmt::Break)
             && let Some(ret_name) = found_result_assign_name(&body[i])
+            && ret_name == ret_var
         {
             body[i + 1] = PreHirStmt::Return(Some(PreHirExpr::Var(ret_name)));
             changed = true;

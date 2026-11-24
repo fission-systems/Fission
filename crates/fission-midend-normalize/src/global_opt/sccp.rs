@@ -174,15 +174,131 @@ fn lvalue_has_side_effects(lhs: &PreHirLValue) -> bool {
     }
 }
 
-fn loop_variant_vars(body: &[PreHirStmt], all_xvars: &HashSet<String>) -> HashSet<String> {
+fn loop_variant_vars(
+    body: &[PreHirStmt],
+    all_xvars: &HashSet<String>,
+    address_aliases: &AddressAliases,
+) -> HashSet<String> {
     let mut vars = HashSet::default();
     for stmt in body {
         loop_variant_stmt(stmt, &mut vars);
+        collect_escaped_and_indirect_in_stmt(stmt, address_aliases, &mut vars);
     }
     for xvar in all_xvars {
         vars.insert(xvar.clone());
     }
     vars
+}
+
+fn collect_escaped_and_indirect_in_lvalue(
+    lhs: &PreHirLValue,
+    address_aliases: &AddressAliases,
+    out: &mut HashSet<String>,
+) {
+    match lhs {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
+            collect_call_escaped_vars_in_expr(ptr, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(ptr, address_aliases, out);
+        }
+        PreHirLValue::Index { base, index, .. } => {
+            collect_call_escaped_vars_in_expr(base, address_aliases, out);
+            collect_call_escaped_vars_in_expr(index, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(base, address_aliases, out);
+            if let Some(root) = expr_root_var_sccp(base) {
+                out.insert(root.to_string());
+            }
+        }
+        PreHirLValue::FieldAccess { base, .. } => {
+            collect_call_escaped_vars_in_expr(base, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(base, address_aliases, out);
+            if let Some(root) = expr_root_var_sccp(base) {
+                out.insert(root.to_string());
+            }
+        }
+    }
+}
+
+fn collect_escaped_and_indirect_in_stmt(
+    stmt: &PreHirStmt,
+    address_aliases: &AddressAliases,
+    out: &mut HashSet<String>,
+) {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            collect_escaped_and_indirect_in_lvalue(lhs, address_aliases, out);
+            collect_call_escaped_vars_in_expr(rhs, address_aliases, out);
+        }
+        PreHirStmt::VaStart { va_list, .. } => {
+            collect_call_escaped_vars_in_expr(va_list, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(va_list, address_aliases, out);
+            if let PreHirExpr::Var(name) = va_list {
+                out.insert(name.clone());
+            }
+        }
+        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+            collect_call_escaped_vars_in_expr(expr, address_aliases, out);
+        }
+        PreHirStmt::Block(body) => {
+            for s in body.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            collect_call_escaped_vars_in_expr(cond, address_aliases, out);
+            for s in body.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+        }
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            collect_call_escaped_vars_in_expr(cond, address_aliases, out);
+            for s in then_body.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+            for s in else_body.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(s) = init {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+            if let Some(c) = cond {
+                collect_call_escaped_vars_in_expr(c, address_aliases, out);
+            }
+            for s in body.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+            if let Some(s) = update {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            collect_call_escaped_vars_in_expr(expr, address_aliases, out);
+            for case in cases {
+                for s in case.body.iter() {
+                    collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+                }
+            }
+            for s in default.iter() {
+                collect_escaped_and_indirect_in_stmt(s, address_aliases, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn loop_variant_stmt(stmt: &PreHirStmt, out: &mut HashSet<String>) {
@@ -521,6 +637,136 @@ fn kill_locals_with_address_taken_in_calls(
     }
 }
 
+fn collect_addr_or_alias_targets_in_expr(
+    expr: &PreHirExpr,
+    address_aliases: &AddressAliases,
+    out: &mut HashSet<String>,
+) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            out.insert(name.clone());
+        }
+        PreHirExpr::Var(name) => {
+            if let Some(aliases) = address_aliases.get(name) {
+                for alias in aliases {
+                    out.insert(alias.clone());
+                }
+            }
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
+            collect_addr_or_alias_targets_in_expr(inner, address_aliases, out)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_addr_or_alias_targets_in_expr(lhs, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(rhs, address_aliases, out);
+        }
+        PreHirExpr::Select {
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_addr_or_alias_targets_in_expr(then_expr, address_aliases, out);
+            collect_addr_or_alias_targets_in_expr(else_expr, address_aliases, out);
+        }
+        PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::Const(_, _)
+        | PreHirExpr::Load { .. }
+        | PreHirExpr::Index { .. }
+        | PreHirExpr::Call { .. }
+        | PreHirExpr::AggregateCopy { .. } => {}
+    }
+}
+
+fn collect_call_escaped_vars_in_expr(
+    expr: &PreHirExpr,
+    address_aliases: &AddressAliases,
+    out: &mut HashSet<String>,
+) {
+    if let PreHirExpr::Call { args, .. } = expr {
+        for arg in args {
+            collect_addr_or_alias_targets_in_expr(arg, address_aliases, out);
+        }
+    }
+    match expr {
+        PreHirExpr::Call { args, .. } => {
+            for a in args {
+                collect_call_escaped_vars_in_expr(a, address_aliases, out);
+            }
+        }
+        PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. } => {
+            collect_call_escaped_vars_in_expr(inner, address_aliases, out);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_call_escaped_vars_in_expr(lhs, address_aliases, out);
+            collect_call_escaped_vars_in_expr(rhs, address_aliases, out);
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_call_escaped_vars_in_expr(base, address_aliases, out);
+            collect_call_escaped_vars_in_expr(index, address_aliases, out);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_call_escaped_vars_in_expr(cond, address_aliases, out);
+            collect_call_escaped_vars_in_expr(then_expr, address_aliases, out);
+            collect_call_escaped_vars_in_expr(else_expr, address_aliases, out);
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
+    }
+}
+
+fn expr_root_var_sccp(expr: &PreHirExpr) -> Option<&str> {
+    let mut cur = expr;
+    loop {
+        match cur {
+            PreHirExpr::Var(name) => return Some(name.as_str()),
+            PreHirExpr::FieldAccess { base, .. }
+            | PreHirExpr::Index { base, .. }
+            | PreHirExpr::Cast { expr: base, .. } => cur = base,
+            _ => return None,
+        }
+    }
+}
+
+fn kill_locals_in_lvalue(lhs: &PreHirLValue, env: &mut ConstEnv, address_aliases: &AddressAliases) {
+    match lhs {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => {
+            kill_locals_with_address_taken_in_calls(ptr, env, address_aliases);
+            collect_address_taken_locals(ptr, env, address_aliases);
+        }
+        PreHirLValue::Index { base, index, .. } => {
+            kill_locals_with_address_taken_in_calls(base, env, address_aliases);
+            kill_locals_with_address_taken_in_calls(index, env, address_aliases);
+            collect_address_taken_locals(base, env, address_aliases);
+            if let Some(root) = expr_root_var_sccp(base) {
+                env.remove(root);
+            }
+        }
+        PreHirLValue::FieldAccess { base, .. } => {
+            kill_locals_with_address_taken_in_calls(base, env, address_aliases);
+            collect_address_taken_locals(base, env, address_aliases);
+            if let Some(root) = expr_root_var_sccp(base) {
+                env.remove(root);
+            }
+        }
+    }
+}
+
 /// Names of every local whose address appears anywhere in `expr` (a call
 /// argument, or a sub-address like `&local + k` / `(char *)&local` nested
 /// inside one) -- the removal side of [`kill_locals_with_address_taken_in_calls`].
@@ -529,41 +775,10 @@ fn collect_address_taken_locals(
     env: &mut ConstEnv,
     address_aliases: &AddressAliases,
 ) {
-    match expr {
-        PreHirExpr::AddressOfLocal(name) => {
-            env.remove(name);
-        }
-        PreHirExpr::Var(name) => {
-            if let Some(aliases) = address_aliases.get(name) {
-                for alias in aliases {
-                    env.remove(alias);
-                }
-            }
-        }
-        PreHirExpr::Cast { expr: inner, .. }
-        | PreHirExpr::Unary { expr: inner, .. }
-        | PreHirExpr::PtrOffset { base: inner, .. }
-        | PreHirExpr::FieldAccess { base: inner, .. } => {
-            collect_address_taken_locals(inner, env, address_aliases)
-        }
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            collect_address_taken_locals(lhs, env, address_aliases);
-            collect_address_taken_locals(rhs, env, address_aliases);
-        }
-        PreHirExpr::Select {
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            collect_address_taken_locals(then_expr, env, address_aliases);
-            collect_address_taken_locals(else_expr, env, address_aliases);
-        }
-        PreHirExpr::AddressOfGlobal(_)
-        | PreHirExpr::Const(_, _)
-        | PreHirExpr::Load { .. }
-        | PreHirExpr::Index { .. }
-        | PreHirExpr::Call { .. }
-        | PreHirExpr::AggregateCopy { .. } => {}
+    let mut killed = HashSet::default();
+    collect_addr_or_alias_targets_in_expr(expr, address_aliases, &mut killed);
+    for name in killed {
+        env.remove(&name);
     }
 }
 
@@ -905,6 +1120,187 @@ mod tests {
         };
         assert_eq!(cases.len(), 2);
     }
+
+    #[test]
+    fn if_cond_call_taking_local_addr_kills_const_in_branches() {
+        let mut func = PreHirFunction {
+            name: "test_if_cond_escape".to_string(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, int(32)),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Ne,
+                        lhs: Box::new(PreHirExpr::Call {
+                            origin: None,
+                            target: "init".to_string(),
+                            args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                            ty: int(32),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(0, int(32))),
+                        ty: NirType::Bool,
+                    },
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".to_string()),
+                        rhs: var("x"),
+                    }]
+                    .into(),
+                    else_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("z".to_string()),
+                        rhs: var("x"),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Return(Some(var("x"))),
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } = &func.body[1]
+        else {
+            panic!("expected If");
+        };
+        assert!(matches!(
+            &then_body[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Var(n), .. } if n == "x"
+        ));
+        assert!(matches!(
+            &else_body[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Var(n), .. } if n == "x"
+        ));
+        assert!(matches!(
+            &func.body[2],
+            PreHirStmt::Return(Some(PreHirExpr::Var(n))) if n == "x"
+        ));
+    }
+
+    #[test]
+    fn while_cond_call_taking_local_addr_kills_const_in_body_and_after() {
+        let mut func = PreHirFunction {
+            name: "test_while_cond_escape".to_string(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, int(32)),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Ne,
+                        lhs: Box::new(PreHirExpr::Call {
+                            origin: None,
+                            target: "next".to_string(),
+                            args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                            ty: int(32),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(0, int(32))),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("y".to_string()),
+                        rhs: var("x"),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Return(Some(var("x"))),
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::While { body, .. } = &func.body[1] else {
+            panic!("expected While");
+        };
+        assert!(matches!(
+            &body[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Var(n), .. } if n == "x"
+        ));
+        assert!(matches!(
+            &func.body[2],
+            PreHirStmt::Return(Some(PreHirExpr::Var(n))) if n == "x"
+        ));
+    }
+
+    #[test]
+    fn switch_expr_and_assign_lhs_call_kill_escaped_const() {
+        let mut func = PreHirFunction {
+            name: "test_switch_and_lhs_escape".to_string(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Const(0, int(32)),
+                },
+                PreHirStmt::Switch {
+                    expr: PreHirExpr::Call {
+                        origin: None,
+                        target: "pick".to_string(),
+                        args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                        ty: int(32),
+                    },
+                    cases: vec![PreHirSwitchCase {
+                        values: vec![1],
+                        body: vec![PreHirStmt::Assign {
+                            lhs: PreHirLValue::Var("a".to_string()),
+                            rhs: var("x"),
+                        }]
+                        .into(),
+                    }],
+                    default: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("b".to_string()),
+                        rhs: var("x"),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_string()),
+                    rhs: PreHirExpr::Const(7, int(32)),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Call {
+                            origin: None,
+                            target: "slot".to_string(),
+                            args: vec![PreHirExpr::AddressOfLocal("y".to_string())],
+                            ty: NirType::Ptr(Box::new(int(32))),
+                        }),
+                        ty: int(32),
+                    },
+                    rhs: PreHirExpr::Const(9, int(32)),
+                },
+                PreHirStmt::Return(Some(var("y"))),
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Switch { cases, default, .. } = &func.body[1] else {
+            panic!("expected Switch");
+        };
+        assert!(matches!(
+            &cases[0].body[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Var(n), .. } if n == "x"
+        ));
+        assert!(matches!(
+            &default[0],
+            PreHirStmt::Assign { rhs: PreHirExpr::Var(n), .. } if n == "x"
+        ));
+        assert!(matches!(
+            func.body.last(),
+            Some(PreHirStmt::Return(Some(PreHirExpr::Var(n)))) if n == "y"
+        ));
+    }
 }
 
 fn eval_truth(expr: &PreHirExpr, env: &ConstEnv) -> Option<bool> {
@@ -1024,13 +1420,21 @@ fn sccp_stmt(
                 } else {
                     changed |= sccp_subst_expr(rhs, env);
                     changed |= fold_expr_hir(rhs);
+                    kill_locals_in_lvalue(lhs, env, address_aliases);
                     kill_locals_with_address_taken_in_calls(rhs, env, address_aliases);
                 }
                 break;
             }
             PreHirStmt::VaStart { va_list, .. } => {
-                changed |= sccp_subst_expr(va_list, env);
-                changed |= fold_expr_hir(va_list);
+                if !matches!(va_list, PreHirExpr::Var(_)) {
+                    changed |= sccp_subst_expr(va_list, env);
+                    changed |= fold_expr_hir(va_list);
+                }
+                kill_locals_with_address_taken_in_calls(va_list, env, address_aliases);
+                collect_address_taken_locals(va_list, env, address_aliases);
+                if let PreHirExpr::Var(name) = va_list {
+                    env.remove(name);
+                }
                 break;
             }
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
@@ -1057,7 +1461,12 @@ fn sccp_stmt(
                 let pre = env.clone();
                 changed |= sccp_subst_expr(cond, &pre);
                 changed |= fold_expr_hir(cond);
-                match eval_truth(cond, &pre) {
+                let cond_truth = if expr_has_side_effects(cond) {
+                    None
+                } else {
+                    eval_truth(cond, &pre)
+                };
+                match cond_truth {
                     Some(true)
                         if !stmt_list_has_side_effects(else_body)
                             && !branch_defines_goto_target(else_body, goto_targets) =>
@@ -1075,18 +1484,26 @@ fn sccp_stmt(
                         continue;
                     }
                     Some(_) | None => {
+                        let mut post_cond = pre.clone();
+                        kill_locals_with_address_taken_in_calls(
+                            cond,
+                            &mut post_cond,
+                            address_aliases,
+                        );
                         // Ghidra ActionConditionalConst: derive constants from the branch condition.
                         // Pattern: `if (x == K)` → inside then-branch, x=K
                         // Pattern: `if (x != K)` → inside else-branch, x=K
                         let (then_extra, else_extra) = derive_branch_constants(cond);
-                        let mut e1 = pre.clone();
-                        let mut e2 = pre.clone();
+                        let mut e1 = post_cond.clone();
+                        let mut e2 = post_cond;
                         for (name, val, ty) in then_extra {
                             e1.insert(name, (val, ty));
                         }
                         for (name, val, ty) in else_extra {
                             e2.insert(name, (val, ty));
                         }
+                        kill_locals_with_address_taken_in_calls(cond, &mut e1, address_aliases);
+                        kill_locals_with_address_taken_in_calls(cond, &mut e2, address_aliases);
                         changed |= sccp_transform_stmts(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                             &mut e1,
@@ -1108,11 +1525,13 @@ fn sccp_stmt(
             }
             PreHirStmt::While { cond, body } => {
                 let pre = env.clone();
-                let modified = loop_variant_vars(body, all_xvars);
+                let mut modified = loop_variant_vars(body, all_xvars, address_aliases);
+                collect_call_escaped_vars_in_expr(cond, address_aliases, &mut modified);
                 let loop_entry = env_without_vars(&pre, &modified);
                 changed |= sccp_subst_expr(cond, &loop_entry);
                 changed |= fold_expr_hir(cond);
                 let mut inner = loop_entry;
+                kill_locals_with_address_taken_in_calls(cond, &mut inner, address_aliases);
                 changed |= sccp_transform_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut inner,
@@ -1125,7 +1544,8 @@ fn sccp_stmt(
             }
             PreHirStmt::DoWhile { body, cond } => {
                 let pre = env.clone();
-                let modified = loop_variant_vars(body, all_xvars);
+                let mut modified = loop_variant_vars(body, all_xvars, address_aliases);
+                collect_call_escaped_vars_in_expr(cond, address_aliases, &mut modified);
                 let mut inner = env_without_vars(&pre, &modified);
                 changed |= sccp_transform_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
@@ -1150,15 +1570,13 @@ fn sccp_stmt(
                     changed |= sccp_stmt(i, env, goto_targets, all_xvars, address_aliases);
                 }
                 let loop_entry = env.clone();
-                let mut modified = loop_variant_vars(body, all_xvars);
+                let mut modified = loop_variant_vars(body, all_xvars, address_aliases);
                 if let Some(u) = update {
-                    if let PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(n),
-                        ..
-                    } = u.as_ref()
-                    {
-                        modified.insert(n.clone());
-                    }
+                    loop_variant_stmt(u, &mut modified);
+                    collect_escaped_and_indirect_in_stmt(u, address_aliases, &mut modified);
+                }
+                if let Some(c) = cond.as_ref() {
+                    collect_call_escaped_vars_in_expr(c, address_aliases, &mut modified);
                 }
                 let loop_body_entry = env_without_vars(&loop_entry, &modified);
                 if let Some(c) = cond.as_mut() {
@@ -1166,6 +1584,9 @@ fn sccp_stmt(
                     changed |= fold_expr_hir(c);
                 }
                 let mut inner = loop_body_entry;
+                if let Some(c) = cond.as_ref() {
+                    kill_locals_with_address_taken_in_calls(c, &mut inner, address_aliases);
+                }
                 changed |= sccp_transform_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut inner,
@@ -1189,7 +1610,9 @@ fn sccp_stmt(
                 let pre = env.clone();
                 changed |= sccp_subst_expr(expr, &pre);
                 changed |= fold_expr_hir(expr);
-                if let Some((v, _)) = eval_hir_expr_with_const_env(expr, &pre) {
+                if !expr_has_side_effects(expr)
+                    && let Some((v, _)) = eval_hir_expr_with_const_env(expr, &pre)
+                {
                     let mut taken: Option<Vec<PreHirStmt>> = None;
                     for case in cases.iter_mut() {
                         if case.values.iter().any(|x| *x == v) {
@@ -1217,9 +1640,11 @@ fn sccp_stmt(
                         continue;
                     }
                 }
+                let mut post_expr = pre;
+                kill_locals_with_address_taken_in_calls(expr, &mut post_expr, address_aliases);
                 let mut acc: Option<ConstEnv> = None;
                 for case in cases.iter_mut() {
-                    let mut e = pre.clone();
+                    let mut e = post_expr.clone();
                     changed |= sccp_transform_stmts(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         &mut e,
@@ -1232,7 +1657,7 @@ fn sccp_stmt(
                         Some(a) => merge_env(&a, &e),
                     });
                 }
-                let mut ed = pre.clone();
+                let mut ed = post_expr.clone();
                 changed |= sccp_transform_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     &mut ed,
@@ -1240,7 +1665,7 @@ fn sccp_stmt(
                     all_xvars,
                     address_aliases,
                 );
-                *env = merge_env(acc.as_ref().unwrap_or(&pre), &ed);
+                *env = merge_env(acc.as_ref().unwrap_or(&post_expr), &ed);
                 break;
             }
             PreHirStmt::Label(label) => {

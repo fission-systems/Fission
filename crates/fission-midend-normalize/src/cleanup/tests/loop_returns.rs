@@ -251,7 +251,7 @@ fn collapse_loop_exit_alias_return_rejects_non_alias_expression() {
 
 #[test]
 fn rewrite_found_path_break_to_return_promotes_match_path() {
-    // while { if (done) break; ... result = value; break; } return -1;
+    // while { if (done) break; ... result = value; break; } return result;
     // → match path becomes return result
     let mut stmts = vec![
         PreHirStmt::While {
@@ -275,7 +275,7 @@ fn rewrite_found_path_break_to_return_promotes_match_path() {
             ]
             .into(),
         },
-        PreHirStmt::Return(Some(PreHirExpr::Const(-1, int(32)))),
+        PreHirStmt::Return(Some(PreHirExpr::Var("result".to_string()))),
     ];
     assert!(rewrite_found_path_break_to_return(&mut stmts));
     let PreHirStmt::While { body, .. } = &stmts[0] else {
@@ -296,6 +296,36 @@ fn rewrite_found_path_break_to_return_promotes_match_path() {
             ..
         } if matches!(then_body.as_slice(), [PreHirStmt::Break])
     ));
+    assert!(matches!(
+        &stmts[1],
+        PreHirStmt::Return(Some(PreHirExpr::Var(name))) if name == "result"
+    ));
+}
+
+#[test]
+fn rewrite_found_path_break_to_return_preserves_const_return_after_loop() {
+    // while { result = value; break; } return -1;
+    // → breaking out falls through to `return -1`, so rewriting `break` to
+    // `return result` would alter the returned value.
+    let mut stmts = vec![
+        PreHirStmt::While {
+            cond: PreHirExpr::Const(1, int(32)),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("result".to_string()),
+                    rhs: PreHirExpr::Var("value".to_string()),
+                },
+                PreHirStmt::Break,
+            ]
+            .into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Const(-1, int(32)))),
+    ];
+    assert!(!rewrite_found_path_break_to_return(&mut stmts));
+    let PreHirStmt::While { body, .. } = &stmts[0] else {
+        panic!("expected while");
+    };
+    assert!(matches!(body.last(), Some(PreHirStmt::Break)));
     assert!(matches!(
         &stmts[1],
         PreHirStmt::Return(Some(PreHirExpr::Const(-1, _)))
