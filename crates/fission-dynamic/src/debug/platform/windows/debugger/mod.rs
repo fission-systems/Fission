@@ -1033,6 +1033,9 @@ impl Default for WindowsDebugger {
 
 impl Drop for WindowsDebugger {
     fn drop(&mut self) {
+        if self.state.attached_pid.is_some() {
+            let _ = self.restore_armed_software_breakpoints();
+        }
         if let Some(pid) = self.state.attached_pid {
             unsafe {
                 let _ = DebugActiveProcessStop(pid);
@@ -1280,7 +1283,8 @@ mod tests {
         dbg.state.system_breakpoint_consumed = true;
         dbg.set_test_memory(0x401000, &[0x55, 0x48, 0x89, 0xE5]);
         dbg.set_sw_breakpoint(0x401000).expect("set breakpoint");
-        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0xCC]);
+        assert_eq!(dbg.read_raw_memory(0x401000, 1).unwrap(), [0xCC]);
+        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0x55]);
         dbg
     }
 
@@ -1299,7 +1303,8 @@ mod tests {
         let bp = &dbg.state.breakpoints[&0x401000];
         assert_eq!(bp.hits, 1);
         assert_eq!(bp.original_byte, 0x55);
-        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0xCC]);
+        assert_eq!(dbg.read_raw_memory(0x401000, 1).unwrap(), [0xCC]);
+        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0x55]);
     }
 
     #[test]
@@ -1316,10 +1321,11 @@ mod tests {
             let (event, _) =
                 dbg.process_debug_event(&exception_event(7, EXCEPTION_SINGLE_STEP_CODE, 0x401001));
             assert_eq!(
-                dbg.read_memory(0x401000, 1).unwrap(),
+                dbg.read_raw_memory(0x401000, 1).unwrap(),
                 [0xCC],
                 "the breakpoint is back (report = {report})"
             );
+            assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0x55]);
             assert!(dbg.step_off.is_none());
             if report {
                 assert!(matches!(
@@ -1353,7 +1359,7 @@ mod tests {
             Some(DebugEvent::SingleStep { thread_id: 9 })
         ));
         assert!(dbg.step_off.is_some(), "thread 7's step is still pending");
-        assert_eq!(dbg.read_memory(0x401000, 1).unwrap(), [0x55]);
+        assert_eq!(dbg.read_raw_memory(0x401000, 1).unwrap(), [0x55]);
     }
 
     /// The address of `ntdll!NtTerminateProcess` in the debuggee, from its
@@ -1702,11 +1708,11 @@ mod tests {
             );
 
             debugger.set_sw_breakpoint(registers.pc)?;
-            assert_eq!(debugger.read_memory(registers.pc, 1)?, [0xCC]);
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
             assert!(debugger.disable_breakpoint(registers.pc)?);
             assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
             assert!(debugger.enable_breakpoint(registers.pc)?);
-            assert_eq!(debugger.read_memory(registers.pc, 1)?, [0xCC]);
+            assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
             debugger.remove_sw_breakpoint(registers.pc)?;
             assert_eq!(debugger.read_memory(registers.pc, 1)?, [original_byte]);
             debugger.single_step()?;
@@ -1939,5 +1945,44 @@ mod tests {
             .find_return_address(1, &regs)
             .expect("find return address");
         assert_eq!(ret_addr, 0x402000);
+    }
+
+    #[test]
+    fn read_memory_hides_armed_breakpoints_and_rejects_duplicate_bp() {
+        let mut dbg = debugger_with_breakpoint();
+        // Spanning read around 0x401000 must return the original 4-byte prologue.
+        assert_eq!(
+            dbg.read_memory(0x401000, 4).unwrap(),
+            [0x55, 0x48, 0x89, 0xE5]
+        );
+        assert_eq!(
+            dbg.read_raw_memory(0x401000, 4).unwrap(),
+            [0xCC, 0x48, 0x89, 0xE5]
+        );
+        // Setting a second breakpoint at the same address is rejected before patching.
+        assert!(dbg.set_sw_breakpoint(0x401000).is_err());
+        assert_eq!(dbg.state.breakpoints[&0x401000].original_byte, 0x55);
+    }
+
+    #[test]
+    fn restore_armed_software_breakpoints_restores_memory_and_clears_step_off() {
+        let mut dbg = debugger_with_breakpoint();
+        dbg.set_sw_breakpoint(0x401002).expect("second breakpoint");
+        dbg.disable_breakpoint(0x401002).expect("disable second");
+        dbg.step_off = Some(StepOffBreakpoint {
+            thread_id: 7,
+            address: 0x401000,
+            report: false,
+        });
+
+        dbg.restore_armed_software_breakpoints()
+            .expect("restore armed breakpoints");
+
+        assert_eq!(
+            dbg.read_raw_memory(0x401000, 4).unwrap(),
+            [0x55, 0x48, 0x89, 0xE5]
+        );
+        assert!(!dbg.state.breakpoints[&0x401000].enabled);
+        assert!(dbg.step_off.is_none());
     }
 }
