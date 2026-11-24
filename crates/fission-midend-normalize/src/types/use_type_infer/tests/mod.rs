@@ -1,5 +1,6 @@
 mod byte_indices;
 mod copy_constraints;
+mod home_slot_widths;
 mod integer_constraints;
 mod pointer_roles;
 mod return_types;

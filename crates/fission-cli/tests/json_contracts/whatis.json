@@ -1,0 +1,72 @@
+{
+  "command": [
+    "whatis",
+    "crates/fission-loader/testdata/x64_dwarf5_strx.elf",
+    "--addr",
+    "0x201140",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "function": {
+        "object": {
+          "entry": "number",
+          "id": "number",
+          "is_export": "bool",
+          "is_import": "bool",
+          "is_thunk": "bool",
+          "kind": "string",
+          "memory_block": "number",
+          "name": "string",
+          "offset": "number",
+          "provenance": {
+            "object": {
+              "confidence": "string",
+              "detail": "string",
+              "source": "string"
+            }
+          },
+          "size": "number"
+        }
+      },
+      "memory_block": {
+        "object": {
+          "file_offset": "number",
+          "file_size": "number",
+          "id": "number",
+          "name": "string",
+          "permissions": {
+            "object": {
+              "execute": "bool",
+              "read": "bool",
+              "write": "bool"
+            }
+          },
+          "provenance": {
+            "object": {
+              "confidence": "string",
+              "source": "string"
+            }
+          },
+          "size": "number",
+          "start": "number",
+          "virtual_size": "number"
+        }
+      },
+      "relocations": {
+        "array": "empty"
+      },
+      "source": {
+        "object": {
+          "file": "string",
+          "line": "number"
+        }
+      },
+      "symbols": {
+        "array": "empty"
+      }
+    }
+  }
+}

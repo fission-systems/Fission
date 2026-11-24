@@ -15,11 +15,11 @@ mod scoring;
 mod signatures_bridge;
 
 pub use model::{
-    BinaryIdentityReport, BinaryIdentitySummary, DieCompatSummary, DieRawMatch, EvidenceLocation,
-    IDENTITY_SCHEMA_VERSION, IdentityDetection, IdentityEvidence, IdentityKind,
+    BinaryIdentityReport, BinaryIdentitySummary, CodeViewSummary, DieCompatSummary, DieRawMatch,
+    EvidenceLocation, IDENTITY_SCHEMA_VERSION, IdentityDetection, IdentityEvidence, IdentityKind,
     IdentityResourceSummary, IdentityScanLimits, IdentitySource, NegativeIdentityEvidence,
-    OverlayInfo, PeIdentitySummary, PeRichHeaderSummary, SectionEntropy, SuppressedDetection,
-    WinApiCatalogSummary,
+    OverlayInfo, PeIdentitySummary, PeRichHeaderSummary, RichRecordSummary, SectionEntropy,
+    SuppressedDetection, WinApiCatalogSummary,
 };
 
 use fission_core::evidence_policy::EvidencePolicy;
@@ -217,6 +217,16 @@ pub fn analyze(binary: &LoadedBinary, limits: IdentityScanLimits) -> Report {
         overlay: overlay_info,
         rich_header: Some(PeRichHeaderSummary {
             present: policy::pe_has_rich_header_probe(binary),
+            records: binary
+                .rich_header_records
+                .iter()
+                .flatten()
+                .map(|record| model::RichRecordSummary {
+                    product_id: record.product_id,
+                    build_number: record.build_number,
+                    count: record.count,
+                })
+                .collect(),
         }),
         resources,
         die_compat,

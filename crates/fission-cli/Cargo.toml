@@ -43,6 +43,7 @@ fission-project = { path = "../fission-project" }
 fission-loader = { path = "../fission-loader" }
 fission-analysis-db = { path = "../fission-analysis-db" }
 fission-static = { path = "../fission-static" }
+fission-signatures = { path = "../fission-signatures" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }
 

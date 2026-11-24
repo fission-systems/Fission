@@ -21,6 +21,7 @@ pub struct ParsedOneShotArgs {
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(long_version = crate::cli::build_identity::long_version())]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
     long_about = "Legacy flat CLI compatibility surface.\n\nCanonical commands:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli decomp binary.exe --addr 0x1400\n\nLegacy flat invocations remain available as deprecated compatibility shims and normalize into the canonical subcommand execution path."
@@ -273,6 +274,7 @@ pub fn normalize_legacy(cli: LegacyCliArgs) -> ParsedOneShotArgs {
         callgraph_function: None,
         identify_cmd: false,
         identify_function: None,
+        lookup: None,
         similar_cmd: false,
         similar_function: None,
         similar_top_k: 5,

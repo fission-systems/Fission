@@ -51,6 +51,11 @@ pub struct JitCompiler {
     /// to it; the compiler has no `Emulator` to reach, so it counts here and
     /// the caller drains it.
     pub unimplemented_ops: std::collections::BTreeMap<String, u64>,
+    /// Per compiled instruction that may fault, the registers it writes;
+    /// indexed by the constant its `jit_insn_checkpoint` call carries.
+    /// Append-only, like the emulator's `wide_ops`: a compiled block holds
+    /// indices into it.
+    pub(crate) insn_reg_writes: Vec<Vec<(u64, u32)>>,
 }
 
 impl JitCompiler {
@@ -137,6 +142,10 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_taint_output as *const u8,
             ),
             (
+                "jit_insn_checkpoint",
+                crate::jit::callbacks::jit_insn_checkpoint as *const u8,
+            ),
+            (
                 "jit_host_reg_base",
                 crate::jit::callbacks::jit_host_reg_base as *const u8,
             ),
@@ -191,6 +200,7 @@ impl JitCompiler {
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
             unimplemented_ops: std::collections::BTreeMap::new(),
+            insn_reg_writes: Vec::new(),
             shadow: crate::observe::ShadowMode::Off,
         })
     }
@@ -263,6 +273,13 @@ impl JitCompiler {
             }
         }
 
+        // A space that is neither constant, register nor unique is memory:
+        // RAM, or whatever else a language names directly by varnode. Only
+        // registers (written through to `host_reg_file`) and uniques
+        // (instruction-local) may live in a variable across ops.
+        let is_memory_space =
+            |space: u64| space != 0 && space != register_space && space != unique_space;
+
         // Does any op jump *backwards* inside this block? Fault-aware blocks
         // also use the per-op fuse so a failed memory callback stops before
         // the next p-code operation can observe a fabricated zero value.
@@ -286,19 +303,63 @@ impl JitCompiler {
                 }
             })
         }) || (check_memory_faults
-            && flat
-                .iter()
-                .any(|op| matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)));
+            && flat.iter().any(|op| {
+                matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)
+                    || op
+                        .output
+                        .iter()
+                        .chain(op.inputs.iter().skip(
+                            // A branch or call names its target by a RAM
+                            // varnode; that is an address, not an access.
+                            usize::from(matches!(
+                                op.opcode,
+                                PcodeOpcode::Branch | PcodeOpcode::CBranch | PcodeOpcode::Call
+                            )),
+                        ))
+                        .any(|vn| !vn.is_constant && is_memory_space(vn.space_id))
+            }));
 
         // Ops whose result nothing reads. They keep their block -- branch
         // targets are indices into `flat`, so the numbering has to stay -- and
         // simply emit nothing into it; Cranelift folds the empty blocks away.
         let dead_ops = dead_value_ops(&flat);
 
+        // Ops an intra-block `BRANCH`/`CBRANCH` can land on: control reaches
+        // them from somewhere other than the op before. Same target rule as
+        // the branch lowering below.
+        let mut join_ops = vec![false; flat.len()];
+        for op in &flat {
+            if matches!(op.opcode, PcodeOpcode::Branch | PcodeOpcode::CBranch) {
+                if let Some(dest) = op.inputs.first() {
+                    let abs = dest.constant_val;
+                    if (dest.space_id == 0 || dest.is_constant)
+                        && abs >= 0
+                        && (abs as usize) < flat.len()
+                    {
+                        join_ops[abs as usize] = true;
+                    }
+                }
+            }
+        }
+
         let fallthrough_pc = {
             let last = insns.last().unwrap();
             last.pc.wrapping_add(last.len as u64)
         };
+
+        // Instructions that can fault, and the registers each writes: a
+        // fault has to leave the instruction un-retired, so these are noted
+        // before it starts (`Emulator::deliver_memory_fault`).
+        let mut checkpoint_at: HashMap<u64, i64> = HashMap::new();
+        if check_memory_faults {
+            for insn in insns {
+                if insn_may_fault(&insn.ops, register_space, unique_space) {
+                    checkpoint_at.insert(insn.pc, self.insn_reg_writes.len() as i64);
+                    self.insn_reg_writes
+                        .push(insn_register_writes(&insn.ops, register_space));
+                }
+            }
+        }
 
         self.ctx.func.signature.params.clear();
         self.ctx.func.signature.returns.clear();
@@ -486,6 +547,10 @@ impl JitCompiler {
             .module
             .declare_function("jit_taint_output", Linkage::Import, &sig_taint)
             .unwrap();
+        let checkpoint_fn = self
+            .module
+            .declare_function("jit_insn_checkpoint", Linkage::Import, &sig_taint)
+            .unwrap();
 
         // jit_host_reg_base(emu) -> ptr
         let mut sig_regbase = self.module.make_signature();
@@ -607,6 +672,9 @@ impl JitCompiler {
         let taint_output_ref = self
             .module
             .declare_func_in_func(taint_output_fn, builder.func);
+        let checkpoint_ref = self
+            .module
+            .declare_func_in_func(checkpoint_fn, builder.func);
         let host_reg_base_ref = self
             .module
             .declare_func_in_func(host_reg_base_fn, builder.func);
@@ -850,6 +918,16 @@ impl JitCompiler {
                         ((vn.constant_val as u64) & ((1u64 << bits) - 1)) as i64
                     };
                     builder.ins().iconst(types::I64, masked)
+                } else if is_memory_space(vn.space_id) {
+                    // Memory named directly by a varnode -- x86 lifts
+                    // `mov [abs], eax` to a COPY into a RAM varnode. Read at
+                    // the op, never cached: a STORE through a pointer can
+                    // change these bytes, and a variable would not see it.
+                    let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                    let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                    let sz = builder.ins().iconst(types::I64, i64::from(vn.size.min(8)));
+                    let call = builder.ins().call(read_space_ref, &[emu_ptr, sp, off, sz]);
+                    builder.inst_results(call)[0]
                 } else if vn.size > 8 {
                     // Wide: load low 8 bytes only for scalar ops; bulk path for Copy/Load/Store.
                     let v = ensure_var!(vn.space_id, vn.offset, 8);
@@ -899,7 +977,23 @@ impl JitCompiler {
             ($vn:expr, $val:expr) => {{
                 let vn: &Varnode = $vn;
                 let val = $val;
-                if !vn.is_constant {
+                if !vn.is_constant && is_memory_space(vn.space_id) {
+                    // Written through at the op, like a STORE. This used to
+                    // be held in a variable and flushed at block exit, which
+                    // was wrong three ways: a LOAD through a pointer to the
+                    // same bytes later in the block read the old value; the
+                    // exit flush is a concrete write, so it cleared the
+                    // taint the op had just given those bytes; and a fault,
+                    // a watchpoint or an SMC invalidation landed at the end
+                    // of the block instead of at the instruction.
+                    let size = vn.size.min(8);
+                    let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                    let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                    let sz = builder.ins().iconst(types::I64, i64::from(size));
+                    builder
+                        .ins()
+                        .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                } else if !vn.is_constant {
                     let v = ensure_var!(vn.space_id, vn.offset, vn.size.min(8));
                     // Every value in here is an I64, whatever the varnode's
                     // width, so a narrow varnode has to be truncated on the way
@@ -1163,6 +1257,28 @@ impl JitCompiler {
         for (idx, op) in flat.iter().enumerate() {
             builder.switch_to_block(op_blocks[idx]);
 
+            // A join inside the block: forget every cached register view.
+            //
+            // `ensure_var!` declares a register's variable where it is first
+            // read, and that is a point in *emission* order, not one that
+            // dominates later reads. When the first read sits in an arm an
+            // intra-instruction branch can skip -- AArch64 `csel` lifts to a
+            // `CBRANCH` over the copy of its second operand -- the variable
+            // has no definition on the skipping path, and Cranelift answers a
+            // read of it there with zero. `mov w8,#2; csel w10,wzr,w8,eq;
+            // mov w0,w8` returned 0 for `w0` when the condition held.
+            //
+            // Every register write already reaches `host_reg_file` (or is
+            // written through), so dropping the views is free of loss: the
+            // next read re-seeds inside this block, which dominates what
+            // follows it up to the next join. Constants are re-materialised
+            // the same way. Unique temporaries are not touched -- they have
+            // no backing store to re-seed from, and SLEIGH defines one before
+            // any path reads it.
+            if join_ops[idx] {
+                var_map.retain(|key, _| key.0 != 0 && key.0 != register_space);
+            }
+
             // Per-pcode-op fuse (breaks relative CBRANCH livelocks under max_inst).
             if needs_pcode_fuse {
                 let tick = builder.ins().call(count_pcode_ref, &[emu_ptr]);
@@ -1189,6 +1305,10 @@ impl JitCompiler {
                 if observe.insn {
                     builder.ins().call(observe_insn_ref, &[emu_ptr, pc]);
                 }
+                if let Some(&index) = checkpoint_at.get(start_pc) {
+                    let index = builder.ins().iconst(types::I64, index);
+                    builder.ins().call(checkpoint_ref, &[emu_ptr, index]);
+                }
             }
 
             let fallthrough = if idx + 1 < n_ops {
@@ -1207,17 +1327,16 @@ impl JitCompiler {
                 op.opcode
             };
 
-            // 128-bit integer ops, and vector `CALLOTHER`s, go back to the
-            // evaluator rather than being lowered here. Cranelift has an `I128` and they could be lowered,
-            // but the reason not to is agreement: these are precisely the ops
-            // both engines used to truncate to eight bytes, and routing the
-            // compiled path through the interpreting one makes the two
-            // *unable* to disagree rather than merely tested for it.
+            // Wide (>8-byte) integer ops, and vector `CALLOTHER`s, go back to
+            // the evaluator rather than being lowered here. Cranelift handles
+            // scalar <=8B ops natively, while routing wider integer ops through
+            // the evaluator prevents eight-byte truncation and ensures both
+            // engines cannot disagree.
             //
-            // It costs a call per op, on 3.5% of instructions. That is the
+            // It costs a call per op, on ~3.5% of instructions. That is the
             // right trade for now -- a wrong answer arrives just as fast.
             if !dead_ops[idx]
-                && (crate::pcode::eval::Evaluator::u128_handled(op)
+                && (crate::pcode::eval::Evaluator::wide_handled(op)
                     || crate::arch::vector::is_wide_userop(op))
             {
                 let index = wide_ops.len() as i64;
@@ -1250,7 +1369,11 @@ impl JitCompiler {
                 // one -- `SubPiece` on a 16-byte input is the common shape,
                 // because its *output* is an ordinary eight-byte register.
                 // So re-read what the call just wrote.
-                if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+                if let Some(out) = op
+                    .output
+                    .as_ref()
+                    .filter(|o| !o.is_constant && !is_memory_space(o.space_id))
+                {
                     // The call wrote all of `out`, up to sixteen bytes. Any
                     // other cached view of those bytes -- a four-byte half, the
                     // upper eight -- is stale now, not just the exact one.
@@ -1261,6 +1384,9 @@ impl JitCompiler {
                             || key.0 != out.space_id
                             || key.1 >= whi
                             || key.1 + key.2 <= wlo
+                    });
+                    dirty.retain(|(sp, off, sz, _)| {
+                        !(*sp == out.space_id && *off < whi && *off + u64::from(*sz) > wlo)
                     });
                     let size = out.size.min(8);
                     let v = ensure_var!(out.space_id, out.offset, size);
@@ -2611,6 +2737,56 @@ impl JitCompiler {
             .map_err(|e| anyhow::anyhow!("finalize: {e}"))?;
         Ok(self.module.get_finalized_function(id))
     }
+}
+
+/// Whether an instruction's p-code can raise a guest page fault: it loads,
+/// stores, names memory directly by varnode, or calls out (a userop such as
+/// AArch64 `DC ZVA` writes memory). Shared by both engines, so they
+/// checkpoint the same instructions.
+pub(crate) fn insn_may_fault(ops: &[PcodeOp], register_space: u64, unique_space: u64) -> bool {
+    let memory = |vn: &Varnode| {
+        !vn.is_constant
+            && vn.space_id != 0
+            && vn.space_id != register_space
+            && vn.space_id != unique_space
+    };
+    ops.iter().any(|op| {
+        matches!(
+            op.opcode,
+            PcodeOpcode::Load | PcodeOpcode::Store | PcodeOpcode::CallOther
+        ) || op.output.iter().any(memory)
+            || op
+                .inputs
+                .iter()
+                // A branch or call names its target by a RAM varnode; that
+                // is an address, not an access.
+                .skip(usize::from(matches!(
+                    op.opcode,
+                    PcodeOpcode::Branch | PcodeOpcode::CBranch | PcodeOpcode::Call
+                )))
+                .any(memory)
+    })
+}
+
+/// The registers an instruction's p-code writes, as (offset, size) in
+/// eight-byte pieces, deduplicated in first-write order.
+pub(crate) fn insn_register_writes(ops: &[PcodeOp], register_space: u64) -> Vec<(u64, u32)> {
+    let mut out: Vec<(u64, u32)> = Vec::new();
+    for vn in ops.iter().filter_map(|op| op.output.as_ref()) {
+        if vn.is_constant || vn.space_id != register_space {
+            continue;
+        }
+        let mut offset = vn.offset;
+        let end = vn.offset + u64::from(vn.size);
+        while offset < end {
+            let piece = ((end - offset).min(8)) as u32;
+            if !out.contains(&(offset, piece)) {
+                out.push((offset, piece));
+            }
+            offset += u64::from(piece);
+        }
+    }
+    out
 }
 
 fn space_const(vn: &Varnode) -> u64 {

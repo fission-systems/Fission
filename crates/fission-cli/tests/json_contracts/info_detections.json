@@ -1,0 +1,34 @@
+{
+  "command": [
+    "info",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--detections",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "arch": "string",
+      "bits": "number",
+      "detections": {
+        "array": {
+          "object": {
+            "confidence": "string",
+            "details": "string",
+            "detection_type": "string",
+            "name": "string",
+            "version": "null"
+          }
+        }
+      },
+      "entry": "string",
+      "exports": "number",
+      "format": "string",
+      "functions": "number",
+      "image_base": "string",
+      "imports": "number",
+      "path": "string",
+      "sections": "number"
+    }
+  }
+}

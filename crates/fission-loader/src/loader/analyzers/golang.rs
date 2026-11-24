@@ -767,6 +767,7 @@ impl GoTypeInfo {
             name: self.name.clone(),
             mangled_name: String::new(),
             kind: "Struct".to_string(),
+            source: "go".to_string(),
             fields: self
                 .fields
                 .iter()

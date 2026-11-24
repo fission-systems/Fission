@@ -254,6 +254,88 @@ fn forced_driver_from(oracle: bool, requested: Option<String>) -> Option<String>
     requested.filter(|value| !value.trim().is_empty())
 }
 
+/// What one observed driver run left behind.
+///
+/// `lower_observed` drops the fork a driver ran on, but the fork shares the
+/// structuring work counter and the resource meters with the host, so those
+/// are the only marks a run leaves: the units it charged, the highest value
+/// any counter it used reached, and whether any meter tripped.
+struct ObservedRunCharge {
+    start: u64,
+    end: u64,
+    peak: u64,
+    tripped: bool,
+}
+
+fn observe_driver_run<'a, T>(
+    builder: &mut crate::midend::builder::PreviewBuilder<'a>,
+    run: impl FnOnce(&mut crate::midend::builder::PreviewBuilder<'a>) -> T,
+) -> (T, ObservedRunCharge) {
+    let counter = std::rc::Rc::clone(&builder.structuring_total_work_units);
+    let usage = std::rc::Rc::clone(&builder.resource_usage);
+    let trips = usage.trip_counts();
+    let start = counter.get();
+    let (result, peak) = usage.structuring_total_work.peak_within(|| run(builder));
+    let charge = ObservedRunCharge {
+        start,
+        end: counter.get(),
+        peak,
+        tripped: usage.trip_counts() != trips,
+    };
+    (result, charge)
+}
+
+/// Whether running a virtual-goto DREAM variant now would repeat, exactly,
+/// the observed run of its plain twin -- and if so, charge that repeat to the
+/// work accounting as if it had run.
+///
+/// The variant differs from its twin only in a first step that places virtual
+/// gotos; with none to place, and nothing to lower to find that out, it starts
+/// from the same host and graph (see
+/// [`virtual_gotos_absent_without_lowering`]). What still differs is where the
+/// shared work counter starts: `units = end - start` later. Nested trials copy
+/// the shared counter, so every value the repeat would observe is one the
+/// twin observed plus `units`. While the highest of those stays within the
+/// limit, no budget check fires in either run, both take the same path, and
+/// the repeat's only effects are the `units` it charges and that highest
+/// value, which are applied here. Returns `false`, changing nothing, when any
+/// of this cannot be shown; the caller then runs the variant.
+///
+/// [`virtual_gotos_absent_without_lowering`]: fission_midend_structuring::reaching_driver::virtual_gotos_absent_without_lowering
+fn virtual_goto_twin_is_a_rerun(
+    builder: &mut crate::midend::builder::PreviewBuilder<'_>,
+    twin: &ObservedRunCharge,
+) -> bool {
+    let counter = std::rc::Rc::clone(&builder.structuring_total_work_units);
+    let limit = builder.options.resource_limits.structuring_total_work;
+    // A trip would repeat and be counted again; a moved counter means
+    // something ran in between.
+    if twin.tripped || counter.get() != twin.end {
+        return false;
+    }
+    let Some(units) = twin.end.checked_sub(twin.start) else {
+        return false;
+    };
+    let Some(repeat_peak) = twin.peak.checked_add(units) else {
+        return false;
+    };
+    if repeat_peak > limit {
+        return false;
+    }
+    if !fission_midend_structuring::reaching_driver::virtual_gotos_absent_without_lowering(builder)
+    {
+        return false;
+    }
+    counter.set(twin.end + units);
+    if twin.peak > 0 {
+        builder
+            .resource_usage
+            .structuring_total_work
+            .observe(repeat_peak, limit);
+    }
+    true
+}
+
 fn try_alternative_structurings(
     ir: &mut NirFunc<'_, '_>,
     baseline: Vec<PreHirStmt>,
@@ -285,11 +367,29 @@ fn try_alternative_structurings(
     // shipped output, which is where the regressions come from.
     let protected = ir.builder.lsda_landing_pad_labels();
     let quality_shell = ir.builder.quality_function_shell();
+    // A pure function of the body, and drivers often offer the same body --
+    // the virtual-goto variants offer their plain twin's whenever there is no
+    // virtual goto to place. Each distinct body is cleaned and measured once.
+    let normalized_seen: std::cell::RefCell<
+        Vec<(
+            Vec<PreHirStmt>,
+            fission_midend_structuring::structuring_quality::StructuringQuality,
+        )>,
+    > = std::cell::RefCell::default();
     let normalized = |body: &Vec<PreHirStmt>| {
+        if let Some((_, quality)) = normalized_seen
+            .borrow()
+            .iter()
+            .find(|(seen, _)| seen == body)
+        {
+            return *quality;
+        }
         let mut cleaned =
             crate::midend::structuring::finalize_structured_body(&protected, body.clone());
         fission_midend_normalize::normalize_function_body(&mut cleaned);
-        measure(&cleaned)
+        let quality = measure(&cleaned);
+        normalized_seen.borrow_mut().push((body.clone(), quality));
+        quality
     };
     let post_layout = |body: &Vec<PreHirStmt>| {
         let mut function = quality_shell.clone();
@@ -474,14 +574,16 @@ fn try_alternative_structurings(
         );
     }
     if fission_midend_structuring::reaching_driver::dream_driver_enabled() {
-        let c =
-            fission_midend_structuring::reaching_driver::preview_reaching_conditions(ir.builder)
-                .map(|candidate| {
-                    candidate.map(|candidate| OfferedCandidate {
-                        body: candidate.body,
-                        hierarchical: candidate.used_hierarchical_regions,
-                    })
-                });
+        let (plain, plain_charge) = observe_driver_run(ir.builder, |builder| {
+            fission_midend_structuring::reaching_driver::preview_reaching_conditions(builder)
+        });
+        let plain_twin = plain.as_ref().ok().cloned();
+        let c = plain.map(|candidate| {
+            candidate.map(|candidate| OfferedCandidate {
+                body: candidate.body,
+                hierarchical: candidate.used_hierarchical_regions,
+            })
+        });
         consider(
             AlternativeDriver::Dream,
             "DREAM",
@@ -492,9 +594,12 @@ fn try_alternative_structurings(
             false,
             &mut winner,
         );
-        let c = fission_midend_structuring::reaching_driver::preview_reaching_conditions_with_virtual_gotos(
-            ir.builder,
-        )
+        let c = match plain_twin {
+            Some(twin) if virtual_goto_twin_is_a_rerun(ir.builder, &plain_charge) => Ok(twin),
+            _ => fission_midend_structuring::reaching_driver::preview_reaching_conditions_with_virtual_gotos(
+                ir.builder,
+            ),
+        }
         .map(|candidate| {
             candidate.map(|candidate| OfferedCandidate {
                 body: candidate.body,
@@ -511,16 +616,18 @@ fn try_alternative_structurings(
             false,
             &mut winner,
         );
-        let c =
+        let (hierarchical, hierarchical_charge) = observe_driver_run(ir.builder, |builder| {
             fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions(
-                ir.builder,
+                builder,
             )
-            .map(|candidate| {
-                candidate.map(|candidate| OfferedCandidate {
-                    body: candidate.body,
-                    hierarchical: true,
-                })
-            });
+        });
+        let hierarchical_twin = hierarchical.as_ref().ok().cloned();
+        let c = hierarchical.map(|candidate| {
+            candidate.map(|candidate| OfferedCandidate {
+                body: candidate.body,
+                hierarchical: true,
+            })
+        });
         consider(
             AlternativeDriver::DreamHierarchical,
             "DREAM-hierarchical",
@@ -531,9 +638,14 @@ fn try_alternative_structurings(
             false,
             &mut winner,
         );
-        let c = fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions_with_virtual_gotos(
-            ir.builder,
-        )
+        let c = match hierarchical_twin {
+            Some(twin) if virtual_goto_twin_is_a_rerun(ir.builder, &hierarchical_charge) => {
+                Ok(twin)
+            }
+            _ => fission_midend_structuring::reaching_driver::preview_hierarchical_reaching_conditions_with_virtual_gotos(
+                ir.builder,
+            ),
+        }
         .map(|candidate| {
             candidate.map(|candidate| OfferedCandidate {
                 body: candidate.body,
@@ -968,5 +1080,334 @@ mod oracle_control_tests {
     #[test]
     fn an_empty_driver_name_forces_nothing() {
         assert_eq!(forced_driver_from(true, Some("   ".to_string())), None);
+    }
+}
+
+#[cfg(test)]
+mod virtual_goto_twin_tests {
+    use super::{observe_driver_run, virtual_goto_twin_is_a_rerun};
+    use crate::midend::CallingConvention;
+    use crate::midend::PreviewBuilder;
+    use crate::midend::ir::{MlilPreviewError, MlilPreviewOptions};
+    use crate::{PcodeBasicBlock, PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
+    use fission_midend_structuring::reaching_driver::ReachingCandidate;
+    use fission_midend_structuring::reaching_driver::{
+        preview_hierarchical_reaching_conditions,
+        preview_hierarchical_reaching_conditions_with_virtual_gotos, preview_reaching_conditions,
+        preview_reaching_conditions_with_virtual_gotos, virtual_gotos_absent_without_lowering,
+    };
+
+    fn reg(offset: u64, size: u32) -> Varnode {
+        Varnode {
+            space_id: fission_pcode_ir::space::REGISTER_SPACE_ID,
+            offset,
+            size,
+            is_constant: false,
+            constant_val: 0,
+        }
+    }
+
+    fn op(
+        seq_num: u32,
+        opcode: PcodeOpcode,
+        address: u64,
+        output: Option<Varnode>,
+        inputs: Vec<Varnode>,
+    ) -> PcodeOp {
+        PcodeOp {
+            seq_num,
+            opcode,
+            address,
+            output,
+            inputs,
+            asm_mnemonic: None,
+        }
+    }
+
+    /// A counting loop followed by a decision that joins before one return:
+    /// enough for every DREAM variant to offer a body and to charge
+    /// structuring work, and no block whose terminator is a goto with no CFG
+    /// edge, so there is no virtual goto to place.
+    fn loop_then_diamond() -> PcodeFunction {
+        let rax = reg(0x0, 8);
+        let constant = |value: i64| Varnode::constant(value, 8);
+        let block =
+            |index: u32, start: u64, successors: Vec<u32>, ops: Vec<PcodeOp>| PcodeBasicBlock {
+                index,
+                start_address: start,
+                successors,
+                ops,
+            };
+        PcodeFunction {
+            blocks: vec![
+                block(
+                    0,
+                    0x5000,
+                    vec![1, 2],
+                    vec![op(
+                        0,
+                        PcodeOpcode::CBranch,
+                        0x5000,
+                        None,
+                        vec![constant(0x5020), reg(0x08, 1)],
+                    )],
+                ),
+                block(
+                    1,
+                    0x5010,
+                    vec![0],
+                    vec![
+                        op(
+                            0,
+                            PcodeOpcode::IntAdd,
+                            0x5010,
+                            Some(rax.clone()),
+                            vec![rax.clone(), constant(1)],
+                        ),
+                        op(1, PcodeOpcode::Branch, 0x5014, None, vec![constant(0x5000)]),
+                    ],
+                ),
+                block(
+                    2,
+                    0x5020,
+                    vec![3, 4],
+                    vec![op(
+                        0,
+                        PcodeOpcode::CBranch,
+                        0x5020,
+                        None,
+                        vec![constant(0x5040), reg(0x10, 1)],
+                    )],
+                ),
+                block(
+                    3,
+                    0x5030,
+                    vec![5],
+                    vec![
+                        op(
+                            0,
+                            PcodeOpcode::Copy,
+                            0x5030,
+                            Some(rax.clone()),
+                            vec![constant(2)],
+                        ),
+                        op(1, PcodeOpcode::Branch, 0x5034, None, vec![constant(0x5050)]),
+                    ],
+                ),
+                block(
+                    4,
+                    0x5040,
+                    vec![5],
+                    vec![op(
+                        0,
+                        PcodeOpcode::Copy,
+                        0x5040,
+                        Some(rax.clone()),
+                        vec![constant(3)],
+                    )],
+                ),
+                block(
+                    5,
+                    0x5050,
+                    vec![],
+                    vec![op(
+                        0,
+                        PcodeOpcode::Return,
+                        0x5050,
+                        None,
+                        vec![constant(0), rax],
+                    )],
+                ),
+            ],
+        }
+    }
+
+    fn options(structuring_total_work: Option<u64>) -> MlilPreviewOptions {
+        let mut options = MlilPreviewOptions {
+            is_64bit: true,
+            pointer_size: 8,
+            format: "ELF64".to_string(),
+            calling_convention: CallingConvention::SystemVAmd64,
+            ..Default::default()
+        };
+        if let Some(limit) = structuring_total_work {
+            options.resource_limits.structuring_total_work = limit;
+        }
+        options
+    }
+
+    /// Lower every terminator once, as the baseline structuring does before
+    /// any alternative is priced, so that reading them again is a memo hit.
+    fn lower_terminators(builder: &mut PreviewBuilder<'_>) {
+        for block in 0..builder.pcode.blocks.len() {
+            builder
+                .lower_block_terminator(block)
+                .expect("terminator lowers");
+        }
+    }
+
+    /// Charge structuring work the way lowering does: checkpoints on the
+    /// shared counter, then on a nested trial's forked copy of it, whose
+    /// highest value ends above the shared counter's.
+    fn charge_work(builder: &PreviewBuilder<'_>) {
+        use fission_midend_structuring::linear_types::IfLoweringBudget;
+        let checkpoints = |counter: std::rc::Rc<std::cell::Cell<u64>>, count: usize| {
+            let mut budget = IfLoweringBudget::new(
+                builder.options,
+                0,
+                0,
+                "test",
+                counter,
+                std::rc::Rc::clone(&builder.resource_usage),
+            );
+            for _ in 0..count {
+                budget.checkpoint("test");
+            }
+        };
+        checkpoints(std::rc::Rc::clone(&builder.structuring_total_work_units), 3);
+        let forked = std::rc::Rc::new(std::cell::Cell::new(
+            builder.structuring_total_work_units.get(),
+        ));
+        checkpoints(forked, 5);
+    }
+
+    struct Accounting {
+        counter: u64,
+        peak: u64,
+        trips: [usize; 4],
+    }
+
+    fn accounting(builder: &PreviewBuilder<'_>) -> Accounting {
+        Accounting {
+            counter: builder.structuring_total_work_units.get(),
+            peak: builder.resource_usage.structuring_total_work.peak(),
+            trips: builder.resource_usage.trip_counts(),
+        }
+    }
+
+    type Offered = Result<Option<ReachingCandidate>, MlilPreviewError>;
+
+    /// Run the variant after its twin on one builder, and replay it on
+    /// another; the two must be indistinguishable.
+    fn assert_replay_matches_run(
+        plain: impl Fn(&mut PreviewBuilder<'_>) -> Offered,
+        variant: impl Fn(&mut PreviewBuilder<'_>) -> Offered,
+    ) {
+        let function = loop_then_diamond();
+        let options = options(None);
+        let mut ran = PreviewBuilder::new(&function, &options, None);
+        lower_terminators(&mut ran);
+        let ran_plain = plain(&mut ran).expect("plain runs");
+        let ran_variant = variant(&mut ran).expect("variant runs");
+        let ran_after = accounting(&ran);
+
+        let mut replayed = PreviewBuilder::new(&function, &options, None);
+        lower_terminators(&mut replayed);
+        let (replayed_plain, charge) = observe_driver_run(&mut replayed, &plain);
+        let replayed_plain = replayed_plain.expect("plain runs");
+        assert!(
+            virtual_goto_twin_is_a_rerun(&mut replayed, &charge),
+            "nothing to place and nothing to lower: the variant is a rerun"
+        );
+        let replayed_after = accounting(&replayed);
+
+        let body = |candidate: &Option<ReachingCandidate>| {
+            candidate.as_ref().map(|candidate| candidate.body.clone())
+        };
+        assert!(ran_plain.is_some(), "the fixture must be structured");
+        assert_eq!(body(&ran_plain), body(&replayed_plain));
+        assert_eq!(body(&ran_variant), body(&replayed_plain));
+        assert!(
+            charge.end > charge.start && charge.peak > charge.end,
+            "the run must charge work, on a fork too, or the accounting is not tested"
+        );
+        assert_eq!(ran_after.counter, replayed_after.counter);
+        assert_eq!(ran_after.peak, replayed_after.peak);
+        assert_eq!(ran_after.trips, replayed_after.trips);
+    }
+
+    /// Running the virtual-goto variant and replaying its twin must leave the
+    /// same candidate, work counter, peak and trips.
+    #[test]
+    fn a_replayed_twin_matches_running_the_variant() {
+        assert_replay_matches_run(
+            |builder| {
+                charge_work(builder);
+                preview_reaching_conditions(builder)
+            },
+            |builder| {
+                charge_work(builder);
+                preview_reaching_conditions_with_virtual_gotos(builder)
+            },
+        );
+    }
+
+    #[test]
+    fn a_replayed_hierarchical_twin_matches_running_the_variant() {
+        assert_replay_matches_run(
+            |builder| {
+                charge_work(builder);
+                preview_hierarchical_reaching_conditions(builder)
+            },
+            |builder| {
+                charge_work(builder);
+                preview_hierarchical_reaching_conditions_with_virtual_gotos(builder)
+            },
+        );
+    }
+
+    fn charged_plain(builder: &mut PreviewBuilder<'_>) -> Offered {
+        charge_work(builder);
+        preview_reaching_conditions(builder)
+    }
+
+    /// A terminator not yet lowered would be lowered by the variant, which
+    /// mints names; the twin cannot stand in for that run.
+    #[test]
+    fn an_unlowered_terminator_is_not_assumed_free() {
+        let function = loop_then_diamond();
+        let options = options(None);
+        let mut builder = PreviewBuilder::new(&function, &options, None);
+        assert!(!virtual_gotos_absent_without_lowering(&mut builder));
+        let (_, charge) = observe_driver_run(&mut builder, charged_plain);
+        let before = builder.structuring_total_work_units.get();
+        assert!(!virtual_goto_twin_is_a_rerun(&mut builder, &charge));
+        assert_eq!(
+            builder.structuring_total_work_units.get(),
+            before,
+            "a refusal charges nothing"
+        );
+        lower_terminators(&mut builder);
+        assert!(virtual_gotos_absent_without_lowering(&mut builder));
+    }
+
+    /// When the repeat would cross the work limit, it could fail where the
+    /// first run succeeded, so it is run rather than replayed.
+    #[test]
+    fn a_repeat_that_could_exhaust_the_budget_is_run() {
+        let function = loop_then_diamond();
+        let unlimited = options(None);
+        let mut probe = PreviewBuilder::new(&function, &unlimited, None);
+        lower_terminators(&mut probe);
+        let (_, probe_charge) = observe_driver_run(&mut probe, charged_plain);
+        let units = probe_charge.end - probe_charge.start;
+        assert!(units > 0);
+
+        // Room for the first run, one unit short of the repeat.
+        let tight = options(Some(probe_charge.peak + units - 1));
+        let mut builder = PreviewBuilder::new(&function, &tight, None);
+        lower_terminators(&mut builder);
+        let (_, charge) = observe_driver_run(&mut builder, charged_plain);
+        assert!(!charge.tripped, "the first run fits");
+        let before = builder.structuring_total_work_units.get();
+        assert!(!virtual_goto_twin_is_a_rerun(&mut builder, &charge));
+        assert_eq!(builder.structuring_total_work_units.get(), before);
+
+        // Exactly enough room, and the repeat is replayed.
+        let exact = options(Some(probe_charge.peak + units));
+        let mut builder = PreviewBuilder::new(&function, &exact, None);
+        lower_terminators(&mut builder);
+        let (_, charge) = observe_driver_run(&mut builder, charged_plain);
+        assert!(virtual_goto_twin_is_a_rerun(&mut builder, &charge));
     }
 }

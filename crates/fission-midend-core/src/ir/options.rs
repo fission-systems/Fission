@@ -407,6 +407,14 @@ pub struct NirTypeContext {
     #[serde(default)]
     pub ambiguous_call_targets: HashSet<u64>,
     pub call_effect_summaries: HashMap<String, NirCallEffectSummary>,
+    /// For direct callees with no symbol identity (a stripped local
+    /// function), the integer argument-register slots the callee's own body
+    /// may write, keyed by entry address. Present only when the bounded
+    /// preview of the callee proved the complete set; a slot not listed is
+    /// preserved across the call (GCC's interprocedural register allocation
+    /// keeps a staged argument live across such a call).
+    #[serde(default)]
+    pub callee_argument_register_writes: HashMap<u64, Vec<usize>>,
     #[serde(default)]
     pub call_prototype_summaries: HashMap<String, NirCallPrototypeSummary>,
     /// Whether a callee's ABI result storage carries a source-language value.

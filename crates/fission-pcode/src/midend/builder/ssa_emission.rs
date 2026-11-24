@@ -780,7 +780,8 @@ impl<'a> PreviewBuilder<'a> {
             if self.append_ssa_edge_copies(block, &mut body).is_err() {
                 return false;
             }
-            self.lowered_block_stmts_cache.insert(block, body);
+            self.lowered_block_stmts_cache
+                .insert(block, std::rc::Rc::new(body));
         }
         true
     }

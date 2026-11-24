@@ -9,9 +9,29 @@ Scope: `crates/fission-cli/`
 
 ## Current command model
 
-Run `fission_cli --help` for the canonical command tree. The
-[CLI reference](../../docs/CLI.md) covers static analysis, decompilation,
-verification, native and emulated debugging, and automation.
+Canonical subcommands (the source of truth is `CANONICAL_SUBCOMMANDS` in
+`src/cli/args/mod.rs`; `fission_cli --help` prints them):
+
+| Group | Commands | Owner of the semantics |
+|---|---|---|
+| Static views | `info`, `list`, `disasm`, `strings`, `hex`, `search`, `xrefs`, `callgraph`, `whatis`, `types` | `fission-loader`, `fission-analysis-db`, `fission-static` |
+| Decompilation | `decomp` | `fission-decompiler` |
+| IR diagnostics | `raw-pcode`, `pcode-stages`, `nir-stats`, `pcode-topology` | `fission-sleigh`, `fission-pcode` |
+| Signatures | `identify`, `similar`, `api` | `fission-decompiler::fid`, `fission-signatures` |
+| Changes and decisions | `patch`, `db` | CLI (`patch`), `fission-project` (`db`) |
+| Batch | `inventory {program-metadata, function-facts, preview-candidates}` | `fission-static`, `fission-analysis-db` |
+| Dynamic | `sandbox`, `call`, `debug` (+ `debug session`), `verify` | `fission-emulator`, `fission-dynamic`, `fission-dir` |
+| Scripting | `script {check, run}` | `fission-script` |
+| Environment and contract | `resources status`, `languages`, `schema`, `skill` | `fission-core`, `fission-sleigh` |
+
+Global flags: `--resource-root`, `--signature-path`, `--language`, `--base`,
+`--entry`, `--arch`, `--db`, `--no-db`, `--contract`, `--fail-on-partial`.
+A global flag a command cannot honor must warn (`ignored_option_warnings`,
+`raw_load_warnings`), never be dropped silently; so must a per-command flag the
+command parses and does not read (`--compiler-id`, `--profile`, `--format`,
+`--engine`).
+
+The [CLI reference](../../docs/CLI.md) documents each command and its JSON.
 
 Legacy flat invocations are still supported as deprecated compatibility shims. They must normalize into the same internal execution path instead of creating a second behavior path.
 

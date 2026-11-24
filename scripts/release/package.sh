@@ -11,8 +11,13 @@
 #
 #   fission-<target>/
 #     bin/fission_cli[.exe]
-#     share/fission/{sleigh-specs,signatures,ghidra-data}
+#     share/fission/{sleigh-specs,signatures,ghidra-data,fission-resources.json}
 #     LICENSE NOTICE README.md
+#
+# `fission-resources.json` names the release the resources were cut from (the
+# Fission version, FISSION_BUILD_TAG, FISSION_BUILD_SHA: the same variables the
+# release build embeds in the binary) and digests each directory. `fission_cli
+# resources status` compares it with the binary (#1208).
 #
 # The earlier flat layout (fission_cli next to utils/) matched no candidate,
 # so an unpacked release could not find its own Sleigh specs unless it was run
@@ -56,12 +61,25 @@ check_resources() {
   [ "$slaspecs" -gt 10 ] || die "utils/sleigh-specs has only $slaspecs .slaspec files"
 }
 
+python_cmd() {
+  # The first Python 3 that runs: Windows has a non-working `python3` stub.
+  local py
+  for py in python3 python; do
+    if "$py" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+      echo "$py"
+      return
+    fi
+  done
+  die "Python 3.9+ is needed to write the resource manifest"
+}
+
 copy_resources() {
   local dest=$1
   mkdir -p "$dest"
   for d in "${RESOURCE_DIRS[@]}"; do
     cp -R "utils/$d" "$dest/$d"
   done
+  "$(python_cmd)" scripts/release/resource_manifest.py "$dest"
 }
 
 write_checksum() {
@@ -115,7 +133,7 @@ package_resources() {
   local stage
   stage=$(mktemp -d)
   copy_resources "$stage"
-  tar -C "$stage" -czf "$out/fission-resources.tar.gz" "${RESOURCE_DIRS[@]}"
+  tar -C "$stage" -czf "$out/fission-resources.tar.gz" "${RESOURCE_DIRS[@]}" fission-resources.json
   rm -rf "$stage"
   write_checksum "$out" fission-resources.tar.gz
 }

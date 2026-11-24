@@ -5,7 +5,8 @@
 | Fast Gate | All PR targets, GitHub merge candidates and pushes to main | Change plan from event SHAs, with affected Linux tests, CLI smoke and pre-merge lanes when selected |
 | Heavy | Nightly or workflow dispatch | Linux workspace tests, Windows and macOS coverage, MSRV, compile surface and the RustSec advisory check |
 | DecBench full sweep | Nightly or workflow dispatch | 24 shards with exact row coverage, per-function results, and comparison with a compatible passing main sweep |
-| Release E2E and packages | Intentional release dispatch or SemVer tag push | L0 and L1 on the exact candidate SHA, release CLI E2E and five unpacked platform packages |
+| Release PR | `Prepare Release PR` dispatch | Version bump, drafted notes and the pinned candidate; never tags |
+| Release E2E and packages | Intentional release dispatch or SemVer tag push | L0 and L1 on the exact SHA, which must be the merged Release PR on top of its candidate; release CLI E2E and five unpacked platform packages |
 | Publish | Successful release candidate run | SHA256 manifest and artifact provenance, complete draft release verified before publication |
 
 ## PR and merge queue
@@ -59,12 +60,31 @@ RustSec advisory database moves on its own schedule, so a PR checks advisories
 when it changes any `Cargo.toml`, `Cargo.lock`, `deny.toml`,
 `.cargo/audit.toml`, or `.cargo/config` / `.cargo/config.toml`. Manual Fast Gate
 dispatches and nightly Heavy also check advisories. The security lane checks
-bans, licenses and sources on Rust or security metadata changes. The sccache
-setup fails open. Every push to main runs workspace fmt and clippy.
+bans, licenses and sources on Rust or security metadata changes. Every push to
+main runs workspace fmt and clippy.
+
+The sccache setup fails open, decided before the build
+(`.github/actions/setup-sccache/probe.sh`). sccache checks its storage when its
+server starts, and a failed check kills the compile that started the server, so
+the setup starts the server the build will use, in the build's environment,
+and compiles one fixed crate through it. Only if that works does it export
+`RUSTC_WRAPPER=sccache`; otherwise the job builds uncached with a warning. The
+server then lives for the whole job (`SCCACHE_IDLE_TIMEOUT=0`), so no later
+cargo step repeats the check, and `SCCACHE_IGNORE_SERVER_IO_ERROR=1` compiles a
+unit locally if the server drops a connection. Once the server is up, storage
+errors are cache misses, not failures. There is no retry of a failed cargo
+step without the wrapper: the step cannot tell an sccache failure from a
+compile error without parsing its output, and a shell-script `RUSTC_WRAPPER`
+that could do it per `rustc` call does not run on the Windows runners. The
+`sccache outage fallback` job in `ci.yml` points the cache at an unresolvable
+host and requires a green uncached build, and requires that the probed server
+still serves later steps; it runs when the setup or `ci.yml` changes.
 
 ## Checks on the checks
 
-- Speed: every Rust PR counts instructions executed by its base and head CLIs
+- Speed: a PR that changes the decompiler, or carries the `type:performance`
+  label when pushed, counts instructions executed by its base and head CLIs
+  after its Linux tests pass
   on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
   runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
   compares main with the last good night and fails at +3%. Dispatch it with
@@ -174,24 +194,90 @@ missing shards and previously successful rows now failing are blocking. Score
 deltas are observational and do not change the accepted baseline thresholds.
 Byte match is not run. See [the benchmark guide](BENCHMARK_DECBENCH.md).
 
-## Promote a release
+## Release process
 
-1. Select a candidate in main's history. Check for a successful Fast Gate
-   **main push run** and a successful Heavy **scheduled or manually dispatched
-   run** on the same SHA.
-2. Dispatch on main with the version and exact candidate SHA.
+The maintainer reviews and merges one Release PR; the workflows do the rest.
+
+1. **Prepare.** Actions, **Prepare Release PR**, on main, with `version`
+   (`vX.Y.Z`) and optionally `ref` (default main HEAD):
 
    ```bash
-   gh workflow run "Release Tag (CI green)" --ref main -f tag=vX.Y.Z -f ref=<candidate-sha>
+   gh workflow run "Prepare Release PR" --ref main -f version=vX.Y.Z
    ```
 
-3. The workflow runs release E2E and stages all five packages before creating
-   any tag itself. A manually pushed SemVer tag enters the same verification
-   path and must already resolve to that verified SHA.
-4. The publish job verifies the staged digests and generates build provenance.
-   It creates the tag if needed, populates a draft, then downloads and verifies
-   the draft attachments before publishing. Retry with the same tag and SHA
-   after a failed publication.
+   It bumps every workspace crate, `Cargo.lock` and the docs nav
+   (`scripts/release/bump_version.py`), drafts `docs/changelog/vX.Y.Z.md`
+   from the PRs merged since the previous tag
+   (`scripts/release/draft_notes.py`), records the candidate SHA in
+   `.github/release-candidate.json`, and opens `release: vX.Y.Z` from branch
+   `release/vX.Y.Z`. Re-running it for the same version updates that branch
+   and PR in place; it never opens a second one, never force-pushes, and keeps
+   the notes' maintainer blocks. `dry_run` only writes the draft into the run
+   summary. It never tags or publishes.
+2. **Start CI on the PR.** GitHub does not start workflows for a PR or push
+   made with `GITHUB_TOKEN`, so the required checks do not appear on their
+   own. This repository also has "Allow GitHub Actions to create and approve
+   pull requests" turned off, so GitHub refuses the PR itself; the run then
+   prints a prefilled link, and the maintainer opening the PR from it starts
+   CI like any PR. If that setting is turned on and the workflow opens the PR,
+   **close and reopen it once** (Fast Gate runs on `reopened`). Do not add a
+   PAT for this.
+3. **Review.** Fill every `TODO(release)` block in the notes: the
+   full-dataset DecBench table (no PR carries it) and, if no issue is labelled
+   `release:blocker` or `bug` + `status:confirmed`, the known limitations.
+   Optionally add a hand-written summary for a major release. Label PRs named
+   under "Needs a label" and re-run step 1 if their section matters.
+4. **Merge** through the merge queue. Then wait for the Fast Gate main push
+   run, and dispatch **CI Heavy Validation** on main (or wait for the nightly
+   on that commit).
+5. **Tag.** Dispatch **Release Tag (CI green)** with `ref` = the Release PR's
+   merge commit. The tag defaults to the one the Release PR recorded.
+
+   ```bash
+   gh workflow run "Release Tag (CI green)" --ref main -f ref=<merge-sha>
+   ```
+
+### What the tag workflow refuses
+
+Before any build, `release-tag.yml` checks, at the exact SHA:
+
+- L0 (Fast Gate main push) and L1 (Heavy) passed on it;
+- `.github/release-candidate.json` names this tag, so a Release PR exists;
+- the SHA is that Release PR's merge commit (head `release/vX.Y.Z`), not a
+  later main commit;
+- the diff from the recorded candidate to the SHA touches only release files
+  (crate manifests, `Cargo.lock`, `mkdocs.yml`, `docs/changelog/`, the
+  candidate record). If main moved before the merge, the notes miss PRs:
+  re-run step 1;
+- the notes exist and contain no `TODO(release)`.
+
+It then runs release E2E (L2) and stages all five packages before creating
+any tag. A manually pushed SemVer tag enters the same verification path. The
+publish job verifies the staged digests, generates build provenance, creates
+the tag if needed, populates a draft with `docs/changelog/vX.Y.Z.md` as its
+notes, verifies the draft attachments, and publishes. Retry with the same tag
+and SHA after a failed publication.
+
+### Release notes
+
+`draft_notes.py` is deterministic and uses no AI. A PR is in the range when
+its merge commit is reachable from the candidate and not from the previous
+tag. Sections, in order: Breaking Changes (`risk:breaking`), Correctness
+Fixes (`bug`, `risk:semantic`), Reliability (`phase:2-reliability`),
+Performance (`type:performance`), New Capabilities (`enhancement`), Internal
+(`type:refactor`), Testing & Infrastructure (`type:test`, `area:ci`),
+Documentation (`documentation`), Other. The first matching label wins; a PR
+with none is classified by its conventional title prefix (`fix`, `perf`,
+`docs`, `test`/`ci`, `refactor`, `feat`, `type!:` for breaking). Anything
+else is listed under Other and named in a "Needs a label" line. Bot authors
+and `skip-changelog` PRs are left out and recorded in a trailing comment.
+`.github/release.yml` gives GitHub's own generated notes the same sections.
+
+Numbers are quoted verbatim, with their PR, only from a PR's `Benchmark ...`,
+`Correctness Evidence` or top-level `## Measurement ...` / `## Measured ...`
+section; nothing is added up across PRs. DecBench
+measures similarity to the source, not correctness (ADR 0018), and the notes
+say so.
 
 After validating the workflow, configure tag protection and the `release`
 environment approval policy in GitHub. Enable immutable releases when the
@@ -219,11 +305,13 @@ Rules:
 1. Platform packages **fail the release** if `utils/sleigh-specs` is missing/incomplete.
 2. `utils/` reaches consumers through the clone, the platform archive, or `fission-resources.tar.gz`; all three are cut from the same tagged checkout.
 3. Regenerate packed artifacts (`.fpk`) with the scripts in [`scripts/`](https://github.com/fission-systems/Fission/tree/main/scripts) and commit them; there is no separate publish step for CI to pick them up.
-4. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](https://github.com/fission-systems/Fission/blob/main/scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
+4. Every bundle carries `fission-resources.json`: the Fission version, tag and commit it was cut from, and a digest of each directory. A release binary embeds the same tag and commit. The package smokes and the publish job refuse a release whose tag, binary identity (`resources status --json`) and manifests disagree, and the tag must equal the CLI's Cargo version before anything builds ([`check_identity.py`](https://github.com/fission-systems/Fission/blob/main/scripts/release/check_identity.py)).
+5. Every archive is smoke-tested the way a user runs it -- unpacked outside the checkout and invoked from an unrelated directory -- by [`scripts/release/smoke_package.sh`](https://github.com/fission-systems/Fission/blob/main/scripts/release/smoke_package.sh). The v0.2.x archives put `utils/` beside the binary, a place the binary never looks, and only worked from inside a source tree.
 
 ## Related files
 
 - [`.github/CI_CD_GUIDE.md`](https://github.com/fission-systems/Fission/blob/main/.github/CI_CD_GUIDE.md) — operator overview
+- [`.github/workflows/prepare-release.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/prepare-release.yml)
 - [`.github/workflows/release-tag.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-tag.yml)
 - [`.github/workflows/release-e2e.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-e2e.yml)
 - [`.github/workflows/cd.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/cd.yml)

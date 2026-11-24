@@ -839,6 +839,7 @@ dependencies = [
  "fission-loader",
  "fission-project",
  "fission-script",
+ "fission-signatures",
  "fission-sleigh",
  "fission-static",
  "jemallocator",

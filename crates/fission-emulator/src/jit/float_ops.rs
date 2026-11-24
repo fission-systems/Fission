@@ -1,5 +1,6 @@
 //! Host-side IEEE float helpers for JIT callouts.
 //!
+//! Size 2 uses exact IEEE 754 binary16 conversion via `f16_to_f64` / `f64_to_f16`.
 //! Sizes 4 and 8 use native f32/f64 by default. Size 10 (x87 extended) is
 //! approximated via f64 (same policy as the offline evaluator).
 //!
@@ -36,6 +37,7 @@ pub enum FloatUnOp {
 
 fn bits_to_f64(bits: u64, size: u32) -> f64 {
     match size {
+        2 => crate::pcode::eval::f16_to_f64(bits as u16),
         4 => f32::from_bits(bits as u32) as f64,
         8 | 10 => f64::from_bits(bits),
         _ => f64::from_bits(bits),
@@ -44,6 +46,7 @@ fn bits_to_f64(bits: u64, size: u32) -> f64 {
 
 fn f64_to_bits(val: f64, size: u32) -> u64 {
     match size {
+        2 => u64::from(crate::pcode::eval::f64_to_f16(val)),
         4 => (val as f32).to_bits() as u64,
         8 | 10 => val.to_bits(),
         _ => val.to_bits(),
@@ -127,7 +130,7 @@ pub fn float_unop(op: u32, in_size: u32, out_size: u32, a_bits: u64) -> u64 {
     }
 }
 
-fn mask_int(val: u64, size: u32) -> u64 {
+pub(crate) fn mask_int(val: u64, size: u32) -> u64 {
     if size >= 8 {
         val
     } else {
@@ -225,5 +228,58 @@ mod tests {
         // 0x7F + 1 overflows signed 8-bit
         assert_eq!(int_flag_op(1, 1, 0x7F, 1), 1);
         assert_eq!(int_flag_op(1, 1, 1, 1), 0);
+    }
+
+    #[test]
+    fn f16_binop_and_unop() {
+        let one_h = 0x3c00u64;
+        let two_h = 0x4000u64;
+        let three_h = 0x4200u64;
+        let four_h = 0x4400u64;
+        assert_eq!(
+            float_binop(FloatBinOp::Add as u32, 2, one_h, two_h),
+            three_h
+        );
+        assert_eq!(
+            float_binop(FloatBinOp::Sub as u32, 2, three_h, one_h),
+            two_h
+        );
+        assert_eq!(float_binop(FloatBinOp::Mul as u32, 2, two_h, two_h), four_h);
+        assert_eq!(float_binop(FloatBinOp::Div as u32, 2, four_h, two_h), two_h);
+        assert_eq!(float_binop(FloatBinOp::Equal as u32, 2, two_h, two_h), 1);
+        assert_eq!(float_binop(FloatBinOp::Less as u32, 2, one_h, two_h), 1);
+
+        assert_eq!(float_unop(FloatUnOp::Neg as u32, 2, 2, two_h), 0xc000);
+        assert_eq!(float_unop(FloatUnOp::Abs as u32, 2, 2, 0xc000), two_h);
+        assert_eq!(float_unop(FloatUnOp::Sqrt as u32, 2, 2, four_h), two_h);
+        assert_eq!(float_unop(FloatUnOp::Nan as u32, 2, 1, 0x7e00), 1);
+        assert_eq!(float_unop(FloatUnOp::Nan as u32, 2, 1, two_h), 0);
+
+        let one_half_f32 = 1.5f32.to_bits() as u64;
+        let one_half_f64 = 1.5f64.to_bits();
+        assert_eq!(
+            float_unop(FloatUnOp::Float2Float as u32, 2, 4, 0x3e00),
+            one_half_f32
+        );
+        assert_eq!(
+            float_unop(FloatUnOp::Float2Float as u32, 4, 2, one_half_f32),
+            0x3e00
+        );
+        assert_eq!(
+            float_unop(FloatUnOp::Float2Float as u32, 2, 8, 0x3e00),
+            one_half_f64
+        );
+        assert_eq!(
+            float_unop(FloatUnOp::Float2Float as u32, 8, 2, one_half_f64),
+            0x3e00
+        );
+        assert_eq!(
+            float_unop(FloatUnOp::Int2Float as u32, 4, 2, (-3i32 as u32) as u64),
+            0xc200
+        );
+        assert_eq!(
+            float_unop(FloatUnOp::Trunc as u32, 2, 4, 0xc300), // -3.5 -> -3
+            (-3i32 as u32) as u64
+        );
     }
 }
