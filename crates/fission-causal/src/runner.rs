@@ -244,6 +244,9 @@ pub struct ModelRecord {
     /// `(input offset, value)` where the model differs from the recorded
     /// input.
     pub changes: Vec<(usize, u8)>,
+    /// Φ on the model's symbolic replay (`None` if never replayed or
+    /// undecided). The native check compares against it.
+    pub phi: Option<bool>,
     pub outcome: ModelOutcome,
 }
 
@@ -1028,7 +1031,12 @@ impl Runner<'_, '_> {
     fn pair_search(&mut self, singles: &[CandidateResult], slice: &Slice) -> Result<JointStatus> {
         let inputs: Vec<&CandidateResult> = singles
             .iter()
-            .filter(|c| c.origin == CandidateOrigin::InputByte)
+            .filter(|c| {
+                matches!(
+                    c.origin,
+                    CandidateOrigin::InputByte | CandidateOrigin::InputByteOutsideSlice
+                )
+            })
             .collect();
         let program = self.case.program;
         let mut pairs_tried = 0u64;
@@ -1270,12 +1278,21 @@ impl Runner<'_, '_> {
                 root.observation, self.trace.observation
             )));
         }
+        // Branches the recording shows depend on the input but the
+        // symbolic replay did not see (an unmodelled op dropped the
+        // expression): the search is blind there.
+        let symbolic_steps: BTreeSet<u64> = root.branches.iter().map(|b| b.step).collect();
+        let blind: Vec<u64> = slice::input_dependent_branches(&self.trace, self.trace.sink_step)
+            .into_iter()
+            .filter(|s| !symbolic_steps.contains(s))
+            .collect();
         let mut queries_left = self.config.max_solver_queries;
         let mut seen: BTreeSet<Vec<u8>> = BTreeSet::from([base.clone()]);
         let mut queue: VecDeque<(std::rc::Rc<SymPath>, usize, usize)> =
             VecDeque::from([(root, 0, 0)]);
         let mut unknown: Option<String> = None;
         let mut truncated = false;
+        let mut rejected = 0usize;
         while let Some((path, bound, generation)) = queue.pop_front() {
             if !self.budget_left() {
                 return Ok(SearchOutcome::Budget("oracle budget".into()));
@@ -1357,6 +1374,7 @@ impl Runner<'_, '_> {
                     generation,
                     negated: negated.clone(),
                     changes: changes.iter().map(|(o, v)| (*o, *v)).collect(),
+                    phi: None,
                     outcome: ModelOutcome::Duplicate,
                 };
                 if !seen.insert(input.clone()) {
@@ -1364,6 +1382,7 @@ impl Runner<'_, '_> {
                     continue;
                 }
                 let child = self.symbolic_replay(&input)?;
+                record.phi = child.holds();
                 // What the model predicts: the prefix as it was, then the
                 // negated branch the other way (or, for Φ, the same path
                 // and Φ flipped).
@@ -1376,6 +1395,7 @@ impl Runner<'_, '_> {
                     observed.len() >= expected.len() && observed[..expected.len()] == expected[..];
                 let phi_ok = target.is_some() || child.holds() == phi0.map(|h| !h);
                 if !path_ok || !phi_ok {
+                    rejected += 1;
                     record.outcome = ModelOutcome::Rejected {
                         expected: format!(
                             "{expected:x?}{}",
@@ -1434,6 +1454,25 @@ impl Runner<'_, '_> {
                     }
                 }
             }
+        }
+        // A model the emulator did not reproduce shows the symbolic layer
+        // mis-models this program: running out of paths then proves nothing.
+        if unknown.is_none() && rejected > 0 {
+            unknown = Some(format!(
+                "{rejected} solver model(s) did not reproduce in the emulator: the symbolic \
+                 shadow mis-models a path here"
+            ));
+        }
+        if unknown.is_none() && !blind.is_empty() {
+            let pcs: BTreeSet<u64> = blind
+                .iter()
+                .filter_map(|s| self.trace.step(*s).map(|r| r.pc))
+                .collect();
+            unknown = Some(format!(
+                "{} input-dependent branch(es) of the recording (at {pcs:x?}) have no symbolic \
+                 condition: an unmodelled operation dropped it, so the search cannot see them",
+                blind.len()
+            ));
         }
         Ok(match (unknown, truncated) {
             (Some(reason), _) => SearchOutcome::Unknown(reason),

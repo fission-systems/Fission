@@ -238,7 +238,10 @@ pub fn replay(program: &Program, input: &[u8], sink: &SinkSpec, max_steps: u64) 
     };
     let mut branches = Vec::new();
     for event in &run.emu.sym_events {
-        if event.step_index >= sink_step {
+        // The interpreter counts an instruction when it starts, so a branch
+        // event's `step_index` is one past the step that ran it.
+        let step = event.step_index.saturating_sub(1);
+        if step >= sink_step {
             break;
         }
         let Some(cond) = event
@@ -248,7 +251,7 @@ pub fn replay(program: &Program, input: &[u8], sink: &SinkSpec, max_steps: u64) 
             continue;
         };
         branches.push(PathBranch {
-            step: event.step_index,
+            step,
             pc: event.pc,
             taken: event.condition_val_taken,
             cond: renamer.rename(cond),

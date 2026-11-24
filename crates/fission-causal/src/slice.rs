@@ -484,6 +484,38 @@ pub fn internal_candidates(program: &Program, trace: &Trace, slice: &Slice) -> V
         .collect()
 }
 
+/// Steps of the conditional branches whose operands derive from an input
+/// byte, by a forward pass over the recorded uses and definitions (data
+/// and address dependence, exact concrete addresses). The solver search
+/// compares these with the branches its symbolic replay saw: an
+/// input-dependent branch the symbolic layer did not see means running
+/// out of symbolic paths proves nothing.
+pub fn input_dependent_branches(trace: &Trace, before: u64) -> BTreeSet<u64> {
+    let mut derived: BTreeSet<ByteLoc> = BTreeSet::new();
+    let mut out = BTreeSet::new();
+    for s in trace.steps.iter().take_while(|s| s.step < before) {
+        let uses_input = s
+            .uses
+            .iter()
+            .flat_map(Access::bytes)
+            .any(|b| derived.contains(&b));
+        if uses_input && matches!(s.flow, crate::cfg::Flow::CBranch { .. }) {
+            out.insert(s.step);
+        }
+        for b in s.defs.iter().flat_map(Access::bytes) {
+            if uses_input {
+                derived.insert(b);
+            } else {
+                derived.remove(&b);
+            }
+        }
+        for b in &s.input {
+            derived.insert(ByteLoc::Mem(b.addr));
+        }
+    }
+    out
+}
+
 /// Deterministic alternative values for a location holding `original`:
 /// low-bit flip, zero (or one), top-bit flip, complement, +1, -1, then the
 /// comparison constants in `pool`.

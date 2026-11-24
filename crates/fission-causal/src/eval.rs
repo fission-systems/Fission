@@ -592,6 +592,37 @@ pub fn cases() -> Vec<CaseSpec> {
             },
         },
         CaseSpec {
+            name: "carry",
+            fixture: "x64_carry.elf",
+            property: "a carry out of a stored word: {req[0], req[2]} and {req[1], req[2]} are both joint causes; the search reports one",
+            input: pad(b"abcx", 16),
+            sink: grant_any,
+            requested: none,
+            // Positive: a carry from req[0] plus 'W'. Adversarial: a low
+            // byte of 1 without a carry (what a byte-blind model of the
+            // word would accept).
+            sets: vec![vec![(0, 0xff), (2, b'W')], vec![(0, 1), (1, 0), (2, b'W')]],
+            truth: Truth {
+                joint: vec![0, 1, 2],
+                ..Truth::default()
+            },
+        },
+        CaseSpec {
+            name: "carry_impossible",
+            fixture: "x64_carry_impossible.elf",
+            property: "the high byte of a two-byte sum compared to 2: unreachable, so no cause; the symbolic layer's model must be rejected on replay and the search must end Unknown",
+            input: pad(b"abcx", 16),
+            sink: grant_any,
+            requested: none,
+            // Adversarial: the low byte of the sum is 2 (the model a
+            // byte-blind layer proposes). Positive: the largest sum.
+            sets: vec![
+                vec![(0, 2), (1, 0), (2, b'W')],
+                vec![(0, 0xff), (1, 0xff), (2, b'W')],
+            ],
+            truth: Truth::default(),
+        },
+        CaseSpec {
             name: "segv_grant_x64",
             fixture: "x64_segv_grant.elf",
             property: "sink reached only in a SIGSEGV handler: req[0] selects the NULL slot; the stored req[1] is not a cause",

@@ -530,3 +530,55 @@ fn solver_backed_reports_are_deterministic() {
     assert!(!a.solver.models.is_empty());
     assert_eq!(a.deterministic_json(), b.deterministic_json());
 }
+
+#[test]
+fn a_solver_model_the_replay_does_not_reproduce_is_rejected() {
+    // Positive control: the reachable carry. The solver's model of the
+    // stored word replays as predicted and is a verified joint witness
+    // (one of the two minimal ones).
+    let (carry, _) = run("carry", &small());
+    match &carry.joint {
+        JointStatus::JointWitness {
+            input_offsets,
+            found_by,
+            ..
+        } => {
+            let offsets: Vec<usize> = input_offsets.iter().flatten().copied().collect();
+            assert!(
+                offsets == vec![0, 2] || offsets == vec![1, 2],
+                "{offsets:?}"
+            );
+            assert!(matches!(found_by, JointSearch::Solver { .. }));
+        }
+        other => panic!("expected a joint witness, got {other:?}"),
+    }
+    assert!(
+        carry
+            .solver
+            .models
+            .iter()
+            .all(|m| !matches!(m.outcome, ModelOutcome::Rejected { .. }))
+    );
+    // Adversarial: compared to 2, the high byte of a two-byte sum is out of
+    // reach. The symbolic layer sees the whole sum where the program reads
+    // one byte of it and proposes a model; the replay takes the other way,
+    // the model is rejected, and the case says Unknown -- not "no cause"
+    // and not a witness.
+    let (impossible, _) = run("carry_impossible", &small());
+    assert!(
+        impossible
+            .solver
+            .models
+            .iter()
+            .any(|m| matches!(m.outcome, ModelOutcome::Rejected { .. })),
+        "{:?}",
+        impossible.solver.models
+    );
+    assert!(
+        matches!(&impossible.joint, JointStatus::SolverUnknown { reason, .. } if reason.contains("did not reproduce")),
+        "{:?}",
+        impossible.joint
+    );
+    assert!(impossible.witness_inputs.is_empty());
+    assert!(impossible.requested_sets.iter().all(|s| !s.changes_sink));
+}

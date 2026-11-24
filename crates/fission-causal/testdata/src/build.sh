@@ -25,6 +25,12 @@ done
 for c in and3 xor_gate segv_grant; do
     build x86_64-linux-musl -O0 "$c" "x64_${c}.elf"
 done
+# carry.c with the high byte compared to 1 (reachable) and to 2 (no sum of
+# two bytes reaches it: the symbolic layer's model must be rejected).
+zig cc -target x86_64-linux-musl -O0 $FLAGS -DCARRY=1 -o "$OUT/x64_carry.elf" carry.c
+"$OBJCOPY" --strip-debug "$OUT/x64_carry.elf"
+zig cc -target x86_64-linux-musl -O0 $FLAGS -DCARRY=2 -o "$OUT/x64_carry_impossible.elf" carry.c
+"$OBJCOPY" --strip-debug "$OUT/x64_carry_impossible.elf"
 build x86_64-linux-musl -O2 xor_gate x64_xor_gate_o2.elf
 for c in and3 segv_grant; do
     build aarch64-linux-musl -O0 "$c" "a64_${c}.elf"
