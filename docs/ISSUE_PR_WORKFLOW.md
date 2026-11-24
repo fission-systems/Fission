@@ -13,7 +13,7 @@ are never deleted or changed automatically.
 | Dimension | Cardinality | Rule |
 | --- | --- | --- |
 | `priority:P0`–`P3` | One after triage | Risk and urgency; P0 candidates are not automatically release blockers |
-| `area:*` | One or more | Canonical code owner(s), not just changed paths |
+| `area:*` | One or more | Canonical code owner(s); on PRs added automatically from changed paths, owners the paths miss added by hand |
 | `phase:*` | One primary | #1293 execution phase |
 | `bug` / `enhancement` / `documentation` / `type:*` | One primary | Nature of the work |
 | `status:needs-repro` / `confirmed` | At most one | Evidence classification for defect reports |
@@ -40,8 +40,10 @@ an issue before its acceptance criteria have been verified.
 ## PR lifecycle
 
 1. Start from the linked issue and current main. State scope and invariant.
-2. Open draft for incomplete work; apply type/area/phase/risk labels manually
-   after reviewing actual changes. Carry priority from the issue if appropriate.
+2. Open draft for incomplete work; apply type/phase/risk labels manually
+   after reviewing actual changes. `area:*` labels are added automatically
+   from the changed paths (below); add any owner the paths miss. Carry
+   priority from the issue if appropriate.
 3. Include reproducer or preventive-work rationale, expected behavior, tests,
    measured before/after evidence when required, and limitations. Use the PR template.
 4. Mark ready for review when the applicable evidence is present. Independent
@@ -68,6 +70,10 @@ The first command is read-only; the second creates missing labels only.
 Existing metadata drift is reported, not overwritten. Review drift separately.
 GitHub CLI authentication and repository label-write permission are required.
 Optionally use the manual Sync managed labels workflow once merged.
-No automatic mass labeling: classify small batches after reviewing issue
-content, and preserve existing labels. Start with #1296–#1298 and then the
+The one automatic labelling is `area:*` on pull requests: the Label PR areas
+workflow (`.github/labeler.yml`) adds them from the paths a PR changes, on
+open and push, and never removes a label. `risk:*`, type, priority, phase and
+status labels are never applied automatically. Otherwise no automatic mass
+labeling: classify small batches after reviewing issue content, and preserve
+existing labels. Start with #1296–#1298 and then the
 #1293 backlog. Do not infer confirmation or release-blocker status from titles.
