@@ -32,6 +32,17 @@ pub(crate) fn hex_address<S: serde::Serializer>(
     serializer.serialize_str(&format!("0x{value:x}"))
 }
 
+/// An optional address, as `hex_address` or null.
+pub(crate) fn hex_address_opt<S: serde::Serializer>(
+    value: &Option<u64>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match value {
+        Some(address) => serializer.serialize_str(&format!("0x{address:x}")),
+        None => serializer.serialize_none(),
+    }
+}
+
 /// The memory model a `ProvedUnderModel` certificate is relative to.
 pub const MODEL_ID: &str = "separated-registers-frame-context.v1";
 

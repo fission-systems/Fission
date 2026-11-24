@@ -449,14 +449,120 @@ alias_step:
         .size   alias_step, .-alias_step
 
 /*
- * Thread-local storage: the stack protector's canary at a constant offset
- * from the thread pointer, a register the caller set up. Not a pointer
- * field, so not a region: refused with its own reason.
+ * Fail closed: thread-local storage below the thread pointer (a variable of
+ * the initial TLS block, `fs:[-8]`). Only offsets at and above it are
+ * modelled, as the thread pointer's block.
  */
         .globl  tls_step
         .type   tls_step,@function
 tls_step:
-        mov     rax, qword ptr fs:[0x28]
+        mov     rax, qword ptr fs:[-8]
         xor     eax, eax
         ret
         .size   tls_step, .-tls_step
+
+/*
+ * Global state (RFC #1093, P4 step 3). gcount_step counts digits mod 3 in
+ * the global g_count, using the class table g_class (.rodata) indexed by
+ * the input byte, and returns the count.
+ */
+        .globl  gcount_step
+        .type   gcount_step,@function
+gcount_step:
+        movzx   ecx, sil
+        movzx   ecx, byte ptr [g_class + rcx]
+        mov     eax, dword ptr [g_count]
+        test    ecx, ecx
+        je      .Lgcount_done
+        inc     eax
+        cmp     eax, 3
+        jne     .Lgcount_store
+        xor     eax, eax
+.Lgcount_store:
+        mov     dword ptr [g_count], eax
+.Lgcount_done:
+        ret
+        .size   gcount_step, .-gcount_step
+
+/* Fail closed: the context's address stored in a global. */
+        .globl  gptr_step
+        .type   gptr_step,@function
+gptr_step:
+        mov     qword ptr [g_ptr], rdi
+        xor     eax, eax
+        ret
+        .size   gptr_step, .-gptr_step
+
+/*
+ * The stack protector's check around a toggle of ctx->bit (offset 0): the
+ * canary is read from the thread pointer's block on entry and again on
+ * exit and compared with its saved copy.
+ */
+        .globl  __stack_chk_fail
+        .type   __stack_chk_fail,@function
+__stack_chk_fail:
+        ud2
+        .size   __stack_chk_fail, .-__stack_chk_fail
+
+        .globl  canary_step
+        .type   canary_step,@function
+canary_step:
+        sub     rsp, 24
+        mov     rax, qword ptr fs:[0x28]
+        mov     qword ptr [rsp + 8], rax
+        mov     eax, dword ptr [rdi]
+        and     esi, 1
+        xor     eax, esi
+        mov     dword ptr [rdi], eax
+        mov     rcx, qword ptr [rsp + 8]
+        sub     rcx, qword ptr fs:[0x28]
+        jne     .Lcanary_fail
+        add     rsp, 24
+        ret
+.Lcanary_fail:
+        call    __stack_chk_fail
+        .size   canary_step, .-canary_step
+
+/*
+ * The `-fzero-call-used-regs` epilogue after the same toggle: zeros pushed
+ * onto the x87 stack and popped again, observed by nothing.
+ */
+        .globl  zeroed_step
+        .type   zeroed_step,@function
+zeroed_step:
+        mov     eax, dword ptr [rdi]
+        and     esi, 1
+        xor     eax, esi
+        mov     dword ptr [rdi], eax
+        fldz
+        fldz
+        fstp    st(0)
+        fstp    st(0)
+        ret
+        .size   zeroed_step, .-zeroed_step
+
+/* Fail closed: the result goes through a floating-point conversion. */
+        .globl  float_step
+        .type   float_step,@function
+float_step:
+        cvtsi2sd xmm0, esi
+        cvttsd2si eax, xmm0
+        ret
+        .size   float_step, .-float_step
+
+        .section .rodata
+        .globl  g_class
+g_class:
+        .zero   48
+        .byte   1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+        .zero   198
+
+        .data
+        .globl  g_count
+        .p2align 2
+g_count:
+        .long   0
+        .globl  g_ptr
+        .p2align 3
+g_ptr:
+        .quad   0

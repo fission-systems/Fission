@@ -419,6 +419,8 @@ fn region(field: u32, initial: Vec<u8>) -> PointerRegion {
         field,
         initial,
         discovered: false,
+        address: None,
+        register: None,
     }
 }
 
@@ -586,14 +588,6 @@ fn what_the_region_model_cannot_vouch_for_is_unsupported() {
         "{:?}",
         retarget.status
     );
-    // Thread-local storage is reached from a register, not a field: not a
-    // region, and said so.
-    let tls = quotient("tls_step");
-    assert!(
-        unsupported_reason(&tls).contains("thread-local storage"),
-        "{:?}",
-        tls.status
-    );
     let alias = quotient_over(
         X86_64,
         "alias_step",
@@ -605,5 +599,81 @@ fn what_the_region_model_cannot_vouch_for_is_unsupported() {
         unsupported_reason(&alias).contains("two regions"),
         "{:?}",
         alias.status
+    );
+}
+
+/// A global counter and a global class table: global memory the step touches
+/// at absolute addresses is a region anchored there, starting as the image
+/// holds it. The table is read at the input byte, the counter carried from
+/// step to step: digits counted mod 3. Storing the context's address in a
+/// global is unsupported.
+#[test]
+fn global_memory_is_a_region_anchored_at_its_address() {
+    let report = quotient("gcount_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 3);
+    assert!(
+        report
+            .boundary
+            .regions
+            .iter()
+            .all(|region| region.address.is_some() && region.discovered)
+    );
+    assert!(
+        report
+            .assumptions
+            .iter()
+            .any(|a| a.description.contains("global memory"))
+    );
+    let stored = quotient("gptr_step");
+    assert!(
+        unsupported_reason(&stored).contains("is stored in the region global["),
+        "{:?}",
+        stored.status
+    );
+}
+
+/// The stack protector reads its canary from the thread pointer's block on
+/// entry and exit and compares the two: the block is a region the oracle
+/// gives the thread pointer, the canary a slot compared with itself. The
+/// check folds and the step is the toggle it guards. Below the thread
+/// pointer is not modelled.
+#[test]
+fn a_stack_protector_check_reads_the_thread_pointers_block() {
+    let report = quotient("canary_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 2);
+    assert!(report.calls.is_empty(), "{:?}", report.calls);
+    let [block] = report.boundary.regions.as_slice() else {
+        panic!("one region: {:?}", report.boundary.regions);
+    };
+    assert!(block.register.is_some());
+    assert!(
+        report
+            .assumptions
+            .iter()
+            .any(|a| a.description.contains("thread-local storage"))
+    );
+    let below = quotient("tls_step");
+    assert!(
+        unsupported_reason(&below).contains("thread-local storage"),
+        "{:?}",
+        below.status
+    );
+}
+
+/// Zeros pushed onto the x87 stack and popped (`-fzero-call-used-regs`)
+/// are floating-point values nothing observes: poison, harmless. A result
+/// that goes through a floating-point conversion is still unsupported.
+#[test]
+fn a_floating_point_value_nothing_observes_is_harmless() {
+    let report = quotient("zeroed_step");
+    assert_proved(&report);
+    assert_eq!(report.states.len(), 2);
+    let float = quotient("float_step");
+    assert!(
+        unsupported_reason(&float).contains("floating-point"),
+        "{:?}",
+        float.status
     );
 }

@@ -47,6 +47,8 @@ fn boundary(args: &QuotientArgs, entry: u64) -> QuotientBoundary {
                 field: region.field,
                 initial: region.initial.clone(),
                 discovered: false,
+                address: None,
+                register: None,
             })
             .collect(),
     }

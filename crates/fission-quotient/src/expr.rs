@@ -175,6 +175,23 @@ pub(crate) fn bin(op: Bin, a: SymExpr, b: SymExpr) -> SymExpr {
         Bin::Neq | Bin::Ult | Bin::Slt if a == b => return konst(0, 1),
         _ => {}
     }
+    // A constant mask that clears a concatenation's high part keeps only the
+    // low part: `concat(h, l) & c` with `c` zero above `l` is
+    // `zext(l & c)`. A 64-bit `and #0xff` of a 32-bit argument would
+    // otherwise still name the register's undefined upper half.
+    if op == Bin::And {
+        let (value, constant) = match (as_const(&a), as_const(&b)) {
+            (None, Some(c)) => (&a, Some(c)),
+            (Some(c), None) => (&b, Some(c)),
+            _ => (&a, None),
+        };
+        if let (SymExpr::Concat(_, low), Some(c)) = (value, constant) {
+            let low_bits = width(low);
+            if low_bits < 64 && c >> low_bits == 0 {
+                return zext(bin(Bin::And, (**low).clone(), konst(c, low_bits)), bits);
+            }
+        }
+    }
     if bits == 1 && matches!(op, Bin::Eq | Bin::Neq) {
         // A one-bit comparison against a constant is the operand or its
         // negation.
@@ -739,6 +756,24 @@ mod tests {
             konst(0, 8),
         );
         assert_eq!(render(&short, &names), "((in == 1) ? 1 : 0)");
+    }
+
+    /// Masking a concatenation with a constant that is zero above its low
+    /// part drops the high part, keeping the value.
+    #[test]
+    fn a_mask_below_a_concatenations_high_part_drops_it() {
+        let (high, high_id) = var("high", 32);
+        let (low, low_id) = var("low", 32);
+        let masked = bin(Bin::And, concat(high, low), konst(0xff, 64));
+        assert!(!free_vars(&masked).contains(&high_id), "{masked:?}");
+        for (h, l) in [
+            (0u64, 0u64),
+            (0xdead_beef, 0x1234_5678),
+            (u64::from(u32::MAX), 0xff),
+        ] {
+            let env = BTreeMap::from([(high_id, h), (low_id, l)]);
+            assert_eq!(eval(&masked, &env), Some(((h << 32) | l) & 0xff));
+        }
     }
 
     #[test]

@@ -60,7 +60,20 @@ pub enum RegionChange {
     Discover { parent: Option<usize>, field: u32 },
     /// A discovered region must hold at least `bytes`.
     Grow { region: usize, bytes: u32 },
+    /// Global memory `[start, end)` at an absolute address is read or
+    /// written: cover it with a global region (a nearby one grows).
+    Global { start: u64, end: u64 },
+    /// Memory at `register + [0, bytes)` is read: the register gets a block
+    /// of its own (the thread pointer and thread-local storage).
+    Register { name: String, bytes: u32 },
 }
+
+/// The bytes the binary's image holds at `[address, +len)`, zero where a
+/// section holds none (`.bss`); `None` where nothing is mapped.
+pub type Image<'a> = &'a dyn Fn(u64, usize) -> Option<Vec<u8>>;
+
+/// Two global ranges closer than this share one region.
+const GLOBAL_GAP: u64 = 64;
 
 /// A contiguous piece of memory -- the context or a pointer region -- the
 /// slice reads or writes as a unit.
@@ -203,12 +216,13 @@ pub fn summarize(
     boundary: &QuotientBoundary,
     budget: &QuotientBudget,
     calls: &CallFacts,
+    image: Image,
 ) -> Result<SliceSummary, SummaryError> {
     let mut boundary = boundary.clone();
     // Each change adds a region (bounded by the budget) or grows one
     // (bounded by its size cap), so this ends; the cap is a backstop.
-    for _ in 0..64 {
-        match summarize_over(function, abi, &boundary, budget, calls) {
+    for _ in 0..256 {
+        match summarize_over(function, abi, &boundary, budget, calls, image) {
             Err(SummaryError::Regions(change)) => match change {
                 RegionChange::Discover { parent, field } => {
                     boundary.regions.push(PointerRegion {
@@ -216,10 +230,32 @@ pub fn summarize(
                         field,
                         initial: vec![0; budget.region_bytes as usize],
                         discovered: true,
+                        address: None,
+                        register: None,
                     });
                 }
                 RegionChange::Grow { region, bytes } => {
                     boundary.regions[region].initial.resize(bytes as usize, 0);
+                }
+                RegionChange::Global { start, end } => {
+                    cover_global(&mut boundary, start, end, budget, image)?;
+                }
+                RegionChange::Register { name, bytes } => {
+                    match boundary
+                        .regions
+                        .iter_mut()
+                        .find(|region| region.register.as_deref() == Some(name.as_str()))
+                    {
+                        Some(region) => region.initial.resize(bytes as usize, 0),
+                        None => boundary.regions.push(PointerRegion {
+                            parent: None,
+                            field: 0,
+                            initial: vec![0; bytes as usize],
+                            discovered: true,
+                            address: None,
+                            register: Some(name),
+                        }),
+                    }
                 }
             },
             other => return other,
@@ -230,12 +266,64 @@ pub fn summarize(
     ))
 }
 
+/// Cover global memory `[start, end)` with a region: grow the region within
+/// `GLOBAL_GAP` of it, or add one. Its bytes are the image's.
+fn cover_global(
+    boundary: &mut QuotientBoundary,
+    start: u64,
+    end: u64,
+    budget: &QuotientBudget,
+    image: Image,
+) -> Result<(), SummaryError> {
+    // Merge with a nearby region only within one section of the image.
+    let near = boundary.regions.iter().position(|region| {
+        region.address.is_some_and(|at| {
+            let region_end = at + region.initial.len() as u64;
+            let (low, high) = (start.min(at), end.max(region_end));
+            start <= region_end + GLOBAL_GAP
+                && at <= end + GLOBAL_GAP
+                && image(low, (high - low) as usize).is_some()
+        })
+    });
+    let (start, end) = match near {
+        Some(index) => {
+            let region = &boundary.regions[index];
+            let at = region.address.expect("a global region");
+            (start.min(at), end.max(at + region.initial.len() as u64))
+        }
+        None => (start, end),
+    };
+    if end - start > u64::from(budget.max_region_bytes) {
+        return Err(SummaryError::Budget(format!(
+            "global memory [{start:#x}, {end:#x}) is wider than a region may be ({} bytes)",
+            budget.max_region_bytes
+        )));
+    }
+    let initial = image(start, (end - start) as usize).ok_or_else(|| {
+        SummaryError::Budget(format!("global memory at {start:#x} is not in the image"))
+    })?;
+    let region = PointerRegion {
+        parent: None,
+        field: 0,
+        initial,
+        discovered: true,
+        address: Some(start),
+        register: None,
+    };
+    match near {
+        Some(index) => boundary.regions[index] = region,
+        None => boundary.regions.push(region),
+    }
+    Ok(())
+}
+
 fn summarize_over(
     function: &PcodeFunction,
     abi: &AbiModel,
     boundary: &QuotientBoundary,
     budget: &QuotientBudget,
     calls: &CallFacts,
+    image: Image,
 ) -> Result<SliceSummary, SummaryError> {
     validate_boundary(abi, boundary)?;
     let mut inputs = boundary
@@ -264,12 +352,22 @@ fn summarize_over(
             !layout
                 .fields
                 .iter()
+                .flatten()
                 .any(|field| (*field..*field + pointer).contains(offset))
         })
         .map(|offset| slot_at(boundary, &layout, offset, 1, "byte_"))
         .collect::<Vec<_>>();
-    let probe = Executor::new(function, abi, boundary, budget, &with_returns, bytes, calls)
-        .run(declared_inputs)?;
+    let probe = Executor::new(
+        function,
+        abi,
+        boundary,
+        budget,
+        &with_returns,
+        bytes,
+        calls,
+        image,
+    )
+    .run(declared_inputs)?;
     let slots = merge_ranges(&probe.context_accesses)
         .into_iter()
         .map(|(offset, size)| slot_at(boundary, &layout, offset, size, ""))
@@ -282,6 +380,7 @@ fn summarize_over(
         &with_returns,
         slots.clone(),
         calls,
+        image,
     )
     .run(declared_inputs)?;
     let allowed = with_returns
@@ -580,6 +679,12 @@ fn validate_boundary(abi: &AbiModel, boundary: &QuotientBoundary) -> Result<(), 
     let pointer = abi.pointer_bits / 8;
     let mut fields: Vec<(Option<usize>, u32)> = Vec::new();
     for (index, region) in boundary.regions.iter().enumerate() {
+        if !region.is_pointee() {
+            if region.initial.is_empty() {
+                return Err(unsupported(format!("region {index} has no bytes")));
+            }
+            continue;
+        }
         let parent_len = match region.parent {
             None => boundary.context.initial.len(),
             Some(parent) if parent < index => boundary.regions[parent].initial.len(),
@@ -838,6 +943,7 @@ struct Executor<'a> {
     /// Each slot variable's `(offset, size)` in the byte space, to recognize
     /// a pointer read straight out of memory.
     var_ranges: BTreeMap<SymNodeId, (u32, u32)>,
+    image: Image<'a>,
     result: RunResult,
 }
 
@@ -852,6 +958,7 @@ impl<'a> Executor<'a> {
         inputs: &'a [SymExpr],
         slots: Vec<Slot>,
         calls: &'a CallFacts,
+        image: Image<'a>,
     ) -> Self {
         let mut op_at = BTreeMap::new();
         for (index, block) in function.blocks.iter().enumerate() {
@@ -884,6 +991,7 @@ impl<'a> Executor<'a> {
             allowed,
             layout: boundary.layout(),
             var_ranges,
+            image,
             result: RunResult {
                 paths: Vec::new(),
                 pruned: BTreeSet::new(),
@@ -931,6 +1039,7 @@ impl<'a> Executor<'a> {
         // Each region's pointer, where its parent holds it.
         let mut memory = Cells::default();
         for (index, field) in self.layout.fields.iter().enumerate() {
+            let Some(field) = field else { continue };
             memory.write(
                 i64::from(*field),
                 abi.pointer_bits / 8,
@@ -964,6 +1073,25 @@ impl<'a> Executor<'a> {
         if let ReturnAddress::Register(link) = &abi.return_address {
             let value = resize(self.return_address.clone(), link.size * 8);
             registers.write(link.offset as i64, link.size, Val::Bits(value), big);
+        }
+        // A register that anchors a region points to it.
+        for (index, region) in self.boundary.regions.iter().enumerate() {
+            let Some(name) = &region.register else {
+                continue;
+            };
+            if let Some(slot) = abi.registers.iter().find(|slot| slot.name == *name) {
+                registers.write(
+                    slot.offset as i64,
+                    slot.size,
+                    Val::Ptr {
+                        region: Region::Pointee(index),
+                        offset: 0,
+                        index: None,
+                        bits: slot.size * 8,
+                    },
+                    big,
+                );
+            }
         }
         PathState {
             spaces: BTreeMap::from([(abi.register_space, registers)]),
@@ -1239,7 +1367,17 @@ impl<'a> Executor<'a> {
         }
         let big = abi.big_endian;
         let mut kept = Cells::default();
-        for register in &abi.preserved {
+        // The convention's preserved registers, and a register that anchors
+        // a region when the convention does not list it as changed by a
+        // call (the thread pointer).
+        let anchors = self
+            .boundary
+            .regions
+            .iter()
+            .filter_map(|region| region.register.as_ref())
+            .filter(|name| !abi.killed.contains(name))
+            .filter_map(|name| abi.registers.iter().find(|slot| slot.name == *name));
+        for register in abi.preserved.iter().chain(anchors) {
             let value = self.read_register(
                 state,
                 abi.register_space,
@@ -1495,8 +1633,10 @@ impl<'a> Executor<'a> {
     fn field_in(&self, start: i64, size: u32) -> Option<usize> {
         let pointer = i64::from(self.abi.pointer_bits / 8);
         self.layout.fields.iter().position(|field| {
-            let field = i64::from(*field);
-            start < field + pointer && field < start + i64::from(size)
+            field.is_some_and(|field| {
+                let field = i64::from(field);
+                start < field + pointer && field < start + i64::from(size)
+            })
         })
     }
 
@@ -1509,7 +1649,25 @@ impl<'a> Executor<'a> {
         if offset >= 0 && end <= len {
             return Ok(base + offset);
         }
+        // A global region covers more of the image instead.
         if let Region::Pointee(index) = region
+            && let Some(at) = self.boundary.regions[index].address
+            && self.boundary.regions[index].discovered
+        {
+            let start = at.wrapping_add(offset.min(0) as u64);
+            let stop = at.wrapping_add(end.max(len) as u64);
+            if stop > start
+                && stop - start <= u64::from(self.budget.max_region_bytes)
+                && (self.image)(start, (stop - start) as usize).is_some()
+            {
+                return Err(SummaryError::Regions(RegionChange::Global {
+                    start: at.wrapping_add(offset as u64),
+                    end: at.wrapping_add(end as u64),
+                }));
+            }
+        }
+        if let Region::Pointee(index) = region
+            && self.boundary.regions[index].address.is_none()
             && offset >= 0
             && self.boundary.regions[index].discovered
             && end <= i64::from(self.budget.max_region_bytes)
@@ -1626,10 +1784,28 @@ impl<'a> Executor<'a> {
             {
                 let end = high as i64 + i64::from(size);
                 if end > len && end <= i64::from(self.budget.max_region_bytes) {
-                    return Err(SummaryError::Regions(RegionChange::Grow {
-                        region: number,
-                        bytes: ((end as u32).div_ceil(64) * 64).min(self.budget.max_region_bytes),
-                    }));
+                    return Err(SummaryError::Regions(
+                        match self.boundary.regions[number].address {
+                            // A global covers what the image holds there.
+                            Some(start) if (self.image)(start, end as usize).is_some() => {
+                                RegionChange::Global {
+                                    start,
+                                    end: start + end as u64,
+                                }
+                            }
+                            Some(_) => {
+                                return self.unsupported(
+                                    op,
+                                    "an indexed access past the end of the image's global memory",
+                                );
+                            }
+                            None => RegionChange::Grow {
+                                region: number,
+                                bytes: ((end as u32).div_ceil(64) * 64)
+                                    .min(self.budget.max_region_bytes),
+                            },
+                        },
+                    ));
                 }
             }
         }
@@ -1882,6 +2058,90 @@ impl<'a> Executor<'a> {
         }))
     }
 
+    /// `address` as a place in global memory, when its constant part is an
+    /// address the image maps: a pointer into the global region covering it
+    /// (the rest of the address, if any, is an index). A global no region
+    /// covers yet is asked for. `None` when the address is not global.
+    fn global_pointer(&self, op: &PcodeOp, address: &SymExpr, size: u32) -> Step<Option<Val>> {
+        let bits = width(address);
+        let mut constant = 0u64;
+        let mut rest = Vec::new();
+        for term in addends(address) {
+            match as_const(&term) {
+                Some(value) => constant = constant.wrapping_add(value),
+                None => rest.push(term),
+            }
+        }
+        let constant = constant & mask(bits);
+        if constant == 0 || (self.image)(constant, 1).is_none() {
+            return Ok(None);
+        }
+        let index = rest
+            .into_iter()
+            .map(|term| resize(term, bits))
+            .reduce(|a, b| bin(Bin::Add, a, b));
+        let reach = if index.is_some() { 1 } else { u64::from(size) };
+        let covering = self.boundary.regions.iter().position(|region| {
+            region.address.is_some_and(|at| {
+                at <= constant && constant + reach <= at + region.initial.len() as u64
+            })
+        });
+        if let Some(number) = covering {
+            let at = self.boundary.regions[number].address.expect("global");
+            return Ok(Some(Val::Ptr {
+                region: Region::Pointee(number),
+                offset: (constant - at) as i64,
+                index,
+                bits,
+            }));
+        }
+        let globals = self
+            .boundary
+            .regions
+            .iter()
+            .filter(|region| region.address.is_some())
+            .count();
+        let near = self.boundary.regions.iter().any(|region| {
+            region.address.is_some_and(|at| {
+                constant <= at + region.initial.len() as u64 + GLOBAL_GAP
+                    && at <= constant + reach + GLOBAL_GAP
+            })
+        });
+        if !near && globals >= self.budget.max_global_regions {
+            return self.unsupported(
+                op,
+                format!(
+                    "global memory at {constant:#x}: more global regions than the budget ({})",
+                    self.budget.max_global_regions
+                ),
+            );
+        }
+        Err(SummaryError::Regions(RegionChange::Global {
+            start: constant,
+            end: constant + reach,
+        }))
+    }
+
+    /// An access at a constant offset from a register the caller set up:
+    /// that register gets a block of its own, read as a region.
+    fn anchor_register(&self, op: &PcodeOp, address: &SymExpr, size: u32) -> Step<()> {
+        let Some((base, offset)) = self.environment_place(address) else {
+            return Ok(());
+        };
+        let pointer = self.abi.pointer_bits / 8;
+        let Some(register) = self.abi.register_at(base, pointer) else {
+            return self.unsupported(op, ENVIRONMENT_READ);
+        };
+        let end = offset + i64::from(size);
+        if offset < 0 || end > i64::from(self.budget.max_region_bytes) {
+            return self.unsupported(op, ENVIRONMENT_READ);
+        }
+        Err(SummaryError::Regions(RegionChange::Register {
+            name: register.name.clone(),
+            bytes: ((end as u32).div_ceil(64) * 64).max(self.budget.region_bytes),
+        }))
+    }
+
     /// Whether `address` is a register the caller set up and the slice
     /// never wrote (a whole word) plus a constant: the thread pointer of
     /// thread-local storage, where the stack protector keeps its canary.
@@ -1972,6 +2232,11 @@ impl<'a> Executor<'a> {
     }
 
     fn read(&mut self, state: &mut PathState, op: &PcodeOp, varnode: &Varnode) -> Step<Val> {
+        // A register or temporary wider than a value (an x87 register) holds
+        // poison: refused where something observes it.
+        if varnode.size > 8 && !varnode.is_constant && varnode.space_id != self.abi.ram_space {
+            return Ok(Val::Poison("a value wider than 8 bytes"));
+        }
         if varnode.size == 0 || varnode.size > 8 {
             return self.unsupported(op, format!("a {}-byte value", varnode.size));
         }
@@ -1983,13 +2248,19 @@ impl<'a> Executor<'a> {
             )));
         }
         if varnode.space_id == self.abi.ram_space {
-            return self.unsupported(
-                op,
-                format!(
-                    "absolute memory at {:#x} (globals are outside the model)",
-                    varnode.offset
+            let address = konst(varnode.offset, self.abi.pointer_bits);
+            return match self.global_pointer(op, &address, varnode.size)? {
+                Some(Val::Ptr { region, offset, .. }) => {
+                    self.read_context(state, op, region, offset, varnode.size)
+                }
+                _ => self.unsupported(
+                    op,
+                    format!(
+                        "absolute memory at {:#x} the image does not map",
+                        varnode.offset
+                    ),
                 ),
-            );
+            };
         }
         Ok(self.read_register(state, varnode.space_id, varnode.offset as i64, varnode.size))
     }
@@ -2001,17 +2272,32 @@ impl<'a> Executor<'a> {
         varnode: &Varnode,
         val: Val,
     ) -> Step<()> {
+        if varnode.size > 8 && varnode.space_id != self.abi.ram_space {
+            state.spaces.entry(varnode.space_id).or_default().write(
+                varnode.offset as i64,
+                varnode.size,
+                Val::Poison("a value wider than 8 bytes"),
+                self.abi.big_endian,
+            );
+            return Ok(());
+        }
         if varnode.size == 0 || varnode.size > 8 {
             return self.unsupported(op, format!("a {}-byte value", varnode.size));
         }
         if varnode.space_id == self.abi.ram_space {
-            return self.unsupported(
-                op,
-                format!(
-                    "absolute memory at {:#x} (globals are outside the model)",
-                    varnode.offset
+            let address = konst(varnode.offset, self.abi.pointer_bits);
+            return match self.global_pointer(op, &address, varnode.size)? {
+                Some(Val::Ptr { region, offset, .. }) => {
+                    self.write_context(state, op, region, offset, varnode.size, val)
+                }
+                _ => self.unsupported(
+                    op,
+                    format!(
+                        "absolute memory at {:#x} the image does not map",
+                        varnode.offset
+                    ),
                 ),
-            );
+            };
         }
         state.spaces.entry(varnode.space_id).or_default().write(
             varnode.offset as i64,
@@ -2028,7 +2314,13 @@ impl<'a> Executor<'a> {
         match op.opcode {
             PcodeOpcode::Load => {
                 let output = op.output.as_ref().expect("validated: LOAD has an output");
-                let value = match self.read(state, op, &op.inputs[1])? {
+                let address = match self.read(state, op, &op.inputs[1])? {
+                    Val::Bits(address) => self
+                        .global_pointer(op, &address, output.size)?
+                        .unwrap_or(Val::Bits(address)),
+                    other => other,
+                };
+                let value = match address {
                     Val::Ptr {
                         region: Region::Stack,
                         offset,
@@ -2051,9 +2343,7 @@ impl<'a> Executor<'a> {
                     },
                     Val::Bits(address) => {
                         self.discover(op, &address, "a load")?;
-                        if self.environment_place(&address).is_some() {
-                            return self.unsupported(op, ENVIRONMENT_READ);
-                        }
+                        self.anchor_register(op, &address, output.size)?;
                         return self.unsupported(
                             op,
                             match as_const(&address) {
@@ -2072,7 +2362,13 @@ impl<'a> Executor<'a> {
             PcodeOpcode::Store => {
                 let value = self.read(state, op, &op.inputs[2])?;
                 let size = op.inputs[2].size;
-                match self.read(state, op, &op.inputs[1])? {
+                let address = match self.read(state, op, &op.inputs[1])? {
+                    Val::Bits(address) => self
+                        .global_pointer(op, &address, size)?
+                        .unwrap_or(Val::Bits(address)),
+                    other => other,
+                };
+                match address {
                     Val::Ptr {
                         region: Region::Stack,
                         offset,
@@ -2097,6 +2393,7 @@ impl<'a> Executor<'a> {
                         ..
                     } => self.indexed_store(state, op, region, offset, &index, size, value),
                     Val::Bits(address) if self.environment_place(&address).is_some() => {
+                        self.anchor_register(op, &address, size)?;
                         self.unsupported(op, ENVIRONMENT_READ)
                     }
                     Val::Bits(address) => {
@@ -2133,6 +2430,10 @@ impl<'a> Executor<'a> {
                     .iter()
                     .map(|input| self.read(state, op, input))
                     .collect::<Step<Vec<_>>>()?;
+                if output.size > 8 && output.space_id != self.abi.ram_space {
+                    self.write(state, op, output, Val::Poison("a value wider than 8 bytes"))?;
+                    return Ok(true);
+                }
                 let value = self.apply(op, output.size * 8, inputs)?;
                 self.write(state, op, output, value)?;
                 Ok(true)
@@ -2293,6 +2594,28 @@ impl<'a> Executor<'a> {
                     ),
                 }
             }
+            // A floating-point result is poison: refused where something
+            // observes it, harmless where nothing does (the
+            // `-fzero-call-used-regs` epilogue loads zeros into the x87
+            // stack and pops them).
+            O::FloatEqual
+            | O::FloatNotEqual
+            | O::FloatLess
+            | O::FloatLessEqual
+            | O::FloatNan
+            | O::FloatAdd
+            | O::FloatDiv
+            | O::FloatMult
+            | O::FloatSub
+            | O::FloatNeg
+            | O::FloatAbs
+            | O::FloatSqrt
+            | O::FloatInt2Float
+            | O::FloatFloat2Float
+            | O::FloatTrunc
+            | O::FloatCeil
+            | O::FloatFloor
+            | O::FloatRound => Ok(Val::Poison("a floating-point value")),
             other => self.unsupported(op, format!("the {other:?} operation")),
         }
     }

@@ -387,6 +387,69 @@ impl EmulatorHarness {
         Ok(addr)
     }
 
+    /// Write `bytes` at `addr` into the restored baseline, so every later
+    /// call starts with them there -- a global the caller wants to carry
+    /// from one call to the next, say. The address must already be mapped
+    /// (the image, or a buffer installed here).
+    pub fn write_baseline(&mut self, addr: u64, bytes: &[u8]) -> Result<()> {
+        if self.baseline_state.enforce_page_faults
+            && (0..bytes.len() as u64).any(|offset| {
+                self.baseline_state
+                    .page_map
+                    .check_access(
+                        addr + offset,
+                        fission_emulator::pcode::page_map::AccessKind::Read,
+                    )
+                    .is_err()
+            })
+        {
+            bail!("{addr:#x}: not mapped in the baseline");
+        }
+        let ram = self.baseline_state.ram_space();
+        // Bytes already there need no write, so read-only memory (a constant
+        // table) can be passed back unchanged.
+        if self
+            .baseline_state
+            .read_space_readonly(ram, addr, bytes.len())
+            .ok()
+            .as_deref()
+            == Some(bytes)
+        {
+            return Ok(());
+        }
+        self.baseline_state
+            .write_space(ram, addr, bytes)
+            .context("failed to write the baseline")
+    }
+
+    /// Map a readable/writable block holding `contents`, point `register`
+    /// at it, and make both part of the restored baseline. Returns the
+    /// block's address.
+    ///
+    /// For a register the caller sets up and a function only reads memory
+    /// through -- the thread pointer, whose block holds thread-local storage
+    /// such as the stack protector's canary. Without it that register is 0
+    /// at every call and the first such read faults.
+    pub fn install_register_block(&mut self, register: &str, contents: &[u8]) -> Result<u64> {
+        self.emu.state = self.baseline_state.clone();
+        let len = contents.len().max(1) as u64;
+        let addr = self
+            .emu
+            .state
+            .page_map
+            .mmap_anon(len, prot::READ | prot::WRITE);
+        let ram = self.emu.state.ram_space();
+        self.emu
+            .state
+            .write_space(ram, addr, contents)
+            .context("failed to fill the register's block")?;
+        self.emu
+            .write_register_u64(register, addr)
+            .with_context(|| format!("failed to point {register} at its block"))?;
+        self.baseline_state = self.emu.state.clone();
+        Ok(addr)
+    }
+
     /// Read the machine registers a decompiled body might name, as they
     /// stand at the start of a call.
     ///

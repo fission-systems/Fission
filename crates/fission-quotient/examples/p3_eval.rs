@@ -95,6 +95,8 @@ fn parse_region(spec: &str) -> anyhow::Result<PointerRegion> {
         field: initial.0 as u32,
         initial: initial.1,
         discovered: false,
+        address: None,
+        register: None,
     })
 }
 

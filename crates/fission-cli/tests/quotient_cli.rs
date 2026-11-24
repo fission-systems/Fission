@@ -277,3 +277,22 @@ fn a_malformed_region_is_a_usage_error() {
         assert_eq!(body["error"]["code"], "usage_error");
     }
 }
+
+/// Global memory and the thread pointer's block are regions anchored at an
+/// address and at a register; both payloads conform to the schema.
+#[test]
+fn anchored_regions_are_reported_and_conform() {
+    for (name, anchor) in [("gcount_step", "address"), ("canary_step", "register")] {
+        let (output, body) = contract(&[FIXTURE, "--name", name]);
+        assert_eq!(output.status.code(), Some(0), "{body}");
+        let data = &body["data"];
+        assert_conforms(&payload_schema(), data, "data");
+        assert_eq!(data["status"]["kind"], "proved_under_model", "{name}");
+        let regions = data["boundary"]["regions"].as_array().unwrap();
+        assert!(!regions.is_empty(), "{name}");
+        assert!(
+            regions.iter().all(|region| !region[anchor].is_null()),
+            "{name}: {regions:?}"
+        );
+    }
+}

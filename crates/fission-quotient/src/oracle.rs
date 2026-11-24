@@ -111,6 +111,13 @@ pub trait MembershipOracle {
     fn place_regions(&mut self, boundary: &QuotientBoundary) -> Result<Vec<u8>> {
         Ok(boundary.initial_memory())
     }
+
+    /// What memory at `[address, +len)` holds before the first step, as the
+    /// program is loaded; `None` where nothing is mapped (or the oracle
+    /// cannot say). Global memory starts as this.
+    fn initial_bytes(&self, _address: u64, _len: usize) -> Option<Vec<u8>> {
+        None
+    }
 }
 
 /// Membership through the real emulator: each step is one call of the
@@ -129,6 +136,10 @@ pub struct EmulatorOracle {
     /// The context and the pointer regions behind it, as one buffer, with
     /// each region's real address in its pointer field.
     memory: Vec<u8>,
+    /// Regions that live outside that buffer -- global memory, a
+    /// register's block -- as `(where in the byte space, real address,
+    /// length)`: copied in before each step and read back after it.
+    anchored: Vec<(usize, u64, usize)>,
     pointer_bytes: usize,
     big_endian: bool,
     arg_count: usize,
@@ -173,6 +184,7 @@ impl EmulatorOracle {
             boundary: boundary.clone(),
             context_address: 0,
             memory: Vec::new(),
+            anchored: Vec::new(),
             pointer_bytes,
             big_endian,
             arg_count,
@@ -193,8 +205,28 @@ impl EmulatorOracle {
             .install_scratch(&vec![0; layout.len])
             .context("failed to map the context buffer")?;
         let mut memory = boundary.initial_memory();
-        for (base, field) in layout.bases.iter().zip(&layout.fields) {
-            let pointer = address + u64::from(*base);
+        let mut anchored = Vec::new();
+        for ((region, base), field) in boundary
+            .regions
+            .iter()
+            .zip(&layout.bases)
+            .zip(&layout.fields)
+        {
+            let base = *base as usize;
+            let len = region.initial.len();
+            if let Some(at) = region.address {
+                anchored.push((base, at, len));
+                continue;
+            }
+            if let Some(register) = &region.register {
+                let block = self
+                    .harness
+                    .install_register_block(register, &region.initial)?;
+                anchored.push((base, block, len));
+                continue;
+            }
+            let Some(field) = field else { continue };
+            let pointer = address + base as u64;
             let bytes = if self.big_endian {
                 pointer.to_be_bytes()[8 - self.pointer_bytes..].to_vec()
             } else {
@@ -203,12 +235,15 @@ impl EmulatorOracle {
             let field = *field as usize;
             memory[field..field + self.pointer_bytes].copy_from_slice(&bytes);
         }
+        // A nested region's pointer may sit in global memory or a register's
+        // block: the copy-in before each step carries it there.
         if self.harness.install_scratch(&memory)? != address {
             bail!("the context buffer moved while its regions were laid out");
         }
         self.boundary = boundary.clone();
         self.context_address = address;
         self.memory = memory;
+        self.anchored = anchored;
         Ok(())
     }
 
@@ -275,6 +310,10 @@ impl MembershipOracle for EmulatorOracle {
                     self.boundary.inputs.len()
                 );
             }
+            for (base, at, len) in &self.anchored {
+                self.harness
+                    .write_baseline(*at, &context[*base..*base + *len])?;
+            }
             let address = self.harness.install_scratch(&context)?;
             if address != self.context_address {
                 bail!("the context buffer moved between steps");
@@ -304,6 +343,10 @@ impl MembershipOracle for EmulatorOracle {
             };
             if observation.exit == Exit::Returned {
                 context = self.harness.read_memory(address, context.len())?;
+                for (base, at, len) in &self.anchored {
+                    let bytes = self.harness.read_memory(*at, *len)?;
+                    context[*base..*base + *len].copy_from_slice(&bytes);
+                }
             } else {
                 halted = true;
             }
@@ -321,6 +364,12 @@ impl MembershipOracle for EmulatorOracle {
 
     fn observe_calls(&mut self, model: &CallModel) {
         self.calls = model.clone();
+    }
+
+    fn initial_bytes(&self, address: u64, len: usize) -> Option<Vec<u8>> {
+        (0..len as u64)
+            .map(|offset| self.harness.baseline_byte(address.checked_add(offset)?))
+            .collect()
     }
 
     fn place_regions(&mut self, boundary: &QuotientBoundary) -> Result<Vec<u8>> {

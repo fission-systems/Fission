@@ -198,7 +198,10 @@ impl<O: MembershipOracle> Wbcq<O> {
             },
         };
 
-        let summary = match summarize(raw, &self.abi, &self.boundary, &budget, &self.calls) {
+        let oracle = &self.oracle;
+        let image = |address: u64, len: usize| oracle.initial_bytes(address, len);
+        let summary = match summarize(raw, &self.abi, &self.boundary, &budget, &self.calls, &image)
+        {
             Ok(summary) => summary,
             Err(error) => {
                 report.status = QuotientStatus::UnsupportedSemantics {
@@ -768,14 +771,57 @@ fn region_assumptions(boundary: &QuotientBoundary, budget: &QuotientBudget) -> V
     let names = (0..boundary.regions.len())
         .map(|index| boundary.region_name(index))
         .collect::<Vec<_>>();
-    let mut out = vec![
+    let mut out = Vec::new();
+    let named = |pick: &dyn Fn(&crate::boundary::PointerRegion) -> bool| {
+        boundary
+            .regions
+            .iter()
+            .zip(&names)
+            .filter(|(region, _)| pick(region))
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>()
+    };
+    let globals = named(&|region| region.address.is_some());
+    if !globals.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::Memory,
+            description: format!(
+                "global memory {} is state of this step function alone: it starts as the \
+                 binary's image holds it, and nothing else -- no callee, no other thread, no \
+                 signal handler -- reads or writes it between or during steps",
+                globals.join(", ")
+            ),
+        });
+    }
+    let anchored = boundary
+        .regions
+        .iter()
+        .filter_map(|region| region.register.as_deref())
+        .collect::<Vec<_>>();
+    if !anchored.is_empty() {
+        out.push(Assumption {
+            kind: AssumptionKind::Environment,
+            description: format!(
+                "{} point(s) to a block of its own (thread-local storage, such as the stack \
+                 protector's canary) that starts zeroed and that only this step function \
+                 writes; a callee leaves the register as it found it when the calling \
+                 convention does not list it as changed by a call",
+                anchored.join(", ")
+            ),
+        });
+    }
+    let pointees = named(&|region| region.is_pointee());
+    if pointees.is_empty() {
+        return out;
+    }
+    out.extend([
         Assumption {
             kind: AssumptionKind::Memory,
             description: format!(
                 "{} each point to a region of their own that aliases nothing else: not the \
                  context, not the stack frame, not another region, and no callee holds an \
                  alias of it; the pointers are not null and never change",
-                names.join(", ")
+                pointees.join(", ")
             ),
         },
         Assumption {
@@ -787,17 +833,18 @@ fn region_assumptions(boundary: &QuotientBoundary, budget: &QuotientBudget) -> V
                     .regions
                     .iter()
                     .zip(&names)
+                    .filter(|(region, _)| region.is_pointee())
                     .map(|(region, name)| format!("{name}: {} bytes", region.initial.len()))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
         },
-    ];
+    ]);
     let discovered = boundary
         .regions
         .iter()
         .zip(&names)
-        .filter(|(region, _)| region.discovered)
+        .filter(|(region, _)| region.discovered && region.is_pointee())
         .map(|(_, name)| name.as_str())
         .collect::<Vec<_>>();
     if !discovered.is_empty() {

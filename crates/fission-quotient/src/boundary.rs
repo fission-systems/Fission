@@ -45,8 +45,27 @@ pub struct PointerRegion {
     #[serde(serialize_with = "crate::report::hex_bytes")]
     pub initial: Vec<u8>,
     /// Found by the summary (a pointer field the slice dereferences), not
-    /// declared with the boundary; its bytes start zeroed.
+    /// declared with the boundary; its bytes start zeroed (a global's start
+    /// as the image holds them).
     pub discovered: bool,
+    /// A region anchored at a fixed address instead of behind a pointer
+    /// field: global memory the slice reads or writes at an absolute
+    /// address. `parent` and `field` are then unused.
+    #[serde(serialize_with = "crate::report::hex_address_opt")]
+    pub address: Option<u64>,
+    /// A region anchored at a register the caller sets up and the slice
+    /// only reads memory through -- the thread pointer, whose block holds
+    /// thread-local storage. `parent` and `field` are then unused.
+    pub register: Option<String>,
+}
+
+impl PointerRegion {
+    /// Whether the region hangs off a pointer field (rather than a fixed
+    /// address or a register).
+    #[must_use]
+    pub fn is_pointee(&self) -> bool {
+        self.address.is_none() && self.register.is_none()
+    }
 }
 
 /// The observational contract of one quotient: inputs `X`, the hidden
@@ -75,8 +94,9 @@ const REGION_ALIGN: usize = 16;
 pub struct MemoryLayout {
     /// The start of each region, in `QuotientBoundary::regions` order.
     pub bases: Vec<u32>,
-    /// Where each region's pointer lives in that space.
-    pub fields: Vec<u32>,
+    /// Where each region's pointer lives in that space; `None` for a
+    /// region anchored at an address or a register.
+    pub fields: Vec<Option<u32>>,
     /// Bytes in all.
     pub len: usize,
 }
@@ -95,7 +115,7 @@ impl QuotientBoundary {
         }
         for region in &self.regions {
             let parent = region.parent.map_or(0, |index| bases[index]);
-            fields.push(parent + region.field);
+            fields.push(region.is_pointee().then_some(parent + region.field));
         }
         MemoryLayout { bases, fields, len }
     }
@@ -119,6 +139,12 @@ impl QuotientBoundary {
     #[must_use]
     pub fn region_name(&self, index: usize) -> String {
         let region = &self.regions[index];
+        if let Some(address) = region.address {
+            return format!("global[{address:#x}]");
+        }
+        if let Some(register) = &region.register {
+            return format!("[{}]", register.to_ascii_lowercase());
+        }
         match region.parent {
             None => format!("ctx[{:#x}]", region.field),
             Some(parent) => format!("{}->[{:#x}]", self.region_name(parent), region.field),
@@ -159,6 +185,8 @@ pub struct QuotientBudget {
     /// count), and how many pointers deep one may lie.
     pub max_regions: usize,
     pub max_region_depth: usize,
+    /// Regions of global memory the summary may cover.
+    pub max_global_regions: usize,
     /// The bytes a discovered region starts with; it grows, up to
     /// `max_region_bytes`, to cover a constant offset the slice reads.
     pub region_bytes: u32,
@@ -181,6 +209,7 @@ impl Default for QuotientBudget {
             max_alphabet: 64,
             max_regions: 4,
             max_region_depth: 2,
+            max_global_regions: 8,
             region_bytes: 64,
             max_region_bytes: 4096,
             max_indexed_positions: 512,
@@ -225,6 +254,21 @@ pub struct AbiModel {
     /// may rely on after a call. Empty when the convention names no
     /// caller-saved set, and then a call cannot be modelled.
     pub preserved: Vec<RegisterSlot>,
+    /// The registers the convention says a call may change, by name.
+    pub killed: Vec<String>,
+    /// Every register of the register space, to name a register the slice
+    /// reads memory through.
+    pub registers: Vec<RegisterSlot>,
+}
+
+impl AbiModel {
+    /// The register at exactly `[offset, +size)` of the register space.
+    #[must_use]
+    pub fn register_at(&self, offset: u64, size: u32) -> Option<&RegisterSlot> {
+        self.registers
+            .iter()
+            .find(|slot| slot.offset == offset && slot.size == size)
+    }
 }
 
 impl AbiModel {
@@ -299,6 +343,23 @@ impl AbiModel {
                 None => ReturnAddress::Stack,
             },
             preserved,
+            killed: killed
+                .iter()
+                .map(|name| name.to_ascii_uppercase())
+                .collect(),
+            registers: {
+                let mut all = registers
+                    .iter()
+                    .filter(|(_, (space, _, _))| *space == register_space)
+                    .map(|(name, (_, offset, size))| RegisterSlot {
+                        name: name.to_ascii_uppercase(),
+                        offset: *offset,
+                        size: *size,
+                    })
+                    .collect::<Vec<_>>();
+                all.sort_by(|a, b| (a.offset, a.size, &a.name).cmp(&(b.offset, b.size, &b.name)));
+                all
+            },
         })
     }
 }

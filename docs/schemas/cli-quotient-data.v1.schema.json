@@ -111,14 +111,16 @@
         },
         "regions": {
           "type": "array",
-          "description": "Pointer fields with a memory region of their own, declared or discovered; a nested region comes after the region holding its pointer. Each aliases nothing else, and its bytes are exactly `initial`.",
+          "description": "Pointer fields with a memory region of their own, declared or discovered; a nested region comes after the region holding its pointer. Each aliases nothing else, and its bytes are exactly `initial`. A region may instead be anchored at a fixed address (global memory, starting as the loaded image holds it) or at a register (the thread pointer's block).",
           "items": {
             "type": "object",
             "required": [
               "parent",
               "field",
               "initial",
-              "discovered"
+              "discovered",
+              "address",
+              "register"
             ],
             "properties": {
               "parent": {
@@ -142,6 +144,21 @@
               "discovered": {
                 "type": "boolean",
                 "description": "Found dereferenced by the slice rather than declared; its bytes start zeroed."
+              },
+              "address": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^0x[0-9a-f]+$",
+                "description": "A region anchored at a fixed address: global memory the step reads or writes there (parent and field are then unused); null for a pointer-field region."
+              },
+              "register": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "A region anchored at a register the caller sets up (the thread pointer's block: thread-local storage); null otherwise."
               }
             }
           }
@@ -163,7 +180,8 @@
         "max_region_depth",
         "region_bytes",
         "max_region_bytes",
-        "max_indexed_positions"
+        "max_indexed_positions",
+        "max_global_regions"
       ],
       "properties": {
         "max_states": {
@@ -225,6 +243,11 @@
           "type": "integer",
           "minimum": 0,
           "description": "Places one indexed access may reach."
+        },
+        "max_global_regions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Regions of global memory the summary may cover."
         }
       }
     },
