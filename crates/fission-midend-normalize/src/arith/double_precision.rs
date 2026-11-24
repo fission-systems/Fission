@@ -1563,7 +1563,43 @@ mod tests {
             ty: u32_ty(),
         };
         assert!(match_hi_shl_mix(&mix_expr, &PreHirExpr::Const(1, u32_ty()), 4).is_none());
-        assert!(match_lo_shr_mix(&mix_expr, &PreHirExpr::Const(1, u32_ty()), 28).is_none());
+        // `mix_expr`'s shifted-left half is `hi`, so the line above cannot
+        // reach the comparison; the shifted-left half must itself be a non-Var.
+        let lo_mix_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(var("lo")),
+                rhs: Box::new(PreHirExpr::Const(28, u32_ty())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Const(99, u32_ty())),
+                rhs: Box::new(PreHirExpr::Const(4, u32_ty())),
+                ty: u32_ty(),
+            }),
+            ty: u32_ty(),
+        };
+        assert!(match_lo_shr_mix(&lo_mix_expr, &PreHirExpr::Const(1, u32_ty()), 28).is_none());
+        // Control: the same shape with matching Var sources does match.
+        let lo_mix_var = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(var("lo")),
+                rhs: Box::new(PreHirExpr::Const(28, u32_ty())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(var("hi")),
+                rhs: Box::new(PreHirExpr::Const(4, u32_ty())),
+                ty: u32_ty(),
+            }),
+            ty: u32_ty(),
+        };
+        assert!(match_lo_shr_mix(&lo_mix_var, &var("hi"), 28).is_some());
     }
 
     #[test]
