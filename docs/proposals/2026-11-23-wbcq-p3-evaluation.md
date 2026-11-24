@@ -589,3 +589,413 @@ plumbing.
 step-shaped sample is still outside the model or degenerate, pivot to AEQ.
 After step (1) that figure is 95%. Step 2 has to move the 51% bucket a lot for
 the redesign to continue.
+
+## 11. P4 step 2: data-computed addresses
+
+Date: 2026-11-24. Status: **measured**. The second P4 step widens the model
+where section 10.4 ranked the most first refusals: a load or store through
+an address computed from data (94 of 186, 51%). As before, only
+`fission-quotient`, the `quotient` command, its schema and these scripts
+change; nothing in the decompiler does.
+
+### 11.1 What the 94 were
+
+Before changing anything, each of the 94 refusal sites was read in the
+disassembly. **Half of the bucket was not a data pointer at all.**
+
+| instruction at the refusal | count |
+|---|---|
+| `mov rax, qword ptr fs:[0x28]`: the stack protector reading its canary from thread-local storage | 47 |
+| a load or store through a pointer the function computed (a context field, a call's result, a field of a field) | 47 |
+
+The canary load's address is the thread pointer (`FS_OFFSET`, a register the
+caller set up) plus a constant. Step 1 reported it with the same words as a
+pointer field. This step gives it its own reason (11.2), and leaves it
+unmodelled (11.6).
+
+### 11.2 The model change
+
+**Pointer fields are regions of their own.** A pointer the slice reads out of
+the context and dereferences is a memory region with a symbolic base:
+- The model never knows its address, only offsets within it, the same way it
+  treats the context.
+- Its bytes are hidden state like the context's. The context and every
+  region are laid out in one byte space (`QuotientBoundary::layout`), so a
+  slot of a region is a slot like any other: `ctx[0x8]->[0x10:1]`.
+- The emulator oracle maps the context and the regions as one buffer and
+  writes each region's real address into its pointer field.
+
+**Where regions come from.** Either:
+- the boundary declares them (`--region FIELD=HEX` or `FIELD:SIZE`), or
+- the summary discovers them. A load or store whose address is a pointer
+  read straight out of memory (one slot of pointer width, unchanged in the
+  step) plus an offset names that field. The field gets a zeroed region and
+  the summary runs again, until no new field turns up.
+
+A discovered region starts at 64 bytes. It grows, up to 4096, to cover:
+- every constant offset the slice reads;
+- every place a bounded index can reach (the solver's maximum of the index
+  under the path).
+
+A pointer read out of a region is a nested region, at most 2 deep. At most 4
+regions are discovered.
+
+**Indexed access** (`buf[i]`, `i` computed from data) is an array access
+within the region:
+- the path splits where the index would leave the region;
+- inside, the solver gives the range and stride of the places the index can
+  take;
+- a read is the value at each place, chosen by the index; a write updates
+  each place unless the index chose another;
+- at most 512 places per access.
+
+The side of the split that leaves the region ends in `LeftRegion`. That is
+not behaviour of the machine; the model has nothing to say about it. If any
+input takes that side from a state the learner reached, the quotient is
+`unsupported`, and the certificate's unrolling sees it as a difference from
+every automaton. So `buf[head]` with an unmasked head is fine as long as no
+reachable state lets the head out.
+
+**A region's pointer is not null**: the boundary gives every region an
+allocation. A null check on it folds; nothing else about its value is
+known.
+
+**Fail closed.** Each of these stops the summary with its reason:
+- a store over a region's pointer field (the region would move);
+- an address stored to memory (an alias the model cannot follow), such as
+  `ctx->a = ctx->b`;
+- an indexed read of a pointer (which region it names is data);
+- a comparison between the addresses of two regions (whether they alias is
+  what the model assumes, not what it knows);
+- a region's pointer passed to a callee (step 1's rule, now naming the
+  region);
+- a region more pointers deep, or more regions, than the budget;
+- a constant access outside a region's bytes;
+- an indexed access with more places than the budget;
+- an access at a constant offset from a register the caller set up
+  (thread-local storage). This last one is a new reason, not a new
+  refusal.
+
+**Assumptions**, in `assumptions` whenever there is a region:
+- each named pointer points to a region of its own that aliases nothing
+  else: not the context, not the frame, not another region, and no callee
+  holds an alias of it; the pointers are not null and never change;
+- each region is exactly as long as its bytes, listed per region;
+- a discovered region's bytes start zeroed, so the quotient holds for that
+  initial memory only.
+
+The certificate's `model_id` is then
+`separated-registers-frame-context-regions.v1`; a quotient without regions
+keeps `separated-registers-frame-context.v1`.
+
+**Schema** (`quotient.v1`, additions only): `boundary.regions` (parent,
+field, initial bytes, discovered), `slots[].region` (`offset` is then within
+the region), and five budget fields. Transition text renders an indexed read
+of a table as `lookup(key; 0x2e: 2, 0x30-0x39: 1; else 0)`.
+
+**Engine fix found by this step.** A cell (a guard once the control state is
+fixed) that the solver proves empty was refused ("a cell the guard folding
+kept has no input"). Folding cannot always see such a guard is false: a table
+read through a region folds to a lookup, not to a constant. The cell has no
+input and adds no transition, so it is now skipped. The `-O0` keyword matcher
+found it; no earlier run hit it.
+
+### 11.3 Setup: step 1 re-run on main's emulator fixes
+
+#1107's branch was merged with main (merge commit, no rebase). This brought
+in the emulator fixes #1109-#1113, including #1109, the AArch64 `csel`
+miscompile in the JIT that section 10.3 caught. The whole of 10.3 and 10.4
+was then re-run with the merged engine before anything in this step
+changed.
+
+| | P4 step 1 (#1107) | step 1 on merged main |
+|---|---|---|
+| corpus runs (160) identical in status, states, transitions, witnesses, replay and conformance | - | **157** |
+| AArch64 `lex_step` O1 / O1-fla / O1-bcf-fla | `U` (summary and emulator disagree) | **`P 3=`** each |
+| machines equal to the ground truth | 112/112 | **115/115** |
+| random replay | 22,400/22,400 | 23,000/23,000 |
+| W-method conformance | 103,833/103,833 | 103,914/103,914 |
+| negatives producing a machine | 0/32 | 0/32 |
+| dir-verify functions identical (status, reason, states, replay) | - | **185/186** |
+| dir-verify machines | 10 | 11 |
+
+- **The three `lex_step` builds now match.** They have 3 states and 9
+  transitions, equal to the ground truth. Replay agrees 200/200 and
+  conformance 27/27 on each.
+- **The one dir-verify difference is timing, not the model.**
+  `check_identifier` (bash, -O0) hit the 600 s harness timeout under step 1.
+  It now finishes in 588 s and is proved: 1 state, 4 transitions, replay
+  100/100. It sits at the edge of the budget.
+
+### 11.4 Corpus: machines behind a context pointer, and their controls
+
+Three new machines are in `scripts/quality/wbcq/corpus/region_machines.c`.
+Their tables come from `region_tables.py`. The engine gets them with
+`--region FIELD=HEX`, and the ground truth gets the same bytes in buffers of
+its own.
+
+| function | through the pointer | index | ground truth |
+|---|---|---|---|
+| `tdfa_step` | a number lexer: a 256-byte class table at `ctx->cls` and a 5x4 transition table at `ctx->delta` (accept bit in bit 7) | the input byte; then `state * 4 + class` | 5 |
+| `kw_step` | the keyword `HELO` at `ctx->word`, read at the match position | the machine's own state | 4 |
+| `ring_step` | a 4-cell ring of bits at `ctx->ring`; each step returns the bit from four steps ago and writes the new one | the head, unmasked | 16 |
+
+**Ground truth.** `ground_truth.py` explores each one natively. It uses all
+256 input bytes, with the context and every buffer as the state, and Moore
+refinement gives the minimal machine, as in section 2. It also checks that
+no step moves a pointer.
+
+**Positive controls.** The merged engine from 11.3, given no regions, ran on
+all 24 builds (3 machines x 8). All 24 were `unsupported_semantics`: "a load
+through an address computed from data". The runs are in
+`~/fission-benchmark/wbcq-p4s2/controls-before/`.
+
+**The full evaluation**: 23 functions x 8 builds = 184 runs, with the corpus
+rebuilt from the same sources plus `region_machines.c`.
+
+| function | truth | a64 O0 | a64 O1 | a64 fla | a64 bcf+fla | x64 O0 | x64 O1 | x64 fla | x64 bcf+fla |
+|---|---|---|---|---|---|---|---|---|---|
+| `tdfa_step` | 5 | P 5= | U* | U* | U* | P 5= | P 5= | P 5= | P 5= |
+| `kw_step` | 4 | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= | P 4= |
+| `ring_step` | 16 | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= | P 16= |
+| `lex_step` | 3 | P 3= | P 3= | P 3= | P 3= | P 3= | P 3= | P 3= | P 3= |
+
+The other 19 functions keep their rows.
+
+| | step 1 on merged main | P4 step 2 |
+|---|---|---|
+| the 160 earlier runs: status, states, transitions, witnesses, replay, conformance | - | **160/160 identical** |
+| machines equal to the ground truth | 115/115 | **136/136** (21 of the 24 new builds) |
+| witnesses re-run on the emulator | all | all |
+| random replay (200 words of length 24) | 23,000/23,000 | **27,200/27,200** (new machines: 4,200/4,200) |
+| W-method conformance | 103,914/103,914 | **106,334/106,334** (new machines: 2,420/2,420) |
+| negatives producing a machine | 0/32 | **0/32** |
+| median node / edge reduction vs the P-code CFG | -80% / -62% | -77% / -51% |
+
+\* **The three `U` cells fail closed on folding precision, not on the region
+model.**
+- The AArch64 -O1 builds index the class table with `and x10, x1, #0xff`, a
+  64-bit mask of the 32-bit argument.
+- The value is the input's low byte. But the folder keeps the mask over
+  `concat(x1's undefined upper half, in)` rather than narrowing it. So the
+  index still names the upper half, and the summary refuses: "an index
+  depends on values outside the boundary: X1_upper_bits".
+- The fix is a folding rule in `expr.rs`: a constant mask that clears a
+  concatenation's high part narrows to the low part. It is left for a
+  follow-up, because it touches every function and would need this whole
+  evaluation re-run.
+
+**Reductions.** The median reductions dropped because `tdfa_step` and
+`ring_step` are one-block functions whose state lives in tables. Section 3
+noted the same for counters: the CFG does not show that state, so the
+"reduction" is negative, and it is reported as measured.
+
+**Black box.** It misses `tdfa_step` and `kw_step` 8 of 8 times (median 1
+state), and finds `ring_step` 8 of 8. The ring's input is one bit.
+
+**Unit fixtures** (`testdata/quotient_fixture.S`):
+- `table_step`: a declared class table, 3 states; the null check on the
+  pointer folds.
+- the same function undeclared: the region is discovered, zeroed and grown
+  to 256 bytes, giving 1 state.
+- `ring_step`: an indexed write at an unmasked head, 16 states.
+- `nested_step`: two pointers deep; the depth budget refuses it at depth 1.
+- Fail-closed fixtures, each with its reason:
+  - `escape_step`: an unbounded index;
+  - `retarget_step`: `ctx->a = ctx->b`;
+  - `alias_step`: comparing two regions' addresses;
+  - `tls_step`: thread-local storage.
+- CLI tests: `--region`, schema conformance, and the text output.
+
+### 11.5 Real-binary reach (dir-verify GNU programs)
+
+The same 186 functions and flags as 10.4. The policy deviation recorded in
+10.4 applies unchanged: 15 of the 16 binaries are stripped byte-identical
+copies of DecBench builds, so this emulates DecBench code. Nothing was
+tuned on them. "Before" is step 1 on merged main (11.3).
+
+| first refusal | before | after |
+|---|---|---|
+| `proved_under_model` | 11 (6%) | **12 (6%)** |
+| data-computed address | 94 (51%) | 16 (9%) |
+| thread-local storage (stack protector canary), named in this step | (inside the 94) | 47 (25%) |
+| globals (absolute memory) | 26 (14%) | 29 (16%) |
+| floating point | 15 (8%) | 27 (15%) |
+| call: unknown callee given an address of the context or frame | 16 (9%) | 18 (10%) |
+| branch on a pointer (`ctx == NULL`) | 12 (6%) | 13 (7%) |
+| wide values (> 8 bytes) | 6 (3%) | 6 (3%) |
+| harness timeout (600 s) | 2 (1%) | 5 (3%) |
+| budget (paths; region retries) | 0 | 4 (2%) |
+| call: indirect | 1 (1%) | 3 (2%) |
+| call: library callee given an address of the frame | 2 (1%) | 2 (1%) |
+| call: more calls per step than ports | 1 (1%) | 1 (1%) |
+| region: a pointer field overwritten | - | 1 (1%) |
+| region: an index may leave its region | - | 1 (1%) |
+| region: an indexed access with too many places | - | 1 (1%) |
+
+**Where the 47 pointer-like refusals of 11.1 went:**
+- 1 became a machine;
+- 12 to floating point;
+- 4 to the path or region-retry budget;
+- 4 to the harness timeout (loops over a region array bounded by a context
+  field: `search_cur_bkref_entry` x2, `re_node_set_contains`,
+  `calc_state_hash`);
+- 3 to globals;
+- 2 to indirect calls;
+- 1 to a context address given to a callee;
+- 1 to a pointer branch;
+- 3 to the new region refusals;
+- 16 still refuse at a data-computed address. None of these pointers is held
+  by a context field. Each is a call's result (`malloc`, `realloc`,
+  `strcpy`, `__errno_location`), or a pointer the step loaded and then
+  advanced or indexed (`*fs->p++`, an array of pointers).
+
+No function was lost.
+
+**All 27 floating-point refusals are one compiler artefact.** Every one is
+an `fldz` in the `-fzero-call-used-regs` epilogue that clears the x87 stack
+before `ret` (`fldz` x8, `fstp st(0)` x8). That code is dead to every
+observation; the summary refuses it only because it refuses an unsupported
+operation where it appears, not where its value is used.
+
+**Newly supported:**
+
+| function | build | states / transitions | ports | calls | regions | replay | conformance |
+|---|---|---|---|---|---|---|---|
+| `sshpkt_put_u64` (openssh) | O2 | 1 / 1 | 2 | tail call to `0x5d340` (unknown) | `ctx[0x0]`, discovered | 100/100 | 1/1 |
+
+**Spot checks against the disassembly.** Only one function is newly
+supported, so the other two checks are new region refusals.
+
+- **`sshpkt_put_u64`** (`inlin_openssh-portable_sshd.elf` 0x81ea0):
+  `mov rax, [rdi]; mov rdi, [rax+0x30]; jmp 0x5d340`. That is
+  `sshbuf_put_u64(ssh->state->outgoing_packet, val)` as a tail call.
+  - The field at 0 is discovered as a region because the step dereferences
+    it.
+  - The quotient is one state: `0 -> 0 if true / calls 0x5d340(0, in);
+    returns ret0`.
+  - The first argument is 0 because the discovered region starts zeroed.
+  - **Exact, and degenerate.**
+- **`re_string_wchar_at`** (`unopt_tar_tar.elf` 0x62911):
+  `if (pstr->mb_cur_max == 1) return pstr->mbs[idx]; return pstr->wcs[idx];`
+  - From a zeroed context the step takes the `wcs` side.
+  - The index is the input itself, scaled by 4. Input 16 already reaches
+    past the discovered 64-byte region.
+  - Refused: "an index leaves its pointer region's bytes (state 0, input
+    [16])".
+  - **Correct.** The real bound is the string's length, a contract of the
+    caller that the function never checks.
+- **`re_node_set_insert_last`** (`unopt_tar_tar.elf` 0x662b9): when
+  `alloc == nelem` it reallocates `set->elems` and stores the new pointer at
+  0x6633c (`mov [rax+0x10], rdx`).
+  - Refused: "a store over the pointer to the region ctx[0x10]: the region
+    would move".
+  - **Correct.** The region moves. The `realloc(set->elems, ...)` call before
+    it would also be refused, because it hands a region's address to a
+    callee.
+
+### 11.6 What this step does not model, and why
+
+**Thread-local storage (47 functions, 25%).** It is now named rather than
+counted as a data-computed address.
+
+Modelling it was tried and taken out, because it can never produce a
+machine with the current harness:
+- The emulator's call harness maps no thread-local block. A fixture's
+  `fs:[0x28]` load faults there, and the summary and emulator then disagree.
+- The canary check's reload follows the step's calls. A call leaves every
+  register the convention does not name as poison, and the thread pointer
+  is one of them.
+
+The fix has two parts, both outside this step's crates:
+- a thread-local block in `fission-dir`'s harness;
+- the thread pointer as a callee-preserved register, a calling-convention
+  fact.
+
+**Step 2b, composing in-binary helpers (`helper(ctx, ...)`, 18 functions):
+not done.** It does not compose naturally with step 1's plumbing:
+- The emulator side stubs exactly the call sites `fission_dir::call_sites`
+  lists for the entry function. Running a helper instead of stubbing it
+  would run that helper's own calls unstubbed (into unresolved PLT stubs).
+  That needs per-callee stub sets in `fission-dir`.
+- The summary side would need the helper's P-code lifted and executed in
+  the caller's frame.
+
+It is left to a later step.
+
+**Also seen:**
+- Two functions exhausted the 64 summary retries while their regions grew
+  ("the pointer regions did not settle"). Each growth jumps only to the
+  offset that asked for it.
+- Five functions hit the 600 s harness timeout. Three of them are new: once
+  the region was modelled, their array loops became reachable.
+
+### 11.7 Outcome and the recommendation
+
+**The model change works, and the reach barely moves again.**
+- On the corpus every answer is still right:
+  - 136/136 machines equal the native ground truth, with no earlier run
+    changed;
+  - 133,534/133,534 replayed words agree;
+  - no negative produces a machine;
+  - every region refusal on a fixture is the one intended.
+- On the 186 dir-verify functions, machines go from 11 to **12 (6%)**. The
+  new one is single-state and degenerate, like all 11 before it.
+- The "data-computed address" bucket shrank from 94 to 16. But it did not
+  turn into machines:
+  - half of it was never a pointer field (thread-local storage);
+  - of the 47 that were, 46 had another blocker behind them, as calls did in
+    step 1.
+
+**The first refusals are now dominated by things that are not the slice's
+semantics.**
+- The stack protector's canary: 47 (25%).
+- The `-fzero-call-used-regs` epilogue: 27 (15%).
+- Together they are the first refusal for 74 of 186 (40%). Both are compiler
+  hardening that no observation can see.
+- Globals are 29 (16%) and helpers given the context are 18 (10%).
+
+**Against the RFC's stop rule** (pivot to AEQ if, after steps 1-3, more than
+60% of the sample is outside the model or degenerate):
+- After step 2 the figure is **94% outside the model, and 100% of the
+  machines are single-state.**
+- Each of the last two steps removed its bucket and converted about 1% into
+  machines. In step 1, 54 of 56 had a second blocker; here 46 of 47 did.
+- Step 3 (globals, 16%) cannot bring the outside share under 60% even if
+  every global function became a machine.
+
+**Recommendation.**
+1. Run step 3 as a bounded, last measurement. Widen it to globals plus the
+   two hardening artefacts, because they are cheap and block 40% outright:
+   - the dead `fldz` epilogue: an unsupported operation's result becomes
+     poison, refused only where it is observed;
+   - the canary: a thread-local block in the harness, and the thread pointer
+     as a preserved register.
+
+   Without them, the stop rule would judge the model on the compiler's
+   hardening rather than on its semantics.
+2. Do not build step 2b first. Its 18 functions would meet the same second
+   blockers.
+3. Unless step 3 moves real machines (more than single-state) into double
+   digits, **pivot to AEQ** as the RFC's stop rule says. On current evidence,
+   that is the expected outcome.
+
+Reproduce (after section 10's corpus build; about 3 h on a loaded 14-core
+host):
+
+```bash
+python3 scripts/quality/wbcq/build_corpus.py --out ~/fission-benchmark/wbcq-p4s2/corpus
+python3 scripts/quality/wbcq/ground_truth.py ~/fission-benchmark/wbcq-p4s2/corpus/manifest.json \
+  --out ~/fission-benchmark/wbcq-p4s2/ground_truth.json
+python3 scripts/quality/wbcq/evaluate.py run --corpus ~/fission-benchmark/wbcq-p4s2/corpus \
+  --out ~/fission-benchmark/wbcq-p4s2/results --eval <p3_eval> --cli <fission_cli> -j 3
+# positive controls: the engine before this step, no regions declared
+python3 scripts/quality/wbcq/evaluate.py run --corpus ~/fission-benchmark/wbcq-p4s2/corpus \
+  --out ~/fission-benchmark/wbcq-p4s2/controls-before --eval <old p3_eval> --cli <old fission_cli> \
+  --only tdfa_step kw_step ring_step --no-regions
+python3 scripts/quality/wbcq/evaluate.py decbench \
+  --candidates ~/fission-benchmark/wbcq-p4/dir_verify_candidates.json \
+  --out ~/fission-benchmark/wbcq-p4s2/dirverify-step2 --eval <p3_eval> -j 2
+python3 scripts/quality/wbcq/evaluate.py compare-reach \
+  --before ~/fission-benchmark/wbcq-p4/dirverify-merged --after ~/fission-benchmark/wbcq-p4s2/dirverify-step2
+```
