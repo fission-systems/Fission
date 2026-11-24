@@ -1597,4 +1597,46 @@ mod remainder_tests {
         ];
         assert!(!collapse_cdq_signed_mod_in_stmts(&mut stmts));
     }
+
+    /// The logical-shift sign bias `(x >>u (w-1)) & (2^k - 1)` adds only 0 or 1,
+    /// so it corrects signed division by `2^k` only when `k == 1`. At `k == 63`
+    /// on 64 bits the divisor `1 << 63` is `i64::MIN`, and `divisor - 1`
+    /// overflowed (a debug panic) before the bias was even compared.
+    #[test]
+    fn signed_pow2_div_rejects_logical_shift_bias_at_k63() {
+        let i32_ty = int(32, true);
+        let u32_ty = int(32, false);
+        let i64_ty = int(64, true);
+        let u64_ty = int(64, false);
+        // `(x + ((x >>u (width - 1)) & mask)) >> k`
+        let div = |k: i64, width: i64, mask: i64, sty: &NirType, uty: &NirType| {
+            bin(
+                PreHirBinaryOp::Sar,
+                bin(
+                    PreHirBinaryOp::Add,
+                    var("x"),
+                    bin(
+                        PreHirBinaryOp::And,
+                        bin(
+                            PreHirBinaryOp::Shr,
+                            var("x"),
+                            konst(width - 1, sty.clone()),
+                            uty.clone(),
+                        ),
+                        konst(mask, sty.clone()),
+                        sty.clone(),
+                    ),
+                    sty.clone(),
+                ),
+                konst(k, sty.clone()),
+                sty.clone(),
+            )
+        };
+
+        assert!(
+            normalize_signed_power_of_two_div(&div(63, 64, i64::MAX, &i64_ty, &u64_ty)).is_none()
+        );
+        // Positive control: at `k == 1` the logical bias is the sign bit itself.
+        assert!(normalize_signed_power_of_two_div(&div(1, 32, 1, &i32_ty, &u32_ty)).is_some());
+    }
 }
