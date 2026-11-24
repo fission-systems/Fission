@@ -157,6 +157,7 @@ mod tests {
                 iat_target_refs: HashMap::new(),
                 ambiguous_call_targets: Default::default(),
                 call_effect_summaries: HashMap::new(),
+                callee_argument_register_writes: HashMap::new(),
                 call_prototype_summaries: HashMap::new(),
                 call_result_is_source_value: HashMap::new(),
                 call_param_rules: vec![PreviewCallParamRule {
@@ -565,6 +566,7 @@ mod tests {
             iat_target_refs: HashMap::new(),
             ambiguous_call_targets: Default::default(),
             call_effect_summaries: HashMap::new(),
+            callee_argument_register_writes: HashMap::new(),
             call_prototype_summaries: HashMap::new(),
             call_result_is_source_value: HashMap::new(),
             call_param_rules: vec![PreviewCallParamRule {
