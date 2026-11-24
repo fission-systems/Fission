@@ -41,8 +41,8 @@ reports is a DecBench or readability claim.
    refine anything. One the emulator does not reproduce means the P-code model
    and the machine disagree: `UnsupportedSemantics`, never a silent retry.
 4. **Fail closed at the boundary.** User-defined operations, indirect calls,
-   absolute addresses, data-computed addresses outside a pointer region,
-   floating point, values wider than 8
+   absolute addresses outside the image's sections, data-computed addresses
+   outside a region, observed floating-point values, values wider than 8
    bytes, and results that read undeclared live-ins stop the summary with a
    reason.
 5. **Calls are effects, never run.** A direct call is observed as its target
@@ -66,6 +66,14 @@ reports is a DecBench or readability claim.
    state takes it is unsupported. An overwritten pointer field, a stored
    address, an indexed read of a pointer, a comparison between two regions'
    addresses, and a region pointer given to a callee are unsupported.
+   Two more kinds of region are anchored rather than pointed to: global
+   memory at an absolute address in an image section (starting as the
+   oracle's loaded baseline holds it, copied in and read back around every
+   step), and the block of a register the caller sets up (the thread
+   pointer: thread-local storage, the stack protector's canary), which a
+   call preserves when the convention does not list it as changed. A
+   floating-point result, or a register wider than 8 bytes, is poison:
+   refused only where something observes it.
 7. **Deterministic output.** Alphabet symbols and counterexamples are least
    solutions (port by port), never whichever model the solver found first;
    every collection is ordered. Same binary and budget, same JSON bytes.
