@@ -84,6 +84,20 @@ pub struct StepRecord {
     /// Constant address of a LOAD/STORE whose address p-code is a
     /// constant, by access order.
     pub direct_addresses: Vec<Option<u64>>,
+    /// A guest memory fault delivered to a signal handler just before this
+    /// step. The faulting instruction did not retire, so it has no record
+    /// of its own: its uses are folded into this one, the first handler
+    /// instruction's, which also opens the handler's activation.
+    pub fault: Option<FaultEvent>,
+}
+
+/// A guest memory fault the run delivered (`SIGSEGV`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaultEvent {
+    /// The instruction that faulted. It did not retire.
+    pub pc: u64,
+    /// The first byte the access could not touch (`si_addr`).
+    pub addr: u64,
 }
 
 /// How the recorded run ended.
@@ -92,9 +106,15 @@ pub enum EndState {
     Exited {
         code: Option<u32>,
     },
+    /// Ended by a guest memory fault: killed by `SIGSEGV` (or, on an OS that
+    /// delivers no fault signals, stopped with an emulator error).
     Faulted {
         pc: u64,
         message: String,
+    },
+    /// Killed by a signal other than a memory fault's.
+    Killed {
+        signal: i32,
     },
     /// The recording stopped at the sink event.
     StoppedAtSink,
@@ -194,6 +214,11 @@ impl DynamicControl<'_, '_> {
             _ => {}
         }
     }
+
+    /// An activation entered at `step` without a call (a signal handler).
+    fn enter(&mut self, step: u64) {
+        self.frames.push((Some(step), Vec::new()));
+    }
 }
 
 /// Evaluates Φ while a run is single-stepped. Recording and every replay
@@ -279,6 +304,25 @@ impl<'s> SinkMonitor<'s> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The instruction at `fault_pc` raised a guest memory fault at step
+    /// `step` (it did not retire). `uses` are what it read.
+    pub fn fault(&mut self, fault_pc: u64, step: u64, uses: &[Access]) {
+        if self.decided.is_some() {
+            return;
+        }
+        if let SinkSpec::FaultAt { pc } = self.sink
+            && *pc == fault_pc
+        {
+            self.decided = Some((
+                step,
+                uses.to_vec(),
+                SinkObservation::Holds {
+                    detail: format!("memory fault at 0x{fault_pc:x}, step {step}"),
+                },
+            ));
         }
     }
 
@@ -400,14 +444,48 @@ fn decode_live(program: &Program, run: &Run, pc: u64) -> Vec<fission_pcode_ir::i
 fn end_of(run: &Run, pc: u64, outcome: Result<RunOutcome>) -> Option<EndState> {
     match outcome {
         Ok(RunOutcome::Stepped) if !run.emu.halt_requested => None,
-        Ok(_) => Some(EndState::Exited {
-            code: run.emu.exit_code,
-        }),
-        Err(e) => Some(EndState::Faulted {
-            pc,
-            message: e.to_string(),
-        }),
+        Ok(_) => Some(halted_end(run)),
+        Err(e) => {
+            let message = e.to_string();
+            Some(EndState::Faulted {
+                pc: guest_fault_pc(&message).unwrap_or(pc),
+                message,
+            })
+        }
     }
+}
+
+/// How a run that stopped on its own ended: an exit, or a signal. A
+/// memory fault nobody handled kills the guest with `SIGSEGV`; the fault
+/// itself names the instruction.
+pub fn halted_end(run: &Run) -> EndState {
+    const SIGSEGV: i32 = 11;
+    match (run.emu.exit_signal, run.emu.last_fault) {
+        (Some(SIGSEGV), Some(fault)) => EndState::Faulted {
+            pc: fault.pc,
+            message: format!(
+                "SIGSEGV: {:?} fault at 0x{:x} (si_code {})",
+                fault.access,
+                fault.addr,
+                fault.si_code()
+            ),
+        },
+        (Some(signal), _) => EndState::Killed { signal },
+        (None, _) => EndState::Exited {
+            code: run.emu.exit_code,
+        },
+    }
+}
+
+/// The fault the last step (or run) raised, if the count moved.
+fn new_fault(run: &Run, faults_before: u64) -> Option<FaultEvent> {
+    if run.emu.metrics.memory_faults <= faults_before {
+        return None;
+    }
+    run.emu.last_fault.map(|f| FaultEvent {
+        pc: f.pc,
+        addr: f.addr,
+    })
 }
 
 /// Record `program` from its initial state to the end of the run, applying
@@ -467,6 +545,14 @@ fn record_inner(
     let mut inputs: Vec<InputByte> = Vec::new();
     let mut input_cursor = 0usize;
     let mut end = EndState::Budget;
+    // A fault delivered to a handler: the faulting instruction's record,
+    // to fold into the handler's first.
+    let mut pending_fault: Option<(FaultEvent, StepRecord)> = None;
+    let delivery_regs: Vec<Access> = std::iter::once(run.emu.arch.sp_reg)
+        .chain(run.emu.arch.cc.arg_regs().iter().take(3).copied())
+        .filter_map(|r| program.register(r))
+        .map(|(_, offset, size)| Access::Reg { offset, size })
+        .collect();
 
     while (steps.len() as u64) < max_steps {
         let step = run.emu.inst_count;
@@ -489,9 +575,11 @@ fn record_inner(
         let parent = control.parent(pc);
 
         let syscalls_before = run.syscall_count();
+        let faults_before = run.emu.metrics.memory_faults;
         run.emu.state.trace_mem_reads.clear();
         run.emu.state.trace_mem_writes.clear();
         let outcome = run.emu.step_instruction();
+        let faulted = new_fault(run, faults_before);
 
         let mut record = analyse_ops(program, step, pc, &ops, flow.clone(), parent);
         record.next_pc = run.emu.pc;
@@ -542,10 +630,38 @@ fn record_inner(
                 input_cursor += n;
             }
         }
+        if let Some((fault, folded)) = pending_fault.take() {
+            record.uses.extend(folded.uses);
+            record.defs.extend(folded.defs);
+            record.input.extend(folded.input);
+            record.syscalls.splice(0..0, folded.syscalls);
+            record.address_regs.extend(folded.address_regs);
+            record.fault = Some(fault);
+        }
         record.uses.sort();
         record.uses.dedup();
         record.defs.sort();
         record.defs.dedup();
+        if let Some(fault) = faulted {
+            monitor.fault(fault.pc, step, &record.uses);
+            if run.emu.inst_count == step && !run.emu.halt_requested {
+                // Delivered to a handler: the instruction did not retire and
+                // the handler's first instruction is the next step at the
+                // same count. Its register writes were undone; what the
+                // delivery wrote (the frame, the stack pointer and the
+                // handler's arguments) stands in for them.
+                record.defs.retain(|d| matches!(d, Access::Mem { .. }));
+                record.defs.extend(delivery_regs.iter().copied());
+                record.uses.extend(delivery_regs.first().copied());
+                pending_fault = Some((fault, record));
+                continue;
+            }
+        }
+        if record.fault.is_some() {
+            // The handler runs as an activation of its own, entered by the
+            // fault.
+            control.enter(step);
+        }
         control.after(step, pc, &flow);
         monitor.after(pc, step, record.next_pc, &flow, &record.uses);
         steps.push(record);
@@ -611,7 +727,11 @@ pub fn observe(
         } else {
             Flow::Fall
         };
+        let faults_before = run.emu.metrics.memory_faults;
         let outcome = run.emu.step_instruction();
+        if let Some(fault) = new_fault(run, faults_before) {
+            monitor.fault(fault.pc, step, &last_uses);
+        }
         monitor.after(pc, step, run.emu.pc, &flow, &[]);
         if let Some(done) = end_of(run, pc, outcome) {
             end = done;
@@ -636,9 +756,9 @@ pub fn observe(
 
 /// [`observe`] without single-stepping: the run goes block by block and
 /// stops only at breakpoints on the sink's own addresses, where the same
-/// [`SinkMonitor`] decides Φ. A fault sink needs the exact faulting
-/// instruction, which only single-stepping reports, so it takes the slow
-/// path.
+/// [`SinkMonitor`] decides Φ. Both engines deliver a guest memory fault
+/// precisely (the faulting instruction, not retired), so a fault sink is
+/// read off the fault the run raised.
 pub fn observe_fast(
     program: &Program,
     run: &mut Run,
@@ -646,12 +766,8 @@ pub fn observe_fast(
     max_steps: u64,
     to_end: bool,
 ) -> (SinkObservation, EndState) {
+    let faults_before = run.emu.metrics.memory_faults;
     let stops: Vec<u64> = match monitor.sink {
-        // The interpreter's fault error does not name the instruction, so a
-        // fault sink single-steps there; the JIT's error does.
-        SinkSpec::FaultAt { .. } if run.emu.force_interpreter => {
-            return observe(program, run, monitor, max_steps, to_end);
-        }
         SinkSpec::FaultAt { .. } => Vec::new(),
         SinkSpec::CallTo { target, .. } => vec![*target],
         SinkSpec::BranchOutcome { pc, .. } => vec![*pc],
@@ -710,11 +826,7 @@ pub fn observe_fast(
                 }
             }
             Ok(RunOutcome::HitBudget) => break EndState::Budget,
-            Ok(_) => {
-                break EndState::Exited {
-                    code: run.emu.exit_code,
-                };
-            }
+            Ok(_) => break halted_end(run),
             Err(e) => {
                 let message = e.to_string();
                 break EndState::Faulted {
@@ -724,6 +836,29 @@ pub fn observe_fast(
             }
         }
     };
+    // A fast run does not stop at a fault a handler takes, so only the last
+    // one is known. One fault is decidable; several are not, unless the
+    // last is the sink's.
+    if let SinkSpec::FaultAt { pc } = monitor.sink
+        && monitor.decided.is_none()
+        && let Some(fault) = new_fault(run, faults_before)
+    {
+        let count = run.emu.metrics.memory_faults - faults_before;
+        if count == 1 || fault.pc == *pc {
+            monitor.fault(fault.pc, run.emu.inst_count, &[]);
+        } else {
+            monitor.decided = Some((
+                run.emu.inst_count,
+                Vec::new(),
+                SinkObservation::Undecided {
+                    detail: format!(
+                        "{count} faults in one fast run, the last at 0x{:x}: which came first is not known",
+                        fault.pc
+                    ),
+                },
+            ));
+        }
+    }
     let last = run.emu.inst_count + u64::from(matches!(end, EndState::Faulted { .. }));
     monitor.finish(run, &end, last, &[]);
     let obs = monitor
@@ -912,5 +1047,6 @@ fn analyse_ops(
         cd_parent,
         address_regs: address_regs.into_iter().collect(),
         direct_addresses,
+        fault: None,
     }
 }

@@ -173,6 +173,8 @@ struct Checkpoint {
     vfs: std::sync::Arc<SimVFS>,
     stdin_buffer: Option<Vec<u8>>,
     exit_code: Option<u32>,
+    exit_signal: Option<i32>,
+    last_fault: Option<fission_emulator::core::GuestFault>,
     heap_cursor: u64,
     fs_base: u64,
     gs_base: u64,
@@ -199,6 +201,8 @@ impl Checkpoint {
             vfs: std::sync::Arc::new(emu.vfs.clone()),
             stdin_buffer: emu.stdin_buffer.clone(),
             exit_code: emu.exit_code,
+            exit_signal: emu.exit_signal,
+            last_fault: emu.last_fault,
             heap_cursor: emu.heap_cursor,
             fs_base: emu.fs_base,
             gs_base: emu.gs_base,
@@ -231,6 +235,8 @@ impl Checkpoint {
         emu.vfs = (*self.vfs).clone();
         emu.stdin_buffer = self.stdin_buffer.clone();
         emu.exit_code = self.exit_code;
+        emu.exit_signal = self.exit_signal;
+        emu.last_fault = self.last_fault;
         emu.heap_cursor = self.heap_cursor;
         emu.fs_base = self.fs_base;
         emu.gs_base = self.gs_base;
@@ -326,6 +332,7 @@ fn end_label(end: &EndState) -> String {
     match end {
         EndState::Exited { code } => format!("exited({})", code.map_or(-1, i64::from)),
         EndState::Faulted { pc, .. } => format!("faulted(0x{pc:x})"),
+        EndState::Killed { signal } => format!("killed({signal})"),
         EndState::StoppedAtSink => "stopped_at_sink".into(),
         EndState::Budget => "budget".into(),
     }
@@ -960,11 +967,7 @@ fn finish_on_jit(run: &mut Run) -> EndState {
     loop {
         match run.emu.resume() {
             Ok(fission_emulator::RunOutcome::HitBreakpoint(_)) => {}
-            Ok(_) if run.emu.halt_requested => {
-                return EndState::Exited {
-                    code: run.emu.exit_code,
-                };
-            }
+            Ok(_) if run.emu.halt_requested => return trace::halted_end(run),
             Ok(_) => return EndState::Budget,
             Err(e) => {
                 return EndState::Faulted {

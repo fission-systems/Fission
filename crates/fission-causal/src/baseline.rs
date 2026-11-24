@@ -105,22 +105,11 @@ fn run_jit_to(run: &mut Run, trace: &Trace, step: u64) -> Result<bool> {
 /// report which sources reach the sink criterion.
 ///
 /// Interpreter throughout: it retires exactly the requested number of
-/// instructions, which the criterion steps need.
+/// instructions, which the criterion steps need. (Since #1111 the two
+/// engines' taint agree through memory, and a store through a tainted
+/// pointer no longer panics the interpreter, so P1's JIT fallback is gone.)
 pub fn dynamic_taint(program: &Program, trace: &Trace) -> Result<TaintResult> {
-    // The interpreter first: on the fixtures it keeps data provenance through
-    // memory that the JIT's taint path loses. It panics on a store through a
-    // tainted pointer, though, and then the JIT result is the one reported.
-    let interpreted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        dynamic_taint_on(program, trace, true)
-    }));
-    match interpreted {
-        Ok(result) => result,
-        Err(_) => {
-            let mut result = dynamic_taint_on(program, trace, false)?;
-            result.engine = "jit (interpreter taint panicked)".into();
-            Ok(result)
-        }
-    }
+    dynamic_taint_on(program, trace, true)
 }
 
 fn dynamic_taint_on(program: &Program, trace: &Trace, interpreter: bool) -> Result<TaintResult> {
@@ -160,10 +149,6 @@ fn dynamic_taint_on(program: &Program, trace: &Trace, interpreter: bool) -> Resu
             continue;
         }
         if is_criterion {
-            // After the sources exist, the JIT carries the taint: the
-            // interpreter's taint path panics on a store through a tainted
-            // pointer (it hands the taint set id to the symbolic-array
-            // code as if it were a solver node), see the P1 report.
             run.emu.force_interpreter = interpreter;
             // An exit criterion is read just before the last instruction
             // (the exit itself writes no memory).

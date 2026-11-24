@@ -346,6 +346,7 @@ pub fn end_digest(run: &Run) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(&run.emu.inst_count.to_le_bytes());
     hasher.update(&run.emu.exit_code.unwrap_or(u32::MAX).to_le_bytes());
+    hasher.update(&run.emu.exit_signal.unwrap_or(0).to_le_bytes());
     hasher.update(&run.stdout());
     hasher.finalize().to_hex().to_string()
 }
