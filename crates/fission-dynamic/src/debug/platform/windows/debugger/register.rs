@@ -260,12 +260,14 @@ impl WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id"))?;
 
         unsafe {
-            let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
-                .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
+            let h_thread = super::super::OwnedHandle(
+                OpenThread(THREAD_ALL_ACCESS, false, tid)
+                    .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?,
+            );
 
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_DEBUG_REGISTERS);
-            GetThreadContext(h_thread, &mut ctx)
+            GetThreadContext(h_thread.0, &mut ctx)
                 .map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             match slot {
@@ -288,9 +290,8 @@ impl WindowsDebugger {
             ctx.Dr7 |= enable_bit;
             ctx.Dr7 |= type_len << shift;
 
-            SetThreadContext(h_thread, &ctx)
+            SetThreadContext(h_thread.0, &ctx)
                 .map_err(|e| FissionError::debug(format!("SetThreadContext failed: {:?}", e)))?;
-            let _ = CloseHandle(h_thread);
         }
 
         self.hw_breakpoints.insert(address, slot);
@@ -317,12 +318,14 @@ impl WindowsDebugger {
             .ok_or_else(|| FissionError::debug("No thread id"))?;
 
         unsafe {
-            let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
-                .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
+            let h_thread = super::super::OwnedHandle(
+                OpenThread(THREAD_ALL_ACCESS, false, tid)
+                    .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?,
+            );
 
             let mut ctx: CONTEXT = std::mem::zeroed();
             ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_DEBUG_REGISTERS);
-            GetThreadContext(h_thread, &mut ctx)
+            GetThreadContext(h_thread.0, &mut ctx)
                 .map_err(|e| FissionError::debug(format!("GetThreadContext failed: {:?}", e)))?;
 
             match slot {
@@ -337,9 +340,8 @@ impl WindowsDebugger {
             ctx.Dr7 &= !(0b11u64 << (slot * 2));
             ctx.Dr7 &= !(0b1111u64 << shift);
 
-            SetThreadContext(h_thread, &ctx)
+            SetThreadContext(h_thread.0, &ctx)
                 .map_err(|e| FissionError::debug(format!("SetThreadContext failed: {:?}", e)))?;
-            let _ = CloseHandle(h_thread);
         }
 
         self.state.last_event = Some(format!("Hardware breakpoint removed at 0x{:016x}", address));

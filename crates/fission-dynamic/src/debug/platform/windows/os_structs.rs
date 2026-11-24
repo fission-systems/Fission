@@ -9,7 +9,6 @@ use windows::Wdk::System::Threading::{
     NtQueryInformationProcess, NtQueryInformationThread, PROCESSINFOCLASS, THREADINFOCLASS,
 };
 use windows::Win32::Foundation::{HANDLE, NTSTATUS};
-use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 
 /// Key fields from the Process Environment Block.
 #[derive(Debug, Clone)]
@@ -84,56 +83,11 @@ pub fn read_peb(process: HANDLE) -> Result<PebInfo, String> {
     // 0x18 Ldr (u64)
     // 0x20 ProcessParameters (u64)
     // 0xBC NtGlobalFlag (u32)
-    let mut read = 0usize;
-
-    let mut being_debugged: u8 = 0;
-    let mut image_base: u64 = 0;
-    let mut ldr: u64 = 0;
-    let mut process_params: u64 = 0;
-    let mut nt_global: u32 = 0;
-
-    unsafe {
-        ReadProcessMemory(
-            process,
-            (peb + peb64::BEING_DEBUGGED) as *const c_void,
-            &mut being_debugged as *mut _ as *mut c_void,
-            1,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (peb + peb64::IMAGE_BASE_ADDRESS) as *const c_void,
-            &mut image_base as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (peb + peb64::LDR) as *const c_void,
-            &mut ldr as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (peb + peb64::PROCESS_PARAMETERS) as *const c_void,
-            &mut process_params as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (peb + peb64::NT_GLOBAL_FLAG) as *const c_void,
-            &mut nt_global as *mut _ as *mut c_void,
-            4,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-    }
+    let being_debugged: u8 = super::read_value(process, peb + peb64::BEING_DEBUGGED)?;
+    let image_base: u64 = super::read_value(process, peb + peb64::IMAGE_BASE_ADDRESS)?;
+    let ldr: u64 = super::read_value(process, peb + peb64::LDR)?;
+    let process_params: u64 = super::read_value(process, peb + peb64::PROCESS_PARAMETERS)?;
+    let nt_global: u32 = super::read_value(process, peb + peb64::NT_GLOBAL_FLAG)?;
 
     Ok(PebInfo {
         peb_address: peb,
@@ -205,73 +159,13 @@ pub fn read_teb(process: HANDLE, thread_id: u32) -> Result<TebInfo, String> {
     // 0x40 ClientId.UniqueProcess (u64)
     // 0x48 ClientId.UniqueThread (u64)
     // 0x60 Peb (u64)
-    let mut read = 0usize;
-    let mut exception_list: u64 = 0;
-    let mut stack_base: u64 = 0;
-    let mut stack_limit: u64 = 0;
-    let mut self_ptr: u64 = 0;
-    let mut client_id_proc: u64 = 0;
-    let mut client_id_thread: u64 = 0;
-    let mut peb_ptr: u64 = 0;
-
-    unsafe {
-        ReadProcessMemory(
-            process,
-            teb as *const c_void,
-            &mut exception_list as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x08) as *const c_void,
-            &mut stack_base as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x10) as *const c_void,
-            &mut stack_limit as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x30) as *const c_void,
-            &mut self_ptr as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x40) as *const c_void,
-            &mut client_id_proc as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x48) as *const c_void,
-            &mut client_id_thread as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-        ReadProcessMemory(
-            process,
-            (teb + 0x60) as *const c_void,
-            &mut peb_ptr as *mut _ as *mut c_void,
-            8,
-            Some(&mut read),
-        )
-        .map_err(|e| format!("ReadProcessMemory failed: {:?}", e))?;
-    }
+    let exception_list: u64 = super::read_value(process, teb)?;
+    let stack_base: u64 = super::read_value(process, teb + 0x08)?;
+    let stack_limit: u64 = super::read_value(process, teb + 0x10)?;
+    let self_ptr: u64 = super::read_value(process, teb + 0x30)?;
+    let client_id_proc: u64 = super::read_value(process, teb + 0x40)?;
+    let client_id_thread: u64 = super::read_value(process, teb + 0x48)?;
+    let peb_ptr: u64 = super::read_value(process, teb + 0x60)?;
 
     Ok(TebInfo {
         teb_address: teb,

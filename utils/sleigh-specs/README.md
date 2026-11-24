@@ -26,6 +26,9 @@ tooling should use this directory.
 Upstream specs are not ground truth ([ADR 0017](../../docs/adr/0017-ghidra-is-not-an-oracle.md)).
 A semantic fix needs architecture-manual or native-execution evidence, a re-apply script,
 a byte-for-byte recompile control, and a test that fails with the upstream `.sla`.
+Recompile with the release's Java compiler, `support/sleigh` (run from the `.slaspec`'s
+directory): it reproduces the checked-in AArch64 `.sla` byte for byte, while the native
+`Ghidra/Features/Decompiler/os/*/sleigh` builds a different `AARCH64_AppleSilicon.sla`.
 
 `languages/` is upstream `Ghidra/Processors/<P>/data/languages/` verbatim (the `.sla`
 files go to `compiled/`), except for the following. Re-apply them when upgrading;
@@ -34,6 +37,23 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
 - `ARM/{ARMt,ARMtTHUMB,ARMt_v6,ARMt_v45,ARMCortex,ARM_v45}.pspec`: `ISAModeSwitch` and
   `TB` are marked `hidden="true"`, so decoder-only interworking state never surfaces as
   decompiled assignments.
+- `ARM/ARMTHUMBinstructions.sinc` (and the twelve compiled `ARM*.sla` with Thumb): the 16-bit
+  `stmia Rn!, {list}` (STM T1) always writes the base back, adding 4 per listed register, as
+  the ARMv7-M pseudocode's `wback = TRUE` does, and displays `Rn!` in every form. Upstream
+  gave it LDM T1's `Rn_exclaim`/`Rn_exclaim_WB` pair, which skips the writeback when `Rn` is
+  in the list. Re-apply with `scripts/sleigh/apply_thumb_stm_writeback.py`.
+  Upstream: NationalSecurityAgency/ghidra#10273.
+  `ARM8_le.sla` and `ARM8m_le.sla` as released are reproduced by no 12.2 compiler (Java on
+  JDK 17 or 21, or native): the root `instruction` decision tree splits on different bits.
+  The 14 other ARM `.sla` reproduce byte for byte, and lifting every 16-bit Thumb halfword
+  plus 300,000 random Thumb-2 and 365,536 ARM words with the released and the recompiled
+  ARM8 files gives identical p-code, so the checked-in ARM8 files are plain recompiles.
+  The same file sets C from the shifter in the Thumb-2 `ands`/`bics`/`movs`/`mvns` with a
+  modified immediate and `ands`/`mvns` with a shifted register, as `ThumbExpandImm_C`/`Shift_C`
+  and `APSR.C = carry` define; upstream built `thSBIT_ZN` there and set only N and Z. They now
+  build a new flag table, `thSBIT_SCZN`, whose `s` form also does `CY = shift_carry`, so the
+  forms without S keep upstream's p-code exactly. Re-apply with
+  `scripts/sleigh/apply_thumb2_logical_carry.py`. Upstream: NationalSecurityAgency/ghidra#10274.
 - `x86/x86-64-swift.cspec` and its `<compiler id="swift">` entry in `x86/x86.ldefs`:
   Ghidra 12.2 removed them (Swift moved to cspec extensions under
   `Ghidra/Features/Swift/data/extensions`). They are kept from 12.0.4 so Swift x86-64
@@ -52,6 +72,15 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `floor` for M, `ceil` for P, `round` for A/I/N/X (approximations: no ties-to-even or
   ties-away, FPCR mode not modelled) and `int2float(trunc(x))` for Z (loses precision for
   magnitudes at or above 2^63). Re-apply with `scripts/sleigh/apply_aarch64_frint_rounding.py`.
+- `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): the sign-extending byte
+  and halfword loads into a `W` register (`ldrsb`/`ldrsh` in every addressing form,
+  `ldursb`/`ldursh`, `ldtrsb`/`ldtrsh`) sign-extend to 32 bits and zero bits 63:32, as the
+  Arm ARM's `X[t, 32] = SignExtend(data, 32)` does and an Apple M4 does when run natively.
+  Upstream sign-extended them into all 64 bits, and zero-extended the `ldursb`/`ldtrsb`
+  byte. Each of the eight `Rt_GPR32` constructors now lifts as
+  `local tmp:4 = sext(*:N addr); Rt_GPR64 = zext(tmp);`; the `X` forms, `ldrsw` and
+  `ldapursb`/`ldapursh` were already right. Re-apply with
+  `scripts/sleigh/apply_aarch64_w_signed_loads.py`. Upstream: NationalSecurityAgency/ghidra#6471.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

@@ -30,3 +30,14 @@ While in `0.x`, **minor releases may still introduce significant behavior change
 ## Pre-releases
 
 If you need `-alpha` / `-beta` suffixes, prefer **GitHub prerelease** toggles plus clear notes; keep tag names consistent with tooling expectations in `cd.yml`.
+
+## Tag, binary and bundle identity
+
+The tag without its `v` must equal the `[package]` version of
+`crates/fission-cli/Cargo.toml`, prerelease suffix included: `v0.5.0-rc.1`
+needs version `0.5.0-rc.1`. Other workspace crates are versioned in lockstep
+but are not checked. A release build embeds the tag and commit
+(`fission_cli --version`, `resources status --json`), and every packaged
+resource bundle carries `fission-resources.json` naming the same release.
+`release-tag.yml` refuses to tag or publish when the three disagree
+(`scripts/release/check_identity.py`).

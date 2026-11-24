@@ -1326,6 +1326,94 @@ pub(super) mod tests {
         );
     }
 
+    /// The 64-bit register value an AArch64 load word leaves behind when its
+    /// memory read returns `loaded`. Only the ops that carry the loaded value
+    /// (`Load`, `Copy`, `IntSExt`, `IntZExt`) are evaluated; the value is the
+    /// last 8-byte register written from it, so a pre/post-index writeback of
+    /// the base (an `IntAdd` of an unknown register) does not count.
+    fn aarch64_loaded_register_value(word: u32, loaded: u64) -> u64 {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        let (ops, len) = frontend
+            .decode_and_lift_with_len(&word.to_le_bytes(), 0x100000)
+            .unwrap_or_else(|error| panic!("lift {word:#010x}: {error:#}"));
+        assert_eq!(len, 4);
+        let mask = |size: u32| u64::MAX >> (64 - 8 * size.min(8));
+        let key = |vn: &Varnode| (vn.space_id, vn.offset, vn.size);
+        let mut known = HashMap::new();
+        let mut written = None;
+        for op in &ops {
+            let Some(out) = &op.output else { continue };
+            let input = op.inputs.first().and_then(|vn| {
+                if vn.is_constant {
+                    Some(vn.offset & mask(vn.size))
+                } else {
+                    known.get(&key(vn)).copied()
+                }
+            });
+            let value = match (op.opcode, input) {
+                (PcodeOpcode::Load, _) => loaded & mask(out.size),
+                (PcodeOpcode::Copy | PcodeOpcode::IntZExt, Some(v)) => v & mask(out.size),
+                (PcodeOpcode::IntSExt, Some(v)) => {
+                    let bits = 64 - 8 * op.inputs[0].size;
+                    (((v << bits) as i64 >> bits) as u64) & mask(out.size)
+                }
+                _ => {
+                    known.remove(&key(out));
+                    continue;
+                }
+            };
+            known.insert(key(out), value);
+            if fission_pcode_ir::space::is_register_space_id(out.space_id) && out.size == 8 {
+                written = Some(value);
+            }
+        }
+        written.unwrap_or_else(|| panic!("{word:#010x} writes no X register: {ops:#?}"))
+    }
+
+    #[test]
+    fn aarch64_signed_byte_and_halfword_loads_into_w_zero_the_upper_half() {
+        // The W forms sign-extend to 32 bits and, like every W write, zero
+        // bits 63:32 (Arm ARM: `X[t, 32] = SignExtend(data, 32)`). Upstream
+        // sign-extended to 64 bits, and zero-extended the ldursb/ldtrsb byte.
+        // Values checked on an Apple M4 by running each instruction natively.
+        let w_forms: [(&str, u32, u64, u64); 12] = [
+            ("ldrsb w0, [x1]", 0x39c0_0020, 0x80, 0xffff_ff80),
+            ("ldrsh w0, [x1]", 0x79c0_0020, 0x8000, 0xffff_8000),
+            ("ldursb w0, [x1]", 0x38c0_0020, 0x80, 0xffff_ff80),
+            ("ldursh w0, [x1]", 0x78c0_0020, 0x8000, 0xffff_8000),
+            ("ldrsb w0, [x1, #1]!", 0x38c0_1c20, 0x80, 0xffff_ff80),
+            ("ldrsh w0, [x1, #2]!", 0x78c0_2c20, 0x8000, 0xffff_8000),
+            ("ldrsb w0, [x1], #1", 0x38c0_1420, 0x80, 0xffff_ff80),
+            ("ldrsh w0, [x1], #2", 0x78c0_2420, 0x8000, 0xffff_8000),
+            ("ldtrsb w0, [x1]", 0x38c0_0820, 0x80, 0xffff_ff80),
+            ("ldtrsh w0, [x1]", 0x78c0_0820, 0x8000, 0xffff_8000),
+            ("ldrsb w0, [x1, x2]", 0x38e2_6820, 0x80, 0xffff_ff80),
+            ("ldrsh w0, [x1, x2]", 0x78e2_6820, 0x8000, 0xffff_8000),
+        ];
+        // The X forms sign-extend to 64 bits and are unchanged.
+        let x_forms: [(&str, u32, u64, u64); 4] = [
+            ("ldrsb x0, [x1]", 0x3980_0020, 0x80, 0xffff_ffff_ffff_ff80),
+            ("ldrsh x0, [x1]", 0x7980_0020, 0x8000, 0xffff_ffff_ffff_8000),
+            ("ldursb x0, [x1]", 0x3880_0020, 0x80, 0xffff_ffff_ffff_ff80),
+            (
+                "ldrsw x0, [x1]",
+                0xb980_0020,
+                0x8000_0000,
+                0xffff_ffff_8000_0000,
+            ),
+        ];
+        for (name, word, loaded, expected) in w_forms.into_iter().chain(x_forms) {
+            assert_eq!(
+                aarch64_loaded_register_value(word, loaded),
+                expected,
+                "{name} ({word:#010x}) loading {loaded:#x}"
+            );
+        }
+        // A positive value is unchanged by either extension.
+        assert_eq!(aarch64_loaded_register_value(0x79c0_0020, 0x7fff), 0x7fff);
+    }
+
     #[test]
     fn aarch64_ands_immediate_decodes_repeated_high_bit_mask() {
         let frontend =
