@@ -40,6 +40,13 @@ executes foundation observations with the emulator, and uses the solver for a
 universal proof or replayable counterexample. Until the foundation carries
 SLEIGH address-space classes, the caller must explicitly admit non-memory value
 spaces and the report remains conditionally proven on that classification.
+When concrete emulator traces agree but symbolic proof returns `Unknown` or
+errors, the verifier reports `ValidationVerdict::Equivalent` at
+`EvidenceStrength::Traces` (`AssuranceBand::TraceValidated` /
+`AssuranceClassification::TraceSampledOnly`) with preserved assumptions and
+unresolved effects; consumers must query `AssuranceReport::is_proven()` or
+`AssuranceReport::classification()` rather than treating `ValidationVerdict::Equivalent`
+alone as universal proof.
 Memory, calls, control flow, and overlapping varnodes remain explicit
 unsupported boundaries.
 See ADR 0014.
