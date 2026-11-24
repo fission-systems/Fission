@@ -281,13 +281,21 @@ fn simplify_expr(
                             || use_count <= 1;
 
                     if is_safe_to_dup {
-                        // Pattern 1: (target_ty)(intermediate_ty)inner_expr  where inner_expr: target_ty
+                        // Pattern 1: (target_ty)(intermediate_ty)inner_expr where inner_expr: target_ty
+                        // Only safe when both target_ty and intermediate_ty are integer/bool scalars
+                        // and intermediate_ty is at least as wide as target_ty.
                         if let PreHirExpr::Cast {
-                            expr: inner_val, ..
+                            ty: inter_ty,
+                            expr: inner_val,
                         } = def_expr
                         {
                             let inner_val_ty = get_expr_type(inner_val, local_types);
-                            if &inner_val_ty == target_ty {
+                            if &inner_val_ty == target_ty
+                                && matches!(
+                                    (int_type_bits(inter_ty), int_type_bits(target_ty)),
+                                    (Some(inter_bits), Some(target_bits)) if inter_bits >= target_bits
+                                )
+                            {
                                 *expr = inner_val.as_ref().clone();
                                 return true;
                             }

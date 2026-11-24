@@ -174,3 +174,66 @@ fn subvar_trim_eliminates_redundant_casts() {
         panic!("expected cast of y, got {:?}", rhs2);
     }
 }
+
+#[test]
+fn subvar_trim_does_not_drop_narrowing_intermediate_cast() {
+    let u8_ty = NirType::Int {
+        bits: 8,
+        signed: false,
+    };
+    let u32_ty = NirType::Int {
+        bits: 32,
+        signed: false,
+    };
+
+    let mut func = PreHirFunction {
+        params: vec![PreHirBinding {
+            name: "x".to_string(),
+            ty: u32_ty.clone(),
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        }],
+        locals: vec![
+            PreHirBinding {
+                name: "trunc".to_string(),
+                ty: u8_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+            PreHirBinding {
+                name: "res".to_string(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            },
+        ],
+        body: vec![
+            // trunc = (u8)x
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("trunc".to_string()),
+                rhs: PreHirExpr::Cast {
+                    ty: u8_ty,
+                    expr: Box::new(PreHirExpr::Var("x".to_string())),
+                },
+            },
+            // res = (u32)trunc
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("res".to_string()),
+                rhs: PreHirExpr::Cast {
+                    ty: u32_ty,
+                    expr: Box::new(PreHirExpr::Var("trunc".to_string())),
+                },
+            },
+        ],
+        ..Default::default()
+    };
+
+    assert!(!apply_subvar_trim_pass(&mut func));
+    let PreHirStmt::Assign { rhs, .. } = &func.body[1] else {
+        panic!();
+    };
+    assert!(matches!(rhs, PreHirExpr::Cast { .. }));
+}

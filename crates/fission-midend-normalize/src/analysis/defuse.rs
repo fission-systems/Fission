@@ -1162,19 +1162,19 @@ pub fn eval_hir_expr_with_const_env(
             expr: inner,
             ty,
         } => {
-            let (a, _) = eval_hir_expr_with_const_env(inner, env)?;
-            let result = eval_unary(*op, a, ty)?;
+            let (a, inner_ty) = eval_hir_expr_with_const_env(inner, env)?;
+            let result = eval_unary(*op, a, &inner_ty, ty)?;
             Some((result, ty.clone()))
         }
         PreHirExpr::Binary { op, lhs, rhs, ty } => {
-            let (a, _) = eval_hir_expr_with_const_env(lhs, env)?;
-            let (b, _) = eval_hir_expr_with_const_env(rhs, env)?;
-            let result = eval_binary(*op, a, b, ty)?;
+            let (a, lhs_ty) = eval_hir_expr_with_const_env(lhs, env)?;
+            let (b, rhs_ty) = eval_hir_expr_with_const_env(rhs, env)?;
+            let result = eval_binary(*op, a, &lhs_ty, b, &rhs_ty, ty)?;
             Some((result, ty.clone()))
         }
         PreHirExpr::Cast { ty, expr: inner } => {
-            let (a, _) = eval_hir_expr_with_const_env(inner, env)?;
-            let result = truncate_const(a, ty)?;
+            let (a, inner_ty) = eval_hir_expr_with_const_env(inner, env)?;
+            let result = eval_cast_const(a, &inner_ty, ty)?;
             Some((result, ty.clone()))
         }
         PreHirExpr::AddressOfGlobal(_)
@@ -1192,13 +1192,13 @@ pub fn eval_hir_expr_with_const_env(
 fn try_fold(expr: &PreHirExpr) -> Option<PreHirExpr> {
     match expr {
         PreHirExpr::Binary { op, lhs, rhs, ty } => {
-            let PreHirExpr::Const(a, _) = lhs.as_ref() else {
+            let PreHirExpr::Const(a, a_ty) = lhs.as_ref() else {
                 return None;
             };
-            let PreHirExpr::Const(b, _) = rhs.as_ref() else {
+            let PreHirExpr::Const(b, b_ty) = rhs.as_ref() else {
                 return None;
             };
-            let result = eval_binary(*op, *a, *b, ty)?;
+            let result = eval_binary(*op, *a, a_ty, *b, b_ty, ty)?;
             Some(PreHirExpr::Const(result, ty.clone()))
         }
         PreHirExpr::Unary {
@@ -1206,25 +1206,46 @@ fn try_fold(expr: &PreHirExpr) -> Option<PreHirExpr> {
             expr: inner,
             ty,
         } => {
-            let PreHirExpr::Const(a, _) = inner.as_ref() else {
+            let PreHirExpr::Const(a, a_ty) = inner.as_ref() else {
                 return None;
             };
-            let result = eval_unary(*op, *a, ty)?;
+            let result = eval_unary(*op, *a, a_ty, ty)?;
             Some(PreHirExpr::Const(result, ty.clone()))
         }
         PreHirExpr::Cast { ty, expr: inner } => {
-            let PreHirExpr::Const(a, _) = inner.as_ref() else {
+            let PreHirExpr::Const(a, a_ty) = inner.as_ref() else {
                 return None;
             };
-            let result = truncate_const(*a, ty)?;
+            let result = eval_cast_const(*a, a_ty, ty)?;
             Some(PreHirExpr::Const(result, ty.clone()))
         }
         _ => None,
     }
 }
 
-fn eval_binary(op: PreHirBinaryOp, a: i64, b: i64, ty: &NirType) -> Option<i64> {
+fn eval_binary(
+    op: PreHirBinaryOp,
+    a: i64,
+    a_ty: &NirType,
+    b: i64,
+    b_ty: &NirType,
+    ty: &NirType,
+) -> Option<i64> {
     let bits = int_or_bool_bits(ty)?;
+    let cmp_bits = || -> Option<u32> {
+        match (int_or_bool_bits(a_ty), int_or_bool_bits(b_ty)) {
+            (Some(ab), Some(bb)) if ab == bb => Some(ab),
+            _ => None,
+        }
+    };
+    let shift_amount = || -> Option<u32> {
+        let b_bits = int_or_bool_bits(b_ty)?;
+        let amount = zero_extend_bits(b, b_bits);
+        if b < 0 || amount >= u64::from(bits) {
+            return None;
+        }
+        Some(amount as u32)
+    };
     let result: i64 = match op {
         PreHirBinaryOp::Add => a.wrapping_add(b),
         PreHirBinaryOp::Sub => a.wrapping_sub(b),
@@ -1232,67 +1253,148 @@ fn eval_binary(op: PreHirBinaryOp, a: i64, b: i64, ty: &NirType) -> Option<i64> 
         PreHirBinaryOp::And => a & b,
         PreHirBinaryOp::Or => a | b,
         PreHirBinaryOp::Xor => a ^ b,
-        PreHirBinaryOp::LogicalAnd => i64::from((a != 0) && (b != 0)),
-        PreHirBinaryOp::LogicalOr => i64::from((a != 0) || (b != 0)),
+        PreHirBinaryOp::LogicalAnd => {
+            let ab = int_or_bool_bits(a_ty)?;
+            let bb = int_or_bool_bits(b_ty)?;
+            i64::from(zero_extend_bits(a, ab) != 0 && zero_extend_bits(b, bb) != 0)
+        }
+        PreHirBinaryOp::LogicalOr => {
+            let ab = int_or_bool_bits(a_ty)?;
+            let bb = int_or_bool_bits(b_ty)?;
+            i64::from(zero_extend_bits(a, ab) != 0 || zero_extend_bits(b, bb) != 0)
+        }
         PreHirBinaryOp::Shl => {
-            if b < 0 || b >= 64 {
-                return None;
-            }
-            a.wrapping_shl(b as u32)
+            let shift = shift_amount()?;
+            a.wrapping_shl(shift)
         }
         PreHirBinaryOp::Shr => {
-            if b < 0 || b >= 64 {
-                return None;
-            }
-            ((a as u64).wrapping_shr(b as u32)) as i64
+            let shift = shift_amount()?;
+            (zero_extend_bits(a, bits).wrapping_shr(shift)) as i64
         }
         PreHirBinaryOp::Sar => {
-            if b < 0 || b >= 64 {
-                return None;
-            }
-            a.wrapping_shr(b as u32)
+            let shift = shift_amount()?;
+            sign_extend_bits(a, bits).wrapping_shr(shift)
         }
-        PreHirBinaryOp::Eq => i64::from(a == b),
-        PreHirBinaryOp::Ne => i64::from(a != b),
-        PreHirBinaryOp::Lt => i64::from((a as u64) < (b as u64)),
-        PreHirBinaryOp::Le => i64::from((a as u64) <= (b as u64)),
-        PreHirBinaryOp::Gt => i64::from((a as u64) > (b as u64)),
-        PreHirBinaryOp::Ge => i64::from((a as u64) >= (b as u64)),
-        PreHirBinaryOp::SLt => i64::from(a < b),
-        PreHirBinaryOp::SLe => i64::from(a <= b),
-        PreHirBinaryOp::SGt => i64::from(a > b),
-        PreHirBinaryOp::SGe => i64::from(a >= b),
-        PreHirBinaryOp::Div => {
-            let bu = b as u64;
-            if bu == 0 {
-                return None;
-            }
-            ((a as u64).wrapping_div(bu)) as i64
+        PreHirBinaryOp::Eq => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) == zero_extend_bits(b, cb))
         }
-        PreHirBinaryOp::Mod => {
-            let bu = b as u64;
-            if bu == 0 {
-                return None;
-            }
-            ((a as u64).wrapping_rem(bu)) as i64
+        PreHirBinaryOp::Ne => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) != zero_extend_bits(b, cb))
         }
+        PreHirBinaryOp::Lt => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) < zero_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::Le => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) <= zero_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::Gt => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) > zero_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::Ge => {
+            let cb = cmp_bits()?;
+            i64::from(zero_extend_bits(a, cb) >= zero_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::SLt => {
+            let cb = cmp_bits()?;
+            i64::from(sign_extend_bits(a, cb) < sign_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::SLe => {
+            let cb = cmp_bits()?;
+            i64::from(sign_extend_bits(a, cb) <= sign_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::SGt => {
+            let cb = cmp_bits()?;
+            i64::from(sign_extend_bits(a, cb) > sign_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::SGe => {
+            let cb = cmp_bits()?;
+            i64::from(sign_extend_bits(a, cb) >= sign_extend_bits(b, cb))
+        }
+        PreHirBinaryOp::Div => match ty {
+            NirType::Int { signed: true, .. } => {
+                let sa = sign_extend_bits(a, bits);
+                let sb = sign_extend_bits(b, bits);
+                if sb == 0 || is_signed_div_overflow(sa, sb, bits) {
+                    return None;
+                }
+                sa.wrapping_div(sb)
+            }
+            NirType::Int { signed: false, .. } => {
+                let ua = zero_extend_bits(a, bits);
+                let ub = zero_extend_bits(b, bits);
+                if ub == 0 {
+                    return None;
+                }
+                (ua.wrapping_div(ub)) as i64
+            }
+            _ => return None,
+        },
+        PreHirBinaryOp::Mod => match ty {
+            NirType::Int { signed: true, .. } => {
+                let sa = sign_extend_bits(a, bits);
+                let sb = sign_extend_bits(b, bits);
+                if sb == 0 || is_signed_div_overflow(sa, sb, bits) {
+                    return None;
+                }
+                sa.wrapping_rem(sb)
+            }
+            NirType::Int { signed: false, .. } => {
+                let ua = zero_extend_bits(a, bits);
+                let ub = zero_extend_bits(b, bits);
+                if ub == 0 {
+                    return None;
+                }
+                (ua.wrapping_rem(ub)) as i64
+            }
+            _ => return None,
+        },
     };
     Some(mask_to_bits(result, bits))
 }
 
-fn eval_unary(op: PreHirUnaryOp, a: i64, ty: &NirType) -> Option<i64> {
+fn eval_unary(op: PreHirUnaryOp, a: i64, a_ty: &NirType, ty: &NirType) -> Option<i64> {
     let bits = int_or_bool_bits(ty)?;
     let result = match op {
         PreHirUnaryOp::Neg => a.wrapping_neg(),
-        PreHirUnaryOp::Not => i64::from(a == 0),
+        PreHirUnaryOp::Not => {
+            let ab = int_or_bool_bits(a_ty)?;
+            i64::from(zero_extend_bits(a, ab) == 0)
+        }
         PreHirUnaryOp::BitNot => !a,
     };
     Some(mask_to_bits(result, bits))
 }
 
-fn truncate_const(a: i64, ty: &NirType) -> Option<i64> {
-    let bits = int_or_bool_bits(ty)?;
-    Some(mask_to_bits(a, bits))
+fn eval_cast_const(a: i64, src_ty: &NirType, dst_ty: &NirType) -> Option<i64> {
+    let dst_bits = int_or_bool_bits(dst_ty)?;
+    let extended = match src_ty {
+        NirType::Int {
+            bits: src_bits,
+            signed: true,
+        } if dst_bits > *src_bits => sign_extend_bits(a, *src_bits),
+        NirType::Int { bits: src_bits, .. } => zero_extend_bits(a, *src_bits) as i64,
+        NirType::Bool => zero_extend_bits(a, 1) as i64,
+        NirType::Unknown => a,
+        _ => return None,
+    };
+    Some(mask_to_bits(extended, dst_bits))
+}
+
+fn is_signed_div_overflow(sa: i64, sb: i64, bits: u32) -> bool {
+    if sb != -1 || bits == 0 || bits > 64 {
+        return false;
+    }
+    let min_val = if bits == 64 {
+        i64::MIN
+    } else {
+        -(1_i64 << (bits - 1))
+    };
+    sa == min_val
 }
 
 fn int_or_bool_bits(ty: &NirType) -> Option<u32> {
@@ -1301,6 +1403,21 @@ fn int_or_bool_bits(ty: &NirType) -> Option<u32> {
         NirType::Int { bits, .. } => Some(*bits),
         _ => None,
     }
+}
+
+fn zero_extend_bits(value: i64, bits: u32) -> u64 {
+    if bits == 0 || bits >= 64 {
+        return value as u64;
+    }
+    (value as u64) & ((1_u64 << bits) - 1)
+}
+
+fn sign_extend_bits(value: i64, bits: u32) -> i64 {
+    if bits == 0 || bits >= 64 {
+        return value;
+    }
+    let shift = 64 - bits;
+    (value << shift) >> shift
 }
 
 /// Truncate an i64 to the lower `bits` bits using the i64 sign-bit convention
@@ -2217,6 +2334,80 @@ mod tests {
         let mut func = test_func(221, 221);
         assert!(apply_wide_dead_assignment_pass(&mut func));
         assert!(func.body.is_empty());
+    }
+
+    #[test]
+    fn fold_respects_sub64_signed_and_unsigned_operand_widths() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        // ~0_i32 == 0xFFFF_FFFF (-1 in 32-bit); signed < 0 must evaluate to true (1).
+        let mut slt_not = PreHirExpr::Binary {
+            op: PreHirBinaryOp::SLt,
+            lhs: Box::new(PreHirExpr::Unary {
+                op: PreHirUnaryOp::BitNot,
+                expr: Box::new(PreHirExpr::Const(0, i32_ty.clone())),
+                ty: i32_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0, i32_ty.clone())),
+            ty: NirType::Bool,
+        };
+        assert!(fold_expr_hir(&mut slt_not));
+        assert!(matches!(slt_not, PreHirExpr::Const(1, NirType::Bool)));
+
+        // Arithmetic right shift of 32-bit sign bit 0x8000_0000 >> 1 == 0xC000_0000.
+        let mut sar = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Const(0x8000_0000, i32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(1, i32_ty.clone())),
+            ty: i32_ty.clone(),
+        };
+        assert!(fold_expr_hir(&mut sar));
+        assert!(matches!(sar, PreHirExpr::Const(0xC000_0000, _)));
+
+        // Logical right shift of sign-extended -1_i64 as u32 >> 1 == 0x7FFF_FFFF.
+        let mut shr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Const(-1, u32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        assert!(fold_expr_hir(&mut shr));
+        assert!(matches!(shr, PreHirExpr::Const(0x7FFF_FFFF, _)));
+
+        // Unsigned -1_i64 (0xFFFF_FFFF_u32) < 0_u32 must be false (0), and Div (-2_u32 / 2_u32) == 0x7FFF_FFFF.
+        let mut ult = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Lt,
+            lhs: Box::new(PreHirExpr::Const(-1, u32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(0, u32_ty.clone())),
+            ty: NirType::Bool,
+        };
+        assert!(fold_expr_hir(&mut ult));
+        assert!(matches!(ult, PreHirExpr::Const(0, NirType::Bool)));
+
+        let mut udiv = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
+            lhs: Box::new(PreHirExpr::Const(-2, u32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(2, u32_ty.clone())),
+            ty: u32_ty,
+        };
+        assert!(fold_expr_hir(&mut udiv));
+        assert!(matches!(udiv, PreHirExpr::Const(0x7FFF_FFFF, _)));
+
+        // Signed 32-bit MIN / -1 must not fold.
+        let mut sdiv_overflow = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Div,
+            lhs: Box::new(PreHirExpr::Const(0x8000_0000_i64, i32_ty.clone())),
+            rhs: Box::new(PreHirExpr::Const(-1, i32_ty.clone())),
+            ty: i32_ty,
+        };
+        assert!(!fold_expr_hir(&mut sdiv_overflow));
     }
 }
 

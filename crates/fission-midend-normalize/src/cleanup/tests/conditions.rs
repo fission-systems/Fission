@@ -550,3 +550,108 @@ fn condexe_folding_keeps_a_test_of_memory_the_loop_around_it_writes() {
     let mut body = looped(assign_var("x", 1));
     assert!(apply_condexe_folding_pass(&mut body));
 }
+
+#[test]
+fn iblock_phi_elimination_blocks_clobber_memory_write_and_multi_use() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    // 1. Intervening write to condition variable `cond` must block hoisting.
+    let mut stmts_clobber_cond = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        assign_var("cond", 0),
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_clobber_cond));
+
+    // 2. Intervening store when branch RHS reads memory must block hoisting.
+    let mut stmts_clobber_mem = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: load_through("p"),
+            }]
+            .into(),
+            else_body: vec![assign_var("x", 0)].into(),
+        },
+        store_through("p", 99),
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_clobber_mem));
+
+    // 3. Multiple uses (`x + x` in one statement and across two statements) must block hoisting.
+    let mut stmts_same_stmt_multi_use = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Var("x".to_string())),
+            ty: int(32),
+        })),
+    ];
+    assert!(!apply_iblock_phi_elimination(
+        &mut stmts_same_stmt_multi_use
+    ));
+
+    let mut stmts_two_stmt_multi_use = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("y".to_string()),
+            rhs: PreHirExpr::Var("x".to_string()),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_two_stmt_multi_use));
+}
+
+#[test]
+fn iblock_phi_elimination_tracks_lvalue_base_uses() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    // Single use inside `Assign.lhs` (*x = 7) followed by return: must substitute into Deref ptr.
+    let mut stmts = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Var("p1".to_string()),
+            }]
+            .into(),
+            else_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Var("p2".to_string()),
+            }]
+            .into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("x".to_string())),
+                ty: int(32),
+            },
+            rhs: PreHirExpr::Const(7, int(32)),
+        },
+        PreHirStmt::Return(None),
+    ];
+
+    assert!(apply_iblock_phi_elimination(&mut stmts));
+    assert_eq!(stmts.len(), 2);
+    assert!(matches!(
+        &stmts[0],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { ptr, .. },
+            ..
+        } if matches!(ptr.as_ref(), PreHirExpr::Select { .. })
+    ));
+}

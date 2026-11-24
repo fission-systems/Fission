@@ -674,10 +674,19 @@ impl SubvarFlowSolver {
                     }
                     true
                 }
-                PreHirBinaryOp::Add
-                | PreHirBinaryOp::Sub
-                | PreHirBinaryOp::And
-                | PreHirBinaryOp::Xor => {
+                PreHirBinaryOp::And | PreHirBinaryOp::Xor => {
+                    if let PreHirExpr::Var(l) = &**lhs {
+                        self.worklist.push((l.clone(), mask));
+                    }
+                    if let PreHirExpr::Var(r) = &**rhs {
+                        self.worklist.push((r.clone(), mask));
+                    }
+                    true
+                }
+                PreHirBinaryOp::Add | PreHirBinaryOp::Sub => {
+                    if (mask & 1) == 0 {
+                        return false;
+                    }
                     if let PreHirExpr::Var(l) = &**lhs {
                         self.worklist.push((l.clone(), mask));
                     }
@@ -739,7 +748,7 @@ impl SubvarFlowSolver {
                 }
             }
             PreHirExpr::Unary { op, expr, .. } => {
-                if *op == PreHirUnaryOp::BitNot || *op == PreHirUnaryOp::Neg {
+                if *op == PreHirUnaryOp::BitNot || (*op == PreHirUnaryOp::Neg && (mask & 1) != 0) {
                     if let PreHirExpr::Var(inner) = &**expr {
                         self.worklist.push((inner.clone(), mask));
                         true
@@ -778,6 +787,9 @@ impl SubvarFlowSolver {
                     }
                 }
                 UseContext::Cast { target_ty, dest } => {
+                    if (mask & 1) == 0 {
+                        return false;
+                    }
                     let bits = match target_ty {
                         NirType::Int { bits, .. } => bits,
                         NirType::Bool => 1,
@@ -798,11 +810,16 @@ impl SubvarFlowSolver {
                     }
                 }
                 UseContext::Binary { op, other, dest } => match op {
-                    PreHirBinaryOp::Add
-                    | PreHirBinaryOp::Sub
-                    | PreHirBinaryOp::And
-                    | PreHirBinaryOp::Or
-                    | PreHirBinaryOp::Xor => {
+                    PreHirBinaryOp::Add | PreHirBinaryOp::Sub => {
+                        if (mask & 1) == 0 {
+                            return false;
+                        }
+                        self.worklist.push((dest.clone(), mask));
+                        if let PreHirExpr::Var(o) = other {
+                            self.worklist.push((o.clone(), mask));
+                        }
+                    }
+                    PreHirBinaryOp::And | PreHirBinaryOp::Or | PreHirBinaryOp::Xor => {
                         self.worklist.push((dest.clone(), mask));
                         if let PreHirExpr::Var(o) = other {
                             self.worklist.push((o.clone(), mask));
@@ -810,7 +827,10 @@ impl SubvarFlowSolver {
                     }
                     _ => return false,
                 },
-                UseContext::Compare { op: _, other } => {
+                UseContext::Compare { op, other } => {
+                    if !matches!(op, PreHirBinaryOp::Eq | PreHirBinaryOp::Ne) {
+                        return false;
+                    }
                     match other {
                         PreHirExpr::Const(val, _) => {
                             if (val as u64 & !mask) != 0 {
@@ -1357,5 +1377,104 @@ mod tests {
         } else {
             panic!("Statement 3 should be an assignment");
         }
+    }
+
+    #[test]
+    fn subvar_flow_rejects_ordering_compare_and_shifted_add() {
+        let binding = |name: &str, ty: NirType, origin: NirBindingOrigin| PreHirBinding {
+            name: name.to_string(),
+            ty,
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+
+        // Ordering compare (<) must reject subvar narrowing when used on the masked value.
+        let mut cmp_func = PreHirFunction {
+            params: vec![
+                binding("a", u64_ty(), NirBindingOrigin::ParamIndex(0)),
+                binding("b", u64_ty(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![
+                binding("x", u64_ty(), NirBindingOrigin::Temp),
+                binding("y", u64_ty(), NirBindingOrigin::Temp),
+                binding("z", u64_ty(), NirBindingOrigin::Temp),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("z".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Lt,
+                        lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(12, u64_ty())),
+                        ty: NirType::Bool,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_subvar_flow_pass(&mut cmp_func));
+
+        // Shifted high-byte mask (0xff00) must not propagate across Add (low-bit carry-in).
+        let mut add_func = PreHirFunction {
+            params: vec![
+                binding("a", u64_ty(), NirBindingOrigin::ParamIndex(0)),
+                binding("b", u64_ty(), NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![
+                binding("x", u64_ty(), NirBindingOrigin::Temp),
+                binding("y", u64_ty(), NirBindingOrigin::Temp),
+                binding("z", u64_ty(), NirBindingOrigin::Temp),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                        rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("y".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(0xff00, u64_ty())),
+                        ty: u64_ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("z".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Eq,
+                        lhs: Box::new(PreHirExpr::Var("y".to_string())),
+                        rhs: Box::new(PreHirExpr::Const(0x1200, u64_ty())),
+                        ty: NirType::Bool,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+        assert!(!apply_subvar_flow_pass(&mut add_func));
     }
 }

@@ -481,6 +481,12 @@ fn get_variables_in_expr(expr: &PreHirExpr, vars: &mut HashSet<String>) {
             get_variables_in_expr(base, vars);
             get_variables_in_expr(index, vars);
         }
+        PreHirExpr::FieldAccess { base, .. } => {
+            get_variables_in_expr(base, vars);
+        }
+        PreHirExpr::AddressOfLocal(name) => {
+            vars.insert(name.clone());
+        }
         PreHirExpr::AggregateCopy { src, .. } => {
             get_variables_in_expr(src, vars);
         }
@@ -580,7 +586,9 @@ pub fn apply_iblock_phi_elimination(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
 
     for _ in 0..8 {
-        let pass_changed = iblock_phi_pass(stmts);
+        let mut address_taken = HashSet::default();
+        collect_address_taken_in_stmts(stmts, &mut address_taken);
+        let pass_changed = iblock_phi_pass(stmts, &address_taken, true);
         if !pass_changed {
             break;
         }
@@ -594,9 +602,15 @@ pub fn apply_iblock_phi_elimination(stmts: &mut Vec<PreHirStmt>) -> bool {
 /// ```text
 /// if cond { lhs = val_t; } else { lhs = val_f; }
 /// ```
-/// where `lhs` is a simple variable (no memory write), and replaces subsequent
-/// uses of `lhs` with `(cond ? val_t : val_f)`, then removes the dead if-else.
-fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
+/// where `lhs` is a simple variable (no memory write), and replaces a single
+/// subsequent use of `lhs` with `(cond ? val_t : val_f)` when no intervening
+/// write or control flow can observe or invalidate `lhs` or its operands, then
+/// removes the dead if-else.
+fn iblock_phi_pass(
+    stmts: &mut Vec<PreHirStmt>,
+    address_taken: &HashSet<String>,
+    is_top_level: bool,
+) -> bool {
     let mut changed = false;
     let mut idx = 0;
 
@@ -604,19 +618,50 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
         // Recurse into nested blocks first
         match &mut stmts[idx] {
             PreHirStmt::Block(body) => {
-                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= iblock_phi_pass(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    address_taken,
+                    false,
+                );
+            }
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                changed |= iblock_phi_pass(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    address_taken,
+                    false,
+                );
+                changed |= iblock_phi_pass(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    address_taken,
+                    false,
+                );
             }
             PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. }
             | PreHirStmt::For { body, .. } => {
-                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
+                changed |= iblock_phi_pass(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    address_taken,
+                    false,
+                );
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |=
-                        iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body));
+                    changed |= iblock_phi_pass(
+                        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        address_taken,
+                        false,
+                    );
                 }
-                changed |= iblock_phi_pass(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
+                changed |= iblock_phi_pass(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    address_taken,
+                    false,
+                );
             }
             _ => {}
         }
@@ -624,10 +669,24 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
         // Try to match diamond pattern at current index
         let diamond = extract_diamond_phi(&stmts[idx]);
         if let Some((cond, lhs_var, val_true, val_false)) = diamond {
-            // Check if lhs_var is used in any subsequent statement and can be replaced
-            let lhs_used_below = stmts[idx + 1..].iter().any(|s| stmt_uses_var(s, &lhs_var));
+            let mut dep_vars = HashSet::default();
+            get_variables_in_expr(&cond, &mut dep_vars);
+            get_variables_in_expr(&val_true, &mut dep_vars);
+            get_variables_in_expr(&val_false, &mut dep_vars);
+            let deps_read_memory = expr_reads_memory(&cond)
+                || expr_reads_memory(&val_true)
+                || expr_reads_memory(&val_false);
+            let deps_need_mem_guard =
+                deps_read_memory || dep_vars.iter().any(|v| address_taken.contains(v));
 
-            if lhs_used_below {
+            if let Some(use_offset) = find_safe_single_phi_use(
+                &stmts[idx + 1..],
+                &lhs_var,
+                &dep_vars,
+                deps_need_mem_guard,
+                address_taken,
+                is_top_level,
+            ) {
                 let select_expr = PreHirExpr::Select {
                     cond: Box::new(cond),
                     then_expr: Box::new(val_true),
@@ -635,25 +694,7 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
                     ty: NirType::Unknown, // type resolved by downstream normalization
                 };
 
-                // Replace uses of lhs_var below with the select expression,
-                // stopping as soon as a statement that assigns to lhs_var is encountered.
-                for s in stmts[idx + 1..].iter_mut() {
-                    let assigns = stmt_assigns_var(s, &lhs_var);
-                    if let PreHirStmt::Assign {
-                        lhs: PreHirLValue::Var(name),
-                        rhs,
-                    } = s
-                    {
-                        if name == &lhs_var {
-                            replace_var_in_expr(rhs, &lhs_var, &select_expr);
-                            break;
-                        }
-                    }
-                    if assigns {
-                        break;
-                    }
-                    replace_var_in_stmt(s, &lhs_var, &select_expr);
-                }
+                replace_var_in_stmt(&mut stmts[idx + 1 + use_offset], &lhs_var, &select_expr);
 
                 // Remove the diamond if-else (it's now dead for lhs)
                 stmts.remove(idx);
@@ -667,6 +708,115 @@ fn iblock_phi_pass(stmts: &mut Vec<PreHirStmt>) -> bool {
     }
 
     changed
+}
+
+fn find_safe_single_phi_use(
+    rest: &[PreHirStmt],
+    lhs_var: &str,
+    dep_vars: &HashSet<String>,
+    deps_need_mem_guard: bool,
+    address_taken: &HashSet<String>,
+    is_top_level: bool,
+) -> Option<usize> {
+    if address_taken.contains(lhs_var) {
+        return None;
+    }
+
+    let mut use_offset: Option<usize> = None;
+
+    for (k, stmt) in rest.iter().enumerate() {
+        let uses = count_var_uses_in_stmt(stmt, lhs_var);
+        if uses == 0 {
+            let overwrites_lhs = matches!(
+                stmt,
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var(name),
+                    ..
+                } if name == lhs_var
+            );
+            if overwrites_lhs {
+                return use_offset;
+            }
+            if let Some(found) = use_offset {
+                if matches!(stmt, PreHirStmt::Return(_)) {
+                    return Some(found);
+                }
+                if stmt_has_nonlocal_jump_or_label(stmt) {
+                    return None;
+                }
+                continue;
+            }
+            if matches!(
+                stmt,
+                PreHirStmt::Label(_)
+                    | PreHirStmt::Goto(_)
+                    | PreHirStmt::Break
+                    | PreHirStmt::Continue
+                    | PreHirStmt::Return(_)
+                    | PreHirStmt::While { .. }
+                    | PreHirStmt::DoWhile { .. }
+                    | PreHirStmt::For { .. }
+            ) || stmt_has_nonlocal_jump_or_label(stmt)
+                || stmt_assigns_var(stmt, lhs_var)
+                || dep_vars.iter().any(|v| stmt_assigns_var(stmt, v))
+                || (deps_need_mem_guard && stmt_may_write_memory(stmt))
+            {
+                return None;
+            }
+            continue;
+        }
+
+        if uses > 1 || use_offset.is_some() {
+            return None;
+        }
+
+        if deps_need_mem_guard && stmt_contains_call(stmt) {
+            return None;
+        }
+
+        let safe_use = match stmt {
+            PreHirStmt::Assign { lhs, .. } => {
+                if matches!(lhs, PreHirLValue::Var(name) if name == lhs_var) {
+                    return Some(k);
+                }
+                true
+            }
+            PreHirStmt::Return(Some(_)) => return Some(k),
+            PreHirStmt::Expr(_) | PreHirStmt::VaStart { .. } => true,
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                then_body
+                    .iter()
+                    .all(|s| count_var_uses_in_stmt(s, lhs_var) == 0)
+                    && else_body
+                        .iter()
+                        .all(|s| count_var_uses_in_stmt(s, lhs_var) == 0)
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                cases.iter().all(|c| {
+                    c.body
+                        .iter()
+                        .all(|s| count_var_uses_in_stmt(s, lhs_var) == 0)
+                }) && default
+                    .iter()
+                    .all(|s| count_var_uses_in_stmt(s, lhs_var) == 0)
+            }
+            _ => false,
+        };
+        if !safe_use {
+            return None;
+        }
+
+        use_offset = Some(k);
+        if stmt_has_nonlocal_jump_or_label(stmt) {
+            return None;
+        }
+    }
+
+    if is_top_level { use_offset } else { None }
 }
 
 /// Attempts to extract a diamond phi assignment from an if-else statement.
@@ -720,23 +870,36 @@ fn extract_simple_assign(stmt: &PreHirStmt) -> Option<(String, &PreHirExpr)> {
     Some((name.clone(), rhs))
 }
 
-/// Returns `true` if any expression in `stmt` reads from `var_name`.
-fn stmt_uses_var(stmt: &PreHirStmt, var_name: &str) -> bool {
+/// Counts expression reads of `var_name` inside `stmt`.
+fn count_var_uses_in_stmt(stmt: &PreHirStmt, var_name: &str) -> usize {
     match stmt {
-        PreHirStmt::Assign { rhs, .. } => expr_uses_var(rhs, var_name),
-        PreHirStmt::Return(Some(expr)) => expr_uses_var(expr, var_name),
-        PreHirStmt::Return(None) => false,
+        PreHirStmt::Assign { lhs, rhs } => {
+            count_var_uses_in_lvalue(lhs, var_name) + count_var_uses_in_expr(rhs, var_name)
+        }
+        PreHirStmt::VaStart { va_list, .. } => count_var_uses_in_expr(va_list, var_name),
+        PreHirStmt::Return(Some(expr)) => count_var_uses_in_expr(expr, var_name),
+        PreHirStmt::Return(None) => 0,
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            expr_uses_var(cond, var_name)
-                || then_body.iter().any(|s| stmt_uses_var(s, var_name))
-                || else_body.iter().any(|s| stmt_uses_var(s, var_name))
+            count_var_uses_in_expr(cond, var_name)
+                + then_body
+                    .iter()
+                    .map(|s| count_var_uses_in_stmt(s, var_name))
+                    .sum::<usize>()
+                + else_body
+                    .iter()
+                    .map(|s| count_var_uses_in_stmt(s, var_name))
+                    .sum::<usize>()
         }
         PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
-            expr_uses_var(cond, var_name) || body.iter().any(|s| stmt_uses_var(s, var_name))
+            count_var_uses_in_expr(cond, var_name)
+                + body
+                    .iter()
+                    .map(|s| count_var_uses_in_stmt(s, var_name))
+                    .sum::<usize>()
         }
         PreHirStmt::For {
             init,
@@ -744,37 +907,194 @@ fn stmt_uses_var(stmt: &PreHirStmt, var_name: &str) -> bool {
             update,
             body,
         } => {
-            init.as_ref().map_or(false, |s| stmt_uses_var(s, var_name))
-                || cond.as_ref().map_or(false, |e| expr_uses_var(e, var_name))
-                || update
+            init.as_ref()
+                .map_or(0, |s| count_var_uses_in_stmt(s, var_name))
+                + cond
                     .as_ref()
-                    .map_or(false, |s| stmt_uses_var(s, var_name))
-                || body.iter().any(|s| stmt_uses_var(s, var_name))
+                    .map_or(0, |e| count_var_uses_in_expr(e, var_name))
+                + update
+                    .as_ref()
+                    .map_or(0, |s| count_var_uses_in_stmt(s, var_name))
+                + body
+                    .iter()
+                    .map(|s| count_var_uses_in_stmt(s, var_name))
+                    .sum::<usize>()
         }
-        PreHirStmt::Block(body) => body.iter().any(|s| stmt_uses_var(s, var_name)),
-        PreHirStmt::Expr(expr) => expr_uses_var(expr, var_name),
+        PreHirStmt::Block(body) => body
+            .iter()
+            .map(|s| count_var_uses_in_stmt(s, var_name))
+            .sum::<usize>(),
+        PreHirStmt::Expr(expr) => count_var_uses_in_expr(expr, var_name),
         PreHirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            expr_uses_var(expr, var_name)
-                || cases
+            count_var_uses_in_expr(expr, var_name)
+                + cases
                     .iter()
-                    .any(|c| c.body.iter().any(|s| stmt_uses_var(s, var_name)))
-                || default.iter().any(|s| stmt_uses_var(s, var_name))
+                    .map(|c| {
+                        c.body
+                            .iter()
+                            .map(|s| count_var_uses_in_stmt(s, var_name))
+                            .sum::<usize>()
+                    })
+                    .sum::<usize>()
+                + default
+                    .iter()
+                    .map(|s| count_var_uses_in_stmt(s, var_name))
+                    .sum::<usize>()
         }
-        _ => false,
+        _ => 0,
     }
 }
 
-fn expr_uses_var(expr: &PreHirExpr, var_name: &str) -> bool {
+fn count_var_uses_in_lvalue(lhs: &PreHirLValue, var_name: &str) -> usize {
+    match lhs {
+        PreHirLValue::Var(_) => 0,
+        PreHirLValue::Deref { ptr, .. } => count_var_uses_in_expr(ptr, var_name),
+        PreHirLValue::Index { base, index, .. } => {
+            count_var_uses_in_expr(base, var_name) + count_var_uses_in_expr(index, var_name)
+        }
+        PreHirLValue::FieldAccess { base, .. } => count_var_uses_in_expr(base, var_name),
+    }
+}
+
+fn count_var_uses_in_expr(expr: &PreHirExpr, var_name: &str) -> usize {
     match expr {
-        PreHirExpr::Var(name) => name == var_name,
-        PreHirExpr::Cast { expr, .. } => expr_uses_var(expr, var_name),
-        PreHirExpr::Unary { expr, .. } => expr_uses_var(expr, var_name),
-        PreHirExpr::Binary { lhs, rhs, .. } => {
-            expr_uses_var(lhs, var_name) || expr_uses_var(rhs, var_name)
+        PreHirExpr::Var(name) => usize::from(name == var_name),
+        // Taking the address allows arbitrary indirect reads, so prevent substitution.
+        PreHirExpr::AddressOfLocal(name) => {
+            if name == var_name {
+                2
+            } else {
+                0
+            }
+        }
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => count_var_uses_in_expr(expr, var_name),
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => count_var_uses_in_expr(lhs, var_name) + count_var_uses_in_expr(rhs, var_name),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            count_var_uses_in_expr(cond, var_name)
+                + count_var_uses_in_expr(then_expr, var_name)
+                + count_var_uses_in_expr(else_expr, var_name)
+        }
+        PreHirExpr::Call { args, .. } => args
+            .iter()
+            .map(|a| count_var_uses_in_expr(a, var_name))
+            .sum(),
+        _ => 0,
+    }
+}
+
+fn collect_address_taken_in_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                match lhs {
+                    PreHirLValue::Var(_) => {}
+                    PreHirLValue::Deref { ptr, .. } => collect_address_taken_in_expr(ptr, out),
+                    PreHirLValue::Index { base, index, .. } => {
+                        collect_address_taken_in_expr(base, out);
+                        collect_address_taken_in_expr(index, out);
+                    }
+                    PreHirLValue::FieldAccess { base, .. } => {
+                        collect_address_taken_in_expr(base, out);
+                    }
+                }
+                collect_address_taken_in_expr(rhs, out);
+            }
+            PreHirStmt::VaStart { va_list, .. } => collect_address_taken_in_expr(va_list, out),
+            PreHirStmt::Return(Some(expr)) | PreHirStmt::Expr(expr) => {
+                collect_address_taken_in_expr(expr, out);
+            }
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => {
+                collect_address_taken_in_stmts(body, out);
+                if let PreHirStmt::While { cond, .. } | PreHirStmt::DoWhile { cond, .. } = stmt {
+                    collect_address_taken_in_expr(cond, out);
+                }
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_address_taken_in_expr(cond, out);
+                collect_address_taken_in_stmts(then_body, out);
+                collect_address_taken_in_stmts(else_body, out);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(s) = init {
+                    collect_address_taken_in_stmts(std::slice::from_ref(s.as_ref()), out);
+                }
+                if let Some(e) = cond {
+                    collect_address_taken_in_expr(e, out);
+                }
+                if let Some(s) = update {
+                    collect_address_taken_in_stmts(std::slice::from_ref(s.as_ref()), out);
+                }
+                collect_address_taken_in_stmts(body, out);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_address_taken_in_expr(expr, out);
+                for case in cases {
+                    collect_address_taken_in_stmts(&case.body, out);
+                }
+                collect_address_taken_in_stmts(default, out);
+            }
+            PreHirStmt::Return(None)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_address_taken_in_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            out.insert(name.clone());
+        }
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => collect_address_taken_in_expr(expr, out),
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => {
+            collect_address_taken_in_expr(lhs, out);
+            collect_address_taken_in_expr(rhs, out);
         }
         PreHirExpr::Select {
             cond,
@@ -782,17 +1102,125 @@ fn expr_uses_var(expr: &PreHirExpr, var_name: &str) -> bool {
             else_expr,
             ..
         } => {
-            expr_uses_var(cond, var_name)
-                || expr_uses_var(then_expr, var_name)
-                || expr_uses_var(else_expr, var_name)
+            collect_address_taken_in_expr(cond, out);
+            collect_address_taken_in_expr(then_expr, out);
+            collect_address_taken_in_expr(else_expr, out);
         }
-        PreHirExpr::Call { args, .. } => args.iter().any(|a| expr_uses_var(a, var_name)),
-        PreHirExpr::Load { ptr, .. } => expr_uses_var(ptr, var_name),
-        PreHirExpr::PtrOffset { base, .. } => expr_uses_var(base, var_name),
-        PreHirExpr::Index { base, index, .. } => {
-            expr_uses_var(base, var_name) || expr_uses_var(index, var_name)
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_address_taken_in_expr(arg, out);
+            }
         }
-        PreHirExpr::AggregateCopy { src, .. } => expr_uses_var(src, var_name),
+        _ => {}
+    }
+}
+
+fn stmt_has_nonlocal_jump_or_label(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Label(_)
+        | PreHirStmt::Goto(_)
+        | PreHirStmt::Break
+        | PreHirStmt::Continue
+        | PreHirStmt::While { .. }
+        | PreHirStmt::DoWhile { .. }
+        | PreHirStmt::For { .. } => true,
+        PreHirStmt::Block(body) => body.iter().any(stmt_has_nonlocal_jump_or_label),
+        PreHirStmt::If {
+            then_body,
+            else_body,
+            ..
+        } => {
+            then_body.iter().any(stmt_has_nonlocal_jump_or_label)
+                || else_body.iter().any(stmt_has_nonlocal_jump_or_label)
+        }
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|c| c.body.iter().any(stmt_has_nonlocal_jump_or_label))
+                || default.iter().any(stmt_has_nonlocal_jump_or_label)
+        }
+        _ => false,
+    }
+}
+
+fn stmt_contains_call(stmt: &PreHirStmt) -> bool {
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => lvalue_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirStmt::VaStart { va_list, .. } => expr_contains_call(va_list),
+        PreHirStmt::Return(Some(expr)) | PreHirStmt::Expr(expr) => expr_contains_call(expr),
+        PreHirStmt::Block(body) => body.iter().any(stmt_contains_call),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            expr_contains_call(cond)
+                || then_body.iter().any(stmt_contains_call)
+                || else_body.iter().any(stmt_contains_call)
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            expr_contains_call(expr)
+                || cases.iter().any(|c| c.body.iter().any(stmt_contains_call))
+                || default.iter().any(stmt_contains_call)
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+            expr_contains_call(cond) || body.iter().any(stmt_contains_call)
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            init.as_deref().is_some_and(stmt_contains_call)
+                || cond.as_ref().is_some_and(expr_contains_call)
+                || update.as_deref().is_some_and(stmt_contains_call)
+                || body.iter().any(stmt_contains_call)
+        }
+        _ => false,
+    }
+}
+
+fn lvalue_contains_call(lhs: &PreHirLValue) -> bool {
+    match lhs {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_contains_call(ptr),
+        PreHirLValue::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirLValue::FieldAccess { base, .. } => expr_contains_call(base),
+    }
+}
+
+fn expr_contains_call(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. } => expr_contains_call(expr),
+        PreHirExpr::Binary { lhs, rhs, .. }
+        | PreHirExpr::Index {
+            base: lhs,
+            index: rhs,
+            ..
+        } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_call(cond)
+                || expr_contains_call(then_expr)
+                || expr_contains_call(else_expr)
+        }
         _ => false,
     }
 }
@@ -800,8 +1228,12 @@ fn expr_uses_var(expr: &PreHirExpr, var_name: &str) -> bool {
 /// Replaces all reads of `var_name` in `stmt` with `replacement`.
 fn replace_var_in_stmt(stmt: &mut PreHirStmt, var_name: &str, replacement: &PreHirExpr) {
     match stmt {
-        PreHirStmt::Assign { rhs, .. } => {
+        PreHirStmt::Assign { lhs, rhs } => {
+            replace_var_in_lvalue(lhs, var_name, replacement);
             replace_var_in_expr(rhs, var_name, replacement);
+        }
+        PreHirStmt::VaStart { va_list, .. } => {
+            replace_var_in_expr(va_list, var_name, replacement);
         }
         PreHirStmt::Return(Some(expr)) => {
             replace_var_in_expr(expr, var_name, replacement);
@@ -871,6 +1303,18 @@ fn replace_var_in_stmt(stmt: &mut PreHirStmt, var_name: &str, replacement: &PreH
     }
 }
 
+fn replace_var_in_lvalue(lhs: &mut PreHirLValue, var_name: &str, replacement: &PreHirExpr) {
+    match lhs {
+        PreHirLValue::Var(_) => {}
+        PreHirLValue::Deref { ptr, .. } => replace_var_in_expr(ptr, var_name, replacement),
+        PreHirLValue::Index { base, index, .. } => {
+            replace_var_in_expr(base, var_name, replacement);
+            replace_var_in_expr(index, var_name, replacement);
+        }
+        PreHirLValue::FieldAccess { base, .. } => replace_var_in_expr(base, var_name, replacement),
+    }
+}
+
 fn replace_var_in_expr(expr: &mut PreHirExpr, var_name: &str, replacement: &PreHirExpr) {
     match expr {
         PreHirExpr::Var(name) if name == var_name => {
@@ -910,6 +1354,9 @@ fn replace_var_in_expr(expr: &mut PreHirExpr, var_name: &str, replacement: &PreH
         PreHirExpr::Index { base, index, .. } => {
             replace_var_in_expr(base, var_name, replacement);
             replace_var_in_expr(index, var_name, replacement);
+        }
+        PreHirExpr::FieldAccess { base, .. } => {
+            replace_var_in_expr(base, var_name, replacement);
         }
         PreHirExpr::AggregateCopy { src, .. } => {
             replace_var_in_expr(src, var_name, replacement);

@@ -912,61 +912,20 @@ fn try_strip_outer_cast(
     binding_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
 ) -> Option<PreHirExpr> {
-    let PreHirExpr::Cast {
-        ty: cast_ty,
-        expr: inner,
-    } = expr
-    else {
-        return None;
-    };
-    let inner_ty = resolved_expr_type(inner, binding_types);
-    if let (Some(inner_bits), Some(cast_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
-    {
-        if inner_bits > cast_bits {
-            return None;
-        }
-    }
-    if let (Some(inner_bits), Some(binding_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(binding_ty))
-    {
-        if inner_bits > binding_bits {
-            return None;
-        }
-    }
-    if cast_ty == binding_ty {
-        let compatible = match (&inner_ty, binding_ty) {
-            (NirType::Unknown, _) => true,
-            (a, b) if a == b => true,
-            (NirType::Bool, NirType::Int { .. }) => true,
-            (
-                NirType::Int {
-                    bits: inner_bits, ..
-                },
-                NirType::Int {
-                    bits: outer_bits, ..
-                },
-            ) => inner_bits <= outer_bits,
-            _ => false,
-        };
-        if compatible {
-            return Some((**inner).clone());
-        }
-    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(binding_ty) {
-        if let (Some(cast_bits), Some(binding_bits)) =
-            (scalar_bit_width(cast_ty), scalar_bit_width(binding_ty))
-        {
-            if cast_bits >= binding_bits {
-                return Some((**inner).clone());
-            }
-        }
-    }
-    None
+    try_strip_outer_cast_for_target(expr, binding_ty, binding_types)
 }
 
 fn try_strip_return_outer_cast(
     expr: &PreHirExpr,
     return_type: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<PreHirExpr> {
+    try_strip_outer_cast_for_target(expr, return_type, binding_types)
+}
+
+fn try_strip_outer_cast_for_target(
+    expr: &PreHirExpr,
+    target_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
 ) -> Option<PreHirExpr> {
     let PreHirExpr::Cast {
@@ -984,38 +943,76 @@ fn try_strip_return_outer_cast(
             return None;
         }
     }
-    if let (Some(inner_bits), Some(return_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(return_type))
+    if let (Some(inner_bits), Some(target_bits)) =
+        (scalar_bit_width(&inner_ty), scalar_bit_width(target_ty))
     {
-        if inner_bits > return_bits {
+        if inner_bits > target_bits {
             return None;
         }
     }
-    if cast_ty == return_type && is_scalar_non_unknown(cast_ty) {
-        let compatible = match (&inner_ty, return_type) {
+    if cast_ty == target_ty && is_scalar_non_unknown(cast_ty) {
+        let compatible = match (&inner_ty, target_ty) {
             (NirType::Unknown, _) => true,
             (a, b) if a == b => true,
             (NirType::Bool, NirType::Int { .. }) => true,
             (
                 NirType::Int {
-                    bits: inner_bits, ..
+                    bits: inner_bits,
+                    signed: inner_signed,
                 },
                 NirType::Int {
-                    bits: outer_bits, ..
+                    bits: outer_bits,
+                    signed: outer_signed,
                 },
-            ) => inner_bits <= outer_bits,
+            ) => {
+                *inner_bits <= *outer_bits
+                    && (*inner_bits == *outer_bits || inner_signed == outer_signed)
+            }
             _ => false,
         };
         if compatible {
             return Some((**inner).clone());
         }
-    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(return_type) {
-        if let (Some(cast_bits), Some(return_bits)) =
-            (scalar_bit_width(cast_ty), scalar_bit_width(return_type))
-        {
-            if cast_bits >= return_bits {
-                return Some((**inner).clone());
+    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(target_ty) {
+        let (Some(cast_bits), Some(target_bits)) =
+            (scalar_bit_width(cast_ty), scalar_bit_width(target_ty))
+        else {
+            return None;
+        };
+        if cast_bits < target_bits {
+            return None;
+        }
+        // Only strip cross-type outer scalar casts when inner is also an integer/bool scalar
+        // (never strip float-to-int or unknown-type conversions), no bits are lost, and
+        // widening preserves signedness.
+        let compatible = match (&inner_ty, cast_ty, target_ty) {
+            (
+                NirType::Bool,
+                NirType::Bool | NirType::Int { .. },
+                NirType::Bool | NirType::Int { .. },
+            ) => true,
+            (
+                NirType::Int {
+                    bits: inner_bits,
+                    signed: inner_signed,
+                },
+                NirType::Int {
+                    signed: cast_signed,
+                    ..
+                },
+                NirType::Int {
+                    bits: outer_bits,
+                    signed: outer_signed,
+                },
+            ) => {
+                *inner_bits <= *outer_bits
+                    && (*inner_bits == *outer_bits
+                        || (inner_signed == cast_signed && cast_signed == outer_signed))
             }
+            _ => false,
+        };
+        if compatible {
+            return Some((**inner).clone());
         }
     }
     None
@@ -1383,5 +1380,36 @@ mod comparison_view_tests {
             try_strip_return_outer_cast(&safe_cast, &u32_ty, &types32),
             Some(PreHirExpr::Var("val32".into()))
         );
+    }
+
+    #[test]
+    fn preserves_float_to_int_and_signedness_changing_widening_outer_casts() {
+        let int = |bits: u32, signed: bool| NirType::Int { bits, signed };
+        let f32_ty = NirType::Float { bits: 32 };
+        let i8_ty = int(8, true);
+        let i32_ty = int(32, true);
+        let u32_ty = int(32, false);
+        let u64_ty = int(64, false);
+        let types = HashMap::from_iter([
+            ("fval".to_string(), f32_ty),
+            ("s8".to_string(), i8_ty),
+            ("x32".to_string(), i32_ty.clone()),
+        ]);
+
+        // Float -> Int conversion must not be stripped even across different integer target widths.
+        let float_to_int = PreHirExpr::Cast {
+            ty: i32_ty.clone(),
+            expr: Box::new(PreHirExpr::Var("fval".into())),
+        };
+        assert!(try_strip_outer_cast(&float_to_int, &u32_ty, &types).is_none());
+        assert!(try_strip_return_outer_cast(&float_to_int, &u32_ty, &types).is_none());
+
+        // Signedness-changing widening (u64)(i8) assigned to i32 must not be stripped.
+        let sign_widen = PreHirExpr::Cast {
+            ty: u64_ty,
+            expr: Box::new(PreHirExpr::Var("s8".into())),
+        };
+        assert!(try_strip_outer_cast(&sign_widen, &i32_ty, &types).is_none());
+        assert!(try_strip_return_outer_cast(&sign_widen, &i32_ty, &types).is_none());
     }
 }
