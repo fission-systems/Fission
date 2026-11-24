@@ -232,8 +232,13 @@ impl EmulatorOracle {
             } else {
                 pointer.to_le_bytes()[..self.pointer_bytes].to_vec()
             };
+            // The boundary is validated by the summary, after the oracle is
+            // built: a field that does not fit stays unwritten here, and the
+            // summary refuses it with the reason.
             let field = *field as usize;
-            memory[field..field + self.pointer_bytes].copy_from_slice(&bytes);
+            if let Some(slot) = memory.get_mut(field..field.saturating_add(self.pointer_bytes)) {
+                slot.copy_from_slice(&bytes);
+            }
         }
         // A nested region's pointer may sit in global memory or a register's
         // block: the copy-in before each step carries it there.

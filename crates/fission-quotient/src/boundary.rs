@@ -115,7 +115,13 @@ impl QuotientBoundary {
         }
         for region in &self.regions {
             let parent = region.parent.map_or(0, |index| bases[index]);
-            fields.push(region.is_pointee().then_some(parent + region.field));
+            // Saturating: a field past its parent is refused by validation,
+            // which runs after the layout is first taken.
+            fields.push(
+                region
+                    .is_pointee()
+                    .then_some(parent.saturating_add(region.field)),
+            );
         }
         MemoryLayout { bases, fields, len }
     }

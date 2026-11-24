@@ -602,6 +602,27 @@ fn what_the_region_model_cannot_vouch_for_is_unsupported() {
     );
 }
 
+/// A declared pointer field that lies outside the context is a boundary the
+/// model refuses with its reason -- not a panic while the oracle lays the
+/// context out, which runs before the summary validates the boundary.
+#[test]
+fn a_pointer_field_outside_the_context_is_refused_not_a_crash() {
+    for field in [100, 0xffff_fff0] {
+        let report = quotient_over(
+            X86_64,
+            "auth_step",
+            8,
+            vec![region(field, vec![0; 16])],
+            QuotientBudget::default(),
+        );
+        assert!(
+            unsupported_reason(&report).contains("does not fit its parent"),
+            "{field:#x}: {:?}",
+            report.status
+        );
+    }
+}
+
 /// A global counter and a global class table: global memory the step touches
 /// at absolute addresses is a region anchored there, starting as the image
 /// holds it. The table is read at the input byte, the counter carried from
