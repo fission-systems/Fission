@@ -582,6 +582,8 @@ struct SubvarFlowSolver {
     def_map: HashMap<String, PreHirExpr>,
     type_map: HashMap<String, NirType>,
     multi_defined: HashSet<String>,
+    /// Bits each variable may hold nonzero (`compute_nz_masks`).
+    nz_masks: HashMap<String, u64>,
     varmap: HashMap<String, ReplaceVar>,
     pull_points: HashSet<String>,
     worklist: Vec<(String, u64)>,
@@ -829,6 +831,22 @@ impl SubvarFlowSolver {
                 },
                 UseContext::Compare { op, other } => {
                     if !matches!(op, PreHirBinaryOp::Eq | PreHirBinaryOp::Ne) {
+                        return false;
+                    }
+                    // The comparison reads the whole variable, so the narrow
+                    // copy compares the same only when every bit outside the
+                    // mask is known zero, the mask starts at bit 0 (the
+                    // constant is not shifted), and the copy is unsigned (a
+                    // signed `i8` holding 200 compares as -56).
+                    let upper_bits_zero = self
+                        .nz_masks
+                        .get(var_name)
+                        .is_some_and(|nz| nz & !mask == 0);
+                    let signed = matches!(
+                        self.type_map.get(var_name),
+                        Some(NirType::Int { signed: true, .. })
+                    );
+                    if !upper_bits_zero || signed || (mask & 1) == 0 {
                         return false;
                     }
                     match other {
@@ -1145,6 +1163,7 @@ pub fn apply_subvar_flow_pass(func: &mut PreHirFunction) -> bool {
             def_map: def_map.clone(),
             type_map: type_map.clone(),
             multi_defined: multi_defined.clone(),
+            nz_masks: nz_masks.clone(),
             varmap: HashMap::default(),
             pull_points: HashSet::default(),
             worklist: vec![(var_name.clone(), mask)],
@@ -1377,6 +1396,81 @@ mod tests {
         } else {
             panic!("Statement 3 should be an assignment");
         }
+    }
+
+    /// `x = a + b; y = x & 0xff; z = x == 12;` -- the comparison reads all
+    /// of `x`, whose upper bits are not known zero: `(u8)x == 12` is a
+    /// different test. Equality is no safer than ordering here.
+    #[test]
+    fn subvar_flow_keeps_an_equality_compare_on_a_variable_with_live_upper_bits() {
+        let binding = |name: &str, origin: NirBindingOrigin| PreHirBinding {
+            name: name.to_string(),
+            ty: u64_ty(),
+            surface_type_name: None,
+            origin: Some(origin),
+            initializer: None,
+        };
+        let var = |n: &str| Box::new(PreHirExpr::Var(n.to_string()));
+        let assign = |lhs: &str, op, l: Box<PreHirExpr>, r: Box<PreHirExpr>| PreHirStmt::Assign {
+            lhs: PreHirLValue::Var(lhs.to_string()),
+            rhs: PreHirExpr::Binary {
+                op,
+                lhs: l,
+                rhs: r,
+                ty: u64_ty(),
+            },
+        };
+        let body = |compared: &str| {
+            vec![
+                assign("x", PreHirBinaryOp::Add, var("a"), var("b")),
+                assign(
+                    "y",
+                    PreHirBinaryOp::And,
+                    var("x"),
+                    Box::new(PreHirExpr::Const(0xff, u64_ty())),
+                ),
+                assign(
+                    "z",
+                    PreHirBinaryOp::Eq,
+                    var(compared),
+                    Box::new(PreHirExpr::Const(12, u64_ty())),
+                ),
+            ]
+        };
+        let func = |compared: &str| PreHirFunction {
+            params: vec![
+                binding("a", NirBindingOrigin::ParamIndex(0)),
+                binding("b", NirBindingOrigin::ParamIndex(1)),
+            ],
+            locals: vec![
+                binding("x", NirBindingOrigin::Temp),
+                binding("y", NirBindingOrigin::Temp),
+                binding("z", NirBindingOrigin::Temp),
+            ],
+            body: body(compared),
+            ..Default::default()
+        };
+
+        let mut whole = func("x");
+        apply_subvar_flow_pass(&mut whole);
+        let PreHirStmt::Assign { rhs, .. } = &whole.body[2] else {
+            panic!("{:#?}", whole.body);
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Binary { lhs, .. } if matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "x")),
+            "{rhs:#?}"
+        );
+
+        // Control: comparing the masked `y` (upper bits zero) still narrows.
+        let mut masked = func("y");
+        assert!(apply_subvar_flow_pass(&mut masked));
+        let PreHirStmt::Assign { rhs, .. } = &masked.body[2] else {
+            panic!("{:#?}", masked.body);
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Binary { lhs, .. } if matches!(lhs.as_ref(), PreHirExpr::Var(n) if n == "x_sub8")),
+            "{rhs:#?}"
+        );
     }
 
     #[test]

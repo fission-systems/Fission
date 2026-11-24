@@ -655,3 +655,82 @@ fn iblock_phi_elimination_tracks_lvalue_base_uses() {
         } if matches!(ptr.as_ref(), PreHirExpr::Select { .. })
     ));
 }
+
+/// The cleanup loop runs every pass on every nested list. On a nested list
+/// iblock cannot see a read after the list ends: `if (p) { if (c) x = a;
+/// else x = b; *q = x; } return x;` must keep the definition of `x` that
+/// `return x` reads on the `p` path.
+#[test]
+fn iblock_phi_elimination_keeps_a_diamond_read_after_its_nested_list() {
+    let nested = |inner_tail: Vec<PreHirStmt>| {
+        let mut then_body = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Var("a".to_string()),
+                }]
+                .into(),
+                else_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Var("b".to_string()),
+                }]
+                .into(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("q".to_string())),
+                    ty: int(32),
+                },
+                rhs: PreHirExpr::Var("x".to_string()),
+            },
+        ];
+        then_body.extend(inner_tail);
+        vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("p".to_string()),
+                then_body: then_body.into(),
+                else_body: vec![assign_var("x", 0)].into(),
+            },
+            PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+        ]
+    };
+    fn defines_x(stmts: &[PreHirStmt]) -> bool {
+        stmts.iter().any(|s| match s {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(n),
+                ..
+            } => n == "x",
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => defines_x(then_body) && defines_x(else_body),
+            PreHirStmt::Block(body) => defines_x(body),
+            _ => false,
+        })
+    }
+    fn then_arm(body: &[PreHirStmt]) -> Vec<PreHirStmt> {
+        body.iter()
+            .find_map(|s| match s {
+                PreHirStmt::If { then_body, .. } => Some(then_body.to_vec()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    let mut body = nested(Vec::new());
+    crate::normalize_function_body(&mut body);
+    assert!(defines_x(&then_arm(&body)), "{body:#?}");
+
+    // Control: when the nested list overwrites `x` after its single use, the
+    // diamond is dead past the use and is folded into it.
+    let mut body = nested(vec![assign_var("x", 5)]);
+    crate::normalize_function_body(&mut body);
+    let arm = then_arm(&body);
+    assert!(
+        !arm.iter()
+            .any(|s| matches!(s, PreHirStmt::If { then_body, .. } if then_body.len() == 1)),
+        "{body:#?}"
+    );
+}

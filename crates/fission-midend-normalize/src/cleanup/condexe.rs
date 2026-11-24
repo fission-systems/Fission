@@ -581,6 +581,11 @@ fn invalidate_variable(
 /// the now-dead assignment. This allows downstream passes to further simplify
 /// or inline the ternary.
 ///
+/// `stmts` must be a whole function body: a use is only taken as the last
+/// one when nothing follows it before the end of `stmts`, which is the
+/// function's exit only at the top level. Nested lists are handled by the
+/// recursion here.
+///
 /// Returns `true` if any transformation was applied.
 pub fn apply_iblock_phi_elimination(stmts: &mut Vec<PreHirStmt>) -> bool {
     let mut changed = false;
