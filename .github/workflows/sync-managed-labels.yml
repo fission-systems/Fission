@@ -1,0 +1,31 @@
+name: Sync managed labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Create missing labels (false previews only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  sync:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Preview or create missing labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY: ${{ inputs.apply }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          args=(--repo "$REPOSITORY")
+          if [[ "$APPLY" == "true" ]]; then args+=(--apply); fi
+          python3 scripts/check/sync_github_labels.py "${args[@]}"
