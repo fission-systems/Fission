@@ -43,12 +43,16 @@ this repository did exactly that:
    unresolved_risks:    <what could still be wrong, or "none">
    ```
 
-4. Approved PRs enter the merge queue with
+4. Reviewed PRs enter the merge queue with
    `gh pr merge N --merge --match-head-commit <reviewed_sha>`, so a commit
    pushed after the review blocks the merge until it is reviewed again.
-   Branch protection already dismisses stale approvals on a new push
-   (`dismiss_stale_reviews: true`). Never `--admin`, never bypass required
-   checks, review or branch protection.
+   The review record above is what binds a review to a commit, not a GitHub
+   approval: branch protection requires 0 approvals, because every PR is
+   opened from one account and GitHub does not let an author approve their
+   own PR, so requiring one would block every merge. Where an approval is
+   given it is dismissed on a new push (`dismiss_stale_reviews: true`).
+   Never `--admin`, never bypass required checks, review or branch
+   protection.
 
 ## Reviewer focus by area and risk
 
@@ -67,4 +71,5 @@ this repository did exactly that:
 | `area:docs` only | One reviewer; commands in the text were run. |
 
 Two or more `risk:*` labels, or `risk:semantic` on `area:solver`/`area:verify`,
-get two independent reviewers, and the combined-tree check before merge.
+get two independent reviewers (each with its own review record; agents count,
+as defined above), and the combined-tree check before merge.
