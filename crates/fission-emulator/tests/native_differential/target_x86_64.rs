@@ -792,6 +792,12 @@ const DENIED: &[&str] = &[
     "INSERTQ",
 ];
 
+/// Instructions whose result the manual leaves to the implementation, so no
+/// one host is the reference: SDM 2, RCPPS / RCPSS / RSQRTPS / RSQRTSS, only
+/// bound the approximation ("|Relative Error| <= 1.5 * 2^-12"), and Intel
+/// and AMD return different bits. Fission computes the exact value.
+const APPROXIMATE: &[&str] = &["RCPPS", "RCPSS", "RSQRTPS", "RSQRTSS"];
+
 fn skip(bytes: &[u8], lifted: &Lifted, fission: &FissionMachine) -> Option<String> {
     // Legacy prefixes, then REX, then the opcode.
     let mut i = 0;
@@ -827,6 +833,9 @@ fn skip(bytes: &[u8], lifted: &Lifted, fission: &FissionMachine) -> Option<Strin
         .trim_end_matches(".LOCK");
     if DENIED.contains(&base) {
         return Some(format!("denied:{base}"));
+    }
+    if APPROXIMATE.contains(&base) {
+        return Some(format!("approximate:{base}"));
     }
     let rs = fission.register_space;
     // x87 and MMX state (ST0-7, the FPU control words, MM0-7).
