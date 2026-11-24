@@ -1771,3 +1771,61 @@ fn exact_iat_call_arity_recovers_entry_owned_windows_registers() {
         "an exact IAT prototype must recover entry-owned RCX/RDX values:\n{rendered}"
     );
 }
+
+/// `dir_name(file) { r = mdir_name(file); ... }` in a stripped binary: the
+/// callee has no symbol, so the call target resolves to no name, but its body
+/// was summarised under `sub_<address>` with a proven arity. The caller hands
+/// its own `rdi` straight on without touching it; that register is the
+/// call's argument and the caller's parameter.
+#[test]
+fn exact_arity_of_an_unnamed_internal_callee_recovers_a_passed_through_register() {
+    let target = 0x401100;
+    let func = PcodeFunction {
+        blocks: vec![PcodeBasicBlock {
+            index: 0,
+            start_address: 0x401000,
+            successors: vec![],
+            ops: vec![
+                PcodeOp {
+                    seq_num: 0,
+                    opcode: PcodeOpcode::Call,
+                    address: 0x401004,
+                    output: None,
+                    inputs: vec![cst(target as i64, 8)],
+                    asm_mnemonic: None,
+                },
+                PcodeOp {
+                    seq_num: 1,
+                    opcode: PcodeOpcode::Return,
+                    address: 0x401009,
+                    output: None,
+                    inputs: vec![cst(0, 8)],
+                    asm_mnemonic: None,
+                },
+            ],
+        }],
+    };
+    let mut context = PreviewTypeContext::default();
+    context.call_prototype_summaries.insert(
+        format!("sub_{target:x}"),
+        NirCallPrototypeSummary {
+            variadic_fixed_arity: None,
+            min_arity: 1,
+            max_arity: 1,
+            locked_exact_arity: Some(1),
+            returns_void: false,
+            param_pointer_pointees: vec![None],
+            param_surface_type_names: vec![None],
+        },
+    );
+    let rendered = render_mlil_preview_with_context(
+        &func,
+        "caller",
+        0x401000,
+        &preview_options_for(CallingConvention::SystemVAmd64),
+        Some(&context),
+    )
+    .expect("preview render should succeed");
+
+    assert!(rendered.contains("sub_401100(param_1)"), "{rendered}");
+}
