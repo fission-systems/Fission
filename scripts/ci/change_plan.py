@@ -192,8 +192,21 @@ def plan(paths: list[str], event: str) -> tuple[str, dict[str, bool]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--paths", required=True, type=Path)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--paths", type=Path, help="CI: write the event's changed paths here")
+    group.add_argument(
+        "--classify", type=Path,
+        help="Local (cargo xtask preflight): plan for the changed paths listed in this file",
+    )
+    parser.add_argument("--event", default="pull_request", help="event to plan for with --classify")
     args = parser.parse_args()
+    if args.classify is not None:
+        paths = [line for line in args.classify.read_text().splitlines() if line]
+        lane, jobs = plan(paths or ["Cargo.toml"], args.event)
+        print(f"lane={lane}")
+        for name, enabled in jobs.items():
+            print(f"{name}={str(enabled).lower()}")
+        return
     event = os.environ["GITHUB_EVENT_NAME"]
     payload = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
     paths = event_paths(event, payload, os.environ["GITHUB_SHA"])

@@ -111,6 +111,9 @@ cargo check -p fission-decompiler
 
 # Formatting -- CI runs exactly this
 cargo fmt --all --check
+
+# Before pushing: CI Fast Gate checks for your commits, via CI's own scripts (--fast, --full, --release)
+cargo xtask preflight
 ```
 
 The workspace is fully rustfmt-clean and CI enforces it across every file, so
