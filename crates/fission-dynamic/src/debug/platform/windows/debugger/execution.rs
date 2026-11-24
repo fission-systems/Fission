@@ -15,17 +15,33 @@ impl WindowsDebugger {
         self.set_registers(thread_id, &registers)
     }
 
-    /// Arm the trap flag so the thread stops after one instruction.
-    fn set_trap_flag(&mut self, thread_id: u32) -> FissionResult<()> {
+    /// Update the trap flag so the thread stops after one instruction (`enabled = true`)
+    /// or clears a pending single-step trap (`enabled = false`).
+    fn set_trap_flag_state(&mut self, thread_id: u32, enabled: bool) -> FissionResult<()> {
         let mut registers = self.fetch_registers(thread_id)?;
         let name = if registers.get("RFLAGS").is_some() {
             "RFLAGS"
         } else {
             "EFLAGS"
         };
-        let flags = registers.get(name).unwrap_or(0x202) | 0x100;
+        let current = registers.get(name).unwrap_or(0x202);
+        let flags = if enabled {
+            current | 0x100
+        } else {
+            current & !0x100
+        };
         registers.set(name, flags);
         self.set_registers(thread_id, &registers)
+    }
+
+    /// Arm the trap flag so the thread stops after one instruction.
+    fn set_trap_flag(&mut self, thread_id: u32) -> FissionResult<()> {
+        self.set_trap_flag_state(thread_id, true)
+    }
+
+    /// Clear the trap flag during rollback.
+    fn clear_trap_flag(&mut self, thread_id: u32) -> FissionResult<()> {
+        self.set_trap_flag_state(thread_id, false)
     }
 
     /// If the current thread stands on one of our persistent breakpoints, run
@@ -66,7 +82,12 @@ impl WindowsDebugger {
             address,
             report,
         });
-        self.continue_pending_debug_event()?;
+        if let Err(error) = self.continue_pending_debug_event() {
+            self.step_off = None;
+            let _ = self.clear_trap_flag(thread_id);
+            let _ = self.write_memory(address, &[0xCC]);
+            return Err(error);
+        }
         self.state.status = DebugStatus::Running;
         Ok(true)
     }
@@ -92,15 +113,17 @@ impl WindowsDebugger {
             .or(self.state.main_thread_id)
             .ok_or_else(|| FissionError::debug("No thread id"))?;
         unsafe {
-            let h_thread = OpenThread(THREAD_ALL_ACCESS, false, tid)
-                .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?;
+            let h_thread = super::super::OwnedHandle(
+                OpenThread(THREAD_ALL_ACCESS, false, tid)
+                    .map_err(|e| FissionError::debug(format!("OpenThread failed: {:?}", e)))?,
+            );
 
             let registers: crate::debug::types::RegisterState;
 
             if self.is_wow64 == Some(true) {
                 let mut ctx: WOW64_CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = WOW64_CONTEXT_ALL;
-                Wow64GetThreadContext(h_thread, &mut ctx).map_err(|e| {
+                Wow64GetThreadContext(h_thread.0, &mut ctx).map_err(|e| {
                     FissionError::debug(format!("Wow64GetThreadContext failed: {:?}", e))
                 })?;
                 registers = crate::debug::types::RegisterState::at(ctx.Eip as u64)
@@ -116,13 +139,13 @@ impl WindowsDebugger {
                     .with("EFLAGS", ctx.EFlags as u64);
                 self.record_ttd_snapshot(tid, &registers);
                 ctx.EFlags |= 0x100; // Set Trap Flag
-                Wow64SetThreadContext(h_thread, &ctx).map_err(|e| {
+                Wow64SetThreadContext(h_thread.0, &ctx).map_err(|e| {
                     FissionError::debug(format!("Wow64SetThreadContext failed: {:?}", e))
                 })?;
             } else {
                 let mut ctx: CONTEXT = std::mem::zeroed();
                 ctx.ContextFlags = CONTEXT_FLAGS(CONTEXT_ALL);
-                GetThreadContext(h_thread, &mut ctx).map_err(|e| {
+                GetThreadContext(h_thread.0, &mut ctx).map_err(|e| {
                     FissionError::debug(format!("GetThreadContext failed: {:?}", e))
                 })?;
 
@@ -149,12 +172,10 @@ impl WindowsDebugger {
 
                 ctx.EFlags |= 0x100; // Set Trap Flag
 
-                SetThreadContext(h_thread, &ctx).map_err(|e| {
+                SetThreadContext(h_thread.0, &ctx).map_err(|e| {
                     FissionError::debug(format!("SetThreadContext failed: {:?}", e))
                 })?;
             }
-
-            let _ = CloseHandle(h_thread);
         }
 
         // Continue to let the CPU execute one instruction and hit the trap.
