@@ -1370,19 +1370,24 @@ fn eval_unary(op: PreHirUnaryOp, a: i64, a_ty: &NirType, ty: &NirType) -> Option
     Some(mask_to_bits(result, bits))
 }
 
+/// Fold `(dst_ty)Const(a, src_ty)`.
+///
+/// A widening `Cast` does not say whether it extends by sign or by zero: the
+/// builder lowers `INT_SEXT` to a cast to the *signed* wider type and leaves
+/// the operand's own type alone, so an `imul r64, r/m64, imm32` immediate
+/// arrives as `(long long)Const(-0x6db6db6d, u32)`. Extending by the source's
+/// signedness turned that into `0x92492493`. The constant's stored `i64`
+/// already carries the extension the lowering meant, so it is kept and only
+/// truncated to the destination width. A float source is a conversion, not a
+/// bit copy, and is not folded.
 fn eval_cast_const(a: i64, src_ty: &NirType, dst_ty: &NirType) -> Option<i64> {
     let dst_bits = int_or_bool_bits(dst_ty)?;
-    let extended = match src_ty {
-        NirType::Int {
-            bits: src_bits,
-            signed: true,
-        } if dst_bits > *src_bits => sign_extend_bits(a, *src_bits),
-        NirType::Int { bits: src_bits, .. } => zero_extend_bits(a, *src_bits) as i64,
-        NirType::Bool => zero_extend_bits(a, 1) as i64,
-        NirType::Unknown => a,
-        _ => return None,
-    };
-    Some(mask_to_bits(extended, dst_bits))
+    match src_ty {
+        NirType::Int { .. } | NirType::Bool | NirType::Ptr(_) | NirType::Unknown => {
+            Some(mask_to_bits(a, dst_bits))
+        }
+        NirType::Float { .. } | NirType::Aggregate { .. } => None,
+    }
 }
 
 fn is_signed_div_overflow(sa: i64, sb: i64, bits: u32) -> bool {
@@ -2418,6 +2423,27 @@ mod tests {
         };
         assert!(fold_expr_hir(&mut udiv));
         assert!(matches!(udiv, PreHirExpr::Const(0x7FFF_FFFF, _)));
+
+        // `INT_SEXT` of an `imul` immediate: `(long long)Const(-1840700269, u32)`
+        // keeps the sign-extended value the builder stored.
+        let mut sext_imm = PreHirExpr::Cast {
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
+            expr: Box::new(PreHirExpr::Const(
+                -1_840_700_269,
+                NirType::Int {
+                    bits: 32,
+                    signed: false,
+                },
+            )),
+        };
+        assert!(fold_expr_hir(&mut sext_imm));
+        assert!(
+            matches!(sext_imm, PreHirExpr::Const(-1_840_700_269, _)),
+            "{sext_imm:?}"
+        );
 
         // Signed 32-bit MIN / -1 must not fold.
         let mut sdiv_overflow = PreHirExpr::Binary {
