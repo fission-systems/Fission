@@ -1,14 +1,28 @@
 //! `resources` subcommand — bundle root probes and resolved [`fission_core::PATHS`] locations.
 
+use crate::cli::build_identity::{build_identity, long_version};
 use anyhow::Result;
 use fission_core::resource_roots::resource_status_snapshot;
 
 pub fn print_resources_status(json: bool) -> Result<()> {
-    let snap = resource_status_snapshot();
+    let snap = resource_status_snapshot(build_identity());
     if json {
         println!("{}", serde_json::to_string_pretty(&snap)?);
         return Ok(());
     }
+
+    println!("Build: fission_cli {}", long_version());
+    let manifest = &snap.resource_manifest;
+    let state = serde_json::to_value(manifest.state)?;
+    println!(
+        "Resource manifest: {}: {}",
+        state.as_str().unwrap_or("?"),
+        manifest.detail
+    );
+    if let Some(path) = &manifest.path {
+        println!("  {path}");
+    }
+    println!();
 
     println!("Resource bundle candidates:");
     for r in &snap.resource_roots {
