@@ -1706,8 +1706,24 @@ RustSec advisory database moves on its own schedule, so a PR checks advisories
 when it changes any <code>Cargo.toml</code>, <code>Cargo.lock</code>, <code>deny.toml</code>,
 <code>.cargo/audit.toml</code>, or <code>.cargo/config</code> / <code>.cargo/config.toml</code>. Manual Fast Gate
 dispatches and nightly Heavy also check advisories. The security lane checks
-bans, licenses and sources on Rust or security metadata changes. The sccache
-setup fails open. Every push to main runs workspace fmt and clippy.</p>
+bans, licenses and sources on Rust or security metadata changes. Every push to
+main runs workspace fmt and clippy.</p>
+<p>The sccache setup fails open, decided before the build
+(<code>.github/actions/setup-sccache/probe.sh</code>). sccache checks its storage when its
+server starts, and a failed check kills the compile that started the server, so
+the setup starts the server the build will use, in the build's environment,
+and compiles one fixed crate through it. Only if that works does it export
+<code>RUSTC_WRAPPER=sccache</code>; otherwise the job builds uncached with a warning. The
+server then lives for the whole job (<code>SCCACHE_IDLE_TIMEOUT=0</code>), so no later
+cargo step repeats the check, and <code>SCCACHE_IGNORE_SERVER_IO_ERROR=1</code> compiles a
+unit locally if the server drops a connection. Once the server is up, storage
+errors are cache misses, not failures. There is no retry of a failed cargo
+step without the wrapper: the step cannot tell an sccache failure from a
+compile error without parsing its output, and a shell-script <code>RUSTC_WRAPPER</code>
+that could do it per <code>rustc</code> call does not run on the Windows runners. The
+<code>sccache outage fallback</code> job in <code>ci.yml</code> points the cache at an unresolvable
+host and requires a green uncached build, and requires that the probed server
+still serves later steps; it runs when the setup or <code>ci.yml</code> changes.</p>
 <h2 id="checks-on-the-checks">Checks on the checks<a class="headerlink" href="#checks-on-the-checks" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Speed: every Rust PR counts instructions executed by its base and head CLIs

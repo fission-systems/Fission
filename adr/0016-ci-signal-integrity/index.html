@@ -1580,6 +1580,11 @@ cost and what it catches are known rather than assumed.</p>
 <td>nextest already terminates a test after 120 s</td>
 <td>Not changed</td>
 </tr>
+<tr>
+<td>sccache decided before the build</td>
+<td>3 required jobs on 2026-11-23/24 (one in the merge queue, run 45302835263) failed at the build's first <code>rustc -vV</code> with <code>Server startup failed: cache storage failed to read</code>. The old check (<code>--show-stats</code>) ran before <code>SCCACHE_GHA_ENABLED</code> was set, so it started a local-disk server that never touched the cache service; the real server, and its storage check, started inside the build</td>
+<td><code>setup-sccache</code> starts the build's server and compiles through it before exporting <code>RUSTC_WRAPPER</code>; <code>sccache outage fallback</code> in Fast Gate proves an unreachable service builds uncached and green</td>
+</tr>
 </tbody>
 </table>
 <h2 id="further-tests-and-what-each-found-or-measured-first">Further tests, and what each found or measured first<a class="headerlink" href="#further-tests-and-what-each-found-or-measured-first" title="Permanent link">&para;</a></h2>
