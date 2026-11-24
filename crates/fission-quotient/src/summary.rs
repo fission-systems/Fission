@@ -2076,6 +2076,16 @@ impl<'a> Executor<'a> {
         if constant == 0 || (self.image)(constant, 1).is_none() {
             return Ok(None);
         }
+        // A pointer read out of memory, or a register the caller set up,
+        // plus a constant is not a global: the constant is an offset.
+        let pointer = self.abi.pointer_bits / 8;
+        if rest.iter().any(|term| {
+            self.memory_read(term)
+                .is_some_and(|(_, size)| size == pointer)
+                || self.live_ins.values().any(|var| var == term)
+        }) {
+            return Ok(None);
+        }
         let index = rest
             .into_iter()
             .map(|term| resize(term, bits))

@@ -29,7 +29,9 @@ only that.
 Machines whose context holds pointers (`region_machines.c`, P4 step 2) get a
 buffer per pointer field holding the manifest's named table
 (`region_tables.py`), the same bytes the engine is given; a context is then
-its bytes together with every buffer's.
+its bytes together with every buffer's. Machines whose state is global
+(`global_machines.c`, P4 step 3) list those globals; the explorer restores
+and reads them around every step.
 
   python3 scripts/quality/wbcq/ground_truth.py ~/fission-benchmark/wbcq-p3/corpus/manifest.json
 """
@@ -168,6 +170,38 @@ def explore_regions(step, size: int, regions: list[tuple[int, bytes]], limit: in
     return rows
 
 
+def explore_globals(library, step, size: int, globals: list[tuple[str, int]], limit: int):
+    """`explore` for a step whose state lives in global variables
+    (`global_machines.c`, P4 step 3): a context's identity is its bytes
+    together with each listed global's, all restored before every step and
+    read back after it, as the engine's oracle carries them."""
+    cells = [(ctypes.c_char * n).in_dll(library, name) for name, n in globals]
+    start = (bytes(size), *(bytes(cell) for cell in cells))
+    index = {start: 0}
+    contexts = [start]
+    rows: list[list[tuple[int, int]]] = []
+    queue = deque([start])
+    ctx = ctypes.create_string_buffer(size)
+    while queue:
+        state = queue.popleft()
+        row = []
+        for value in INPUTS:
+            ctypes.memmove(ctx, state[0], size)
+            for cell, content in zip(cells, state[1:]):
+                ctypes.memmove(cell, content, len(content))
+            result = step(ctx, value)
+            successor = (ctx.raw[:size], *(bytes(cell) for cell in cells))
+            if successor not in index:
+                if len(contexts) >= limit:
+                    return None
+                index[successor] = len(contexts)
+                contexts.append(successor)
+                queue.append(successor)
+            row.append((result, index[successor]))
+        rows.append(row)
+    return rows
+
+
 def minimize(rows: list[list[tuple[int, int]]]) -> int:
     """Moore refinement: start from classes of equal results, split by the
     class each input leads to, until stable."""
@@ -195,7 +229,14 @@ def main() -> None:
     calls_library = ctypes.CDLL(manifest["native_calls"]) if "native_calls" in manifest else None
     truth = {}
     for entry in manifest["functions"]:
-        if entry["source"] == "region_machines.c":
+        if entry["source"] == "global_machines.c":
+            step = getattr(library, entry["name"])
+            step.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            step.restype = ctypes.c_uint
+            rows = explore_globals(library, step, entry["context_bytes"],
+                                   [(g["symbol"], g["bytes"]) for g in entry["globals"]],
+                                   args.max_contexts)
+        elif entry["source"] == "region_machines.c":
             step = getattr(library, entry["name"])
             step.argtypes = [ctypes.c_void_p, ctypes.c_uint]
             step.restype = ctypes.c_uint

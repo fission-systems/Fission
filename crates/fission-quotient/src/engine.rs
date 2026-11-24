@@ -37,6 +37,10 @@ pub struct Wbcq<O: MembershipOracle> {
     pub oracle: O,
     /// What is known about each call the slice makes.
     pub calls: CallFacts,
+    /// `[start, end)` of each addressable section of the image: where an
+    /// absolute address may name global memory (a loaded header is not a
+    /// section).
+    pub sections: Vec<(u64, u64)>,
 }
 
 impl Wbcq<EmulatorOracle> {
@@ -54,6 +58,17 @@ impl Wbcq<EmulatorOracle> {
             .map_err(|error| anyhow::anyhow!("invalid P-code: {error}"))?;
         let abi = AbiModel::for_binary(&binary)?;
         let calls = CallFacts::for_function(&binary, boundary.entry, foundation.pcode().as_raw());
+        let sections = binary
+            .sections
+            .iter()
+            .filter(|section| section.is_addressable() && section.virtual_size > 0)
+            .map(|section| {
+                (
+                    section.virtual_address,
+                    section.virtual_address + section.virtual_size,
+                )
+            })
+            .collect();
         let oracle = EmulatorOracle::new(path, &boundary, max_instructions)?;
         Ok((
             Self {
@@ -61,6 +76,7 @@ impl Wbcq<EmulatorOracle> {
                 boundary,
                 oracle,
                 calls,
+                sections,
             },
             foundation,
         ))
@@ -199,7 +215,15 @@ impl<O: MembershipOracle> Wbcq<O> {
         };
 
         let oracle = &self.oracle;
-        let image = |address: u64, len: usize| oracle.initial_bytes(address, len);
+        let sections = &self.sections;
+        let image = |address: u64, len: usize| {
+            let end = address.checked_add(len as u64)?;
+            sections
+                .iter()
+                .any(|(start, stop)| *start <= address && end <= *stop)
+                .then(|| oracle.initial_bytes(address, len))
+                .flatten()
+        };
         let summary = match summarize(raw, &self.abi, &self.boundary, &budget, &self.calls, &image)
         {
             Ok(summary) => summary,
