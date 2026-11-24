@@ -2,6 +2,18 @@ use crate::pcode::state::MachineState;
 use anyhow::Result;
 use fission_solver::{SymExpr, SymNodeId, solver::Solver};
 
+/// The expression behind a shadow id, or an error naming what it was for.
+///
+/// A shadow id is only a solver node under symbolic shadowing. Under taint it
+/// is a set id, and looking one up here used to `unwrap` a `None`.
+fn solver_node(solver: &Solver, id: SymNodeId, what: &str) -> Result<SymExpr> {
+    solver
+        .nodes
+        .get(&id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("symbolic {what}: shadow id {id} is not a solver node"))
+}
+
 /// angr-style memory mixin for handling symbolic pointers.
 ///
 /// When a pointer is symbolic, we query the solver to evaluate possible concrete addresses.
@@ -21,7 +33,7 @@ impl MemoryMixin {
         ptr_node: SymNodeId,
         size_bytes: u32,
     ) -> Result<SymNodeId> {
-        let ptr_expr = solver.nodes.get(&ptr_node).unwrap().clone();
+        let ptr_expr = solver_node(solver, ptr_node, "pointer")?;
 
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
@@ -36,7 +48,7 @@ impl MemoryMixin {
             id
         };
 
-        let array_expr = solver.nodes.get(&array_id).unwrap().clone();
+        let array_expr = solver_node(solver, array_id, "memory array")?;
 
         // Single byte read vs Multi-byte read.
         // Memory arrays map addresses to bytes. If size_bytes > 1, we must concat multiple ArraySelects.
@@ -68,8 +80,8 @@ impl MemoryMixin {
         val_node: SymNodeId,
         size_bytes: u32,
     ) -> Result<()> {
-        let ptr_expr = solver.nodes.get(&ptr_node).unwrap().clone();
-        let val_expr = solver.nodes.get(&val_node).unwrap().clone();
+        let ptr_expr = solver_node(solver, ptr_node, "pointer")?;
+        let val_expr = solver_node(solver, val_node, "value")?;
 
         let array_id = if let Some(id) = state.get_theory_array_id(space_id) {
             id
@@ -84,7 +96,7 @@ impl MemoryMixin {
             id
         };
 
-        let mut current_array = solver.nodes.get(&array_id).unwrap().clone();
+        let mut current_array = solver_node(solver, array_id, "memory array")?;
 
         // If writing multiple bytes, we need multiple ArrayStores
         for i in 0..size_bytes {
@@ -113,5 +125,27 @@ impl MemoryMixin {
         state.set_theory_array_id(space_id, new_id);
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A shadow id that is not a solver node -- a taint set id, say -- is an
+    /// error, not a panic. It used to `unwrap` a `None` here.
+    #[test]
+    fn a_shadow_id_that_is_not_a_solver_node_is_an_error() {
+        let mut state = MachineState::new();
+        let mut solver = Solver::new();
+        let ram = state.ram_space();
+        let missing: SymNodeId = 4242;
+        assert!(
+            MemoryMixin::handle_symbolic_write(&mut state, &mut solver, ram, missing, missing, 1)
+                .is_err()
+        );
+        assert!(
+            MemoryMixin::handle_symbolic_read(&mut state, &mut solver, ram, missing, 1).is_err()
+        );
     }
 }
