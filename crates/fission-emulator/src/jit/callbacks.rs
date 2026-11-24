@@ -121,7 +121,7 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
 
     // A vector userop is answered against whole varnodes rather than the
     // `&[u64]` the ordinary userop interface passes.
-    if crate::arch::vector::is_wide_userop(op) {
+    if op.opcode == fission_pcode_ir::ir::PcodeOpcode::CallOther {
         if !crate::arch::vector::answer_vector_userop(emu, op) {
             let name = op
                 .inputs

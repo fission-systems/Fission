@@ -16,7 +16,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module, default_libcall_names};
 use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
@@ -53,6 +53,12 @@ pub struct JitCompiler {
     /// to it; the compiler has no `Emulator` to reach, so it counts here and
     /// the caller drains it.
     pub unimplemented_ops: std::collections::BTreeMap<String, u64>,
+    /// SLEIGH userop IDs answered by `arch::vector::answer_vector_userop` even when
+    /// all operands are `<= 8` bytes (narrow vector / MMX / scalar NEON forms).
+    vector_userop_ids: HashSet<u32>,
+    /// True on AArch64 so narrow NEON `CALLOTHER` outputs invalidate all 16 bytes
+    /// of the enclosing Q-register window when `answer_vector_userop` zeroes upper lanes.
+    zero_vector_upper_lanes: bool,
     /// Per compiled instruction that may fault, the registers it writes;
     /// indexed by the constant its `jit_insn_checkpoint` call carries.
     /// Append-only, like the emulator's `wide_ops`: a compiled block holds
@@ -205,7 +211,21 @@ impl JitCompiler {
             unimplemented_ops: std::collections::BTreeMap::new(),
             insn_reg_writes: Vec::new(),
             shadow: crate::observe::ShadowMode::Off,
+            vector_userop_ids: HashSet::new(),
+            zero_vector_upper_lanes: false,
         })
+    }
+
+    pub fn set_vector_userop_ids(&mut self, ids: HashSet<u32>) {
+        self.vector_userop_ids = ids;
+    }
+
+    pub fn add_vector_userop_id(&mut self, id: u32) {
+        self.vector_userop_ids.insert(id);
+    }
+
+    pub fn set_zero_vector_upper_lanes(&mut self, enabled: bool) {
+        self.zero_vector_upper_lanes = enabled;
     }
 
     /// Compile a single guest instruction (TB of length 1).
@@ -1339,9 +1359,13 @@ impl JitCompiler {
             //
             // It costs a call per op, on ~3.5% of instructions. That is the
             // right trade for now -- a wrong answer arrives just as fast.
+            let is_vector_userop = op.opcode == PcodeOpcode::CallOther
+                && (crate::arch::vector::is_wide_userop(op)
+                    || op.inputs.first().is_some_and(|vn| {
+                        self.vector_userop_ids.contains(&(vn.constant_val as u32))
+                    }));
             if !dead_ops[idx]
-                && (crate::pcode::eval::Evaluator::wide_handled(op)
-                    || crate::arch::vector::is_wide_userop(op))
+                && (crate::pcode::eval::Evaluator::wide_handled(op) || is_vector_userop)
             {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());
@@ -1381,7 +1405,17 @@ impl JitCompiler {
                     // The call wrote all of `out`, up to sixteen bytes. Any
                     // other cached view of those bytes -- a four-byte half, the
                     // upper eight -- is stale now, not just the exact one.
-                    let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
+                    let widens_to_q = is_vector_userop
+                        && self.zero_vector_upper_lanes
+                        && out.space_id == register_space
+                        && out.offset >= 0x5000
+                        && out.offset < 0x5400
+                        && (out.offset - 0x5000) % 32 == 0
+                        && out.size < 16;
+                    let (wlo, whi) = (
+                        out.offset,
+                        out.offset + if widens_to_q { 16 } else { u64::from(out.size) },
+                    );
                     let exact = (out.space_id, out.offset, u64::from(out.size.min(8)));
                     var_map.retain(|key, _| {
                         *key == exact
