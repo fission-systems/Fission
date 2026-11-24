@@ -482,6 +482,18 @@ impl Emulator {
         let sp_init = crate::loader::default_stack_top(emu.arch.pointer_size == 8);
         let _ = emu.write_register_u64(emu.arch.sp_reg, sp_init);
 
+        let zero_upper_lanes = emu.arch.name.starts_with("AARCH64");
+        let vector_ids: std::collections::HashSet<u32> = emu
+            .userop_map
+            .iter()
+            .filter(|(_, name)| crate::arch::vector::is_known_vector_userop(name))
+            .map(|(&id, _)| id)
+            .collect();
+        if let Some(jit) = emu.jit.as_mut() {
+            jit.set_vector_userop_ids(vector_ids);
+            jit.set_zero_vector_upper_lanes(zero_upper_lanes);
+        }
+
         if emu.arch.name.starts_with("AARCH64") {
             crate::arch::aarch64::initialize_cpu_state(&mut emu)?;
         }
@@ -2295,7 +2307,14 @@ impl Emulator {
                 .map_err(|e| anyhow::anyhow!("Decode/lift failed at 0x{:X}: {:#}", cur, e))?;
 
             for (id, name) in details.userops.iter() {
-                self.userop_map.entry(*id).or_insert_with(|| name.clone());
+                if !self.userop_map.contains_key(id) {
+                    self.userop_map.insert(*id, name.clone());
+                    if crate::arch::vector::is_known_vector_userop(name)
+                        && let Some(jit) = self.jit.as_mut()
+                    {
+                        jit.add_vector_userop_id(*id);
+                    }
+                }
             }
 
             let terminates = pcode_ops.iter().any(|op| {

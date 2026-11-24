@@ -311,7 +311,7 @@ impl Emulator {
                     // Same function the compiled path calls, for the same
                     // reason: two implementations of one vector instruction
                     // are two chances to be wrong differently.
-                    if crate::arch::vector::is_wide_userop(&flat[idx]) {
+                    if crate::arch::vector::is_vector_userop(&flat[idx], &self.userop_map) {
                         let op = flat[idx].clone();
                         if !crate::arch::vector::answer_vector_userop(self, &op) {
                             let name = self
