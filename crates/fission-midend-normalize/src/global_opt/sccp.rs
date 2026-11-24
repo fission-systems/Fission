@@ -452,11 +452,13 @@ struct AddressAliases {
     targets: HashMap<String, HashSet<String>>,
     /// Variables assigned somewhere in the body.
     defined: HashSet<String>,
-    /// Parameters and bindings that start with a value: they hold what they
-    /// held at entry, which is never an address in this frame.
+    /// Parameters: they hold what the caller passed, which is never an
+    /// address in this frame.
     entry_values: HashSet<String>,
     /// Variables no callee or store can reach: parameters and the builder's
     /// register temporaries. Every other variable may be frame storage.
+    /// This reads binding origins as the builder sets them; SCCP runs before
+    /// the normalize passes that mint temporaries over other variables.
     register_storage: HashSet<String>,
 }
 
@@ -532,15 +534,22 @@ fn collect_address_alias_expr(
 /// [`collect_address_aliases_with`] for `func`: its parameters, the bindings
 /// that start with a value, and the register temporaries a callee cannot reach.
 fn collect_function_address_aliases(func: &PreHirFunction) -> AddressAliases {
-    let mut entry_values: HashSet<String> = func.params.iter().map(|p| p.name.clone()).collect();
-    // A binding that starts with a value is defined at entry, like a param.
-    entry_values.extend(
-        func.params
-            .iter()
-            .chain(func.locals.iter())
-            .filter(|binding| binding.initializer.is_some())
-            .map(|binding| binding.name.clone()),
-    );
+    let entry_values: HashSet<String> = func.params.iter().map(|p| p.name.clone()).collect();
+    // A binding that starts with a value is defined by that value: an
+    // initializer such as `(T *)(sp + off)` is a frame address, so it goes
+    // through the same summary as an assignment rather than counting as a
+    // parameter.
+    let initializers: Vec<(String, &PreHirExpr)> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .filter_map(|binding| {
+            binding
+                .initializer
+                .as_ref()
+                .map(|init| (binding.name.clone(), init))
+        })
+        .collect();
     let register_storage = func
         .params
         .iter()
@@ -552,12 +561,12 @@ fn collect_function_address_aliases(func: &PreHirFunction) -> AddressAliases {
                 .map(|binding| binding.name.clone()),
         )
         .collect();
-    collect_address_aliases_with(&func.body, entry_values, register_storage)
+    collect_address_aliases_with(&func.body, &initializers, entry_values, register_storage)
 }
 
 #[cfg(test)]
 fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
-    collect_address_aliases_with(stmts, HashSet::default(), HashSet::default())
+    collect_address_aliases_with(stmts, &[], HashSet::default(), HashSet::default())
 }
 
 /// Collect pointer-like variable assignments so an address passed through a
@@ -573,6 +582,7 @@ fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
 /// could substitute a stale value after a call and change semantics.
 fn collect_address_aliases_with(
     stmts: &[PreHirStmt],
+    initializers: &[(String, &PreHirExpr)],
     entry_values: HashSet<String>,
     register_storage: HashSet<String>,
 ) -> AddressAliases {
@@ -626,6 +636,14 @@ fn collect_address_aliases_with(
     }
 
     visit(stmts, &mut definitions);
+    for (name, init) in initializers {
+        let summary = definitions.entry(name.clone()).or_default();
+        collect_address_alias_expr(
+            init,
+            &mut summary.dependencies,
+            &mut summary.local_addresses,
+        );
+    }
 
     let defined: HashSet<String> = definitions.keys().cloned().collect();
     // A definition that reads an unknown live-in (`r15 = rsp`) may hold the
@@ -1478,8 +1496,11 @@ mod tests {
              pre-call constant must not reach the read after it:\n{:#?}",
             func.body
         );
+        let PreHirStmt::If { cond, .. } = &func.body[4] else {
+            panic!("expected the branch to remain an if:\n{:#?}", func.body);
+        };
         assert!(
-            matches!(&func.body[4], PreHirStmt::If { .. }),
+            format!("{cond:?}").contains("Var(\"field\")"),
             "the branch on the rewritten slot must not be decided from the \
              pre-call value:\n{:#?}",
             func.body
@@ -1546,6 +1567,79 @@ mod tests {
             "a parameter argument does not reach the frame:\n{:#?}",
             func.body
         );
+    }
+
+    #[test]
+    fn sccp_kills_frame_slots_when_a_loop_body_hands_out_the_frame() {
+        // `slot = -1; while (c) { fills_struct(sp); } field = slot;` -- the
+        // loop path forgets loop-variant names through `env_without_vars`.
+        let mut func = PreHirFunction {
+            name: "test_sccp_frame_escape_in_loop".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".to_string()),
+                    rhs: PreHirExpr::Const(0xffff_ffff, int(32)),
+                },
+                PreHirStmt::While {
+                    cond: var("keep_going"),
+                    body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                        origin: None,
+                        target: "fills_struct".to_string(),
+                        args: vec![var("sp")],
+                        ty: int(64),
+                    })]
+                    .into(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("field".to_string()),
+                    rhs: var("slot"),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!("expected the read after the loop to remain an assignment");
+        };
+        assert_eq!(rhs, &var("slot"), "{:#?}", func.body);
+    }
+
+    #[test]
+    fn sccp_kills_frame_slots_when_an_initialized_binding_holds_the_frame() {
+        // A binding whose initializer reads the stack pointer is a frame
+        // address like an assigned one, not an entry value like a parameter.
+        let mut body = frame_escape_body(var("frame_alias"));
+        body.remove(0);
+        let mut func = PreHirFunction {
+            name: "test_sccp_frame_escape_via_initializer".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![PreHirBinding {
+                name: "frame_alias".to_string(),
+                ty: int(64),
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(var("sp")),
+                    rhs: Box::new(PreHirExpr::Const(16, int(64))),
+                    ty: int(64),
+                }),
+            }],
+            return_type: int(32),
+            body,
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[2] else {
+            panic!("expected the post-call read to remain an assignment");
+        };
+        assert_eq!(rhs, &var("slot"), "{:#?}", func.body);
     }
 
     #[test]
