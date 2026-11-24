@@ -273,6 +273,13 @@ impl JitCompiler {
             }
         }
 
+        // A space that is neither constant, register nor unique is memory:
+        // RAM, or whatever else a language names directly by varnode. Only
+        // registers (written through to `host_reg_file`) and uniques
+        // (instruction-local) may live in a variable across ops.
+        let is_memory_space =
+            |space: u64| space != 0 && space != register_space && space != unique_space;
+
         // Does any op jump *backwards* inside this block? Fault-aware blocks
         // also use the per-op fuse so a failed memory callback stops before
         // the next p-code operation can observe a fabricated zero value.
@@ -296,9 +303,21 @@ impl JitCompiler {
                 }
             })
         }) || (check_memory_faults
-            && flat
-                .iter()
-                .any(|op| matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)));
+            && flat.iter().any(|op| {
+                matches!(op.opcode, PcodeOpcode::Load | PcodeOpcode::Store)
+                    || op
+                        .output
+                        .iter()
+                        .chain(op.inputs.iter().skip(
+                            // A branch or call names its target by a RAM
+                            // varnode; that is an address, not an access.
+                            usize::from(matches!(
+                                op.opcode,
+                                PcodeOpcode::Branch | PcodeOpcode::CBranch | PcodeOpcode::Call
+                            )),
+                        ))
+                        .any(|vn| !vn.is_constant && is_memory_space(vn.space_id))
+            }));
 
         // Ops whose result nothing reads. They keep their block -- branch
         // targets are indices into `flat`, so the numbering has to stay -- and
@@ -899,6 +918,16 @@ impl JitCompiler {
                         ((vn.constant_val as u64) & ((1u64 << bits) - 1)) as i64
                     };
                     builder.ins().iconst(types::I64, masked)
+                } else if is_memory_space(vn.space_id) {
+                    // Memory named directly by a varnode -- x86 lifts
+                    // `mov [abs], eax` to a COPY into a RAM varnode. Read at
+                    // the op, never cached: a STORE through a pointer can
+                    // change these bytes, and a variable would not see it.
+                    let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                    let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                    let sz = builder.ins().iconst(types::I64, i64::from(vn.size.min(8)));
+                    let call = builder.ins().call(read_space_ref, &[emu_ptr, sp, off, sz]);
+                    builder.inst_results(call)[0]
                 } else if vn.size > 8 {
                     // Wide: load low 8 bytes only for scalar ops; bulk path for Copy/Load/Store.
                     let v = ensure_var!(vn.space_id, vn.offset, 8);
@@ -948,7 +977,23 @@ impl JitCompiler {
             ($vn:expr, $val:expr) => {{
                 let vn: &Varnode = $vn;
                 let val = $val;
-                if !vn.is_constant {
+                if !vn.is_constant && is_memory_space(vn.space_id) {
+                    // Written through at the op, like a STORE. This used to
+                    // be held in a variable and flushed at block exit, which
+                    // was wrong three ways: a LOAD through a pointer to the
+                    // same bytes later in the block read the old value; the
+                    // exit flush is a concrete write, so it cleared the
+                    // taint the op had just given those bytes; and a fault,
+                    // a watchpoint or an SMC invalidation landed at the end
+                    // of the block instead of at the instruction.
+                    let size = vn.size.min(8);
+                    let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
+                    let off = builder.ins().iconst(types::I64, vn.offset as i64);
+                    let sz = builder.ins().iconst(types::I64, i64::from(size));
+                    builder
+                        .ins()
+                        .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
+                } else if !vn.is_constant {
                     let v = ensure_var!(vn.space_id, vn.offset, vn.size.min(8));
                     // Every value in here is an I64, whatever the varnode's
                     // width, so a narrow varnode has to be truncated on the way
@@ -1325,7 +1370,11 @@ impl JitCompiler {
                 // one -- `SubPiece` on a 16-byte input is the common shape,
                 // because its *output* is an ordinary eight-byte register.
                 // So re-read what the call just wrote.
-                if let Some(out) = op.output.as_ref().filter(|o| !o.is_constant) {
+                if let Some(out) = op
+                    .output
+                    .as_ref()
+                    .filter(|o| !o.is_constant && !is_memory_space(o.space_id))
+                {
                     // The call wrote all of `out`, up to sixteen bytes. Any
                     // other cached view of those bytes -- a four-byte half, the
                     // upper eight -- is stale now, not just the exact one.
