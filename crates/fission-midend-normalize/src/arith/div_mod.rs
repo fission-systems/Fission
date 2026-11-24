@@ -19,22 +19,25 @@ pub fn recombine_remainder(expr: &PreHirExpr) -> Option<PreHirExpr> {
     else {
         return None;
     };
+    let NirType::Int { bits, .. } = *sub_ty else {
+        return None;
+    };
     let PreHirExpr::Binary {
         op: PreHirBinaryOp::Mul,
         lhs: left,
         rhs: right,
         ..
-    } = strip_cast_chain(product)
+    } = strip_width_preserving_casts(product, bits)?
     else {
         return None;
     };
     let (quotient, factor) = [(left, right), (right, left)].into_iter().find(|(q, _)| {
         matches!(
-            strip_cast_chain(q),
-            PreHirExpr::Binary {
+            strip_width_preserving_casts(q, bits),
+            Some(PreHirExpr::Binary {
                 op: PreHirBinaryOp::Div,
                 ..
-            }
+            })
         )
     })?;
     let PreHirExpr::Binary {
@@ -42,33 +45,33 @@ pub fn recombine_remainder(expr: &PreHirExpr) -> Option<PreHirExpr> {
         lhs: dividend,
         rhs: divisor,
         ty: div_ty,
-    } = strip_cast_chain(quotient)
+    } = strip_width_preserving_casts(quotient, bits)?
     else {
         return None;
     };
-    let (PreHirExpr::Const(d, _), PreHirExpr::Const(f, _)) =
-        (strip_cast_chain(divisor), strip_cast_chain(factor))
-    else {
+    let (PreHirExpr::Const(d, _), PreHirExpr::Const(f, _)) = (
+        strip_width_preserving_casts(divisor, bits)?,
+        strip_width_preserving_casts(factor, bits)?,
+    ) else {
         return None;
     };
     if d != f || *d <= 1 {
         return None;
     }
-    let x = strip_cast_chain(minuend);
-    if x != strip_cast_chain(dividend) || crate::cleanup::expr_has_side_effects(x) {
+    let x = strip_width_preserving_casts(minuend, bits)?;
+    if Some(x) != strip_width_preserving_casts(dividend, bits)
+        || crate::cleanup::expr_has_side_effects(x)
+    {
         return None;
     }
     // One bit width throughout, so the subtraction cannot see a different
     // number than the division did.
-    let NirType::Int { bits, .. } = div_ty else {
-        return None;
-    };
-    let same_width = |t: &NirType| matches!(t, NirType::Int { bits: b, .. } if b == bits);
+    let same_width = |t: &NirType| matches!(t, NirType::Int { bits: b, .. } if *b == bits);
     // A bare variable carries no type at this level; it is read at the width
     // of the node that holds it, which is the same for both occurrences. A
     // dividend whose type IS recorded must agree.
     let known_width_agrees = |t: &NirType| matches!(t, NirType::Unknown) || same_width(t);
-    if !same_width(sub_ty) || !known_width_agrees(&expr_type(x)) {
+    if !same_width(div_ty) || !known_width_agrees(&expr_type(x)) {
         return None;
     }
     let remainder = PreHirExpr::Binary {
@@ -87,11 +90,14 @@ pub fn recombine_remainder(expr: &PreHirExpr) -> Option<PreHirExpr> {
     })
 }
 
-fn strip_cast_chain(mut expr: &PreHirExpr) -> &PreHirExpr {
-    while let PreHirExpr::Cast { expr: inner, .. } = expr {
-        expr = inner;
+fn strip_width_preserving_casts(mut expr: &PreHirExpr, expected_bits: u32) -> Option<&PreHirExpr> {
+    while let PreHirExpr::Cast { ty, expr: inner } = expr {
+        match ty {
+            NirType::Int { bits, .. } if *bits >= expected_bits => expr = inner,
+            _ => return None,
+        }
     }
-    expr
+    Some(expr)
 }
 
 pub fn recognize_mod_div_power_of_two(expr: &PreHirExpr) -> Option<PreHirExpr> {
@@ -112,6 +118,14 @@ pub fn recognize_mod_div_power_of_two(expr: &PreHirExpr) -> Option<PreHirExpr> {
 /// - kill `t` on any reassign of `t`;
 /// - kill entries whose free vars are redefined before the mod/div use.
 pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
+    let address_taken = crate::analysis::defuse::collect_address_taken_locals(stmts);
+    collapse_cdq_signed_mod_in_stmts_with_addr(stmts, &address_taken)
+}
+
+fn collapse_cdq_signed_mod_in_stmts_with_addr(
+    stmts: &mut Vec<PreHirStmt>,
+    address_taken: &crate::HashSet<String>,
+) -> bool {
     let mut changed = false;
     // Live CDQ temps: name → (wide expr, free vars of wide).
     let mut live: crate::HashMap<String, (PreHirExpr, crate::HashSet<String>)> =
@@ -123,8 +137,9 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
             PreHirStmt::Block(body)
             | PreHirStmt::While { body, .. }
             | PreHirStmt::DoWhile { body, .. } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(
+                changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    address_taken,
                 );
                 // Conservative: control transfer may clobber linear live set.
                 live.clear();
@@ -135,11 +150,13 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 else_body,
                 ..
             } => {
-                changed |= collapse_cdq_signed_mod_in_stmts(
+                changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                    address_taken,
                 );
-                changed |= collapse_cdq_signed_mod_in_stmts(
+                changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                    address_taken,
                 );
                 live.clear();
                 continue;
@@ -149,32 +166,37 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
             } => {
                 if let Some(init_stmt) = init {
                     if let PreHirStmt::Block(b) = init_stmt.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(
+                        changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            address_taken,
                         );
                     }
                 }
                 if let Some(upd) = update {
                     if let PreHirStmt::Block(b) = upd.as_mut() {
-                        changed |= collapse_cdq_signed_mod_in_stmts(
+                        changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                             std::rc::Rc::<Vec<PreHirStmt>>::make_mut(b),
+                            address_taken,
                         );
                     }
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(
+                changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                    address_taken,
                 );
                 live.clear();
                 continue;
             }
             PreHirStmt::Switch { cases, default, .. } => {
                 for case in cases.iter_mut() {
-                    changed |= collapse_cdq_signed_mod_in_stmts(
+                    changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
+                        address_taken,
                     );
                 }
-                changed |= collapse_cdq_signed_mod_in_stmts(
+                changed |= collapse_cdq_signed_mod_in_stmts_with_addr(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                    address_taken,
                 );
                 live.clear();
                 continue;
@@ -186,6 +208,15 @@ pub fn collapse_cdq_signed_mod_in_stmts(stmts: &mut Vec<PreHirStmt>) -> bool {
                 continue;
             }
             _ => {}
+        }
+
+        // Invalidate live temps that read memory or address-taken locals when
+        // this statement may write memory or call another function.
+        if crate::cleanup::stmt_may_write_memory(&stmts[i]) {
+            live.retain(|_k, (wide, frees)| {
+                !crate::cleanup::expr_reads_memory(wide)
+                    && !frees.iter().any(|v| address_taken.contains(v))
+            });
         }
 
         // Kill live temps whose free vars are written by this stmt's LHS.
@@ -292,17 +323,38 @@ fn collect_free_var_names(expr: &PreHirExpr, out: &mut crate::HashSet<String>) {
         }
     }
 }
+fn rhs_fits_signed_bits(rhs: &PreHirExpr, bits: u32) -> bool {
+    match rhs {
+        PreHirExpr::Const(c, _) => {
+            if bits >= 64 {
+                true
+            } else {
+                let min = -(1_i128 << (bits - 1));
+                let max = (1_i128 << (bits - 1)) - 1;
+                (min..=max).contains(&i128::from(*c))
+            }
+        }
+        PreHirExpr::Cast {
+            ty: NirType::Int { signed: true, .. },
+            expr: inner,
+        } => rhs_fits_signed_bits(inner, bits),
+        PreHirExpr::Var(_) => true,
+        _ => match expr_type(rhs) {
+            NirType::Int { bits: rhs_bits, .. } => rhs_bits <= bits,
+            NirType::Unknown => true,
+            _ => false,
+        },
+    }
+}
+
 pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
-    let PreHirExpr::Binary {
-        op,
-        lhs,
-        rhs,
-        ty: _,
-    } = expr
-    else {
+    let PreHirExpr::Binary { op, lhs, rhs, ty } = expr else {
         return None;
     };
     if !matches!(op, PreHirBinaryOp::Mod | PreHirBinaryOp::Div) {
+        return None;
+    }
+    if !matches!(ty, NirType::Int { signed: true, .. } | NirType::Unknown) {
         return None;
     }
     let (low, shift_amt) = extract_cdq_low_and_shift(lhs)?;
@@ -313,6 +365,9 @@ pub fn collapse_cdq_style_signed_mod_div(expr: &PreHirExpr) -> Option<PreHirExpr
         NirType::Int { bits, .. } => bits.max(from_shift),
         _ => from_shift,
     };
+    if bits == 0 || bits > 64 || !rhs_fits_signed_bits(rhs, bits) {
+        return None;
+    }
     let signed_ty = NirType::Int { bits, signed: true };
     Some(PreHirExpr::Binary {
         op: *op,
@@ -452,7 +507,7 @@ fn normalize_unsigned_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> 
         op: PreHirBinaryOp::And,
         lhs,
         rhs,
-        ..
+        ty,
     } = expr
     else {
         return None;
@@ -467,11 +522,20 @@ fn normalize_unsigned_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> 
     else {
         return None;
     };
-    if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) {
+    if !matches!(ty, NirType::Int { bits: tb, signed: false } if tb == bits)
+        || matches!(expr_type(lhs), NirType::Int { bits: lb, .. } if lb > *bits)
+    {
         return None;
     }
-    let divisor = (*mask as i128) + 1;
-    if divisor <= 1 || (divisor & (divisor - 1)) != 0 {
+    if is_full_mask_const(rhs.as_ref(), &expr_type(lhs)) || *mask < 0 {
+        return None;
+    }
+    let divisor = i128::from(*mask) + 1;
+    if divisor <= 1
+        || (divisor & (divisor - 1)) != 0
+        || i64::try_from(divisor).is_err()
+        || (*bits < 64 && divisor >= (1_i128 << *bits))
+    {
         return None;
     }
     // Do not normalize `x & 1` to `x % 2` to preserve bitwise operations.
@@ -554,6 +618,70 @@ fn normalize_unsigned_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> 
     })
 }
 
+fn extract_signed_pow2_sign_bias<'a>(
+    add_rhs: &'a PreHirExpr,
+    shift_amount: i64,
+) -> Option<(&'a PreHirExpr, i64, i64)> {
+    let is_valid_sign_op = |op: PreHirBinaryOp| {
+        op == PreHirBinaryOp::Sar || (op == PreHirBinaryOp::Shr && shift_amount == 1)
+    };
+    match add_rhs {
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: and_lhs,
+            rhs: and_rhs,
+            ..
+        } => {
+            let PreHirExpr::Binary {
+                op: sign_op,
+                lhs: shr_lhs,
+                rhs: shr_rhs,
+                ..
+            } = and_lhs.as_ref()
+            else {
+                return None;
+            };
+            if !is_valid_sign_op(*sign_op) {
+                return None;
+            }
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+                return None;
+            };
+            let PreHirExpr::Const(mask, _) = and_rhs.as_ref() else {
+                return None;
+            };
+            Some((shr_lhs.as_ref(), *sign_shift, *mask))
+        }
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::Mod,
+            lhs: mod_lhs,
+            rhs: mod_rhs,
+            ..
+        } => {
+            let PreHirExpr::Binary {
+                op: sign_op,
+                lhs: shr_lhs,
+                rhs: shr_rhs,
+                ..
+            } = mod_lhs.as_ref()
+            else {
+                return None;
+            };
+            if !is_valid_sign_op(*sign_op) {
+                return None;
+            }
+            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
+                return None;
+            };
+            let PreHirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
+                return None;
+            };
+            Some((shr_lhs.as_ref(), *sign_shift, divisor.checked_sub(1)?))
+        }
+        _ => None,
+    }
+}
+
 fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let PreHirExpr::Binary {
         op: PreHirBinaryOp::Sub,
@@ -564,6 +692,13 @@ fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
     else {
         return None;
     };
+    let NirType::Int { bits, signed: true } = *ty else {
+        return None;
+    };
+    if bits < 2 || bits > 64 {
+        return None;
+    }
+    let width = bits;
     if let PreHirExpr::Binary {
         op: PreHirBinaryOp::Shl,
         lhs: shl_inner,
@@ -574,6 +709,9 @@ fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
         let PreHirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
             return None;
         };
+        if *shift_amount < 1 || *shift_amount >= i64::from(width - 1) {
+            return None;
+        }
         let PreHirExpr::Binary {
             op: PreHirBinaryOp::Div,
             lhs: div_lhs,
@@ -591,10 +729,6 @@ fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
             && (*divisor & (*divisor - 1)) == 0
             && *divisor == (1_i64.checked_shl(*shift_amount as u32)?)
         {
-            let width = match ty {
-                NirType::Int { bits, signed: true } => *bits,
-                _ => 64,
-            };
             return Some(PreHirExpr::Binary {
                 op: PreHirBinaryOp::Mod,
                 lhs: lhs.clone(),
@@ -624,6 +758,9 @@ fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let PreHirExpr::Const(shift_amount, _) = shl_rhs.as_ref() else {
         return None;
     };
+    if *shift_amount < 1 || *shift_amount >= i64::from(width - 1) {
+        return None;
+    }
     let PreHirExpr::Binary {
         op: PreHirBinaryOp::Sar,
         lhs: sar_inner,
@@ -651,65 +788,14 @@ fn normalize_signed_power_of_two_mod(expr: &PreHirExpr) -> Option<PreHirExpr> {
     if add_lhs.as_ref() != lhs.as_ref() {
         return None;
     }
-    let (sign_source, sign_shift, mask) = match add_rhs.as_ref() {
-        PreHirExpr::Binary {
-            op: PreHirBinaryOp::And,
-            lhs: and_lhs,
-            rhs: and_rhs,
-            ..
-        } => {
-            let PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr,
-                lhs: shr_lhs,
-                rhs: shr_rhs,
-                ..
-            } = and_lhs.as_ref()
-            else {
-                return None;
-            };
-            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
-                return None;
-            };
-            let PreHirExpr::Const(mask, _) = and_rhs.as_ref() else {
-                return None;
-            };
-            (shr_lhs.as_ref(), *sign_shift, *mask)
-        }
-        PreHirExpr::Binary {
-            op: PreHirBinaryOp::Mod,
-            lhs: mod_lhs,
-            rhs: mod_rhs,
-            ..
-        } => {
-            let PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr,
-                lhs: shr_lhs,
-                rhs: shr_rhs,
-                ..
-            } = mod_lhs.as_ref()
-            else {
-                return None;
-            };
-            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
-                return None;
-            };
-            let PreHirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
-                return None;
-            };
-            (shr_lhs.as_ref(), *sign_shift, *divisor - 1)
-        }
-        _ => return None,
-    };
+    let (sign_source, sign_shift, mask) =
+        extract_signed_pow2_sign_bias(add_rhs.as_ref(), *shift_amount)?;
     if sign_source != lhs.as_ref() {
         return None;
     }
 
-    let width = match ty {
-        NirType::Int { bits, signed: true } => *bits,
-        _ => 64,
-    };
     let divisor = 1_i64.checked_shl(*shift_amount as u32)?;
-    if sign_shift != i64::from(width.saturating_sub(1)) || mask != divisor - 1 {
+    if sign_shift != i64::from(width - 1) || mask != divisor.checked_sub(1)? {
         return None;
     }
 
@@ -740,9 +826,19 @@ fn normalize_signed_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
     else {
         return None;
     };
+    let NirType::Int { bits, signed: true } = *ty else {
+        return None;
+    };
+    if bits < 2 || bits > 64 {
+        return None;
+    }
+    let width = bits;
     let PreHirExpr::Const(shift_amount, _) = rhs.as_ref() else {
         return None;
     };
+    if *shift_amount < 1 || *shift_amount >= i64::from(width - 1) {
+        return None;
+    }
     let PreHirExpr::Binary {
         op: PreHirBinaryOp::Add,
         lhs: add_lhs,
@@ -752,55 +848,8 @@ fn normalize_signed_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
     else {
         return None;
     };
-    let (sign_source, sign_shift, mask) = match add_rhs.as_ref() {
-        PreHirExpr::Binary {
-            op: PreHirBinaryOp::And,
-            lhs: and_lhs,
-            rhs: and_rhs,
-            ..
-        } => {
-            let PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr,
-                lhs: shr_lhs,
-                rhs: shr_rhs,
-                ..
-            } = and_lhs.as_ref()
-            else {
-                return None;
-            };
-            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
-                return None;
-            };
-            let PreHirExpr::Const(mask, _) = and_rhs.as_ref() else {
-                return None;
-            };
-            (shr_lhs.as_ref(), *sign_shift, *mask)
-        }
-        PreHirExpr::Binary {
-            op: PreHirBinaryOp::Mod,
-            lhs: mod_lhs,
-            rhs: mod_rhs,
-            ..
-        } => {
-            let PreHirExpr::Binary {
-                op: PreHirBinaryOp::Shr,
-                lhs: shr_lhs,
-                rhs: shr_rhs,
-                ..
-            } = mod_lhs.as_ref()
-            else {
-                return None;
-            };
-            let PreHirExpr::Const(sign_shift, _) = shr_rhs.as_ref() else {
-                return None;
-            };
-            let PreHirExpr::Const(divisor, _) = mod_rhs.as_ref() else {
-                return None;
-            };
-            (shr_lhs.as_ref(), *sign_shift, *divisor - 1)
-        }
-        _ => return None,
-    };
+    let (sign_source, sign_shift, mask) =
+        extract_signed_pow2_sign_bias(add_rhs.as_ref(), *shift_amount)?;
     if sign_source != add_lhs.as_ref() && sign_source != add_rhs.as_ref() {
         return None;
     }
@@ -810,15 +859,8 @@ fn normalize_signed_power_of_two_div(expr: &PreHirExpr) -> Option<PreHirExpr> {
         add_rhs.clone()
     };
 
-    let width = match ty {
-        NirType::Int { bits, signed: true } => *bits,
-        _ => return None,
-    };
-    if *shift_amount < 0 || *shift_amount >= i64::from(width) {
-        return None;
-    }
     let divisor = 1_i64.checked_shl(*shift_amount as u32)?;
-    if sign_shift != i64::from(width.saturating_sub(1)) || mask != divisor - 1 {
+    if sign_shift != i64::from(width - 1) || mask != divisor.checked_sub(1)? {
         return None;
     }
 
@@ -948,7 +990,10 @@ mod cdq_tests {
             op: PreHirBinaryOp::Mod,
             lhs: Box::new(lhs),
             rhs: Box::new(PreHirExpr::Var(rhs_name.into())),
-            ty: u64_ty(),
+            ty: NirType::Int {
+                bits: 64,
+                signed: true,
+            },
         }
     }
 
@@ -1012,7 +1057,7 @@ mod cdq_tests {
             rhs: Box::new(PreHirExpr::Var("rcx".into())),
             ty: NirType::Int {
                 bits: 128,
-                signed: false,
+                signed: true,
             },
         };
         let out = collapse_cdq_style_signed_mod_div(&expr).expect("collapse");
@@ -1365,5 +1410,233 @@ mod remainder_tests {
                 assert_eq!(x - (x / d) * d, x % d, "unsigned {x} {d}");
             }
         }
+    }
+
+    #[test]
+    fn rejects_unsound_div_mod_and_cdq_edge_cases() {
+        let u16_ty = int(16, false);
+        let i32_ty = int(32, true);
+        let u32_ty = int(32, false);
+        let i64_ty = int(64, true);
+        let u64_ty = int(64, false);
+
+        // 1. recombine_remainder rejects narrowing casts.
+        let narrowed = bin(
+            PreHirBinaryOp::Sub,
+            cast(u16_ty, var("x")),
+            bin(
+                PreHirBinaryOp::Mul,
+                bin(
+                    PreHirBinaryOp::Div,
+                    var("x"),
+                    konst(10, u32_ty.clone()),
+                    u32_ty.clone(),
+                ),
+                konst(10, u32_ty.clone()),
+                u32_ty.clone(),
+            ),
+            u32_ty.clone(),
+        );
+        assert!(recombine_remainder(&narrowed).is_none());
+
+        // 2. normalize_unsigned_power_of_two_mod rejects width mismatches and 2^63 divisor overflow.
+        let mismatched = bin(
+            PreHirBinaryOp::And,
+            bin(
+                PreHirBinaryOp::Add,
+                var("a"),
+                konst(1, u64_ty.clone()),
+                u64_ty.clone(),
+            ),
+            konst(0xffff_ffff, u32_ty.clone()),
+            u64_ty.clone(),
+        );
+        assert!(normalize_unsigned_power_of_two_mod(&mismatched).is_none());
+
+        let i64_min_div = bin(
+            PreHirBinaryOp::And,
+            var("a"),
+            konst(0x7fff_ffff_ffff_ffff, u64_ty.clone()),
+            u64_ty.clone(),
+        );
+        assert!(normalize_unsigned_power_of_two_mod(&i64_min_div).is_none());
+
+        // 3. normalize_signed_power_of_two_div/mod rejects k=63 on 64-bit (no panic) and Shr when k>=2.
+        let k63_div = bin(
+            PreHirBinaryOp::Sar,
+            bin(
+                PreHirBinaryOp::Add,
+                var("x"),
+                bin(
+                    PreHirBinaryOp::And,
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        var("x"),
+                        konst(63, i64_ty.clone()),
+                        i64_ty.clone(),
+                    ),
+                    konst(i64::MAX, i64_ty.clone()),
+                    i64_ty.clone(),
+                ),
+                i64_ty.clone(),
+            ),
+            konst(63, i64_ty.clone()),
+            i64_ty.clone(),
+        );
+        assert!(normalize_signed_power_of_two_div(&k63_div).is_none());
+
+        let shr_div4 = bin(
+            PreHirBinaryOp::Sar,
+            bin(
+                PreHirBinaryOp::Add,
+                var("x"),
+                bin(
+                    PreHirBinaryOp::And,
+                    bin(
+                        PreHirBinaryOp::Shr,
+                        var("x"),
+                        konst(31, i32_ty.clone()),
+                        u32_ty,
+                    ),
+                    konst(3, i32_ty.clone()),
+                    i32_ty.clone(),
+                ),
+                i32_ty.clone(),
+            ),
+            konst(2, i32_ty.clone()),
+            i32_ty.clone(),
+        );
+        assert!(normalize_signed_power_of_two_div(&shr_div4).is_none());
+
+        // 4. collapse_cdq_style_signed_mod_div rejects unsigned result and out-of-range divisor.
+        let cdq_dividend = bin(
+            PreHirBinaryOp::Or,
+            bin(
+                PreHirBinaryOp::Shl,
+                cast(
+                    u64_ty.clone(),
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        var("a"),
+                        konst(31, i32_ty.clone()),
+                        i32_ty.clone(),
+                    ),
+                ),
+                konst(32, u64_ty.clone()),
+                u64_ty.clone(),
+            ),
+            cast(u64_ty.clone(), var("a")),
+            u64_ty.clone(),
+        );
+        let unsigned_mod = bin(
+            PreHirBinaryOp::Mod,
+            cdq_dividend.clone(),
+            konst(10, u64_ty.clone()),
+            u64_ty,
+        );
+        assert!(collapse_cdq_style_signed_mod_div(&unsigned_mod).is_none());
+
+        let wide_divisor = bin(
+            PreHirBinaryOp::Mod,
+            cdq_dividend.clone(),
+            konst(0x1_0000_0001, i64_ty.clone()),
+            i64_ty.clone(),
+        );
+        assert!(collapse_cdq_style_signed_mod_div(&wide_divisor).is_none());
+
+        // 5. collapse_cdq_signed_mod_in_stmts invalidates Load-bearing temps across `*p = 1;`.
+        let cdq_mem_dividend = bin(
+            PreHirBinaryOp::Or,
+            bin(
+                PreHirBinaryOp::Shl,
+                cast(
+                    i64_ty.clone(),
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        PreHirExpr::Load {
+                            ptr: Box::new(var("p")),
+                            ty: i32_ty.clone(),
+                        },
+                        konst(31, i32_ty.clone()),
+                        i32_ty.clone(),
+                    ),
+                ),
+                konst(32, i64_ty.clone()),
+                i64_ty.clone(),
+            ),
+            cast(
+                i64_ty.clone(),
+                PreHirExpr::Load {
+                    ptr: Box::new(var("p")),
+                    ty: i32_ty.clone(),
+                },
+            ),
+            i64_ty.clone(),
+        );
+        let mut stmts = vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("t".to_string()),
+                rhs: cdq_mem_dividend,
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(var("p")),
+                    ty: i32_ty.clone(),
+                },
+                rhs: konst(1, i32_ty),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("out".to_string()),
+                rhs: bin(
+                    PreHirBinaryOp::Mod,
+                    var("t"),
+                    konst(10, i64_ty.clone()),
+                    i64_ty,
+                ),
+            },
+        ];
+        assert!(!collapse_cdq_signed_mod_in_stmts(&mut stmts));
+    }
+
+    /// The logical-shift sign bias `(x >>u (w-1)) & (2^k - 1)` adds only 0 or 1,
+    /// so it corrects signed division by `2^k` only when `k == 1`. At `k == 63`
+    /// on 64 bits the divisor `1 << 63` is `i64::MIN`, and `divisor - 1`
+    /// overflowed (a debug panic) before the bias was even compared.
+    #[test]
+    fn signed_pow2_div_rejects_logical_shift_bias_at_k63() {
+        let i32_ty = int(32, true);
+        let u32_ty = int(32, false);
+        let i64_ty = int(64, true);
+        let u64_ty = int(64, false);
+        // `(x + ((x >>u (width - 1)) & mask)) >> k`
+        let div = |k: i64, width: i64, mask: i64, sty: &NirType, uty: &NirType| {
+            bin(
+                PreHirBinaryOp::Sar,
+                bin(
+                    PreHirBinaryOp::Add,
+                    var("x"),
+                    bin(
+                        PreHirBinaryOp::And,
+                        bin(
+                            PreHirBinaryOp::Shr,
+                            var("x"),
+                            konst(width - 1, sty.clone()),
+                            uty.clone(),
+                        ),
+                        konst(mask, sty.clone()),
+                        sty.clone(),
+                    ),
+                    sty.clone(),
+                ),
+                konst(k, sty.clone()),
+                sty.clone(),
+            )
+        };
+
+        assert!(
+            normalize_signed_power_of_two_div(&div(63, 64, i64::MAX, &i64_ty, &u64_ty)).is_none()
+        );
+        // Positive control: at `k == 1` the logical bias is the sign bit itself.
+        assert!(normalize_signed_power_of_two_div(&div(1, 32, 1, &i32_ty, &u32_ty)).is_some());
     }
 }

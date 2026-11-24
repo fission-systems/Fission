@@ -170,7 +170,10 @@ pub fn cleanup_arithmetic_wrappers(expr: &PreHirExpr) -> Option<PreHirExpr> {
             PreHirExpr::Cast {
                 ty: cast_ty,
                 expr: inner,
-            } if matches!(cast_ty, NirType::Int { signed: true, .. }) && cast_ty == ty => {
+            } if matches!(cast_ty, NirType::Int { signed: true, .. })
+                && cast_ty == ty
+                && expr_type(inner) == *cast_ty =>
+            {
                 Some(PreHirExpr::Binary {
                     op: PreHirBinaryOp::Sar,
                     lhs: inner.clone(),
@@ -255,19 +258,24 @@ pub fn simplify_subpiece_chain(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let is_signed = |ty: &NirType| matches!(ty, NirType::Int { signed: true, .. });
 
     // Rule 2: shift expels all real data → result is 0.
-    // Only valid for logical shift on unsigned types; Sar or signed values preserve sign bits.
+    // Only valid for logical shift on unsigned types with pure operands.
     if *shift_op == PreHirBinaryOp::Shr
         && !is_signed(mid_ty)
         && !is_signed(&source_ty)
         && *shift_amount >= i64::from(source_bits)
         && mid_bits >= source_bits
+        && !expr_has_side_effects(source_expr)
     {
         return Some(PreHirExpr::Const(0, outer_ty.clone()));
     }
 
-    // Rule 1: inner cast is a non-narrowing zero-extension — it doesn't
-    // change any bits that will end up in the final result.  Remove it.
-    if !is_signed(mid_ty) && !is_signed(&source_ty) && mid_bits >= source_bits {
+    // Rule 1: inner cast is a non-narrowing zero-extension — only valid for logical Shr
+    // (widening `Sar` changes which sign bit is replicated).
+    if *shift_op == PreHirBinaryOp::Shr
+        && !is_signed(mid_ty)
+        && !is_signed(&source_ty)
+        && mid_bits >= source_bits
+    {
         let outer_bits = int_type_bits(outer_ty).unwrap_or(0);
         // Preserve the shift result type as the wider of the two integer sizes.
         let shr_result_ty = if mid_bits >= outer_bits {
@@ -326,7 +334,7 @@ pub fn merge_consecutive_shifts(expr: &PreHirExpr) -> Option<PreHirExpr> {
     let total = k1.checked_add(*k2)?;
     // Guard against degenerate total shifts ≥ 64 bits.
     if total >= 64 {
-        return Some(PreHirExpr::Const(0, ty.clone()));
+        return (!expr_has_side_effects(x)).then(|| PreHirExpr::Const(0, ty.clone()));
     }
     Some(PreHirExpr::Binary {
         op: PreHirBinaryOp::Shr,
@@ -439,5 +447,95 @@ mod tests {
             simplify_subpiece_chain(&expr),
             Some(PreHirExpr::Const(0, u32_ty()))
         );
+    }
+
+    #[test]
+    fn preserves_sar_casts_sar_width_and_side_effecting_oversized_shifts() {
+        // 1. `Sar(Cast(i32, inner_u32), 1)` and `Sar(Cast(i32, inner_u64), 1)` must keep Cast(i32).
+        let u32_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("a".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+            ty: u32_ty(),
+        };
+        let sar_unsigned = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: i32_ty(),
+                expr: Box::new(u32_expr.clone()),
+            }),
+            rhs: Box::new(PreHirExpr::Const(1, i32_ty())),
+            ty: i32_ty(),
+        };
+        assert!(cleanup_arithmetic_wrappers(&sar_unsigned).is_none());
+
+        let u64_expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("b".to_string())),
+            rhs: Box::new(PreHirExpr::Const(1, u64_ty())),
+            ty: u64_ty(),
+        };
+        let sar_narrow = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Sar,
+            lhs: Box::new(PreHirExpr::Cast {
+                ty: i32_ty(),
+                expr: Box::new(u64_expr),
+            }),
+            rhs: Box::new(PreHirExpr::Const(1, i32_ty())),
+            ty: i32_ty(),
+        };
+        assert!(cleanup_arithmetic_wrappers(&sar_narrow).is_none());
+
+        // 2. `Cast(u64, Sar(Cast(u32, u32_val), 1))` must not widen Sar to 64 bits.
+        let sar_widen = PreHirExpr::Cast {
+            ty: u64_ty(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sar,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u32_ty(),
+                    expr: Box::new(u32_expr),
+                }),
+                rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+                ty: u32_ty(),
+            }),
+        };
+        assert!(simplify_subpiece_chain(&sar_widen).is_none());
+
+        // 3. Oversized shift of side-effecting call must not drop the call.
+        let side_effect = PreHirExpr::Call {
+            origin: None,
+            target: "foo".to_string(),
+            args: vec![],
+            ty: u32_ty(),
+        };
+        let subpiece_call = PreHirExpr::Cast {
+            ty: u32_ty(),
+            expr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty(),
+                    expr: Box::new(side_effect.clone()),
+                }),
+                rhs: Box::new(PreHirExpr::Const(32, u32_ty())),
+                ty: u64_ty(),
+            }),
+        };
+        assert!(!matches!(
+            simplify_subpiece_chain(&subpiece_call),
+            Some(PreHirExpr::Const(0, _))
+        ));
+
+        let merged_call = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Shr,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shr,
+                lhs: Box::new(side_effect),
+                rhs: Box::new(PreHirExpr::Const(40, u64_ty())),
+                ty: u64_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(30, u64_ty())),
+            ty: u64_ty(),
+        };
+        assert!(merge_consecutive_shifts(&merged_call).is_none());
     }
 }
