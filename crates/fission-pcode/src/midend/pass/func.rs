@@ -107,17 +107,19 @@ impl<'a, 'b> NirFunc<'a, 'b> {
 
     pub(crate) fn lowered_block_stmts_mut(&mut self, block_idx: usize) -> &mut Vec<PreHirStmt> {
         self.ir_version += 1;
-        self.builder
-            .lowered_block_stmts_cache
-            .entry(block_idx)
-            .or_insert_with(Vec::new)
+        std::rc::Rc::make_mut(
+            self.builder
+                .lowered_block_stmts_cache
+                .entry(block_idx)
+                .or_default(),
+        )
     }
 
     pub(crate) fn set_lowered_block_stmts(&mut self, block_idx: usize, stmts: Vec<PreHirStmt>) {
         self.ir_version += 1;
         self.builder
             .lowered_block_stmts_cache
-            .insert(block_idx, stmts);
+            .insert(block_idx, std::rc::Rc::new(stmts));
     }
 
     pub(crate) fn apply_virtual_goto_edge(&mut self, from: usize, to: usize) -> bool {

@@ -201,6 +201,11 @@ impl<'a> StructuringHost for PreviewBuilder<'a> {
     ) -> Result<LoweredTerminator, MlilPreviewError> {
         PreviewBuilder::lower_block_terminator(self, block_idx)
     }
+    fn cached_block_terminator(&self, block_idx: usize) -> Option<LoweredTerminator> {
+        // `lower_block_terminator` answers from this memo before doing any
+        // work, so a hit here is exactly what it would return, with no effect.
+        self.terminator_cache.get(&block_idx).cloned()
+    }
     fn lower_isolated<T, F>(&mut self, lower: F) -> Result<Option<T>, MlilPreviewError>
     where
         F: FnOnce(&mut Self) -> Result<Option<T>, MlilPreviewError>,

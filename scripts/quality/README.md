@@ -119,3 +119,19 @@ and for how to read a score change. Its tests:
 ```bash
 ~/fission-benchmark/.venv-decbench/bin/python -m unittest scripts/quality/test_decbench_scoring.py
 ```
+
+## `wbcq/`: behavioural-quotient evaluation (RFC #1093, P3)
+
+Evaluation tooling for the experimental `fission_cli quotient`. It is not a
+decompiler-quality gate. It contains:
+
+- an OLLVM-style obfuscator plugin (`obfuscator/`);
+- a corpus of step-function state machines and negative cases (`corpus/`);
+- the corpus builder;
+- a native ground truth (`ground_truth.py`);
+- a DecBench step-function selector;
+- the driver and summarizer (`evaluate.py`).
+
+Procedure and results:
+[`docs/proposals/2026-11-23-wbcq-p3-evaluation.md`](../../docs/proposals/2026-11-23-wbcq-p3-evaluation.md).
+Outputs go under `~/fission-benchmark/wbcq-p3/`.

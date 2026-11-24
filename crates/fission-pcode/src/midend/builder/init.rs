@@ -376,7 +376,7 @@ impl<'a> PreviewBuilder<'a> {
             heritage_successors,
             heritage_predecessors,
             heritage_idom,
-            scalar_ssa,
+            scalar_ssa: std::rc::Rc::new(scalar_ssa),
             ssa_emission: super::ssa_emission::SsaEmissionPlan::default(),
             successors,
             predecessors,

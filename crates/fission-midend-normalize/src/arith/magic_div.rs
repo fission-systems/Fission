@@ -349,15 +349,25 @@ fn strip_casts(mut expr: &PreHirExpr) -> &PreHirExpr {
 /// `strip_casts`, also reporting the narrowest integer width any stripped cast
 /// has (`u32::MAX` when there was none): a shifted-out high half only survives
 /// a cast that is wide enough to hold it.
-fn strip_casts_tracking_width(mut expr: &PreHirExpr) -> (&PreHirExpr, u32) {
+/// Peel outer casts down to the inner expression, tracking:
+/// - `narrowest`: the narrowest integer bit-width encountered along the chain (`u32::MAX` if none),
+/// - `has_sign_extension`: `true` if a signed inner cast is widened by a wider outer cast
+///   (e.g. `Cast(u64, Cast(i32, ...))`).
+fn strip_casts_tracking_width(mut expr: &PreHirExpr) -> (&PreHirExpr, u32, bool) {
     let mut narrowest = u32::MAX;
+    let mut prev_outer_bits: Option<u32> = None;
+    let mut has_sign_extension = false;
     while let PreHirExpr::Cast { ty, expr: inner } = expr {
-        if let Some(bits) = int_bits(ty) {
-            narrowest = narrowest.min(bits);
+        if let NirType::Int { bits, signed } = ty {
+            if *signed && prev_outer_bits.is_some_and(|outer| outer > *bits) {
+                has_sign_extension = true;
+            }
+            narrowest = narrowest.min(*bits);
+            prev_outer_bits = Some(*bits);
         }
         expr = inner;
     }
-    (expr, narrowest)
+    (expr, narrowest, has_sign_extension)
 }
 
 /// Strip casts that only widen or re-sign (never narrow), so the remaining
@@ -483,7 +493,10 @@ fn recognize_unsigned(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
     };
     // The shift may be split across a cast: `((x * M) >> a) >> b` is a shift by
     // `a + b` when the cast between them can hold the `a`-shifted product.
-    let (shifted, narrowest) = strip_casts_tracking_width(lhs);
+    let (shifted, narrowest, has_sign_extension) = strip_casts_tracking_width(lhs);
+    if has_sign_extension {
+        return None;
+    }
     let (product, n, inner_shift) = match shifted {
         PreHirExpr::Binary {
             op: inner_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
@@ -518,6 +531,9 @@ fn recognize_unsigned(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
         return None;
     }
     let (d, e) = magic_parameters(m, n)?;
+    if d >= (1_i128 << w) || u64::try_from(d).is_err() {
+        return None;
+    }
     let max_x = (1i128 << w) - 1;
     let error_fits = max_x
         .checked_mul(e)
@@ -608,7 +624,10 @@ fn recognize_unsigned_add(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
     }
     // `t` is the high half of `x * m'`, read through a cast that keeps its
     // low `w` bits: an arithmetic and a logical shift agree there.
-    let (t, narrowest) = strip_casts_tracking_width(t_other);
+    let (t, narrowest, has_sign_extension) = strip_casts_tracking_width(t_other);
+    if has_sign_extension {
+        return None;
+    }
     let PreHirExpr::Binary {
         op: high_op @ (PreHirBinaryOp::Shr | PreHirBinaryOp::Sar),
         lhs: product,
@@ -658,6 +677,9 @@ fn recognize_unsigned_add(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
     let m = m_low.checked_add(1i128 << w)?;
     let n = w.checked_add(1)?.checked_add(k)?;
     let (d, e) = magic_parameters(m, n)?;
+    if d >= (1_i128 << w) || u64::try_from(d).is_err() {
+        return None;
+    }
     let max_x = (1i128 << w) - 1;
     if m_low <= 0 || max_x.checked_mul(e)? >= (1i128 << n) {
         return None;
@@ -744,6 +766,9 @@ fn recognize_signed(core: &PreHirExpr, ctx: &Ctx) -> Option<PreHirExpr> {
         return None;
     }
     let (d, e) = magic_parameters(m, n)?;
+    if d > (1_i128 << (w - 1)) - 1 {
+        return None;
+    }
     // `2^(w-1) * e` can pass `i128` for a 64-bit dividend; that is far past
     // `2^n` (`n < 100`), so an overflow is a rejection, exactly.
     if (1i128 << (w - 1)).checked_mul(e)? > (1i128 << n) {
@@ -768,7 +793,10 @@ fn signed_quotient_parts(
             rhs,
             ..
         } => {
-            let (inner, narrowest) = strip_casts_tracking_width(lhs);
+            let (inner, narrowest, has_sign_extension) = strip_casts_tracking_width(lhs);
+            if has_sign_extension {
+                return None;
+            }
             (inner, u32::try_from(const_value(rhs)?).ok()?, narrowest)
         }
         other => (other, 0, u32::MAX),
@@ -1759,5 +1787,49 @@ mod tests {
             let q = ((hi + x) >> 2) - (x >> 31);
             assert_eq!(q, x.abs() / 7 * x.signum(), "x={x}");
         }
+    }
+
+    #[test]
+    fn rejects_divisor_exceeding_width_and_sign_extended_inner_cast() {
+        // 1. w=64, m=257, n=73 yields d > 2^64 (would truncate in `d as i64`).
+        let ctx64 = ctx_with_x(64);
+        let mul_overflow_d = bin(
+            PreHirBinaryOp::Shr,
+            bin(
+                PreHirBinaryOp::Mul,
+                cast(i(128, false), var("x")),
+                konst(257, i(128, false)),
+                i(128, false),
+            ),
+            konst(73, i(64, false)),
+            i(128, false),
+        );
+        assert!(recognize_unsigned(&mul_overflow_d, &ctx64).is_none());
+
+        // 2. `Cast(u64, Cast(i32, Sar(product, 32))) >>u 1` sign-extends bit 31 and must be rejected.
+        let ctx32 = ctx_with_x(32);
+        let sign_ext_cast = bin(
+            PreHirBinaryOp::Shr,
+            cast(
+                i(64, false),
+                cast(
+                    i(32, true),
+                    bin(
+                        PreHirBinaryOp::Sar,
+                        bin(
+                            PreHirBinaryOp::Mul,
+                            cast(i(64, false), var("x")),
+                            konst(2863311531_u64 as i64, i(64, false)),
+                            i(64, false),
+                        ),
+                        konst(32, i(64, false)),
+                        i(64, false),
+                    ),
+                ),
+            ),
+            konst(1, i(64, false)),
+            i(64, false),
+        );
+        assert!(recognize_unsigned(&sign_ext_cast, &ctx32).is_none());
     }
 }

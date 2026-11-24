@@ -348,12 +348,32 @@ pub struct DirCounterexample {
     pub candidate_observation: String,
 }
 
+/// Overall verification outcome reported by a DIR validator backend.
+///
+/// NOTE: [`ValidationVerdict::Equivalent`] alone does NOT imply a universal
+/// mathematical proof. Consumers deciding whether equivalence was universally
+/// proved versus only observed on sampled paths or traces MUST inspect
+/// [`AssuranceReport::is_proven`], [`AssuranceReport::is_sampled_only`],
+/// [`AssuranceReport::band`], or [`AssuranceReport::classification`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValidationVerdict {
     Equivalent,
     Counterexample,
     Inconclusive,
     Unsupported,
+}
+
+impl ValidationVerdict {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Equivalent => "equivalent",
+            Self::Counterexample => "counterexample",
+            Self::Inconclusive => "inconclusive",
+            Self::Unsupported => "unsupported",
+        }
+    }
 }
 
 /// Strength of positive evidence.  This is separate from the verdict so an
@@ -365,6 +385,20 @@ pub enum EvidenceStrength {
     BoundedPaths,
     Traces,
     None,
+}
+
+impl EvidenceStrength {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Universal => "universal",
+            Self::Conditional => "conditional",
+            Self::BoundedPaths => "bounded_paths",
+            Self::Traces => "traces",
+            Self::None => "none",
+        }
+    }
 }
 
 /// Evidence and limitations emitted by a verifier backend.
@@ -406,6 +440,78 @@ pub enum AssuranceBand {
     Unverified,
 }
 
+impl AssuranceBand {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Proven => "proven",
+            Self::ConditionallyProven => "conditionally_proven",
+            Self::PathValidated => "path_validated",
+            Self::TraceValidated => "trace_validated",
+            Self::Unverified => "unverified",
+        }
+    }
+
+    /// True only when equivalence was proved universally with no assumptions
+    /// or unresolved effects.
+    #[must_use]
+    pub const fn is_unconditionally_proven(self) -> bool {
+        matches!(self, Self::Proven)
+    }
+
+    /// True when equivalence was proved symbolically/universally (either
+    /// unconditionally or modulo explicit [`ValidationAssumption`]s), and false
+    /// for sampled path/trace agreement or unverified outcomes.
+    #[must_use]
+    pub const fn is_proven(self) -> bool {
+        matches!(self, Self::Proven | Self::ConditionallyProven)
+    }
+
+    /// True when positive agreement rests only on bounded paths or concrete
+    /// traces rather than a universal proof.
+    #[must_use]
+    pub const fn is_sampled_only(self) -> bool {
+        matches!(self, Self::PathValidated | Self::TraceValidated)
+    }
+
+    /// True when positive agreement rests strictly on concrete trace samples
+    /// (for example after a symbolic backend returned `Unknown` or failed).
+    #[must_use]
+    pub const fn is_trace_only(self) -> bool {
+        matches!(self, Self::TraceValidated)
+    }
+}
+
+/// Exhaustive consumer-facing verdict classification distinguishing universal
+/// proofs from sampled path/trace agreement and negative/inconclusive outcomes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssuranceClassification {
+    UniversallyProven,
+    ConditionallyProven,
+    PathSampledOnly,
+    TraceSampledOnly,
+    Refuted,
+    Inconclusive,
+    Unsupported,
+}
+
+impl AssuranceClassification {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::UniversallyProven => "universally_proven",
+            Self::ConditionallyProven => "conditionally_proven",
+            Self::PathSampledOnly => "path_sampled_only",
+            Self::TraceSampledOnly => "trace_sampled_only",
+            Self::Refuted => "refuted",
+            Self::Inconclusive => "inconclusive",
+            Self::Unsupported => "unsupported",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AssuranceContractError {
     #[error("equivalent verdict requires positive evidence")]
@@ -420,6 +526,8 @@ pub enum AssuranceContractError {
     EmptyPathEvidence,
     #[error("trace evidence requires at least one executed trace")]
     EmptyTraceEvidence,
+    #[error("universal or conditional proof cannot carry unresolved effects")]
+    ProofWithUnresolvedEffects,
 }
 
 /// Complete validation statement for one candidate/foundation pair.
@@ -460,6 +568,13 @@ impl AssuranceReport {
         if evidence.strength == EvidenceStrength::Traces && evidence.executed_traces == 0 {
             return Err(AssuranceContractError::EmptyTraceEvidence);
         }
+        if matches!(
+            evidence.strength,
+            EvidenceStrength::Universal | EvidenceStrength::Conditional
+        ) && !evidence.unresolved_effects.is_empty()
+        {
+            return Err(AssuranceContractError::ProofWithUnresolvedEffects);
+        }
 
         Ok(Self {
             foundation,
@@ -479,6 +594,10 @@ impl AssuranceReport {
         &self.scope
     }
 
+    /// Raw validator verdict. Prefer [`Self::is_proven`], [`Self::is_sampled_only`],
+    /// [`Self::band`], or [`Self::classification`] when deciding whether universal
+    /// equivalence was established, because `ValidationVerdict::Equivalent` also
+    /// encompasses trace-only and bounded-path agreement.
     #[must_use]
     pub fn verdict(&self) -> ValidationVerdict {
         self.verdict
@@ -502,13 +621,71 @@ impl AssuranceReport {
             {
                 AssuranceBand::Proven
             }
-            EvidenceStrength::Universal | EvidenceStrength::Conditional => {
+            EvidenceStrength::Universal | EvidenceStrength::Conditional
+                if self.evidence.unresolved_effects.is_empty() =>
+            {
                 AssuranceBand::ConditionallyProven
+            }
+            EvidenceStrength::Universal | EvidenceStrength::Conditional => {
+                AssuranceBand::Unverified
             }
             EvidenceStrength::BoundedPaths => AssuranceBand::PathValidated,
             EvidenceStrength::Traces => AssuranceBand::TraceValidated,
             EvidenceStrength::None => AssuranceBand::Unverified,
         }
+    }
+
+    /// Exhaustive consumer-facing classification separating universal proofs from
+    /// sampled path/trace agreement and negative/inconclusive verdicts.
+    #[must_use]
+    pub fn classification(&self) -> AssuranceClassification {
+        match self.verdict {
+            ValidationVerdict::Counterexample => AssuranceClassification::Refuted,
+            ValidationVerdict::Inconclusive => AssuranceClassification::Inconclusive,
+            ValidationVerdict::Unsupported => AssuranceClassification::Unsupported,
+            ValidationVerdict::Equivalent => match self.band() {
+                AssuranceBand::Proven => AssuranceClassification::UniversallyProven,
+                AssuranceBand::ConditionallyProven => AssuranceClassification::ConditionallyProven,
+                AssuranceBand::PathValidated => AssuranceClassification::PathSampledOnly,
+                AssuranceBand::TraceValidated => AssuranceClassification::TraceSampledOnly,
+                AssuranceBand::Unverified => AssuranceClassification::Inconclusive,
+            },
+        }
+    }
+
+    /// True only when equivalence was proved universally with no assumptions
+    /// or unresolved effects.
+    #[must_use]
+    pub fn is_unconditionally_proven(&self) -> bool {
+        self.band().is_unconditionally_proven()
+    }
+
+    /// True when equivalence was proved universally (unconditionally or under
+    /// explicit assumptions with no unresolved effects), never for trace-only or
+    /// bounded-path agreement.
+    #[must_use]
+    pub fn is_proven(&self) -> bool {
+        self.band().is_proven()
+    }
+
+    /// True when equivalence rests only on bounded path or concrete trace
+    /// sampling rather than a universal proof.
+    #[must_use]
+    pub fn is_sampled_only(&self) -> bool {
+        self.band().is_sampled_only()
+    }
+
+    /// True when equivalence rests strictly on concrete traces (never universal
+    /// proof).
+    #[must_use]
+    pub fn is_trace_only(&self) -> bool {
+        self.band().is_trace_only()
+    }
+
+    /// True when the verifier produced a confirmed counterexample witness.
+    #[must_use]
+    pub fn has_counterexample(&self) -> bool {
+        self.verdict == ValidationVerdict::Counterexample && self.evidence.counterexample.is_some()
     }
 }
 
@@ -901,5 +1078,197 @@ mod tests {
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].assurance.foundation(), foundation.identity());
         assert_eq!(artifacts[0].assurance.band(), AssuranceBand::TraceValidated);
+    }
+
+    #[test]
+    fn consumer_predicates_distinguish_universal_proof_from_trace_only_agreement() {
+        let foundation = PcodeFoundation::new(0x1000, valid_function(1)).unwrap();
+        let make =
+            |verdict, strength, explored_paths, executed_traces, assumptions, unresolved, ce| {
+                AssuranceReport::new(
+                    foundation.identity(),
+                    ObservationScope::default(),
+                    verdict,
+                    ValidationEvidence {
+                        strength,
+                        budget: ValidationBudget::default(),
+                        explored_paths,
+                        executed_traces,
+                        assumptions,
+                        unresolved_effects: unresolved,
+                        counterexample: ce,
+                        detail: String::new(),
+                    },
+                )
+            };
+
+        let proven = make(
+            ValidationVerdict::Equivalent,
+            EvidenceStrength::Universal,
+            1,
+            4,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(proven.band(), AssuranceBand::Proven);
+        assert_eq!(
+            proven.classification(),
+            AssuranceClassification::UniversallyProven
+        );
+        assert!(proven.is_unconditionally_proven());
+        assert!(proven.is_proven());
+        assert!(!proven.is_sampled_only());
+        assert!(!proven.is_trace_only());
+        assert!(!proven.has_counterexample());
+        assert_eq!(proven.classification().as_str(), "universally_proven");
+        assert_eq!(proven.band().as_str(), "proven");
+        assert_eq!(proven.verdict().as_str(), "equivalent");
+        assert_eq!(proven.evidence().strength.as_str(), "universal");
+
+        let cond_proven = make(
+            ValidationVerdict::Equivalent,
+            EvidenceStrength::Conditional,
+            1,
+            4,
+            vec![ValidationAssumption {
+                kind: AssumptionKind::Memory,
+                description: "non-aliasing".to_string(),
+            }],
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(cond_proven.band(), AssuranceBand::ConditionallyProven);
+        assert_eq!(
+            cond_proven.classification(),
+            AssuranceClassification::ConditionallyProven
+        );
+        assert!(!cond_proven.is_unconditionally_proven());
+        assert!(cond_proven.is_proven());
+        assert!(!cond_proven.is_sampled_only());
+        assert!(!cond_proven.is_trace_only());
+        assert_eq!(cond_proven.evidence().strength.as_str(), "conditional");
+
+        let path_only = make(
+            ValidationVerdict::Equivalent,
+            EvidenceStrength::BoundedPaths,
+            8,
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(path_only.band(), AssuranceBand::PathValidated);
+        assert_eq!(
+            path_only.classification(),
+            AssuranceClassification::PathSampledOnly
+        );
+        assert!(!path_only.is_unconditionally_proven());
+        assert!(!path_only.is_proven());
+        assert!(path_only.is_sampled_only());
+        assert!(!path_only.is_trace_only());
+
+        let trace_only = make(
+            ValidationVerdict::Equivalent,
+            EvidenceStrength::Traces,
+            0,
+            4,
+            vec![ValidationAssumption {
+                kind: AssumptionKind::Memory,
+                description: "non-aliasing".to_string(),
+            }],
+            vec![UnresolvedEffect {
+                kind: UnresolvedEffectKind::Other,
+                description: "solver returned unknown".to_string(),
+            }],
+            None,
+        )
+        .unwrap();
+        assert_eq!(trace_only.verdict(), ValidationVerdict::Equivalent);
+        assert_eq!(trace_only.band(), AssuranceBand::TraceValidated);
+        assert_eq!(
+            trace_only.classification(),
+            AssuranceClassification::TraceSampledOnly
+        );
+        assert!(!trace_only.is_unconditionally_proven());
+        assert!(!trace_only.is_proven());
+        assert!(trace_only.is_sampled_only());
+        assert!(trace_only.is_trace_only());
+        assert_eq!(trace_only.classification().as_str(), "trace_sampled_only");
+        assert_eq!(trace_only.evidence().assumptions.len(), 1);
+        assert_eq!(trace_only.evidence().unresolved_effects.len(), 1);
+
+        let refuted = make(
+            ValidationVerdict::Counterexample,
+            EvidenceStrength::None,
+            1,
+            1,
+            Vec::new(),
+            Vec::new(),
+            Some(DirCounterexample {
+                inputs: vec![("x".to_string(), 7)],
+                foundation_observation: "r0 = 0x1".to_string(),
+                candidate_observation: "r0 = 0x2".to_string(),
+            }),
+        )
+        .unwrap();
+        assert_eq!(refuted.classification(), AssuranceClassification::Refuted);
+        assert!(refuted.has_counterexample());
+        assert!(!refuted.is_proven());
+        assert!(!refuted.is_sampled_only());
+
+        let inconclusive = make(
+            ValidationVerdict::Inconclusive,
+            EvidenceStrength::None,
+            0,
+            2,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            inconclusive.classification(),
+            AssuranceClassification::Inconclusive
+        );
+        assert!(!inconclusive.is_proven());
+        assert!(!inconclusive.is_sampled_only());
+
+        let unsupported = make(
+            ValidationVerdict::Unsupported,
+            EvidenceStrength::None,
+            0,
+            0,
+            Vec::new(),
+            Vec::new(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            unsupported.classification(),
+            AssuranceClassification::Unsupported
+        );
+        assert!(!unsupported.is_proven());
+        assert!(!unsupported.is_sampled_only());
+
+        // Universal / Conditional proof cannot carry unresolved effects.
+        for strength in [EvidenceStrength::Universal, EvidenceStrength::Conditional] {
+            let err = make(
+                ValidationVerdict::Equivalent,
+                strength,
+                1,
+                1,
+                Vec::new(),
+                vec![UnresolvedEffect {
+                    kind: UnresolvedEffectKind::SolverTimeout,
+                    description: "timed out".to_string(),
+                }],
+                None,
+            );
+            assert_eq!(err, Err(AssuranceContractError::ProofWithUnresolvedEffects));
+        }
     }
 }

@@ -757,6 +757,14 @@ fn reject_overlapping_varnodes(
 }
 
 /// Emulator + solver verifier for [`PcodeNativeRegion`] candidates.
+///
+/// Runs deterministic concrete emulator traces first to catch concrete
+/// counterexamples quickly, then attempts universal equivalence proof through
+/// the solver. When the symbolic backend returns `Unknown` or fails after at
+/// least one agreeing emulator trace, the verifier emits
+/// [`ValidationVerdict::Equivalent`] with [`EvidenceStrength::Traces`]
+/// (`AssuranceBand::TraceValidated` / `AssuranceClassification::TraceSampledOnly`)
+/// rather than upgrading sampled trace agreement to universal proof.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PcodeObservationVerifier {
     default_trace_limit: u64,
@@ -777,16 +785,18 @@ impl PcodeObservationVerifier {
             default_trace_limit: default_trace_limit.max(1),
         }
     }
-}
 
-impl DirVerifier for PcodeObservationVerifier {
-    fn verify(
+    fn verify_with_symbolic<F>(
         &self,
         foundation: &PcodeFoundation,
         candidate: &DirCandidate,
         scope: &ObservationScope,
         budget: ValidationBudget,
-    ) -> (ValidationVerdict, ValidationEvidence) {
+        prove: F,
+    ) -> (ValidationVerdict, ValidationEvidence)
+    where
+        F: FnOnce(&PcodeFoundation, &PcodeNativeRegion) -> Result<SymbolicOutcome, String>,
+    {
         let CandidateSemantics::PcodeNativeRegion(region) = &candidate.semantics else {
             return unsupported(
                 budget,
@@ -866,7 +876,7 @@ impl DirVerifier for PcodeObservationVerifier {
             );
         }
 
-        match prove_symbolically(foundation, region) {
+        match prove(foundation, region) {
             Ok(SymbolicOutcome::Equivalent) => (
                 ValidationVerdict::Equivalent,
                 ValidationEvidence {
@@ -922,7 +932,7 @@ impl DirVerifier for PcodeObservationVerifier {
                 ValidationEvidence {
                     strength: EvidenceStrength::Traces,
                     budget,
-                    explored_paths: 1,
+                    explored_paths: 0,
                     executed_traces,
                     assumptions: region_assumptions(region),
                     unresolved_effects: vec![UnresolvedEffect {
@@ -940,7 +950,7 @@ impl DirVerifier for PcodeObservationVerifier {
                 ValidationEvidence {
                     strength: EvidenceStrength::Traces,
                     budget,
-                    explored_paths: 1,
+                    explored_paths: 0,
                     executed_traces,
                     assumptions: region_assumptions(region),
                     unresolved_effects: vec![UnresolvedEffect {
@@ -954,6 +964,18 @@ impl DirVerifier for PcodeObservationVerifier {
                 },
             ),
         }
+    }
+}
+
+impl DirVerifier for PcodeObservationVerifier {
+    fn verify(
+        &self,
+        foundation: &PcodeFoundation,
+        candidate: &DirCandidate,
+        scope: &ObservationScope,
+        budget: ValidationBudget,
+    ) -> (ValidationVerdict, ValidationEvidence) {
+        self.verify_with_symbolic(foundation, candidate, scope, budget, prove_symbolically)
     }
 }
 
@@ -2054,7 +2076,7 @@ mod tests {
     use fission_pcode_ir::{PcodeBasicBlock, PcodeFunction};
 
     use super::*;
-    use crate::product::{AssuranceBand, DirPipeline};
+    use crate::product::{AssuranceBand, AssuranceClassification, AssuranceReport, DirPipeline};
 
     fn varnode(space_id: u64, offset: u64, size: u32) -> Varnode {
         Varnode {
@@ -2338,18 +2360,36 @@ mod tests {
                 .expect("flag region reconstructs")
                 .remove(0);
 
+            let scope = ObservationScope::location_only(selection.output);
             let (verdict, evidence) = PcodeObservationVerifier::default().verify(
                 &foundation,
                 &candidate,
-                &ObservationScope::location_only(selection.output),
+                &scope,
                 ValidationBudget::default(),
             );
+            let report =
+                AssuranceReport::new(foundation.identity(), scope, verdict, evidence.clone())
+                    .expect("valid report");
             assert_eq!(
-                verdict,
+                report.verdict(),
                 ValidationVerdict::Equivalent,
                 "{opcode:?}: {}",
                 evidence.detail
             );
+            // `IntSCarry` / `IntSBorrow` do not yet have symbolic lowering on
+            // the foundation side, so this produces trace-only agreement rather
+            // than universal proof -- and must not be promoted by consumers.
+            assert_eq!(report.band(), AssuranceBand::TraceValidated);
+            assert_eq!(
+                report.classification(),
+                AssuranceClassification::TraceSampledOnly
+            );
+            assert!(report.is_trace_only());
+            assert!(report.is_sampled_only());
+            assert!(!report.is_proven());
+            assert!(evidence.executed_traces > 0);
+            assert_eq!(evidence.explored_paths, 0);
+            assert!(!evidence.unresolved_effects.is_empty());
         }
     }
 
@@ -2734,6 +2774,12 @@ mod tests {
         .expect("the sub-register region runs");
 
         assert_eq!(artifacts.len(), 1);
+        assert!(artifacts[0].assurance.is_proven());
+        assert!(!artifacts[0].assurance.is_trace_only());
+        assert_eq!(
+            artifacts[0].assurance.classification(),
+            AssuranceClassification::ConditionallyProven
+        );
         assert_eq!(
             artifacts[0].assurance.verdict(),
             ValidationVerdict::Equivalent,
@@ -3033,7 +3079,24 @@ mod tests {
             "{:?}",
             artifacts[0].assurance
         );
+        // `Load` is validated via concrete emulator traces until symbolic memory
+        // lowering is added; consumers must see trace-only agreement, not proof.
+        assert_eq!(artifacts[0].assurance.band(), AssuranceBand::TraceValidated);
+        assert_eq!(
+            artifacts[0].assurance.classification(),
+            AssuranceClassification::TraceSampledOnly
+        );
+        assert!(artifacts[0].assurance.is_trace_only());
+        assert!(!artifacts[0].assurance.is_proven());
         assert!(artifacts[0].assurance.evidence().executed_traces > 0);
+        assert_eq!(artifacts[0].assurance.evidence().explored_paths, 0);
+        assert!(
+            !artifacts[0]
+                .assurance
+                .evidence()
+                .unresolved_effects
+                .is_empty()
+        );
 
         let CandidateSemantics::PcodeNativeRegion(region) = &artifacts[0].candidate.semantics
         else {
@@ -3091,5 +3154,141 @@ mod tests {
             artifacts[0].assurance.evidence().strength,
             EvidenceStrength::Universal
         );
+    }
+
+    #[test]
+    fn symbolic_unknown_and_backend_error_yield_trace_only_not_universal_proof() {
+        let (foundation, selection) = arithmetic_foundation();
+        let scope = ObservationScope::location_only(selection.output);
+        let candidate = PcodeNativeReconstructor::new(selection, [1, 2])
+            .reconstruct(&foundation)
+            .expect("arithmetic region reconstructs")
+            .remove(0);
+
+        let build_report = |verdict, evidence| {
+            AssuranceReport::new(foundation.identity(), scope.clone(), verdict, evidence)
+                .expect("valid assurance contract")
+        };
+
+        // 1. Genuine UNSAT proof -> universally (conditionally) proven.
+        let (v_unsat, e_unsat) = PcodeObservationVerifier::default().verify_with_symbolic(
+            &foundation,
+            &candidate,
+            &scope,
+            ValidationBudget::default(),
+            prove_symbolically,
+        );
+        let r_unsat = build_report(v_unsat, e_unsat);
+        assert!(r_unsat.is_proven());
+        assert!(!r_unsat.is_sampled_only());
+        assert!(!r_unsat.is_trace_only());
+        assert_eq!(r_unsat.band(), AssuranceBand::ConditionallyProven);
+        assert_eq!(
+            r_unsat.classification(),
+            AssuranceClassification::ConditionallyProven
+        );
+        assert_eq!(r_unsat.evidence().explored_paths, 1);
+        assert!(r_unsat.evidence().executed_traces > 0);
+        assert!(r_unsat.evidence().unresolved_effects.is_empty());
+
+        // 2. Injected SymbolicOutcome::Unknown after agreeing emulator traces:
+        //    preserves traces, assumptions, and unresolved effects without upgrading to proof.
+        let (v_unk, e_unk) = PcodeObservationVerifier::default().verify_with_symbolic(
+            &foundation,
+            &candidate,
+            &scope,
+            ValidationBudget::default(),
+            |_, _| Ok(SymbolicOutcome::Unknown),
+        );
+        let r_unk = build_report(v_unk, e_unk);
+        assert_eq!(r_unk.verdict(), ValidationVerdict::Equivalent);
+        assert!(!r_unk.is_proven());
+        assert!(r_unk.is_sampled_only());
+        assert!(r_unk.is_trace_only());
+        assert_eq!(r_unk.band(), AssuranceBand::TraceValidated);
+        assert_eq!(
+            r_unk.classification(),
+            AssuranceClassification::TraceSampledOnly
+        );
+        assert_eq!(r_unk.evidence().strength, EvidenceStrength::Traces);
+        assert_eq!(r_unk.evidence().explored_paths, 0);
+        assert!(r_unk.evidence().executed_traces > 0);
+        assert!(!r_unk.evidence().assumptions.is_empty());
+        assert!(
+            r_unk
+                .evidence()
+                .unresolved_effects
+                .iter()
+                .any(|u| u.description.contains("unknown"))
+        );
+
+        // 3. Injected solver backend error after agreeing emulator traces.
+        let (v_err, e_err) = PcodeObservationVerifier::default().verify_with_symbolic(
+            &foundation,
+            &candidate,
+            &scope,
+            ValidationBudget::default(),
+            |_, _| Err("injected backend failure".to_string()),
+        );
+        let r_err = build_report(v_err, e_err);
+        assert_eq!(r_err.verdict(), ValidationVerdict::Equivalent);
+        assert!(!r_err.is_proven());
+        assert!(r_err.is_sampled_only());
+        assert!(r_err.is_trace_only());
+        assert_eq!(r_err.band(), AssuranceBand::TraceValidated);
+        assert_eq!(
+            r_err.classification(),
+            AssuranceClassification::TraceSampledOnly
+        );
+        assert_eq!(r_err.evidence().explored_paths, 0);
+        assert!(r_err.evidence().executed_traces > 0);
+        assert!(!r_err.evidence().assumptions.is_empty());
+        assert!(
+            r_err
+                .evidence()
+                .unresolved_effects
+                .iter()
+                .any(|u| u.description.contains("injected backend failure"))
+        );
+
+        // 4. Non-replaying symbolic counterexample model -> Inconclusive, never TraceValidated/Proven.
+        let (v_spurious, e_spurious) = PcodeObservationVerifier::new(1).verify_with_symbolic(
+            &foundation,
+            &candidate,
+            &scope,
+            ValidationBudget::default(),
+            |_, _| Ok(SymbolicOutcome::Counterexample(vec![1, 2])),
+        );
+        let r_spurious = build_report(v_spurious, e_spurious);
+        assert_eq!(r_spurious.verdict(), ValidationVerdict::Inconclusive);
+        assert_eq!(
+            r_spurious.classification(),
+            AssuranceClassification::Inconclusive
+        );
+        assert!(!r_spurious.is_proven());
+        assert!(!r_spurious.is_sampled_only());
+        assert!(!r_spurious.has_counterexample());
+
+        // 5. Replayed divergence (tampered candidate) -> Refuted with counterexample witness.
+        let mut tampered = candidate;
+        if let CandidateSemantics::PcodeNativeRegion(region) = &mut tampered.semantics
+            && let PcodeNativeExpr::Binary { op, .. } = &mut region.expression
+        {
+            *op = PcodeNativeBinaryOp::BitOr;
+            tampered.pseudocode = render_region_pseudocode(region);
+        }
+        let (v_ce, e_ce) = PcodeObservationVerifier::new(1).verify_with_symbolic(
+            &foundation,
+            &tampered,
+            &scope,
+            ValidationBudget::default(),
+            prove_symbolically,
+        );
+        let r_ce = build_report(v_ce, e_ce);
+        assert_eq!(r_ce.verdict(), ValidationVerdict::Counterexample);
+        assert_eq!(r_ce.classification(), AssuranceClassification::Refuted);
+        assert!(r_ce.has_counterexample());
+        assert!(!r_ce.is_proven());
+        assert!(!r_ce.is_sampled_only());
     }
 }

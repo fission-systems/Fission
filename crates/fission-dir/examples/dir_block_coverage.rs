@@ -7,10 +7,11 @@
 //! something later could read -- a block counts as covered only when a single
 //! region spanning the whole block reconstructs for *each* of those outputs.
 //!
-//! `--verify` additionally runs the emulator/solver pipeline and requires an
-//! `Equivalent` verdict rather than merely a successful reconstruction. That
-//! is the number worth reporting; reconstruction alone only says the region
-//! was expressible.
+//! `--verify` additionally runs the emulator/solver pipeline and distinguishes
+//! universally proved equivalence (`AssuranceReport::is_proven()`) from
+//! trace-only agreement (`AssuranceReport::is_trace_only()`). Universal proof
+//! counts as covered; trace-only agreement is reported separately rather than
+//! upgrading sampled concrete traces to universal proof.
 //!
 //! Usage:
 //!   cargo run --release -p fission-dir --example dir_block_coverage -- [--verify] <binary> [addr ...]
@@ -23,7 +24,6 @@ const REGISTER_SPACES: [u64; 3] = [1, 4, 5];
 use fission_dir::{
     DirPipeline, DirReconstructor, ObservationScope, ObservedLocation, PcodeFoundation,
     PcodeNativeReconstructor, PcodeObservationVerifier, PcodeRegionSelection, ValidationBudget,
-    ValidationVerdict,
 };
 
 fn main() {
@@ -51,10 +51,11 @@ fn main() {
         wanted
     };
 
-    let (mut blocks_total, mut blocks_covered) = (0u64, 0u64);
+    let (mut blocks_total, mut blocks_covered, mut blocks_trace_only) = (0u64, 0u64, 0u64);
     let (mut fns_total, mut fns_covered) = (0u64, 0u64);
     let mut outputs_total = 0u64;
     let mut outputs_covered = 0u64;
+    let mut outputs_trace_only = 0u64;
     let mut shortfall: BTreeMap<u64, u64> = BTreeMap::new();
 
     for addr in addrs {
@@ -101,6 +102,7 @@ fn main() {
                 continue;
             }
             let mut block_ok = true;
+            let mut block_sampled_all = true;
             let mut covered_here = 0u64;
             for (output, last_write) in &outs {
                 outputs_total += 1;
@@ -112,31 +114,45 @@ fn main() {
                     output: *output,
                 };
                 let reconstructor = PcodeNativeReconstructor::new(selection, [1u64, 2, 3, 4, 5]);
-                let ok = if verify {
-                    DirPipeline::new(reconstructor, PcodeObservationVerifier::default())
-                        .run(
-                            &foundation,
-                            &ObservationScope::location_only(*output),
-                            ValidationBudget::default(),
-                        )
-                        .ok()
-                        .and_then(|artifacts| artifacts.into_iter().next())
-                        .is_some_and(|artifact| {
-                            artifact.assurance.verdict() == ValidationVerdict::Equivalent
-                        })
-                } else {
-                    reconstructor.reconstruct(&foundation).is_ok()
-                };
-                if ok {
+                if verify {
+                    let artifact =
+                        DirPipeline::new(reconstructor, PcodeObservationVerifier::default())
+                            .run(
+                                &foundation,
+                                &ObservationScope::location_only(*output),
+                                ValidationBudget::default(),
+                            )
+                            .ok()
+                            .and_then(|artifacts| artifacts.into_iter().next());
+                    if let Some(artifact) = artifact {
+                        if artifact.assurance.is_proven() {
+                            outputs_covered += 1;
+                            covered_here += 1;
+                        } else if artifact.assurance.is_sampled_only() {
+                            outputs_trace_only += 1;
+                            block_ok = false;
+                        } else {
+                            block_ok = false;
+                            block_sampled_all = false;
+                        }
+                    } else {
+                        block_ok = false;
+                        block_sampled_all = false;
+                    }
+                } else if reconstructor.reconstruct(&foundation).is_ok() {
                     outputs_covered += 1;
                     covered_here += 1;
                 } else {
                     block_ok = false;
+                    block_sampled_all = false;
                 }
             }
             if block_ok {
                 blocks_covered += 1;
             } else {
+                if verify && block_sampled_all {
+                    blocks_trace_only += 1;
+                }
                 *shortfall
                     .entry(outs.len() as u64 - covered_here)
                     .or_default() += 1;
@@ -151,7 +167,11 @@ fn main() {
     let pct = |a: u64, b: u64| 100.0 * a as f64 / b.max(1) as f64;
     println!(
         "{}  함수 {fns_total}  블록 {blocks_total}  출력 {outputs_total}",
-        if verify { "[검증]" } else { "[재구성만]" }
+        if verify {
+            "[검증(보편 증명)]"
+        } else {
+            "[재구성만]"
+        }
     );
     println!(
         "  출력 단위  {outputs_covered}/{outputs_total} = {:.1}%",
@@ -165,6 +185,13 @@ fn main() {
         "  함수 단위  {fns_covered}/{fns_total} = {:.1}%   (모든 블록이 덮인 경우)",
         pct(fns_covered, fns_total)
     );
+    if verify {
+        println!(
+            "  [참고: 추적 합의만(보편 증명 미완료)] 출력 {outputs_trace_only}/{outputs_total} ({:.1}%)  블록 {blocks_trace_only}/{blocks_total} ({:.1}%)",
+            pct(outputs_trace_only, outputs_total),
+            pct(blocks_trace_only, blocks_total)
+        );
+    }
     if !shortfall.is_empty() {
         println!("\n덮이지 않은 블록의 미달 출력 수 분포:");
         for (missing, count) in shortfall.iter().take(8) {

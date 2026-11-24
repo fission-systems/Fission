@@ -21,12 +21,14 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 | `crates/fission-midend-normalize` | Normalize owner (**owns** normalize pipeline source; ADR 0012) |
 | `crates/fission-midend-structuring` | Structuring free-function owners + pcode PreviewBuilder residual (ADR 0012) |
 | `crates/fission-dir` | Experimental P-code-rooted DIR product, native pure-region reconstruction, emulator/solver observation verification, and transition diagnostics (ADR 0014) |
+| `crates/fission-quotient` | Experimental WBCQ prototype (RFC #1093): minimal observable state machines of P-code slices, learned against the emulator and certified by the solver; reached only through the experimental `fission_cli quotient` |
 | [`crates/fission-signatures`](https://github.com/fission-systems/Fission/tree/main/crates/fission-signatures) | Signature datasets / lookup |
 | [`crates/fission-static`](https://github.com/fission-systems/Fission/tree/main/crates/fission-static) | Static facts, orchestration helpers, analysis services (`analysis`, `utils`) |
 | [`crates/fission-dynamic`](https://github.com/fission-systems/Fission/tree/main/crates/fission-dynamic) | Dynamic analysis support |
 | [`crates/fission-emulator`](https://github.com/fission-systems/Fission/tree/main/crates/fission-emulator) | P-code execution engine and OS high-level emulation; backs the execution differential |
 | [`crates/fission-solver`](https://github.com/fission-systems/Fission/tree/main/crates/fission-solver) | Native SMT/SAT stack (AST, AIG, CNF, SAT, theory) used by symbolic and concolic paths |
 | [`crates/fission-ttd`](https://github.com/fission-systems/Fission/tree/main/crates/fission-ttd) | Time-travel / trace-adjacent support |
+| `crates/fission-causal` | Experimental CSIC (RFC #1101 Track B): one-variable counterfactual interventions on emulator replays; no production dependents |
 | [`crates/fission-plugin`](https://github.com/fission-systems/Fission/tree/main/crates/fission-plugin) | Plugin contracts (`contracts`), manager/loader/hooks (`interactive_runtime`) |
 | [`crates/fission-cli`](https://github.com/fission-systems/Fission/tree/main/crates/fission-cli) | CLI product (`fission_cli`) |
 | [`crates/fission-script`](https://github.com/fission-systems/Fission/tree/main/crates/fission-script) | Rust-native embedded scripting (Rhai) for read-only binary automation |

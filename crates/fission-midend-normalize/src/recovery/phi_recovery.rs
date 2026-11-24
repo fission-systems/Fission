@@ -530,6 +530,75 @@ mod tests {
             "N-to-1 coalescing occurred: {assigned:?}"
         );
     }
+
+    #[test]
+    fn join_coalescing_does_not_clobber_pre_if_then_var_with_dead_else_temp() {
+        let mut func = PreHirFunction {
+            name: "test_join_dead_else".to_string(),
+            locals: vec![
+                PreHirBinding {
+                    name: "t1".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                PreHirBinding {
+                    name: "t2".to_string(),
+                    ty: int(32),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("t1".to_string()),
+                    rhs: PreHirExpr::Const(1, int(32)),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("cond".to_string()),
+                    then_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("t1".to_string()),
+                        rhs: PreHirExpr::Const(2, int(32)),
+                    }]
+                    .into(),
+                    else_body: vec![PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("t2".to_string()),
+                        rhs: PreHirExpr::Const(3, int(32)),
+                    }]
+                    .into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Var("t1".to_string()))),
+            ],
+            ..Default::default()
+        };
+
+        let before = func.clone();
+        assert!(!join_coalescing_pass(&mut func));
+        assert_eq!(func, before);
+    }
+
+    #[test]
+    fn count_uses_in_stmt_flat_covers_lvalue_block_and_va_start() {
+        let assign_lhs = PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("x".to_string())),
+                ty: int(32),
+            },
+            rhs: PreHirExpr::Const(1, int(32)),
+        };
+        let block = PreHirStmt::Block(
+            vec![PreHirStmt::VaStart {
+                va_list: PreHirExpr::Var("x".to_string()),
+                last_named_param: "p".to_string(),
+            }]
+            .into(),
+        );
+        assert_eq!(count_uses_in_stmt_flat(&assign_lhs, "x"), 1);
+        assert_eq!(count_uses_in_stmt_flat(&block, "x"), 1);
+    }
 }
 
 fn count_preserved_copyprop_candidates(
@@ -1669,7 +1738,23 @@ fn collect_join_renames(
                             map.use_count.get(else_var.as_str()).copied().unwrap_or(0);
                         let else_uses_after = count_uses_after(stmts, idx + 1, else_var);
                         let else_uses_in_branch = else_uses_total.saturating_sub(else_uses_after);
-                        if else_uses_in_branch == 0 {
+                        let then_defs_in_branch = count_defs_in_stmts(then_body, then_var);
+                        let then_defs_total =
+                            map.def_count.get(then_var.as_str()).copied().unwrap_or(0);
+                        let then_defined_outside = then_defs_total > then_defs_in_branch;
+                        let then_used_in_else = else_body
+                            .iter()
+                            .any(|s| count_uses_in_stmt_flat(s, then_var) > 0);
+                        let else_defs_in_branch = count_defs_in_stmts(else_body, else_var);
+                        let else_defs_total =
+                            map.def_count.get(else_var.as_str()).copied().unwrap_or(0);
+                        let else_defined_outside = else_defs_total > else_defs_in_branch;
+                        if else_uses_after > 0
+                            && else_uses_in_branch == 0
+                            && !then_defined_outside
+                            && !then_used_in_else
+                            && !else_defined_outside
+                        {
                             rename_map.insert(else_var.clone(), then_var.clone());
                             matched_then.insert(then_var.clone());
                             matched_else.insert(else_var.clone());
@@ -1741,10 +1826,61 @@ fn count_uses_after(stmts: &[PreHirStmt], start_idx: usize, name: &str) -> usize
         .sum()
 }
 
+fn count_defs_in_stmts(stmts: &[PreHirStmt], name: &str) -> usize {
+    fn in_stmt(stmt: &PreHirStmt, name: &str) -> usize {
+        match stmt {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(lhs),
+                ..
+            } => usize::from(lhs.as_str() == name),
+            PreHirStmt::Block(body)
+            | PreHirStmt::While { body, .. }
+            | PreHirStmt::DoWhile { body, .. } => count_defs_in_stmts(body, name),
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => count_defs_in_stmts(then_body, name) + count_defs_in_stmts(else_body, name),
+            PreHirStmt::For {
+                init, update, body, ..
+            } => {
+                init.as_deref().map_or(0, |s| in_stmt(s, name))
+                    + update.as_deref().map_or(0, |s| in_stmt(s, name))
+                    + count_defs_in_stmts(body, name)
+            }
+            PreHirStmt::Switch { cases, default, .. } => {
+                cases
+                    .iter()
+                    .map(|c| count_defs_in_stmts(&c.body, name))
+                    .sum::<usize>()
+                    + count_defs_in_stmts(default, name)
+            }
+            _ => 0,
+        }
+    }
+    stmts.iter().map(|s| in_stmt(s, name)).sum()
+}
+
+fn count_uses_in_lvalue_flat(lhs: &PreHirLValue, name: &str) -> usize {
+    match lhs {
+        PreHirLValue::Var(_) => 0,
+        PreHirLValue::Deref { ptr, .. } => count_var_in_expr(ptr, name),
+        PreHirLValue::Index { base, index, .. } => {
+            count_var_in_expr(base, name) + count_var_in_expr(index, name)
+        }
+        PreHirLValue::FieldAccess { base, .. } => count_var_in_expr(base, name),
+    }
+}
+
 fn count_uses_in_stmt_flat(stmt: &PreHirStmt, name: &str) -> usize {
     match stmt {
-        PreHirStmt::Assign { lhs: _, rhs } => count_var_in_expr(rhs, name),
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => count_var_in_expr(expr, name),
+        PreHirStmt::Assign { lhs, rhs } => {
+            count_uses_in_lvalue_flat(lhs, name) + count_var_in_expr(rhs, name)
+        }
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::Return(Some(expr))
+        | PreHirStmt::VaStart { va_list: expr, .. } => count_var_in_expr(expr, name),
+        PreHirStmt::Block(body) => body.iter().map(|s| count_uses_in_stmt_flat(s, name)).sum(),
         PreHirStmt::If {
             cond,
             then_body,

@@ -16,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PE = "crates/fission-loader/testdata/x64_pdb_struct_test.exe"
 ELF = "crates/fission-dir/testdata/ground_truth_fixture.elf"
 SHARED = "crates/fission-sleigh/testdata/a64_csel_select.so"
+QUOTIENT = "crates/fission-quotient/testdata/quotient_fixture.elf"
+QUOTIENT_A64 = "crates/fission-quotient/testdata/quotient_fixture_aarch64.elf"
 
 
 def invoke(cli: str, *args: str, status: int = 0) -> dict:
@@ -34,6 +36,12 @@ def check(cli: str) -> None:
         ("list", [(PE,), (ELF,)]),
         ("decomp", [(PE, "--addr", "0x140001040"), (PE, "--all"),
                     (PE, "--all", "--benchmark")]),
+        # One case per status the payload can carry.
+        ("quotient", [(QUOTIENT, "--name", "auth_step"), (QUOTIENT_A64, "--name", "auth_step"),
+                      (QUOTIENT, "--name", "split_step"),
+                      (QUOTIENT, "--name", "counter_step", "--max-states", "4"),
+                      (QUOTIENT, "--name", "latch_step", "--conflict-budget", "0"),
+                      (QUOTIENT, "--name", "clock_step")]),
     ):
         schema = invoke(cli, "schema", command)
         Draft202012Validator.check_schema(schema)
@@ -45,7 +53,7 @@ def check(cli: str) -> None:
         for case in cases:
             result = invoke(cli, "--contract", "v1", "--no-db", command, *case, "--json")
             validator.validate(result)
-        selector = ("--all",) if command == "decomp" else ()
+        selector = {"decomp": ("--all",), "quotient": ("--addr", "0x1000")}.get(command, ())
         error = invoke(
             cli, "--contract", "v1", command, "missing-fission-fixture.elf",
             *selector, "--json", status=3,
@@ -62,6 +70,13 @@ def check(cli: str) -> None:
             rows[0].pop("code")
             rows[0]["error"] = "sample item failed"
             validator.validate(partial)
+        if command == "quotient":
+            # A status the contract does not define must not validate: a
+            # reader branches on `kind` to know how far the claim reaches.
+            claim = copy.deepcopy(result)
+            claim["data"]["status"] = {"kind": "proved", "horizon": 4}
+            if validator.is_valid(claim):
+                raise RuntimeError("quotient: an undefined status kind was accepted")
         broken = copy.deepcopy(result)
         broken["data"] = True
         if validator.is_valid(broken):

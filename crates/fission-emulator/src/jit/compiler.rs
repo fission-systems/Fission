@@ -16,7 +16,7 @@ use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{Linkage, Module, default_libcall_names};
 use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
@@ -43,6 +43,8 @@ pub struct JitCompiler {
     /// block until an observer is registered, and registering one flushes the
     /// cache anyway ([`crate::observe`]).
     pub observe: crate::observe::ObserveMask,
+    /// Architectural NaN propagation policy passed to `jit_float_binop`.
+    pub nan_policy: crate::arch::NanPolicy,
     /// Opcodes this compiler met and did not implement, by name.
     ///
     /// An unimplemented op lowers to nothing, so the block compiles, runs, and
@@ -51,6 +53,12 @@ pub struct JitCompiler {
     /// to it; the compiler has no `Emulator` to reach, so it counts here and
     /// the caller drains it.
     pub unimplemented_ops: std::collections::BTreeMap<String, u64>,
+    /// SLEIGH userop IDs answered by `arch::vector::answer_vector_userop` even when
+    /// all operands are `<= 8` bytes (narrow vector / MMX / scalar NEON forms).
+    vector_userop_ids: HashSet<u32>,
+    /// True on AArch64 so narrow NEON `CALLOTHER` outputs invalidate all 16 bytes
+    /// of the enclosing Q-register window when `answer_vector_userop` zeroes upper lanes.
+    zero_vector_upper_lanes: bool,
     /// Per compiled instruction that may fault, the registers it writes;
     /// indexed by the constant its `jit_insn_checkpoint` call carries.
     /// Append-only, like the emulator's `wide_ops`: a compiled block holds
@@ -199,10 +207,25 @@ impl JitCompiler {
             builder_ctx,
             compile_seq: 0,
             observe: crate::observe::ObserveMask::NONE,
+            nan_policy: crate::arch::NanPolicy::FirstOperand,
             unimplemented_ops: std::collections::BTreeMap::new(),
             insn_reg_writes: Vec::new(),
             shadow: crate::observe::ShadowMode::Off,
+            vector_userop_ids: HashSet::new(),
+            zero_vector_upper_lanes: false,
         })
+    }
+
+    pub fn set_vector_userop_ids(&mut self, ids: HashSet<u32>) {
+        self.vector_userop_ids = ids;
+    }
+
+    pub fn add_vector_userop_id(&mut self, id: u32) {
+        self.vector_userop_ids.insert(id);
+    }
+
+    pub fn set_zero_vector_upper_lanes(&mut self, enabled: bool) {
+        self.zero_vector_upper_lanes = enabled;
     }
 
     /// Compile a single guest instruction (TB of length 1).
@@ -431,6 +454,7 @@ impl JitCompiler {
 
         let mut sig_fbin = self.module.make_signature();
         sig_fbin.params.extend([
+            AbiParam::new(types::I32),
             AbiParam::new(types::I32),
             AbiParam::new(types::I32),
             AbiParam::new(types::I64),
@@ -1327,18 +1351,21 @@ impl JitCompiler {
                 op.opcode
             };
 
-            // 128-bit integer ops, and vector `CALLOTHER`s, go back to the
-            // evaluator rather than being lowered here. Cranelift has an `I128` and they could be lowered,
-            // but the reason not to is agreement: these are precisely the ops
-            // both engines used to truncate to eight bytes, and routing the
-            // compiled path through the interpreting one makes the two
-            // *unable* to disagree rather than merely tested for it.
+            // Wide (>8-byte) integer ops, and vector `CALLOTHER`s, go back to
+            // the evaluator rather than being lowered here. Cranelift handles
+            // scalar <=8B ops natively, while routing wider integer ops through
+            // the evaluator prevents eight-byte truncation and ensures both
+            // engines cannot disagree.
             //
-            // It costs a call per op, on 3.5% of instructions. That is the
+            // It costs a call per op, on ~3.5% of instructions. That is the
             // right trade for now -- a wrong answer arrives just as fast.
+            let is_vector_userop = op.opcode == PcodeOpcode::CallOther
+                && (crate::arch::vector::is_wide_userop(op)
+                    || op.inputs.first().is_some_and(|vn| {
+                        self.vector_userop_ids.contains(&(vn.constant_val as u32))
+                    }));
             if !dead_ops[idx]
-                && (crate::pcode::eval::Evaluator::u128_handled(op)
-                    || crate::arch::vector::is_wide_userop(op))
+                && (crate::pcode::eval::Evaluator::wide_handled(op) || is_vector_userop)
             {
                 let index = wide_ops.len() as i64;
                 wide_ops.push(op.clone());
@@ -1378,13 +1405,26 @@ impl JitCompiler {
                     // The call wrote all of `out`, up to sixteen bytes. Any
                     // other cached view of those bytes -- a four-byte half, the
                     // upper eight -- is stale now, not just the exact one.
-                    let (wlo, whi) = (out.offset, out.offset + u64::from(out.size));
+                    let widens_to_q = is_vector_userop
+                        && self.zero_vector_upper_lanes
+                        && out.space_id == register_space
+                        && out.offset >= 0x5000
+                        && out.offset < 0x5400
+                        && (out.offset - 0x5000) % 32 == 0
+                        && out.size < 16;
+                    let (wlo, whi) = (
+                        out.offset,
+                        out.offset + if widens_to_q { 16 } else { u64::from(out.size) },
+                    );
                     let exact = (out.space_id, out.offset, u64::from(out.size.min(8)));
                     var_map.retain(|key, _| {
                         *key == exact
                             || key.0 != out.space_id
                             || key.1 >= whi
                             || key.1 + key.2 <= wlo
+                    });
+                    dirty.retain(|(sp, off, sz, _)| {
+                        !(*sp == out.space_id && *off < whi && *off + u64::from(*sz) > wlo)
                     });
                     let size = out.size.min(8);
                     let v = ensure_var!(out.space_id, out.offset, size);
@@ -2273,7 +2313,8 @@ impl JitCompiler {
                         };
                         let opi = builder.ins().iconst(types::I32, fop as i64);
                         let szi = builder.ins().iconst(types::I32, size as i64);
-                        let call = builder.ins().call(float_binop_ref, &[opi, szi, a, b]);
+                        let pol = builder.ins().iconst(types::I32, self.nan_policy as i64);
+                        let call = builder.ins().call(float_binop_ref, &[opi, szi, pol, a, b]);
                         store_vn!(out, builder.inst_results(call)[0]);
                         let sk = match op.opcode {
                             PcodeOpcode::FloatAdd => SymBinOpKind::FloatAdd as u32,

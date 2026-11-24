@@ -2,6 +2,18 @@
 
 <!-- What does this PR change and why? Link issues (e.g. `Closes #123`). -->
 
+## Issue / Stabilization Context
+
+- Linked issue(s), primary phase, priority and owner:
+- Base revision / reproduction (or preventive-work rationale):
+- Probe (defect before, gone after) and acceptance test (fails on base, passes on head; path):
+- Violated invariant / expected behavior:
+- Dependencies, risk, and out-of-scope changes:
+
+<!-- See docs/ISSUE_PR_WORKFLOW.md. Apply the corresponding labels after
+reviewing the actual change. Use Refs for partial/umbrella work; Closes only
+when all acceptance criteria are verified. -->
+
 ## Change Type
 
 - [ ] Decompiler semantics / IR / structuring / types

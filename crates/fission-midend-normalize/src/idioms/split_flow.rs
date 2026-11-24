@@ -62,7 +62,30 @@ fn type_bits(ty: &NirType) -> u32 {
     }
 }
 
-fn match_piece_concat(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, u32)> {
+fn low_mask(shift_bits: u32) -> u64 {
+    if shift_bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << shift_bits) - 1
+    }
+}
+
+fn is_unsigned_fitting(ty: &NirType, shift_bits: u32) -> bool {
+    matches!(ty, NirType::Bool)
+        || matches!(ty, NirType::Int { bits, signed: false } if *bits <= shift_bits)
+}
+
+fn resolve_expr_type(expr: &PreHirExpr, type_map: &HashMap<String, NirType>) -> NirType {
+    match expr {
+        PreHirExpr::Var(name) => type_map.get(name).cloned().unwrap_or(NirType::Unknown),
+        _ => expr_type(expr),
+    }
+}
+
+fn match_piece_concat(
+    expr: &PreHirExpr,
+    type_map: &HashMap<String, NirType>,
+) -> Option<(PreHirExpr, PreHirExpr, u32)> {
     if let PreHirExpr::Binary {
         op: PreHirBinaryOp::Or,
         lhs,
@@ -70,12 +93,14 @@ fn match_piece_concat(expr: &PreHirExpr) -> Option<(PreHirExpr, PreHirExpr, u32)
         ..
     } = expr
     {
-        if let Some((hi, shift_bits)) = match_shifted_high(lhs) {
-            let lo = match_unshifted_low(rhs);
+        if let Some((hi, shift_bits)) = match_shifted_high(lhs)
+            && let Some(lo) = match_unshifted_low(rhs, shift_bits, type_map)
+        {
             return Some((hi, lo, shift_bits));
         }
-        if let Some((hi, shift_bits)) = match_shifted_high(rhs) {
-            let lo = match_unshifted_low(lhs);
+        if let Some((hi, shift_bits)) = match_shifted_high(rhs)
+            && let Some(lo) = match_unshifted_low(lhs, shift_bits, type_map)
+        {
             return Some((hi, lo, shift_bits));
         }
     }
@@ -90,7 +115,10 @@ fn match_shifted_high(expr: &PreHirExpr) -> Option<(PreHirExpr, u32)> {
         ..
     } = expr
     {
-        if let PreHirExpr::Const(shift_bits, _) = &**rhs {
+        if let PreHirExpr::Const(shift_bits, _) = &**rhs
+            && *shift_bits > 0
+            && *shift_bits < 64
+        {
             let hi = if let PreHirExpr::Cast { expr: inner, .. } = &**lhs {
                 (**inner).clone()
             } else {
@@ -102,11 +130,57 @@ fn match_shifted_high(expr: &PreHirExpr) -> Option<(PreHirExpr, u32)> {
     None
 }
 
-fn match_unshifted_low(expr: &PreHirExpr) -> PreHirExpr {
-    if let PreHirExpr::Cast { expr: inner, .. } = expr {
-        (**inner).clone()
-    } else {
-        expr.clone()
+fn match_unshifted_low(
+    expr: &PreHirExpr,
+    shift_bits: u32,
+    type_map: &HashMap<String, NirType>,
+) -> Option<PreHirExpr> {
+    match expr {
+        PreHirExpr::Cast { ty, expr: inner } => {
+            let inner_ty = resolve_expr_type(inner, type_map);
+            if is_unsigned_fitting(ty, shift_bits) {
+                if is_unsigned_fitting(&inner_ty, shift_bits) {
+                    Some((**inner).clone())
+                } else {
+                    Some(expr.clone())
+                }
+            } else if matches!(ty, NirType::Int { bits, signed: false } if *bits > shift_bits)
+                && !matches!(inner_ty, NirType::Int { signed: true, .. })
+            {
+                match_unshifted_low(inner, shift_bits, type_map)
+            } else {
+                None
+            }
+        }
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs,
+            rhs,
+            ..
+        } => {
+            let max_mask = low_mask(shift_bits);
+            if matches!(lhs.as_ref(), PreHirExpr::Const(m, _) if (*m as u64) <= max_mask)
+                || matches!(rhs.as_ref(), PreHirExpr::Const(m, _) if (*m as u64) <= max_mask)
+            {
+                Some(expr.clone())
+            } else {
+                None
+            }
+        }
+        PreHirExpr::Const(val, _) => {
+            if (*val as u64) <= low_mask(shift_bits) {
+                Some(expr.clone())
+            } else {
+                None
+            }
+        }
+        _ => {
+            if is_unsigned_fitting(&resolve_expr_type(expr, type_map), shift_bits) {
+                Some(expr.clone())
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -402,13 +476,15 @@ fn rewrite_stmt(
     x_high: &str,
     shift_bits: u32,
     x_bits: u32,
+    type_map: &HashMap<String, NirType>,
+    used_tmp: &mut bool,
 ) {
     match stmt {
         PreHirStmt::Assign {
             lhs: PreHirLValue::Var(name),
             rhs,
         } if name == x_name => {
-            if let Some((mut hi, mut lo, _)) = match_piece_concat(rhs) {
+            if let Some((mut hi, mut lo, _)) = match_piece_concat(rhs, type_map) {
                 rewrite_expr(&mut lo, x_name, x_low, x_high, shift_bits);
                 rewrite_expr(&mut hi, x_name, x_low, x_high, shift_bits);
                 if expr_reads_name(&hi, x_low) && !expr_reads_name(&lo, x_high) {
@@ -427,6 +503,7 @@ fn rewrite_stmt(
                     );
                 } else if expr_reads_name(&hi, x_low) && expr_reads_name(&lo, x_high) {
                     let tmp_name = format!("{x_low}__split_tmp");
+                    *used_tmp = true;
                     *stmt = PreHirStmt::Block(
                         vec![
                             PreHirStmt::Assign {
@@ -507,6 +584,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
         }
         PreHirStmt::While { cond, body } => {
@@ -518,6 +597,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
         }
         PreHirStmt::DoWhile { body, cond } => {
@@ -528,6 +609,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
             rewrite_expr(cond, x_name, x_low, x_high, shift_bits);
         }
@@ -538,13 +621,17 @@ fn rewrite_stmt(
             body,
         } => {
             if let Some(i) = init {
-                rewrite_stmt(i, x_name, x_low, x_high, shift_bits, x_bits);
+                rewrite_stmt(
+                    i, x_name, x_low, x_high, shift_bits, x_bits, type_map, used_tmp,
+                );
             }
             if let Some(c) = cond {
                 rewrite_expr(c, x_name, x_low, x_high, shift_bits);
             }
             if let Some(u) = update {
-                rewrite_stmt(u, x_name, x_low, x_high, shift_bits, x_bits);
+                rewrite_stmt(
+                    u, x_name, x_low, x_high, shift_bits, x_bits, type_map, used_tmp,
+                );
             }
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
@@ -553,6 +640,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
         }
         PreHirStmt::If {
@@ -568,6 +657,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
             rewrite_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
@@ -576,6 +667,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
         }
         PreHirStmt::Switch {
@@ -592,6 +685,8 @@ fn rewrite_stmt(
                     x_high,
                     shift_bits,
                     x_bits,
+                    type_map,
+                    used_tmp,
                 );
             }
             rewrite_stmts(
@@ -601,6 +696,8 @@ fn rewrite_stmt(
                 x_high,
                 shift_bits,
                 x_bits,
+                type_map,
+                used_tmp,
             );
         }
         _ => {}
@@ -614,9 +711,13 @@ fn rewrite_stmts(
     x_high: &str,
     shift_bits: u32,
     x_bits: u32,
+    type_map: &HashMap<String, NirType>,
+    used_tmp: &mut bool,
 ) {
     for stmt in stmts {
-        rewrite_stmt(stmt, x_name, x_low, x_high, shift_bits, x_bits);
+        rewrite_stmt(
+            stmt, x_name, x_low, x_high, shift_bits, x_bits, type_map, used_tmp,
+        );
     }
 }
 
@@ -919,6 +1020,7 @@ fn split_scalar_role_phases(
     pointer_locals: &HashSet<String>,
     used_names: &mut HashSet<String>,
     new_bindings: &mut Vec<PreHirBinding>,
+    is_top_level: bool,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts.iter_mut() {
@@ -931,6 +1033,7 @@ fn split_scalar_role_phases(
                     pointer_locals,
                     used_names,
                     new_bindings,
+                    false,
                 );
             }
             PreHirStmt::If {
@@ -943,12 +1046,14 @@ fn split_scalar_role_phases(
                     pointer_locals,
                     used_names,
                     new_bindings,
+                    false,
                 );
                 changed |= split_scalar_role_phases(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     pointer_locals,
                     used_names,
                     new_bindings,
+                    false,
                 );
             }
             PreHirStmt::For {
@@ -960,6 +1065,7 @@ fn split_scalar_role_phases(
                         pointer_locals,
                         used_names,
                         new_bindings,
+                        false,
                     );
                 }
                 changed |= split_scalar_role_phases(
@@ -967,6 +1073,7 @@ fn split_scalar_role_phases(
                     pointer_locals,
                     used_names,
                     new_bindings,
+                    false,
                 );
                 if let Some(update) = update {
                     changed |= split_scalar_role_phases(
@@ -974,6 +1081,7 @@ fn split_scalar_role_phases(
                         pointer_locals,
                         used_names,
                         new_bindings,
+                        false,
                     );
                 }
             }
@@ -984,6 +1092,7 @@ fn split_scalar_role_phases(
                         pointer_locals,
                         used_names,
                         new_bindings,
+                        false,
                     );
                 }
                 changed |= split_scalar_role_phases(
@@ -991,6 +1100,7 @@ fn split_scalar_role_phases(
                     pointer_locals,
                     used_names,
                     new_bindings,
+                    false,
                 );
             }
             _ => {}
@@ -1025,10 +1135,24 @@ fn split_scalar_role_phases(
             .position(|stmt| !is_linear_phase_stmt(stmt))
             .map_or(stmts.len(), |offset| index + 1 + offset);
         let end = next_definition.min(control_boundary);
+        if !is_top_level && (next_definition >= stmts.len() || end != next_definition) {
+            index += 1;
+            continue;
+        }
+        if end == next_definition
+            && next_definition < stmts.len()
+            && stmt_reads_name(&stmts[next_definition], &old_name)
+        {
+            index += 1;
+            continue;
+        }
         if control_boundary < next_definition
-            && stmts[control_boundary..next_definition]
+            && (matches!(
+                stmts.get(control_boundary),
+                Some(PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue)
+            ) || stmts[control_boundary..next_definition]
                 .iter()
-                .any(|stmt| stmt_reads_name_deep(stmt, &old_name))
+                .any(|stmt| stmt_reads_name_deep(stmt, &old_name)))
         {
             index += 1;
             continue;
@@ -1106,7 +1230,7 @@ pub fn apply_split_flow_pass(func: &mut PreHirFunction) -> bool {
         let mut all_match = true;
 
         for rhs in rhs_exprs {
-            if let Some((_, _, shift_bits)) = match_piece_concat(rhs) {
+            if let Some((_, _, shift_bits)) = match_piece_concat(rhs, &type_map) {
                 if let Some(first) = first_shift {
                     if first != shift_bits {
                         all_match = false;
@@ -1172,7 +1296,32 @@ pub fn apply_split_flow_pass(func: &mut PreHirFunction) -> bool {
             func.locals.push(low_binding);
             func.locals.push(high_binding);
 
-            rewrite_stmts(&mut func.body, name, &x_low, &x_high, shift_bits, x_bits);
+            let mut used_tmp = false;
+            rewrite_stmts(
+                &mut func.body,
+                name,
+                &x_low,
+                &x_high,
+                shift_bits,
+                x_bits,
+                &type_map,
+                &mut used_tmp,
+            );
+            if used_tmp {
+                let tmp_name = format!("{x_low}__split_tmp");
+                if !func.locals.iter().any(|l| l.name == tmp_name) {
+                    func.locals.push(PreHirBinding {
+                        name: tmp_name,
+                        ty: NirType::Int {
+                            bits: shift_bits,
+                            signed: false,
+                        },
+                        surface_type_name: None,
+                        origin: Some(NirBindingOrigin::Temp),
+                        initializer: None,
+                    });
+                }
+            }
             func.locals.retain(|l| &l.name != name);
 
             changed = true;
@@ -1197,6 +1346,7 @@ pub fn apply_split_flow_pass(func: &mut PreHirFunction) -> bool {
         &pointer_locals,
         &mut used_names,
         &mut new_bindings,
+        true,
     );
     func.locals.extend(new_bindings);
 
@@ -1502,7 +1652,20 @@ mod tests {
                 ty: uint(64),
             },
         };
-        rewrite_stmt(&mut stmt, "pair", "pair_lo", "pair_hi", 32, 64);
+        let mut type_map = HashMap::default();
+        type_map.insert("val".into(), uint(32));
+        let mut used_tmp = false;
+        rewrite_stmt(
+            &mut stmt,
+            "pair",
+            "pair_lo",
+            "pair_hi",
+            32,
+            64,
+            &type_map,
+            &mut used_tmp,
+        );
+        assert!(!used_tmp);
         // Because hi reads pair_lo, pair_hi must be assigned BEFORE pair_lo
         let PreHirStmt::Block(stmts) = stmt else {
             panic!("expected Block stmt");
@@ -1522,5 +1685,197 @@ mod tests {
                 ..
             } if name == "pair_lo"
         ));
+    }
+
+    #[test]
+    fn does_not_split_scalar_phase_when_redefinition_reads_old_name() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = PreHirFunction {
+            name: "redef_reads_old".into(),
+            locals: vec![
+                binding("slot", pointer_ty.clone()),
+                binding("base", pointer_ty.clone()),
+                binding("value", uint(32)),
+                binding("acc", uint(32)),
+            ],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Var("base".into()),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Cast {
+                        ty: uint(8),
+                        expr: Box::new(PreHirExpr::Var("value".into())),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("acc".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("acc".into())),
+                        rhs: Box::new(PreHirExpr::Var("slot".into())),
+                        ty: uint(32),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("slot".into()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Add,
+                        lhs: Box::new(PreHirExpr::Var("slot".into())),
+                        rhs: Box::new(PreHirExpr::Const(1, uint(32))),
+                        ty: uint(32),
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_split_flow_pass(&mut func));
+        assert!(
+            !func
+                .locals
+                .iter()
+                .any(|binding| binding.name == "slot_value")
+        );
+    }
+
+    #[test]
+    fn does_not_split_scalar_phase_escaping_nested_if_or_loop() {
+        let pointer_ty = NirType::Ptr(Box::new(uint(8)));
+        let mut func = PreHirFunction {
+            name: "nested_if_escape".into(),
+            locals: vec![
+                binding("slot", pointer_ty.clone()),
+                binding("base", pointer_ty),
+                binding("value", uint(32)),
+                binding("acc", uint(32)),
+                binding("cond", NirType::Bool),
+            ],
+            body: vec![PreHirStmt::If {
+                cond: PreHirExpr::Var("cond".into()),
+                then_body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("slot".into()),
+                        rhs: PreHirExpr::Var("base".into()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("slot".into()),
+                        rhs: PreHirExpr::Cast {
+                            ty: uint(8),
+                            expr: Box::new(PreHirExpr::Var("value".into())),
+                        },
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("acc".into()),
+                        rhs: PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Add,
+                            lhs: Box::new(PreHirExpr::Var("acc".into())),
+                            rhs: Box::new(PreHirExpr::Var("slot".into())),
+                            ty: uint(32),
+                        },
+                    },
+                ]
+                .into(),
+                else_body: vec![].into(),
+            }],
+            ..Default::default()
+        };
+
+        assert!(!apply_split_flow_pass(&mut func));
+        assert!(
+            !func
+                .locals
+                .iter()
+                .any(|binding| binding.name == "slot_value")
+        );
+    }
+
+    #[test]
+    fn rejects_signed_low_piece_in_concat() {
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let mut func = PreHirFunction {
+            name: "signed_concat".into(),
+            locals: vec![
+                binding("pair", uint(64)),
+                binding("hi", uint(32)),
+                binding("lo", i32_ty.clone()),
+            ],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("pair".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    lhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
+                        lhs: Box::new(PreHirExpr::Cast {
+                            ty: uint(64),
+                            expr: Box::new(PreHirExpr::Var("hi".into())),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(32, uint(32))),
+                        ty: uint(64),
+                    }),
+                    rhs: Box::new(PreHirExpr::Cast {
+                        ty: uint(64),
+                        expr: Box::new(PreHirExpr::Cast {
+                            ty: i32_ty,
+                            expr: Box::new(PreHirExpr::Var("lo".into())),
+                        }),
+                    }),
+                    ty: uint(64),
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(!apply_split_flow_pass(&mut func));
+        assert!(func.locals.iter().any(|b| b.name == "pair"));
+    }
+
+    #[test]
+    fn declares_split_tmp_local_when_self_referential_swap_emits_it() {
+        let mut func = PreHirFunction {
+            name: "swap_concat".into(),
+            locals: vec![binding("pair", uint(64))],
+            body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("pair".into()),
+                rhs: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    lhs: Box::new(PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Shl,
+                        lhs: Box::new(PreHirExpr::Cast {
+                            ty: uint(64),
+                            expr: Box::new(PreHirExpr::Cast {
+                                ty: uint(32),
+                                expr: Box::new(PreHirExpr::Var("pair".into())),
+                            }),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(32, uint(32))),
+                        ty: uint(64),
+                    }),
+                    rhs: Box::new(PreHirExpr::Cast {
+                        ty: uint(32),
+                        expr: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shr,
+                            lhs: Box::new(PreHirExpr::Var("pair".into())),
+                            rhs: Box::new(PreHirExpr::Const(32, uint(32))),
+                            ty: uint(64),
+                        }),
+                    }),
+                    ty: uint(64),
+                },
+            }],
+            ..Default::default()
+        };
+
+        assert!(apply_split_flow_pass(&mut func));
+        assert!(
+            func.locals.iter().any(|b| b.name == "pair_low__split_tmp"),
+            "locals must declare pair_low__split_tmp: {:?}",
+            func.locals
+        );
     }
 }

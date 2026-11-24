@@ -26,6 +26,110 @@ pub enum UnknownReason {
     OracleRefinement,
 }
 
+/// Value state for one symbol in a published `Sat` model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelValue {
+    /// Every bit of the value was driven by SAT assignments or AIG constants.
+    Assigned(u64),
+    /// At least one bit was unconstrained by CNF/SAT (`LBool::Undef` or
+    /// unlowered variable) and completed with default zero bits.
+    DefaultCompleted(u64),
+}
+
+impl ModelValue {
+    #[must_use]
+    pub const fn raw_value(self) -> u64 {
+        match self {
+            Self::Assigned(v) | Self::DefaultCompleted(v) => v,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_assigned(self) -> bool {
+        matches!(self, Self::Assigned(_))
+    }
+}
+
+/// Why a lookup into [`Solver::get_model_value`] has no concrete entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbsentModelReason {
+    /// No active `Sat` query has published a model (initial state, invalidated,
+    /// `Unsat`, or `Unknown`).
+    NoPublishedModel,
+    /// `solver.assertions` changed since the last published model.
+    AssertionsModified,
+    /// The queried `SymNodeId` was not registered in `solver.nodes`.
+    UnregisteredNode,
+    /// The registered node cannot be extracted as a `1..=64`-bit scalar (e.g.
+    /// unsupported sort/width or an unconstrained `ArraySelect`).
+    UnextractableSortOrWidth,
+}
+
+/// Result of querying a symbol against the currently published model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelLookup {
+    Value(ModelValue),
+    Absent(AbsentModelReason),
+}
+
+/// Immutable witness snapshot published strictly after a supported `Sat` verdict.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublishedModel {
+    pub query_epoch: u64,
+    pub oracle_epoch: Option<u64>,
+    pub assumptions: Vec<SymExpr>,
+    assertions_snapshot: Vec<SymExpr>,
+    pub entries: HashMap<SymNodeId, ModelValue>,
+}
+
+impl PublishedModel {
+    #[must_use]
+    pub fn get_model_value(&self, var_id: SymNodeId) -> Option<ModelValue> {
+        self.entries.get(&var_id).copied()
+    }
+
+    #[must_use]
+    pub fn get_value(&self, var_id: SymNodeId) -> Option<u64> {
+        self.entries.get(&var_id).map(|entry| entry.raw_value())
+    }
+}
+
+/// Termination status of [`Solver::eval_detailed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EvalTermination {
+    /// Caller requested zero values (`n == 0`).
+    ZeroRequested,
+    /// All satisfying values within scope were enumerated and further exclusion was `Unsat`.
+    Exhausted,
+    /// Enumeration stopped after collecting the requested limit `n` values.
+    LimitReached,
+    /// Enumeration stopped because a query returned `Unknown`; partial `values`
+    /// collected before `Unknown` are preserved without conflating with `Exhausted`/`Unsat`.
+    Unknown(UnknownReason),
+    /// Internal solver error terminated enumeration.
+    Error(String),
+    /// A repeated value was returned despite an exclusion constraint.
+    StalledRepeat,
+}
+
+/// Individual value witness produced by [`Solver::eval_detailed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalWitness {
+    pub value: u64,
+    pub query_epoch: u64,
+    /// True iff all scalar bits were driven by SAT assignments or AIG constants.
+    pub exact: bool,
+}
+
+/// Typed enumeration result returned by [`Solver::eval_detailed`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EvalReport {
+    pub values: Vec<u64>,
+    pub witnesses: Vec<EvalWitness>,
+    pub termination: EvalTermination,
+    pub base_satisfiable: bool,
+}
+
 pub trait MemoryOracle {
     fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8>;
 }
@@ -34,7 +138,8 @@ pub trait MemoryOracle {
 pub struct Solver {
     /// The list of assertions (Path Conditions) that must be satisfied.
     pub assertions: Vec<SymExpr>,
-    /// Simplified model mapping variable IDs to concrete values.
+    /// Compatibility mirror of the currently published `Sat` model. Cleared
+    /// on assertion changes, query start, and every non-`Sat` outcome.
     pub model: HashMap<SymNodeId, u64>,
     /// Storage for AST nodes by ID.
     pub nodes: HashMap<SymNodeId, SymExpr>,
@@ -45,6 +150,9 @@ pub struct Solver {
     pub lowered_assertions: usize,
     /// Why the most recent query was `Unknown`, if it was.
     last_unknown: Option<UnknownReason>,
+    query_epoch: u64,
+    oracle_epoch: u64,
+    published_model: Option<PublishedModel>,
 }
 
 impl Default for Solver {
@@ -107,7 +215,17 @@ impl Solver {
             sat: crate::sat::SatSolver::new(),
             lowered_assertions: 0,
             last_unknown: None,
+            query_epoch: 0,
+            oracle_epoch: 0,
+            published_model: None,
         }
+    }
+
+    /// Invalidate any previously published model without disturbing previously
+    /// cloned [`PublishedModel`] snapshots held by callers.
+    pub fn invalidate_model(&mut self) {
+        self.model.clear();
+        self.published_model = None;
     }
 
     pub fn register_node(&mut self, expr: SymExpr) -> SymNodeId {
@@ -130,6 +248,7 @@ impl Solver {
 
     /// Add a constraint (boolean expression) to the solver context.
     pub fn assert(&mut self, expr: SymExpr) {
+        self.invalidate_model();
         if expr.get_bit_width() != 1 {
             tracing::warn!("Asserted expression does not evaluate to a boolean (size != 1)");
         }
@@ -232,7 +351,16 @@ impl Solver {
         oracle: Option<&dyn MemoryOracle>,
         extra: &[SymExpr],
     ) -> Result<SatResult> {
-        let result = self.check_sat_inner(oracle, extra)?;
+        self.query_epoch = self.query_epoch.saturating_add(1);
+        let oracle_epoch = oracle.map(|_| {
+            self.oracle_epoch = self.oracle_epoch.saturating_add(1);
+            self.oracle_epoch
+        });
+        self.invalidate_model();
+        let result = self.check_sat_inner(oracle, extra, oracle_epoch)?;
+        if result != SatResult::Sat {
+            self.invalidate_model();
+        }
         self.last_unknown = match result {
             SatResult::Unknown => Some(self.last_unknown.take().unwrap_or_else(|| {
                 UnknownReason::Unsupported(self.bv_theory.unsupported().to_vec())
@@ -246,6 +374,7 @@ impl Solver {
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
         extra: &[SymExpr],
+        oracle_epoch: Option<u64>,
     ) -> Result<SatResult> {
         self.last_unknown = None;
         let mut loop_count = 0;
@@ -290,12 +419,7 @@ impl Solver {
                 }
             }
 
-            // 4. Model Extraction
-            self.model.clear();
-            self.bv_theory
-                .extract_model(&self.sat, &self.nodes, &mut self.model);
-
-            // 5. Memory CEGAR
+            // 4. Memory CEGAR (before publishing any candidate model)
             if let Some(oracle) = oracle {
                 let mut seen_selects = HashSet::new();
                 let mut selects = Vec::new();
@@ -365,17 +489,32 @@ impl Solver {
                 }
             }
 
-            for (node_id, val) in &self.model {
-                tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
+            // 5. Extract candidate model only after CEGAR succeeds; publish only if
+            //    no unsupported operations tainted the verdict.
+            let candidate_entries = self
+                .bv_theory
+                .extract_model_with_status(&self.sat, &self.nodes);
+            if !self.bv_theory.unsupported().is_empty() {
+                self.invalidate_model();
+                return Ok(SatResult::Unknown);
             }
 
-            // A model of a problem with an unencoded operation is a model of
-            // a looser problem, not of this one.
-            return Ok(if self.bv_theory.unsupported().is_empty() {
-                SatResult::Sat
-            } else {
-                SatResult::Unknown
+            let raw_model: HashMap<SymNodeId, u64> = candidate_entries
+                .iter()
+                .map(|(&id, entry)| (id, entry.raw_value()))
+                .collect();
+            for (node_id, val) in &raw_model {
+                tracing::debug!("Model: var_id={} value=0x{:X}", node_id, val);
+            }
+            self.model = raw_model;
+            self.published_model = Some(PublishedModel {
+                query_epoch: self.query_epoch,
+                oracle_epoch,
+                assumptions: extra.to_vec(),
+                assertions_snapshot: self.assertions.clone(),
+                entries: candidate_entries,
             });
+            return Ok(SatResult::Sat);
         }
     }
 
@@ -393,9 +532,52 @@ impl Solver {
         }
     }
 
-    /// Retrieve the satisfying model for a given variable ID.
+    /// Returns the currently published [`PublishedModel`] iff the last query
+    /// returned a supported `Sat` verdict and `assertions` has not been mutated
+    /// since publication.
+    #[must_use]
+    pub fn published_model(&self) -> Option<&PublishedModel> {
+        self.published_model
+            .as_ref()
+            .filter(|published| published.assertions_snapshot == self.assertions)
+    }
+
+    /// Inspect a symbol in the active published model, distinguishing between
+    /// SAT-assigned values, explicit default zero completion, and absent/stale
+    /// entries.
+    #[must_use]
+    pub fn get_model_value(&self, var_id: SymNodeId) -> ModelLookup {
+        let Some(published) = self.published_model.as_ref() else {
+            return ModelLookup::Absent(AbsentModelReason::NoPublishedModel);
+        };
+        if published.assertions_snapshot != self.assertions {
+            return ModelLookup::Absent(AbsentModelReason::AssertionsModified);
+        }
+        if let Some(&entry) = published.entries.get(&var_id) {
+            return ModelLookup::Value(entry);
+        }
+        match self.nodes.get(&var_id) {
+            Some(_) => ModelLookup::Absent(AbsentModelReason::UnextractableSortOrWidth),
+            None => ModelLookup::Absent(AbsentModelReason::UnregisteredNode),
+        }
+    }
+
+    /// Retrieve a model value for `var_id` iff the current model is valid and
+    /// consistent with `self.assertions`.
     pub fn get_value(&self, var_id: SymNodeId) -> Option<u64> {
-        self.model.get(&var_id).copied()
+        match self.get_model_value(var_id) {
+            ModelLookup::Value(entry) => Some(entry.raw_value()),
+            ModelLookup::Absent(_) => None,
+        }
+    }
+
+    /// Retrieve only a SAT-assigned model value (returning `None` for missing,
+    /// stale, or default-completed entries).
+    pub fn get_assigned_value(&self, var_id: SymNodeId) -> Option<u64> {
+        match self.get_model_value(var_id) {
+            ModelLookup::Value(ModelValue::Assigned(val)) => Some(val),
+            _ => None,
+        }
     }
 
     // ── High-level API (inspired by angr SimSolver) ───────────────────────────
@@ -422,70 +604,229 @@ impl Solver {
         )
     }
 
-    /// Evaluate the expression and return up to `n` concrete values that satisfy
-    /// the current path constraints.
+    /// Transactional enumeration returning distinct satisfying values of `expr`
+    /// (up to `n`), witness provenance, and an explicit [`EvalTermination`]
+    /// distinguishing complete UNSAT exhaustion from limit cutoffs or `Unknown`.
     ///
-    /// Constants obey the same satisfiability and supported-width checks as
-    /// symbolic queries; an inconsistent context has no concrete values.
-    pub fn eval(&mut self, expr: &SymExpr, n: usize) -> Vec<u64> {
+    /// Unsupported temporary expressions fail cleanly for this query without
+    /// poisoning subsequent supported queries on the solver.
+    pub fn eval_detailed(&mut self, expr: &SymExpr, n: usize) -> EvalReport {
         if n == 0 {
-            return Vec::new();
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::ZeroRequested,
+                base_satisfiable: false,
+            };
         }
 
-        // Lower the queried expression before solving.  `check_sat` only
-        // lowers assertions; without this step a compound expression queried
-        // after the path constraints would have no CNF-backed AIG nodes and
-        // model evaluation would read the new gates as zero.
+        self.invalidate_model();
+        // Catch up any pending permanent assertions first so pre-existing
+        // persistent unsupported errors stay distinct from this temporary query.
+        if !self.lower_pending_assertions() {
+            let result = self.refuted();
+            if result == SatResult::Unsat {
+                self.last_unknown = None;
+                return EvalReport {
+                    values: Vec::new(),
+                    witnesses: Vec::new(),
+                    termination: EvalTermination::Exhausted,
+                    base_satisfiable: false,
+                };
+            }
+            let reason = UnknownReason::Unsupported(self.bv_theory.unsupported().to_vec());
+            self.last_unknown = Some(reason.clone());
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::Unknown(reason),
+                base_satisfiable: false,
+            };
+        }
+        if !self.bv_theory.unsupported().is_empty() {
+            let reason = UnknownReason::Unsupported(self.bv_theory.unsupported().to_vec());
+            self.last_unknown = Some(reason.clone());
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::Unknown(reason),
+                base_satisfiable: false,
+            };
+        }
+
+        let prior_unsupported_len = self.bv_theory.unsupported().len();
+        let saved_array_theory = self.array_theory.clone();
+
+        // Lower `expr` in a query-local transaction before running SAT so
+        // unsupported temporary expressions neither fabricate zero models nor
+        // poison subsequent queries.
         self.bv_theory.aig.lower_expr(expr);
-        // And give its array reads their axioms. With array axioms on, the
-        // AIG no longer flags a select as unsupported, so a select that only
-        // the query mentions -- `select(a, j)` when the constraints talk
-        // about `select(a, i)` and `i == j` -- would otherwise be free bits,
-        // and the first model value an arbitrary one. The lemmas are axioms
-        // of the array, true in every query, so they stay asserted.
-        self.assert_array_lemmas_for(expr);
-        let mut results = Vec::new();
-        if !matches!(
-            self.check_sat().unwrap_or(SatResult::Unknown),
-            SatResult::Sat
-        ) {
-            return results;
+        let new_unsupported = self
+            .bv_theory
+            .aig
+            .drain_unsupported_since(prior_unsupported_len);
+        if !new_unsupported.is_empty() {
+            self.array_theory = saved_array_theory;
+            let reason = UnknownReason::Unsupported(new_unsupported);
+            self.last_unknown = Some(reason.clone());
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::Unknown(reason),
+                base_satisfiable: false,
+            };
         }
 
-        // Evaluate the complete expression in the satisfying AIG model, not
-        // just a top-level Var lookup.  This also handles Extract, Ite, and
-        // other compound expressions.
-        results.push(self.bv_theory.evaluate_expr_in_model(&self.sat, expr));
+        // Compute any array-theory axioms needed for `expr` on a temporary clone
+        // first, committing them only if lowering stays completely supported.
+        if self.array_theory.has_new_terms(expr) {
+            let prior_clauses_len = self.bv_theory.cnf.clauses.len();
+            let mut next_array = self.array_theory.clone();
+            next_array.add_expr(expr);
+            let lemmas = next_array.take_lemmas();
+            for lemma in &lemmas {
+                self.bv_theory.assert_expr(lemma);
+            }
+            let lemma_unsupported = self
+                .bv_theory
+                .aig
+                .drain_unsupported_since(prior_unsupported_len);
+            if !lemma_unsupported.is_empty() {
+                self.bv_theory.cnf.clauses.truncate(prior_clauses_len);
+                self.array_theory = saved_array_theory;
+                let reason = UnknownReason::Unsupported(lemma_unsupported);
+                self.last_unknown = Some(reason.clone());
+                return EvalReport {
+                    values: Vec::new(),
+                    witnesses: Vec::new(),
+                    termination: EvalTermination::Unknown(reason),
+                    base_satisfiable: false,
+                };
+            }
+            self.array_theory = next_array;
+        }
 
-        // For additional solutions (up to n), exclude each found solution and re-solve
-        // This is standard SMT enumeration: assert (expr != prev_val) and re-check
-        let mut extra_exclusions: Vec<SymExpr> = Vec::new();
-        while results.len() < n {
-            let last = *results.last().expect("the first model value is recorded");
-            let exclusion =
-                SymExpr::new_neq(expr.clone(), SymExpr::new_const(last, expr.get_bit_width()));
-            extra_exclusions.push(exclusion);
-
-            let sat = matches!(
-                self.check_sat_with_oracle(None, &extra_exclusions)
-                    .unwrap_or(SatResult::Unknown),
-                SatResult::Sat
-            );
-            if sat {
-                let value = self.bv_theory.evaluate_expr_in_model(&self.sat, expr);
-                if results.contains(&value) {
-                    // A repeated value means the model did not move outside
-                    // the accumulated exclusions.  Do not spin indefinitely
-                    // if a future backend reports an inconsistent model.
-                    break;
-                }
-                results.push(value);
-            } else {
-                break;
+        let first_verdict = match self.check_sat() {
+            Ok(v) => v,
+            Err(err) => {
+                return EvalReport {
+                    values: Vec::new(),
+                    witnesses: Vec::new(),
+                    termination: EvalTermination::Error(err.to_string()),
+                    base_satisfiable: false,
+                };
+            }
+        };
+        match first_verdict {
+            SatResult::Sat => {}
+            SatResult::Unsat => {
+                return EvalReport {
+                    values: Vec::new(),
+                    witnesses: Vec::new(),
+                    termination: EvalTermination::Exhausted,
+                    base_satisfiable: false,
+                };
+            }
+            SatResult::Unknown => {
+                let reason = self
+                    .last_unknown
+                    .clone()
+                    .unwrap_or(UnknownReason::ConflictBudget);
+                return EvalReport {
+                    values: Vec::new(),
+                    witnesses: Vec::new(),
+                    termination: EvalTermination::Unknown(reason),
+                    base_satisfiable: false,
+                };
             }
         }
 
-        results
+        let (first_val, first_exact) = self
+            .bv_theory
+            .evaluate_expr_in_model_with_status(&self.sat, expr);
+        let eval_unsupported = self
+            .bv_theory
+            .aig
+            .drain_unsupported_since(prior_unsupported_len);
+        if !eval_unsupported.is_empty() {
+            self.invalidate_model();
+            self.array_theory = saved_array_theory;
+            let reason = UnknownReason::Unsupported(eval_unsupported);
+            self.last_unknown = Some(reason.clone());
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::Unknown(reason),
+                base_satisfiable: false,
+            };
+        }
+
+        let mut values = vec![first_val];
+        let mut witnesses = vec![EvalWitness {
+            value: first_val,
+            query_epoch: self.query_epoch,
+            exact: first_exact,
+        }];
+        let mut extra_exclusions: Vec<SymExpr> = Vec::new();
+        let termination = loop {
+            if values.len() >= n {
+                break EvalTermination::LimitReached;
+            }
+            let last = *values.last().expect("at least one witness is recorded");
+            extra_exclusions.push(SymExpr::new_neq(
+                expr.clone(),
+                SymExpr::new_const(last, expr.get_bit_width()),
+            ));
+            match self.check_sat_with_oracle(None, &extra_exclusions) {
+                Ok(SatResult::Sat) => {
+                    let (value, exact) = self
+                        .bv_theory
+                        .evaluate_expr_in_model_with_status(&self.sat, expr);
+                    let loop_unsupported = self
+                        .bv_theory
+                        .aig
+                        .drain_unsupported_since(prior_unsupported_len);
+                    if !loop_unsupported.is_empty() {
+                        self.invalidate_model();
+                        let reason = UnknownReason::Unsupported(loop_unsupported);
+                        self.last_unknown = Some(reason.clone());
+                        break EvalTermination::Unknown(reason);
+                    }
+                    if values.contains(&value) {
+                        break EvalTermination::StalledRepeat;
+                    }
+                    values.push(value);
+                    witnesses.push(EvalWitness {
+                        value,
+                        query_epoch: self.query_epoch,
+                        exact,
+                    });
+                }
+                Ok(SatResult::Unsat) => break EvalTermination::Exhausted,
+                Ok(SatResult::Unknown) => {
+                    let reason = self
+                        .last_unknown
+                        .clone()
+                        .unwrap_or(UnknownReason::ConflictBudget);
+                    break EvalTermination::Unknown(reason);
+                }
+                Err(err) => break EvalTermination::Error(err.to_string()),
+            }
+        };
+
+        EvalReport {
+            values,
+            witnesses,
+            termination,
+            base_satisfiable: true,
+        }
+    }
+
+    /// Compatibility wrapper returning up to `n` satisfying concrete values
+    /// for `expr`. Prefer [`Self::eval_detailed`] when the caller must
+    /// distinguish incomplete enumeration (`Unknown`) from UNSAT exhaustion.
+    pub fn eval(&mut self, expr: &SymExpr, n: usize) -> Vec<u64> {
+        self.eval_detailed(expr, n).values
     }
 
     /// Returns true if `expr` is definitely true under all satisfying assignments.

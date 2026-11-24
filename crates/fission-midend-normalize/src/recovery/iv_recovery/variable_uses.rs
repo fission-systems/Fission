@@ -11,10 +11,17 @@ pub(super) fn count_var_uses_in_stmt(stmt: &PreHirStmt, name: &str) -> usize {
             count_var_uses(va_list, name)
         }
         PreHirStmt::Return(Some(expr)) => count_var_uses(expr, name),
-        PreHirStmt::Block(body) | PreHirStmt::While { body, .. } => body
+        PreHirStmt::Block(body) => body
             .iter()
             .map(|stmt| count_var_uses_in_stmt(stmt, name))
             .sum(),
+        PreHirStmt::While { cond, body } => {
+            count_var_uses(cond, name)
+                + body
+                    .iter()
+                    .map(|stmt| count_var_uses_in_stmt(stmt, name))
+                    .sum::<usize>()
+        }
         PreHirStmt::DoWhile { body, cond } => {
             body.iter()
                 .map(|stmt| count_var_uses_in_stmt(stmt, name))

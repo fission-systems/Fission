@@ -1,0 +1,120 @@
+{
+  "commits_without_pr": [
+    {
+      "sha": "95e052259d3d4edfe707e3bd4a66f22ff2e30305",
+      "subject": "Remove stale advisory ignores (#72)"
+    }
+  ],
+  "open_issues": [
+    {
+      "labels": ["bug", "status:confirmed"],
+      "number": 120,
+      "title": "One jump table lost in an O2 build"
+    }
+  ],
+  "previous_tag": "v1.1.0",
+  "pull_requests": [
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "## Summary\n\nCuts decompile time by 42% on the full dataset; 7 of 9 binaries faster.\n\n## Benchmark Impact\n\nn/a\n",
+      "labels": [],
+      "merge_commit_sha": "a1",
+      "number": 101,
+      "title": "perf: reuse the worker stack"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "## Summary\n\nSomething 12 times.\n\n```bash\n## Benchmark Impact 99%\n```\n\n## Correctness Evidence\n\n<!-- Required when this PR claims wrong output became right. 5 examples. -->\n\nverify --tier ground-truth on gzip -O0: diverged 14 -> 3\n\nNo numbers on this line.\n\n## Benchmark Impact\n\n```text\nsample-set gate:    GED perfect <before> -> <after>, total distance <before> -> <after>\n\nfull-dataset sweep, per config (unoptimized):\n  GED perfect:        13,260 -> 13,465\n  GED total distance: <before> -> <after>\n```\n\n| config | before | after |\n| --- | --- | --- |\n| O0 | 1,605 | 1,544 |\n\n## Telemetry and Reporting\n\nThis line has 3 numbers 4 5 and is not evidence.\n",
+      "labels": ["bug", "area:midend"],
+      "merge_commit_sha": "a2",
+      "number": 102,
+      "title": "normalize: a call's result is the value ret returns"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": [],
+      "merge_commit_sha": "a3",
+      "number": 103,
+      "title": "emulator: answer each guest in its own ABI"
+    },
+    {
+      "author": "dependabot[bot]",
+      "author_is_bot": true,
+      "body": "Bumps serde from 1.0.1 to 1.0.2.",
+      "labels": ["dependencies"],
+      "merge_commit_sha": "a4",
+      "number": 104,
+      "title": "build(deps): bump serde"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": ["skip-changelog"],
+      "merge_commit_sha": "a5",
+      "number": 105,
+      "title": "fix: typo in a comment"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": ["enhancement", "risk:breaking"],
+      "merge_commit_sha": "a6",
+      "number": 106,
+      "title": "cli: rename --json-out to --json"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": [],
+      "merge_commit_sha": "a7",
+      "number": 99,
+      "title": "fix(loader)!: refuse truncated headers"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": [],
+      "merge_commit_sha": "a8",
+      "number": 107,
+      "title": "ci(release): pin the release actions"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": ["area:cli"],
+      "merge_commit_sha": "a9",
+      "number": 108,
+      "title": "Add a languages command"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": [],
+      "merge_commit_sha": "a10",
+      "number": 109,
+      "title": "docs: the CLI surface as it now is"
+    },
+    {
+      "author": "maintainer",
+      "author_is_bot": false,
+      "body": "",
+      "labels": [],
+      "merge_commit_sha": "a11",
+      "number": 110,
+      "title": "refactor(static): split function discovery"
+    }
+  ],
+  "repo": "example/Fission",
+  "schema": 1,
+  "target_sha": "4b7877536bceed4e9967d6418d6bee25a24ca775"
+}

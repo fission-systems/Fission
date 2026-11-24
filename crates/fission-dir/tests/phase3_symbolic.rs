@@ -52,6 +52,9 @@ fn clamp_dir_and_hir_are_provably_equivalent() {
         SymbolicOutcome::Unsupported(reason) => {
             panic!("expected clamp to be provable, got: {reason}")
         }
+        SymbolicOutcome::Inconclusive { reason } => {
+            panic!("expected clamp to be provable, got inconclusive: {reason}")
+        }
     }
 }
 
@@ -80,12 +83,16 @@ fn corrupted_hir_yields_a_real_counterexample() {
     match check_symbolic_equivalence(&pair.prehir, &corrupted_hir) {
         SymbolicOutcome::Diverged(cx) => {
             assert!(!cx.args.is_empty(), "expected a nonempty counterexample");
+            assert_eq!(cx.args.len(), cx.arg_widths.len());
         }
         SymbolicOutcome::Equivalent => {
             panic!("expected the corrupted HIR to be provably different")
         }
         SymbolicOutcome::Unsupported(reason) => {
             panic!("expected a decidable result, got: {reason}")
+        }
+        SymbolicOutcome::Inconclusive { reason } => {
+            panic!("expected a confirmed counterexample, got inconclusive: {reason}")
         }
     }
 }
@@ -165,6 +172,7 @@ fn swapped_branches_are_not_proven_equivalent() {
     match check_symbolic_equivalence(&pair.prehir, &swapped_hir) {
         SymbolicOutcome::Diverged(cx) => {
             assert!(!cx.args.is_empty(), "expected a nonempty counterexample");
+            assert_eq!(cx.args.len(), cx.arg_widths.len());
         }
         SymbolicOutcome::Equivalent => panic!(
             "a clamp with its branches swapped was proven equivalent to the original: \
@@ -172,6 +180,9 @@ fn swapped_branches_are_not_proven_equivalent() {
         ),
         SymbolicOutcome::Unsupported(reason) => {
             panic!("expected a decidable result, got: {reason}")
+        }
+        SymbolicOutcome::Inconclusive { reason } => {
+            panic!("expected a confirmed counterexample, got inconclusive: {reason}")
         }
     }
 }

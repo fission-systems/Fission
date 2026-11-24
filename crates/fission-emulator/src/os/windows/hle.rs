@@ -106,6 +106,24 @@ const CREATE_EVENT_MANUAL_RESET: u64 = 0x1;
 const CREATE_EVENT_INITIAL_SET: u64 = 0x2;
 
 impl WindowsEnv {
+    fn sync_heap_base(&self, emu: &Emulator) -> u64 {
+        let mut heap = self.heap.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(info) = emu.pe_image_info.as_ref() {
+            let min_next = info.heap_base.saturating_add(0x20000);
+            if heap.allocations.is_empty() {
+                if heap.base_addr != info.heap_base {
+                    heap.base_addr = info.heap_base;
+                    // Reserve [heap_base, heap_base + 0x20000) because image_info places
+                    // guest path strings at heap_base + 0x10000.
+                    heap.next_addr = min_next;
+                } else if heap.next_addr < min_next {
+                    heap.next_addr = min_next;
+                }
+            }
+        }
+        heap.base_addr
+    }
+
     fn lock_threads(&self) -> std::sync::MutexGuard<'_, WindowsThreads> {
         self.threads.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -230,10 +248,12 @@ impl OsEnvironment for WindowsEnv {
 
             // Heap
             "GetProcessHeap" => {
-                emu.write_return_val(0x20000000)?;
+                let heap = self.sync_heap_base(emu);
+                emu.write_return_val(heap)?;
             }
             "HeapCreate" => {
-                emu.write_return_val(0x20000000)?;
+                let heap = self.sync_heap_base(emu);
+                emu.write_return_val(heap)?;
             }
             "HeapAlloc" | "RtlAllocateHeap" => handle_heap_alloc(emu, self)?,
             "HeapFree" | "RtlFreeHeap" => handle_heap_free(emu, self)?,
@@ -1535,6 +1555,7 @@ fn guest_block(emu: &mut Emulator, env: &WindowsEnv, bytes: &[u8]) -> Result<u64
 /// A pointer the guest cannot write to is not an allocation.
 fn heap_alloc_mapped(emu: &mut Emulator, env: &WindowsEnv, bytes: usize) -> u64 {
     use crate::pcode::page_map::prot;
+    let _ = env.sync_heap_base(emu);
     let addr = env.heap.lock().unwrap().alloc(bytes);
     if addr == 0 {
         return 0;
@@ -3015,5 +3036,38 @@ mod win32_abi_tests {
                 "{name}: written to {size}"
             );
         }
+    }
+
+    #[test]
+    fn windows_heap_syncs_with_pe_image_info_heap_base() {
+        let mut emu = emulator();
+        let env = WindowsEnv::new();
+        let custom_heap = 0x1_4020_0000u64;
+        emu.pe_image_info = Some(crate::os::windows::image_info::PeImageInfo {
+            image_base: 0x1_4000_0000,
+            entry: 0x1_4000_1000,
+            start_code: 0x1_4000_1000,
+            end_code: 0x1_4000_2000,
+            start_data: 0x1_4000_2000,
+            end_data: 0x1_4000_3000,
+            start_stack: 0x7FFF_FFFF_EFE0,
+            stack_limit: 0x7FFF_FF7F_F000,
+            peb_addr: crate::os::windows::peb_teb::PEB_ADDR_64,
+            teb_addr: crate::os::windows::peb_teb::TEB_ADDR_64,
+            module_path: "test.exe".to_string(),
+            is_64bit: true,
+            heap_base: custom_heap,
+        });
+
+        env.dispatch_hle(&mut emu, "GetProcessHeap")
+            .expect("GetProcessHeap");
+        assert_eq!(emu.read_register_u64("rax").unwrap(), custom_heap);
+
+        let ptr = heap_alloc_mapped(&mut emu, &env, 64);
+        assert!(
+            ptr >= custom_heap + 0x20000,
+            "heap allocation 0x{ptr:x} collided with image_info path region"
+        );
+        assert!(emu.state.page_map.is_mapped(ptr));
     }
 }

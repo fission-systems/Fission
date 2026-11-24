@@ -609,11 +609,18 @@ pub fn canonicalize_sub_xor_zero_compare(expr: &PreHirExpr) -> Option<PreHirExpr
         op: PreHirBinaryOp::Sub | PreHirBinaryOp::Xor,
         lhs: inner_lhs,
         rhs: inner_rhs,
-        ..
+        ty: inner_ty,
     } = lhs.as_ref()
     else {
         return None;
     };
+    if matches!(inner_ty, NirType::Float { .. })
+        || matches!(expr_type(inner_lhs), NirType::Float { .. })
+        || matches!(expr_type(inner_rhs), NirType::Float { .. })
+        || matches!(expr_type(rhs.as_ref()), NirType::Float { .. })
+    {
+        return None;
+    }
     Some(PreHirExpr::Binary {
         op: *op,
         lhs: inner_lhs.clone(),
@@ -736,6 +743,36 @@ mod unsigned_compare_tests {
         };
 
         assert!(canonicalize_unsigned_compare_operands(&expr).is_none());
+    }
+
+    #[test]
+    fn does_not_rewrite_float_subtraction_compare_with_zero() {
+        let f32_ty = NirType::Float { bits: 32 };
+        let float_sub_cmp = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
+                lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                ty: f32_ty,
+            }),
+            rhs: Box::new(PreHirExpr::Const(0, int(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_sub_xor_zero_compare(&float_sub_cmp).is_none());
+
+        let i32_sub_cmp = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Sub,
+                lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                rhs: Box::new(PreHirExpr::Var("b".to_string())),
+                ty: int(32, true),
+            }),
+            rhs: Box::new(PreHirExpr::Const(0, int(32, true))),
+            ty: NirType::Bool,
+        };
+        assert!(canonicalize_sub_xor_zero_compare(&i32_sub_cmp).is_some());
     }
 }
 

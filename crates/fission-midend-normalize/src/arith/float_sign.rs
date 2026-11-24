@@ -28,7 +28,14 @@ fn resolve_float_expr(
     var_types: &HashMap<String, NirType>,
 ) -> Option<(PreHirExpr, u32)> {
     match expr {
-        PreHirExpr::Cast { expr: inner, .. } => resolve_float_expr(inner, var_types),
+        PreHirExpr::Cast {
+            ty: NirType::Float { bits: cast_bits },
+            expr: inner,
+        } => {
+            let (inner_float, inner_bits) = resolve_float_expr(inner, var_types)?;
+            (*cast_bits == inner_bits).then_some((inner_float, inner_bits))
+        }
+        PreHirExpr::Cast { .. } => None,
         PreHirExpr::Var(name) => {
             if let Some(NirType::Float { bits }) = var_types.get(name) {
                 Some((expr.clone(), *bits))
@@ -252,4 +259,64 @@ fn visit_stmt(stmt: &mut PreHirStmt, var_types: &HashMap<String, NirType>) -> bo
         _ => {}
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_float_sign_through_value_converting_casts() {
+        let f32_ty = NirType::Float { bits: 32 };
+        let f64_ty = NirType::Float { bits: 64 };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+
+        let mut func = PreHirFunction {
+            locals: vec![PreHirBinding {
+                name: "f".to_string(),
+                ty: f32_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                // `((int32_t)f) & 0x7fffffff` converts float->int, not raw bits.
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("r1".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::And,
+                        lhs: Box::new(PreHirExpr::Cast {
+                            ty: i32_ty.clone(),
+                            expr: Box::new(PreHirExpr::Var("f".to_string())),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(0x7fff_ffff, u32_ty.clone())),
+                        ty: i32_ty,
+                    },
+                },
+                // `((double)f) ^ 0x80000000` widens f32->f64, not f32 raw bits.
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("r2".to_string()),
+                    rhs: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Xor,
+                        lhs: Box::new(PreHirExpr::Cast {
+                            ty: f64_ty,
+                            expr: Box::new(PreHirExpr::Var("f".to_string())),
+                        }),
+                        rhs: Box::new(PreHirExpr::Const(0x8000_0000, u32_ty.clone())),
+                        ty: u32_ty,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_float_sign_pass(&mut func));
+    }
 }
