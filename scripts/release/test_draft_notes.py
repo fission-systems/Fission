@@ -111,6 +111,64 @@ class EvidenceTests(unittest.TestCase):
         body = "## Validation\n\n```bash\n# Benchmark 50% faster\n```\n"
         self.assertEqual(draft_notes.evidence_blocks(body), [])
 
+    def test_a_top_level_measurement_section_is_evidence(self):
+        # Speed PRs put their numbers under `## Measurement (...)` / `## Measured`.
+        body = (
+            "Preamble: 128.9 -> 79.3 s\n\n"
+            "## Measurement (fixed subset: 81 binaries; interleaved runs)\n\n"
+            "| step | CPU |\n| --- | --- |\n| total | 1217.1 -> 1077.3 s (-11.5%) |\n\n"
+            "## Measured\n\nwall 653.2 -> 644.2 s\n\n"
+            "## Validation\n\n### Measured locally\n\n12 tests, 3 runs\n\n"
+            "## Tests\n\n17 new tests\n"
+        )
+        self.assertEqual(
+            draft_notes.evidence_blocks(body),
+            [
+                (
+                    "Measurement (fixed subset: 81 binaries; interleaved runs)",
+                    ["| step | CPU |", "| --- | --- |", "| total | 1217.1 -> 1077.3 s (-11.5%) |"],
+                ),
+                ("Measured", ["wall 653.2 -> 644.2 s"]),
+            ],
+        )
+        # Positive control: the numbers outside those two sections (the
+        # preamble, a `### Measured` subsection of another section, Tests)
+        # are in the body and are not quoted.
+        quoted = "\n".join(line for _, lines in draft_notes.evidence_blocks(body) for line in lines)
+        for text in ("128.9 -> 79.3", "12 tests, 3 runs", "17 new tests"):
+            self.assertIn(text, body)
+            self.assertNotIn(text, quoted)
+
+    def test_a_measurement_section_is_quoted_in_the_notes(self):
+        data = copy.deepcopy(DATA)
+        data["pull_requests"].append(
+            {
+                "author": "m",
+                "body": "## Measurement (81 binaries)\n\nCPU 695 -> 425 s (-39%)\n",
+                "labels": [],
+                "number": 112,
+                "title": "perf: one fewer pass",
+            }
+        )
+        evidence = section(draft_notes.render(data, "v1.2.0"), "Measured evidence")
+        self.assertIn("From #112 (Measurement (81 binaries)):", evidence)
+        self.assertIn("CPU 695 -> 425 s (-39%)", evidence)
+
+    def test_a_release_pr_is_not_quoted_again(self):
+        # A Release PR's body carries that release's notes, whose own
+        # "## Measured evidence" section would otherwise be re-quoted.
+        notes = draft_notes.render(copy.deepcopy(DATA), "v1.2.0")
+        body = draft_notes.pr_body(copy.deepcopy(DATA), "v1.2.0", notes)
+        self.assertTrue(draft_notes.evidence_blocks(body))
+        later = dict(copy.deepcopy(DATA), previous_tag="v1.2.0", open_issues=[])
+        later["pull_requests"] = [
+            {"author": "m", "body": body, "labels": [], "number": 130, "title": "release: v1.2.0"}
+        ]
+        again = draft_notes.render(later, "v1.3.0")
+        self.assertNotIn("Measured evidence", again)
+        self.assertNotIn("(#130)", again.split("<!-- excluded:")[0])
+        self.assertIn("<!-- excluded: #130 (release PR) -->", again)
+
     def test_an_evidence_section_ends_at_the_next_heading_of_its_level(self):
         body = "## Benchmark Impact\n\nGED 1 -> 2\n\n### Detail\n\nrow 3\n\n## Risk\n\nrow 4\n"
         self.assertEqual(

@@ -26,8 +26,10 @@ What goes where:
   excluded and recorded in a trailing HTML comment.
 * Numbers are quoted only from a PR's evidence sections, the template's
   `## Benchmark Impact` and `## Correctness Evidence` (any heading that starts
-  with "Benchmark" or is "Correctness Evidence"), verbatim and attributed.
-  Nothing is computed, summed or compared across PRs.
+  with "Benchmark" or is "Correctness Evidence"), plus a top-level
+  `## Measurement ...` / `## Measured ...` section, where many PRs put their
+  numbers; verbatim and attributed. Nothing is computed, summed or compared
+  across PRs.
 * The full DecBench sweep table is not in any PR, so it is a placeholder the
   maintainer fills. Known limitations come from open issues labelled
   `release:blocker`, or `bug` and `status:confirmed`.
@@ -81,9 +83,17 @@ TITLE_PREFIX = {
 PREFIX_RE = re.compile(r"^(?P<type>[A-Za-z]+)(?:\([^)]*\))?(?P<bang>!)?:\s")
 
 SKIP_LABELS = frozenset({"skip-changelog"})
+# pr_body() starts every Release PR description with this.
+RELEASE_PR_MARKER = "<!-- release-pr: "
 
 EVIDENCE_HEADING_RE = re.compile(
     r"^(?P<hashes>#{1,6})\s+(?P<title>(?:benchmark\b.*|correctness evidence\b.*?))\s*#*\s*$",
+    re.IGNORECASE,
+)
+# A PR's own measurement section. Only at `##`, the PR body's top level: a
+# "Measured" subsection of some other section is not an evidence section.
+MEASUREMENT_HEADING_RE = re.compile(
+    r"^##\s+(?P<title>measure(?:ments?|d)\b.*?)\s*#*\s*$",
     re.IGNORECASE,
 )
 HEADING_RE = re.compile(r"^(?P<hashes>#{1,6})\s+\S")
@@ -125,6 +135,10 @@ def is_bot(pr: dict) -> bool:
 def exclusion(pr: dict) -> str | None:
     if is_bot(pr):
         return "bot author"
+    if RELEASE_PR_MARKER in (pr.get("body") or ""):
+        # A Release PR's body is an earlier release's notes; quoting its
+        # "Measured evidence" again would repeat that release's numbers.
+        return "release PR"
     skipped = sorted(SKIP_LABELS & set(pr.get("labels", [])))
     if skipped:
         return skipped[0]
@@ -154,7 +168,8 @@ def evidence_blocks(body: str) -> list[tuple[str, list[str]]]:
     """Quote the measured lines of each evidence section, verbatim.
 
     Only text under a heading that starts with "Benchmark" or is "Correctness
-    Evidence" counts, outside HTML comments. A prose line is quoted when it
+    Evidence", or a `##` heading that starts with "Measurement"/"Measured",
+    counts, outside HTML comments. A prose line is quoted when it
     has a digit. A markdown table or a fenced block is quoted whole when any
     of its lines has a digit, so a header or a wrapped line stays with its
     numbers. Unfilled template placeholders (`<before> -> <after>`) are not
@@ -204,7 +219,7 @@ def evidence_blocks(body: str) -> list[tuple[str, list[str]]]:
             level = len(heading.group("hashes"))
             if current is not None and level <= current[1]:
                 close()
-            evidence = EVIDENCE_HEADING_RE.match(line)
+            evidence = EVIDENCE_HEADING_RE.match(line) or MEASUREMENT_HEADING_RE.match(line)
             if evidence and current is None:
                 current = (evidence.group("title").strip(), level, [])
             continue
@@ -344,7 +359,8 @@ def render(data: dict, version: str, previous: str | None = None) -> str:
         out.append("## Measured evidence")
         out.append("")
         out.append(
-            "Quoted verbatim from each PR's Benchmark or Correctness Evidence section. "
+            "Quoted verbatim from each PR's Benchmark, Measurement or Correctness Evidence "
+            "section. "
             "Each number was measured by that PR, under its own load; nothing here is "
             "added up or compared across PRs. DecBench scores measure similarity to the "
             "source, not correctness (ADR 0018)."
@@ -425,7 +441,7 @@ def pr_body(data: dict, version: str, notes: str) -> str:
     sha = data["target_sha"]
     return "\n".join(
         [
-            f"<!-- release-pr: {tag} -->",
+            f"{RELEASE_PR_MARKER}{tag} -->",
             f"Release **{tag}**. Candidate `{sha}`, notes drafted from the PRs merged in "
             f"`{data['previous_tag']}..{sha[:12]}` by `scripts/release/draft_notes.py`.",
             "",
@@ -439,7 +455,8 @@ def pr_body(data: dict, version: str, notes: str) -> str:
             "",
             "After merging, dispatch **CI Heavy Validation** on the merge commit (or wait for "
             f"the nightly), then **Release Tag (CI green)** with `ref` = that commit. The tag "
-            f"defaults to `{tag}` from Cargo.toml, and release-tag refuses if the merge commit "
+            f"defaults to `{tag}` from `.github/release-candidate.json`, and release-tag refuses "
+            "if the merge commit "
             "contains anything but this PR on top of the candidate.",
             "",
             "---",

@@ -225,8 +225,9 @@ else is listed under Other and named in a "Needs a label" line. Bot authors
 and `skip-changelog` PRs are left out and recorded in a trailing comment.
 `.github/release.yml` gives GitHub's own generated notes the same sections.
 
-Numbers are quoted verbatim, with their PR, only from a PR's `Benchmark ...`
-or `Correctness Evidence` section; nothing is added up across PRs. DecBench
+Numbers are quoted verbatim, with their PR, only from a PR's `Benchmark ...`,
+`Correctness Evidence` or top-level `## Measurement ...` / `## Measured ...`
+section; nothing is added up across PRs. DecBench
 measures similarity to the source, not correctness (ADR 0018), and the notes
 say so.
 
