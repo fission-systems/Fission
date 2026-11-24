@@ -165,7 +165,7 @@ class RunnerTests(unittest.TestCase):
             job(h + "10:00Z", h + "20:00Z"),
             job(h + "15:00Z", h + "16:00Z"),             # three at once at 10:15
             job(h + "20:00Z", h + "40:00Z"),             # starts as one ends: still three
-            job(h + "17:00Z", h + "17:03Z"),             # 3 s: a skip, left out
+            job(h + "15:10Z", h + "15:13Z"),             # 3 s inside the peak: a skip, left out
             job(h + "05:00Z", h + "50:00Z", "macos-latest"),
             {"name": "never started", "started_at": None, "completed_at": None, "labels": ["ubuntu-latest"]},
         ]}]}
@@ -179,12 +179,9 @@ class RunnerTests(unittest.TestCase):
         across = {"runs": [{"jobs": [job("2026-11-24T05:50:00Z", "2026-11-24T08:00:00Z")]}]}
         self.assertEqual(dev_metrics.concurrency(across, since, now)["all"]["per_hour"],
                          {"2026-11-24 05": 1, "2026-11-24 06": 1, "2026-11-24 07": 1})
-        # Positive control for the 5-second rule: a 5 s job counts.
-        raw["runs"][0]["jobs"][4]["completed_at"] = h + "17:05Z"
-        raw["runs"][0]["jobs"][4]["started_at"] = h + "17:00Z"
-        self.assertEqual(dev_metrics.concurrency(raw, since, now)["ubuntu-latest"]["peak"], 3)
-        raw["runs"][0]["jobs"][4]["started_at"] = h + "15:30Z"
-        raw["runs"][0]["jobs"][4]["completed_at"] = h + "15:40Z"
+        # Positive control for the 5-second rule: the same job at 5 s overlaps
+        # the three others and counts (peak 3 -> 4); at 3 s above it did not.
+        raw["runs"][0]["jobs"][4]["completed_at"] = h + "15:15Z"
         self.assertEqual(dev_metrics.concurrency(raw, since, now)["ubuntu-latest"]["peak"], 4)
 
     def test_runner_minutes_are_attributed_to_the_pr(self):
