@@ -1,0 +1,23 @@
+{
+  "command": [
+    "info",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--sections",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "executable": "bool",
+        "file_offset": "string",
+        "file_size": "number",
+        "name": "string",
+        "readable": "bool",
+        "virtual_address": "string",
+        "virtual_size": "number",
+        "writable": "bool"
+      }
+    }
+  }
+}

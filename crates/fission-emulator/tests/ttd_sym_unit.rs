@@ -87,10 +87,11 @@ fn ttd_seek_recompute_on_hello_fixture() {
     use std::path::PathBuf;
 
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/linux_x64_hello_sys.elf");
-    if !path.is_file() {
-        eprintln!("skip: missing fixture");
-        return;
-    }
+    assert!(
+        path.is_file(),
+        "committed fixture missing: {}",
+        path.display()
+    );
     let binary = LoadedBinary::from_file(&path).expect("load");
     let mut state = MachineState::new();
     let info = fission_emulator::os::linux::loader::load_elf(&mut state, &binary).expect("elf");

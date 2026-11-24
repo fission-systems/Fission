@@ -1557,7 +1557,7 @@ impl<'a> PreviewBuilder<'a> {
                 .find(|candidate| candidate != pred_addr)?;
             let other_idx = *self.address_to_index.get(&other_addr)?;
             let other_target = self.block_target_key(other_idx);
-            let false_target = self.next_block_address(pred_idx)?;
+            let false_target = self.pcode_fallthrough_address(pred_idx)?;
             if let Some((true_target, cond)) = self.lower_cbranch_condition_for_block(pred_idx) {
                 let true_expr = if true_target == merge_target {
                     incoming_by_pred.get(pred_addr)?.clone()

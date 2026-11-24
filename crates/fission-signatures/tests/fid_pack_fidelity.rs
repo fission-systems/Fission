@@ -6,9 +6,10 @@
 //! hashes are computed, so it had to be ruled out before blaming the hashing
 //! side -- and this keeps it ruled out.
 //!
-//! Skips when `utils/source/fid/` is absent: the source databases are not
-//! committed (only the packed tables are), so this runs on a developer
-//! checkout that has them and is skipped everywhere else.
+//! Opt-in (`--ignored`): the source databases live in the gitignored
+//! `utils/source/fid/`, and only the packed tables are committed. It used to
+//! skip when they were absent -- in every checkout including CI -- and report
+//! itself passed.
 use fission_signatures::fidbf::fpk_store::LazyFidDatabase;
 use fission_signatures::fidbf::parse_fidbf;
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ fn utils_root() -> PathBuf {
 }
 
 #[test]
+#[ignore = "needs the gitignored utils/source/fid/ databases; run with --ignored"]
 fn packed_tables_answer_what_the_source_database_answers() {
     let root = utils_root();
     let mut checked = 0usize;
@@ -28,9 +30,11 @@ fn packed_tables_answer_what_the_source_database_answers() {
         "gcc-ARM.LE.32.v8",
     ] {
         let source = root.join(format!("source/fid/{db}.fidbf"));
-        if !source.exists() {
-            continue;
-        }
+        assert!(
+            source.exists(),
+            "source database absent: {}",
+            source.display()
+        );
         let eager = parse_fidbf(&source).expect("source database parses");
         // `LazyFidDatabase::open` derives `<stem>.fn.fpk` itself, so it takes
         // the stem-bearing path the resource provider hands it rather than a
@@ -63,7 +67,5 @@ fn packed_tables_answer_what_the_source_database_answers() {
         }
         checked += 1;
     }
-    if checked == 0 {
-        eprintln!("skipped: utils/source/fid/ has no source databases in this checkout");
-    }
+    assert_eq!(checked, 4);
 }

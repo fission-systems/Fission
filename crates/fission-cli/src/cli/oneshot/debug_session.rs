@@ -235,6 +235,20 @@ fn execute(
             backend.step_out()?;
             execution_progress(backend, thread_id, "step_out")?
         }
+        DebugCommand::BackStep => {
+            let now = backend
+                .execution_step()
+                .ok_or_else(|| anyhow::anyhow!("this backend does not count execution steps"))?;
+            if now == 0 {
+                bail!("already at the first instruction; there is no step before it");
+            }
+            backend.seek_step(now - 1)?;
+            execution_progress(backend, thread_id, "back_step")?
+        }
+        DebugCommand::Seek(a) => {
+            backend.seek_step(a.step)?;
+            execution_progress(backend, thread_id, "seek")?
+        }
         DebugCommand::Regs => {
             let regs = backend.fetch_registers(thread_id)?;
             json!({ "action": "regs", "registers": registers_json(&regs) })
@@ -341,6 +355,9 @@ fn execution_progress(
     Ok(json!({
         "action": action,
         "pc": pc,
+        // Instructions executed since launch, where the backend counts them:
+        // the position `seek` takes.
+        "step": backend.execution_step(),
         // Why it stopped, which `Suspended` cannot say: a breakpoint and a
         // program that ran out of code look the same otherwise.
         "stop": backend.stop_reason(),
@@ -363,6 +380,16 @@ fn start_session(
     let mut builder = fission_dynamic::debug::DebugSession::new();
     if use_emulator {
         builder = builder.with_emulator();
+        if args.record {
+            builder = builder.with_emulator_recording(args.record_interval);
+        }
+    } else if args.record {
+        // Native backends do not record; say so rather than run a session
+        // whose `back-step` will fail for a reason the caller never saw.
+        eprintln!(
+            "warning: `--record` is accepted but ignored by native debugging; \
+             it records only with `debug --emulator session`"
+        );
     }
     let mut session = builder.build();
     let pid = if let Some(pid) = args.attach {
@@ -389,14 +416,20 @@ fn start_session(
 /// first command runs. Finding an address worth stopping at is the expensive
 /// part of a session; having to find it again next time is what makes a
 /// debugger a thing you use once.
-fn restore_saved_breakpoints(backend: &mut dyn ExecutionBackend, path: Option<&str>) -> Vec<Value> {
-    let Some(path) = path else {
+fn restore_saved_breakpoints(
+    backend: &mut dyn ExecutionBackend,
+    args: &DebugSessionArgs,
+) -> Vec<Value> {
+    if args.no_analysis_db {
         return Vec::new();
+    }
+    let project_path = match (&args.analysis_db, args.path.as_deref()) {
+        (Some(db), _) => db.clone(),
+        (None, Some(path)) => fission_project::Project::default_path(std::path::Path::new(path)),
+        (None, None) => return Vec::new(),
     };
     let mut restored = Vec::new();
-    if let Ok(Some(project)) = fission_project::Project::read(
-        &fission_project::Project::default_path(std::path::Path::new(path)),
-    ) {
+    if let Ok(Some(project)) = fission_project::Project::read(&project_path) {
         for address in &project.breakpoints {
             if backend.set_sw_breakpoint(*address).is_ok() {
                 restored.push(json!({ "breakpoint": format!("0x{address:x}") }));
@@ -564,7 +597,7 @@ fn run_interactive_session(args: DebugSessionArgs, use_emulator: bool) -> Result
     let backend_name = if use_emulator { "emulator" } else { "native" };
     let session_id = format!("{}-{pid}", std::process::id());
     let target = json!({ "path": args.path, "pid": pid });
-    let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
+    let restored = restore_saved_breakpoints(session.debugger.as_mut(), &args);
 
     let stdout = std::io::stdout();
     let mut output = stdout.lock();
@@ -688,7 +721,7 @@ pub fn run_session(args: DebugSessionArgs, use_emulator: bool) -> Result<()> {
     }
     let commands = collect_commands(&args)?;
     let (mut session, pid, thread_id) = start_session(&args, use_emulator)?;
-    let restored = restore_saved_breakpoints(session.debugger.as_mut(), args.path.as_deref());
+    let restored = restore_saved_breakpoints(session.debugger.as_mut(), &args);
 
     let mut results: Vec<Value> = Vec::new();
     let mut failed = false;

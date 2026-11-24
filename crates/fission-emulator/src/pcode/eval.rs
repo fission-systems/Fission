@@ -51,6 +51,16 @@ pub struct Evaluator<'a> {
     /// the evaluator reporting it -- and something must, or the run produces a
     /// wrong answer without saying so.
     pub unimplemented: Option<PcodeOpcode>,
+    /// Whether `step` reads and writes the shadow layer itself, treating each
+    /// shadow id as a solver node.
+    ///
+    /// True for a caller that drives the evaluator on its own. False under
+    /// the emulator's engines, which propagate the shadow after every op
+    /// through the mode's own layer -- taint sets or symbolic nodes, the same
+    /// code the JIT calls -- so the two engines cannot disagree. Left on
+    /// there, a taint set id was read as a solver node: a store through a
+    /// tainted pointer panicked looking it up.
+    pub track_shadow: bool,
 }
 
 impl<'a> Evaluator<'a> {
@@ -59,6 +69,16 @@ impl<'a> Evaluator<'a> {
             state,
             solver,
             unimplemented: None,
+            track_shadow: true,
+        }
+    }
+
+    /// An evaluator that computes concrete values only and leaves the shadow
+    /// layer to its caller. See [`Self::track_shadow`].
+    pub fn concrete(state: &'a mut MachineState, solver: &'a mut fission_solver::Solver) -> Self {
+        Self {
+            track_shadow: false,
+            ..Self::new(state, solver)
         }
     }
 
@@ -422,7 +442,7 @@ impl<'a> Evaluator<'a> {
     }
 
     fn read_varnode_shadow(&mut self, vn: &Varnode) -> Option<u32> {
-        if vn.is_constant {
+        if vn.is_constant || !self.track_shadow {
             return None;
         }
         // Just check the first byte for taint to keep it simple for now
@@ -430,7 +450,7 @@ impl<'a> Evaluator<'a> {
     }
 
     fn write_varnode_shadow(&mut self, vn: &Varnode, node: u32) {
-        if vn.is_constant {
+        if vn.is_constant || !self.track_shadow {
             return;
         }
         for i in 0..vn.size as u64 {
@@ -518,31 +538,31 @@ impl<'a> Evaluator<'a> {
                 let addr_node = self.read_varnode_shadow(&op.inputs[1]);
                 let out = op.output.as_ref().expect("LOAD must have output");
 
-                if let Some(ptr_node) = addr_node {
-                    // Symbolic pointer! Use the angr-style mixin.
-                    let result_node =
+                // The concrete access happens whatever the shadow says: this
+                // is concolic execution, and a symbolic pointer still has a
+                // concrete value. It used to load zero instead.
+                let addr = self.read_varnode_u64(&op.inputs[1])?;
+                let raw = self.state.read_space(space_id, addr, out.size as usize)?;
+                let node = if !self.track_shadow {
+                    None
+                } else if let Some(ptr_node) = addr_node {
+                    // Symbolic pointer: the angr-style mixin.
+                    Some(
                         crate::pcode::memory_mixin::MemoryMixin::handle_symbolic_read(
                             self.state,
                             self.solver,
                             space_id,
                             ptr_node,
                             out.size,
-                        )?;
-
-                    // We must still give the output varnode some concrete value (0 is fine)
-                    let zeros = vec![0u8; out.size as usize];
-                    self.state.write_space(out.space_id, out.offset, &zeros)?;
-                    self.write_varnode_shadow(out, result_node);
+                        )?,
+                    )
                 } else {
-                    // Concrete pointer
-                    let addr = self.read_varnode_u64(&op.inputs[1])?;
-                    let raw = self.state.read_space(space_id, addr, out.size as usize)?;
-                    let node = self.state.get_shadow_memory(space_id, addr);
-                    self.state.write_space(out.space_id, out.offset, &raw)?;
-                    // After the concrete bytes, which clear the shadow they cover.
-                    if let Some(id) = node {
-                        self.write_varnode_shadow(out, id);
-                    }
+                    self.state.get_shadow_memory(space_id, addr)
+                };
+                self.state.write_space(out.space_id, out.offset, &raw)?;
+                // After the concrete bytes, which clear the shadow they cover.
+                if let Some(id) = node {
+                    self.write_varnode_shadow(out, id);
                 }
             }
 
@@ -550,6 +570,14 @@ impl<'a> Evaluator<'a> {
                 let space_id = op.inputs[0].constant_val as u64;
                 let ptr_node = self.read_varnode_shadow(&op.inputs[1]);
                 let val_node = self.read_varnode_shadow(&op.inputs[2]);
+
+                // The concrete store happens whatever the shadow says: a
+                // symbolic pointer still has a concrete value, and skipping
+                // the store left the destination holding its old bytes.
+                // Before the shadow, since a concrete write clears it.
+                let addr = self.read_varnode_u64(&op.inputs[1])?;
+                let bytes = self.read_varnode_bytes(&op.inputs[2])?;
+                self.state.write_space(space_id, addr, &bytes)?;
 
                 if let (Some(p_node), Some(v_node)) = (ptr_node, val_node) {
                     // Symbolic pointer AND symbolic value
@@ -579,17 +607,13 @@ impl<'a> Evaluator<'a> {
                         op.inputs[2].size,
                     )?;
                 } else {
-                    // Concrete pointer.
-                    //
-                    // Every byte, not eight. A `movaps %xmm0, (%rax)` stores
-                    // sixteen, and storing only the low half left the other
-                    // eight holding whatever was at the destination -- which
-                    // is how a `va_copy` produced a `va_list` with its fields
-                    // in the wrong places, three thousand instructions before
+                    // Concrete pointer. The store above wrote every byte, not
+                    // eight: a `movaps %xmm0, (%rax)` stores sixteen, and
+                    // storing only the low half left the other eight holding
+                    // whatever was at the destination -- which is how a
+                    // `va_copy` produced a `va_list` with its fields in the
+                    // wrong places, three thousand instructions before
                     // anything noticed.
-                    let addr = self.read_varnode_u64(&op.inputs[1])?;
-                    let bytes = self.read_varnode_bytes(&op.inputs[2])?;
-                    self.state.write_space(space_id, addr, &bytes)?;
                     if let Some(id) = val_node {
                         for i in 0..op.inputs[2].size as u64 {
                             self.state.set_shadow_memory(space_id, addr + i, id);

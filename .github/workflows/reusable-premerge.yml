@@ -61,6 +61,8 @@ jobs:
       FISSION_DIFF_CASES: "12"
       FISSION_DIFF_DEPTH: "2"
       FISSION_DIFF_JOBS: "2"
+      # z3 is installed below; a differential test that cannot find it fails.
+      FISSION_REQUIRE_TEST_INPUTS: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

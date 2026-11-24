@@ -1,0 +1,40 @@
+{
+  "command": [
+    "disasm",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--addr",
+    "0x10414",
+    "--function",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "function": {
+        "object": {
+          "address": "string",
+          "name": "string",
+          "size": "string"
+        }
+      },
+      "instructions": {
+        "array": {
+          "object": {
+            "address": "string",
+            "bytes": "string",
+            "instruction": "string",
+            "source": {
+              "object": {
+                "file": "string",
+                "line": "number"
+              }
+            }
+          },
+          "optional": [
+            "source"
+          ]
+        }
+      }
+    }
+  }
+}

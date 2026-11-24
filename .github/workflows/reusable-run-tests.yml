@@ -84,6 +84,10 @@ env:
   CARGO_INCREMENTAL: "0"
   CARGO_NET_RETRY: "10"
   RUST_BACKTRACE: "1"
+  # A test whose external input (python3; on macOS, `swift demangle`) is
+  # absent fails here instead of returning early, which nextest would count
+  # as a pass. See crates/fission-core/src/test_inputs.rs.
+  FISSION_REQUIRE_TEST_INPUTS: "1"
 
 jobs:
   test:
@@ -111,6 +115,7 @@ jobs:
           toolchain: stable
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -288,7 +293,8 @@ jobs:
           cargo check -p fission-cli --no-default-features --locked
           cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true

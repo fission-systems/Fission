@@ -1,7 +1,7 @@
 # ADR 0006: Decompiler quality change gate
 
-**Status:** Accepted
-**Last verified:** 2026-07-03
+**Status:** Accepted; amended by [ADR 0018](0018-decbench-is-not-a-correctness-oracle.md)
+**Last verified:** 2026-11-23
 
 ## Context
 
@@ -29,7 +29,10 @@ and record the chain:
 
 1. **Row anchor (measured):** the binary, function, address, current output,
    semantic case count, and failure category that motivated the work — from a
-   real decomp/benchmark run, not a hand-built IR fixture alone.
+   real decomp/benchmark run, not a hand-built IR fixture alone. A `verify`
+   divergence or a native replay mismatch is an anchor too; a benchmark score
+   is evidence of similarity to the source, not of correctness
+   ([ADR 0018](0018-decbench-is-not-a-correctness-oracle.md)).
 2. **Owner proof:** evidence that the bug belongs to SLEIGH/raw p-code,
    builder/materialize, normalize, structuring, type/data recovery, printer, or
    benchmark/automation.

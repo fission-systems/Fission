@@ -139,7 +139,7 @@ fn path_sat_eq_var_const_sat() {
         "expected symbolic Eq, got {eq:?}"
     );
     assert!(
-        emu.solver.satisfiable(&[eq.clone()]),
+        emu.solver.satisfiable(std::slice::from_ref(&eq)),
         "Eq(x, 5) must be SAT"
     );
 }
@@ -193,7 +193,10 @@ fn path_sat_prune_eq_var_const_forks() {
     let five = SymExpr::new_const(5, 8);
     let c_eq5 = SymExpr::new_eq(x.clone(), five.clone());
     let c_ne5 = SymExpr::new_neq(x, five);
-    assert!(aig_and_sat(&[c_eq5.clone()]), "x==5 path must be SAT");
+    assert!(
+        aig_and_sat(std::slice::from_ref(&c_eq5)),
+        "x==5 path must be SAT"
+    );
     assert!(
         !aig_and_sat(&[c_eq5, c_ne5]),
         "x==5 ∧ x!=5 path must be UNSAT (structural)"

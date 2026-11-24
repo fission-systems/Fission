@@ -201,7 +201,7 @@ Follow the [Rust Style Guide](https://doc.rust-lang.org/style-guide/). Use `rust
 cargo fmt --all
 
 # Lint code -- CI's exact line
-cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity
+cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
 ```
 
 Run `cargo fmt --all` with your change, not as a separate sweep, and never
@@ -391,7 +391,7 @@ git commit -m "feat(cli): add --strings flag"
 5. **Run checks**
    ```bash
    cargo fmt --all --check
-   cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity
+   cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
    cargo nextest run -p <crates you touched>
    cargo build -p fission-cli --release
    ```

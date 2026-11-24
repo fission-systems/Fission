@@ -1227,6 +1227,9 @@ impl<'a> PeLoaderImpl<'a> {
 pub(crate) struct IdentityPeFacts {
     pub tls_directory_present: bool,
     pub tls_callback_count: usize,
+    /// The callback addresses themselves: code the loader runs before the
+    /// entry point, a common place to hide anti-debugging.
+    pub tls_callbacks: Vec<u64>,
     pub debug_directory_kinds: Vec<String>,
 }
 
@@ -1246,6 +1249,7 @@ pub(crate) fn identity_pe_facts(binary: &LoadedBinary) -> Option<IdentityPeFacts
         .get(9)
         .is_some_and(|d| d.virtual_address != 0 && d.size != 0);
     let mut tls_callback_count = 0usize;
+    let mut tls_callbacks = Vec::new();
 
     if let Some(tls_dd) = data_directories.get(9)
         && tls_dd.virtual_address != 0
@@ -1282,6 +1286,7 @@ pub(crate) fn identity_pe_facts(binary: &LoadedBinary) -> Option<IdentityPeFacts
                         break;
                     }
                     tls_callback_count += 1;
+                    tls_callbacks.push(ptr);
                     off = end;
                 }
             }
@@ -1308,6 +1313,7 @@ pub(crate) fn identity_pe_facts(binary: &LoadedBinary) -> Option<IdentityPeFacts
     Some(IdentityPeFacts {
         tls_directory_present,
         tls_callback_count,
+        tls_callbacks,
         debug_directory_kinds,
     })
 }
@@ -1520,6 +1526,7 @@ fn generate_pe_header_types(
         name: "IMAGE_DOS_HEADER".to_string(),
         mangled_name: "IMAGE_DOS_HEADER".to_string(),
         kind: "struct".to_string(),
+        source: "pe_header".to_string(),
         fields: dos_fields,
         size: 64,
         metadata_address: image_base,
@@ -1565,6 +1572,7 @@ fn generate_pe_header_types(
         name: nt_name.to_string(),
         mangled_name: nt_name.to_string(),
         kind: "struct".to_string(),
+        source: "pe_header".to_string(),
         fields: nt_fields,
         size: nt_size,
         metadata_address: nt_va,
@@ -1640,6 +1648,7 @@ fn generate_pe_header_types(
         name: "IMAGE_SECTION_HEADER".to_string(),
         mangled_name: "IMAGE_SECTION_HEADER".to_string(),
         kind: "struct".to_string(),
+        source: "pe_header".to_string(),
         fields: sect_fields,
         size: 40 * section_count as u32,
         metadata_address: section_table_va,
@@ -2214,6 +2223,16 @@ mod tests {
         data[0x160..0x164].copy_from_slice(&0x1000u32.to_le_bytes());
         data[0x164..0x168].copy_from_slice(&64u32.to_le_bytes());
 
+        // TLS Directory (Directory Index 9) at 0x98 + 96 + 9 * 8 = 0x140:
+        // IMAGE_TLS_DIRECTORY32 at RVA 0x1100 (file offset 0x300), whose
+        // AddressOfCallBacks (offset 12) is VA 0x401120 (file offset 0x320),
+        // a null-terminated list of two callbacks.
+        data[0x140..0x144].copy_from_slice(&0x1100u32.to_le_bytes());
+        data[0x144..0x148].copy_from_slice(&24u32.to_le_bytes());
+        data[0x30C..0x310].copy_from_slice(&0x401120u32.to_le_bytes());
+        data[0x320..0x324].copy_from_slice(&0x401010u32.to_le_bytes());
+        data[0x324..0x328].copy_from_slice(&0x401020u32.to_le_bytes());
+
         // Section Headers (at 0x80 + 4 + 20 + 224 = 0x178)
         let section_offset = 0x178;
         // Name: .text
@@ -2294,6 +2313,22 @@ mod tests {
         assert_eq!(rich[0].product_id, 0x0010);
         assert_eq!(rich[0].count, 5);
         assert_eq!(bin.get_ghidra_compiler_id(), Some("windows".to_string()));
+
+        // The identity report carries the same records, not only `present`.
+        let identity = crate::loader::identity::analyze(
+            &bin,
+            crate::loader::identity::IdentityScanLimits::default(),
+        );
+        let records = &identity.rich_header.as_ref().expect("rich summary").records;
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].product_id, 0x0010);
+        assert_eq!(records[0].build_number, 0x0020);
+        assert_eq!(records[0].count, 5);
+
+        // ...and the TLS callbacks by address, not only how many.
+        let pe = identity.pe.as_ref().expect("pe summary");
+        assert_eq!(pe.tls_callback_count, Some(2));
+        assert_eq!(pe.tls_callbacks, vec![0x401010, 0x401020]);
 
         // Verify Delay-Load Import Function
         let delay_func = bin

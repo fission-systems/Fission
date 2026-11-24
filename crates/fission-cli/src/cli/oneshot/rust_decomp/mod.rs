@@ -57,9 +57,11 @@ fn render_with_rust_sleigh(
     facts: &fission_static::analysis::decomp::facts::FactStore,
     func: &FunctionInfo,
     timeout_ms: Option<u64>,
+    resource_limits: fission_decompiler::midend_core::ir::ResourceLimits,
     want_prehir: bool,
 ) -> Result<RustSleighRender, FissionError> {
     let mut config = fission_decompiler::RustSleighDecompileConfig::cli_defaults();
+    config.resource_limits = resource_limits;
     // `0` means "no timeout" (the flag's help, and the worker layer, which
     // filters it out). The renderer reads `Some(0)` as a deadline that has
     // already passed, so it must not see it.
@@ -330,7 +332,14 @@ pub(crate) fn render_one_function_inner(
         func
     };
 
-    match render_with_rust_sleigh(binary, facts, func, config.timeout_ms, config.prehir) {
+    match render_with_rust_sleigh(
+        binary,
+        facts,
+        func,
+        config.timeout_ms,
+        config.resource_limits,
+        config.prehir,
+    ) {
         Ok(rendered) => {
             let decomp_sec = start.elapsed().as_secs_f64();
             let code = apply_output_filters(&rendered.code, config);
@@ -471,6 +480,7 @@ fn run_with_functions(
         debug_decomp_bundle: cli.debug_decomp_bundle.is_some(),
         requested_address: cli.address,
         timeout_ms: workers::resolve_render_timeout_ms(cli.timeout_ms),
+        resource_limits: workers::resolve_resource_limits(&cli.work_limits),
         prehir: cli.prehir,
     };
     let stack_size_bytes = workers::resolve_decomp_stack_size_bytes();
@@ -721,8 +731,15 @@ mod project_call_arity_tests {
         let target = binary
             .function_at_exact(0x1020)
             .expect("synthetic callee exists");
-        let rendered = super::render_with_rust_sleigh(&binary, &facts, target, None, false)
-            .expect("synthetic callee decompiles with the seeded facts");
+        let rendered = super::render_with_rust_sleigh(
+            &binary,
+            &facts,
+            target,
+            None,
+            Default::default(),
+            false,
+        )
+        .expect("synthetic callee decompiles with the seeded facts");
         let signature = rendered
             .code
             .lines()
@@ -767,8 +784,9 @@ mod project_call_arity_tests {
         let entry = binary
             .function_at_exact(0x1020)
             .expect("synthetic C entry exists");
-        let rendered_entry = super::render_with_rust_sleigh(&binary, &facts, entry, None, false)
-            .expect("entry decompiles with the recovered runtime prototype");
+        let rendered_entry =
+            super::render_with_rust_sleigh(&binary, &facts, entry, None, Default::default(), false)
+                .expect("entry decompiles with the recovered runtime prototype");
         let signature = rendered_entry
             .code
             .lines()
@@ -781,8 +799,15 @@ mod project_call_arity_tests {
         let caller = binary
             .function_at_exact(0x1000)
             .expect("synthetic caller exists");
-        let rendered_caller = super::render_with_rust_sleigh(&binary, &facts, caller, None, false)
-            .expect("startup call site decompiles");
+        let rendered_caller = super::render_with_rust_sleigh(
+            &binary,
+            &facts,
+            caller,
+            None,
+            Default::default(),
+            false,
+        )
+        .expect("startup call site decompiles");
         assert!(
             rendered_caller.code.contains("main("),
             "{}",

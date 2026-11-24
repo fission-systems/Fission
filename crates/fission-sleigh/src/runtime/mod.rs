@@ -41,60 +41,115 @@ pub use registry::{
 };
 pub use spine::{LanguageRuntime, ProcessorRuntimeProfile, RuntimeAttemptReport, RuntimeEndian};
 
+/// The two tables the emulator reads out of a packaged `.sla`.
+struct SlaRuntimeMaps {
+    registers: HashMap<String, (u64, u64, u32)>,
+    userops: BTreeMap<u32, String>,
+}
+
+/// Which `.sla` a cached [`SlaRuntimeMaps`] was parsed from: its resolved
+/// path -- so a different resource root is a different entry -- and the
+/// file's length and modification time, so a file replaced in place is
+/// parsed again rather than served stale.
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct SlaIdentity {
+    path: std::path::PathBuf,
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+/// Parsed `.sla` tables, per file. Parsing one costs a few hundred
+/// milliseconds and every `Emulator::new` asked for two of them, so an
+/// emulator took about as long to build as a restored checkpoint takes four
+/// orders of magnitude to replace.
+///
+/// The parse runs with no lock held and outside any `OnceLock` initialiser
+/// (the initialiser below only builds an empty map): blocking on work that
+/// may reach rayon inside an initialiser has deadlocked here before. Two
+/// threads that miss together both parse, and the first insert wins; the
+/// results are identical, so which one is kept does not matter.
+static SLA_RUNTIME_MAPS: std::sync::OnceLock<
+    std::sync::Mutex<HashMap<SlaIdentity, std::sync::Arc<SlaRuntimeMaps>>>,
+> = std::sync::OnceLock::new();
+
+/// How many times [`sla_runtime_maps`] parsed a file, for the cache's test.
+#[cfg(test)]
+static SLA_RUNTIME_MAP_PARSES: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+fn sla_runtime_maps(load_spec: &BinaryLoadSpec) -> Option<std::sync::Arc<SlaRuntimeMaps>> {
+    use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
+
+    let language_id = load_spec.pair.language_id.as_str();
+    let entry = crate::compiler::runtime_entry_specs()
+        .ok()?
+        .iter()
+        .find(|e| frontend::entry_matches_language_name(e, language_id))?;
+    let path = packaged_sla_for_entry_spec(&entry.path).ok()??;
+    let metadata = std::fs::metadata(&path).ok()?;
+    let identity = SlaIdentity {
+        path,
+        len: metadata.len(),
+        modified: metadata.modified().ok(),
+    };
+
+    let cache = SLA_RUNTIME_MAPS.get_or_init(Default::default);
+    if let Some(maps) = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(&identity)
+    {
+        return Some(maps.clone());
+    }
+
+    let library = load_construct_templates_from_sla(&identity.path).ok()?;
+    #[cfg(test)]
+    SLA_RUNTIME_MAP_PARSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    let maps = std::sync::Arc::new(SlaRuntimeMaps {
+        registers: library
+            .register_map
+            .into_iter()
+            .map(|(name, varnode)| {
+                (
+                    name,
+                    (varnode.space.index as u64, varnode.offset, varnode.size),
+                )
+            })
+            .collect(),
+        userops: library.userops,
+    });
+    Some(
+        cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .entry(identity)
+            .or_insert(maps)
+            .clone(),
+    )
+}
+
 /// Extract the register name → (offset, size) map for the given `BinaryLoadSpec`.
 ///
 /// Reads the checked-in packaged `.sla` file (Ghidra's canonical `ELEM_VARNODE_SYM` table)
 /// from `utils/sleigh-specs/compiled/` and converts it into the flat register map.
+/// The parse is cached per `.sla` file for the life of the process.
 ///
 /// Returns `None` if the SLA file is unavailable or the library cannot be decoded.
 pub fn register_map_for_load_spec(
     load_spec: &BinaryLoadSpec,
 ) -> Option<std::collections::HashMap<String, (u64, u64, u32)>> {
-    use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
-
-    let language_id = load_spec.pair.language_id.as_str();
-
-    let entries = discover_all_entry_specs().ok()?;
-    let entry = entries
-        .into_iter()
-        .find(|e| frontend::entry_matches_language_name(e, language_id))?;
-
-    let sla_path = packaged_sla_for_entry_spec(&entry.path).ok()??;
-    let library = load_construct_templates_from_sla(&sla_path).ok()?;
-
-    let map = library
-        .register_map
-        .into_iter()
-        .map(|(name, varnode)| {
-            (
-                name,
-                (varnode.space.index as u64, varnode.offset, varnode.size),
-            )
-        })
-        .collect();
-
-    Some(map)
+    Some(sla_runtime_maps(load_spec)?.registers.clone())
 }
 
 /// Extract the Sleigh USEROP id → name table for the given `BinaryLoadSpec`.
 ///
-/// Same SLA discovery path as [`register_map_for_load_spec`]. Used by the
-/// emulator so CallOther names (`syscall`, `cpuid`, …) resolve correctly.
+/// Same SLA discovery path, and the same cached parse, as
+/// [`register_map_for_load_spec`]. Used by the emulator so CallOther names
+/// (`syscall`, `cpuid`, …) resolve correctly.
 pub fn userop_map_for_load_spec(
     load_spec: &BinaryLoadSpec,
 ) -> Option<std::collections::BTreeMap<u32, String>> {
-    use crate::compiler::{packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla};
-
-    let language_id = load_spec.pair.language_id.as_str();
-
-    let entries = discover_all_entry_specs().ok()?;
-    let entry = entries
-        .into_iter()
-        .find(|e| frontend::entry_matches_language_name(e, language_id))?;
-
-    let sla_path = packaged_sla_for_entry_spec(&entry.path).ok()??;
-    let library = load_construct_templates_from_sla(&sla_path).ok()?;
-    Some(library.userops)
+    Some(sla_runtime_maps(load_spec)?.userops.clone())
 }
 
 const DEFAULT_FUNCTION_INSTRUCTION_LIMIT: usize = 512;
@@ -363,6 +418,47 @@ pub fn is_terminal_control_flow(opcode: PcodeOpcode) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// The cached `.sla` tables are the ones a fresh parse produces, and a
+    /// second request parses nothing.
+    #[test]
+    fn sla_runtime_maps_are_cached_and_equal_to_a_fresh_parse() {
+        use crate::compiler::{
+            packaged_sla_for_entry_spec, sla::load_construct_templates_from_sla,
+        };
+        for (language, entry_id) in [
+            ("x86:LE:64:default", "x86-64"),
+            ("AARCH64:LE:64:v8A", "AARCH64"),
+        ] {
+            let load_spec = BinaryLoadSpec::new("ELF", 0, language, "gcc", "unit-test");
+            let registers = register_map_for_load_spec(&load_spec).expect(language);
+            let parses = SLA_RUNTIME_MAP_PARSES.load(std::sync::atomic::Ordering::SeqCst);
+            let again = register_map_for_load_spec(&load_spec).expect(language);
+            let userops = userop_map_for_load_spec(&load_spec).expect(language);
+            assert_eq!(
+                SLA_RUNTIME_MAP_PARSES.load(std::sync::atomic::Ordering::SeqCst),
+                parses,
+                "{language}: served from the cache"
+            );
+            assert_eq!(registers, again);
+
+            let entry = crate::compiler::runtime_entry_specs()
+                .unwrap()
+                .iter()
+                .find(|e| e.entry_id == entry_id)
+                .expect(entry_id);
+            let path = packaged_sla_for_entry_spec(&entry.path).unwrap().unwrap();
+            let fresh = load_construct_templates_from_sla(&path).unwrap();
+            let fresh_registers: HashMap<String, (u64, u64, u32)> = fresh
+                .register_map
+                .into_iter()
+                .map(|(name, vn)| (name, (vn.space.index as u64, vn.offset, vn.size)))
+                .collect();
+            assert!(!fresh_registers.is_empty() && !fresh.userops.is_empty());
+            assert_eq!(registers, fresh_registers, "{language}: registers");
+            assert_eq!(userops, fresh.userops, "{language}: userops");
+        }
+    }
+
     use super::*;
     use crate::compiler::discovery;
     use fission_core::architecture::BinaryLoadSpec;

@@ -62,5 +62,4 @@ pub use switch_norm::apply_switch_norm_pass;
 pub use utils::expr_has_side_effects;
 
 #[cfg(test)]
-#[path = "passes_tests.rs"]
 mod tests;

@@ -1,0 +1,18 @@
+{
+  "command": [
+    "search",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--text",
+    "sel",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "address": "string",
+        "section": "string"
+      }
+    }
+  }
+}

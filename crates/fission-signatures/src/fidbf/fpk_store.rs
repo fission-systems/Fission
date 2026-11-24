@@ -344,11 +344,27 @@ mod tests {
     /// rather than a summary: a re-encoding that lost `auto_fail` would still
     /// match on counts and hashes.
     #[test]
+    ///
+    /// The original is the committed pack decoded, not the raw `.fidbf` it was
+    /// packed from: that is not committed, and reading it made this test
+    /// return before comparing anything in every checkout. Re-encoding what
+    /// decoding produced still has to reproduce every field.
     fn a_real_database_round_trips_field_for_field() {
-        let src = &utils_dir().join("signatures/fid/libc-x86.LE.64.default.fidbf");
-        let Ok(original) = crate::fidbf::parse_fidbf(src) else {
-            return; // bundle not present in this checkout
-        };
+        let dir = utils_dir().join("signatures/fid");
+        let stem = "libc-x86.LE.64.default";
+        let table = |suffix: &str| dir.join(format!("{stem}.{suffix}.fpk"));
+        let original = decode(
+            dir.join(format!("{stem}.fidbf")).display().to_string(),
+            &table("lib"),
+            &table("fn"),
+            &table("rel"),
+            &table("dom"),
+        )
+        .expect("decode the committed libc FID pack");
+        assert!(
+            !original.functions.is_empty() && !original.relations.is_empty(),
+            "the libc pack should carry functions and relations"
+        );
 
         let images = encode(&original);
         let dir = std::env::temp_dir().join(format!("fidfpk_{}", std::process::id()));
@@ -398,12 +414,11 @@ mod tests {
 
     /// The two databases that an empty relation table used to reject.
     #[test]
+    #[ignore = "needs raw Ghidra .fidbf databases, which are not committed (only their .fpk packs are); run with --ignored"]
     fn a_database_with_no_relations_parses() {
         for stem in ["gcc-MIPS.BE.32.default", "gcc-avr8.LE.16.extended"] {
             let path = utils_dir().join(format!("signatures/fid/{stem}.fidbf"));
-            if !path.exists() {
-                continue; // bundle not present in this checkout
-            }
+            assert!(path.exists(), "raw database absent: {}", path.display());
             let db = crate::fidbf::parse_fidbf(&path)
                 .unwrap_or_else(|e| panic!("{stem} should parse: {e}"));
             assert!(!db.functions.is_empty(), "{stem} has functions");

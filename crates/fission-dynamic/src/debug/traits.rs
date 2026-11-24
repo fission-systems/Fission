@@ -92,6 +92,24 @@ pub trait ExecutionBackend: Send {
         None
     }
 
+    /// How many instructions the target has executed since launch, when the
+    /// backend counts them. A position for [`Self::seek_step`].
+    fn execution_step(&self) -> Option<u64> {
+        None
+    }
+
+    /// Move the target to execution step `step`, backwards or forwards, with
+    /// registers and memory as they were there. Only a backend that records
+    /// its own execution can do this; the rest refuse rather than pretend.
+    fn seek_step(&mut self, step: u64) -> FissionResult<()> {
+        let _ = step;
+        Err(fission_core::err!(
+            debug,
+            "seeking to an execution step needs a recording emulator session \
+             (`debug --emulator session --record`)"
+        ))
+    }
+
     /// Poll for the next debug event
     fn poll_event(&mut self, timeout_ms: u32) -> FissionResult<Option<super::types::DebugEvent>> {
         let _ = timeout_ms;

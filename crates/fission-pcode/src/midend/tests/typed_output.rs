@@ -47,6 +47,7 @@ fn typed_render_output_owns_all_pipeline_observations() {
     let (printed_code, _) = crate::render::render_hir_function_with_provenance(
         printed_hir,
         &options,
+        None,
         crate::render::PrintProfile::Hir,
         &Default::default(),
     );

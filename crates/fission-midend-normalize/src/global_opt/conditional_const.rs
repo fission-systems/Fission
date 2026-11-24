@@ -20,7 +20,500 @@ pub fn apply_conditional_const_pass(func: &mut PreHirFunction) -> bool {
 
     let mut env = HashMap::default();
     let mut ranges = RangeEnv::default();
-    visit_stmts(&mut func.body, &mut env, &mut ranges, &binding_types)
+    let mut changed = visit_stmts(&mut func.body, &mut env, &mut ranges, &binding_types);
+    changed |= fold_branch_decided_selects(&mut func.body);
+    changed
+}
+
+// ── Selects decided by the dominating branch ─────────────────────────────────
+
+/// A condition known to hold (`value`) or fail on the current path because an
+/// enclosing `if` arm decided it, and the variables it reads.
+#[derive(Clone)]
+struct PathFact {
+    atom: PreHirExpr,
+    value: bool,
+    reads: HashSet<String>,
+}
+
+/// Fold `c ? a : b` to the arm the enclosing branch already decided.
+///
+/// A join whose incoming paths carry different values is read as a select on
+/// the branch condition; when the structurer then copies the join's tail into
+/// each arm of that branch, every copy keeps the whole select although the
+/// arm it sits in has settled the condition: `if (set) { ... set ? A : B ...}`.
+/// Inside the arm the condition's value is a path fact -- the arm is entered
+/// only through that edge -- so the select is exactly the arm's value.
+///
+/// A fact covers only pure conditions over variables whose address is never
+/// taken (so neither a store nor a call can change them), lives until one of
+/// those variables is assigned, and is dropped at a label, where other paths
+/// join without having taken the edge.
+///
+/// Runs inside this pass and again on the finished layout, because the
+/// layout cleanup is where most tails are copied into the arms.
+pub fn fold_branch_decided_selects(body: &mut [PreHirStmt]) -> bool {
+    let mut address_taken = HashSet::default();
+    collect_address_taken_stmts(body, &mut address_taken);
+    let mut facts = Vec::new();
+    fold_selects_in_stmts(body, &mut facts, &address_taken)
+}
+
+/// Split a condition into the atoms it decides on the arm where it is
+/// `holds`: both conjuncts of a taken `&&`, both disjuncts of a failed `||`.
+fn decided_atoms(cond: &PreHirExpr, holds: bool, out: &mut Vec<(PreHirExpr, bool)>) {
+    match cond {
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr,
+            ..
+        } => decided_atoms(expr, !holds, out),
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalAnd,
+            lhs,
+            rhs,
+            ..
+        } if holds => {
+            decided_atoms(lhs, true, out);
+            decided_atoms(rhs, true, out);
+        }
+        PreHirExpr::Binary {
+            op: PreHirBinaryOp::LogicalOr,
+            lhs,
+            rhs,
+            ..
+        } if !holds => {
+            decided_atoms(lhs, false, out);
+            decided_atoms(rhs, false, out);
+        }
+        _ => {
+            let (atom, polarity) = truth_atom(cond);
+            out.push((atom.clone(), holds == polarity));
+        }
+    }
+}
+
+/// The value whose truthiness a condition tests, and whether the condition
+/// is that truthiness (`true`) or its negation: `!x`, `x == 0` and `0 == x`
+/// all test `x` negated, `x != 0` tests it plainly.
+fn truth_atom(cond: &PreHirExpr) -> (&PreHirExpr, bool) {
+    match cond {
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr,
+            ..
+        } => {
+            let (atom, polarity) = truth_atom(expr);
+            (atom, !polarity)
+        }
+        PreHirExpr::Binary {
+            op: op @ (PreHirBinaryOp::Eq | PreHirBinaryOp::Ne),
+            lhs,
+            rhs,
+            ..
+        } => {
+            let zero = |e: &PreHirExpr| matches!(e, PreHirExpr::Const(0, _));
+            let tested = if zero(rhs) {
+                Some(lhs.as_ref())
+            } else if zero(lhs) {
+                Some(rhs.as_ref())
+            } else {
+                None
+            };
+            match tested {
+                Some(inner) => {
+                    let (atom, polarity) = truth_atom(inner);
+                    let is_ne = matches!(op, PreHirBinaryOp::Ne);
+                    (atom, if is_ne { polarity } else { !polarity })
+                }
+                None => (cond, true),
+            }
+        }
+        _ => (cond, true),
+    }
+}
+
+/// Variables a fact may depend on, or `None` when the expression reads
+/// anything a store or call could change.
+fn pure_reads(
+    expr: &PreHirExpr,
+    address_taken: &HashSet<String>,
+    out: &mut HashSet<String>,
+) -> bool {
+    match expr {
+        PreHirExpr::Var(name) => {
+            if address_taken.contains(name) {
+                return false;
+            }
+            out.insert(name.clone());
+            true
+        }
+        PreHirExpr::Const(_, _) => true,
+        PreHirExpr::Unary { expr: inner, .. } | PreHirExpr::Cast { expr: inner, .. } => {
+            pure_reads(inner, address_taken, out)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            pure_reads(lhs, address_taken, out) && pure_reads(rhs, address_taken, out)
+        }
+        _ => false,
+    }
+}
+
+fn path_facts_for(
+    cond: &PreHirExpr,
+    holds: bool,
+    address_taken: &HashSet<String>,
+) -> Vec<PathFact> {
+    let mut atoms = Vec::new();
+    decided_atoms(cond, holds, &mut atoms);
+    atoms
+        .into_iter()
+        .filter_map(|(atom, value)| {
+            let mut reads = HashSet::default();
+            (pure_reads(&atom, address_taken, &mut reads) && !reads.is_empty())
+                .then_some(PathFact { atom, value, reads })
+        })
+        .collect()
+}
+
+fn decide_by_facts(cond: &PreHirExpr, facts: &[PathFact]) -> Option<bool> {
+    let (atom, polarity) = truth_atom(cond);
+    facts
+        .iter()
+        .rev()
+        .find(|fact| fact.atom == *atom)
+        .map(|fact| fact.value == polarity)
+}
+
+fn drop_facts_reading(facts: &mut Vec<PathFact>, written: &HashSet<String>) {
+    facts.retain(|fact| fact.reads.is_disjoint(written));
+}
+
+fn fold_selects_in_stmts(
+    stmts: &mut [PreHirStmt],
+    facts: &mut Vec<PathFact>,
+    address_taken: &HashSet<String>,
+) -> bool {
+    let mut changed = false;
+    for stmt in stmts {
+        changed |= fold_selects_in_stmt(stmt, facts, address_taken);
+    }
+    changed
+}
+
+fn fold_selects_in_body(
+    body: &mut std::rc::Rc<Vec<PreHirStmt>>,
+    facts: &mut Vec<PathFact>,
+    address_taken: &HashSet<String>,
+) -> bool {
+    if facts.is_empty() && !stmts_contain_select_under_if(body) {
+        return false;
+    }
+    fold_selects_in_stmts(
+        std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+        facts,
+        address_taken,
+    )
+}
+
+/// Whether a body could hold anything to fold: an `if` whose arms carry
+/// facts. Keeps the walk from cloning shared bodies it will not change.
+fn stmts_contain_select_under_if(stmts: &[PreHirStmt]) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        PreHirStmt::If { .. } => true,
+        PreHirStmt::Block(body)
+        | PreHirStmt::While { body, .. }
+        | PreHirStmt::DoWhile { body, .. }
+        | PreHirStmt::For { body, .. } => stmts_contain_select_under_if(body),
+        PreHirStmt::Switch { cases, default, .. } => {
+            cases
+                .iter()
+                .any(|case| stmts_contain_select_under_if(&case.body))
+                || stmts_contain_select_under_if(default)
+        }
+        _ => false,
+    })
+}
+
+fn fold_selects_in_stmt(
+    stmt: &mut PreHirStmt,
+    facts: &mut Vec<PathFact>,
+    address_taken: &HashSet<String>,
+) -> bool {
+    let mut changed = false;
+    match stmt {
+        PreHirStmt::Assign { lhs, rhs } => {
+            changed |= fold_selects_in_expr(rhs, facts);
+            changed |= fold_selects_in_lvalue(lhs, facts);
+            if let PreHirLValue::Var(name) = lhs {
+                let written = HashSet::from_iter([name.clone()]);
+                drop_facts_reading(facts, &written);
+            }
+        }
+        PreHirStmt::Expr(expr) => changed |= fold_selects_in_expr(expr, facts),
+        PreHirStmt::VaStart { va_list, .. } => changed |= fold_selects_in_expr(va_list, facts),
+        PreHirStmt::Return(expr) => {
+            if let Some(expr) = expr {
+                changed |= fold_selects_in_expr(expr, facts);
+            }
+            facts.clear();
+        }
+        PreHirStmt::Label(_) | PreHirStmt::Goto(_) | PreHirStmt::Break | PreHirStmt::Continue => {
+            facts.clear();
+        }
+        PreHirStmt::Block(body) => changed |= fold_selects_in_body(body, facts, address_taken),
+        PreHirStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            changed |= fold_selects_in_expr(cond, facts);
+            let mut then_facts = facts.clone();
+            then_facts.extend(path_facts_for(cond, true, address_taken));
+            let mut else_facts = facts.clone();
+            else_facts.extend(path_facts_for(cond, false, address_taken));
+            changed |= fold_selects_in_body(then_body, &mut then_facts, address_taken);
+            changed |= fold_selects_in_body(else_body, &mut else_facts, address_taken);
+            if stmts_contain_label(then_body) || stmts_contain_label(else_body) {
+                facts.clear();
+            } else {
+                let mut written = HashSet::default();
+                collect_written_vars(then_body, &mut written);
+                collect_written_vars(else_body, &mut written);
+                drop_facts_reading(facts, &written);
+            }
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+            let mut written = HashSet::default();
+            collect_written_vars(body, &mut written);
+            drop_facts_reading(facts, &written);
+            if stmts_contain_label(body) {
+                facts.clear();
+            }
+            changed |= fold_selects_in_expr(cond, facts);
+            let mut loop_facts = facts.clone();
+            changed |= fold_selects_in_body(body, &mut loop_facts, address_taken);
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            let mut written = HashSet::default();
+            if let Some(init) = init {
+                collect_written_vars(std::slice::from_ref(init.as_ref()), &mut written);
+            }
+            if let Some(update) = update {
+                collect_written_vars(std::slice::from_ref(update.as_ref()), &mut written);
+            }
+            collect_written_vars(body, &mut written);
+            drop_facts_reading(facts, &written);
+            if stmts_contain_label(body) {
+                facts.clear();
+            }
+            if let Some(cond) = cond {
+                changed |= fold_selects_in_expr(cond, facts);
+            }
+            let mut loop_facts = facts.clone();
+            changed |= fold_selects_in_body(body, &mut loop_facts, address_taken);
+        }
+        PreHirStmt::Switch {
+            expr,
+            cases,
+            default,
+        } => {
+            changed |= fold_selects_in_expr(expr, facts);
+            let mut written = HashSet::default();
+            for case in cases.iter_mut() {
+                let mut case_facts = facts.clone();
+                changed |= fold_selects_in_body(&mut case.body, &mut case_facts, address_taken);
+                collect_written_vars(&case.body, &mut written);
+            }
+            let mut default_facts = facts.clone();
+            changed |= fold_selects_in_body(default, &mut default_facts, address_taken);
+            collect_written_vars(default, &mut written);
+            if cases.iter().any(|case| stmts_contain_label(&case.body))
+                || stmts_contain_label(default)
+            {
+                facts.clear();
+            } else {
+                drop_facts_reading(facts, &written);
+            }
+        }
+    }
+    changed
+}
+
+fn fold_selects_in_lvalue(lval: &mut PreHirLValue, facts: &[PathFact]) -> bool {
+    match lval {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => fold_selects_in_expr(ptr, facts),
+        PreHirLValue::Index { base, index, .. } => {
+            fold_selects_in_expr(base, facts) | fold_selects_in_expr(index, facts)
+        }
+        PreHirLValue::FieldAccess { base, .. } => fold_selects_in_expr(base, facts),
+    }
+}
+
+fn fold_selects_in_expr(expr: &mut PreHirExpr, facts: &[PathFact]) -> bool {
+    if facts.is_empty() {
+        return false;
+    }
+    let mut changed = false;
+    match expr {
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => {
+            changed |= fold_selects_in_expr(inner, facts);
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            changed |= fold_selects_in_expr(lhs, facts);
+            changed |= fold_selects_in_expr(rhs, facts);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                changed |= fold_selects_in_expr(arg, facts);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            changed |= fold_selects_in_expr(base, facts);
+            changed |= fold_selects_in_expr(index, facts);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            changed |= fold_selects_in_expr(cond, facts);
+            changed |= fold_selects_in_expr(then_expr, facts);
+            changed |= fold_selects_in_expr(else_expr, facts);
+            if let Some(decided) = decide_by_facts(cond, facts) {
+                let chosen = if decided { then_expr } else { else_expr };
+                let chosen =
+                    std::mem::replace(chosen.as_mut(), PreHirExpr::Const(0, NirType::Bool));
+                *expr = chosen;
+                changed = true;
+            }
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => {}
+    }
+    changed
+}
+
+fn collect_address_taken_stmts(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+    for stmt in stmts {
+        match stmt {
+            PreHirStmt::Assign { lhs, rhs } => {
+                collect_address_taken_expr(rhs, out);
+                match lhs {
+                    PreHirLValue::Var(_) => {}
+                    PreHirLValue::Deref { ptr, .. } => collect_address_taken_expr(ptr, out),
+                    PreHirLValue::Index { base, index, .. } => {
+                        collect_address_taken_expr(base, out);
+                        collect_address_taken_expr(index, out);
+                    }
+                    PreHirLValue::FieldAccess { base, .. } => collect_address_taken_expr(base, out),
+                }
+            }
+            PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
+                collect_address_taken_expr(expr, out)
+            }
+            PreHirStmt::VaStart { va_list, .. } => collect_address_taken_expr(va_list, out),
+            PreHirStmt::Block(body) => collect_address_taken_stmts(body, out),
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                collect_address_taken_expr(cond, out);
+                collect_address_taken_stmts(then_body, out);
+                collect_address_taken_stmts(else_body, out);
+            }
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { cond, body } => {
+                collect_address_taken_expr(cond, out);
+                collect_address_taken_stmts(body, out);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(init) = init {
+                    collect_address_taken_stmts(std::slice::from_ref(init.as_ref()), out);
+                }
+                if let Some(cond) = cond {
+                    collect_address_taken_expr(cond, out);
+                }
+                if let Some(update) = update {
+                    collect_address_taken_stmts(std::slice::from_ref(update.as_ref()), out);
+                }
+                collect_address_taken_stmts(body, out);
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                collect_address_taken_expr(expr, out);
+                for case in cases {
+                    collect_address_taken_stmts(&case.body, out);
+                }
+                collect_address_taken_stmts(default, out);
+            }
+            PreHirStmt::Return(None)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
+
+fn collect_address_taken_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
+    match expr {
+        PreHirExpr::AddressOfLocal(name) => {
+            out.insert(name.clone());
+        }
+        PreHirExpr::Cast { expr: inner, .. }
+        | PreHirExpr::Unary { expr: inner, .. }
+        | PreHirExpr::Load { ptr: inner, .. }
+        | PreHirExpr::PtrOffset { base: inner, .. }
+        | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. } => collect_address_taken_expr(inner, out),
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            collect_address_taken_expr(lhs, out);
+            collect_address_taken_expr(rhs, out);
+        }
+        PreHirExpr::Call { args, .. } => {
+            for arg in args {
+                collect_address_taken_expr(arg, out);
+            }
+        }
+        PreHirExpr::Index { base, index, .. } => {
+            collect_address_taken_expr(base, out);
+            collect_address_taken_expr(index, out);
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            collect_address_taken_expr(cond, out);
+            collect_address_taken_expr(then_expr, out);
+            collect_address_taken_expr(else_expr, out);
+        }
+        PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(_, _) => {}
+    }
 }
 
 // ── Relational interval domain ───────────────────────────────────────────────
@@ -1174,5 +1667,114 @@ mod tests {
                 panic!("Expected Assign statement");
             }
         }
+    }
+
+    fn not_set() -> PreHirExpr {
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            expr: Box::new(PreHirExpr::Var("set".to_string())),
+            ty: NirType::Bool,
+        }
+    }
+
+    /// `msg(!set ? 1 : 2)`, the tail every arm of `if (set)` carries.
+    fn tail_call() -> PreHirStmt {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: "msg".to_string(),
+            args: vec![PreHirExpr::Select {
+                cond: Box::new(not_set()),
+                then_expr: Box::new(PreHirExpr::Const(1, u32_ty())),
+                else_expr: Box::new(PreHirExpr::Const(2, u32_ty())),
+                ty: u32_ty(),
+            }],
+            ty: u32_ty(),
+        })
+    }
+
+    fn call_arg(stmt: &PreHirStmt) -> &PreHirExpr {
+        match stmt {
+            PreHirStmt::Expr(PreHirExpr::Call { args, .. }) => &args[0],
+            other => panic!("expected the tail call, got {other:?}"),
+        }
+    }
+
+    fn branch_with_tails(then_prefix: Vec<PreHirStmt>) -> Vec<PreHirStmt> {
+        let mut then_body = then_prefix;
+        then_body.push(tail_call());
+        vec![PreHirStmt::If {
+            cond: PreHirExpr::Var("set".to_string()),
+            then_body: then_body.into(),
+            else_body: vec![tail_call()].into(),
+        }]
+    }
+
+    fn arms(body: &[PreHirStmt]) -> (&[PreHirStmt], &[PreHirStmt]) {
+        match &body[0] {
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => (then_body, else_body),
+            other => panic!("expected the branch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn select_in_a_duplicated_tail_folds_to_the_value_its_arm_implies() {
+        let mut body = branch_with_tails(Vec::new());
+        assert!(fold_branch_decided_selects(&mut body));
+        let (then_body, else_body) = arms(&body);
+        assert!(
+            matches!(call_arg(&then_body[0]), PreHirExpr::Const(2, _)),
+            "`set` holds in the then arm, so `!set ? 1 : 2` is 2: {:?}",
+            then_body[0]
+        );
+        assert!(
+            matches!(call_arg(&else_body[0]), PreHirExpr::Const(1, _)),
+            "`set` fails in the else arm, so `!set ? 1 : 2` is 1: {:?}",
+            else_body[0]
+        );
+    }
+
+    #[test]
+    fn select_after_its_condition_is_reassigned_or_rejoined_stays() {
+        // `set = 0;` before the tail: the branch no longer decides it.
+        let mut reassigned = branch_with_tails(vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("set".to_string()),
+            rhs: PreHirExpr::Const(0, u32_ty()),
+        }]);
+        fold_branch_decided_selects(&mut reassigned);
+        let (then_body, _) = arms(&reassigned);
+        assert!(
+            matches!(call_arg(&then_body[1]), PreHirExpr::Select { .. }),
+            "{:?}",
+            then_body[1]
+        );
+
+        // A label before the tail: other paths enter without the edge.
+        let mut rejoined = branch_with_tails(vec![PreHirStmt::Label("L".to_string())]);
+        fold_branch_decided_selects(&mut rejoined);
+        let (then_body, _) = arms(&rejoined);
+        assert!(
+            matches!(call_arg(&then_body[1]), PreHirExpr::Select { .. }),
+            "{:?}",
+            then_body[1]
+        );
+
+        // `&set` escapes: a call may change it, so it is no path fact.
+        let mut escaped = branch_with_tails(vec![PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: "mutate".to_string(),
+            args: vec![PreHirExpr::AddressOfLocal("set".to_string())],
+            ty: u32_ty(),
+        })]);
+        fold_branch_decided_selects(&mut escaped);
+        let (then_body, _) = arms(&escaped);
+        assert!(
+            matches!(call_arg(&then_body[1]), PreHirExpr::Select { .. }),
+            "{:?}",
+            then_body[1]
+        );
     }
 }

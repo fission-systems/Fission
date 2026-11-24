@@ -319,12 +319,10 @@ mod packed_tests {
     /// Ghidra's export tables add DLLs the primary lacks and never override it.
     #[test]
     fn ghidra_exports_fill_gaps_without_overriding() {
-        let Some(path) = ResourceProvider::global().ordinals_json_path("ghidra_exports.fpk") else {
-            return; // bundle not present in this checkout
-        };
-        if !path.exists() {
-            return;
-        }
+        let path = ResourceProvider::global()
+            .ordinals_json_path("ghidra_exports.fpk")
+            .expect("the committed ghidra_exports.fpk resolves");
+        assert!(path.exists(), "committed {} is missing", path.display());
         let db = OrdinalDatabase::try_new().expect("load");
 
         // mfc140 is in Ghidra's tables and in no RetDec one.
@@ -344,14 +342,16 @@ mod packed_tests {
         assert_eq!(db.resolve("no-such-dll.dll", 1), None);
     }
 
+    /// Compares against the JSON the pack was built from, which lives in the
+    /// gitignored `utils/source/ordinals`; it used to skip when that was
+    /// absent, which is every checkout including CI.
     #[test]
+    #[ignore = "needs the gitignored utils/source/ordinals JSON; run with --ignored"]
     fn packed_and_json_agree() {
-        let Some(fpk) = ResourceProvider::global().ordinals_json_path("ordinals.fpk") else {
-            return; // bundle not present in this checkout
-        };
-        if !fpk.exists() {
-            return;
-        }
+        let fpk = ResourceProvider::global()
+            .ordinals_json_path("ordinals.fpk")
+            .expect("the committed ordinals.fpk resolves");
+        assert!(fpk.exists(), "committed {} is missing", fpk.display());
         let packed = OrdinalDatabase::try_new().expect("packed load");
         assert!(packed.packed.is_some(), "test needs the packed path");
 
@@ -369,9 +369,8 @@ mod packed_tests {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils/source/ordinals");
         for filename in ["x86_ordinals.json", "arm_ordinals.json"] {
             let path = source.join(filename);
-            let Ok(content) = fs::read_to_string(&path) else {
-                continue;
-            };
+            let content = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("packer input {} unreadable: {e}", path.display()));
             let raw: HashMap<String, HashMap<String, String>> =
                 serde_json::from_str(&content).expect("parse json");
             for (dll, entries) in raw {
@@ -383,13 +382,11 @@ mod packed_tests {
                 }
             }
         }
-        if tables.is_empty() {
-            // `utils/source/` is gitignored, so a normal checkout (and CI) has
-            // the `.fpk` but not the JSON it was packed from. There is nothing
-            // to compare against; the guard above already skipped every file.
-            eprintln!("skipping: packer inputs not found at {}", source.display());
-            return;
-        }
+        assert!(
+            !tables.is_empty(),
+            "no packer inputs at {}",
+            source.display()
+        );
         json.tables = std::sync::Arc::new(tables);
 
         let mut checked = 0usize;

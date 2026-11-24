@@ -9,7 +9,7 @@ use crate::cleanup::cleanup_redundant_labels;
 use crate::helpers::block_label;
 use crate::host::StructuringHost;
 use crate::linear_types::{LinearBodyLoweringOutcome, LinearExit, structuring_diag_enabled};
-use fission_midend_core::ir::MlilPreviewError;
+use fission_midend_core::ir::{MlilPreviewError, ResourceLimits};
 use fission_midend_prehir::PreHirStmt;
 
 /// Soft SESE region proof budget, in `sese_region_proof_budget_exceeded()`
@@ -20,7 +20,7 @@ use fission_midend_prehir::PreHirStmt;
 /// decompiled output -- depend on machine speed / load (see PROJECT.md).
 /// Calibrated generously above what any corpus function needs; only meant
 /// to bound genuinely pathological (e.g. exponential node-splitting) cases.
-pub const SESE_REGION_PROOF_BUDGET_CALLS: u64 = 20_000;
+pub const SESE_REGION_PROOF_BUDGET_CALLS: u64 = ResourceLimits::DEFAULT.sese_region_proof_calls;
 
 fn push_unique_region_exit(candidates: &mut Vec<LinearExit>, candidate: LinearExit) {
     if !candidates.contains(&candidate) {
@@ -188,7 +188,7 @@ pub fn build_linear_sese_child_fallback(
         if structuring_diag_enabled() {
             eprintln!(
                 "[DIAG] build_linear_sese_child_fallback: skipping payload lowering after {} proof-attempt ceiling",
-                SESE_REGION_PROOF_BUDGET_CALLS
+                host.options().resource_limits.sese_region_proof_calls
             );
         }
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);

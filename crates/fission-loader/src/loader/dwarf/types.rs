@@ -61,6 +61,7 @@ impl DwarfTypeInfo {
             name: self.name.clone(),
             mangled_name: self.name.clone(), // DWARF names are already demangled
             kind: self.kind.clone(),
+            source: "dwarf".to_string(),
             fields: self
                 .members
                 .iter()

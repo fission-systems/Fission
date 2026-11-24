@@ -46,6 +46,7 @@ jobs:
           components: clippy,rustfmt
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -92,9 +93,9 @@ jobs:
             done
           fi
           if [ "${#package_flags[@]}" -gt 0 ]; then
-            cargo clippy "${package_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+            cargo clippy "${package_flags[@]}" --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
           else
-            cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
+            cargo clippy --workspace "${exclude_flags[@]}" --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity
           fi
 
       # Static audit for Rust tests missed by harness discovery. Keep it in
@@ -103,7 +104,8 @@ jobs:
         shell: bash
         run: scripts/audit/unrun_tests_scan.py
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true

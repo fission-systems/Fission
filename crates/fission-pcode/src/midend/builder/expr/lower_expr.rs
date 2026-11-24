@@ -15,7 +15,6 @@ use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 /// `gzip`, `bzip2` or `coreutils/ls`. A 200,000-entry ceiling still allowed a
 /// join-heavy value to expand into a 1.8-million-character expression before
 /// normalization, so keep the fallback well below that measured output cliff.
-const VARNODE_LOWERING_WORK_BUDGET: u64 = 20_000;
 
 /// Node ceiling for one lowered varnode expression.
 ///
@@ -543,7 +542,7 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn is_identity_copy_def(op: &PcodeOp) -> bool {
+    pub(in crate::midend::builder) fn is_identity_copy_def(op: &PcodeOp) -> bool {
         op.opcode == PcodeOpcode::Copy
             && op.output.as_ref().is_some_and(|output| {
                 op.inputs
@@ -577,7 +576,7 @@ impl<'a> PreviewBuilder<'a> {
     /// Only names: nothing here rebuilds the definition's expression, so the
     /// result is right for any read the definition's storage name is right
     /// for, merged or not.
-    fn name_emitted_for_definition(
+    pub(in crate::midend::builder) fn name_emitted_for_definition(
         &self,
         vn: &Varnode,
         site: LoweringSite,
@@ -1033,7 +1032,11 @@ impl<'a> PreviewBuilder<'a> {
         }
         const VARNODE_REDIRECT_DEPTH_CAP: u32 = 64;
         self.varnode_lowering_work += 1;
-        let over_budget = self.varnode_lowering_work > VARNODE_LOWERING_WORK_BUDGET;
+        let work_limit = self.options.resource_limits.varnode_lowering_work;
+        self.resource_usage
+            .varnode_lowering_work
+            .observe(self.varnode_lowering_work, work_limit);
+        let over_budget = self.varnode_lowering_work > work_limit;
         if over_budget || !visiting.insert(key.clone()) {
             if !over_budget
                 && let Some((site, op)) = def_site

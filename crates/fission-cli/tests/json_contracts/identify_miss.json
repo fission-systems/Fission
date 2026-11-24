@@ -1,0 +1,19 @@
+{
+  "command": [
+    "identify",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--function",
+    "0x201510",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "code_unit_count": "number",
+      "full_hash": "string",
+      "matched": "bool",
+      "specific_hash": "string"
+    }
+  }
+}

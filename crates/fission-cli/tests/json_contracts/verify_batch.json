@@ -1,0 +1,25 @@
+{
+  "command": [
+    "verify",
+    "crates/fission-dir/testdata/ground_truth_fixture.elf",
+    "--addresses-file",
+    "$TMP/fission-contract-57403-verify-batch/addrs.txt",
+    "--tier",
+    "concrete"
+  ],
+  "shape": {
+    "object": {
+      "address": "string",
+      "concrete": {
+        "object": {
+          "category": "string",
+          "checked": "number",
+          "detail": "string",
+          "reason": "string"
+        }
+      },
+      "name": "string",
+      "seed": "number"
+    }
+  }
+}

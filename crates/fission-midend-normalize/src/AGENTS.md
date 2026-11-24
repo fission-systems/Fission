@@ -1,6 +1,6 @@
 # Normalize Area Guide
 
-Scope: `crates/fission-pcode/src/midend/normalize/`
+Scope: `crates/fission-midend-normalize/src/`
 
 ## Directory map
 
@@ -24,11 +24,14 @@ normalize. Import via `crate::midend::wave_stats` (ADR 0012 Phase D0).
 | Concern | Primary owner | Related (do not duplicate policy) |
 |---------|---------------|-----------------------------------|
 | PHI / join copies at merge | `recovery/phi_recovery.rs` | `global_opt/gvn_join.rs` (GVN at joins) |
-| IV / induction vs structured `for` | `recovery/iv_recovery.rs` | `recovery/for_loops.rs` (shape fold) |
+| IV / induction vs structured `for` | `recovery/iv_recovery/` | `recovery/for_loops.rs` (shape fold) |
+| Pointer arithmetic and typed accesses | `memory/ptr_arith/` | `memory/typed_facts.rs` (access facts) |
 | Temp inline vs copy propagation | `cleanup/` passes | `global_opt/copy_propagation_pass.rs` |
 | Redundant load / stack stores | `global_opt/redundant_load.rs`, `memory/` | `AliasKey::Stack` — justify via store→load deps |
 
-`apply_iv_recovery` and related hooks are wired from `recovery/mod.rs` (not a legacy flat `iv_recovery.rs` at `normalize/` root).
+`recovery/mod.rs` re-exports `apply_iv_recovery_pass` from
+`recovery/iv_recovery/mod.rs`. `memory/mod.rs` re-exports the pointer arithmetic
+and zero-index dereference passes from `memory/ptr_arith/mod.rs`.
 
 ## Conventions
 

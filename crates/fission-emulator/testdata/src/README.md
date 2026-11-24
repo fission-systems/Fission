@@ -17,7 +17,7 @@ zig cc -target aarch64-linux-musl -nostdlib -fPIC -shared \
   -o testdata/aarch64_dyn_import.elf testdata/src/aarch64_dyn_import.S
 ```
 
-## Static musl (opt-in CI via FISSION_SMOKE_STATIC_PRINTF=1)
+## Static musl (opt-in: `--run-ignored only smoke_static`)
 
 ```bash
 zig cc -target x86_64-linux-musl -O1 -static -s \

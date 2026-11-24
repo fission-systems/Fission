@@ -455,6 +455,30 @@ pub struct NirBuildStats {
     /// Cleanup families skipped due to explicit budget/readiness guards.
     #[serde(default)]
     pub cleanup_budget_skip_count: usize,
+    // Observed use of the deterministic work limits (`ResourceLimits`). A peak
+    // is the highest value the limit's counter reached anywhere in this
+    // function's attempts, including discarded trials; a trip count is how
+    // many times that counter crossed its limit. Telemetry only.
+    /// Peak of the whole-structuring checkpoint counter.
+    #[serde(default)]
+    pub resource_structuring_total_work_peak: u64,
+    #[serde(default)]
+    pub resource_structuring_total_work_trip_count: usize,
+    /// Peak subcall count inside any one condition-recovery attempt.
+    #[serde(default)]
+    pub resource_condition_recovery_subcalls_peak: u64,
+    #[serde(default)]
+    pub resource_condition_recovery_subcalls_trip_count: usize,
+    /// Peak SESE region-proof attempts counted since the last reset.
+    #[serde(default)]
+    pub resource_sese_region_proof_calls_peak: u64,
+    #[serde(default)]
+    pub resource_sese_region_proof_calls_trip_count: usize,
+    /// Peak varnode-lowering steps within one call trace.
+    #[serde(default)]
+    pub resource_varnode_lowering_work_peak: u64,
+    #[serde(default)]
+    pub resource_varnode_lowering_work_trip_count: usize,
     /// Binding-initializer cleanup family invocations.
     #[serde(default)]
     pub cleanup_family_binding_init_count: usize,

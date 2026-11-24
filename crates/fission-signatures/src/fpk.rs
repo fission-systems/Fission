@@ -995,40 +995,59 @@ mod tests {
         // uses zlib and flate2 uses miniz_oxide, which emit different streams at
         // the same level -- so what is pinned is what matters: both files carry
         // the same records, in the same order, with the same block boundaries.
-        let utils = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../utils");
-        let src = utils.join("signatures/typeinfo/win32/wdk_signatures.txt");
-        let src = src.as_path();
-        let Ok(text) = std::fs::read_to_string(src) else {
-            return; // bundle not present in this checkout
-        };
+        //
+        // The records are generated here rather than read from
+        // `utils/.../wdk_signatures.txt`, which is not committed: with it
+        // absent this test returned before packing anything, everywhere.
+        // Names are scrambled so the packers' sort is exercised, and there are
+        // enough of them to span several blocks.
+        let mut text = String::from("# generated pipe-text records\n\n");
+        for i in 0..20_000u64 {
+            let scrambled = i.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40;
+            text.push_str(&format!(
+                "Fn{scrambled:06x}_{i}|{}|HANDLE h, DWORD n{}\n",
+                ["int", "void", "BOOL"][(i % 3) as usize],
+                i % 7
+            ));
+        }
         let records: Vec<String> = text
             .lines()
             .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
             .map(str::to_owned)
             .collect();
+        let src_path = std::env::temp_dir().join(format!("fpk_src_{}.txt", std::process::id()));
+        std::fs::write(&src_path, &text).unwrap();
 
         let ours_path = std::env::temp_dir().join(format!("fpk_ours_{}.fpk", std::process::id()));
         std::fs::write(&ours_path, super::pack(&records, 1)).unwrap();
 
         let theirs_path =
             std::env::temp_dir().join(format!("fpk_theirs_{}.fpk", std::process::id()));
-        let Ok(run) = std::process::Command::new("python3")
+        let run = std::process::Command::new("python3")
             .args([
                 concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/fpk_pack.py"),
-                src.to_str().unwrap(),
+                src_path.to_str().unwrap(),
                 "--kind",
                 "pipe-text",
                 "--output",
                 theirs_path.to_str().unwrap(),
             ])
-            .output()
-        else {
-            std::fs::remove_file(&ours_path).ok();
-            return;
+            .output();
+        std::fs::remove_file(&src_path).ok();
+        let run = match run {
+            Ok(run) => run,
+            Err(e) => {
+                std::fs::remove_file(&ours_path).ok();
+                fission_core::test_inputs::absent(&format!("python3 ({e})"));
+                return;
+            }
         };
         if !run.status.success() {
             std::fs::remove_file(&ours_path).ok();
-            return;
+            panic!(
+                "scripts/fpk_pack.py failed: {}",
+                String::from_utf8_lossy(&run.stderr)
+            );
         }
 
         let ours = FpkReader::open(&ours_path).unwrap();

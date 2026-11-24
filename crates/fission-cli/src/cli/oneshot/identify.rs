@@ -32,10 +32,24 @@ pub(super) fn run_identify(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<(
                     "code_unit_count": m.code_unit_count,
                     "specific_matched": m.specific_matched,
                 }),
-                None => json!({
-                    "address": format!("0x{:x}", address),
-                    "matched": false,
-                }),
+                // No match says nothing about why; the hashes a match was
+                // looked up by do -- they are what to search a FID database
+                // for, or what a missing signature would have to carry.
+                None => match identifier.hashes(address) {
+                    Some((code_unit_count, full_hash, specific_hash)) => json!({
+                        "address": format!("0x{:x}", address),
+                        "matched": false,
+                        "code_unit_count": code_unit_count,
+                        "full_hash": format!("0x{:016x}", full_hash),
+                        "specific_hash": format!("0x{:016x}", specific_hash),
+                    }),
+                    None => json!({
+                        "address": format!("0x{:x}", address),
+                        "matched": false,
+                        "hashed": false,
+                        "reason": "no FID hash: the function is too short, uses an operand shape the hasher does not support, or failed to decode",
+                    }),
+                },
             };
             let text = serde_json::to_string_pretty(&payload).context("serialize identify JSON")?;
             println!("{}", text);
@@ -54,8 +68,16 @@ pub(super) fn run_identify(cli: &OneShotArgs, binary: &LoadedBinary) -> Result<(
                 m.specific_matched
             )
             .context("write identify match")?,
-            None => writeln!(stdout, "0x{:012x}  no match", address)
+            None => match identifier.hashes(address) {
+                Some((code_units, full_hash, specific_hash)) => writeln!(
+                    stdout,
+                    "0x{:012x}  no match  full_hash=0x{:016x}  specific_hash=0x{:016x}  code_units={}",
+                    address, full_hash, specific_hash, code_units
+                )
                 .context("write identify no-match")?,
+                None => writeln!(stdout, "0x{:012x}  no match (could not be hashed)", address)
+                    .context("write identify no-match")?,
+            },
         }
         return Ok(());
     }

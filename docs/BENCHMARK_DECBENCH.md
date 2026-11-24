@@ -4,6 +4,14 @@ DecBench is the benchmark decompiler-quality work is measured on. It replaces
 the docker multi-decompiler loop described in
 [`BENCHMARK_DOCKER.md`](BENCHMARK_DOCKER.md), which is retired.
 
+**It measures similarity to the source, not correctness.** GED compares the
+shape of the control-flow graph, and the type metric compares the variables it
+can match. A wrong value, argument or call is invisible to both, and recovering
+missing code can raise the distance. Correctness is shown with native replay,
+`fission_cli verify`, manuals and source ground truth; DecBench is the
+regression and comparison measurement reported next to that evidence
+([ADR 0018](adr/0018-decbench-is-not-a-correctness-oracle.md)).
+
 **Quality is measured on the whole dataset.** Every quality claim cites the
 full-dataset sweep: all 96,103 functions of `noelo-lab/decbench-dataset`, broken
 down by config (`unoptimized`, `optimized`, `inlined`, `large`, `sample-set`),

@@ -45,7 +45,19 @@ Four rules, each a response to a row above.
 4. **Every check can fail and has run.** No `|| true` on tests; nextest uses
    `--no-tests=fail`; a lane's definition changing runs the lane (#980). A gate
    that fires on a change it cannot be about (a removal) is narrowed, not
-   worked around with a placeholder test.
+   worked around with a placeholder test. A test whose input is missing does
+   not return early, which nextest counts as a pass: a committed input
+   (`utils/`, `testdata/`) is `expect`ed; one only a developer machine has (a
+   benchmark corpus, the gitignored `utils/source/`) makes the test
+   `#[ignore = "..."]`, and it panics when an opt-in run cannot find it; an
+   external tool (python3, the Swift demangler) goes through
+   `fission_core::test_inputs::absent`, which fails under
+   `FISSION_REQUIRE_TEST_INPUTS=1`, set in every CI test job. The z3
+   differential is opt-in, so a missing z3 always fails it. Counted
+   on 2026-11-22: 37 tests had passed in CI without running because their
+   input was absent there (besides the three engine differential tests
+   #997 fixed), and 46 more skipped on a committed input that could only be
+   missing from a broken checkout.
 
 ## Hardening, and what was measured before adding it
 
@@ -59,6 +71,7 @@ cost and what it catches are known rather than assumed.
 | Overflow checks and debug assertions in release builds | 0 panics over the same 2,868 functions; the 83 errors are lift failures on PE data symbols. Kept because the class has occurred (four panic sites from a debug sweep, the `align_up` fuzz crash) and costs little on the fixture lane | PR fixture lane |
 | Retry masking | 0 tests passed only on retry in 59 recent green test jobs | Not changed |
 | Hangs | nextest already terminates a test after 120 s | Not changed |
+| sccache decided before the build | 3 required jobs on 2026-11-23/24 (one in the merge queue, run 45302835263) failed at the build's first `rustc -vV` with `Server startup failed: cache storage failed to read`. The old check (`--show-stats`) ran before `SCCACHE_GHA_ENABLED` was set, so it started a local-disk server that never touched the cache service; the real server, and its storage check, started inside the build | `setup-sccache` starts the build's server and compiles through it before exporting `RUSTC_WRAPPER`; `sccache outage fallback` in Fast Gate proves an unreachable service builds uncached and green |
 
 ## Further tests, and what each found or measured first
 
