@@ -24,7 +24,15 @@ use std::fs;
 use std::io::{self, Write};
 use std::sync::Arc;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RenderOutcomeKind {
+    Analysis,
+    Infrastructure(record::InfrastructureFailureKind),
+}
+
 pub(crate) struct FunctionRenderResult {
+    pub task_id: Option<workers::BatchTaskId>,
+    pub outcome_kind: RenderOutcomeKind,
     pub address: u64,
     pub decomp_sec: f64,
     pub postprocess_sec: f64,
@@ -261,6 +269,14 @@ fn record_into_function_render_result(
     benchmark: bool,
 ) -> FunctionRenderResult {
     let address = record.func.address;
+    let outcome_kind = match &record.outcome {
+        CliRustOutcome::Success { .. }
+        | CliRustOutcome::AssemblyFallback { .. }
+        | CliRustOutcome::HardError { .. } => RenderOutcomeKind::Analysis,
+        CliRustOutcome::WorkerInternalError { kind, .. } => {
+            RenderOutcomeKind::Infrastructure(*kind)
+        }
+    };
     let decomp_sec = match &record.outcome {
         CliRustOutcome::Success { decomp_sec, .. } => *decomp_sec,
         CliRustOutcome::AssemblyFallback { decomp_sec, .. } => *decomp_sec,
@@ -270,6 +286,8 @@ fn record_into_function_render_result(
     let json_entry = record_to_json(&record, benchmark);
     let plain_output = record_plain_output(&record);
     FunctionRenderResult {
+        task_id: None,
+        outcome_kind,
         address,
         decomp_sec,
         postprocess_sec: 0.0,
@@ -279,18 +297,25 @@ fn record_into_function_render_result(
     }
 }
 
-pub(crate) fn make_internal_error_result(
+pub(crate) fn make_infrastructure_error_result(
     binary: &LoadedBinary,
     func: &FunctionInfo,
+    kind: record::InfrastructureFailureKind,
     message: String,
     config: RenderConfig,
 ) -> FunctionRenderResult {
-    let fallback =
-        fallback::make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &message);
+    let fallback = match kind {
+        record::InfrastructureFailureKind::WorkerInternalError => {
+            fallback::make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &message)
+        }
+        record::InfrastructureFailureKind::NotStarted
+        | record::InfrastructureFailureKind::Cancelled => None,
+    };
     let asm_fallback = fallback.is_some();
     let record = CliRustDecompileRecord {
         func: func.clone(),
         outcome: CliRustOutcome::WorkerInternalError {
+            kind,
             message,
             assembly_fallback_code: fallback,
         },
@@ -306,6 +331,21 @@ pub(crate) fn make_internal_error_result(
         asm_fallback,
     );
     record_into_function_render_result(record, debug_bundle, config.benchmark)
+}
+
+pub(crate) fn make_internal_error_result(
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+    message: String,
+    config: RenderConfig,
+) -> FunctionRenderResult {
+    make_infrastructure_error_result(
+        binary,
+        func,
+        record::InfrastructureFailureKind::WorkerInternalError,
+        message,
+        config,
+    )
 }
 
 pub(crate) fn render_one_function_inner(
@@ -510,7 +550,7 @@ fn run_with_functions(
         cli.decomp_all || functions.len() > 1,
         cli.project && functions.len() > 1,
     ));
-    let mut results = if use_worker_fanout {
+    let batch_report = if use_worker_fanout {
         if cli.verbose {
             eprintln!(
                 "[*] Rust-only decomp-all worker fan-out/fan-in: workers={}, functions={}, stack_mb={}",
@@ -528,22 +568,36 @@ fn run_with_functions(
             stack_size_bytes,
         )
     } else {
-        let binary_arc = Arc::new(binary.clone());
-        functions
-            .iter()
-            .map(|func| {
-                workers::render_one_function_on_large_stack(
-                    Arc::clone(&binary_arc),
-                    Arc::clone(&facts),
-                    func,
-                    config,
-                    stack_size_bytes,
-                )
-            })
-            .collect::<Vec<_>>()
+        workers::run_sequential_batch(
+            Arc::new(binary.clone()),
+            Arc::clone(&facts),
+            functions,
+            config,
+            stack_size_bytes,
+        )
     };
-
-    results.sort_by_key(|entry| entry.address);
+    debug_assert!(batch_report.accounting.reconciles());
+    debug_assert_eq!(batch_report.results.len(), batch_report.accounting.accepted);
+    if batch_report.accounting.has_infrastructure_anomalies() {
+        let acct = &batch_report.accounting;
+        tracing::warn!(
+            accepted = acct.accepted,
+            analysis_completed = acct.analysis_completed,
+            infrastructure_failed = acct.infrastructure_failed,
+            not_started = acct.not_started,
+            cancelled = acct.cancelled,
+            synthesized_rows = acct.synthesized_rows,
+            join_errors = acct.join_errors,
+            spawn_errors = acct.spawn_errors,
+            send_errors = acct.send_errors,
+            duplicate_completions = acct.duplicate_completions,
+            stale_completions = acct.stale_completions,
+            consumer_errors = acct.consumer_errors,
+            "batch worker ledger reconciled infrastructure anomalies"
+        );
+    }
+    let batch_accounting = batch_report.accounting;
+    let results = batch_report.results;
 
     let mut all_output = String::new();
     let mut json_results = Vec::with_capacity(results.len());
@@ -606,6 +660,7 @@ fn run_with_functions(
             worker_env_requested,
             stack_size_bytes,
             &selection_accounting,
+            &batch_accounting,
             total_decomp_secs,
             total_postprocess_secs,
             wall_clock_sec,

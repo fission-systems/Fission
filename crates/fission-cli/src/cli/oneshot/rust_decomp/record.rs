@@ -21,6 +21,32 @@ pub(crate) struct CliRustDecompileRecord {
     pub outcome: CliRustOutcome,
 }
 
+/// Distinguishes batch job/infrastructure failures from function-level analysis errors.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum InfrastructureFailureKind {
+    WorkerInternalError,
+    NotStarted,
+    Cancelled,
+}
+
+impl InfrastructureFailureKind {
+    pub(crate) fn fallback_reason(self) -> &'static str {
+        match self {
+            Self::WorkerInternalError => "rust_sleigh:worker_internal_error",
+            Self::NotStarted => "rust_sleigh:worker_not_started",
+            Self::Cancelled => "rust_sleigh:worker_cancelled",
+        }
+    }
+
+    pub(crate) fn job_status(self) -> &'static str {
+        match self {
+            Self::WorkerInternalError => "infrastructure_failed",
+            Self::NotStarted => "not_started",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
 pub(crate) enum CliRustOutcome {
     Success {
         /// The single output surface (HIR presentation of the structured tree).
@@ -53,6 +79,7 @@ pub(crate) enum CliRustOutcome {
         decomp_sec: f64,
     },
     WorkerInternalError {
+        kind: InfrastructureFailureKind,
         message: String,
         assembly_fallback_code: Option<String>,
     },

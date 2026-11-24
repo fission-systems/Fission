@@ -94,6 +94,7 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
             obj
         }
         CliRustOutcome::WorkerInternalError {
+            kind,
             message,
             assembly_fallback_code,
         } => {
@@ -109,7 +110,9 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "size": entry.func.size,
                 "engine_used": "rust_sleigh",
                 "fell_back": true,
-                "fallback_reason": "rust_sleigh:worker_internal_error",
+                "fallback_reason": kind.fallback_reason(),
+                "failure_domain": "job_infrastructure",
+                "job_status": kind.job_status(),
                 "error": message,
             });
             if let Some(code) = assembly_fallback_code {
@@ -150,6 +153,7 @@ pub(crate) fn record_plain_output(entry: &CliRustDecompileRecord) -> String {
         CliRustOutcome::WorkerInternalError {
             message,
             assembly_fallback_code,
+            ..
         } => assembly_fallback_code.clone().unwrap_or_else(|| {
             format!(
                 "// Error decompiling {} (0x{:x}): {}",
