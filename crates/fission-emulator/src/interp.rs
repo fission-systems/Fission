@@ -80,6 +80,21 @@ impl Emulator {
         // the next one. Taking just the first, or just the last, loses a real
         // instruction from the count and from anything watching.
         let mut starts_at: Vec<Vec<(u64, u32)>> = Vec::new();
+        // The registers each instruction that can fault writes, by its PC:
+        // the same instructions, and the same registers, the JIT notes.
+        let mut checkpoints: std::collections::HashMap<u64, Vec<(u64, u32)>> =
+            std::collections::HashMap::new();
+        if self.state.enforce_page_faults {
+            let (register, unique) = (self.state.register_space(), self.state.unique_space());
+            for insn in insns {
+                if crate::jit::compiler::insn_may_fault(&insn.ops, register, unique) {
+                    checkpoints.insert(
+                        insn.pc,
+                        crate::jit::compiler::insn_register_writes(&insn.ops, register),
+                    );
+                }
+            }
+        }
         for insn in insns {
             let base = flat.len();
             while starts_at.len() <= base {
@@ -127,6 +142,9 @@ impl Emulator {
                 self.inst_count = self.inst_count.saturating_add(1);
                 if self.observe.insn {
                     self.notify_insn(pc);
+                }
+                if let Some(writes) = checkpoints.get(&pc) {
+                    self.checkpoint_instruction(writes);
                 }
             }
 

@@ -353,7 +353,10 @@ impl PageMap {
         let mut at = page_align_down(addr);
         loop {
             let mapping = self.mapping_at(at);
-            Self::permit(mapping.map(|m| m.prot), at, kind)?;
+            // The fault names the first byte that cannot be reached -- the
+            // access's own address on its first page, not that page's base.
+            // It becomes the guest's `si_addr`.
+            Self::permit(mapping.map(|m| m.prot), at.max(addr), kind)?;
             match mapping {
                 Some(m) if last >= m.end => at = m.end,
                 _ => return Ok(()),
