@@ -29,6 +29,28 @@ body:
       required: true
 
   - type: textarea
+    id: probe
+    attributes:
+      label: Probe (shows the defect)
+      description: >-
+        A command or test that shows the defect on the commit below, with its
+        output. Without one the issue is triaged as `status:needs-repro`; see
+        docs/ISSUE_PR_WORKFLOW.md, "Defect intake".
+      placeholder: |
+        cargo nextest run -p fission-pcode <filter>
+        fission_cli decomp tests/fixtures/... --addr 0x...
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance check (fails now, passes when fixed)
+      description: The expected behavior as a test or assertion. The fixing PR commits it as a regression test.
+    validations:
+      required: false
+
+  - type: textarea
     id: expected
     attributes:
       label: Expected behavior

@@ -37,6 +37,51 @@ acceptance verification → close. Blocked items must name their blocker.
 Use Refs rather than Closes for partial work or umbrella issues; do not close
 an issue before its acceptance criteria have been verified.
 
+## Defect intake: probe and acceptance check
+
+A defect report is a claim until something executable shows it. Each defect
+needs two checks, both run against a named `main` SHA:
+
+| Check | What it shows | Before the fix | After the fix |
+| --- | --- | --- | --- |
+| **Probe** | The defect: wrong output, panic, divergence | reproduces | no longer reproduces |
+| **Acceptance check** | The expected behaviour, stated as a test | fails | passes |
+
+Each check is a command or test someone else can run: a `cargo nextest`
+filter, a `fission_cli` invocation on an in-repo fixture, or a native-replay
+witness.
+
+**Labels**
+- An issue with both checks and their output on a named SHA gets
+  `status:confirmed`.
+- Anything less gets `status:needs-repro`, including audit findings that only
+  cite a file and line. A `status:needs-repro` issue is not handed to an
+  implementation agent; the first step is writing the probe.
+
+**Results that are not a defect.** Triage closes or reclassifies these, and
+records the probe output either way:
+- Does not reproduce on current `main`: close as not planned, with the probe
+  output.
+- Already fixed: close and reference the fixing PR.
+- Flaky: the probe passes sometimes. Keep `status:needs-repro` and record the
+  pass rate. Never retry until green.
+
+**Promotion.** The implementation PR commits the acceptance check as a
+regression test in the owning crate, so it stays in the suite permanently.
+The PR states that the test fails on the base and passes on the head. That is
+the positive control the PR template already requires.
+
+**Do not open an issue for work you are about to do.** An agent fixing a
+defect in its own PR puts the problem statement, probe and acceptance check in
+the PR body and opens no issue. Open an issue only for work that is not being
+done now, and only with a probe; otherwise label it `status:needs-repro`.
+Never file every finding as an issue: an unbounded backlog costs more triage
+than it saves. On 2026-11-24, 168 issues were opened in one day and 190 open
+issues had no label.
+
+**Keep PRs small.** One defect or one invariant per PR. Unrelated fixes found
+along the way go in their own PRs, or in an issue with a probe.
+
 ## PR lifecycle
 
 1. Start from the linked issue and current main. State scope and invariant.
