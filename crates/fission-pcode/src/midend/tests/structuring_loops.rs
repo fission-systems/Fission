@@ -2774,3 +2774,182 @@ fn irreducible_two_head_cycle_does_not_lower_loops_into_each_other() {
         "the cycle between the two heads must be cut by declining a re-entry, not by exhausting the work budget"
     );
 }
+
+/// A loop's second exit that leaves through an instruction-free block.
+///
+/// GCC at `-O0` emits a `nop` at the label a `break` jumps to, and the nop
+/// lifts to no p-code. The block that holds it has a start address of its
+/// own and falls through into the code after the loop:
+///
+///   block 0 (0x6000, entry):  Branch(-> head 0x6030)
+///   block 1 (0x6010, body):   CBranch(found -> 0x6041, fallthrough -> 0x6020)
+///   block 2 (0x6020, step):   Store; fallthrough -> head
+///   block 3 (0x6030, head):   CBranch(more -> body 0x6010, fallthrough -> 0x6040)
+///   block 4 (0x6040):         Branch(-> 0x6042)      normal loop exit
+///   block 5 (0x6041):         (no ops)  -> 0x6042    `break` target
+///   block 6 (0x6042, after):  Store; Return
+///
+/// Both exits reach block 6. Taking `found` must leave the loop; the output
+/// once printed `block_6042: goto block_6042;` inside the loop, an infinite
+/// loop on a path that ends the function.
+#[test]
+fn loop_exit_through_empty_block_does_not_become_self_goto() {
+    let found = uniq(0x600, 1);
+    let more = uniq(0x601, 1);
+    let step_ptr = uniq(0x602, 8);
+    let after_ptr = uniq(0x603, 8);
+    let op = |seq: u32,
+              opcode: PcodeOpcode,
+              address: u64,
+              output: Option<Varnode>,
+              inputs: Vec<Varnode>| PcodeOp {
+        seq_num: seq,
+        opcode,
+        address,
+        output,
+        inputs,
+        asm_mnemonic: None,
+    };
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6000,
+                successors: vec![3],
+                ops: vec![op(
+                    0,
+                    PcodeOpcode::Branch,
+                    0x6000,
+                    None,
+                    vec![cst(0x6030, 8)],
+                )],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6010,
+                successors: vec![2, 5],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        0x6010,
+                        Some(found.clone()),
+                        vec![reg(0x08, 1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        0x6011,
+                        None,
+                        vec![cst(0x6041, 8), found],
+                    ),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6020,
+                successors: vec![3],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntAdd,
+                        0x6020,
+                        Some(step_ptr.clone()),
+                        vec![reg(0x28, 8), cst(-0x10, 8)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Store,
+                        0x6021,
+                        None,
+                        vec![cst(0, 4), step_ptr, cst(7, 4)],
+                    ),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 3,
+                start_address: 0x6030,
+                successors: vec![4, 1],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::Copy,
+                        0x6030,
+                        Some(more.clone()),
+                        vec![reg(0x10, 1)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::CBranch,
+                        0x6031,
+                        None,
+                        vec![cst(0x6010, 8), more],
+                    ),
+                ],
+            },
+            PcodeBasicBlock {
+                index: 4,
+                start_address: 0x6040,
+                successors: vec![6],
+                ops: vec![op(
+                    0,
+                    PcodeOpcode::Branch,
+                    0x6040,
+                    None,
+                    vec![cst(0x6042, 8)],
+                )],
+            },
+            PcodeBasicBlock {
+                index: 5,
+                start_address: 0x6041,
+                successors: vec![6],
+                ops: vec![],
+            },
+            PcodeBasicBlock {
+                index: 6,
+                start_address: 0x6042,
+                successors: vec![],
+                ops: vec![
+                    op(
+                        0,
+                        PcodeOpcode::IntAdd,
+                        0x6042,
+                        Some(after_ptr.clone()),
+                        vec![reg(0x28, 8), cst(-0x18, 8)],
+                    ),
+                    op(
+                        1,
+                        PcodeOpcode::Store,
+                        0x6043,
+                        None,
+                        vec![cst(0, 4), after_ptr, cst(9, 4)],
+                    ),
+                    op(
+                        2,
+                        PcodeOpcode::Return,
+                        0x6044,
+                        None,
+                        vec![cst(0, 8), cst(0, 4)],
+                    ),
+                ],
+            },
+        ],
+    };
+
+    let code = render_mlil_preview(&func, "loop_exit_empty_block", 0x6000, &preview_options())
+        .expect("preview render");
+    let lines: Vec<&str> = code.lines().map(str::trim).collect();
+    for pair in lines.windows(2) {
+        if let Some(label) = pair[0].strip_suffix(':') {
+            assert_ne!(
+                pair[1],
+                format!("goto {label};"),
+                "a label must not jump to itself: {code}"
+            );
+        }
+    }
+    assert!(
+        code.contains("local_18 = 9;"),
+        "code after the loop must be kept: {code}"
+    );
+}
