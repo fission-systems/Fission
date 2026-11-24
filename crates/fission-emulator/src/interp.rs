@@ -494,15 +494,17 @@ impl Emulator {
                     let in1 = &op.inputs[1];
                     let in2 = &op.inputs[2];
                     let addr = value(1);
+                    // The callback's order (the JIT's): space, address,
+                    // size, then the value's varnode, then the pointer's.
                     jit_shadow_store(
                         emu_ptr,
                         space_id,
                         addr,
-                        if in1.is_constant { 0 } else { in1.space_id },
-                        if in1.is_constant { 0 } else { in1.offset },
+                        in2.size as u64,
                         if in2.is_constant { 0 } else { in2.space_id },
                         if in2.is_constant { 0 } else { in2.offset },
-                        in2.size as u64,
+                        if in1.is_constant { 0 } else { in1.space_id },
+                        if in1.is_constant { 0 } else { in1.offset },
                         in1.size as u64,
                     );
                 }
