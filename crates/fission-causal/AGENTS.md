@@ -1,7 +1,7 @@
 # fission-causal Agent Guide
 
 Scope: `crates/fission-causal`. Experimental CSIC prototype (RFC #1101,
-Track B). P1 report: `docs/proposals/2026-11-23-csic-p1-counterfactual-runner.md`.
+Track B). P1/P2 report: `docs/proposals/2026-11-23-csic-p1-counterfactual-runner.md`.
 
 ## Rules
 
@@ -12,6 +12,14 @@ Track B). P1 report: `docs/proposals/2026-11-23-csic-p1-counterfactual-runner.md
   `CounterfactualWitness` is a one-location flip confirmed by a fresh replay,
   not an actual-cause or minimality claim. Do not add a "cause"/"minimal"
   verdict without contingency search and a written soundness argument.
+  `Minimality::MinimalWithinBudget` is bounded (input bytes only, others
+  held at recorded values, what the symbolic shadow models) and must say so.
+- **Solver models are proposals.** Every model is replayed in the emulator
+  before it is used; one that does not reproduce is rejected and logged, and
+  the search then ends `SolverUnknown`. Unknown is never "no cause".
+- **Input first.** Input bytes and named variables are the primary
+  candidates; internal registers/stack slots only via
+  `InternalPolicy::Always` or when no input-level witness exists.
 - **Dynamic analysis only on this crate's fixtures** (`testdata/`) or on
   `~/fission-benchmark/dir-verify/binaries`. Never on DecBench/evalkit binaries.
 - **Correctness evidence is native execution** (`testdata/native/verify_native.py`)
@@ -33,7 +41,8 @@ Track B). P1 report: `docs/proposals/2026-11-23-csic-p1-counterfactual-runner.md
 | `src/trace.rs` | Single-step recorder, `SinkMonitor`, observers |
 | `src/cfg.rs` | Per-function CFG, postdominators, control dependence |
 | `src/slice.rs` | Backward dynamic slice, candidates, value alternatives |
-| `src/runner.rs` | Checkpoints (`Replayer`), oracle, verification, joint search |
+| `src/runner.rs` | Checkpoints (`Replayer`), tiered oracle, verification, solver and pair joint search, minimality, contingencies |
+| `src/symbolic.rs` | Symbolic replays (`ShadowMode::Symbolic`, interpreter), canonical input variables, solver queries |
 | `src/baseline.rs` / `src/static_slice.rs` | Fission-taint and pinned static-slice baselines |
 | `src/eval.rs` | The controlled cases and scoring |
 | `examples/csic_eval.rs` | Evaluation harness (per-case child processes) |

@@ -18,8 +18,15 @@ what the emulator replays (`../native/verify_native.py`).
 | `crash_null.c` | fault at the store | `req[0]` (selects a NULL slot); not `req[1]` (the stored value) |
 | `password.c` | `grant_admin(1000)` | `req[0..3]` |
 | `branch_len.c` | `classify`'s first branch outcome | `req[0]` |
+| `and3.c` | `grant()` called | on "abcQ": joint `{req[0..3]}` = "KEY"; `req[3]` is a decoy on the path |
+| `xor_gate.c` | `grant()` called | `req[0]` and `req[1]` each alone; flipping the same bit in both restores Φ |
+| `segv_grant.c` | `grant()` in the SIGSEGV handler | `req[0]` (selects the NULL slot); not `req[1]` (the stored value) |
+| `carry.c` (`-DCARRY=1`) | `grant()` called | joint `{req[0], req[2]}` or `{req[1], req[2]}` (a carry out of a stored sum, and 'W') |
+| `carry.c` (`-DCARRY=2`) | `grant()` called | none: the high byte of a two-byte sum never reaches 2 |
 
 Rebuild with `./build.sh` (zig 0.15.2, `llvm-objcopy`). Builds are static
 musl, `-fno-pie`, symbols kept, debug info stripped: x86-64 `-O0` for every
 source, x86-64 `-O2` for `rfc_auth.c`, AArch64 `-O0` for `rfc_auth.c`,
-`crash_null.c` and `password.c`.
+`crash_null.c` and `password.c`. P2 adds x86-64 `-O0` for `and3.c`,
+`xor_gate.c`, `segv_grant.c` and both `carry.c` variants, x86-64 `-O2` for
+`xor_gate.c`, and AArch64 `-O0` for `and3.c` and `segv_grant.c`.

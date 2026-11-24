@@ -1405,7 +1405,7 @@ impl Runner<'_, '_> {
                                 ""
                             }
                         ),
-                        observed: format!("{:x?} Φ={:?}", &observed, child.holds()),
+                        observed: format!("{observed:x?} Φ={:?}", child.holds()),
                     };
                     self.solver_log.models.push(record);
                     continue;
