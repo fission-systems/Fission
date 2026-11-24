@@ -6,6 +6,7 @@
 
 - Linked issue(s), primary phase, priority and owner:
 - Base revision / reproduction (or preventive-work rationale):
+- Probe (defect before, gone after) and acceptance test (fails on base, passes on head; path):
 - Violated invariant / expected behavior:
 - Dependencies, risk, and out-of-scope changes:
 

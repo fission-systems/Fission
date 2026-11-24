@@ -1,0 +1,1249 @@
+{
+ "behind": {
+  "10": 0,
+  "11": 3,
+  "12": 0,
+  "13": 0,
+  "14": 0,
+  "15": 0,
+  "16": 2,
+  "17": 0,
+  "18": 0,
+  "19": 108
+ },
+ "days": 7,
+ "dependency_states": {
+  "98": "CLOSED",
+  "99": "OPEN"
+ },
+ "issues": {
+  "closed": 3,
+  "open_unlabeled": 2,
+  "opened": 5
+ },
+ "main_runs": [
+  200
+ ],
+ "merged": [
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h1"
+      }
+     }
+    ]
+   },
+   "headRefName": "fix/one",
+   "headRefOid": "h1",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": "2026-11-24T11:40:00Z",
+   "number": 1,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": [
+     {
+      "__typename": "AddedToMergeQueueEvent",
+      "actor": {
+       "login": "maintainer"
+      },
+      "createdAt": "2026-11-24T11:00:00Z"
+     },
+     {
+      "__typename": "RemovedFromMergeQueueEvent",
+      "actor": {
+       "login": "github-merge-queue"
+      },
+      "createdAt": "2026-11-24T11:40:00Z",
+      "reason": "merged"
+     }
+    ]
+   },
+   "title": "queued normally",
+   "url": "https://example.invalid/1"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h2"
+      }
+     }
+    ]
+   },
+   "headRefName": "fix/two",
+   "headRefOid": "h2",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": "2026-11-24T11:50:00Z",
+   "number": 2,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "merged around the queue",
+   "url": "https://example.invalid/2"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-24T05:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T06:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T06:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T06:01:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T07:00:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T06:50:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h3"
+      }
+     }
+    ]
+   },
+   "headRefName": "fix/three",
+   "headRefOid": "h3",
+   "history": {
+    "nodes": [
+     {
+      "commit": {
+       "messageHeadline": "fix: x",
+       "parents": {
+        "totalCount": 1
+       }
+      }
+     },
+     {
+      "commit": {
+       "messageHeadline": "Merge branch 'main' into fix/x",
+       "parents": {
+        "totalCount": 2
+       }
+      }
+     },
+     {
+      "commit": {
+       "messageHeadline": "Merge pull request #5 from y",
+       "parents": {
+        "totalCount": 2
+       }
+      }
+     }
+    ]
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": "2026-11-24T10:00:00Z",
+   "number": 3,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": [
+     {
+      "__typename": "AddedToMergeQueueEvent",
+      "actor": {
+       "login": "maintainer"
+      },
+      "createdAt": "2026-11-24T08:00:00Z"
+     },
+     {
+      "__typename": "RemovedFromMergeQueueEvent",
+      "actor": {
+       "login": "github-merge-queue"
+      },
+      "createdAt": "2026-11-24T08:30:00Z",
+      "reason": "failed_checks"
+     },
+     {
+      "__typename": "HeadRefForcePushedEvent",
+      "actor": {
+       "login": "maintainer"
+      },
+      "createdAt": "2026-11-24T08:40:00Z"
+     },
+     {
+      "__typename": "AddedToMergeQueueEvent",
+      "actor": {
+       "login": "agent"
+      },
+      "createdAt": "2026-11-24T09:00:00Z"
+     },
+     {
+      "__typename": "RemovedFromMergeQueueEvent",
+      "actor": {
+       "login": "github-merge-queue"
+      },
+      "createdAt": "2026-11-24T10:00:00Z",
+      "reason": "merged"
+     }
+    ]
+   },
+   "title": "ejected then requeued",
+   "url": "https://example.invalid/3"
+  }
+ ],
+ "now": "2026-11-24T12:00:00+00:00",
+ "open": [
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": {
+    "enabledAt": "2026-11-24T11:00:00Z"
+   },
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "FAILURE",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:01:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h10"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/10",
+   "headRefOid": "h10",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 10,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "auto-merge on, checks red",
+   "url": "https://example.invalid/10"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": null,
+             "conclusion": null,
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:01:00Z",
+             "status": "IN_PROGRESS"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h11"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/11",
+   "headRefOid": "h11",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "CONFLICTING",
+   "mergedAt": null,
+   "number": 11,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "checks running, conflicting",
+   "url": "https://example.invalid/11"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "feat/base",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h12"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/12",
+   "headRefOid": "h12",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 12,
+   "reviewDecision": "CHANGES_REQUESTED",
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": [
+     {
+      "state": "CHANGES_REQUESTED",
+      "submittedAt": "2026-11-24T08:00:00Z"
+     }
+    ]
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "changes requested on a stack",
+   "url": "https://example.invalid/12"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h13"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/13",
+   "headRefOid": "h13",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 13,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": [
+     {
+      "isResolved": true
+     },
+     {
+      "isResolved": false
+     }
+    ]
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "one unresolved thread",
+   "url": "https://example.invalid/13"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "Merge after #99 lands.",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h14"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/14",
+   "headRefOid": "h14",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 14,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "after an open PR",
+   "url": "https://example.invalid/14"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "depends on #98",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h15"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/15",
+   "headRefOid": "h15",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 15,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "after a closed PR",
+   "url": "https://example.invalid/15"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-14T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h16"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/16",
+   "headRefOid": "h16",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 16,
+   "reviewDecision": "REVIEW_REQUIRED",
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "needs a review",
+   "url": "https://example.invalid/16"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h17"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/17",
+   "headRefOid": "h17",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": true,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 17,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "draft",
+   "url": "https://example.invalid/17"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h18"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/18",
+   "headRefOid": "h18",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "CONFLICTING",
+   "mergedAt": null,
+   "number": 18,
+   "reviewDecision": null,
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "green but conflicting",
+   "url": "https://example.invalid/18"
+  },
+  {
+   "author": {
+    "login": "dev"
+   },
+   "autoMergeRequest": null,
+   "baseRefName": "main",
+   "body": "",
+   "createdAt": "2026-11-23T09:00:00Z",
+   "head": {
+    "nodes": [
+     {
+      "commit": {
+       "checkSuites": {
+        "nodes": [
+         {
+          "createdAt": "2026-11-24T10:00:00Z",
+          "detect": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:05:00Z",
+             "conclusion": "SUCCESS",
+             "name": "Detect changes",
+             "startedAt": "2026-11-24T10:02:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "summary": {
+           "nodes": [
+            {
+             "completedAt": "2026-11-24T10:30:00Z",
+             "conclusion": "SUCCESS",
+             "name": "CI Summary",
+             "startedAt": "2026-11-24T10:29:00Z",
+             "status": "COMPLETED"
+            }
+           ]
+          },
+          "workflowRun": {
+           "event": "pull_request"
+          }
+         }
+        ]
+       },
+       "oid": "h19"
+      }
+     }
+    ]
+   },
+   "headRefName": "branch/19",
+   "headRefOid": "h19",
+   "history": {
+    "nodes": []
+   },
+   "isDraft": false,
+   "mergeQueueEntry": null,
+   "mergeable": "MERGEABLE",
+   "mergedAt": null,
+   "number": 19,
+   "reviewDecision": "APPROVED",
+   "reviewThreads": {
+    "nodes": []
+   },
+   "reviews": {
+    "nodes": []
+   },
+   "timelineItems": {
+    "nodes": []
+   },
+   "title": "approved, far behind",
+   "url": "https://example.invalid/19"
+  }
+ ],
+ "repo": "example/repo",
+ "runner_metrics": true,
+ "runs": [
+  {
+   "conclusion": "failure",
+   "created_at": "2026-11-10T10:00:00Z",
+   "event": "pull_request",
+   "head_branch": "old",
+   "head_sha": "old",
+   "id": 50,
+   "jobs": [
+    {
+     "completed_at": "2026-11-10T10:11:00Z",
+     "conclusion": "failure",
+     "created_at": "2026-11-10T10:00:00Z",
+     "name": "CI Summary",
+     "started_at": "2026-11-10T10:10:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [],
+   "run_attempt": 3,
+   "status": "completed"
+  },
+  {
+   "conclusion": "cancelled",
+   "created_at": "2026-11-24T10:50:00Z",
+   "event": "merge_group",
+   "head_branch": "gh-readonly-queue/main/pr-1-aaa",
+   "head_sha": "g0",
+   "id": 99,
+   "jobs": [
+    {
+     "completed_at": "2026-11-24T10:51:00Z",
+     "conclusion": "cancelled",
+     "created_at": "2026-11-24T10:50:00Z",
+     "name": "Detect changes",
+     "started_at": "2026-11-24T10:50:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [],
+   "run_attempt": 1,
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-11-24T10:00:00Z",
+   "event": "pull_request",
+   "head_branch": "fix/one",
+   "head_sha": "h1",
+   "id": 100,
+   "jobs": [
+    {
+     "completed_at": "2026-11-24T10:05:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T10:00:00Z",
+     "name": "Detect changes",
+     "started_at": "2026-11-24T10:02:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T10:25:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T10:05:00Z",
+     "name": "Lint",
+     "started_at": "2026-11-24T10:15:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T10:30:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T10:29:00Z",
+     "name": "CI Summary",
+     "started_at": "2026-11-24T10:29:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [
+    1
+   ],
+   "run_attempt": 1,
+   "status": "completed"
+  },
+  {
+   "conclusion": "success",
+   "created_at": "2026-11-24T11:00:00Z",
+   "event": "merge_group",
+   "head_branch": "gh-readonly-queue/main/pr-1-bbb",
+   "head_sha": "g1",
+   "id": 101,
+   "jobs": [
+    {
+     "completed_at": "2026-11-24T11:22:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T11:00:00Z",
+     "name": "Detect changes",
+     "started_at": "2026-11-24T11:20:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T11:32:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T11:22:00Z",
+     "name": "Lint",
+     "started_at": "2026-11-24T11:22:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T11:29:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T11:22:00Z",
+     "name": "Package rehearsal",
+     "started_at": "2026-11-24T11:24:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T11:22:00Z",
+     "conclusion": "skipped",
+     "created_at": "2026-11-24T11:22:00Z",
+     "name": "Skipped lane",
+     "started_at": "2026-11-24T11:22:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T11:39:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T11:38:00Z",
+     "name": "CI Summary",
+     "started_at": "2026-11-24T11:38:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [],
+   "run_attempt": 1,
+   "status": "completed"
+  },
+  {
+   "conclusion": "failure",
+   "created_at": "2026-11-24T06:00:00Z",
+   "event": "pull_request",
+   "head_branch": "fix/three",
+   "head_sha": "h3",
+   "id": 103,
+   "jobs": [
+    {
+     "completed_at": "2026-11-24T06:05:00Z",
+     "conclusion": "success",
+     "created_at": "2026-11-24T06:00:00Z",
+     "name": "Detect changes",
+     "started_at": "2026-11-24T06:01:00Z",
+     "status": "completed"
+    },
+    {
+     "completed_at": "2026-11-24T07:00:00Z",
+     "conclusion": "failure",
+     "created_at": "2026-11-24T06:50:00Z",
+     "name": "CI Summary",
+     "started_at": "2026-11-24T06:50:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [],
+   "run_attempt": 2,
+   "status": "completed"
+  },
+  {
+   "conclusion": "failure",
+   "created_at": "2026-11-24T11:45:00Z",
+   "event": "push",
+   "head_branch": "main",
+   "head_sha": "m1",
+   "id": 200,
+   "jobs": [
+    {
+     "completed_at": "2026-11-24T11:47:00Z",
+     "conclusion": "failure",
+     "created_at": "2026-11-24T11:45:00Z",
+     "name": "CI Summary",
+     "started_at": "2026-11-24T11:46:00Z",
+     "status": "completed"
+    }
+   ],
+   "pull_requests": [],
+   "run_attempt": 1,
+   "status": "completed"
+  }
+ ]
+}
