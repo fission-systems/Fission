@@ -439,13 +439,14 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// Read a float value from a varnode. Returns (bits, size_bytes).
+    /// Read a float value from a varnode.
     fn read_varnode_f64(&mut self, vn: &Varnode) -> Result<f64> {
         if vn.is_constant {
             // The constant is the raw bits of a float of the varnode's size: a
-            // four-byte one is a single-precision value, not the low half of a
-            // double (which reads as a denormal near zero).
+            // two- or four-byte one is a half- or single-precision value, not
+            // the low bits of a double (which reads as zero or a subnormal).
             return Ok(match vn.size {
+                2 => f16_to_f64(vn.constant_val as u16),
                 4 => f32::from_bits(vn.constant_val as u32) as f64,
                 _ => f64::from_bits(vn.constant_val as u64),
             });
@@ -454,6 +455,7 @@ impl<'a> Evaluator<'a> {
             .state
             .read_space(vn.space_id, vn.offset, vn.size as usize)?;
         Ok(match vn.size {
+            2 => f16_to_f64(u16::from_le_bytes(data[..2].try_into().unwrap())),
             4 => f32::from_bits(u32::from_le_bytes(data[..4].try_into().unwrap())) as f64,
             8 => f64::from_bits(u64::from_le_bytes(data[..8].try_into().unwrap())),
             10 => x87_to_f64(&data[..10]),
@@ -466,6 +468,10 @@ impl<'a> Evaluator<'a> {
 
     fn write_varnode_f64(&mut self, vn: &Varnode, val: f64) -> Result<()> {
         match vn.size {
+            2 => {
+                let bits = f64_to_f16(val).to_le_bytes();
+                self.state.write_space(vn.space_id, vn.offset, &bits)
+            }
             4 => {
                 let bits = (val as f32).to_bits().to_le_bytes();
                 self.state.write_space(vn.space_id, vn.offset, &bits)
@@ -1304,6 +1310,79 @@ fn size_mask_u64(size: u32) -> u64 {
 /// report its value -- shifted past sixty-three. In a debug build that panics;
 /// in a release build it wraps, and the observer reports a number that is
 /// quietly wrong.
+/// Decode an IEEE 754 binary16 (half-precision) value into `f64`.
+///
+/// Every binary16 value — including subnormals, signed zero, infinities, and
+/// NaN payloads — is exactly representable in `f64`.
+pub(crate) fn f16_to_f64(bits: u16) -> f64 {
+    let sign = u64::from(bits >> 15) << 63;
+    let exp = (bits >> 10) & 0x1f;
+    let frac = bits & 0x03ff;
+    if exp == 0 {
+        if frac == 0 {
+            return f64::from_bits(sign);
+        }
+        // Subnormal: normalize the 10-bit significand into IEEE binary64.
+        let shift = frac.leading_zeros() - 5;
+        let exp64 = u64::from(1023 - 14 - shift) << 52;
+        let frac64 = u64::from((frac << shift) & 0x03ff) << 42;
+        return f64::from_bits(sign | exp64 | frac64);
+    }
+    if exp == 0x1f {
+        let frac64 = if frac == 0 { 0 } else { u64::from(frac) << 42 };
+        return f64::from_bits(sign | (0x7ffu64 << 52) | frac64);
+    }
+    let exp64 = (u64::from(exp) + 1023 - 15) << 52;
+    let frac64 = u64::from(frac) << 42;
+    f64::from_bits(sign | exp64 | frac64)
+}
+
+/// Encode an `f64` as IEEE 754 binary16 (half-precision) using round-to-nearest,
+/// ties-to-even directly from `f64` (avoiding double rounding via `f32`).
+pub(crate) fn f64_to_f16(val: f64) -> u16 {
+    let bits = val.to_bits();
+    let sign = ((bits >> 48) as u16) & 0x8000;
+    let exp11 = ((bits >> 52) & 0x7ff) as i32;
+    let mant52 = bits & 0x000f_ffff_ffff_ffff;
+    if exp11 == 0x7ff {
+        if mant52 == 0 {
+            return sign | 0x7c00;
+        }
+        // Quiet NaN, preserving sign and the top 10 payload bits. Setting the
+        // quiet bit guarantees a NaN with only low payload bits stays NaN.
+        return sign | 0x7e00 | (((mant52 >> 42) as u16) & 0x03ff);
+    }
+    if exp11 == 0 {
+        // Zero and f64 subnormals underflow to signed binary16 zero.
+        return sign;
+    }
+    let unbiased = exp11 - 1023;
+    let exp16 = unbiased + 15;
+    if exp16 >= 31 {
+        return sign | 0x7c00;
+    }
+    if exp16 >= 1 {
+        let frac10 = (mant52 >> 42) as u16;
+        let rem = mant52 & ((1u64 << 42) - 1);
+        let half = 1u64 << 41;
+        let round_up = rem > half || (rem == half && (frac10 & 1) != 0);
+        let mag = ((exp16 as u16) << 10) | frac10;
+        return sign | if round_up { mag + 1 } else { mag };
+    }
+    if unbiased < -25 {
+        return sign;
+    }
+    // Subnormal binary16 (value = sig53 * 2^(unbiased - 52) -> frac10 * 2^-24).
+    let shift = (28 - unbiased) as u32;
+    let sig53 = (1u64 << 52) | mant52;
+    let frac10 = (sig53 >> shift) as u16;
+    let rem = sig53 & ((1u64 << shift) - 1);
+    let half = 1u64 << (shift - 1);
+    let round_up = rem > half || (rem == half && (frac10 & 1) != 0);
+    let mag = if round_up { frac10 + 1 } else { frac10 };
+    sign | mag
+}
+
 /// Decode an x87 80-bit extended value: a 64-bit significand with an explicit
 /// integer bit, then a sign bit and a 15-bit exponent (bias 16383). Values
 /// outside `f64`'s range become infinity or zero.
@@ -1401,5 +1480,94 @@ mod x87_tests {
             assert_eq!(x87_to_f64(&f64_to_x87(v)).to_bits(), v.to_bits(), "{v:e}");
         }
         assert!(x87_to_f64(&f64_to_x87(f64::NAN)).is_nan());
+    }
+}
+
+#[cfg(test)]
+mod f16_tests {
+    use super::*;
+
+    #[test]
+    fn f16_exhaustive_round_trip() {
+        for bits in 0u16..=u16::MAX {
+            let val = f16_to_f64(bits);
+            let exp = (bits >> 10) & 0x1f;
+            let frac = bits & 0x03ff;
+            if exp == 0x1f && frac != 0 {
+                assert!(val.is_nan(), "0x{bits:04x} must decode as NaN");
+                assert_eq!(f64_to_f16(val), bits | 0x0200, "NaN 0x{bits:04x}");
+            } else {
+                assert_eq!(
+                    f64_to_f16(val),
+                    bits,
+                    "0x{bits:04x} ({val:e}) failed round-trip"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn f16_known_values_match_ieee_binary16() {
+        assert_eq!(f16_to_f64(0x0000).to_bits(), 0.0f64.to_bits());
+        assert_eq!(f16_to_f64(0x8000).to_bits(), (-0.0f64).to_bits());
+        assert_eq!(f16_to_f64(0x3c00), 1.0);
+        assert_eq!(f16_to_f64(0xbc00), -1.0);
+        assert_eq!(f16_to_f64(0x3e00), 1.5);
+        assert_eq!(f16_to_f64(0x7bff), 65504.0);
+        assert_eq!(f16_to_f64(0x0400), 2f64.powi(-14));
+        assert_eq!(f16_to_f64(0x0001), 2f64.powi(-24));
+        assert_eq!(f16_to_f64(0x03ff), 1023.0 * 2f64.powi(-24));
+        assert_eq!(f16_to_f64(0x7c00), f64::INFINITY);
+        assert_eq!(f16_to_f64(0xfc00), f64::NEG_INFINITY);
+
+        assert_eq!(f64_to_f16(0.0), 0x0000);
+        assert_eq!(f64_to_f16(-0.0), 0x8000);
+        assert_eq!(f64_to_f16(1.0), 0x3c00);
+        assert_eq!(f64_to_f16(-1.0), 0xbc00);
+        assert_eq!(f64_to_f16(1.5), 0x3e00);
+        assert_eq!(f64_to_f16(65504.0), 0x7bff);
+        assert_eq!(f64_to_f16(2f64.powi(-14)), 0x0400);
+        assert_eq!(f64_to_f16(2f64.powi(-24)), 0x0001);
+        assert_eq!(f64_to_f16(1023.0 * 2f64.powi(-24)), 0x03ff);
+        assert_eq!(f64_to_f16(f64::INFINITY), 0x7c00);
+        assert_eq!(f64_to_f16(f64::NEG_INFINITY), 0xfc00);
+    }
+
+    #[test]
+    fn f16_rounding_boundaries_and_nan_payloads() {
+        // Overflow threshold at 65520.0 (halfway between 65504 and 2^16).
+        assert_eq!(f64_to_f16(65520.0), 0x7c00);
+        assert_eq!(f64_to_f16(65519.999), 0x7bff);
+        assert_eq!(f64_to_f16(-65520.0), 0xfc00);
+        assert_eq!(f64_to_f16(-65519.999), 0xfbff);
+
+        // Underflow / subnormal ties-to-even.
+        let half_subnormal = 2f64.powi(-25);
+        assert_eq!(f64_to_f16(half_subnormal), 0x0000);
+        assert_eq!(
+            f64_to_f16(f64::from_bits(half_subnormal.to_bits() + 1)),
+            0x0001
+        );
+        assert_eq!(f64_to_f16(3.0 * half_subnormal), 0x0002);
+        assert_eq!(f64_to_f16(5.0 * half_subnormal), 0x0002);
+        assert_eq!(f64_to_f16(-2f64.powi(-26)), 0x8000);
+        assert_eq!(f64_to_f16(-f64::MIN_POSITIVE), 0x8000);
+
+        // Subnormal-to-normal carry at 2^-14 - 2^-25.
+        assert_eq!(f64_to_f16(2f64.powi(-14) - half_subnormal), 0x0400);
+        assert_eq!(
+            f64_to_f16(2f64.powi(-14) - half_subnormal - 2f64.powi(-26)),
+            0x03ff
+        );
+
+        // Direct f64 -> f16 must not double-round through f32.
+        let just_below_mid_even = 1.0 + 2f64.powi(-11) - 2f64.powi(-25);
+        let just_below_mid_odd = (1.0 + 2f64.powi(-10)) + 2f64.powi(-11) - 2f64.powi(-25);
+        assert_eq!(f64_to_f16(just_below_mid_even), 0x3c00);
+        assert_eq!(f64_to_f16(just_below_mid_odd), 0x3c01);
+
+        // A double NaN whose only set payload bit is below bit 42 must stay NaN.
+        assert_eq!(f64_to_f16(f64::from_bits(0x7ff0_0000_0000_0001)), 0x7e00);
+        assert_eq!(f64_to_f16(f64::from_bits(0xfff0_0000_0000_0001)), 0xfe00);
     }
 }
