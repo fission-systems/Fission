@@ -23,7 +23,7 @@ pub fn apply_sccp_pass(func: &mut PreHirFunction) -> bool {
     let mut any = false;
     for _ in 0..max_rounds {
         let mut env = ConstEnv::default();
-        let address_aliases = collect_address_aliases(&func.body);
+        let address_aliases = collect_function_address_aliases(func);
         if !sccp_transform_stmts(
             &mut func.body,
             &mut env,
@@ -111,10 +111,17 @@ fn merge_env(a: &ConstEnv, b: &ConstEnv) -> ConstEnv {
     out
 }
 
-fn env_without_vars(env: &ConstEnv, vars: &HashSet<String>) -> ConstEnv {
+fn env_without_vars(
+    env: &ConstEnv,
+    vars: &HashSet<String>,
+    address_aliases: &AddressAliases,
+) -> ConstEnv {
     let mut out = env.clone();
     for var in vars {
         out.remove(var);
+    }
+    if vars.contains(UNKNOWN_FRAME_ADDRESS) {
+        address_aliases.forget_frame_storage(&mut out);
     }
     out
 }
@@ -412,6 +419,18 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
     changed
 }
 
+/// Alias target standing for "somewhere in this function's own frame, at an
+/// offset nothing here records".
+///
+/// A value read before anything in the function defines it -- a live-in
+/// register that is not a parameter, such as the stack pointer the builder
+/// prints as `rsp` -- carries no provenance. It can be the address of the
+/// frame, and a callee handed it can write any slot the frame holds; so can
+/// a store through it. Parameters are excluded: they are the caller's values
+/// and cannot point into a frame that did not exist when they were passed.
+/// Not a C identifier, so it never collides with a variable name.
+const UNKNOWN_FRAME_ADDRESS: &str = "<frame>";
+
 /// Drop from `env` any local whose address is passed to a call anywhere in
 /// `expr`: the callee may write through that pointer (`getline(&buf, &n,
 /// f)`, `scanf("%d", &x)`, `fstat(fd, &st)`), so the local's last-known value
@@ -424,7 +443,40 @@ fn sccp_subst_expr(expr: &mut PreHirExpr, env: &ConstEnv) -> bool {
 /// `AddressOfLocal` cannot itself have been folded into a `Const` (that is
 /// exactly what `sccp_subst_expr` now refuses to do), so this always finds
 /// the real argument shape, not a folded stand-in.
-type AddressAliases = HashMap<String, HashSet<String>>;
+///
+/// What each variable may point at, for deciding which constants a call or a
+/// store through a pointer can overwrite.
+#[derive(Default)]
+struct AddressAliases {
+    /// Local addresses (and [`UNKNOWN_FRAME_ADDRESS`]) each variable may hold.
+    targets: HashMap<String, HashSet<String>>,
+    /// Variables assigned somewhere in the body.
+    defined: HashSet<String>,
+    /// Parameters and bindings that start with a value: they hold what they
+    /// held at entry, which is never an address in this frame.
+    entry_values: HashSet<String>,
+    /// Variables no callee or store can reach: parameters and the builder's
+    /// register temporaries. Every other variable may be frame storage.
+    register_storage: HashSet<String>,
+}
+
+impl AddressAliases {
+    fn get(&self, name: &str) -> Option<&HashSet<String>> {
+        self.targets.get(name)
+    }
+
+    /// Whether `name` is read with no definition and is not a parameter, so
+    /// its value -- possibly the frame's own address -- is unknown.
+    fn is_unknown_live_in(&self, name: &str) -> bool {
+        !self.defined.contains(name) && !self.entry_values.contains(name)
+    }
+
+    /// Drop every constant that frame storage holds: an address into the
+    /// frame escaped at an offset that is not known, so any slot may change.
+    fn forget_frame_storage(&self, env: &mut ConstEnv) {
+        env.retain(|name, _| self.register_storage.contains(name));
+    }
+}
 
 #[derive(Default)]
 struct AddressAliasSummary {
@@ -477,6 +529,37 @@ fn collect_address_alias_expr(
     }
 }
 
+/// [`collect_address_aliases_with`] for `func`: its parameters, the bindings
+/// that start with a value, and the register temporaries a callee cannot reach.
+fn collect_function_address_aliases(func: &PreHirFunction) -> AddressAliases {
+    let mut entry_values: HashSet<String> = func.params.iter().map(|p| p.name.clone()).collect();
+    // A binding that starts with a value is defined at entry, like a param.
+    entry_values.extend(
+        func.params
+            .iter()
+            .chain(func.locals.iter())
+            .filter(|binding| binding.initializer.is_some())
+            .map(|binding| binding.name.clone()),
+    );
+    let register_storage = func
+        .params
+        .iter()
+        .map(|binding| binding.name.clone())
+        .chain(
+            func.locals
+                .iter()
+                .filter(|binding| binding.is_temp_like())
+                .map(|binding| binding.name.clone()),
+        )
+        .collect();
+    collect_address_aliases_with(&func.body, entry_values, register_storage)
+}
+
+#[cfg(test)]
+fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
+    collect_address_aliases_with(stmts, HashSet::default(), HashSet::default())
+}
+
 /// Collect pointer-like variable assignments so an address passed through a
 /// temporary is still recognized as an escaping local.  The builder commonly
 /// materializes `p = &local; call(p)` rather than keeping the address
@@ -488,7 +571,11 @@ fn collect_address_alias_expr(
 /// an old possible address after a later reassignment can only discard a
 /// constant that would otherwise be propagated; dropping a possible address
 /// could substitute a stale value after a call and change semantics.
-fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
+fn collect_address_aliases_with(
+    stmts: &[PreHirStmt],
+    entry_values: HashSet<String>,
+    register_storage: HashSet<String>,
+) -> AddressAliases {
     let mut definitions = HashMap::<String, AddressAliasSummary>::default();
 
     fn visit(stmts: &[PreHirStmt], definitions: &mut HashMap<String, AddressAliasSummary>) {
@@ -540,6 +627,21 @@ fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
 
     visit(stmts, &mut definitions);
 
+    let defined: HashSet<String> = definitions.keys().cloned().collect();
+    // A definition that reads an unknown live-in (`r15 = rsp`) may hold the
+    // frame's address; the fixed point below carries that to its users.
+    for summary in definitions.values_mut() {
+        if summary
+            .dependencies
+            .iter()
+            .any(|dependency| !defined.contains(dependency) && !entry_values.contains(dependency))
+        {
+            summary
+                .local_addresses
+                .insert(UNKNOWN_FRAME_ADDRESS.to_string());
+        }
+    }
+
     // `aliases[name]` is the least fixed point of the local addresses in that
     // variable's definitions plus the aliases of every referenced variable.
     // The reverse dependency map propagates only when a set grows, including
@@ -585,7 +687,12 @@ fn collect_address_aliases(stmts: &[PreHirStmt]) -> AddressAliases {
     }
 
     aliases.retain(|_, targets| !targets.is_empty());
-    aliases
+    AddressAliases {
+        targets: aliases,
+        defined,
+        entry_values,
+        register_storage,
+    }
 }
 
 fn kill_locals_with_address_taken_in_calls(
@@ -651,6 +758,8 @@ fn collect_addr_or_alias_targets_in_expr(
                 for alias in aliases {
                     out.insert(alias.clone());
                 }
+            } else if address_aliases.is_unknown_live_in(name) {
+                out.insert(UNKNOWN_FRAME_ADDRESS.to_string());
             }
         }
         PreHirExpr::Cast { expr: inner, .. }
@@ -777,6 +886,9 @@ fn collect_address_taken_locals(
 ) {
     let mut killed = HashSet::default();
     collect_addr_or_alias_targets_in_expr(expr, address_aliases, &mut killed);
+    if killed.contains(UNKNOWN_FRAME_ADDRESS) {
+        address_aliases.forget_frame_storage(env);
+    }
     for name in killed {
         env.remove(&name);
     }
@@ -1301,6 +1413,180 @@ mod tests {
             Some(PreHirStmt::Return(Some(PreHirExpr::Var(n)))) if n == "y"
         ));
     }
+
+    /// `frame_ptr = sp; slot = -1; call(frame_ptr); if (0 <= (int)slot) call2();`
+    /// -- the shape of a `struct tm` built on the stack and handed to
+    /// `mktime` through the stack pointer, with a field preset before the
+    /// call and tested after it. `sp` is read with no definition and is not
+    /// a parameter: it is the frame's own address, so the callee may rewrite
+    /// `slot`, and neither the slot's constant nor the branch it decides may
+    /// survive the call.
+    fn frame_escape_body(call_arg: PreHirExpr) -> Vec<PreHirStmt> {
+        vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("frame_ptr".to_string()),
+                rhs: var("sp"),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("slot".to_string()),
+                rhs: PreHirExpr::Const(0xffff_ffff, int(32)),
+            },
+            PreHirStmt::Expr(PreHirExpr::Call {
+                origin: None,
+                target: "fills_struct".to_string(),
+                args: vec![call_arg],
+                ty: int(64),
+            }),
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("field".to_string()),
+                rhs: var("slot"),
+            },
+            PreHirStmt::If {
+                cond: PreHirExpr::Binary {
+                    op: PreHirBinaryOp::SLe,
+                    lhs: Box::new(PreHirExpr::Const(0, signed_int(32))),
+                    rhs: Box::new(PreHirExpr::Cast {
+                        ty: signed_int(32),
+                        expr: Box::new(var("field")),
+                    }),
+                    ty: NirType::Bool,
+                },
+                then_body: vec![PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "on_success".to_string(),
+                    args: vec![],
+                    ty: int(64),
+                })]
+                .into(),
+                else_body: vec![].into(),
+            },
+        ]
+    }
+
+    fn signed_int(bits: u32) -> NirType {
+        NirType::Int { bits, signed: true }
+    }
+
+    fn assert_slot_survives_call(func: &PreHirFunction) {
+        let PreHirStmt::Assign { rhs, .. } = &func.body[3] else {
+            panic!("expected the post-call read to remain an assignment");
+        };
+        assert_eq!(
+            rhs,
+            &var("slot"),
+            "a call given the frame's address may rewrite every slot; the \
+             pre-call constant must not reach the read after it:\n{:#?}",
+            func.body
+        );
+        assert!(
+            matches!(&func.body[4], PreHirStmt::If { .. }),
+            "the branch on the rewritten slot must not be decided from the \
+             pre-call value:\n{:#?}",
+            func.body
+        );
+    }
+
+    #[test]
+    fn sccp_kills_frame_slots_when_the_stack_pointer_reaches_a_call_through_a_register() {
+        let mut func = PreHirFunction {
+            name: "test_sccp_frame_escape_via_register".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: frame_escape_body(var("frame_ptr")),
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        assert_slot_survives_call(&func);
+    }
+
+    #[test]
+    fn sccp_kills_frame_slots_when_the_stack_pointer_is_a_call_argument() {
+        let mut func = PreHirFunction {
+            name: "test_sccp_frame_escape_direct".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: frame_escape_body(var("sp")),
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        assert_slot_survives_call(&func);
+    }
+
+    #[test]
+    fn sccp_keeps_frame_constants_across_a_call_given_only_a_parameter() {
+        // A parameter is the caller's value: it cannot point into a frame
+        // that did not exist when it was passed, so handing it to a callee
+        // leaves this frame's constants alone.
+        let mut func = PreHirFunction {
+            name: "test_sccp_param_does_not_escape_frame".to_string(),
+            int_param_offsets: Vec::new(),
+            params: vec![PreHirBinding {
+                name: "param_1".to_string(),
+                ty: int(64),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            return_type: int(32),
+            body: frame_escape_body(var("param_1")),
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[3] else {
+            panic!("expected the post-call read to remain an assignment");
+        };
+        assert!(
+            matches!(rhs, PreHirExpr::Const(0xffff_ffff, _)),
+            "a parameter argument does not reach the frame:\n{:#?}",
+            func.body
+        );
+    }
+
+    #[test]
+    fn sccp_keeps_register_temporaries_when_the_frame_escapes() {
+        // Only storage a callee can reach is forgotten: a register temporary
+        // keeps its constant across the call that receives the frame.
+        let mut body = frame_escape_body(var("frame_ptr"));
+        body.insert(
+            0,
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("reg".to_string()),
+                rhs: PreHirExpr::Const(7, int(64)),
+            },
+        );
+        body.push(PreHirStmt::Return(Some(var("reg"))));
+        let mut func = PreHirFunction {
+            name: "test_sccp_frame_escape_keeps_temps".to_string(),
+            int_param_offsets: Vec::new(),
+            locals: vec![PreHirBinding {
+                name: "reg".to_string(),
+                ty: int(64),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::Temp),
+                initializer: None,
+            }],
+            return_type: int(64),
+            body,
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        assert!(
+            matches!(
+                func.body.last(),
+                Some(PreHirStmt::Return(Some(PreHirExpr::Const(7, _))))
+            ),
+            "a register temporary is not frame storage:\n{:#?}",
+            func.body
+        );
+    }
 }
 
 fn eval_truth(expr: &PreHirExpr, env: &ConstEnv) -> Option<bool> {
@@ -1527,7 +1813,7 @@ fn sccp_stmt(
                 let pre = env.clone();
                 let mut modified = loop_variant_vars(body, all_xvars, address_aliases);
                 collect_call_escaped_vars_in_expr(cond, address_aliases, &mut modified);
-                let loop_entry = env_without_vars(&pre, &modified);
+                let loop_entry = env_without_vars(&pre, &modified, address_aliases);
                 changed |= sccp_subst_expr(cond, &loop_entry);
                 changed |= fold_expr_hir(cond);
                 let mut inner = loop_entry;
@@ -1539,14 +1825,14 @@ fn sccp_stmt(
                     all_xvars,
                     address_aliases,
                 );
-                *env = env_without_vars(&pre, &modified);
+                *env = env_without_vars(&pre, &modified, address_aliases);
                 break;
             }
             PreHirStmt::DoWhile { body, cond } => {
                 let pre = env.clone();
                 let mut modified = loop_variant_vars(body, all_xvars, address_aliases);
                 collect_call_escaped_vars_in_expr(cond, address_aliases, &mut modified);
-                let mut inner = env_without_vars(&pre, &modified);
+                let mut inner = env_without_vars(&pre, &modified, address_aliases);
                 changed |= sccp_transform_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     &mut inner,
@@ -1554,10 +1840,10 @@ fn sccp_stmt(
                     all_xvars,
                     address_aliases,
                 );
-                let cond_env = env_without_vars(&inner, &modified);
+                let cond_env = env_without_vars(&inner, &modified, address_aliases);
                 changed |= sccp_subst_expr(cond, &cond_env);
                 changed |= fold_expr_hir(cond);
-                *env = env_without_vars(&pre, &modified);
+                *env = env_without_vars(&pre, &modified, address_aliases);
                 break;
             }
             PreHirStmt::For {
@@ -1578,7 +1864,7 @@ fn sccp_stmt(
                 if let Some(c) = cond.as_ref() {
                     collect_call_escaped_vars_in_expr(c, address_aliases, &mut modified);
                 }
-                let loop_body_entry = env_without_vars(&loop_entry, &modified);
+                let loop_body_entry = env_without_vars(&loop_entry, &modified, address_aliases);
                 if let Some(c) = cond.as_mut() {
                     changed |= sccp_subst_expr(c, &loop_body_entry);
                     changed |= fold_expr_hir(c);
@@ -1594,9 +1880,9 @@ fn sccp_stmt(
                     all_xvars,
                     address_aliases,
                 );
-                *env = env_without_vars(&loop_entry, &modified);
+                *env = env_without_vars(&loop_entry, &modified, address_aliases);
                 if let Some(u) = update.as_mut() {
-                    let mut update_env = env_without_vars(&inner, &modified);
+                    let mut update_env = env_without_vars(&inner, &modified, address_aliases);
                     changed |=
                         sccp_stmt(u, &mut update_env, goto_targets, all_xvars, address_aliases);
                 }
