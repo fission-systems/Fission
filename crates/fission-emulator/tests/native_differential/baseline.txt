@@ -31,11 +31,12 @@ x86_64 * ~nan #1055 NaN payload / operand order @host
 x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
 
 # ── AArch64 ─────────────────────────────────────────────────────────────────
-# Evaluator: NaN propagation (operand order, sNaN priority and quieting).
-aarch64 * ~nan #1055 NaN payload / operand order
-# Evaluator: half-precision float varnodes read as 0.0 and are not written.
-aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
-# Spec: fused multiply-adds round twice.
+# Spec: fused multiply-adds round twice (p-code has no fused operation, so the
+# lift is a product and a sum), and process NaNs in the order of the product and
+# then the sum instead of FPMulAdd's (addend, op1, op2).
 aarch64 FMSUB * #1072 not fused @nightly
+aarch64 FNMADD ~nan #1072 NaN operand order of a product then a sum @nightly
+aarch64 FMADD ~nan #1072 NaN operand order of a product then a sum @nightly
+aarch64 FNMSUB ~nan #1072 NaN operand order of a product then a sum @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly

@@ -102,6 +102,18 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   full element width is right too). All sources are read before Vd is written (#1068, native
   evidence). Forms upstream lifts as `NEON_*` user ops are unchanged. Re-apply with
   `scripts/sleigh/apply_aarch64_neon_saturate.py`.
+- `AARCH64/AARCH64neon.sinc` and `AARCH64/AARCH64instructions.sinc` (and the three compiled
+  `AARCH64*.sla`): `FMLAL`/`FMLAL2`/`FMLSL`/`FMLSL2` accumulated with the integer `+`/`-`
+  (adding float bit patterns) after a half-precision multiply; each lane is now
+  `acc f+ (float2float(a) f* float2float(b))`, exact because a half-precision product fits in
+  single precision, so it rounds once as FPMulAdd does (FMLSL negates the first element). Their
+  by-element forms decoded the index as H:L instead of H:L:M (the `b_2223=2` rules of
+  `vIndexHLM` and `Re_VPR128Lo.H.sel`, used by no other instruction). `SCVTF`/`UCVTF Hd, Rn,
+  #fbits` converted to half precision (infinity above 65504) and divided by 2^fbits as a
+  half-precision constant (infinity for fbits >= 16), giving NaN; they now convert through
+  double and round once (a 64-bit source with more than 53 significant bits rounds twice).
+  Evidence: an Apple M4 run natively; the native differential's `~fp16` entry hid these.
+  Re-apply with `scripts/sleigh/apply_aarch64_fmlal_fp16_convert.py`.
 - `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
   `FMAX`/`FMIN`/`FMAXNM`/`FMINNM` (H, S, D) follow FPMax/FPMin/FPMaxNum/FPMinNum. Upstream
   copied Rn into Rd before comparing, so with Rd = Rm (`fmax d0, d1, d0`) the result was
