@@ -1314,4 +1314,31 @@ mod tests {
         assert_eq!(emu.taint.sources()[0].label, "read");
         assert_eq!(emu.taint.sources()[0].len, 5);
     }
+
+    /// The libc entry point shares the syscall's copy-out, so a host stdin
+    /// failure is `-1` there too, never a 0 that reads as end-of-file.
+    #[test]
+    fn libc_read_host_stdin_error_is_minus_one_not_eof() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("host stdin is gone"))
+            }
+        }
+        let mut emu = tiny_emu();
+        emu.host_stdin = true;
+        emu.set_host_stdin_reader(Box::new(Broken));
+        let buf = emu.heap_alloc(8).unwrap();
+        emu.state
+            .write_space(emu.state.ram_space(), buf, b"UNTOUCHD")
+            .unwrap();
+
+        assert_eq!(libc_read(&mut emu, 0, buf, 8), -1);
+        assert_eq!(
+            emu.state.read_space(emu.state.ram_space(), buf, 8).unwrap(),
+            b"UNTOUCHD"
+        );
+        assert!(emu.stdin_buffer.is_none());
+        assert_eq!(emu.symbolic_stdin_bytes, 0);
+    }
 }

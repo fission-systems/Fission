@@ -110,6 +110,10 @@ pub(crate) fn write_from_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64
 ///    transferred prefix, leaves `eof` unset, returns committed byte count, and
 ///    restricts symbolic stdin tracking to transferred bytes under aggregate
 ///    runtime caps.
+/// 6. Host stdin (fd 0 with no mock, [`Emulator::host_stdin`] on) is read once,
+///    offered at most the writable prefix (and at most [`IO_CHUNK`]). A host
+///    failure is never end-of-file: it is `-EINTR`, `-EAGAIN` or `-EIO` per
+///    [`crate::core::HostStdinError`], with nothing committed.
 pub(crate) fn read_to_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -> i64 {
     enum ReadSource {
         Vfs(usize),
@@ -232,17 +236,23 @@ pub(crate) fn read_to_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -
             }
         }
         ReadSource::HostStdin => {
-            use std::io::Read as _;
+            // One host read, offered no more than the guest can receive, so
+            // nothing is taken from the host that cannot land.
             let want = writable.min(IO_CHUNK);
             let mut tmp = vec![0u8; want];
-            let n = match std::io::stdin().read(&mut tmp) {
+            let n = match emu.read_host_stdin(&mut tmp) {
                 Ok(n) => n,
-                Err(_) => return 0,
+                // Nothing was transferred, so nothing is committed: guest
+                // memory, shadow memory and the stdin mock stay as they were.
+                Err(error) => return -error.linux_errno(),
             };
             if n == 0 {
                 return 0;
             }
             if emu.state.write_space(ram, buf, &tmp[..n]).is_err() {
+                // Unreachable while `writable_len` holds, but the host has
+                // already given these bytes up: keep them for the next read
+                // rather than lose them.
                 emu.stdin_buffer = Some(tmp[..n].to_vec());
                 return -EFAULT;
             }

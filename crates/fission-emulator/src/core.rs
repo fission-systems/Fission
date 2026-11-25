@@ -18,6 +18,44 @@ pub const MAX_SYMBOLIC_STDIN_BYTES: usize = 64 * 1024;
 /// Aggregate cap on bytes marked as taint sources across an emulator run.
 pub const MAX_TAINT_MARKED_BYTES: u64 = 4 << 20;
 
+/// How many consecutive `EINTR`s a single host stdin read absorbs before the
+/// guest is told `EINTR`.
+pub(crate) const HOST_STDIN_EINTR_RETRIES: usize = 16;
+
+/// Why a read from host standard input transferred nothing, and the Linux
+/// `errno` a guest `read(2)` reports for it.
+///
+/// The guest's descriptor is valid and the failure is in what backs it, so
+/// the policy is:
+///
+/// | host outcome | guest sees |
+/// |---|---|
+/// | `Ok(0)` | `0` (end-of-file) |
+/// | `Interrupted`, retried [`HOST_STDIN_EINTR_RETRIES`] times, or once the run was interrupted | `-EINTR` (4) |
+/// | `WouldBlock` (non-blocking host stdin) | `-EAGAIN` (11) |
+/// | anything else, or a reader claiming more bytes than its buffer | `-EIO` (5) |
+///
+/// Host `errno` values are never passed through: they are host-numbered
+/// (macOS `EAGAIN` is 35, Linux's is 11), and a host `EBADF` would tell the
+/// guest its own fd 0 is closed when it is not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum HostStdinError {
+    Interrupted,
+    WouldBlock,
+    Io,
+}
+
+impl HostStdinError {
+    /// The positive Linux `errno` for this failure.
+    pub(crate) fn linux_errno(self) -> i64 {
+        match self {
+            HostStdinError::Interrupted => 4, // EINTR
+            HostStdinError::WouldBlock => 11, // EAGAIN
+            HostStdinError::Io => 5,          // EIO
+        }
+    }
+}
+
 /// Arch-agnostic emulator.
 ///
 /// `pc` is the architecture-independent program counter.
@@ -96,6 +134,11 @@ pub struct Emulator {
     /// a background job's stdin. A harness has no human at the other end;
     /// only an interactive front end should turn this on.
     pub host_stdin: bool,
+    /// Where host standard input is read from when [`Self::host_stdin`] is on.
+    /// `None` is the process's own stdin; tests inject readers that fail on
+    /// purpose, because a real terminal cannot be made to return `EINTR` or
+    /// `EIO` on demand.
+    pub(crate) host_stdin_reader: Option<Box<dyn std::io::Read + Send>>,
 
     /// TTD (Time-Travel Debugging) recorder.
     pub ttd: TTDRecorder,
@@ -458,6 +501,7 @@ impl Emulator {
             pcode_budget_pc: None,
             stdin_buffer: None,
             host_stdin: false,
+            host_stdin_reader: None,
             host_stdout: true,
             ttd: TTDRecorder::new(),
             ttd_snapshot_interval: 0,
@@ -1516,6 +1560,66 @@ impl Emulator {
         self
     }
 
+    /// Replace the host standard input that console reads fall through to
+    /// (only consulted while [`Self::host_stdin`] is on).
+    pub fn set_host_stdin_reader(&mut self, reader: Box<dyn std::io::Read + Send>) {
+        self.host_stdin_reader = Some(reader);
+    }
+
+    /// One raw `read` from host standard input (injected reader or the
+    /// process's own stdin), with no retry or error translation.
+    fn host_stdin_read_raw(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::io::Read;
+        match self.host_stdin_reader.as_mut() {
+            Some(reader) => reader.read(buf),
+            None => std::io::stdin().read(buf),
+        }
+    }
+
+    /// Read once from host standard input into `buf`, under the guest errno
+    /// policy in [`HostStdinError`].
+    ///
+    /// `Ok(0)` is end-of-file and nothing else: a failure is never reported as
+    /// one. On `Err` no host byte was handed back, so the caller has nothing
+    /// to commit and must leave guest memory, shadow memory and the stdin
+    /// mock as they were.
+    pub(crate) fn read_host_stdin(&mut self, buf: &mut [u8]) -> Result<usize, HostStdinError> {
+        let mut interrupted = 0usize;
+        loop {
+            match self.host_stdin_read_raw(buf) {
+                Ok(n) if n <= buf.len() => return Ok(n),
+                Ok(n) => {
+                    // `Read` promises `n <= buf.len()`; a reader that breaks it
+                    // has not told us which bytes are real.
+                    tracing::warn!(
+                        claimed = n,
+                        capacity = buf.len(),
+                        "host stdin reader claimed more bytes than its buffer; reporting EIO"
+                    );
+                    return Err(HostStdinError::Io);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                    interrupted += 1;
+                    // A host signal is not a guest signal: retry, but a bounded
+                    // number of times, and not at all once the run itself has
+                    // been asked to stop.
+                    if interrupted >= HOST_STDIN_EINTR_RETRIES
+                        || IS_INTERRUPTED.load(std::sync::atomic::Ordering::Relaxed)
+                    {
+                        return Err(HostStdinError::Interrupted);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    return Err(HostStdinError::WouldBlock);
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "host stdin read failed; reporting EIO");
+                    return Err(HostStdinError::Io);
+                }
+            }
+        }
+    }
+
     pub fn with_stdin_mock(mut self, mock: Option<String>) -> Self {
         self.stdin_buffer = mock.map(|s| s.into_bytes());
         // Keep VFS fd 0 in sync so `sys_read` (not only libc read) sees the mock.
@@ -1732,13 +1836,16 @@ impl Emulator {
         if !self.host_stdin || limit == 0 {
             return Vec::new();
         }
-        use std::io::Read;
         let mut data = vec![0u8; limit.min(0x10_0000)];
-        match std::io::stdin().read(&mut data) {
+        match self.read_host_stdin(&mut data) {
             Ok(n) => {
                 data.truncate(n);
                 data
             }
+            // The Windows console/CRT callers of this have no error channel
+            // yet, so a failure still reaches them as no data; it is logged
+            // by `read_host_stdin`. The Linux `read` path does not come
+            // through here and reports the errno.
             Err(_) => Vec::new(),
         }
     }
