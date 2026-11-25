@@ -9,11 +9,14 @@
 //! the JIT and interpreter cannot disagree.
 
 mod aarch64;
+pub mod contract;
 mod x86;
+
+pub use contract::*;
 
 use std::collections::BTreeMap;
 
-use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode, Varnode};
+use fission_pcode_ir::ir::{PcodeOp, PcodeOpcode};
 
 use crate::core::Emulator;
 
@@ -51,6 +54,9 @@ pub fn is_vector_userop(op: &PcodeOp, userop_map: &BTreeMap<u32, String>) -> boo
 
 /// Answer a vector/SIMD `CALLOTHER`. Returns whether it was one this knows.
 pub fn answer_vector_userop(emu: &mut Emulator, op: &PcodeOp) -> bool {
+    if emu.arch.endian != crate::arch::Endianness::Little {
+        return false;
+    }
     let Some(id) = op.inputs.first().map(|vn| vn.constant_val as u32) else {
         return false;
     };
@@ -124,18 +130,4 @@ pub(super) fn sign_extend_esize(val: u64, esize: usize) -> i64 {
 
 pub(super) fn write_elem_u64(out: &mut [u8], idx: usize, esize: usize, val: u64) {
     out[idx * esize..(idx + 1) * esize].copy_from_slice(&val.to_le_bytes()[..esize]);
-}
-
-pub(super) fn write_bytes(emu: &mut Emulator, vn: &Varnode, data: &[u8]) -> bool {
-    let size = (vn.size as usize).min(data.len());
-    emu.state
-        .write_space(vn.space_id, vn.offset, &data[..size])
-        .is_ok()
-}
-
-pub(super) fn write_bytes_exact(emu: &mut Emulator, vn: &Varnode, data: &[u8]) -> bool {
-    if data.len() != vn.size as usize {
-        return false;
-    }
-    write_bytes(emu, vn, data)
 }

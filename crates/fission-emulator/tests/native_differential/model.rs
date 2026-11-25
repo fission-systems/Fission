@@ -47,7 +47,7 @@ pub struct Isa {
 }
 
 /// Fields the architecture manual leaves undefined for one instruction.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 pub struct Mask {
     /// Bit `i` masks `Isa::flags[i]`.
     pub flags: u8,
@@ -55,14 +55,44 @@ pub struct Mask {
     pub gprs: u32,
     /// The scratch buffer (a memory destination the manual leaves undefined).
     pub mem: bool,
+    /// Bit mask per vector register (`vec[r][byte]`) where `1` means the bit is
+    /// architecturally undefined / excluded from comparison; `0` checks all bits.
+    pub vec_undefined: [[u8; 16]; 32],
+}
+
+impl Default for Mask {
+    fn default() -> Self {
+        Self {
+            flags: 0,
+            gprs: 0,
+            mem: false,
+            vec_undefined: [[0; 16]; 32],
+        }
+    }
 }
 
 impl Mask {
     pub fn union(self, other: Mask) -> Mask {
+        let mut vec_undefined = self.vec_undefined;
+        for (dst, src) in vec_undefined.iter_mut().zip(other.vec_undefined.iter()) {
+            for (d, s) in dst.iter_mut().zip(src.iter()) {
+                *d |= *s;
+            }
+        }
         Mask {
             flags: self.flags | other.flags,
             gprs: self.gprs | other.gprs,
             mem: self.mem || other.mem,
+            vec_undefined,
+        }
+    }
+
+    /// Mark bytes `start_byte..end_byte` of vector register `reg` as undefined.
+    pub fn with_vec_undefined_range(&mut self, reg: usize, start_byte: usize, end_byte: usize) {
+        if let Some(mask) = self.vec_undefined.get_mut(reg) {
+            for byte in mask.iter_mut().take(end_byte.min(16)).skip(start_byte) {
+                *byte = 0xFF;
+            }
         }
     }
 }
@@ -115,11 +145,23 @@ pub fn compare(
         }
     }
     for (i, name) in isa.vec.iter().enumerate() {
-        if native.vec[i] != fission.vec[i] {
-            // Both sides produced a NaN and only the payload differs: kept
-            // apart, because which NaN propagates is one evaluator question
-            // (#1055), not a defect of each instruction.
-            let suffix = if nan_payload_only(&native.vec[i], &fission.vec[i]) {
+        let undef = mask.vec_undefined[i];
+        let mut defined_mismatch = false;
+        let mut masked_native = [0u8; 16];
+        let mut masked_fission = [0u8; 16];
+        for b in 0..16 {
+            let def = !undef[b];
+            masked_native[b] = native.vec[i][b] & def;
+            masked_fission[b] = fission.vec[i][b] & def;
+            if masked_native[b] != masked_fission[b] {
+                defined_mismatch = true;
+            }
+        }
+        if defined_mismatch {
+            // Both sides produced a NaN in defined lanes and only the payload
+            // differs: kept apart, because which NaN propagates is one
+            // evaluator question (#1055), not a defect of each instruction.
+            let suffix = if nan_payload_only(&masked_native, &masked_fission) {
                 "~nan"
             } else {
                 ""
@@ -343,4 +385,44 @@ pub fn vec_value(rng: &mut Rng) -> [u8; 16] {
         _ => rng.fill(&mut out),
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compare_checks_defined_vector_lanes_and_respects_undefined_masks() {
+        let isa = Isa {
+            name: "test",
+            gpr: &[],
+            flags: &[],
+            vec: &["q0"],
+            control: ("fpcr", 0),
+            ignored_gprs: 0,
+        };
+        let input = CpuState::zeroed();
+        let mut native = CpuState::zeroed();
+        let mut fission = CpuState::zeroed();
+        // Low 8 bytes match, upper 8 bytes carry stale bits on fission side.
+        native.vec[0][0..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        fission.vec[0][0..8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+        fission.vec[0][8..16].copy_from_slice(&[0xDE; 8]);
+
+        // Unmasked: stale upper bytes are reported.
+        let diffs = compare(&isa, Mask::default(), &input, &native, &fission);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].field, "q0");
+
+        // When upper bytes 8..16 are explicitly marked undefined, match succeeds.
+        let mut mask = Mask::default();
+        mask.with_vec_undefined_range(0, 8, 16);
+        assert!(compare(&isa, mask, &input, &native, &fission).is_empty());
+
+        // Defined low bytes still trigger a diff even when upper bytes are masked.
+        fission.vec[0][0] = 99;
+        let diffs_low = compare(&isa, mask, &input, &native, &fission);
+        assert_eq!(diffs_low.len(), 1);
+        assert_eq!(diffs_low[0].field, "q0");
+    }
 }

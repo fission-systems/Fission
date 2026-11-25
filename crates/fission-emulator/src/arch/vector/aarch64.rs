@@ -2,9 +2,8 @@
 
 use fission_pcode_ir::ir::{PcodeOp, Varnode};
 
-use super::{
-    read_bytes, read_const_u64, read_elem_u64, sign_extend_esize, write_bytes, write_elem_u64,
-};
+use super::contract::{UpperBitsPolicy, VectorIsa, apply_vector_write};
+use super::{read_bytes, read_const_u64, read_elem_u64, sign_extend_esize, write_elem_u64};
 use crate::core::Emulator;
 
 pub(super) fn is_known(name: &str) -> bool {
@@ -137,7 +136,16 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             };
             neon_xtn(&rd, &rn, src_esize, kind, is_part2)
                 .filter(|r| r.len() == out.size as usize)
-                .is_some_and(|r| write_neon_result(emu, out, &r))
+                .is_some_and(|r| {
+                    let policy = if is_part2 {
+                        UpperBitsPolicy::MergeHighHalf {
+                            low_preserve_bytes: 8,
+                        }
+                    } else {
+                        UpperBitsPolicy::ZeroUpperTo { full_reg_bytes: 16 }
+                    };
+                    write_neon_result_with_policy(emu, out, &r, policy)
+                })
         }
         "NEON_sshl" | "NEON_ushl" => {
             let (Ok(a), Ok(b)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
@@ -190,7 +198,16 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             };
             neon_rshrn(&rd, &rn, shift as u32, src_esize as usize, is_part2)
                 .filter(|r| r.len() == out.size as usize)
-                .is_some_and(|r| write_neon_result(emu, out, &r))
+                .is_some_and(|r| {
+                    let policy = if is_part2 {
+                        UpperBitsPolicy::MergeHighHalf {
+                            low_preserve_bytes: 8,
+                        }
+                    } else {
+                        UpperBitsPolicy::ZeroUpperTo { full_reg_bytes: 16 }
+                    };
+                    write_neon_result_with_policy(emu, out, &r, policy)
+                })
         }
         "NEON_sqrdmulh" | "NEON_sqdmulh" => {
             let (Ok(a), Ok(b)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
@@ -267,13 +284,13 @@ fn pairwise_op(emu: &mut Emulator, op: &PcodeOp, out: &Varnode, kind: Pairwise) 
     let Some(esize) = op.inputs.get(3).map(|vn| vn.constant_val as usize) else {
         return false;
     };
-    if esize == 0 || esize > 8 {
+    if !matches!(esize, 1 | 2 | 4 | 8) {
         return false;
     }
     let (Ok(a), Ok(b)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
         return false;
     };
-    if a.len() != b.len() || a.is_empty() || a.len() % (esize * 2) != 0 {
+    if a.len() != b.len() || !matches!(a.len(), 8 | 16) || a.len() % (esize * 2) != 0 {
         return false;
     }
     let result = pairwise_reduce(&a, &b, esize, kind);
@@ -287,30 +304,24 @@ fn pairwise_op(emu: &mut Emulator, op: &PcodeOp, out: &Varnode, kind: Pairwise) 
 /// when the destination is an AArch64 VPR/FPR register smaller than 16 bytes.
 ///
 /// The SLEIGH `NEON_*` userops omit the `zext_z*` tail macros that pure p-code
-/// SIMD constructors emit.
+/// SIMD constructors emit; enclosing `q0`..`q31` storage is resolved through
+/// [`apply_vector_write`].
 fn write_neon_result(emu: &mut Emulator, out: &Varnode, data: &[u8]) -> bool {
-    if !write_bytes(emu, out, data) {
-        return false;
-    }
-    let reg_space = emu.state.register_space();
-    if out.space_id == reg_space
-        && out.offset >= 0x5000
-        && out.offset < 0x5400
-        && (out.offset - 0x5000) % 32 == 0
-        && out.size < 16
-    {
-        let zero_len = 16usize - out.size as usize;
-        let zeros = [0u8; 16];
-        return emu
-            .state
-            .write_space(
-                reg_space,
-                out.offset + u64::from(out.size),
-                &zeros[..zero_len],
-            )
-            .is_ok();
-    }
-    true
+    write_neon_result_with_policy(
+        emu,
+        out,
+        data,
+        UpperBitsPolicy::ZeroUpperTo { full_reg_bytes: 16 },
+    )
+}
+
+fn write_neon_result_with_policy(
+    emu: &mut Emulator,
+    out: &Varnode,
+    data: &[u8],
+    policy: UpperBitsPolicy,
+) -> bool {
+    apply_vector_write(emu, out, data, VectorIsa::AArch64, policy).is_ok()
 }
 
 #[derive(Clone, Copy)]
@@ -347,7 +358,7 @@ fn pairwise_reduce(a: &[u8], b: &[u8], esize: usize, kind: Pairwise) -> Vec<u8> 
 }
 
 fn extract_bytes(a: &[u8], b: &[u8], index: usize) -> Option<Vec<u8>> {
-    if a.is_empty() || a.len() != b.len() || index >= a.len() {
+    if !matches!(a.len(), 8 | 16) || a.len() != b.len() || index >= a.len() {
         return None;
     }
     let end = index.checked_add(a.len())?;
@@ -466,10 +477,11 @@ fn fp_to_f64(bits: u64, esize: usize) -> Option<f64> {
 }
 
 fn neon_fp_minmax(a: &[u8], b: &[u8], esize: usize, is_max: bool, is_nm: bool) -> Option<Vec<u8>> {
-    if a.len() != b.len() || a.is_empty() || a.len() % esize != 0 {
-        return None;
-    }
-    if !matches!(esize, 2 | 4 | 8) {
+    if a.len() != b.len()
+        || !matches!(esize, 2 | 4 | 8)
+        || !(a.len() == esize || matches!(a.len(), 8 | 16))
+        || a.len() % esize != 0
+    {
         return None;
     }
     let sign_bit = 1u64 << (esize * 8 - 1);
@@ -634,7 +646,10 @@ fn neon_sat_add_sub(
     signed: bool,
     is_sub: bool,
 ) -> Option<Vec<u8>> {
-    if a.len() != b.len() || a.is_empty() || a.len() % esize != 0 || !matches!(esize, 1 | 2 | 4 | 8)
+    if a.len() != b.len()
+        || !matches!(esize, 1 | 2 | 4 | 8)
+        || !(a.len() == esize || matches!(a.len(), 8 | 16))
+        || a.len() % esize != 0
     {
         return None;
     }
@@ -725,7 +740,10 @@ fn neon_xtn(
 }
 
 fn neon_shl(a: &[u8], b: &[u8], esize: usize, signed: bool) -> Option<Vec<u8>> {
-    if a.len() != b.len() || a.is_empty() || a.len() % esize != 0 || !matches!(esize, 1 | 2 | 4 | 8)
+    if a.len() != b.len()
+        || !matches!(esize, 1 | 2 | 4 | 8)
+        || !(a.len() == esize || matches!(a.len(), 8 | 16))
+        || a.len() % esize != 0
     {
         return None;
     }
@@ -767,7 +785,10 @@ fn neon_shl(a: &[u8], b: &[u8], esize: usize, signed: bool) -> Option<Vec<u8>> {
 }
 
 fn neon_rshr(rn: &[u8], shift: u32, esize: usize, signed: bool) -> Option<Vec<u8>> {
-    if rn.is_empty() || rn.len() % esize != 0 || !matches!(esize, 1 | 2 | 4 | 8) {
+    if !matches!(esize, 1 | 2 | 4 | 8)
+        || !(rn.len() == esize || matches!(rn.len(), 8 | 16))
+        || rn.len() % esize != 0
+    {
         return None;
     }
     let bits = (esize * 8) as u32;
@@ -831,7 +852,11 @@ fn neon_rshrn(
 }
 
 fn neon_sqdmulh(a: &[u8], b: &[u8], esize: usize, rounding: bool) -> Option<Vec<u8>> {
-    if a.len() != b.len() || a.is_empty() || a.len() % esize != 0 || !matches!(esize, 2 | 4) {
+    if a.len() != b.len()
+        || !matches!(esize, 2 | 4)
+        || !(a.len() == esize || matches!(a.len(), 8 | 16))
+        || a.len() % esize != 0
+    {
         return None;
     }
     let bits = (esize * 8) as u32;
@@ -865,7 +890,10 @@ fn elem_abs_diff(a: u64, b: u64, esize: usize, signed: bool) -> u64 {
 }
 
 fn neon_abd(rn: &[u8], rm: &[u8], esize: usize, signed: bool) -> Option<Vec<u8>> {
-    if rn.len() != rm.len() || rn.is_empty() || rn.len() % esize != 0 || !matches!(esize, 1 | 2 | 4)
+    if rn.len() != rm.len()
+        || !matches!(esize, 1 | 2 | 4)
+        || !(rn.len() == esize || matches!(rn.len(), 8 | 16))
+        || rn.len() % esize != 0
     {
         return None;
     }
@@ -886,9 +914,9 @@ fn neon_abd(rn: &[u8], rm: &[u8], esize: usize, signed: bool) -> Option<Vec<u8>>
 fn neon_aba(rd: &[u8], rn: &[u8], rm: &[u8], esize: usize, signed: bool) -> Option<Vec<u8>> {
     if rd.len() != rn.len()
         || rd.len() != rm.len()
-        || rd.is_empty()
-        || rd.len() % esize != 0
         || !matches!(esize, 1 | 2 | 4)
+        || !(rd.len() == esize || matches!(rd.len(), 8 | 16))
+        || rd.len() % esize != 0
     {
         return None;
     }
@@ -908,7 +936,7 @@ fn neon_aba(rd: &[u8], rn: &[u8], rm: &[u8], esize: usize, signed: bool) -> Opti
 }
 
 fn neon_addlv(rn: &[u8], esize: usize, signed: bool, out_size: usize) -> Option<Vec<u8>> {
-    if rn.is_empty()
+    if !matches!(rn.len(), 8 | 16)
         || rn.len() % esize != 0
         || !matches!(esize, 1 | 2 | 4)
         || out_size != esize * 2
@@ -935,7 +963,7 @@ fn neon_addlv(rn: &[u8], esize: usize, signed: bool, out_size: usize) -> Option<
 }
 
 fn neon_rev(rn: &[u8], container: usize, esize: usize) -> Option<Vec<u8>> {
-    if rn.is_empty()
+    if !matches!(rn.len(), 8 | 16)
         || container == 0
         || esize == 0
         || rn.len() % container != 0

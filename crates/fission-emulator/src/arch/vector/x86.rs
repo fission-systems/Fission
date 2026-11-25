@@ -2,11 +2,20 @@
 
 use fission_pcode_ir::ir::{PcodeOp, Varnode};
 
+use super::contract::{UpperBitsPolicy, VectorIsa, apply_vector_write};
 use super::{
-    read_bytes, read_const_u64, read_elem_u64, read_u64_le, sign_extend_esize, write_bytes_exact,
-    write_elem_u64,
+    read_bytes, read_const_u64, read_elem_u64, read_u64_le, sign_extend_esize, write_elem_u64,
 };
 use crate::core::Emulator;
+
+fn write_sse_result(
+    emu: &mut Emulator,
+    out: &Varnode,
+    data: &[u8],
+    policy: UpperBitsPolicy,
+) -> bool {
+    apply_vector_write(emu, out, data, VectorIsa::X86, policy).is_ok()
+}
 
 const X86_QNAN32: u32 = 0xFFC0_0000;
 const X86_QNAN64: u64 = 0xFFF8_0000_0000_0000;
@@ -106,7 +115,16 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
                 return false;
             };
             let mode = resolve_round_mode(emu, imm);
-            round_ss(&dst, &src, mode).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            round_ss(&dst, &src, mode).is_some_and(|res| {
+                write_sse_result(
+                    emu,
+                    out,
+                    &res,
+                    UpperBitsPolicy::MergeLowPreserveUpper {
+                        active_low_bytes: 4,
+                    },
+                )
+            })
         }
         "roundsd" => {
             let (Ok(dst), Ok(src), Some(imm)) = (
@@ -117,74 +135,90 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
                 return false;
             };
             let mode = resolve_round_mode(emu, imm);
-            round_sd(&dst, &src, mode).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            round_sd(&dst, &src, mode).is_some_and(|res| {
+                write_sse_result(
+                    emu,
+                    out,
+                    &res,
+                    UpperBitsPolicy::MergeLowPreserveUpper {
+                        active_low_bytes: 8,
+                    },
+                )
+            })
         }
         "roundps" => {
             let (Ok(src), Some(imm)) = (read_bytes(emu, op, 2), read_const_u64(op, 3)) else {
                 return false;
             };
             let mode = resolve_round_mode(emu, imm);
-            round_ps(&src, mode).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            round_ps(&src, mode)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "roundpd" => {
             let (Ok(src), Some(imm)) = (read_bytes(emu, op, 2), read_const_u64(op, 3)) else {
                 return false;
             };
             let mode = resolve_round_mode(emu, imm);
-            round_pd(&src, mode).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            round_pd(&src, mode)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pshufb" => {
             let (Ok(dst), Ok(mask)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            pshufb(&dst, &mask).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            pshufb(&dst, &mask).is_some_and(|res| {
+                write_sse_result(emu, out, &res, UpperBitsPolicy::ZeroMaskedLanes)
+            })
         }
         "pshuflw" => {
             let (Ok(src), Some(imm)) = (read_bytes(emu, op, 2), read_const_u64(op, 3)) else {
                 return false;
             };
-            pshuf_words(&src, imm as u8, false).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            pshuf_words(&src, imm as u8, false)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pshufhw" => {
             let (Ok(src), Some(imm)) = (read_bytes(emu, op, 2), read_const_u64(op, 3)) else {
                 return false;
             };
-            pshuf_words(&src, imm as u8, true).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            pshuf_words(&src, imm as u8, true)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "packsswb" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
             pack(&dst, &src, PackKind::SignedWordToByte)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "packssdw" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
             pack(&dst, &src, PackKind::SignedDwordToWord)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "packusdw" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
             pack(&dst, &src, PackKind::UnsignedDwordToWord)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "packuswb" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
             pack(&dst, &src, PackKind::UnsignedWordToByte)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "paddsb" | "paddsw" | "paddusb" | "paddusw" | "psubsb" | "psubsw" | "psubusb"
         | "psubusw" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            sat_add_sub(&dst, &src, name).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            sat_add_sub(&dst, &src, name)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pmulhw" => bin_vec(emu, op, out, |a, b| {
             pmul_words(a, b, MulWordKind::SignedHigh)
@@ -208,13 +242,15 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             ) else {
                 return false;
             };
-            mpsadbw(&dst, &src, imm as u8).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            mpsadbw(&dst, &src, imm as u8)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "phaddw" | "phaddd" | "phaddsw" | "phsubw" | "phsubd" | "phsubsw" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            horiz_add_sub(&dst, &src, name).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            horiz_add_sub(&dst, &src, name)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "psignb" | "psignw" | "psignd" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
@@ -225,7 +261,8 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
                 "psignw" => 2,
                 _ => 4,
             };
-            psign(&dst, &src, esize).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            psign(&dst, &src, esize)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pabsb" | "pabsw" | "pabsd" => {
             let Ok(src) = read_bytes(emu, op, 2) else {
@@ -236,14 +273,15 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
                 "pabsw" => 2,
                 _ => 4,
             };
-            pabs(&src, esize).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            pabs(&src, esize)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "psllw" | "psraw" => {
             let (Ok(dst), Ok(count)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
             pshift_w(&dst, read_u64_le(&count), name == "psraw")
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pmovsxbw" | "pmovsxbd" | "pmovsxbq" | "pmovsxwd" | "pmovsxwq" | "pmovsxdq"
         | "pmovzxbw" | "pmovzxbd" | "pmovzxbq" | "pmovzxwd" | "pmovzxwq" | "pmovzxdq" => {
@@ -251,7 +289,7 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
                 return false;
             };
             pmov_ext(&src, name, out.size as usize)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "pblendw" => blend(emu, op, out, 2),
         "blendps" => blend(emu, op, out, 4),
@@ -264,7 +302,8 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             ) else {
                 return false;
             };
-            dpps(&dst, &src, imm as u8).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            dpps(&dst, &src, imm as u8)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "dppd" => {
             let (Ok(dst), Ok(src), Some(imm)) = (
@@ -274,14 +313,21 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             ) else {
                 return false;
             };
-            dppd(&dst, &src, imm as u8).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            dppd(&dst, &src, imm as u8)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "extractps" => {
             let (Ok(src), Some(imm)) = (read_bytes(emu, op, 1), read_const_u64(op, 2)) else {
                 return false;
             };
-            extractps(&src, imm as u8, out.size as usize)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+            extractps(&src, imm as u8, out.size as usize).is_some_and(|res| {
+                let policy = if out.size == 8 {
+                    UpperBitsPolicy::PreserveUpper
+                } else {
+                    UpperBitsPolicy::ZeroUpperTo { full_reg_bytes: 8 }
+                };
+                write_sse_result(emu, out, &res, policy)
+            })
         }
         "insertps" => {
             let (Ok(dst), Ok(src), Some(imm)) = (
@@ -291,25 +337,30 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             ) else {
                 return false;
             };
-            insertps(&dst, &src, imm as u8).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            insertps(&dst, &src, imm as u8).is_some_and(|res| {
+                write_sse_result(emu, out, &res, UpperBitsPolicy::ZeroMaskedLanes)
+            })
         }
         "phminposuw" => {
             let Ok(src) = read_bytes(emu, op, 1) else {
                 return false;
             };
-            phminposuw(&src).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            phminposuw(&src)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "movmskps" => {
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            movmsk(&src, 4, out.size as usize).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            movmsk(&src, 4, out.size as usize)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "movmskpd" => {
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            movmsk(&src, 8, out.size as usize).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            movmsk(&src, 8, out.size as usize)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "divps" => bin_vec(emu, op, out, |a, b| fp_binop_f32(a, b, f32_div)),
         "divpd" => bin_vec(emu, op, out, |a, b| fp_binop_f64(a, b, f64_div)),
@@ -317,13 +368,15 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            fp_unop_f32(&src, f32_sqrt).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            fp_unop_f32(&src, f32_sqrt)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "sqrtpd" => {
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            fp_unop_f64(&src, f64_sqrt).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            fp_unop_f64(&src, f64_sqrt)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "minps" => bin_vec(emu, op, out, |a, b| fp_binop_f32(a, b, f32_min)),
         "maxps" => bin_vec(emu, op, out, |a, b| fp_binop_f32(a, b, f32_max)),
@@ -333,33 +386,52 @@ pub(super) fn answer(emu: &mut Emulator, name: &str, op: &PcodeOp, out: &Varnode
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            fp_unop_f32(&src, f32_rcp).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            fp_unop_f32(&src, f32_rcp)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "rsqrtps" => {
             let Ok(src) = read_bytes(emu, op, 2) else {
                 return false;
             };
-            fp_unop_f32(&src, f32_rsqrt).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            fp_unop_f32(&src, f32_rsqrt)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         "rcpss" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            scalar_f32_unop(&dst, &src, f32_rcp)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+            scalar_f32_unop(&dst, &src, f32_rcp).is_some_and(|res| {
+                write_sse_result(
+                    emu,
+                    out,
+                    &res,
+                    UpperBitsPolicy::MergeLowPreserveUpper {
+                        active_low_bytes: 4,
+                    },
+                )
+            })
         }
         "rsqrtss" => {
             let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            scalar_f32_unop(&dst, &src, f32_rsqrt)
-                .is_some_and(|res| write_bytes_exact(emu, out, &res))
+            scalar_f32_unop(&dst, &src, f32_rsqrt).is_some_and(|res| {
+                write_sse_result(
+                    emu,
+                    out,
+                    &res,
+                    UpperBitsPolicy::MergeLowPreserveUpper {
+                        active_low_bytes: 4,
+                    },
+                )
+            })
         }
         "pavgb" | "pavgw" => {
             let (Ok(a), Ok(b)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
                 return false;
             };
-            pavg(&a, &b).is_some_and(|res| write_bytes_exact(emu, out, &res))
+            pavg(&a, &b)
+                .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
         }
         _ => false,
     }
@@ -374,7 +446,8 @@ fn bin_vec(
     let (Ok(dst), Ok(src)) = (read_bytes(emu, op, 1), read_bytes(emu, op, 2)) else {
         return false;
     };
-    f(&dst, &src).is_some_and(|res| write_bytes_exact(emu, out, &res))
+    f(&dst, &src)
+        .is_some_and(|res| write_sse_result(emu, out, &res, UpperBitsPolicy::PreserveUpper))
 }
 
 fn blend(emu: &mut Emulator, op: &PcodeOp, out: &Varnode, esize: usize) -> bool {
@@ -385,7 +458,7 @@ fn blend(emu: &mut Emulator, op: &PcodeOp, out: &Varnode, esize: usize) -> bool 
     ) else {
         return false;
     };
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % esize != 0 {
+    if dst.len() != 16 || src.len() != 16 || 16 % esize != 0 {
         return false;
     }
     let lanes = dst.len() / esize;
@@ -395,7 +468,7 @@ fn blend(emu: &mut Emulator, op: &PcodeOp, out: &Varnode, esize: usize) -> bool 
             out_bytes[i * esize..(i + 1) * esize].copy_from_slice(&src[i * esize..(i + 1) * esize]);
         }
     }
-    write_bytes_exact(emu, out, &out_bytes)
+    write_sse_result(emu, out, &out_bytes, UpperBitsPolicy::PreserveUpper)
 }
 
 fn resolve_round_mode(emu: &mut Emulator, imm: u64) -> u8 {
@@ -442,7 +515,7 @@ fn round_f64_bits(bits: u64, mode: u8) -> u64 {
 }
 
 fn round_ss(dst: &[u8], src: &[u8], mode: u8) -> Option<Vec<u8>> {
-    if dst.len() < 4 || src.len() < 4 {
+    if dst.len() != 16 || !matches!(src.len(), 4 | 16) {
         return None;
     }
     let mut out = dst.to_vec();
@@ -452,7 +525,7 @@ fn round_ss(dst: &[u8], src: &[u8], mode: u8) -> Option<Vec<u8>> {
 }
 
 fn round_sd(dst: &[u8], src: &[u8], mode: u8) -> Option<Vec<u8>> {
-    if dst.len() < 8 || src.len() < 8 {
+    if dst.len() != 16 || !matches!(src.len(), 8 | 16) {
         return None;
     }
     let mut out = dst.to_vec();
@@ -538,7 +611,7 @@ fn pack(dst: &[u8], src: &[u8], kind: PackKind) -> Option<Vec<u8>> {
 }
 
 fn sat_add_sub(dst: &[u8], src: &[u8], op: &str) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 2 != 0 {
+    if dst.len() != src.len() || !matches!(dst.len(), 8 | 16) {
         return None;
     }
     let esize = if op.ends_with('w') { 2 } else { 1 };
@@ -575,7 +648,7 @@ enum MulWordKind {
 }
 
 fn pmul_words(dst: &[u8], src: &[u8], kind: MulWordKind) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 2 != 0 {
+    if dst.len() != src.len() || !matches!(dst.len(), 8 | 16) {
         return None;
     }
     let lanes = dst.len() / 2;
@@ -601,7 +674,7 @@ fn pmul_words(dst: &[u8], src: &[u8], kind: MulWordKind) -> Option<Vec<u8>> {
 }
 
 fn pmulld(dst: &[u8], src: &[u8]) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 4 != 0 {
+    if dst.len() != src.len() || dst.len() != 16 {
         return None;
     }
     let lanes = dst.len() / 4;
@@ -628,7 +701,7 @@ fn pmuldq(dst: &[u8], src: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn pmaddwd(dst: &[u8], src: &[u8]) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 4 != 0 {
+    if dst.len() != src.len() || !matches!(dst.len(), 8 | 16) {
         return None;
     }
     let pairs = dst.len() / 4;
@@ -645,7 +718,7 @@ fn pmaddwd(dst: &[u8], src: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn pmaddubsw(dst: &[u8], src: &[u8]) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 2 != 0 {
+    if dst.len() != src.len() || !matches!(dst.len(), 8 | 16) {
         return None;
     }
     let pairs = dst.len() / 2;
@@ -724,7 +797,7 @@ fn horiz_add_sub(dst: &[u8], src: &[u8], op: &str) -> Option<Vec<u8>> {
 }
 
 fn psign(dst: &[u8], src: &[u8], esize: usize) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % esize != 0 {
+    if dst.len() != src.len() || !matches!(dst.len(), 8 | 16) || dst.len() % esize != 0 {
         return None;
     }
     let lanes = dst.len() / esize;
@@ -745,7 +818,7 @@ fn psign(dst: &[u8], src: &[u8], esize: usize) -> Option<Vec<u8>> {
 }
 
 fn pabs(src: &[u8], esize: usize) -> Option<Vec<u8>> {
-    if src.is_empty() || src.len() % esize != 0 {
+    if !matches!(src.len(), 8 | 16) || src.len() % esize != 0 {
         return None;
     }
     let lanes = src.len() / esize;
@@ -758,7 +831,7 @@ fn pabs(src: &[u8], esize: usize) -> Option<Vec<u8>> {
 }
 
 fn pshift_w(dst: &[u8], count: u64, arith: bool) -> Option<Vec<u8>> {
-    if dst.is_empty() || dst.len() % 2 != 0 {
+    if !matches!(dst.len(), 8 | 16) {
         return None;
     }
     let lanes = dst.len() / 2;
@@ -948,7 +1021,7 @@ fn pavg(a: &[u8], b: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn fp_binop_f32(dst: &[u8], src: &[u8], f: impl Fn(u32, u32) -> u32) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 4 != 0 {
+    if dst.len() != 16 || src.len() != 16 {
         return None;
     }
     let lanes = dst.len() / 4;
@@ -962,7 +1035,7 @@ fn fp_binop_f32(dst: &[u8], src: &[u8], f: impl Fn(u32, u32) -> u32) -> Option<V
 }
 
 fn fp_binop_f64(dst: &[u8], src: &[u8], f: impl Fn(u64, u64) -> u64) -> Option<Vec<u8>> {
-    if dst.len() != src.len() || dst.is_empty() || dst.len() % 8 != 0 {
+    if dst.len() != 16 || src.len() != 16 {
         return None;
     }
     let lanes = dst.len() / 8;
@@ -976,7 +1049,7 @@ fn fp_binop_f64(dst: &[u8], src: &[u8], f: impl Fn(u64, u64) -> u64) -> Option<V
 }
 
 fn fp_unop_f32(src: &[u8], f: impl Fn(u32) -> u32) -> Option<Vec<u8>> {
-    if src.is_empty() || src.len() % 4 != 0 {
+    if src.len() != 16 {
         return None;
     }
     let lanes = src.len() / 4;
@@ -989,7 +1062,7 @@ fn fp_unop_f32(src: &[u8], f: impl Fn(u32) -> u32) -> Option<Vec<u8>> {
 }
 
 fn fp_unop_f64(src: &[u8], f: impl Fn(u64) -> u64) -> Option<Vec<u8>> {
-    if src.is_empty() || src.len() % 8 != 0 {
+    if src.len() != 16 {
         return None;
     }
     let lanes = src.len() / 8;
@@ -1002,7 +1075,7 @@ fn fp_unop_f64(src: &[u8], f: impl Fn(u64) -> u64) -> Option<Vec<u8>> {
 }
 
 fn scalar_f32_unop(dst: &[u8], src: &[u8], f: impl Fn(u32) -> u32) -> Option<Vec<u8>> {
-    if dst.len() < 4 || src.len() < 4 {
+    if dst.len() != 16 || !matches!(src.len(), 4 | 16) {
         return None;
     }
     let mut out = dst.to_vec();
@@ -1209,14 +1282,18 @@ mod tests {
         );
         // Bytes: 0x10 - 0x90 is 16 - (-112) = 127 signed, 0 unsigned.
         assert_eq!(sat_add_sub(&[0x10], &[0x90], "psubsb"), None);
-        assert_eq!(
-            sat_add_sub(&[0x10, 0x00], &[0x90, 0x00], "psubsb").unwrap(),
-            vec![0x7f, 0x00]
-        );
-        assert_eq!(
-            sat_add_sub(&[0x10, 0x00], &[0x90, 0x00], "psubusb").unwrap(),
-            vec![0x00, 0x00]
-        );
+        assert_eq!(sat_add_sub(&[0x10, 0x00], &[0x90, 0x00], "psubsb"), None);
+        assert_eq!(sat_add_sub(&[0x10; 32], &[0x90; 32], "psubsb"), None);
+        let mut a8 = [0u8; 8];
+        a8[0] = 0x10;
+        let mut b8 = [0u8; 8];
+        b8[0] = 0x90;
+        let mut exp_s = [0u8; 8];
+        exp_s[0] = 0x7f;
+        let mut exp_u = [0u8; 8];
+        exp_u[0] = 0x00;
+        assert_eq!(sat_add_sub(&a8, &b8, "psubsb").unwrap(), exp_s.to_vec());
+        assert_eq!(sat_add_sub(&a8, &b8, "psubusb").unwrap(), exp_u.to_vec());
     }
 
     #[test]
@@ -1227,6 +1304,10 @@ mod tests {
         let out = round_sd(&dst, &src, 0).unwrap();
         assert_eq!(&out[..8], &(-0.0f64).to_le_bytes());
         assert_eq!(&out[8..16], &0xDEAD_BEEF_CAFE_BABEu64.to_le_bytes());
+
+        // Reject truncated or unmodeled 32B YMM widths cleanly.
+        assert_eq!(round_sd(&[0u8; 8], &src, 0), None);
+        assert_eq!(round_sd(&[0u8; 32], &[0u8; 32], 0), None);
 
         let out_floor = round_sd(&dst, &(-1.25f64).to_le_bytes(), 1).unwrap();
         assert_eq!(&out_floor[..8], &(-2.0f64).to_le_bytes());
