@@ -1,5 +1,36 @@
 #!/usr/bin/env python3
-"""Parse LCOV coverage output, check per-crate threshold, and emit status/summaries."""
+"""Parse LCOV coverage output, check per-crate threshold, and emit status/summaries.
+
+Evidence contract
+-----------------
+Line coverage is counted from ``DA`` records; ``LF``/``LH`` are summaries that
+must agree with them. The producer (``cargo llvm-cov report --lcov``, i.e.
+``llvm-cov export -format=lcov``) writes one ``DA`` per instrumented line and
+then ``LF``/``LH`` equal to the unique ``DA`` line counts, so every rule below
+holds for intact producer output:
+
+* ``LF``/``LH`` present next to ``DA`` must equal the number of unique ``DA``
+  lines / unique ``DA`` lines with a non-zero count. Disagreement is
+  ``malformed_evidence``: the summary is never trusted over the line data.
+* Repeated ``DA`` entries for one line (within a record, or across records
+  for the same ``SF`` path) are one line whose counts are summed -- the
+  merge rule ``lcov`` itself uses -- so a line is hit if any entry hit it.
+* A record without ``DA`` may only declare zero lines (``LF:0``/``LH:0`` or
+  nothing). A summary-only record claiming lines cannot be checked and is
+  ``malformed_evidence``, never a measurement.
+* Only known LCOV directives are accepted; anything else (garbage, an
+  unknown tag, a line cut short) is ``malformed_evidence``.
+* A failed generation step is ``measurement_failed`` even when a file exists;
+  an absent/empty file or no lines for the target crate is
+  ``missing_evidence``; a configuration or internal checker fault is
+  ``checker_error``. Below-threshold coverage is advisory (exit 0).
+
+LCOV has no trailer, so a file cut exactly at a record boundary is
+indistinguishable from a complete one; truncation anywhere else is caught.
+
+The step summary, ``GITHUB_OUTPUT`` and ``--json-out`` are all rendered from
+one payload (``CoverageReport.to_dict``).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +44,9 @@ import sys
 from typing import Sequence
 
 
+SCHEMA = "fission.coverage_summary.v1"
+
+
 class EvidenceStatus:
     """Explicit diagnostic coverage status codes."""
 
@@ -20,7 +54,17 @@ class EvidenceStatus:
     MEASURED_BELOW_THRESHOLD = "measured_below_threshold"
     MISSING_EVIDENCE = "missing_evidence"
     MALFORMED_EVIDENCE = "malformed_evidence"
+    MEASUREMENT_FAILED = "measurement_failed"
     CHECKER_ERROR = "checker_error"
+
+    ALL = (
+        MEASURED_PASS,
+        MEASURED_BELOW_THRESHOLD,
+        MISSING_EVIDENCE,
+        MALFORMED_EVIDENCE,
+        MEASUREMENT_FAILED,
+        CHECKER_ERROR,
+    )
 
 
 class ConfigError(ValueError):
@@ -37,6 +81,7 @@ class CrateCoverage:
 
     total: int = 0
     hit: int = 0
+    files: int = 0
 
     @property
     def pct(self) -> float | None:
@@ -57,6 +102,8 @@ class CoverageReport:
     target_total: int = 0
     target_pct: float | None = None
     record_count: int = 0
+    duplicate_da_merged: int = 0
+    duplicate_source_records: int = 0
     crates: dict[str, CrateCoverage] = field(default_factory=dict)
 
     def exit_code(self) -> int:
@@ -69,6 +116,7 @@ class CoverageReport:
 
     def to_dict(self) -> dict[str, object]:
         return {
+            "schema": SCHEMA,
             "status": self.status,
             "detail": self.detail,
             "target_crate": self.target_crate,
@@ -77,8 +125,11 @@ class CoverageReport:
             "target_total": self.target_total,
             "target_pct": self.target_pct,
             "record_count": self.record_count,
+            "duplicate_da_merged": self.duplicate_da_merged,
+            "duplicate_source_records": self.duplicate_source_records,
             "crates": {
                 name: {
+                    "files": cov.files,
                     "hit": cov.hit,
                     "total": cov.total,
                     "pct": cov.pct,
@@ -116,91 +167,167 @@ def crate_from_source_path(source_path: str) -> str | None:
 
 
 def _parse_non_negative_int(raw: str, label: str, line_no: int) -> int:
-    try:
-        val = int(raw.strip())
-    except ValueError as exc:
-        raise MalformedLcovError(f"line {line_no}: invalid integer for {label}: {raw!r}") from exc
-    if val < 0:
-        raise MalformedLcovError(f"line {line_no}: negative count for {label}: {val}")
-    return val
+    text = raw.strip()
+    # int() also accepts "+5", "1_000" and surrounding whitespace; LCOV counts
+    # are plain decimal digits.
+    if not text.isdigit() or not text.isascii():
+        raise MalformedLcovError(f"line {line_no}: invalid count for {label}: {raw!r}")
+    return int(text)
 
 
-def parse_lcov(text: str) -> tuple[dict[str, CrateCoverage], int]:
-    """Strictly parse LCOV records and aggregate counts by exact crate name."""
-    crate_stats: dict[str, CrateCoverage] = {}
+# Directives `llvm-cov export -format=lcov` and lcov/geninfo write. Only SF, DA,
+# LF, LH and end_of_record carry line coverage; the rest are accepted and not
+# interpreted. Anything else is not LCOV this checker understands.
+_RECORD_DIRECTIVES = frozenset(
+    {"FN", "FNDA", "FNF", "FNH", "FNL", "FNA", "BRDA", "BRF", "BRH", "MCDC", "DA", "LF", "LH"}
+)
+_TOP_LEVEL_DIRECTIVES = frozenset({"TN", "VER"})
+
+
+@dataclass
+class LcovSummary:
+    """Line coverage per source file and crate, after consistency checks."""
+
+    crates: dict[str, CrateCoverage]
+    record_count: int
+    duplicate_da_merged: int = 0
+    duplicate_source_records: int = 0
+
+
+def _close_record(
+    *,
+    line_no: int,
+    source: str,
+    da: dict[int, int],
+    lf: int | None,
+    lh: int | None,
+) -> None:
+    """Check one record's LF/LH against its unique DA lines."""
+    if da:
+        unique_found = len(da)
+        unique_hit = sum(1 for hits in da.values() if hits > 0)
+        if lf is not None and lf != unique_found:
+            raise MalformedLcovError(
+                f"line {line_no}: {source}: LF:{lf} disagrees with {unique_found} unique DA lines"
+            )
+        if lh is not None and lh != unique_hit:
+            raise MalformedLcovError(
+                f"line {line_no}: {source}: LH:{lh} disagrees with {unique_hit} unique "
+                f"executed DA lines"
+            )
+        return
+    if (lf or 0) != 0 or (lh or 0) != 0:
+        raise MalformedLcovError(
+            f"line {line_no}: {source}: summary LF:{lf} LH:{lh} without DA line data "
+            "cannot be verified"
+        )
+
+
+def parse_lcov_summary(text: str) -> LcovSummary:
+    """Strictly parse LCOV and aggregate unique-line counts by exact crate name."""
+    # Source path -> line -> summed execution count, across all records.
+    files: dict[str, dict[int, int]] = {}
+    seen_sources: set[str] = set()
+    record_count = 0
+    duplicate_da_merged = 0
+    duplicate_source_records = 0
+
     in_record = False
-    current_crate: str | None = None
+    source = ""
+    da: dict[int, int] = {}
     lf: int | None = None
     lh: int | None = None
-    da_found = 0
-    da_hit = 0
-    record_count = 0
 
     for line_no, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
         if not line:
             continue
-        if line.startswith("TN:"):
+        if line == "end_of_record":
+            if not in_record:
+                raise MalformedLcovError(f"line {line_no}: unexpected end_of_record")
+            _close_record(line_no=line_no, source=source, da=da, lf=lf, lh=lh)
+            record_count += 1
+            if source in seen_sources:
+                duplicate_source_records += 1
+            seen_sources.add(source)
+            merged = files.setdefault(source, {})
+            for da_line, hits in da.items():
+                merged[da_line] = merged.get(da_line, 0) + hits
+            in_record = False
             continue
-        if line.startswith("SF:"):
+
+        tag, sep, value = line.partition(":")
+        if not sep:
+            raise MalformedLcovError(f"line {line_no}: not an LCOV directive: {line!r}")
+        if tag in _TOP_LEVEL_DIRECTIVES:
+            continue
+        if tag == "SF":
             if in_record:
                 raise MalformedLcovError(
                     f"line {line_no}: nested SF record without preceding end_of_record"
                 )
+            source = value.strip().replace("\\", "/")
+            if not source:
+                raise MalformedLcovError(f"line {line_no}: SF directive with an empty path")
             in_record = True
-            current_crate = crate_from_source_path(line[3:])
+            da = {}
             lf = None
             lh = None
-            da_found = 0
-            da_hit = 0
             continue
-        if line == "end_of_record":
-            if not in_record:
-                raise MalformedLcovError(f"line {line_no}: unexpected end_of_record")
-            total = lf if lf is not None else da_found
-            hit = lh if lh is not None else da_hit
-            if hit > total:
-                raise MalformedLcovError(
-                    f"line {line_no}: hit count ({hit}) exceeds found count ({total})"
-                )
-            record_count += 1
-            if current_crate is not None:
-                entry = crate_stats.setdefault(current_crate, CrateCoverage())
-                entry.total += total
-                entry.hit += hit
-            in_record = False
-            current_crate = None
-            lf = None
-            lh = None
-            da_found = 0
-            da_hit = 0
-            continue
-
+        if tag not in _RECORD_DIRECTIVES:
+            raise MalformedLcovError(f"line {line_no}: unknown LCOV directive: {line!r}")
         if not in_record:
-            raise MalformedLcovError(f"line {line_no}: directive outside SF..end_of_record: {line!r}")
+            raise MalformedLcovError(
+                f"line {line_no}: directive outside SF..end_of_record: {line!r}"
+            )
 
-        if line.startswith("LF:"):
+        if tag == "LF":
             if lf is not None:
                 raise MalformedLcovError(f"line {line_no}: duplicate LF entry inside record")
-            lf = _parse_non_negative_int(line[3:], "LF", line_no)
-        elif line.startswith("LH:"):
+            lf = _parse_non_negative_int(value, "LF", line_no)
+        elif tag == "LH":
             if lh is not None:
                 raise MalformedLcovError(f"line {line_no}: duplicate LH entry inside record")
-            lh = _parse_non_negative_int(line[3:], "LH", line_no)
-        elif line.startswith("DA:"):
-            fields = line[3:].split(",")
-            if len(fields) < 2:
+            lh = _parse_non_negative_int(value, "LH", line_no)
+        elif tag == "DA":
+            # DA:<line>,<count>[,<checksum>]
+            fields = value.split(",")
+            if len(fields) not in (2, 3):
                 raise MalformedLcovError(f"line {line_no}: malformed DA directive: {line!r}")
-            _parse_non_negative_int(fields[0], "DA line", line_no)
+            da_line = _parse_non_negative_int(fields[0], "DA line", line_no)
+            if da_line == 0:
+                raise MalformedLcovError(f"line {line_no}: DA line numbers start at 1: {line!r}")
             hits = _parse_non_negative_int(fields[1], "DA hits", line_no)
-            da_found += 1
-            if hits > 0:
-                da_hit += 1
+            if da_line in da:
+                duplicate_da_merged += 1
+            da[da_line] = da.get(da_line, 0) + hits
 
     if in_record:
         raise MalformedLcovError("unterminated LCOV record at EOF (missing end_of_record)")
 
-    return crate_stats, record_count
+    crate_stats: dict[str, CrateCoverage] = {}
+    for path in sorted(files):
+        crate = crate_from_source_path(path)
+        if crate is None:
+            continue
+        entry = crate_stats.setdefault(crate, CrateCoverage())
+        lines = files[path]
+        entry.files += 1
+        entry.total += len(lines)
+        entry.hit += sum(1 for hits in lines.values() if hits > 0)
+
+    return LcovSummary(
+        crates=crate_stats,
+        record_count=record_count,
+        duplicate_da_merged=duplicate_da_merged,
+        duplicate_source_records=duplicate_source_records,
+    )
+
+
+def parse_lcov(text: str) -> tuple[dict[str, CrateCoverage], int]:
+    """Compatibility wrapper: per-crate counts and the number of records."""
+    summary = parse_lcov_summary(text)
+    return summary.crates, summary.record_count
 
 
 def evaluate_coverage(
@@ -211,8 +338,9 @@ def evaluate_coverage(
 ) -> CoverageReport:
     """Evaluate LCOV coverage for `target_crate` and return explicit status."""
     if generate_outcome != "success":
+        # Whatever file a failed run left behind is not evidence.
         return CoverageReport(
-            status=EvidenceStatus.CHECKER_ERROR,
+            status=EvidenceStatus.MEASUREMENT_FAILED,
             detail=f"coverage generation did not succeed (outcome={generate_outcome})",
             target_crate=target_crate,
             threshold_pct=None,
@@ -255,7 +383,7 @@ def evaluate_coverage(
         )
 
     try:
-        crate_stats, record_count = parse_lcov(text)
+        parsed = parse_lcov_summary(text)
     except MalformedLcovError as exc:
         return CoverageReport(
             status=EvidenceStatus.MALFORMED_EVIDENCE,
@@ -264,6 +392,14 @@ def evaluate_coverage(
             threshold_pct=threshold,
         )
 
+    crate_stats = parsed.crates
+    record_count = parsed.record_count
+    provenance = {
+        "record_count": record_count,
+        "duplicate_da_merged": parsed.duplicate_da_merged,
+        "duplicate_source_records": parsed.duplicate_source_records,
+        "crates": crate_stats,
+    }
     target_cov = crate_stats.get(target_crate)
     if record_count == 0 or target_cov is None or target_cov.total == 0:
         return CoverageReport(
@@ -271,8 +407,7 @@ def evaluate_coverage(
             detail=f"no executable LCOV line data found for crate '{target_crate}'",
             target_crate=target_crate,
             threshold_pct=threshold,
-            record_count=record_count,
-            crates=crate_stats,
+            **provenance,
         )
 
     pct = target_cov.pct
@@ -280,14 +415,14 @@ def evaluate_coverage(
     if pct < threshold:
         status = EvidenceStatus.MEASURED_BELOW_THRESHOLD
         detail = (
-            f"{target_crate} coverage {pct:.1f}% ({target_cov.hit}/{target_cov.total} lines) "
-            f"is below advisory threshold {threshold:.1f}%"
+            f"{target_crate} coverage {format_pct(pct)}% ({target_cov.hit}/{target_cov.total} lines) "
+            f"is below advisory threshold {format_pct(threshold)}%"
         )
     else:
         status = EvidenceStatus.MEASURED_PASS
         detail = (
-            f"{target_crate} coverage {pct:.1f}% ({target_cov.hit}/{target_cov.total} lines) "
-            f"meets threshold {threshold:.1f}%"
+            f"{target_crate} coverage {format_pct(pct)}% ({target_cov.hit}/{target_cov.total} lines) "
+            f"meets advisory threshold {format_pct(threshold)}%"
         )
 
     return CoverageReport(
@@ -298,29 +433,55 @@ def evaluate_coverage(
         target_hit=target_cov.hit,
         target_total=target_cov.total,
         target_pct=pct,
-        record_count=record_count,
-        crates=crate_stats,
+        **provenance,
     )
 
 
-def format_markdown_summary(report: CoverageReport) -> str:
-    """Format diagnostic coverage status and per-crate table as Markdown."""
+def format_pct(value: object) -> str:
+    """The one percentage format shared by the summary and GITHUB_OUTPUT."""
+    if value is None:
+        return ""
+    return f"{float(value):.2f}"  # type: ignore[arg-type]
+
+
+def format_pct_cell(value: object) -> str:
+    text = format_pct(value)
+    return f"{text}%" if text else "n/a"
+
+
+def _md_cell(value: object) -> str:
+    return str(value).replace("|", "\\|").replace("\r", " ").replace("\n", " ")
+
+
+def format_markdown_summary(report: CoverageReport | dict[str, object]) -> str:
+    """Render the step summary from the same payload written as JSON."""
+    payload = report.to_dict() if isinstance(report, CoverageReport) else report
+    threshold = payload["threshold_pct"]
+    target_pct = format_pct(payload["target_pct"])
     lines = [
         "## Code Coverage Report",
         "",
-        f"- Status: `{report.status}`",
-        f"- Target crate: `{report.target_crate}`",
-        f"- Detail: {report.detail}",
+        f"- Status: `{payload['status']}`",
+        f"- Target crate: `{payload['target_crate']}`",
+        f"- Advisory threshold: {format_pct(threshold) + '%' if threshold is not None else 'n/a'}",
+        f"- Target lines: {payload['target_hit']}/{payload['target_total']} lines "
+        f"({target_pct + '%' if target_pct else 'not measured'})",
+        f"- LCOV records: {payload['record_count']} "
+        f"(merged duplicate DA lines: {payload['duplicate_da_merged']}, "
+        f"repeated SF records: {payload['duplicate_source_records']})",
+        f"- Detail: {_md_cell(payload['detail'])}",
         "",
     ]
-    rows = [(name, cov) for name, cov in sorted(report.crates.items()) if cov.total > 0]
-    if rows:
-        lines.append("| Crate | Lines Hit | Total Lines | Coverage % |")
-        lines.append("|---|---:|---:|---:|")
-        for name, cov in rows:
-            pct = cov.pct
-            pct_str = f"{pct:.1f}%" if pct is not None else "N/A"
-            lines.append(f"| `{name}` | {cov.hit} | {cov.total} | {pct_str} |")
+    crates = payload["crates"]
+    assert isinstance(crates, dict)
+    if crates:
+        lines.append("| Crate | Files | Lines Hit | Total Lines | Coverage % |")
+        lines.append("|---|---:|---:|---:|---:|")
+        for name, row in crates.items():
+            lines.append(
+                f"| `{name}` | {row['files']} | {row['hit']} | {row['total']} "
+                f"| {format_pct_cell(row['pct'])} |"
+            )
     else:
         lines.append("_No per-crate LCOV measurements recorded._")
     return "\n".join(lines) + "\n"
@@ -330,17 +491,17 @@ def _sanitize_output_value(value: str) -> str:
     return value.replace("\r", " ").replace("\n", " ").strip()
 
 
-def write_github_output(path: Path, report: CoverageReport) -> None:
-    """Append coverage status outputs to `GITHUB_OUTPUT`."""
+def write_github_output(path: Path, report: CoverageReport | dict[str, object]) -> None:
+    """Append coverage status outputs to `GITHUB_OUTPUT` from the JSON payload."""
+    payload = report.to_dict() if isinstance(report, CoverageReport) else report
     path.parent.mkdir(parents=True, exist_ok=True)
-    pct_str = f"{report.target_pct:.2f}" if report.target_pct is not None else ""
-    payload = (
-        f"coverage_status={_sanitize_output_value(report.status)}\n"
-        f"coverage_detail={_sanitize_output_value(report.detail)}\n"
-        f"target_pct={pct_str}\n"
+    payload_text = (
+        f"coverage_status={_sanitize_output_value(str(payload['status']))}\n"
+        f"coverage_detail={_sanitize_output_value(str(payload['detail']))}\n"
+        f"target_pct={format_pct(payload['target_pct'])}\n"
     )
     with path.open("a", encoding="utf-8") as handle:
-        handle.write(payload)
+        handle.write(payload_text)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -379,15 +540,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.threshold is not None
         else os.environ.get("FISSION_IN_WARN_THRESHOLD_PCT")
     )
-    report = evaluate_coverage(
-        lcov_path=Path(args.lcov),
-        target_crate=args.target_crate,
-        threshold_raw=threshold_raw,
-        generate_outcome=args.generate_outcome,
-    )
+    try:
+        report = evaluate_coverage(
+            lcov_path=Path(args.lcov),
+            target_crate=args.target_crate,
+            threshold_raw=threshold_raw,
+            generate_outcome=args.generate_outcome,
+        )
+    except Exception as exc:  # noqa: BLE001 - published as checker_error, not lost
+        report = CoverageReport(
+            status=EvidenceStatus.CHECKER_ERROR,
+            detail=f"internal checker error: {type(exc).__name__}: {exc}",
+            target_crate=args.target_crate,
+            threshold_pct=None,
+        )
+    # Every published form below is rendered from this one payload.
+    payload = report.to_dict()
+    # The detail is single-line everywhere it is published.
+    payload["detail"] = _sanitize_output_value(str(payload["detail"]))
 
-    markdown = format_markdown_summary(report)
-    print(f"[{report.status}] {report.detail}")
+    markdown = format_markdown_summary(payload)
+    print(f"[{payload['status']}] {payload['detail']}")
 
     step_summary = (
         args.step_summary
@@ -405,7 +578,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json_out:
         json_path = Path(args.json_out)
         json_path.parent.mkdir(parents=True, exist_ok=True)
-        json_path.write_text(json.dumps(report.to_dict(), indent=2) + "\n", encoding="utf-8")
+        json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
     github_output = (
         args.github_output
@@ -413,7 +586,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else os.environ.get("GITHUB_OUTPUT", "")
     )
     if github_output:
-        write_github_output(Path(github_output), report)
+        write_github_output(Path(github_output), payload)
 
     return report.exit_code()
 

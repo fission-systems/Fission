@@ -161,6 +161,12 @@ jobs:
     if: always()
     steps:
       - name: Check Status
+        env:
+          # Through env, not `${{ }}` in the script: the detail can quote LCOV
+          # content, and template text is spliced in before bash parses it.
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          COVERAGE_STATUS: ${{ needs.coverage.outputs.coverage_status }}
+          COVERAGE_DETAIL: ${{ needs.coverage.outputs.coverage_detail }}
         run: |
           set -euo pipefail
           FAILED=0
@@ -185,28 +191,29 @@ jobs:
           require_success "Security advisories" "${{ needs.advisories.result }}"
 
           # Coverage is diagnostic/advisory only, but distinguish valid measurement from
-          # missing/malformed evidence and checker/infrastructure failures.
-          COVERAGE_RESULT="${{ needs.coverage.result }}"
-          COVERAGE_STATUS="${{ needs.coverage.outputs.coverage_status }}"
-          COVERAGE_DETAIL="${{ needs.coverage.outputs.coverage_detail }}"
+          # missing/malformed evidence, a failed measurement and checker failures.
+          # Status values: scripts/ci/coverage_summary.py (EvidenceStatus).
           case "$COVERAGE_STATUS" in
             measured_pass)
-              echo "OK: Coverage measured and above threshold (${COVERAGE_DETAIL})"
+              echo "OK: Coverage measured and meets advisory threshold (${COVERAGE_DETAIL})"
               ;;
             measured_below_threshold)
               echo "WARNING: Coverage below advisory threshold (${COVERAGE_DETAIL})"
               ;;
-            missing_evidence|malformed_evidence|checker_error)
+            missing_evidence|malformed_evidence|measurement_failed|checker_error)
               echo "WARNING: Coverage diagnostic failed [${COVERAGE_STATUS}] (${COVERAGE_DETAIL})"
               ;;
-            *)
-              if [ "$COVERAGE_RESULT" = "failure" ]; then
-                echo "WARNING: Coverage job encountered an infrastructure error (non-blocking)"
-              elif [ "$COVERAGE_RESULT" = "skipped" ]; then
+            "")
+              if [ "$COVERAGE_RESULT" = "skipped" ]; then
                 echo "INFO: Coverage skipped"
               else
-                echo "INFO: Coverage finished (${COVERAGE_RESULT}; status=${COVERAGE_STATUS:-unknown})"
+                # The checker publishes a status on every path it reaches, so an
+                # empty one means it never ran; that is not a measurement.
+                echo "WARNING: Coverage published no diagnostic status (job result=${COVERAGE_RESULT}; non-blocking)"
               fi
+              ;;
+            *)
+              echo "WARNING: Coverage published an unknown status '${COVERAGE_STATUS}' (job result=${COVERAGE_RESULT}; non-blocking)"
               ;;
           esac
           if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
