@@ -2526,6 +2526,7 @@ mod operand_expression_borrow_tests {
             Box::new(CompiledPatternExpression::Constant(1)),
         );
         let constructor = std::sync::Arc::new(CompiledExecutableConstructor {
+            consumes_sequential_operand_bytes: Default::default(),
             constructor_id: 9999,
             sla_identity: None,
             sla_decode_status: CompiledSlaDecodeStatus::Decoded,
