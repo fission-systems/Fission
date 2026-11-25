@@ -1571,4 +1571,47 @@ mod tests {
         };
         assert!(!apply_subvar_flow_pass(&mut add_func));
     }
+
+    /// The whole-pass test above cannot reach a shifted mask: candidates are
+    /// 0xff/0xffff/0xffffffff, and the only way to shift one is a `>>` def,
+    /// whose operand then fails its own forward trace. Drive the solver
+    /// directly so the carry guard itself is pinned: bits 8..15 of `a + b`
+    /// depend on the carry out of bits 0..7, which a 0xff00 slice drops.
+    #[test]
+    fn subvar_flow_carry_ops_reject_a_mask_that_skips_bit_zero() {
+        let var = |n: &str| Box::new(PreHirExpr::Var(n.to_string()));
+        let solver = |rhs: PreHirExpr| SubvarFlowSolver {
+            def_map: HashMap::from_iter([("x".to_string(), rhs)]),
+            type_map: HashMap::from_iter([
+                ("a".to_string(), u64_ty()),
+                ("b".to_string(), u64_ty()),
+                ("x".to_string(), u64_ty()),
+            ]),
+            multi_defined: HashSet::default(),
+            nz_masks: HashMap::default(),
+            varmap: HashMap::default(),
+            pull_points: HashSet::default(),
+            worklist: Vec::new(),
+            pull_count: 0,
+        };
+        let binary = |op| PreHirExpr::Binary {
+            op,
+            lhs: var("a"),
+            rhs: var("b"),
+            ty: u64_ty(),
+        };
+        for op in [PreHirBinaryOp::Add, PreHirBinaryOp::Sub] {
+            assert!(!solver(binary(op)).trace_backward("x", 0xff00), "{op:?}");
+            assert!(solver(binary(op)).trace_backward("x", 0xff), "{op:?}");
+        }
+        let neg = PreHirExpr::Unary {
+            op: PreHirUnaryOp::Neg,
+            expr: var("a"),
+            ty: u64_ty(),
+        };
+        assert!(!solver(neg.clone()).trace_backward("x", 0xff00));
+        assert!(solver(neg).trace_backward("x", 0xff));
+        // Bitwise ops have no carry: any slice is fine.
+        assert!(solver(binary(PreHirBinaryOp::Xor)).trace_backward("x", 0xff00));
+    }
 }
