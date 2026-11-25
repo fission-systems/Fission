@@ -262,7 +262,12 @@ $PY -I ~/fission-benchmark/decbench-full/sweep.py report ~/fission-benchmark/dec
 - Build once, then measure; do not rebuild `fission_cli` while a run is in flight.
 
 Never promote local runs to an official ranking. The docker multi-decompiler
-loop ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) is retired.
+loop ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) is retired, and
+the GitHub repository behind it, `fission-systems/fission-benchmark`, was
+deleted on 2026-11-24 together with its Pages dashboard. The local
+`~/fission-benchmark/` directory was kept and still holds the DecBench data and
+sweep above. The organisation's public benchmark is now
+[FreshBench](https://github.com/fission-systems/freshbench).
 
 ## AI Overfit Firewall
 

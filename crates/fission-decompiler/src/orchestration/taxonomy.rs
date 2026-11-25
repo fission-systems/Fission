@@ -62,9 +62,19 @@ pub fn classify_nir_failure_refined(reason: &str) -> &'static str {
         || lower.contains("stdin unavailable")
         || lower.contains("stdin write failed")
         || lower.contains("stdout read failed")
+        || lower.contains("stdout unavailable")
         || lower.contains("wait failed")
         || lower.contains("without json response")
         || lower.contains("response parse failed")
+        || lower.contains("request exceeded")
+        || lower.contains("response exceeded")
+        || lower.contains("request identity mismatch")
+        || lower.contains("worker crashed")
+        || lower.contains("exited with non-zero status")
+        || lower.contains("delayed eof")
+        || lower.contains("worker cleanup failed")
+        || lower.contains("worker returned success without code")
+        || lower.contains("worker failed without error")
     {
         return "nir_worker_failure";
     }

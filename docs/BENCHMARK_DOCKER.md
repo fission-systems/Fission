@@ -1,6 +1,12 @@
 > **Retired.** DecBench is the main benchmark; this docker multi-decompiler loop
 > is no longer used. See [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md). The text
 > below is kept for the history that older proposals link to.
+>
+> The `fission-systems/fission-benchmark` GitHub repository this loop ran from,
+> and its Pages dashboard, were deleted on 2026-11-24, so the release-backed
+> CI/Pages runs and the `/quality` dashboard mentioned below no longer exist.
+> The organisation's public benchmark is now
+> [FreshBench](https://github.com/fission-systems/freshbench).
 
 # Mandatory external benchmark loop (fission-benchmark)
 

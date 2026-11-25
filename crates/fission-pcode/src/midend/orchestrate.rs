@@ -489,7 +489,7 @@ fn render_mlil_preview_with_binary_and_context_output(
     // `params`/`locals` an interpreter needs) as of the point a real caller
     // would consider structuring's semantic output done -- any remaining
     // steps below this point are printer-facing, not semantic (see
-    // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
+    // `midend/AGENTS.md`: "Do not fix structuring bugs only in `render/printer/`").
     let hir_function = hir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);

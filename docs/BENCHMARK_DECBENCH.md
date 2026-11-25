@@ -21,7 +21,12 @@ published Fission leaderboard row covers 100 rows of a config, so a rank read of
 the leaderboard was never same-denominator.
 
 The data and harness live outside this repository, under
-`~/fission-benchmark` (the directory name is historical; it hosts DecBench):
+`~/fission-benchmark` (the directory name is historical; it hosts DecBench). It
+began as a checkout of the `fission-systems/fission-benchmark` GitHub repository,
+which was deleted on 2026-11-24 along with its Pages site; the local directory
+is kept and is the only copy, so do not try to clone it. The organisation's
+public benchmark is now [FreshBench](https://github.com/fission-systems/freshbench),
+which is independent of DecBench and is not what this page measures:
 
 | Item | Path |
 |------|------|

@@ -13,7 +13,7 @@ Canonical policy:
 render/
 ├── mod.rs           # owner surface + type bridge from nir
 ├── layer.rs         # PrintProfile, RecoveredLineMapping (LayeredPseudocode is test-only)
-├── printer.rs       # C print (shared walk; profile sugar)
+├── printer/         # C print (shared walk; profile sugar)
 ├── presentation/    # HIR-only tree polish (apply_hir_presentation)
 │   └── mod.rs
 ├── layered.rs       # final-surface print + global/aggregate decls
@@ -56,7 +56,7 @@ nir (types / builder / normalize / structuring / labels)
 4. Preserve single evaluation of calls/loads.
 5. Focused tests under `presentation` / `layered` / `globals` for every new transform.
 6. **Measurement-only quality claims** (repo root `AGENTS.md` Core Rule 10): new presentation folds that claim readability improvement need a **measured** real-binary/row baseline and remeasure — not synthetic IR alone. Fixture tests may land mechanical coverage; they do not prove quality.
-7. Real-binary verification with `fission_cli decomp` and/or fission-benchmark when the change is a quality claim. There is one surface, so report total distance next to the perfect count.
+7. Real-binary verification with `fission_cli decomp` and/or the DecBench full-dataset sweep ([`docs/BENCHMARK_DECBENCH.md`](../../../../docs/BENCHMARK_DECBENCH.md)) when the change is a quality claim. There is one surface, so report total distance next to the perfect count.
 8. Dead pure-assign elim must use **whole-function** use counts (never subtree-local).
 9. Rely on `presentation/invariants.rs` post-pass firewall; on violation polish is rolled back.
 10. Tests that pin builder/structuring *shape* use `crate::midend::render_mechanical_preview` (the print before presentation); tests of the output surface use `render_mlil_preview`.

@@ -129,6 +129,7 @@ mod tests {
     #[test]
     fn preview_worker_request_roundtrip() {
         let request = NirWorkerRequest {
+            request_id: Some(7),
             pcode_json: "{\"blocks\":[]}".to_string(),
             address: 0x1234,
             name: "sub_1234".to_string(),

@@ -39,7 +39,7 @@ Symptoms: duplicated labels, collapsed loops, odd regions.
 
 Symptoms: types look fine internally but pseudocode unreadable.
 
-- Only after NIR/HIR matches intent should you tune [`printer.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-pcode/src/render/printer.rs) paths.
+- Only after NIR/HIR matches intent should you tune [`printer/`](https://github.com/fission-systems/Fission/blob/main/crates/fission-pcode/src/render/printer/mod.rs) paths.
 
 ## 7. Regression scale-up
 
