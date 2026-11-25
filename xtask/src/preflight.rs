@@ -495,6 +495,9 @@ pub fn plan(options: &Options, ci: &CiConfig, selection: &Selection, base: &str)
         checks.push(
             Check::new("nextest", "bash", &["scripts/ci/test_crates.sh", "nextest"])
                 .envs(&ci.test_env)
+                // Same nextest profile as CI: the default profile plus the
+                // JUnit report the Sentry defect reporter reads.
+                .env("NEXTEST_PROFILE", "ci")
                 .env("CRATES", &crates)
                 .env("FEATURES", "")
                 .env("RETRIES", &ci.retries)
@@ -1100,6 +1103,12 @@ mod tests {
             nextest
                 .env
                 .contains(&("FISSION_REQUIRE_TEST_INPUTS".into(), "1".into()))
+        );
+        assert!(
+            nextest
+                .env
+                .contains(&("NEXTEST_PROFILE".into(), "ci".into())),
+            "same nextest profile as the CI step"
         );
         // Same inputs, same list.
         assert_eq!(checks, plan(&options(), &ci_config(), &sel, "abc"));
