@@ -190,10 +190,17 @@ pub struct ValidatedQuery {
 
 /// Variable-sort consistency environment accumulated across one query, script,
 /// or expression pair.
+///
+/// A long-lived environment (such as the identity table a [`crate::Solver`]
+/// keeps for its backend) is extended with the `try_bind_*` methods, which are
+/// atomic: an expression that fails validation leaves no binding behind, so a
+/// rejected query cannot change how a later one is judged.
 #[derive(Debug, Clone, Default)]
 pub struct VarSortEnv {
     vars: BTreeMap<SymNodeId, Sort>,
     has_arrays: bool,
+    /// IDs first bound inside the open transaction, if one is open.
+    journal: Option<Vec<SymNodeId>>,
 }
 
 impl VarSortEnv {
@@ -217,8 +224,79 @@ impl VarSortEnv {
             }
         } else {
             self.vars.insert(id, sort.clone());
+            if let Some(journal) = self.journal.as_mut() {
+                journal.push(id);
+            }
         }
         Ok(())
+    }
+
+    /// The sort bound to `id`, if any.
+    #[must_use]
+    pub fn sort_of(&self, id: SymNodeId) -> Option<&Sort> {
+        self.vars.get(&id)
+    }
+
+    /// Number of distinct variable IDs bound.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.vars.len()
+    }
+
+    /// True when no variable is bound.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.vars.is_empty()
+    }
+
+    /// Run `f` as one transaction: on `Err` every binding it added is removed
+    /// again and `has_arrays` is restored, so the environment is unchanged.
+    fn transaction<T>(
+        &mut self,
+        f: impl FnOnce(&mut Self) -> Result<T, ValidationError>,
+    ) -> Result<T, ValidationError> {
+        debug_assert!(
+            self.journal.is_none(),
+            "VarSortEnv transactions do not nest"
+        );
+        let had_arrays = self.has_arrays;
+        self.journal = Some(Vec::new());
+        let result = f(self);
+        let journal = self.journal.take().unwrap_or_default();
+        if result.is_err() {
+            for id in journal {
+                self.vars.remove(&id);
+            }
+            self.has_arrays = had_arrays;
+        }
+        result
+    }
+
+    /// Atomically bind one declared variable.
+    pub fn try_bind_var(&mut self, id: SymNodeId, sort: &Sort) -> Result<(), ValidationError> {
+        self.transaction(|env| env.bind_var(id, sort))
+    }
+
+    /// Atomically validate `expr` against the bindings so far and keep its
+    /// variable bindings only if it is well formed. Returns its sort.
+    pub fn try_bind_expr(&mut self, expr: &SymExpr) -> Result<Sort, ValidationError> {
+        self.transaction(|env| validate_expr_depth(expr, env, 0))
+    }
+
+    /// Atomically validate `expr` as an assertion (sort `BitVector(1)`).
+    pub fn try_bind_assertion(&mut self, expr: &SymExpr) -> Result<(), ValidationError> {
+        self.transaction(|env| validate_assertion_in_env(expr, env))
+    }
+
+    /// Atomically validate every expression in `exprs` as an assertion: either
+    /// all of them are bound or none is.
+    pub fn try_bind_assertions(&mut self, exprs: &[SymExpr]) -> Result<(), ValidationError> {
+        self.transaction(|env| {
+            for expr in exprs {
+                validate_assertion_in_env(expr, env)?;
+            }
+            Ok(())
+        })
     }
 
     #[must_use]

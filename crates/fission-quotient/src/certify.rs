@@ -90,7 +90,11 @@ pub fn refute(
     solver.set_conflict_budget(budget.conflict_budget);
     let fresh = |solver: &mut Solver, name: String, bits: u32| {
         let var = SymExpr::new_var(&name, bits);
-        solver.nodes.insert(var_id(&var), var.clone());
+        // `new_var` draws its ID from the process-global counter, so it is
+        // new to this solver's identity table.
+        solver
+            .insert_node(var_id(&var), var.clone())
+            .expect("a fresh variable has a fresh ID");
         var
     };
 
@@ -334,15 +338,19 @@ pub fn refute(
         SatResult::Unsat => Refutation::Proved,
         SatResult::Unknown => Refutation::Unknown,
         SatResult::Sat => {
-            // The model as found, before minimizing moves it.
+            // The model as found, before minimizing moves it. An input the
+            // model cannot give a value for leaves no candidate word.
             let found = inputs
                 .iter()
                 .map(|step| {
                     step.iter()
-                        .map(|input| solver.bv_theory.evaluate_expr_in_model(&solver.sat, input))
-                        .collect::<Vec<_>>()
+                        .map(|input| solver.eval_in_model(input).map(|v| v.raw_value()))
+                        .collect::<Option<Vec<_>>>()
                 })
-                .collect::<Vec<_>>();
+                .collect::<Option<Vec<_>>>();
+            let Some(found) = found else {
+                return Refutation::Unknown;
+            };
             // The least word, so a rerun finds the same one. If the solver
             // cannot finish minimizing, the model it found is still a
             // distinguishing word.

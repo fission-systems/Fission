@@ -298,7 +298,7 @@ fn conflict_budget() -> Option<u64> {
 fn configure(solver: &mut Solver) {
     solver.set_conflict_budget(conflict_budget());
     if env_u64("FISSION_DIFF_RESTARTS", 1) == 0 {
-        solver.sat.set_restart_unit(None);
+        solver.set_restart_unit(None);
     }
 }
 
@@ -1094,8 +1094,9 @@ fn check_formula_timed(
     }
     for select in selects_of(ours) {
         let value = solver
-            .bv_theory
-            .evaluate_expr_in_model(&solver.sat, &select);
+            .eval_in_model(&select)
+            .expect("a published model evaluates a well-formed select")
+            .raw_value();
         pinned.push(pin(&select, value));
     }
     let pinned_script = smtlib::script(&pinned).expect("a pinned model prints");
@@ -1450,8 +1451,9 @@ fn incremental_case(
                         }
                         for select in selects_of(&all) {
                             let value = solver
-                                .bv_theory
-                                .evaluate_expr_in_model(&solver.sat, &select);
+                                .eval_in_model(&select)
+                                .expect("a published model evaluates a well-formed select")
+                                .raw_value();
                             pinned.push(pin(&select, value));
                         }
                         if ask(&pinned) == Verdict::Unsat {

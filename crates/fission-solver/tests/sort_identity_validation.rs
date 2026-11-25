@@ -43,7 +43,7 @@ fn assert_invalid_in_solver(expr: SymExpr, label: &str) {
 
     let mut solver_extra = Solver::new();
     let x_id = solver_extra.register_var("ok".to_string(), 8);
-    let x = solver_extra.nodes[&x_id].clone();
+    let x = solver_extra.nodes()[&x_id].clone();
     solver_extra.assert(SymExpr::Eq(
         Box::new(x.clone()),
         Box::new(SymExpr::new_const(9, 8)),

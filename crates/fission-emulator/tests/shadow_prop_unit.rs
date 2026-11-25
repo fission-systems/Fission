@@ -79,7 +79,11 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
         add_id, 77,
         "AST node should be a new solver id, not raw taint union"
     );
-    let expr = emu.solver.nodes.get(&add_id).expect("solver node for add");
+    let expr = emu
+        .solver
+        .nodes()
+        .get(&add_id)
+        .expect("solver node for add");
     assert!(
         matches!(expr, fission_solver::SymExpr::Add(_, _))
             || matches!(expr, fission_solver::SymExpr::Const { .. }),
@@ -139,7 +143,7 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
         SymUnOpKind::Not as u32,
     );
     let not_id = emu.state.get_shadow_memory(uniq, 0x50).expect("not shadow");
-    let not_expr = emu.solver.nodes.get(&not_id).expect("not node");
+    let not_expr = emu.solver.nodes().get(&not_id).expect("not node");
     // new_not may be Xor with mask or Const; just ensure a node was registered.
     assert!(
         !matches!(not_expr, fission_solver::SymExpr::Var { .. })
