@@ -91,6 +91,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
                 &empty_known,
                 &mut local_cache,
                 Some(&all_references),
+                Some(&coverage_decodes),
             );
             if valid { Some(addr) } else { None }
         })
@@ -127,6 +128,7 @@ pub fn discover_functions_with_runtime(binary: &mut LoadedBinary) -> FunctionDis
                 &known_function_addresses,
                 &mut local_cache,
                 Some(&all_references),
+                Some(&coverage_decodes),
             );
             (valid_routine
                 || terminal_import_thunk_target(binary, &frontend, seed.address).is_some())

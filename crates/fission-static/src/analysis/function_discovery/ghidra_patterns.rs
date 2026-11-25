@@ -336,6 +336,7 @@ pub(super) fn scan_ghidra_patterns(
                 &mut local_cache,
                 global_references,
                 decode_context,
+                None,
             )
             .0
             {

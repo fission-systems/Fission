@@ -889,9 +889,10 @@ impl RuntimeSleighFrontend {
     }
 
     /// Report the byte prefix needed to reproduce an instruction with the
-    /// same frontend, address, and default starting context. A missing bound
-    /// means the decode attempted an out-of-window read or used a context
-    /// override.
+    /// same frontend and address, starting in `base_context`. A missing bound
+    /// means the decode attempted an out-of-window read, started in a context
+    /// that earlier instructions' commits had changed, or (with a
+    /// `base_context`) queued context commits of its own.
     pub fn decode_window_no_pcode_with_read_prefixes(
         &self,
         bytes: &[u8],
@@ -931,13 +932,13 @@ impl RuntimeSleighFrontend {
         while offset < bytes.len() && decoded.len() < limit {
             let remaining = &bytes[offset..];
 
-            let ctx_override = merge_base_and_pending_override(
-                base_context,
-                pending_overrides.get(&current).copied(),
-            );
+            let pending = pending_overrides.get(&current).copied();
+            let ctx_override = merge_base_and_pending_override(base_context, pending);
 
+            // A prefix is reported only for a decode that started in
+            // `base_context` itself, which is all a caller can key it on.
             let read_end = std::cell::Cell::new(0);
-            let capture = track_reads && ctx_override.is_none();
+            let capture = track_reads && pending.is_none();
             let instruction = match self.decode_single_no_pcode_impl(
                 remaining,
                 current,
@@ -973,7 +974,12 @@ impl RuntimeSleighFrontend {
                 .checked_add(step)
                 .ok_or_else(|| anyhow!("decode byte offset overflowed at 0x{current:x}"))?;
             let prefix = read_end.get().max(step);
-            let reusable_prefix = (capture && prefix <= remaining.len()).then_some(prefix);
+            // In a base context, an instruction that queues context commits
+            // is decoded again by any reuser, which checks the commits itself.
+            let reusable_prefix = (capture
+                && prefix <= remaining.len()
+                && (base_context.is_none() || instruction.pending_context_commits.is_empty()))
+            .then_some(prefix);
             decoded.push(project(instruction, reusable_prefix));
         }
         Ok(decoded)
@@ -1069,10 +1075,22 @@ mod decode_context_merge_tests {
             )
             .unwrap();
         assert_eq!(with_prefixes.len(), no_pcode.len());
-        for ((instruction, prefix), expected) in with_prefixes.iter().zip(&no_pcode) {
-            assert!(prefix.is_none());
+        for ((instruction, _), expected) in with_prefixes.iter().zip(&no_pcode) {
             assert_eq!(instruction, expected);
         }
+        // A prefix is reported only for a decode that started in the base
+        // context and queued no commits: not `it hi` (it commits), not the
+        // `add` it governs (decoded under the committed context), but `bx lr`.
+        let prefixes: Vec<Option<usize>> = with_prefixes.iter().map(|(_, p)| *p).collect();
+        assert_eq!(prefixes, vec![None, None, Some(2)]);
+        let (bx, _) = &with_prefixes[2];
+        let replay = frontend
+            .decode_single_no_pcode(&bytes[4..6], bx.address, address.context_override)
+            .unwrap();
+        assert_eq!(
+            &replay, bx,
+            "the prefix reproduces the instruction in the base context"
+        );
         let with_pcode = frontend
             .decode_window_with_context_override(
                 &bytes,
