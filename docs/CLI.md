@@ -317,7 +317,11 @@ fission_cli api memcpy --32 --json
 ```
 
 `whatis` answers from the typed program-metadata snapshot (`fission-analysis-db`)
-plus the DWARF line table. `types` lists what the loader recovered from the
+plus the DWARF line table. A malformed loader row (a section or symbol whose
+range runs past the end of the address space, say) is left out of that snapshot
+together with the rows that reference it; `whatis --json` and `inventory
+program-metadata` then list each such row under `rejected_rows` with its
+reasons, and the rest of the program is answered as usual. `types` lists what the loader recovered from the
 binary's own metadata; each type names the analysis that produced it
 (`source`: `cpp_rtti`, `dwarf`, `pdb`, `go`, `rust_vtable`, `objc`, `swift`,
 `pe_header`, `elf_header`, `te_header`). Objective-C, Swift and Rust-vtable
@@ -393,6 +397,20 @@ Keep stdin open while choosing commands from prior responses. Use
 `event --timeout-ms 1000` to wait for a native stop or process-exit event. If
 detaching fails during shutdown, the final state is marked unknown and includes
 the last observed state rather than reporting the target as suspended.
+
+Every frame's `state` names one thread. `thread_id` is the selected thread, and
+`pc` and `regs`, `set-reg`, `step` and `stack-peek` act on it. `event_thread_id`
+raised the stop that `stop` describes (for example `breakpoint:0x401000`,
+`stepped`, `thread-exited`, `exited`; `null` on the Linux and macOS native
+backends, which do not report one yet). A new reported event selects the thread
+that raised it, so after a breakpoint on a worker `thread_id`, `pc` and `stop`
+describe that worker even if another thread was selected before. `switch-thread`
+selects another live thread until the next reported event. Polling a stopped
+target with `event` reports no event and changes nothing. A thread that exits
+is never left selected: the selection falls back to the main thread, else the
+lowest live thread. On Windows, `step` with a thread selected other than the
+event thread is refused while the event thread stands on one of the session's
+breakpoints; `continue` or step that thread first.
 
 The module report keeps runtime mapping ranges and file offsets separate from
 ELF analysis VAs. A resolved ELF transform includes `load_bias` and the formula

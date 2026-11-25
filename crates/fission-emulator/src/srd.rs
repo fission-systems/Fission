@@ -132,7 +132,7 @@ impl SemanticReplaySnapshot {
     pub fn capture(emu: &mut Emulator, opts: CaptureOpts) -> Self {
         let path_assertions: Vec<String> = emu
             .solver
-            .assertions
+            .assertions()
             .iter()
             .map(|e| format!("{e:?}"))
             .collect();

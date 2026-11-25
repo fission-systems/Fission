@@ -776,6 +776,10 @@ impl SatSolver {
 
     /// Restart every `unit` times the Luby sequence in conflicts; `None`
     /// never restarts. On by default, at [`RESTART_UNIT`].
+    pub(crate) fn restart_unit(&self) -> Option<u64> {
+        self.restart_unit
+    }
+
     pub fn set_restart_unit(&mut self, unit: Option<u64>) {
         self.restart_unit = unit.filter(|&unit| unit > 0);
     }

@@ -146,7 +146,7 @@ impl SimulationManager {
                 );
                 continue;
             };
-            let Some(cond_expr) = self.emu.solver.nodes.get(&cond_node).cloned() else {
+            let Some(cond_expr) = self.emu.solver.nodes().get(&cond_node).cloned() else {
                 next_deadended.push(
                     SimState::new(self.emu.inst_count, self.emu.pc, self.emu.state.clone())
                         .with_history(state.history.clone())

@@ -78,7 +78,7 @@ fn call(emu: &mut Emulator, name: &str, args: &[u64]) -> u64 {
 
     // The environment and the emulator cannot both be borrowed, so it is
     // lifted out for the call and put back.
-    let os = std::mem::replace(&mut emu.os, Box::new(BareMetalEnv::new()));
+    let os = std::mem::replace(&mut emu.os, std::sync::Arc::new(BareMetalEnv::new()));
     os.dispatch_hle(emu, name).expect("dispatch");
     emu.os = os;
 
@@ -859,7 +859,7 @@ fn an_impossible_systemtime_fails_the_conversion() {
 /// Call a stub and hand back what the dispatcher decided, for the one stub
 /// that does not simply return.
 fn dispatch_raw(emu: &mut Emulator, name: &str) -> fission_emulator::os::env::HleResult {
-    let os = std::mem::replace(&mut emu.os, Box::new(BareMetalEnv::new()));
+    let os = std::mem::replace(&mut emu.os, std::sync::Arc::new(BareMetalEnv::new()));
     let result = os.dispatch_hle(emu, name).expect("dispatch");
     emu.os = os;
     result

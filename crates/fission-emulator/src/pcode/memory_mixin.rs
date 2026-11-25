@@ -8,8 +8,7 @@ use fission_solver::{SymExpr, SymNodeId, solver::Solver};
 /// is a set id, and looking one up here used to `unwrap` a `None`.
 fn solver_node(solver: &Solver, id: SymNodeId, what: &str) -> Result<SymExpr> {
     solver
-        .nodes
-        .get(&id)
+        .node(id)
         .cloned()
         .ok_or_else(|| anyhow::anyhow!("symbolic {what}: shadow id {id} is not a solver node"))
 }

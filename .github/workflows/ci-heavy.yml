@@ -65,7 +65,9 @@ jobs:
           cargo check --locked -p fission-dynamic --features windows_native_debugger
           cargo check --locked -p fission-cli --features windows_native_debugger
       - name: Run native debugger tests
-        run: cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
+        run: |
+          cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
+          cargo nextest run --locked --no-tests=fail -p fission-cli --features windows_native_debugger --test debug_session_cli -E 'test(windows_native_)'
 
   build-macos-heavy:
     name: Heavy Build (macOS)

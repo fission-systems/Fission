@@ -1,3 +1,4 @@
+use super::workers::BatchLedgerSummary;
 use crate::cli::args::OneShotArgs;
 use crate::cli::oneshot::function_select::BatchSelectionAccounting;
 use serde_json::json;
@@ -67,6 +68,7 @@ pub(crate) fn capture_process_cpu_snapshot() -> Option<ProcessCpuSnapshot> {
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn benchmark_envelope_json(
     cli: &OneShotArgs,
     json_results: Vec<serde_json::Value>,
@@ -77,6 +79,7 @@ pub(crate) fn benchmark_envelope_json(
     worker_env_requested: Option<String>,
     stack_size_bytes: usize,
     selection_accounting: &BatchSelectionAccounting,
+    batch_accounting: &BatchLedgerSummary,
     total_decomp_secs: f64,
     total_postprocess_secs: f64,
     wall_clock_sec: f64,
@@ -103,6 +106,7 @@ pub(crate) fn benchmark_envelope_json(
             "functions_excluded_runtime_wrapper_count": selection_accounting.functions_excluded_runtime_wrapper_count,
             "functions_excluded_provenance_count": selection_accounting.functions_excluded_provenance_count,
             "include_nonuser_functions": selection_accounting.include_nonuser_functions,
+            "batch_accounting": batch_accounting,
             "init_sec": 0.0,
             "total_decomp_sec": round_six(total_decomp_secs),
             "total_postprocess_sec": round_six(total_postprocess_secs),

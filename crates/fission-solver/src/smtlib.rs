@@ -25,6 +25,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 use crate::ast::{Sort, SymExpr};
+use crate::validate::{validate_assertions, ValidationError};
 
 /// A construct this printer does not translate, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,24 +39,52 @@ impl std::fmt::Display for Unsupported {
 
 impl std::error::Error for Unsupported {}
 
-/// A complete script: declarations, one `assert` per assertion, `check-sat`.
-/// The logic is `QF_BV`, or `QF_ABV` when the assertions read an array.
-pub fn script(assertions: &[SymExpr]) -> Result<String, Unsupported> {
+/// Structured SMT-LIB generation failure separating malformed terms/sorts from
+/// unsupported solver theories.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SmtLibError {
+    Invalid(ValidationError),
+    Unsupported(String),
+}
+
+impl std::fmt::Display for SmtLibError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(err) => write!(f, "invalid formula for SMT-LIB export: {err}"),
+            Self::Unsupported(msg) => write!(f, "not expressible in QF_BV here: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for SmtLibError {}
+
+/// Elaborate `assertions` via the shared sort/identity validator, then emit an
+/// SMT-LIB 2 script (`QF_BV`, or `QF_ABV` when arrays appear).
+pub fn script_checked(assertions: &[SymExpr]) -> Result<String, SmtLibError> {
+    let validated = validate_assertions(assertions).map_err(SmtLibError::Invalid)?;
     let mut printer = Printer::default();
     let mut body = String::new();
     for assertion in assertions {
-        let (text, width) = printer.bitvector(assertion)?;
+        let (text, width) = printer
+            .bitvector(assertion)
+            .map_err(|Unsupported(msg)| SmtLibError::Unsupported(msg))?;
         if width != 1 {
-            return Err(Unsupported(format!("an assertion {width} bits wide")));
+            return Err(SmtLibError::Invalid(
+                ValidationError::InvalidAssertionSort {
+                    sort: Sort::BitVector(width),
+                },
+            ));
         }
         let _ = writeln!(body, "(assert (= {text} #b1))");
     }
 
-    let mut out = String::from(if printer.declared_arrays.is_empty() {
-        "(set-logic QF_BV)\n"
-    } else {
-        "(set-logic QF_ABV)\n"
-    });
+    let mut out = String::from(
+        if !validated.has_arrays && printer.declared_arrays.is_empty() {
+            "(set-logic QF_BV)\n"
+        } else {
+            "(set-logic QF_ABV)\n"
+        },
+    );
     for (symbol, width) in &printer.declared {
         let _ = writeln!(out, "(declare-const {symbol} (_ BitVec {width}))");
     }
@@ -68,6 +97,12 @@ pub fn script(assertions: &[SymExpr]) -> Result<String, Unsupported> {
     out.push_str(&body);
     out.push_str("(check-sat)\n");
     Ok(out)
+}
+
+/// A complete script: declarations, one `assert` per assertion, `check-sat`.
+/// The logic is `QF_BV`, or `QF_ABV` when the assertions read an array.
+pub fn script(assertions: &[SymExpr]) -> Result<String, Unsupported> {
+    script_checked(assertions).map_err(|err| Unsupported(err.to_string()))
 }
 
 /// The SMT-LIB symbol a variable is declared under. Stable, so a model
@@ -104,7 +139,22 @@ impl Printer {
                 let Sort::BitVector(width) = sort else {
                     return Err(Unsupported(format!("a variable of sort {sort:?}")));
                 };
+                if *width == 0 {
+                    return Err(Unsupported("zero-width variable".to_string()));
+                }
                 let symbol = symbol_for(expr).expect("a variable has a symbol");
+                if self.declared_arrays.contains_key(&symbol) {
+                    return Err(Unsupported(format!(
+                        "symbol {symbol} collides between bitvector and array declarations"
+                    )));
+                }
+                if let Some(&prev) = self.declared.get(&symbol) {
+                    if prev != *width {
+                        return Err(Unsupported(format!(
+                            "symbol {symbol} declared with conflicting widths: {prev} vs {width}"
+                        )));
+                    }
+                }
                 self.declared.insert(symbol.clone(), *width);
                 (symbol, *width)
             }
@@ -168,7 +218,12 @@ impl Printer {
             Concat(a, b) => {
                 let (a, a_width) = self.bitvector(a)?;
                 let (b, b_width) = self.bitvector(b)?;
-                (format!("(concat {a} {b})"), a_width + b_width)
+                let Some(total) = a_width.checked_add(b_width) else {
+                    return Err(Unsupported(format!(
+                        "concat width overflow ({a_width} + {b_width})"
+                    )));
+                };
+                (format!("(concat {a} {b})"), total)
             }
             ArraySelect { array, index } => {
                 let (array, domain, range) = self.array(array)?;
@@ -206,6 +261,18 @@ impl Printer {
                     return Err(Unsupported(format!("an array of sort {sort:?}")));
                 };
                 let symbol = symbol_for(expr).expect("a variable has a symbol");
+                if self.declared.contains_key(&symbol) {
+                    return Err(Unsupported(format!(
+                        "symbol {symbol} collides between bitvector and array declarations"
+                    )));
+                }
+                if let Some(&prev) = self.declared_arrays.get(&symbol) {
+                    if prev != (*domain, *range) {
+                        return Err(Unsupported(format!(
+                            "array symbol {symbol} declared with conflicting sorts: {prev:?} vs ({domain}, {range})"
+                        )));
+                    }
+                }
                 self.declared_arrays
                     .insert(symbol.clone(), (*domain, *range));
                 (symbol, *domain, *range)

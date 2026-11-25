@@ -3,6 +3,30 @@
 //! Hard chaining (QEMU-inspired): a **global** table maps guest entry PC →
 //! host function pointer (`AtomicUsize`). Any TB exit to that PC can hard-chain
 //! (fallthrough **or** absolute branch/call), without a soft lookup once linked.
+//!
+//! The run loop calls whatever host pointer the cache holds, so publishing one
+//! is `unsafe` and the tables are private. Safe code cannot make the emulator
+//! jump to an arbitrary address:
+//!
+//! ```compile_fail,E0133
+//! use fission_emulator::jit::cache::{JitBlock, JitCache};
+//! let block = JitBlock {
+//!     guest_pc: 0x1000,
+//!     host_func_ptr: 0x10 as *const u8,
+//!     block_size: 4,
+//!     guest_insns: 1,
+//!     next_pc: None,
+//!     pages: vec![0x1000],
+//!     abs_exit_targets: Vec::new(),
+//! };
+//! JitCache::new().insert(0x1000, std::sync::Arc::new(block));
+//! ```
+//!
+//! ```compile_fail,E0616
+//! use fission_emulator::jit::cache::JitCache;
+//! let cache = JitCache::new();
+//! assert_eq!(cache.blocks.read().unwrap().len(), 0);
+//! ```
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -25,17 +49,22 @@ pub struct JitBlock {
     pub abs_exit_targets: Vec<u64>,
 }
 
+// SAFETY: `host_func_ptr` points to finalized executable machine code owned by
+// the `Emulator`'s `JITModule` for as long as the block stays in `JitCache`; the
+// generated code bytes are immutable once published.
 unsafe impl Send for JitBlock {}
+// SAFETY: Shared references to `JitBlock` only expose immutable metadata and the
+// thread-safe finalized code entry point.
 unsafe impl Sync for JitBlock {}
 
 /// Guest PC → host block map with page-level invalidation and global hard-chain table.
 pub struct JitCache {
-    pub blocks: RwLock<HashMap<u64, Arc<JitBlock>>>,
+    blocks: RwLock<HashMap<u64, Arc<JitBlock>>>,
     /// Page base → list of TB entry PCs intersecting that page.
-    pub page_to_blocks: RwLock<HashMap<u64, Vec<u64>>>,
+    page_to_blocks: RwLock<HashMap<u64, Vec<u64>>>,
     /// Guest entry PC → hard-chain slot (host `*const u8` as usize, 0 = unresolved).
     /// Shared by fallthrough and absolute exits targeting this PC.
-    pub chain_table: RwLock<HashMap<u64, Arc<AtomicUsize>>>,
+    chain_table: RwLock<HashMap<u64, Arc<AtomicUsize>>>,
 }
 
 impl JitCache {
@@ -48,12 +77,16 @@ impl JitCache {
     }
 
     pub fn lookup(&self, pc: u64) -> Option<Arc<JitBlock>> {
-        self.blocks.read().unwrap().get(&pc).cloned()
+        self.blocks
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&pc)
+            .cloned()
     }
 
     /// Get or create the hard-chain slot for a guest PC.
     pub fn chain_slot(&self, pc: u64) -> Arc<AtomicUsize> {
-        let mut table = self.chain_table.write().unwrap();
+        let mut table = self.chain_table.write().unwrap_or_else(|e| e.into_inner());
         table
             .entry(pc)
             .or_insert_with(|| Arc::new(AtomicUsize::new(0)))
@@ -62,7 +95,7 @@ impl JitCache {
 
     /// Load host function for hard chain, if resolved.
     pub fn hard_chain_host(&self, pc: u64) -> Option<*const u8> {
-        let table = self.chain_table.read().unwrap();
+        let table = self.chain_table.read().unwrap_or_else(|e| e.into_inner());
         let slot = table.get(&pc)?;
         let host = slot.load(Ordering::Acquire);
         if host == 0 {
@@ -73,7 +106,23 @@ impl JitCache {
     }
 
     /// Insert a TB and publish its host entry into the global chain table.
-    pub fn insert(&self, pc: u64, block: Arc<JitBlock>) {
+    /// Null host function pointers are rejected so they can never be called.
+    ///
+    /// # Safety
+    ///
+    /// `block.host_func_ptr` must be the entry of finalized machine code with
+    /// the signature `extern "C" fn(*mut Emulator) -> u64`, honouring the
+    /// [`crate::jit::callbacks`] contract, and must stay valid for as long as
+    /// the block can be looked up or hard-chained to. The emulator meets this
+    /// with code from its own `JITModule`, which never frees code memory while
+    /// the emulator lives (so invalidating a block that is still on the host
+    /// stack cannot leave a dangling return address). The run loop and the
+    /// chaining callbacks call the pointer without further checks.
+    pub unsafe fn insert(&self, pc: u64, block: Arc<JitBlock>) {
+        if block.host_func_ptr.is_null() {
+            tracing::error!("JITCache::insert: rejecting null host_func_ptr at guest PC {pc:#x}");
+            return;
+        }
         let pages = block.pages.clone();
         let host = block.host_func_ptr as usize;
 
@@ -85,17 +134,26 @@ impl JitCache {
             block.host_func_ptr
         );
 
-        self.blocks.write().unwrap().insert(pc, block);
-        let mut ptb = self.page_to_blocks.write().unwrap();
+        self.blocks
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(pc, block);
+        let mut ptb = self
+            .page_to_blocks
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         for page in pages {
             ptb.entry(page).or_default().push(pc);
         }
     }
 
     pub fn invalidate_page(&self, page_addr: u64) {
-        let mut ptb = self.page_to_blocks.write().unwrap();
-        let mut blks = self.blocks.write().unwrap();
-        let table = self.chain_table.read().unwrap();
+        let mut ptb = self
+            .page_to_blocks
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        let mut blks = self.blocks.write().unwrap_or_else(|e| e.into_inner());
+        let table = self.chain_table.read().unwrap_or_else(|e| e.into_inner());
 
         if let Some(pcs) = ptb.remove(&page_addr) {
             let mut removed_hosts = Vec::new();
@@ -145,7 +203,10 @@ impl JitCache {
         let last = addr.saturating_add(len - 1) & !(PAGE - 1);
         let span = (last - first) / PAGE + 1;
         let pages: Vec<u64> = {
-            let ptb = self.page_to_blocks.read().unwrap();
+            let ptb = self
+                .page_to_blocks
+                .read()
+                .unwrap_or_else(|e| e.into_inner());
             if span <= ptb.len() as u64 {
                 (0..span)
                     .map(|i| first + i * PAGE)
@@ -170,9 +231,12 @@ impl JitCache {
     /// observer subscribed carries no callbacks and would keep running
     /// uninstrumented for as long as it stays cached.
     pub fn flush_all(&self) {
-        let mut blks = self.blocks.write().unwrap();
-        let mut ptb = self.page_to_blocks.write().unwrap();
-        let table = self.chain_table.read().unwrap();
+        let mut blks = self.blocks.write().unwrap_or_else(|e| e.into_inner());
+        let mut ptb = self
+            .page_to_blocks
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
+        let table = self.chain_table.read().unwrap_or_else(|e| e.into_inner());
         for slot in table.values() {
             slot.store(0, Ordering::Release);
         }
@@ -185,12 +249,67 @@ impl JitCache {
     }
 
     pub fn len(&self) -> usize {
-        self.blocks.read().unwrap().len()
+        self.blocks.read().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
 
 impl Default for JitCache {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_null_host_func_ptr_and_clears_chain_slots_on_invalidation() {
+        let cache = JitCache::new();
+        // SAFETY: the null pointer is rejected; nothing is ever called.
+        unsafe {
+            cache.insert(
+                0x1000,
+                Arc::new(JitBlock {
+                    guest_pc: 0x1000,
+                    host_func_ptr: std::ptr::null(),
+                    block_size: 4,
+                    guest_insns: 1,
+                    next_pc: Some(0x1004),
+                    pages: vec![0x1000],
+                    abs_exit_targets: Vec::new(),
+                }),
+            );
+        }
+        assert!(cache.is_empty());
+        assert!(cache.lookup(0x1000).is_none());
+        assert!(cache.hard_chain_host(0x1000).is_none());
+
+        let dummy_fn: usize = 0x1234_5678;
+        // SAFETY: this test only inspects and invalidates the published
+        // pointer; it never calls it.
+        unsafe {
+            cache.insert(
+                0x2000,
+                Arc::new(JitBlock {
+                    guest_pc: 0x2000,
+                    host_func_ptr: dummy_fn as *const u8,
+                    block_size: 4,
+                    guest_insns: 1,
+                    next_pc: Some(0x2004),
+                    pages: vec![0x2000],
+                    abs_exit_targets: Vec::new(),
+                }),
+            );
+        }
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache.hard_chain_host(0x2000), Some(dummy_fn as *const u8));
+        cache.invalidate_range(0x2000, 0x1000);
+        assert!(cache.is_empty());
+        assert!(cache.hard_chain_host(0x2000).is_none());
     }
 }

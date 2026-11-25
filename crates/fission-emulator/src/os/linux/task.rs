@@ -1574,7 +1574,7 @@ mod tests {
         assert_eq!(taint_emu.taint.sources().len(), 1);
         assert_eq!(taint_emu.taint.sources()[0].len, 3);
         assert_eq!(taint_emu.taint_marked_bytes, 3);
-        assert!(taint_emu.solver.nodes.is_empty());
+        assert!(taint_emu.solver.nodes().is_empty());
         let tram = taint_emu.state.ram_space();
         assert!(
             taint_emu
