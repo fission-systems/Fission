@@ -135,7 +135,48 @@ Optionally use the manual Sync managed labels workflow once merged.
 The one automatic labelling is `area:*` on pull requests: the Label PR areas
 workflow (`.github/labeler.yml`) adds them from the paths a PR changes, on
 open and push, and never removes a label. `risk:*`, type, priority, phase and
-status labels are never applied automatically. Otherwise no automatic mass
+status labels are never applied automatically, except by the Sentry triage
+below, on the issues it files. Otherwise no automatic mass
 labeling: classify small batches after reviewing issue content, and preserve
 existing labels. Start with #1296–#1298 and then the
 #1293 backlog. Do not infer confirmation or release-blocker status from titles.
+
+## Sentry triage
+
+`.github/workflows/sentry-triage.yml` runs `scripts/ci/sentry_triage.py`
+every six hours. It reads unresolved Sentry issues of project `fission` and
+considers one only if its latest event follows the Sentry defect-event
+contract: environment `ci` or `nightly`, category `confirmed_semantic_defect`
+or `crash`, kind not `flaky_test`, and every contract tag present and valid,
+including `run_url`. It then checks the event against GitHub rather than
+trusting it: the run exists in this repository, was triggered by the event its
+environment stands for (`schedule` for `nightly`; `push`, `merge_group` or
+`workflow_dispatch` for `ci`), tested the reported commit, and that commit is on
+`main`. Anything else is ignored. The `main` check runs at triage time: a
+`merge_group` event names the queue's head commit, which becomes a `main`
+commit only when the group merges, so it is held until then and never filed if
+the group failed.
+
+The issue is built only from validated tags and Sentry's id, counts, first and
+last seen, and the suspect commit SHA if Sentry has one. No event text is
+copied. It carries a `Probe` section naming `repro_id` and `commit`, and an
+empty `Acceptance` section.
+
+| Label | Rule |
+| --- | --- |
+| `bug` | Every filed issue is a defect candidate |
+| `status:needs-repro` | Always. The event names a probe but records neither its output nor an acceptance check, which `status:confirmed` requires (above), even when `repro_id` is an in-repo fixture |
+| `priority:P1` | Both eligible categories are correctness or reliability defects; P0 is a maintainer's escalation, never automatic |
+| `area:*` | From `component`, by the crate paths in `.github/labeler.yml`; none if no path matches |
+
+Labels that do not already exist in the repository are dropped, never created.
+
+A hidden `<!-- sentry-issue: <id> -->` marker deduplicates: an issue with it,
+open or closed, is left alone. A closed one is never reopened or commented on.
+At most 5 issues are filed per run and 10 per UTC day.
+
+Every run is a dry run that writes the would-be issues to the job summary and
+the `sentry-triage-preview` artifact. Filing needs the repository variable
+`SENTRY_TRIAGE_ENABLED` set to `true`. The Sentry issue is not linked back to
+the GitHub issue: that needs a Sentry token with `event:write`, and the triage
+only reads Sentry.
