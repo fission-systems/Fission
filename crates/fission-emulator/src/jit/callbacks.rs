@@ -1,16 +1,32 @@
 //! Host callouts emitted by the Cranelift JIT.
 //!
 //! These are the only bridge from compiled guest blocks into `Emulator` state.
-//! There is no interpreter fallback path.
-
-// Cranelift invokes these through C-compatible function pointers. Keeping the
-// exported callbacks safe avoids propagating an unsafe ABI through the JIT,
-// while each raw-pointer access remains contained in an explicit unsafe block.
-#![allow(clippy::not_unsafe_ptr_arg_deref)]
+//! The interpreter (`crate::interp`) shares `jit_call_other` with them.
+//!
+//! # Callback contract
+//!
+//! Every callback that takes a raw pointer is an `unsafe extern "C" fn`: a
+//! non-null check cannot tell a live `Emulator` or a stack slot of the right
+//! size from any other address, so the caller has to promise it. A caller
+//! (compiled code, the interpreter, or a test) must guarantee that:
+//!
+//! - `emu_ptr` is null or points to a live `Emulator` that nothing else
+//!   borrows for the duration of the call;
+//! - a buffer pointer (`dst_ptr`, `src_ptr`, `args_ptr`) is null or valid for
+//!   the `size` bytes / `argc` `u64`s the call names, which the JIT bounds by
+//!   [`MAX_JIT_BULK_BYTES`] and [`MAX_JIT_CALLOTHER_ARGS`] at compile time
+//!   (the callbacks re-check both bounds, but cannot check provenance).
+//!
+//! Safe code cannot hand a callback an arbitrary destination:
+//!
+//! ```compile_fail,E0133
+//! use fission_emulator::jit::callbacks::jit_read_bytes;
+//! jit_read_bytes(std::ptr::null_mut(), 0, 0, 0x10 as *mut u8, 16);
+//! ```
 
 use crate::core::Emulator;
 use crate::jit::float_ops::{float_binop_with_policy, float_unop};
-use crate::os::env::{HleResult, OsEnvironment};
+use crate::os::env::HleResult;
 use crate::pcode::page_map::page_align_down;
 
 /// Max direct TB chain depth (soft chaining, QEMU-inspired).
@@ -73,8 +89,11 @@ fn call_chained_host_block(emu_ptr: *mut Emulator, host_ptr: *const u8) -> u64 {
 
 // ── Generic address-space I/O (≤8 bytes as u64) ─────────────────────────────
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_read_space(
+pub unsafe extern "C" fn jit_read_space(
     emu_ptr: *mut Emulator,
     space_id: u64,
     offset: u64,
@@ -112,8 +131,11 @@ pub extern "C" fn jit_read_space(
     })
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_write_space(
+pub unsafe extern "C" fn jit_write_space(
     emu_ptr: *mut Emulator,
     space_id: u64,
     offset: u64,
@@ -173,8 +195,11 @@ pub extern "C" fn jit_write_space(
 /// impossible rather than merely tested for.
 ///
 /// Returns 1 if the op could not be executed, which stops the block.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
+pub unsafe extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     if emu_ptr.is_null() {
         return 1;
     }
@@ -224,8 +249,11 @@ pub extern "C" fn jit_wide_op(emu_ptr: *mut Emulator, index: u64) -> u64 {
     })
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_read_bytes(
+pub unsafe extern "C" fn jit_read_bytes(
     emu_ptr: *mut Emulator,
     space_id: u64,
     offset: u64,
@@ -279,8 +307,11 @@ pub extern "C" fn jit_read_bytes(
     });
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_write_bytes(
+pub unsafe extern "C" fn jit_write_bytes(
     emu_ptr: *mut Emulator,
     space_id: u64,
     offset: u64,
@@ -357,8 +388,11 @@ pub extern "C" fn jit_int_flag(kind: u32, size: u32, a: u64, b: u64) -> u64 {
 // ── Instruction accounting + chaining ───────────────────────────────────────
 
 /// Count one guest instruction inside a multi-instruction TB.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64, len: u32) {
+pub unsafe extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64, len: u32) {
     if emu_ptr.is_null() {
         return;
     }
@@ -377,8 +411,11 @@ pub extern "C" fn jit_count_insn(emu_ptr: *mut Emulator, pc: u64, len: u32) {
 ///
 /// Emitted at the block's own entry, and only when some observer asked for
 /// `block` -- a run nobody watches compiles without this call at all.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_observe_block(emu_ptr: *mut Emulator, pc: u64) {
+pub unsafe extern "C" fn jit_observe_block(emu_ptr: *mut Emulator, pc: u64) {
     if emu_ptr.is_null() {
         return;
     }
@@ -388,8 +425,11 @@ pub extern "C" fn jit_observe_block(emu_ptr: *mut Emulator, pc: u64) {
 }
 
 /// One guest instruction is about to execute.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_observe_insn(emu_ptr: *mut Emulator, pc: u64) {
+pub unsafe extern "C" fn jit_observe_insn(emu_ptr: *mut Emulator, pc: u64) {
     if emu_ptr.is_null() {
         return;
     }
@@ -411,8 +451,11 @@ pub(crate) fn pcode_budget(max_inst: u64) -> u64 {
 ///
 /// Returns 1 when the TB should exit early (guest insn budget or pcode fuse).
 /// Does **not** set `halt_requested` for `max_inst` (process exit stays separate).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
+pub unsafe extern "C" fn jit_count_pcode(emu_ptr: *mut Emulator) -> u64 {
     if emu_ptr.is_null() {
         return 1;
     }
@@ -470,8 +513,11 @@ fn must_return_to_dispatcher(emu: &Emulator) -> bool {
 
 /// Soft direct chaining: if `next_pc` is already compiled, enter it (bounded depth).
 /// Returns the final next PC once chaining stops (miss or depth limit).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
+pub unsafe extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu_ptr.is_null() {
         return next_pc;
     }
@@ -505,8 +551,11 @@ pub extern "C" fn jit_chain(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
 ///
 /// When TTD is recording, chaining is disabled so the outer run loop can take
 /// snapshots at TB boundaries (Phase D: TTD over JIT segments).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
+pub unsafe extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
     if emu_ptr.is_null() {
         return next_pc;
     }
@@ -554,14 +603,19 @@ pub extern "C" fn jit_exit_tb(emu_ptr: *mut Emulator, next_pc: u64) -> u64 {
         match action {
             ChainAction::Return(pc) => pc,
             ChainAction::HardChain(host) => call_chained_host_block(emu_ptr, host),
-            ChainAction::SoftChain(pc) => jit_chain(emu_ptr, pc),
+            // SAFETY: this callback's own contract covers `emu_ptr`, and no
+            // `&mut Emulator` from the scope above is still live.
+            ChainAction::SoftChain(pc) => unsafe { jit_chain(emu_ptr, pc) },
         }
     })
 }
 
 // Legacy wrappers (register/memory fixed spaces — prefer jit_*_space).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_read_register(emu_ptr: *mut Emulator, offset: u64, size: u64) -> u64 {
+pub unsafe extern "C" fn jit_read_register(emu_ptr: *mut Emulator, offset: u64, size: u64) -> u64 {
     if emu_ptr.is_null() {
         return 0;
     }
@@ -570,11 +624,20 @@ pub extern "C" fn jit_read_register(emu_ptr: *mut Emulator, offset: u64, size: u
         let emu = unsafe { &*emu_ptr };
         emu.state.register_space()
     };
-    jit_read_space(emu_ptr, space_id, offset, size)
+    // SAFETY: forwards this callback's own contract unchanged.
+    unsafe { jit_read_space(emu_ptr, space_id, offset, size) }
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_write_register(emu_ptr: *mut Emulator, offset: u64, size: u64, val: u64) {
+pub unsafe extern "C" fn jit_write_register(
+    emu_ptr: *mut Emulator,
+    offset: u64,
+    size: u64,
+    val: u64,
+) {
     if emu_ptr.is_null() {
         return;
     }
@@ -583,11 +646,15 @@ pub extern "C" fn jit_write_register(emu_ptr: *mut Emulator, offset: u64, size: 
         let emu = unsafe { &*emu_ptr };
         emu.state.register_space()
     };
-    jit_write_space(emu_ptr, space_id, offset, size, val);
+    // SAFETY: forwards this callback's own contract unchanged.
+    unsafe { jit_write_space(emu_ptr, space_id, offset, size, val) };
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_read_memory(emu_ptr: *mut Emulator, offset: u64, size: u64) -> u64 {
+pub unsafe extern "C" fn jit_read_memory(emu_ptr: *mut Emulator, offset: u64, size: u64) -> u64 {
     if emu_ptr.is_null() {
         return 0;
     }
@@ -596,11 +663,20 @@ pub extern "C" fn jit_read_memory(emu_ptr: *mut Emulator, offset: u64, size: u64
         let emu = unsafe { &*emu_ptr };
         emu.state.ram_space()
     };
-    jit_read_space(emu_ptr, space_id, offset, size)
+    // SAFETY: forwards this callback's own contract unchanged.
+    unsafe { jit_read_space(emu_ptr, space_id, offset, size) }
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_write_memory(emu_ptr: *mut Emulator, offset: u64, size: u64, val: u64) {
+pub unsafe extern "C" fn jit_write_memory(
+    emu_ptr: *mut Emulator,
+    offset: u64,
+    size: u64,
+    val: u64,
+) {
     if emu_ptr.is_null() {
         return;
     }
@@ -609,14 +685,18 @@ pub extern "C" fn jit_write_memory(emu_ptr: *mut Emulator, offset: u64, size: u6
         let emu = unsafe { &*emu_ptr };
         emu.state.ram_space()
     };
-    jit_write_space(emu_ptr, space_id, offset, size, val);
+    // SAFETY: forwards this callback's own contract unchanged.
+    unsafe { jit_write_space(emu_ptr, space_id, offset, size, val) };
 }
 
 // ── Host register file (zero-callout loads) ──────────────────────────────────
 
 /// Base pointer of the contiguous host register mirror (`MachineState::host_reg_file`).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
+pub unsafe extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
     if emu_ptr.is_null() {
         return 0;
     }
@@ -628,8 +708,11 @@ pub extern "C" fn jit_host_reg_base(emu_ptr: *mut Emulator) -> u64 {
 // ── Shadow / taint propagation (concolic) ────────────────────────────────────
 
 /// Copy shadow from `src` varnode to `dst` (COPY). Clears dst if src is concrete.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_shadow_copy(
+pub unsafe extern "C" fn jit_shadow_copy(
     emu_ptr: *mut Emulator,
     dst_sp: u64,
     dst_off: u64,
@@ -664,8 +747,11 @@ pub extern "C" fn jit_shadow_copy(
 }
 
 /// After LOAD: propagate memory-value and tainted-address provenance to dst.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_shadow_load(
+pub unsafe extern "C" fn jit_shadow_load(
     emu_ptr: *mut Emulator,
     dst_sp: u64,
     dst_off: u64,
@@ -730,8 +816,11 @@ pub extern "C" fn jit_shadow_load(
 }
 
 /// After STORE: propagate value, address, and active-control provenance to memory.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_shadow_store(
+pub unsafe extern "C" fn jit_shadow_store(
     emu_ptr: *mut Emulator,
     mem_sp: u64,
     addr: u64,
@@ -864,8 +953,11 @@ pub enum SymUnOpKind {
 /// (not merely taint-id union) and attach it to the destination varnode.
 ///
 /// Concrete values are supplied so untainted inputs become `Const` leaves.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_shadow_binop(
+pub unsafe extern "C" fn jit_shadow_binop(
     emu_ptr: *mut Emulator,
     dst_sp: u64,
     dst_off: u64,
@@ -971,8 +1063,11 @@ pub extern "C" fn jit_shadow_binop(
 }
 
 /// Unary int / float: build AST when the input is tainted.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_shadow_unop(
+pub unsafe extern "C" fn jit_shadow_unop(
     emu_ptr: *mut Emulator,
     dst_sp: u64,
     dst_off: u64,
@@ -1048,8 +1143,11 @@ pub extern "C" fn jit_shadow_unop(
 /// and request a stop so `SimulationManager` can fork. Returns 1 when stopped.
 ///
 /// Concrete-only conditions return 0 and leave control to normal CBranch IR.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_sym_cbranch_gate(
+pub unsafe extern "C" fn jit_sym_cbranch_gate(
     emu_ptr: *mut Emulator,
     branch_pc: u64,
     cond_val: u64,
@@ -1109,8 +1207,11 @@ pub extern "C" fn jit_sym_cbranch_gate(
 
 /// Rebuild data/control provenance after a p-code output operation. The op is
 /// in the emulator's append-only JIT side table, alongside wide evaluator ops.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
+pub unsafe extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
     if emu_ptr.is_null() {
         return;
     }
@@ -1125,8 +1226,11 @@ pub extern "C" fn jit_taint_output(emu_ptr: *mut Emulator, index: u64) {
 
 /// An instruction that can fault is about to start: note the registers it
 /// writes, so a fault can put them back.
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_insn_checkpoint(emu_ptr: *mut Emulator, index: u64) {
+pub unsafe extern "C" fn jit_insn_checkpoint(emu_ptr: *mut Emulator, index: u64) {
     if emu_ptr.is_null() {
         return;
     }
@@ -1146,8 +1250,11 @@ pub extern "C" fn jit_insn_checkpoint(emu_ptr: *mut Emulator, index: u64) {
 
 // ── CallOther / HLE ──────────────────────────────────────────────────────────
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_call_other(
+pub unsafe extern "C" fn jit_call_other(
     emu_ptr: *mut Emulator,
     userop_id: u32,
     args_ptr: *const u64,
@@ -1197,18 +1304,13 @@ pub extern "C" fn jit_call_other(
 
         emu.callother_result = 0;
         let result = if is_syscall {
-            let os_ptr = &*emu.os as *const dyn OsEnvironment;
-            // SAFETY: `emu.os` is heap-allocated and immutable during `dispatch_hle`,
-            // which never replaces or mutates the `os` box itself.
-            let os_ref = unsafe { &*os_ptr };
+            let os_ref = std::sync::Arc::clone(&emu.os);
             os_ref.dispatch_hle(emu, "syscall").unwrap_or_else(|e| {
                 tracing::warn!("JIT syscall dispatch error: {:?}", e);
                 HleResult::Continue
             })
         } else {
-            let os_ptr = &*emu.os as *const dyn OsEnvironment;
-            // SAFETY: `emu.os` is heap-allocated and immutable during `dispatch_userop`.
-            let os_ref = unsafe { &*os_ptr };
+            let os_ref = std::sync::Arc::clone(&emu.os);
             match os_ref.dispatch_userop(emu, &userop_name, &input_vals, output_size as u32) {
                 Ok(r) => r,
                 Err(e) => {
@@ -1243,8 +1345,11 @@ pub extern "C" fn jit_call_other(
 }
 
 /// Data result of the most recent CallOther / userop (e.g. `segment_fs` address).
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_callother_result(emu_ptr: *mut Emulator) -> u64 {
+pub unsafe extern "C" fn jit_callother_result(emu_ptr: *mut Emulator) -> u64 {
     if emu_ptr.is_null() {
         return 0;
     }
@@ -1253,8 +1358,11 @@ pub extern "C" fn jit_callother_result(emu_ptr: *mut Emulator) -> u64 {
     emu.callother_result
 }
 
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
 #[unsafe(no_mangle)]
-pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
+pub unsafe extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
     if emu_ptr.is_null() {
         return 1;
     }
@@ -1270,9 +1378,7 @@ pub extern "C" fn jit_hle_trap(emu_ptr: *mut Emulator, magic_pc: u64) -> u64 {
         tracing::debug!("JIT HLE trap: {} at 0x{:X}", func_name, magic_pc);
 
         let result = {
-            let os_ptr = &*emu.os as *const dyn OsEnvironment;
-            // SAFETY: `emu.os` is heap-allocated and immutable during `dispatch_hle`.
-            let os_ref = unsafe { &*os_ptr };
+            let os_ref = std::sync::Arc::clone(&emu.os);
             os_ref.dispatch_hle(emu, &func_name).unwrap_or_else(|e| {
                 tracing::warn!("JIT HLE dispatch error: {:?}", e);
                 HleResult::Continue

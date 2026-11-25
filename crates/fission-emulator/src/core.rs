@@ -30,7 +30,12 @@ pub struct Emulator {
     /// Architecture metadata: PC/SP register names, pointer size, CC, …
     pub arch: ArchInfo,
     /// OS execution environment: import patching, HLE dispatch, …
-    pub os: Box<dyn OsEnvironment>,
+    ///
+    /// Shared, not boxed: every dispatch clones the handle and calls through
+    /// the clone, because the handler receives `&mut Emulator` and may
+    /// replace this field. A `Box` there would free the layer whose method is
+    /// still running.
+    pub os: Arc<dyn OsEnvironment>,
 
     pub snapshots: Vec<EmulatorSnapshot>,
     pub snapshot_triggers: Vec<u64>,
@@ -430,7 +435,7 @@ impl Emulator {
             register_map,
             snapshot_registers,
             arch,
-            os,
+            os: Arc::from(os),
             snapshots: Vec::new(),
             snapshot_triggers: Vec::new(),
             trace: ExecutionTrace::disabled(),
@@ -2701,7 +2706,10 @@ impl Emulator {
             pages,
             abs_exit_targets: Vec::new(),
         });
-        self.jit_cache.insert(start_pc, block.clone());
+        // SAFETY: `func_ptr` was just returned by `compile_translation_block`:
+        // finalized code in `self.jit`'s module, which outlives the cache entry
+        // and never frees code memory, compiled with the callback signature.
+        unsafe { self.jit_cache.insert(start_pc, block.clone()) };
 
         tracing::debug!(
             "JIT: compiled TB@0x{:X} ({} insns, {} bytes)",
@@ -2900,8 +2908,10 @@ impl Emulator {
                 }
 
                 let result = {
-                    let os_ptr = &*self.os as *const dyn OsEnvironment;
-                    let os_ref = unsafe { &*os_ptr };
+                    // A clone of the handle, not a pointer into `self`: the
+                    // handler gets `&mut self` and may replace `self.os`, and
+                    // the layer whose method is running must outlive the call.
+                    let os_ref = Arc::clone(&self.os);
                     os_ref.dispatch_hle(self, &func_name)?
                 };
 
