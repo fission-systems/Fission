@@ -93,3 +93,14 @@ slug**, `fission-systems`, and `SENTRY_PROJECT` is `fission`. The slug happens
 to equal the GitHub organization name, but it is the Sentry slug that
 matters. CI sets these from the trusted build environment; never expose
 `SENTRY_AUTH_TOKEN` to fork PRs.
+
+## CI defect events
+
+CI reports its own defects to the same project, separately from this opt-in
+CLI telemetry. `scripts/ci/sentry_defects.py` sends flaky tests, aborted
+tests, native differential divergences, fixture replay mismatches and fuzz
+crashes from trusted `main` runs, and never from pull requests or forks. Every
+field is a closed-set value or a pattern-checked identifier, so no analyzed
+program's text can be sent. The defect triage reads these events to file
+GitHub issues. Sources, fields and limits:
+[CI release gates](CI_RELEASE_GATES.md#ci-defect-events).

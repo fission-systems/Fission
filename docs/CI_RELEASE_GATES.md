@@ -143,6 +143,56 @@ plan has one cron and one uptime monitor seat, and both are in use.
   `https://fission-systems.github.io/freshbench/` every 5 minutes with a
   10-second timeout. It was created once through the API and needs no secret.
 
+## CI defect events
+
+Some red runs are defects someone should fix, not just a red check. CI sends
+those to Sentry (org `fission-systems`, project `fission`) as structured
+events, so a defect that comes back night after night is one Sentry issue with
+a count, not a series of comments.
+`scripts/ci/sentry_defects.py` reads what the jobs already produce. Each
+job uploads its input as a `defect-evidence-*` artifact, and fuzzing keeps its
+`fuzz-crashes-*` artifacts. A final report-only job
+(`reusable-sentry-defects.yml`) turns them into events:
+
+| Source | Event | Category |
+|---|---|---|
+| nextest JUnit (`NEXTEST_PROFILE=ci`), a test that failed and then passed on nextest's retry | `flaky_test` (warning) | `flaky` |
+| nextest JUnit, a test killed by a signal on every attempt | `test_failure` | `crash` |
+| native differential, a divergence `baseline.txt` does not list | `native_differential_mismatch`, one per instruction and field | `confirmed_semantic_defect` (`crash` for `panic`) |
+| fixture replay witness, a lane that disagrees with the native run | `verify_diverged` | `confirmed_semantic_defect` |
+| libFuzzer `crash-<sha1>` | `fuzz_crash`, one per input | `crash` |
+| `fission_cli verify` JSON on an in-repo fixture, a `diverged` tier (no CI job runs this yet) | `verify_diverged` | `confirmed_semantic_defect` |
+
+These are never sent: a test that fails the same way on every attempt (the
+job's status and the `ci-red` issue already report it), timeouts, libFuzzer
+`timeout`/`oom`/`leak` files, stale baseline entries, instructions Fission
+cannot execute, and `suspect`, `unsupported`, `harness` or `inconclusive`
+verify results.
+
+Every tag value comes from a closed set or must match a pattern: `kind`,
+`component` (a crate name), `arch`, `stage`, `invariant`, `category`,
+`commit` (the run's head SHA), `repro_id` (`fixture:`, `fuzz:` or
+`run:<id>/<artifact>`) and `run_url`. The exception value is the fixed text
+`<kind> in <component>/<stage>`. An event with a value that fails its check is
+dropped, and the reason is listed in the job summary; the value is never
+cleaned up and sent. The reporter only looks at structure (element names,
+closed-set fields, file names). It never reads panic text, disassembly,
+decompiled output, symbol names or input bytes into an event. A test id longer
+than 64 characters is cut to 55 characters plus 8 hex digits of its SHA-256.
+
+The reporter sends at most 50 events per run and one per fingerprint. Defects
+take the cap before flaky tests. It sends only from `push`, `merge_group`,
+`workflow_dispatch` and `schedule` runs of this repository on `main` (a merge
+group must target `main`), and only when the `SENTRY_DSN` repository secret is
+set. Pull requests, forks and runs on other branches get a dry run. Every run
+writes a job summary of what was sent, or what would have been. The job has
+only `contents: read`, runs no build or test code, and is `continue-on-error`.
+The script itself exits 0. It never changes a run's result.
+
+Run it locally on downloaded artifacts with `--dry-run` (set the `GITHUB_*`
+variables of the run). Its tests are `scripts/ci/test_sentry_defects.py`, and
+they never touch the network.
+
 ## Native differential (SLEIGH lift against the CPU)
 
 Fission lifts from Ghidra's SLEIGH specs, and its emulator and decompiler share

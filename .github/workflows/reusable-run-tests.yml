@@ -66,6 +66,14 @@ on:
         required: false
         default: false
         description: "Compile alternate CLI feature configurations when the CLI is affected"
+      evidence_name:
+        type: string
+        required: false
+        default: ""
+        description: >-
+          Upload nextest's JUnit report as defect-evidence-junit-<name>-<lane>
+          for the Sentry defect reporter (reusable-sentry-defects.yml). Empty:
+          no upload. Pull-request runs never upload it.
       parallel_lanes:
         type: boolean
         required: false
@@ -155,10 +163,13 @@ jobs:
       # macOS runners use Bash 3.2, where `set -u` rejects direct expansion of
       # an empty array. Keep array expansions in the `${array[@]+...}` form.
       # --- Specific crates mode (single cargo/nextest process) ---
+      # NEXTEST_PROFILE=ci: the default profile plus a JUnit report
+      # (.config/nextest.toml), which records retried-then-passed tests.
       - name: Run Tests (Specific Crates) [nextest]
         if: ${{ inputs.crates != '' && matrix.lane != 'extras' }}
         shell: bash
         env:
+          NEXTEST_PROFILE: ci
           CRATES: ${{ inputs.crates }}
           FEATURES: ${{ inputs.features }}
           RETRIES: ${{ inputs.retries }}
@@ -179,6 +190,8 @@ jobs:
       - name: Run Full Test Suite (All Crates) [nextest]
         if: ${{ inputs.crates == '' && matrix.lane != 'extras' }}
         shell: bash
+        env:
+          NEXTEST_PROFILE: ci
         run: |
           set -euo pipefail
           features="${FISSION_IN_FEATURES}"
@@ -204,6 +217,8 @@ jobs:
             --no-fail-fast \
             --retries ${FISSION_IN_RETRIES} \
             ${{ inputs.profile == 'release' && '--release' || '' }}
+          # The next run writes its own junit.xml; keep this one.
+          mv target/nextest/ci/junit.xml target/nextest/ci/junit-workspace.xml
           # fission-static is often excluded from workspace GUI path; still test it.
           if echo "${FISSION_IN_EXCLUDE_CRATES}" | tr ',' '\n' | grep -qx 'fission-static'; then
             cargo nextest run \
@@ -249,6 +264,15 @@ jobs:
         if: ${{ inputs.run_cli_alt_feature_checks && matrix.lane != 'core' }}
         shell: bash
         run: bash scripts/ci/feature_suite.sh cli_alt
+
+      - name: Keep the JUnit report for the defect reporter
+        if: ${{ always() && inputs.evidence_name != '' && matrix.lane != 'extras' && github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: defect-evidence-junit-${{ inputs.evidence_name }}-${{ matrix.lane }}
+          path: target/nextest/ci/*.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
       # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats

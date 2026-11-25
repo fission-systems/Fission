@@ -62,6 +62,7 @@ jobs:
       crates: "fission-midend-structuring,fission-pcode-ir,fission-cspec,fission-pcode,fission-decompiler"
       profile: release
       timeout_minutes: 120
+      evidence_name: windows
 
   test-windows-native-debugger:
     name: Native Win32 Debugger (Windows)
@@ -121,6 +122,7 @@ jobs:
       exclude_crates: "fission-static"
       run_interactive_runtime_tests: true
       run_script_emulator_tests: true
+      evidence_name: linux-full
 
   compile-surface:
     name: Compile Surface (Linux · all features)
@@ -253,6 +255,16 @@ jobs:
           fi
           echo "OK: Heavy validation checks passed for this event!"
           echo "INFO: Heavy runs nightly or on demand; dispatch it for a release candidate SHA before tagging."
+
+  # Report-only: flaky and aborted tests as Sentry events (reusable-sentry-defects.yml).
+  sentry-defects:
+    needs: [test-windows-heavy, test-linux-full]
+    if: always() && github.repository == 'fission-systems/Fission'
+    uses: ./.github/workflows/reusable-sentry-defects.yml
+    with:
+      pattern: defect-evidence-*
+    secrets:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
   # Needs the start job too, so the final check-in can never overtake the
   # in_progress one. Any heavy-summary result but success (failure,

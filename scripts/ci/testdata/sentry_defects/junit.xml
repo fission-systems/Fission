@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="6" failures="3" errors="0" uuid="db3bd92e-198c-4c0a-8378-e8148cf89fd6" timestamp="2026-11-25T20:45:09.744+09:00" time="4.017">
+    <testsuite name="fission-junitprobe::probe" tests="6" disabled="0" errors="0" failures="3">
+        <testcase name="nested::deep_module_test_with_a_rather_long_name_to_exceed_the_limit_of_sixty_four" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.745+09:00" time="0.014">
+        </testcase>
+        <testcase name="passes" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.745+09:00" time="0.016">
+        </testcase>
+        <testcase name="always_fails" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.745+09:00" time="0.014">
+            <failure message="thread &apos;always_fails&apos; (54558129) panicked at tests/probe.rs:14:5" type="test failure with exit code 101">thread &apos;always_fails&apos; (54558129) panicked at tests/probe.rs:14:5:
+assertion `left == right` failed: arithmetic
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace</failure>
+            <rerunFailure timestamp="2026-11-25T20:45:09.763+09:00" time="0.008" message="thread &apos;always_fails&apos; (54558208) panicked at tests/probe.rs:14:5" type="test failure with exit code 101">thread &apos;always_fails&apos; (54558208) panicked at tests/probe.rs:14:5:
+assertion `left == right` failed: arithmetic
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+                <system-out>
+running 1 test
+test always_fails ... FAILED
+
+failures:
+
+failures:
+    always_fails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+</system-out>
+                <system-err>
+thread &apos;always_fails&apos; (54558208) panicked at tests/probe.rs:14:5:
+assertion `left == right` failed: arithmetic
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</system-err>
+            </rerunFailure>
+            <system-out>
+running 1 test
+test always_fails ... FAILED
+
+failures:
+
+failures:
+    always_fails
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+</system-out>
+            <system-err>
+thread &apos;always_fails&apos; (54558129) panicked at tests/probe.rs:14:5:
+assertion `left == right` failed: arithmetic
+  left: 2
+ right: 3
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</system-err>
+        </testcase>
+        <testcase name="aborts" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.745+09:00" time="0.015">
+            <failure message="process aborted with signal 6 (SIGABRT)" type="test abort">process aborted with signal 6 (SIGABRT)</failure>
+            <rerunFailure timestamp="2026-11-25T20:45:09.763+09:00" time="0.009" message="process aborted with signal 6 (SIGABRT)" type="test abort">process aborted with signal 6 (SIGABRT)
+                <system-out>
+running 1 test
+</system-out>
+                <system-err></system-err>
+            </rerunFailure>
+            <system-out>
+running 1 test
+</system-out>
+            <system-err></system-err>
+        </testcase>
+        <testcase name="flaky_once" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.763+09:00" time="0.009">
+            <flakyFailure timestamp="2026-11-25T20:45:09.745+09:00" time="0.015" message="thread &apos;flaky_once&apos; (54558136) panicked at tests/probe.rs:9:9" type="test failure with exit code 101">thread &apos;flaky_once&apos; (54558136) panicked at tests/probe.rs:9:9:
+first attempt fails
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+                <system-out>
+running 1 test
+test flaky_once ... FAILED
+
+failures:
+
+failures:
+    flaky_once
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered out; finished in 0.00s
+
+</system-out>
+                <system-err>
+thread &apos;flaky_once&apos; (54558136) panicked at tests/probe.rs:9:9:
+first attempt fails
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</system-err>
+            </flakyFailure>
+        </testcase>
+        <testcase name="hangs" classname="fission-junitprobe::probe" timestamp="2026-11-25T20:45:09.745+09:00" time="2.005">
+            <failure type="test timeout"/>
+            <rerunFailure timestamp="2026-11-25T20:45:11.751+09:00" time="2.009" type="test timeout">
+                <system-out>
+running 1 test
+</system-out>
+                <system-err></system-err>
+            </rerunFailure>
+            <system-out>
+running 1 test
+</system-out>
+            <system-err></system-err>
+        </testcase>
+    </testsuite>
+</testsuites>
