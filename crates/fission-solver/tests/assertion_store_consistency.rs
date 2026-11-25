@@ -53,7 +53,7 @@ fn fresh(assertions: &[SymExpr], extra: &[SymExpr]) -> SatResult {
 
 fn agrees_with_fresh(solver: &mut Solver, extra: &[SymExpr]) -> SatResult {
     let incremental = solver.check_sat_with_oracle(None, extra).unwrap();
-    let expected = fresh(&solver.assertions().to_vec(), extra);
+    let expected = fresh(solver.assertions(), extra);
     assert_eq!(
         incremental,
         expected,
