@@ -1,5 +1,6 @@
 //! Plugin Types
 
+use crate::security::PluginTrustTier;
 use fission_core::FISSION_VERSION;
 
 /// Plugin metadata
@@ -17,6 +18,8 @@ pub struct PluginInfo {
     pub description: String,
     /// Plugin type
     pub plugin_type: PluginType,
+    /// Declared trust boundary of this plugin
+    pub trust_tier: PluginTrustTier,
     /// Is plugin currently enabled
     pub enabled: bool,
 }
@@ -26,8 +29,12 @@ pub struct PluginInfo {
 pub enum PluginType {
     /// Lua script plugin
     Lua,
+    /// Constrained Rhai script
+    RhaiScript,
     /// Native Rust plugin (dynamic library)
     Native,
+    /// Out-of-process external SDK worker
+    ExternalWorker,
 }
 
 impl Default for PluginInfo {
@@ -39,6 +46,7 @@ impl Default for PluginInfo {
             author: String::from("Unknown"),
             description: String::new(),
             plugin_type: PluginType::Native,
+            trust_tier: PluginTrustTier::TrustedNative,
             enabled: true,
         }
     }

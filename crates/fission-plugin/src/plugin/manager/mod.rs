@@ -397,6 +397,20 @@ mod tests {
     }
 
     #[test]
+    fn load_plugin_is_denied_by_default_without_explicit_opt_in() {
+        let path = std::env::temp_dir().join(format!(
+            "fission-plugin-denied-{}.dylib",
+            std::process::id()
+        ));
+        let mut pm = PluginManager::new();
+        let error = pm
+            .load_plugin(&path)
+            .expect_err("native loading must be denied by default");
+        assert!(error.contains("explicit opt-in"), "{error}");
+        assert_eq!(pm.plugin_count(), 0);
+    }
+
+    #[test]
     fn load_plugin_does_not_register_an_unopenable_library() {
         let path = std::env::temp_dir().join(format!(
             "fission-plugin-missing-{}.dylib",
@@ -405,6 +419,11 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         let mut pm = PluginManager::new();
+        pm.set_security_policy(
+            crate::security::PluginSecurityPolicy::allow_trusted_native_without_manifest([
+                std::env::temp_dir(),
+            ]),
+        );
         let error = pm
             .load_plugin(&path)
             .expect_err("a missing dynamic library must not load");

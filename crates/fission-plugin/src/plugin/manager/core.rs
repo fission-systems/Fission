@@ -8,11 +8,13 @@ use super::super::api::PluginAPI;
 use super::super::hooks::PluginHook;
 use super::types::{HookCallback, LoadedPlugin};
 use crate::events::EventBus;
+use crate::security::PluginSecurityPolicy;
 
 pub struct PluginManager {
     pub(super) hooks: HashMap<u64, (PluginHook, HookCallback)>,
     pub(super) next_hook_id: u64,
     pub(super) search_paths: Vec<PathBuf>,
+    pub(super) security_policy: PluginSecurityPolicy,
     pub(super) api: Option<Arc<dyn PluginAPI>>,
     pub(super) event_bus: Option<Arc<EventBus>>,
     /// Declared last on purpose. Struct fields drop in declaration order, and
@@ -25,7 +27,9 @@ pub struct PluginManager {
 
 impl PluginManager {
     pub fn new() -> Self {
-        let mut search_paths = vec![PathBuf::from(PLUGIN_DIR_NAME)];
+        // Avoid probing the current working directory (such as a target binary's
+        // folder) by default, and enforce deny-all until the operator opts in.
+        let mut search_paths = Vec::new();
         if let Some(home) = dirs::home_dir() {
             search_paths.push(
                 home.join(format!(".{}", APP_DIR_NAME))
@@ -38,9 +42,24 @@ impl PluginManager {
             hooks: HashMap::new(),
             next_hook_id: 1,
             search_paths,
+            security_policy: PluginSecurityPolicy::deny_all(),
             api: None,
             event_bus: None,
         }
+    }
+
+    pub fn set_security_policy(&mut self, policy: PluginSecurityPolicy) {
+        self.security_policy = policy;
+    }
+
+    #[must_use]
+    pub fn security_policy(&self) -> &PluginSecurityPolicy {
+        &self.security_policy
+    }
+
+    /// Block native plugin loads from the analyzed binary's parent directory.
+    pub fn forbid_target_binary_dir(&mut self, binary_path: &Path) {
+        self.security_policy.forbid_target_binary_dir(binary_path);
     }
 
     pub(super) fn context_for_plugin(
