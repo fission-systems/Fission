@@ -195,9 +195,7 @@ impl WindowsDebugger {
     pub(super) fn step_over(&mut self) -> FissionResult<()> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for step over"))?;
 
         let regs = self.fetch_registers(tid)?;
@@ -247,9 +245,7 @@ impl WindowsDebugger {
     pub(super) fn step_out(&mut self) -> FissionResult<()> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for step out"))?;
 
         let regs = self.fetch_registers(tid)?;
@@ -562,9 +558,7 @@ impl WindowsDebugger {
     pub(super) fn skip_instruction(&mut self) -> FissionResult<()> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for skip"))?;
 
         let mut regs = self.fetch_registers(tid)?;

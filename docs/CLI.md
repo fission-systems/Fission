@@ -394,6 +394,20 @@ Keep stdin open while choosing commands from prior responses. Use
 detaching fails during shutdown, the final state is marked unknown and includes
 the last observed state rather than reporting the target as suspended.
 
+Every frame's `state` names one thread. `thread_id` is the selected thread, and
+`pc` and `regs`, `set-reg`, `step` and `stack-peek` act on it. `event_thread_id`
+raised the stop that `stop` describes (for example `breakpoint:0x401000`,
+`stepped`, `thread-exited`, `exited`; `null` on the Linux and macOS native
+backends, which do not report one yet). A new reported event selects the thread
+that raised it, so after a breakpoint on a worker `thread_id`, `pc` and `stop`
+describe that worker even if another thread was selected before. `switch-thread`
+selects another live thread until the next reported event. Polling a stopped
+target with `event` reports no event and changes nothing. A thread that exits
+is never left selected: the selection falls back to the main thread, else the
+lowest live thread. On Windows, `step` with a thread selected other than the
+event thread is refused while the event thread stands on one of the session's
+breakpoints; `continue` or step that thread first.
+
 The module report keeps runtime mapping ranges and file offsets separate from
 ELF analysis VAs. A resolved ELF transform includes `load_bias` and the formula
 `runtime_va = analysis_va + load_bias`; the bias is derived by matching actual

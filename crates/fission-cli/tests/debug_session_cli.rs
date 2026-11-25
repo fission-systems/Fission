@@ -737,8 +737,35 @@ fn windows_native_launch_reads_registers_of_the_thread_it_stopped() {
     session.send("regs");
     let registers = session.next_response();
     assert_eq!(registers["status"], "ok", "{registers:#}");
-    assert_eq!(registers["state"]["thread_id"], thread, "{registers:#}");
-    assert!(registers["state"]["pc"].is_string(), "{registers:#}");
+    // Thread, PC, registers and stop all describe the same stop.
+    let state = &registers["state"];
+    assert_eq!(state["thread_id"], thread, "{registers:#}");
+    assert_eq!(state["event_thread_id"], thread, "{registers:#}");
+    assert_eq!(state["status"], "suspended", "{registers:#}");
+    assert_eq!(
+        state["stop"],
+        serde_json::json!(format!(
+            "breakpoint:{}",
+            stopped["address"].as_str().expect("breakpoint address")
+        )),
+        "{registers:#}"
+    );
+    assert_eq!(
+        state["pc"], registers["result"]["registers"]["pc"],
+        "{registers:#}"
+    );
+
+    // Polling the frozen target reports no event and changes nothing.
+    session.send("event --timeout-ms 0");
+    let polled = session.next_response();
+    assert_eq!(polled["status"], "ok", "{polled:#}");
+    assert_eq!(
+        polled["result"]["event"],
+        serde_json::Value::Null,
+        "{polled:#}"
+    );
+    assert_eq!(polled["state"]["thread_id"], thread, "{polled:#}");
+    assert_eq!(polled["state"]["pc"], state["pc"], "{polled:#}");
 
     session.send("stop");
     let _ = session.next_response();
