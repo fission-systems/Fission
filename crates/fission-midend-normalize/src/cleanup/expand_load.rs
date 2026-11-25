@@ -40,24 +40,25 @@ use crate::prelude::*;
 /// Returns `true` if any transformation was made.
 pub fn apply_expand_load_pass(func: &mut PreHirFunction) -> bool {
     let mut changed = false;
+    let is_big_endian = func.is_big_endian;
     for stmt in &mut func.body {
-        changed |= expand_load_in_stmt(stmt);
+        changed |= expand_load_in_stmt(stmt, is_big_endian);
     }
     changed
 }
 
-fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
+fn expand_load_in_stmt(stmt: &mut PreHirStmt, is_big_endian: bool) -> bool {
     let mut changed = false;
     match stmt {
-        PreHirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs),
+        PreHirStmt::Assign { rhs, .. } => changed |= expand_load_in_expr(rhs, is_big_endian),
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-            changed |= expand_load_in_expr(expr)
+            changed |= expand_load_in_expr(expr, is_big_endian)
         }
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
         | PreHirStmt::DoWhile { body, .. } => {
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
         }
         PreHirStmt::For {
@@ -67,16 +68,16 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
             body,
         } => {
             if let Some(s) = init {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
             if let Some(s) = update {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
             if let Some(c) = cond {
-                changed |= expand_load_in_expr(c);
+                changed |= expand_load_in_expr(c, is_big_endian);
             }
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body).iter_mut() {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
         }
         PreHirStmt::If {
@@ -84,12 +85,12 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
             then_body,
             else_body,
         } => {
-            changed |= expand_load_in_expr(cond);
+            changed |= expand_load_in_expr(cond, is_big_endian);
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body).iter_mut() {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body).iter_mut() {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
         }
         PreHirStmt::Switch {
@@ -97,14 +98,14 @@ fn expand_load_in_stmt(stmt: &mut PreHirStmt) -> bool {
             cases,
             default,
         } => {
-            changed |= expand_load_in_expr(expr);
+            changed |= expand_load_in_expr(expr, is_big_endian);
             for case in cases.iter_mut() {
                 for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body).iter_mut() {
-                    changed |= expand_load_in_stmt(s);
+                    changed |= expand_load_in_stmt(s, is_big_endian);
                 }
             }
             for s in std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default).iter_mut() {
-                changed |= expand_load_in_stmt(s);
+                changed |= expand_load_in_stmt(s, is_big_endian);
             }
         }
         _ => {}
@@ -142,14 +143,14 @@ fn is_natural_narrowing(outer: &NirType, inner: &NirType) -> bool {
     }
 }
 
-fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
+fn expand_load_in_expr(expr: &mut PreHirExpr, is_big_endian: bool) -> bool {
     // -----------------------------------------------------------------------
     // Pattern A (AND-comparison form) — checked BEFORE recursion so that
     // Pattern B (below) does not eagerly collapse Cast<small>(Load<large>)
     // inside the And expression before Pattern A gets a chance to see it.
     //
     //   ((Cast<u{small}>(Load<u{large}>(ptr))) & mask) == cmp_val
-    //   → (Load<u{large}>(ptr) & (mask widened to u{large})) == (cmp_val widened)
+    //   → (Load<u{large}>(ptr) & (mask zero-extended to u{large})) == (cmp_val)
     // -----------------------------------------------------------------------
     if let PreHirExpr::Binary {
         op: PreHirBinaryOp::Eq | PreHirBinaryOp::Ne,
@@ -179,22 +180,40 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
                             ty: load_ty,
                         } = cast_inner.as_mut()
                         {
+                            let is_unsigned_narrow = matches!(
+                                cast_ty,
+                                NirType::Int { signed: false, .. } | NirType::Bool
+                            );
                             let sb = int_bits(cast_ty);
                             let lb = int_bits(load_ty);
-                            if let (Some(sb_bits), Some(lb_bits)) = (sb, lb) {
-                                if sb_bits < lb_bits {
-                                    let wide_ty = load_ty.clone();
-                                    let wide_ptr = load_ptr.clone();
-                                    *and_lhs = Box::new(PreHirExpr::Load {
-                                        ptr: wide_ptr,
-                                        ty: wide_ty.clone(),
-                                    });
-                                    *and_ty = wide_ty.clone();
-                                    *and_rhs =
-                                        Box::new(PreHirExpr::Const(mask_val, wide_ty.clone()));
-                                    *cmp_rhs = Box::new(PreHirExpr::Const(cmp_val, wide_ty));
-                                    *cmp_ty = NirType::Bool;
-                                    return true;
+                            if is_unsigned_narrow {
+                                if let (Some(sb_bits), Some(lb_bits)) = (sb, lb) {
+                                    if sb_bits < lb_bits && sb_bits <= 64 {
+                                        let sb_mask = if sb_bits == 64 {
+                                            u64::MAX
+                                        } else {
+                                            (1_u64 << sb_bits) - 1
+                                        };
+                                        if ((cmp_val as u64) & !sb_mask) == 0 {
+                                            let narrowed_mask =
+                                                ((mask_val as u64) & sb_mask) as i64;
+                                            let wide_ty = load_ty.clone();
+                                            let wide_ptr = load_ptr.clone();
+                                            *and_lhs = Box::new(PreHirExpr::Load {
+                                                ptr: wide_ptr,
+                                                ty: wide_ty.clone(),
+                                            });
+                                            *and_ty = wide_ty.clone();
+                                            *and_rhs = Box::new(PreHirExpr::Const(
+                                                narrowed_mask,
+                                                wide_ty.clone(),
+                                            ));
+                                            *cmp_rhs =
+                                                Box::new(PreHirExpr::Const(cmp_val, wide_ty));
+                                            *cmp_ty = NirType::Bool;
+                                            return true;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -207,23 +226,26 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
     // -----------------------------------------------------------------------
     // Pattern B (natural truncation):
     //   Cast<u{small}>(Load<u{large}>(ptr))  →  Load<u{small}>(ptr)
+    // Only valid on little-endian targets where ptr+0 addresses the LSBs.
     // -----------------------------------------------------------------------
-    if let PreHirExpr::Cast {
-        ty: cast_ty,
-        expr: inner,
-    } = expr
-    {
-        if let PreHirExpr::Load {
-            ptr: load_ptr,
-            ty: load_ty,
-        } = inner.as_mut()
+    if !is_big_endian {
+        if let PreHirExpr::Cast {
+            ty: cast_ty,
+            expr: inner,
+        } = expr
         {
-            if is_natural_narrowing(cast_ty, load_ty) {
-                *expr = PreHirExpr::Load {
-                    ptr: load_ptr.clone(),
-                    ty: cast_ty.clone(),
-                };
-                return true;
+            if let PreHirExpr::Load {
+                ptr: load_ptr,
+                ty: load_ty,
+            } = inner.as_mut()
+            {
+                if is_natural_narrowing(cast_ty, load_ty) {
+                    *expr = PreHirExpr::Load {
+                        ptr: load_ptr.clone(),
+                        ty: cast_ty.clone(),
+                    };
+                    return true;
+                }
             }
         }
     }
@@ -232,27 +254,27 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
     let mut changed = false;
     match expr {
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= expand_load_in_expr(lhs);
-            changed |= expand_load_in_expr(rhs);
+            changed |= expand_load_in_expr(lhs, is_big_endian);
+            changed |= expand_load_in_expr(rhs, is_big_endian);
         }
         PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::Cast { expr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. }
         | PreHirExpr::FieldAccess { base: inner, .. } => {
-            changed |= expand_load_in_expr(inner);
+            changed |= expand_load_in_expr(inner, is_big_endian);
         }
         PreHirExpr::Load { ptr, .. } => {
-            changed |= expand_load_in_expr(ptr);
+            changed |= expand_load_in_expr(ptr, is_big_endian);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args.iter_mut() {
-                changed |= expand_load_in_expr(arg);
+                changed |= expand_load_in_expr(arg, is_big_endian);
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= expand_load_in_expr(base);
-            changed |= expand_load_in_expr(index);
+            changed |= expand_load_in_expr(base, is_big_endian);
+            changed |= expand_load_in_expr(index, is_big_endian);
         }
         PreHirExpr::Select {
             cond,
@@ -260,9 +282,9 @@ fn expand_load_in_expr(expr: &mut PreHirExpr) -> bool {
             else_expr,
             ..
         } => {
-            changed |= expand_load_in_expr(cond);
-            changed |= expand_load_in_expr(then_expr);
-            changed |= expand_load_in_expr(else_expr);
+            changed |= expand_load_in_expr(cond, is_big_endian);
+            changed |= expand_load_in_expr(then_expr, is_big_endian);
+            changed |= expand_load_in_expr(else_expr, is_big_endian);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::Const(_, _)
@@ -454,5 +476,70 @@ mod tests {
                 "expected Load<u16>, got: {rhs:?}"
             );
         }
+    }
+
+    #[test]
+    fn big_endian_skips_narrowing_load_collapse() {
+        let mut func = empty_func_with_body(vec![PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("x".to_string()),
+            rhs: cast_expr(u8(), load_expr(u32())),
+        }]);
+        func.is_big_endian = true;
+        assert!(!apply_expand_load_pass(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Cast { .. },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn and_comparison_rejects_signed_cast_and_masks_negative_mask() {
+        let i8_ty = make_int(8, true);
+        let signed_and = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(cast_expr(i8_ty.clone(), load_expr(u32()))),
+            rhs: Box::new(PreHirExpr::Const(0xFE, i8_ty.clone())),
+            ty: i8_ty.clone(),
+        };
+        let signed_cmp = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(signed_and),
+            rhs: Box::new(PreHirExpr::Const(2, i8_ty)),
+            ty: NirType::Bool,
+        };
+        let mut signed_func = empty_func_with_body(vec![PreHirStmt::Expr(signed_cmp)]);
+        assert!(!apply_expand_load_pass(&mut signed_func));
+
+        // Unsigned narrow cast with sign-extended negative mask (-2_i64 on u8 -> 0xFE_u32).
+        let neg_mask_and = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(cast_expr(u8(), load_expr(u32()))),
+            rhs: Box::new(PreHirExpr::Const(-2, u8())),
+            ty: u8(),
+        };
+        let neg_mask_cmp = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Eq,
+            lhs: Box::new(neg_mask_and),
+            rhs: Box::new(PreHirExpr::Const(2, u8())),
+            ty: NirType::Bool,
+        };
+        let mut neg_func = empty_func_with_body(vec![PreHirStmt::Expr(neg_mask_cmp)]);
+        assert!(apply_expand_load_pass(&mut neg_func));
+        let PreHirStmt::Expr(PreHirExpr::Binary { lhs, .. }) = &neg_func.body[0] else {
+            panic!("expected cmp");
+        };
+        let PreHirExpr::Binary { rhs: and_rhs, .. } = lhs.as_ref() else {
+            panic!("expected and");
+        };
+        assert!(
+            matches!(
+                and_rhs.as_ref(),
+                PreHirExpr::Const(0xFE, NirType::Int { bits: 32, .. })
+            ),
+            "expected masked u32 0xFE, got {and_rhs:?}"
+        );
     }
 }

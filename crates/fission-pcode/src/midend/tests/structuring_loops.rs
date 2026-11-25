@@ -1385,9 +1385,9 @@ fn while_loop_with_early_continue() {
 /// Expected: for (counter = 0; !cond; counter = counter + 1) { store; }
 #[test]
 fn for_loop_simple_counter() {
-    let counter = uniq(0x700, 4);
-    let lt_cond = uniq(0x701, 1);
-    let ptr = uniq(0x702, 8);
+    let counter = reg(0x08, 4);
+    let lt_cond = uniq(0x710, 1);
+    let ptr = uniq(0x720, 8);
     let mut func = PcodeFunction {
         blocks: vec![
             // block 0: init — counter = 0; Branch(→ head)

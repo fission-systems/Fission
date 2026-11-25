@@ -1,6 +1,6 @@
 use super::super::cleanup::expr_has_side_effects;
 use super::super::pipeline::normalize_expr;
-use super::partition::{collect_partitioned_memory_accesses, type_byte_size};
+use super::partition::{collect_partitioned_memory_accesses, type_byte_size_with_pointer_bytes};
 use super::typed_facts::collect_typed_fact_inventory;
 use crate::analysis::defuse::{collect_assigned_names, collect_expr_vars};
 use crate::prelude::*;
@@ -71,8 +71,9 @@ pub fn apply_memory_slot_surfacing_cheap(func: &mut PreHirFunction) -> bool {
 }
 
 fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: bool) -> bool {
+    let pointer_bytes = if func.is_64bit { 8 } else { 4 };
     let mut candidates = HashMap::<MemorySlotKey, MemorySlotCandidate>::default();
-    collect_memory_slot_candidates(func, &mut candidates);
+    collect_memory_slot_candidates(func, pointer_bytes, &mut candidates);
     let alias_defs = collect_single_var_aliases(&func.body);
     let mut assigned = HashSet::default();
     collect_assigned_names(&func.body, &mut assigned);
@@ -175,7 +176,7 @@ fn apply_memory_slot_surfacing_with_mode(func: &mut PreHirFunction, cheap_only: 
 
     add_surface_binding_promotions(aliases.len());
 
-    rewrite_memory_slot_stmts(&mut func.body, &aliases)
+    rewrite_memory_slot_stmts(&mut func.body, &aliases, pointer_bytes)
 }
 
 fn slot_surface_type_name(
@@ -461,13 +462,15 @@ fn memory_slot_family_key(key: &MemorySlotKey) -> MemorySlotFamilyKey {
 
 fn collect_memory_slot_candidates(
     func: &PreHirFunction,
+    pointer_bytes: u32,
     candidates: &mut HashMap<MemorySlotKey, MemorySlotCandidate>,
 ) {
     for (first_seen, access) in collect_partitioned_memory_accesses(&func.body, func.is_64bit)
         .into_iter()
         .enumerate()
     {
-        let access_size = match type_byte_size(&access.access_ty) {
+        let access_size = match type_byte_size_with_pointer_bytes(&access.access_ty, pointer_bytes)
+        {
             Some(size) => size,
             None => continue,
         };
@@ -494,44 +497,82 @@ fn collect_memory_slot_candidates(
 fn rewrite_memory_slot_stmts(
     stmts: &mut [PreHirStmt],
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
+    pointer_bytes: u32,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts {
         match stmt {
             PreHirStmt::Assign { lhs, rhs } => {
-                changed |= rewrite_memory_slot_lvalue(lhs, aliases);
-                changed |= rewrite_memory_slot_expr(rhs, aliases);
+                changed |= rewrite_memory_slot_lvalue(lhs, aliases, pointer_bytes);
+                changed |= rewrite_memory_slot_expr(rhs, aliases, pointer_bytes);
             }
             PreHirStmt::VaStart { va_list, .. } => {
-                changed |= rewrite_memory_slot_expr(va_list, aliases);
+                changed |= rewrite_memory_slot_expr(va_list, aliases, pointer_bytes);
             }
             PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-                changed |= rewrite_memory_slot_expr(expr, aliases);
+                changed |= rewrite_memory_slot_expr(expr, aliases, pointer_bytes);
             }
-            PreHirStmt::Block(stmts)
-            | PreHirStmt::While { body: stmts, .. }
-            | PreHirStmt::DoWhile { body: stmts, .. }
-            | PreHirStmt::For { body: stmts, .. } => {
+            PreHirStmt::Block(stmts) => {
                 changed |= rewrite_memory_slot_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
                     aliases,
+                    pointer_bytes,
                 );
+            }
+            PreHirStmt::While { cond, body: stmts } | PreHirStmt::DoWhile { body: stmts, cond } => {
+                changed |= rewrite_memory_slot_expr(cond, aliases, pointer_bytes);
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                    aliases,
+                    pointer_bytes,
+                );
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body: stmts,
+            } => {
+                if let Some(init) = init {
+                    changed |= rewrite_memory_slot_stmts(
+                        std::slice::from_mut(init.as_mut()),
+                        aliases,
+                        pointer_bytes,
+                    );
+                }
+                if let Some(cond) = cond {
+                    changed |= rewrite_memory_slot_expr(cond, aliases, pointer_bytes);
+                }
+                changed |= rewrite_memory_slot_stmts(
+                    std::rc::Rc::<Vec<PreHirStmt>>::make_mut(stmts),
+                    aliases,
+                    pointer_bytes,
+                );
+                if let Some(update) = update {
+                    changed |= rewrite_memory_slot_stmts(
+                        std::slice::from_mut(update.as_mut()),
+                        aliases,
+                        pointer_bytes,
+                    );
+                }
             }
             PreHirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                changed |= rewrite_memory_slot_expr(expr, aliases);
+                changed |= rewrite_memory_slot_expr(expr, aliases, pointer_bytes);
                 for case in cases {
                     changed |= rewrite_memory_slot_stmts(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                         aliases,
+                        pointer_bytes,
                     );
                 }
                 changed |= rewrite_memory_slot_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     aliases,
+                    pointer_bytes,
                 );
             }
             PreHirStmt::If {
@@ -539,14 +580,16 @@ fn rewrite_memory_slot_stmts(
                 then_body,
                 else_body,
             } => {
-                changed |= rewrite_memory_slot_expr(cond, aliases);
+                changed |= rewrite_memory_slot_expr(cond, aliases, pointer_bytes);
                 changed |= rewrite_memory_slot_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                     aliases,
+                    pointer_bytes,
                 );
                 changed |= rewrite_memory_slot_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     aliases,
+                    pointer_bytes,
                 );
             }
             PreHirStmt::Label(_)
@@ -562,12 +605,13 @@ fn rewrite_memory_slot_stmts(
 fn rewrite_memory_slot_lvalue(
     lhs: &mut PreHirLValue,
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
+    pointer_bytes: u32,
 ) -> bool {
     match lhs {
         PreHirLValue::Var(_) => false,
         PreHirLValue::Deref { ptr, ty } => {
-            let changed = rewrite_memory_slot_expr(ptr, aliases);
-            if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
+            let changed = rewrite_memory_slot_expr(ptr, aliases, pointer_bytes);
+            if let Some(pattern) = parse_memory_slot_pattern(ptr, ty, pointer_bytes)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
                 *lhs = if let Some(index) = pattern.index {
@@ -587,23 +631,26 @@ fn rewrite_memory_slot_lvalue(
             changed
         }
         PreHirLValue::Index { base, index, .. } => {
-            let mut changed = rewrite_memory_slot_expr(base, aliases);
-            changed |= rewrite_memory_slot_expr(index, aliases);
+            let mut changed = rewrite_memory_slot_expr(base, aliases, pointer_bytes);
+            changed |= rewrite_memory_slot_expr(index, aliases, pointer_bytes);
             changed
         }
-        PreHirLValue::FieldAccess { base, .. } => rewrite_memory_slot_expr(base, aliases),
+        PreHirLValue::FieldAccess { base, .. } => {
+            rewrite_memory_slot_expr(base, aliases, pointer_bytes)
+        }
     }
 }
 
 fn rewrite_memory_slot_expr(
     expr: &mut PreHirExpr,
     aliases: &HashMap<MemorySlotKey, MemorySlotAlias>,
+    pointer_bytes: u32,
 ) -> bool {
     let mut changed = false;
     match expr {
         PreHirExpr::Load { ptr, ty } => {
-            changed |= rewrite_memory_slot_expr(ptr, aliases);
-            if let Some(pattern) = parse_memory_slot_pattern(ptr, ty)
+            changed |= rewrite_memory_slot_expr(ptr, aliases, pointer_bytes);
+            if let Some(pattern) = parse_memory_slot_pattern(ptr, ty, pointer_bytes)
                 && let Some(alias) = aliases.get(&pattern.key)
             {
                 *expr = if let Some(index) = pattern.index {
@@ -624,23 +671,23 @@ fn rewrite_memory_slot_expr(
         PreHirExpr::Cast { expr, .. }
         | PreHirExpr::Unary { expr, .. }
         | PreHirExpr::AggregateCopy { src: expr, .. } => {
-            changed |= rewrite_memory_slot_expr(expr, aliases);
+            changed |= rewrite_memory_slot_expr(expr, aliases, pointer_bytes);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= rewrite_memory_slot_expr(lhs, aliases);
-            changed |= rewrite_memory_slot_expr(rhs, aliases);
+            changed |= rewrite_memory_slot_expr(lhs, aliases, pointer_bytes);
+            changed |= rewrite_memory_slot_expr(rhs, aliases, pointer_bytes);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                changed |= rewrite_memory_slot_expr(arg, aliases);
+                changed |= rewrite_memory_slot_expr(arg, aliases, pointer_bytes);
             }
         }
         PreHirExpr::PtrOffset { base, .. } | PreHirExpr::FieldAccess { base, .. } => {
-            changed |= rewrite_memory_slot_expr(base, aliases);
+            changed |= rewrite_memory_slot_expr(base, aliases, pointer_bytes);
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= rewrite_memory_slot_expr(base, aliases);
-            changed |= rewrite_memory_slot_expr(index, aliases);
+            changed |= rewrite_memory_slot_expr(base, aliases, pointer_bytes);
+            changed |= rewrite_memory_slot_expr(index, aliases, pointer_bytes);
         }
         PreHirExpr::Select {
             cond,
@@ -648,9 +695,9 @@ fn rewrite_memory_slot_expr(
             else_expr,
             ..
         } => {
-            changed |= rewrite_memory_slot_expr(cond, aliases);
-            changed |= rewrite_memory_slot_expr(then_expr, aliases);
-            changed |= rewrite_memory_slot_expr(else_expr, aliases);
+            changed |= rewrite_memory_slot_expr(cond, aliases, pointer_bytes);
+            changed |= rewrite_memory_slot_expr(then_expr, aliases, pointer_bytes);
+            changed |= rewrite_memory_slot_expr(else_expr, aliases, pointer_bytes);
         }
         PreHirExpr::Var(_)
         | PreHirExpr::AddressOfGlobal(_)
@@ -660,11 +707,15 @@ fn rewrite_memory_slot_expr(
     changed
 }
 
-fn parse_memory_slot_pattern(ptr: &PreHirExpr, elem_ty: &NirType) -> Option<MemorySlotPattern> {
-    let access_size = type_byte_size(elem_ty)?;
+fn parse_memory_slot_pattern(
+    ptr: &PreHirExpr,
+    elem_ty: &NirType,
+    pointer_bytes: u32,
+) -> Option<MemorySlotPattern> {
+    let access_size = type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes)?;
     let elem_size = i64::from(access_size);
     let mut parts = AddressParts::default();
-    collect_address_parts(ptr, &mut parts, 1)?;
+    collect_address_parts(ptr, &mut parts, pointer_bytes, 1)?;
     let base = parts.base?;
     if expr_has_side_effects(&base) {
         return None;
@@ -690,31 +741,36 @@ fn parse_memory_slot_pattern(ptr: &PreHirExpr, elem_ty: &NirType) -> Option<Memo
     })
 }
 
-fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64) -> Option<()> {
+fn collect_address_parts(
+    expr: &PreHirExpr,
+    parts: &mut AddressParts,
+    pointer_bytes: u32,
+    sign: i64,
+) -> Option<()> {
     match expr {
         PreHirExpr::Const(value, _) => {
             parts.const_offset += sign * *value;
             Some(())
         }
-        PreHirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, sign),
+        PreHirExpr::Cast { expr, .. } => collect_address_parts(expr, parts, pointer_bytes, sign),
         PreHirExpr::PtrOffset { base, offset } => {
             parts.const_offset += sign * *offset;
-            collect_address_parts(base, parts, sign)
+            collect_address_parts(base, parts, pointer_bytes, sign)
         }
         PreHirExpr::FieldAccess { base, offset, .. } => {
             parts.const_offset += sign * i64::from(*offset);
-            collect_address_parts(base, parts, sign)
+            collect_address_parts(base, parts, pointer_bytes, sign)
         }
         PreHirExpr::Index {
             base,
             index,
             elem_ty,
         } => {
-            let stride = i64::from(type_byte_size(elem_ty)?);
+            let stride = i64::from(type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes)?);
             if stride <= 0 {
                 return None;
             }
-            collect_address_parts(base, parts, sign)?;
+            collect_address_parts(base, parts, pointer_bytes, sign)?;
             if let PreHirExpr::Const(index, _) = index.as_ref() {
                 let offset = index.checked_mul(stride)?.checked_mul(sign)?;
                 parts.const_offset = parts.const_offset.checked_add(offset)?;
@@ -730,24 +786,26 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) =
+                    type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1)
+                {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
-                        collect_address_parts(lhs, parts, sign)?;
+                        collect_address_parts(lhs, parts, pointer_bytes, sign)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                     if let PreHirExpr::Const(val, _) = lhs.as_ref() {
-                        collect_address_parts(rhs, parts, sign)?;
+                        collect_address_parts(rhs, parts, pointer_bytes, sign)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                 }
             }
-            collect_address_parts(lhs, parts, sign)?;
-            collect_address_parts(rhs, parts, sign)
+            collect_address_parts(lhs, parts, pointer_bytes, sign)?;
+            collect_address_parts(rhs, parts, pointer_bytes, sign)
         }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Sub,
@@ -756,18 +814,20 @@ fn collect_address_parts(expr: &PreHirExpr, parts: &mut AddressParts, sign: i64)
             ty,
         } => {
             if let NirType::Ptr(elem_ty) = ty {
-                if let Some(elem_sz) = type_byte_size(elem_ty).filter(|&sz| sz > 1) {
+                if let Some(elem_sz) =
+                    type_byte_size_with_pointer_bytes(elem_ty, pointer_bytes).filter(|&sz| sz > 1)
+                {
                     let elem_sz_i = elem_sz as i64;
                     if let PreHirExpr::Const(val, _) = rhs.as_ref() {
-                        collect_address_parts(lhs, parts, sign)?;
+                        collect_address_parts(lhs, parts, pointer_bytes, sign)?;
                         let offset = val.checked_mul(elem_sz_i)?.checked_mul(-sign)?;
                         parts.const_offset = parts.const_offset.checked_add(offset)?;
                         return Some(());
                     }
                 }
             }
-            collect_address_parts(lhs, parts, sign)?;
-            collect_address_parts(rhs, parts, -sign)
+            collect_address_parts(lhs, parts, pointer_bytes, sign)?;
+            collect_address_parts(rhs, parts, pointer_bytes, -sign)
         }
         PreHirExpr::Binary {
             op: PreHirBinaryOp::Mul,
@@ -966,7 +1026,7 @@ mod tests {
             ty: ptr_u32_ty,
         };
         let mut parts = AddressParts::default();
-        collect_address_parts(&expr, &mut parts, 1).expect("collect parts");
+        collect_address_parts(&expr, &mut parts, 8, 1).expect("collect parts");
         assert_eq!(parts.const_offset, 20); // 5 elements * 4 bytes = 20
         assert_eq!(parts.base, Some(PreHirExpr::Var("p".to_string())));
     }
@@ -983,7 +1043,7 @@ mod tests {
             elem_ty: u32_ty,
         };
         let mut parts = AddressParts::default();
-        collect_address_parts(&expr, &mut parts, 1).expect("collect parts");
+        collect_address_parts(&expr, &mut parts, 8, 1).expect("collect parts");
         assert_eq!(parts.const_offset, 8); // 2 elements * 4 bytes = 8
         assert_eq!(parts.base, Some(PreHirExpr::Var("arr".to_string())));
     }
@@ -1139,5 +1199,70 @@ mod tests {
         ]);
         apply_memory_slot_surfacing(&mut func);
         assert!(slot_initializers(&func).is_empty(), "{:?}", func.locals);
+    }
+
+    #[test]
+    fn rewrites_slot_in_while_cond_and_matches_32bit_ptr_stride() {
+        let ptr_ty = NirType::Ptr(Box::new(u32_ty()));
+        let ptr_load = |off: i64, scale_i: i64| PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(PreHirExpr::PtrOffset {
+                    base: Box::new(PreHirExpr::Var("rbp".to_string())),
+                    offset: off,
+                }),
+                rhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(PreHirExpr::Var("i".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(scale_i, u32_ty())),
+                    ty: u32_ty(),
+                }),
+                ty: ptr_ty.clone(),
+            }),
+            ty: ptr_ty.clone(),
+        };
+        let mut func = PreHirFunction {
+            name: "f32".to_string(),
+            is_64bit: false,
+            params: vec![PreHirBinding {
+                name: "i".to_string(),
+                ty: u32_ty(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![PreHirBinding {
+                name: "rbp".to_string(),
+                ty: ptr_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::StackOffset(0)),
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("a".to_string()),
+                    rhs: ptr_load(-16, 4),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Binary {
+                        op: PreHirBinaryOp::Ne,
+                        lhs: Box::new(ptr_load(-16, 4)),
+                        rhs: Box::new(PreHirExpr::Const(0, ptr_ty.clone())),
+                        ty: NirType::Bool,
+                    },
+                    body: vec![].into(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_memory_slot_surfacing(&mut func));
+        let PreHirStmt::While { cond, .. } = &func.body[1] else {
+            panic!("expected while");
+        };
+        let PreHirExpr::Binary { lhs, .. } = cond else {
+            panic!("expected binary cond");
+        };
+        assert!(matches!(lhs.as_ref(), PreHirExpr::Index { .. }));
     }
 }

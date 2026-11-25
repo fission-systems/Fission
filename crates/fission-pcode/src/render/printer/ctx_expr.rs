@@ -46,8 +46,11 @@ pub(super) fn try_elide_hir_cast(
             });
         }
     }
-    // (ulonglong)(uint)x / nested same-family integer casts → peel outer when
-    // outer is wider unsigned and inner is already an integer cast/var.
+    // (ulonglong)(uint)x / nested same-family integer casts → drop the inner
+    // cast when outer is wider unsigned and inner is already an integer
+    // cast/var. The outer cast stays: it sets the width the surrounding
+    // operator works in, and `(unsigned __int128)(ulonglong)x * k` printed
+    // as `x * k` is a 64-bit multiply.
     if let (
         NirType::Int {
             bits: outer_bits,
@@ -71,7 +74,18 @@ pub(super) fn try_elide_hir_cast(
         if *outer_bits >= *inner_bits
             && expr_unsigned_integer_width(inner, ctx).is_some_and(|bits| bits <= *inner_bits)
         {
-            return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
+            if *outer_bits == *inner_bits {
+                return Some(print_expr_prec_ctx(inner, parent_prec, depth + 1, ctx));
+            }
+            return Some(print_expr_prec_ctx(
+                &HirExpr::Cast {
+                    ty: ty.clone(),
+                    expr: inner.clone(),
+                },
+                parent_prec,
+                depth + 1,
+                ctx,
+            ));
         }
     }
     None

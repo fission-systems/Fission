@@ -994,3 +994,93 @@ fn goto_to_label_before_do_while_is_not_a_continue() {
     };
     assert!(!apply_break_continue_pass(&mut func));
 }
+
+#[test]
+fn scev_does_not_hoist_non_final_update_past_break_or_rhs_dep_or_while_cond() {
+    let i32_ty = int(32, true);
+    let cond = |lhs_n: &str| PreHirExpr::Binary {
+        op: PreHirBinaryOp::SLt,
+        lhs: Box::new(var(lhs_n)),
+        rhs: Box::new(var("n")),
+        ty: NirType::Bool,
+    };
+
+    // Case 1: trailing `if (done) break;` after update
+    let mut f_break = PreHirFunction {
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("i".to_string()),
+                rhs: const_i(0),
+            },
+            PreHirStmt::While {
+                cond: cond("i"),
+                body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: add(var("i"), const_i(1), i32_ty.clone()),
+                    },
+                    PreHirStmt::If {
+                        cond: var("done"),
+                        then_body: vec![PreHirStmt::Break].into(),
+                        else_body: vec![].into(),
+                    },
+                ]
+                .into(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(!apply_iv_recovery_pass(&mut f_break));
+
+    // Case 2: trailing write to `step` read by update's RHS
+    let mut f_dep = PreHirFunction {
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("i".to_string()),
+                rhs: const_i(0),
+            },
+            PreHirStmt::While {
+                cond: cond("i"),
+                body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: add(var("i"), var("step"), i32_ty.clone()),
+                    },
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("step".to_string()),
+                        rhs: const_i(2),
+                    },
+                ]
+                .into(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(!apply_iv_recovery_pass(&mut f_dep));
+
+    // Case 3: trailing nested `While.cond` reading `i`
+    let mut f_while_cond = PreHirFunction {
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("i".to_string()),
+                rhs: const_i(0),
+            },
+            PreHirStmt::While {
+                cond: cond("i"),
+                body: vec![
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: add(var("i"), const_i(1), i32_ty),
+                    },
+                    PreHirStmt::While {
+                        cond: cond("i"),
+                        body: vec![PreHirStmt::Break].into(),
+                    },
+                ]
+                .into(),
+            },
+        ],
+        ..Default::default()
+    };
+    assert!(!apply_iv_recovery_pass(&mut f_while_cond));
+}

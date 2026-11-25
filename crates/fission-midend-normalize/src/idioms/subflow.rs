@@ -440,18 +440,16 @@ fn optimize_expr_with_context(
         op: PreHirBinaryOp::And,
         lhs,
         rhs,
-        ..
+        ty,
     } = expr
     {
         if let PreHirExpr::Const(mask, _) = &**rhs {
-            let active = active_bits(lhs, type_map, nz_masks);
-            if (active & !(*mask as u64)) == 0 {
+            if can_drop_redundant_and_mask(lhs, *mask, ty, type_map, nz_masks) {
                 *expr = (**lhs).clone();
                 return true;
             }
         } else if let PreHirExpr::Const(mask, _) = &**lhs {
-            let active = active_bits(rhs, type_map, nz_masks);
-            if (active & !(*mask as u64)) == 0 {
+            if can_drop_redundant_and_mask(rhs, *mask, ty, type_map, nz_masks) {
                 *expr = (**rhs).clone();
                 return true;
             }
@@ -459,6 +457,35 @@ fn optimize_expr_with_context(
     }
 
     changed
+}
+
+fn can_drop_redundant_and_mask(
+    operand: &PreHirExpr,
+    mask: i64,
+    and_ty: &NirType,
+    type_map: &HashMap<String, NirType>,
+    nz_masks: &HashMap<String, u64>,
+) -> bool {
+    let active = active_bits(operand, type_map, nz_masks);
+    if (active & !(mask as u64)) != 0 {
+        return false;
+    }
+    if let NirType::Int {
+        bits: op_bits,
+        signed: true,
+    } = get_expr_type(operand, type_map)
+    {
+        let and_bits = scalar_bit_width(and_ty).unwrap_or(64);
+        // Narrow signed operands sign-extend under C integer promotion (`int` = 32 bits)
+        // or when widened to the `&` result width; `& mask` zeroes those upper sign bits.
+        if op_bits > 0 && op_bits < and_bits.max(32) {
+            let sign_bit = 1u64 << (op_bits - 1);
+            if (active & sign_bit) != 0 {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -675,5 +702,58 @@ mod tests {
             panic!()
         };
         assert_eq!(*cond, PreHirExpr::Const(42, u64_ty()));
+    }
+
+    #[test]
+    fn does_not_drop_mask_on_signed_narrow_var_widened_by_and() {
+        let i8_ty = NirType::Int {
+            bits: 8,
+            signed: true,
+        };
+        let mut type_map = HashMap::default();
+        type_map.insert("x".to_string(), i8_ty);
+
+        let mut nz_masks = HashMap::default();
+        nz_masks.insert("x".to_string(), 0xff);
+
+        for and_ty in [
+            u32_ty(),
+            NirType::Int {
+                bits: 32,
+                signed: true,
+            },
+        ] {
+            let mut expr = PreHirExpr::Binary {
+                op: PreHirBinaryOp::And,
+                lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                rhs: Box::new(PreHirExpr::Const(0xff, and_ty.clone())),
+                ty: and_ty,
+            };
+            let orig = expr.clone();
+            assert!(!optimize_expr(&mut expr, &type_map, &nz_masks));
+            assert_eq!(expr, orig);
+        }
+    }
+
+    #[test]
+    fn drops_mask_on_signed_narrow_var_when_sign_bit_known_zero() {
+        let i8_ty = NirType::Int {
+            bits: 8,
+            signed: true,
+        };
+        let mut type_map = HashMap::default();
+        type_map.insert("x".to_string(), i8_ty);
+
+        let mut nz_masks = HashMap::default();
+        nz_masks.insert("x".to_string(), 0x7f);
+
+        let mut expr = PreHirExpr::Binary {
+            op: PreHirBinaryOp::And,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Const(0xff, u32_ty())),
+            ty: u32_ty(),
+        };
+        assert!(optimize_expr(&mut expr, &type_map, &nz_masks));
+        assert_eq!(expr, PreHirExpr::Var("x".to_string()));
     }
 }

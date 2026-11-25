@@ -1,4 +1,7 @@
+use crate::HashMap;
+use crate::cleanup::expr_has_side_effects;
 use crate::prelude::*;
+use fission_midend_prehir::util::expr_type;
 
 /// The trait representing an AST simplification rule.
 pub trait Rule {
@@ -8,6 +11,37 @@ pub trait Rule {
     }
     fn apply_expr(&self, _expr: &mut PreHirExpr) -> bool {
         false
+    }
+    fn apply_expr_with_types(
+        &self,
+        expr: &mut PreHirExpr,
+        _type_map: &HashMap<String, NirType>,
+    ) -> bool {
+        self.apply_expr(expr)
+    }
+}
+
+fn is_bool_expr(expr: &PreHirExpr, type_map: &HashMap<String, NirType>) -> bool {
+    match expr {
+        PreHirExpr::Var(name) => matches!(type_map.get(name), Some(NirType::Bool)),
+        PreHirExpr::Const(v, NirType::Bool) => *v == 0 || *v == 1,
+        PreHirExpr::Unary {
+            op: PreHirUnaryOp::Not,
+            ..
+        } => true,
+        PreHirExpr::Binary {
+            op:
+                PreHirBinaryOp::Eq
+                | PreHirBinaryOp::Ne
+                | PreHirBinaryOp::Lt
+                | PreHirBinaryOp::Le
+                | PreHirBinaryOp::Gt
+                | PreHirBinaryOp::Ge
+                | PreHirBinaryOp::LogicalAnd
+                | PreHirBinaryOp::LogicalOr,
+            ..
+        } => true,
+        _ => expr_type(expr) == NirType::Bool,
     }
 }
 
@@ -98,9 +132,9 @@ impl Rule for RuleFoldConstants {
                         *expr = other.clone();
                         return true;
                     }
-                    // x * 0 -> 0, x * 1 -> x
+                    // x * 0 -> 0 (only if x is pure), x * 1 -> x
                     (other, PreHirExpr::Const(c, _)) if *op == PreHirBinaryOp::Mul => {
-                        if *c == 0 {
+                        if *c == 0 && !expr_has_side_effects(other) {
                             *expr = PreHirExpr::Const(0, ty.clone());
                             return true;
                         } else if *c == 1 {
@@ -109,7 +143,7 @@ impl Rule for RuleFoldConstants {
                         }
                     }
                     (PreHirExpr::Const(c, _), other) if *op == PreHirBinaryOp::Mul => {
-                        if *c == 0 {
+                        if *c == 0 && !expr_has_side_effects(other) {
                             *expr = PreHirExpr::Const(0, ty.clone());
                             return true;
                         } else if *c == 1 {
@@ -152,11 +186,11 @@ impl Rule for RuleBitwiseIdentities {
         if let PreHirExpr::Binary { op, lhs, rhs, ty } = expr {
             match op {
                 PreHirBinaryOp::And => match (lhs.as_ref(), rhs.as_ref()) {
-                    (_, PreHirExpr::Const(0, _)) => {
+                    (other, PreHirExpr::Const(0, _)) if !expr_has_side_effects(other) => {
                         *expr = PreHirExpr::Const(0, ty.clone());
                         return true;
                     }
-                    (PreHirExpr::Const(0, _), _) => {
+                    (PreHirExpr::Const(0, _), other) if !expr_has_side_effects(other) => {
                         *expr = PreHirExpr::Const(0, ty.clone());
                         return true;
                     }
@@ -200,8 +234,8 @@ impl Rule for RuleBitwiseIdentities {
 }
 
 /// Simplifies logical identities:
-/// - `x && true` -> `x`
-/// - `x || false` -> `x`
+/// - `b && true` -> `b` (for boolean `b`)
+/// - `b || false` -> `b` (for boolean `b`)
 struct RuleLogicalIdentities;
 
 impl Rule for RuleLogicalIdentities {
@@ -210,6 +244,14 @@ impl Rule for RuleLogicalIdentities {
     }
 
     fn apply_expr(&self, expr: &mut PreHirExpr) -> bool {
+        self.apply_expr_with_types(expr, &HashMap::default())
+    }
+
+    fn apply_expr_with_types(
+        &self,
+        expr: &mut PreHirExpr,
+        type_map: &HashMap<String, NirType>,
+    ) -> bool {
         if let PreHirExpr::Binary {
             op,
             lhs,
@@ -219,15 +261,19 @@ impl Rule for RuleLogicalIdentities {
         {
             match op {
                 PreHirBinaryOp::LogicalAnd => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, PreHirExpr::Const(1, _)) => {
+                    (other, PreHirExpr::Const(c, _))
+                        if *c != 0 && is_bool_expr(other, type_map) =>
+                    {
                         *expr = other.clone();
                         return true;
                     }
-                    (PreHirExpr::Const(1, _), other) => {
+                    (PreHirExpr::Const(c, _), other)
+                        if *c != 0 && is_bool_expr(other, type_map) =>
+                    {
                         *expr = other.clone();
                         return true;
                     }
-                    (_, PreHirExpr::Const(0, _)) => {
+                    (lhs_expr, PreHirExpr::Const(0, _)) if !expr_has_side_effects(lhs_expr) => {
                         *expr = PreHirExpr::Const(0, NirType::Bool);
                         return true;
                     }
@@ -238,19 +284,21 @@ impl Rule for RuleLogicalIdentities {
                     _ => {}
                 },
                 PreHirBinaryOp::LogicalOr => match (lhs.as_ref(), rhs.as_ref()) {
-                    (other, PreHirExpr::Const(0, _)) => {
+                    (other, PreHirExpr::Const(0, _)) if is_bool_expr(other, type_map) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (PreHirExpr::Const(0, _), other) => {
+                    (PreHirExpr::Const(0, _), other) if is_bool_expr(other, type_map) => {
                         *expr = other.clone();
                         return true;
                     }
-                    (_, PreHirExpr::Const(1, _)) => {
+                    (lhs_expr, PreHirExpr::Const(c, _))
+                        if *c != 0 && !expr_has_side_effects(lhs_expr) =>
+                    {
                         *expr = PreHirExpr::Const(1, NirType::Bool);
                         return true;
                     }
-                    (PreHirExpr::Const(1, _), _) => {
+                    (PreHirExpr::Const(c, _), _) if *c != 0 => {
                         *expr = PreHirExpr::Const(1, NirType::Bool);
                         return true;
                     }
@@ -337,8 +385,8 @@ impl Rule for RuleSimplifySelect {
             ..
         } = expr
         {
-            // Rule 1: cond ? A : A -> A
-            if then_expr == else_expr {
+            // Rule 1: cond ? A : A -> A (only if cond is pure)
+            if then_expr == else_expr && !expr_has_side_effects(cond) {
                 *expr = (**then_expr).clone();
                 return true;
             }
@@ -358,6 +406,11 @@ impl Rule for RuleSimplifySelect {
 
 /// Applies a list of rules to the function AST iteratively until convergence.
 pub fn apply_rule_normalization(func: &mut PreHirFunction) -> bool {
+    let mut type_map = HashMap::default();
+    for binding in func.params.iter().chain(func.locals.iter()) {
+        type_map.insert(binding.name.clone(), binding.ty.clone());
+    }
+
     let rules: Vec<Box<dyn Rule>> = vec![
         Box::new(RuleSimplifyDoubleNegation),
         Box::new(RuleFoldConstants),
@@ -376,22 +429,30 @@ pub fn apply_rule_normalization(func: &mut PreHirFunction) -> bool {
         loop_changed = false;
         round += 1;
 
-        loop_changed |= apply_rules_to_stmts(&mut func.body, &rules);
+        loop_changed |= apply_rules_to_stmts(&mut func.body, &rules, &type_map);
         changed |= loop_changed;
     }
 
     changed
 }
 
-fn apply_rules_to_stmts(stmts: &mut [PreHirStmt], rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_stmts(
+    stmts: &mut [PreHirStmt],
+    rules: &[Box<dyn Rule>],
+    type_map: &HashMap<String, NirType>,
+) -> bool {
     let mut changed = false;
     for stmt in stmts {
-        changed |= apply_rules_to_stmt(stmt, rules);
+        changed |= apply_rules_to_stmt(stmt, rules, type_map);
     }
     changed
 }
 
-fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_stmt(
+    stmt: &mut PreHirStmt,
+    rules: &[Box<dyn Rule>],
+    type_map: &HashMap<String, NirType>,
+) -> bool {
     let mut changed = false;
 
     // Apply rules directly to the statement
@@ -402,43 +463,85 @@ fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
     // Recurse and apply to inner expressions/statements
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            changed |= apply_rules_to_lvalue(lhs, rules);
-            changed |= apply_rules_to_expr(rhs, rules);
+            changed |= apply_rules_to_lvalue(lhs, rules, type_map);
+            changed |= apply_rules_to_expr(rhs, rules, type_map);
         }
-        PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-            changed |= apply_rules_to_expr(expr, rules);
+        PreHirStmt::Expr(expr)
+        | PreHirStmt::Return(Some(expr))
+        | PreHirStmt::VaStart { va_list: expr, .. } => {
+            changed |= apply_rules_to_expr(expr, rules, type_map);
         }
-        PreHirStmt::Block(body)
-        | PreHirStmt::While { body, .. }
-        | PreHirStmt::DoWhile { body, .. }
-        | PreHirStmt::For { body, .. } => {
-            changed |= apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body), rules);
+        PreHirStmt::Block(body) => {
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                rules,
+                type_map,
+            );
+        }
+        PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+            changed |= apply_rules_to_expr(cond, rules, type_map);
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                rules,
+                type_map,
+            );
+        }
+        PreHirStmt::For {
+            init,
+            cond,
+            update,
+            body,
+        } => {
+            if let Some(init) = init {
+                changed |= apply_rules_to_stmt(init, rules, type_map);
+            }
+            if let Some(cond) = cond {
+                changed |= apply_rules_to_expr(cond, rules, type_map);
+            }
+            if let Some(update) = update {
+                changed |= apply_rules_to_stmt(update, rules, type_map);
+            }
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
+                rules,
+                type_map,
+            );
         }
         PreHirStmt::If {
             cond,
             then_body,
             else_body,
         } => {
-            changed |= apply_rules_to_expr(cond, rules);
-            changed |=
-                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body), rules);
-            changed |=
-                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body), rules);
+            changed |= apply_rules_to_expr(cond, rules, type_map);
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
+                rules,
+                type_map,
+            );
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
+                rules,
+                type_map,
+            );
         }
         PreHirStmt::Switch {
             expr,
             cases,
             default,
         } => {
-            changed |= apply_rules_to_expr(expr, rules);
+            changed |= apply_rules_to_expr(expr, rules, type_map);
             for case in cases {
                 changed |= apply_rules_to_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     rules,
+                    type_map,
                 );
             }
-            changed |=
-                apply_rules_to_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default), rules);
+            changed |= apply_rules_to_stmts(
+                std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
+                rules,
+                type_map,
+            );
         }
         _ => {}
     }
@@ -446,22 +549,30 @@ fn apply_rules_to_stmt(stmt: &mut PreHirStmt, rules: &[Box<dyn Rule>]) -> bool {
     changed
 }
 
-fn apply_rules_to_lvalue(lhs: &mut PreHirLValue, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_lvalue(
+    lhs: &mut PreHirLValue,
+    rules: &[Box<dyn Rule>],
+    type_map: &HashMap<String, NirType>,
+) -> bool {
     let mut changed = false;
     match lhs {
-        PreHirLValue::Deref { ptr, .. } => {
-            changed |= apply_rules_to_expr(ptr, rules);
+        PreHirLValue::Deref { ptr, .. } | PreHirLValue::FieldAccess { base: ptr, .. } => {
+            changed |= apply_rules_to_expr(ptr, rules, type_map);
         }
         PreHirLValue::Index { base, index, .. } => {
-            changed |= apply_rules_to_expr(base, rules);
-            changed |= apply_rules_to_expr(index, rules);
+            changed |= apply_rules_to_expr(base, rules, type_map);
+            changed |= apply_rules_to_expr(index, rules, type_map);
         }
-        _ => {}
+        PreHirLValue::Var(_) => {}
     }
     changed
 }
 
-fn apply_rules_to_expr(expr: &mut PreHirExpr, rules: &[Box<dyn Rule>]) -> bool {
+fn apply_rules_to_expr(
+    expr: &mut PreHirExpr,
+    rules: &[Box<dyn Rule>],
+    type_map: &HashMap<String, NirType>,
+) -> bool {
     let mut changed = false;
 
     // First apply rules to sub-expressions recursively
@@ -470,12 +581,13 @@ fn apply_rules_to_expr(expr: &mut PreHirExpr, rules: &[Box<dyn Rule>]) -> bool {
         | PreHirExpr::Unary { expr: inner, .. }
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. }
+        | PreHirExpr::FieldAccess { base: inner, .. }
         | PreHirExpr::Load { ptr: inner, .. } => {
-            changed |= apply_rules_to_expr(inner, rules);
+            changed |= apply_rules_to_expr(inner, rules, type_map);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= apply_rules_to_expr(lhs, rules);
-            changed |= apply_rules_to_expr(rhs, rules);
+            changed |= apply_rules_to_expr(lhs, rules, type_map);
+            changed |= apply_rules_to_expr(rhs, rules, type_map);
         }
         PreHirExpr::Select {
             cond,
@@ -483,25 +595,25 @@ fn apply_rules_to_expr(expr: &mut PreHirExpr, rules: &[Box<dyn Rule>]) -> bool {
             else_expr,
             ..
         } => {
-            changed |= apply_rules_to_expr(cond, rules);
-            changed |= apply_rules_to_expr(then_expr, rules);
-            changed |= apply_rules_to_expr(else_expr, rules);
+            changed |= apply_rules_to_expr(cond, rules, type_map);
+            changed |= apply_rules_to_expr(then_expr, rules, type_map);
+            changed |= apply_rules_to_expr(else_expr, rules, type_map);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                changed |= apply_rules_to_expr(arg, rules);
+                changed |= apply_rules_to_expr(arg, rules, type_map);
             }
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= apply_rules_to_expr(base, rules);
-            changed |= apply_rules_to_expr(index, rules);
+            changed |= apply_rules_to_expr(base, rules, type_map);
+            changed |= apply_rules_to_expr(index, rules, type_map);
         }
         _ => {}
     }
 
     // Apply rules directly to this expression
     for rule in rules {
-        changed |= rule.apply_expr(expr);
+        changed |= rule.apply_expr_with_types(expr, type_map);
     }
 
     changed
@@ -529,5 +641,231 @@ mod tests {
         let changed = rule.apply_expr(&mut select_expr);
         assert!(changed);
         assert_eq!(select_expr, val);
+    }
+
+    #[test]
+    fn does_not_drop_side_effects_in_zero_absorbing_or_select_rules() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let side_effect = PreHirExpr::Call {
+            origin: None,
+            target: "tick".to_string(),
+            args: vec![],
+            ty: u32_ty.clone(),
+        };
+        let mut func = PreHirFunction {
+            name: "side_effects".to_string(),
+            body: vec![
+                PreHirStmt::Expr(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Mul,
+                    lhs: Box::new(side_effect.clone()),
+                    rhs: Box::new(PreHirExpr::Const(0, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                }),
+                PreHirStmt::Expr(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::And,
+                    lhs: Box::new(side_effect.clone()),
+                    rhs: Box::new(PreHirExpr::Const(0, u32_ty.clone())),
+                    ty: u32_ty.clone(),
+                }),
+                PreHirStmt::Expr(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalAnd,
+                    lhs: Box::new(side_effect.clone()),
+                    rhs: Box::new(PreHirExpr::Const(0, NirType::Bool)),
+                    ty: NirType::Bool,
+                }),
+                PreHirStmt::Expr(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalOr,
+                    lhs: Box::new(side_effect.clone()),
+                    rhs: Box::new(PreHirExpr::Const(1, NirType::Bool)),
+                    ty: NirType::Bool,
+                }),
+                PreHirStmt::Expr(PreHirExpr::Select {
+                    cond: Box::new(side_effect),
+                    then_expr: Box::new(PreHirExpr::Const(5, u32_ty.clone())),
+                    else_expr: Box::new(PreHirExpr::Const(5, u32_ty.clone())),
+                    ty: u32_ty,
+                }),
+            ],
+            ..Default::default()
+        };
+
+        assert!(!apply_rule_normalization(&mut func));
+        assert!(
+            func.body
+                .iter()
+                .all(|s| !matches!(s, PreHirStmt::Expr(PreHirExpr::Const(_, _))))
+        );
+    }
+
+    #[test]
+    fn does_not_reduce_non_bool_logical_identities() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let binding = |name: &str, ty: NirType| PreHirBinding {
+            name: name.to_string(),
+            ty,
+            surface_type_name: None,
+            origin: None,
+            initializer: None,
+        };
+        let mut func = PreHirFunction {
+            name: "logical_bool_only".to_string(),
+            locals: vec![binding("x", u32_ty.clone()), binding("b", NirType::Bool)],
+            body: vec![
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalAnd,
+                    lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(1, NirType::Bool)),
+                    ty: NirType::Bool,
+                })),
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalOr,
+                    lhs: Box::new(PreHirExpr::Var("x".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(0, NirType::Bool)),
+                    ty: NirType::Bool,
+                })),
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::LogicalAnd,
+                    lhs: Box::new(PreHirExpr::Var("b".to_string())),
+                    rhs: Box::new(PreHirExpr::Const(1, NirType::Bool)),
+                    ty: NirType::Bool,
+                })),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_rule_normalization(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalAnd,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::LogicalOr,
+                ..
+            }))
+        ));
+        assert_eq!(
+            func.body[2],
+            PreHirStmt::Return(Some(PreHirExpr::Var("b".to_string())))
+        );
+    }
+
+    #[test]
+    fn traverses_loop_conditions_for_headers_vastart_and_field_access() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let add_zero = |name: &str| PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var(name.to_string())),
+            rhs: Box::new(PreHirExpr::Const(0, u32_ty.clone())),
+            ty: u32_ty.clone(),
+        };
+        let mut func = PreHirFunction {
+            name: "traversal".to_string(),
+            body: vec![
+                PreHirStmt::While {
+                    cond: add_zero("w"),
+                    body: vec![].into(),
+                },
+                PreHirStmt::DoWhile {
+                    body: vec![].into(),
+                    cond: add_zero("dw"),
+                },
+                PreHirStmt::For {
+                    init: Some(Box::new(PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: add_zero("init_v"),
+                    })),
+                    cond: Some(add_zero("fc")),
+                    update: Some(Box::new(PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var("i".to_string()),
+                        rhs: add_zero("upd_v"),
+                    })),
+                    body: vec![].into(),
+                },
+                PreHirStmt::VaStart {
+                    va_list: PreHirExpr::PtrOffset {
+                        base: Box::new(PreHirExpr::Var("ap".to_string())),
+                        offset: 0,
+                    },
+                    last_named_param: "n".to_string(),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::FieldAccess {
+                        base: Box::new(PreHirExpr::PtrOffset {
+                            base: Box::new(PreHirExpr::Var("obj".to_string())),
+                            offset: 0,
+                        }),
+                        field_name: "f".to_string(),
+                        offset: 0,
+                        ty: u32_ty.clone(),
+                    },
+                    rhs: PreHirExpr::FieldAccess {
+                        base: Box::new(PreHirExpr::PtrOffset {
+                            base: Box::new(PreHirExpr::Var("src".to_string())),
+                            offset: 0,
+                        }),
+                        field_name: "g".to_string(),
+                        offset: 0,
+                        ty: u32_ty,
+                    },
+                },
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_rule_normalization(&mut func));
+        assert!(matches!(
+            &func.body[0],
+            PreHirStmt::While {
+                cond: PreHirExpr::Var(n),
+                ..
+            } if n == "w"
+        ));
+        assert!(matches!(
+            &func.body[1],
+            PreHirStmt::DoWhile {
+                cond: PreHirExpr::Var(n),
+                ..
+            } if n == "dw"
+        ));
+        assert!(matches!(
+            &func.body[2],
+            PreHirStmt::For {
+                init: Some(init),
+                cond: Some(PreHirExpr::Var(c)),
+                update: Some(upd),
+                ..
+            } if c == "fc"
+                && matches!(init.as_ref(), PreHirStmt::Assign { rhs: PreHirExpr::Var(iv), .. } if iv == "init_v")
+                && matches!(upd.as_ref(), PreHirStmt::Assign { rhs: PreHirExpr::Var(uv), .. } if uv == "upd_v")
+        ));
+        assert!(matches!(
+            &func.body[3],
+            PreHirStmt::VaStart {
+                va_list: PreHirExpr::Var(n),
+                ..
+            } if n == "ap"
+        ));
+        assert!(matches!(
+            &func.body[4],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::FieldAccess { base: lhs_base, .. },
+                rhs: PreHirExpr::FieldAccess { base: rhs_base, .. },
+            } if matches!(lhs_base.as_ref(), PreHirExpr::Var(l) if l == "obj")
+                && matches!(rhs_base.as_ref(), PreHirExpr::Var(r) if r == "src")
+        ));
     }
 }
