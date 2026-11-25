@@ -184,13 +184,33 @@ jobs:
           require_success "MSRV" "${{ needs.msrv-check.result }}"
           require_success "Security advisories" "${{ needs.advisories.result }}"
 
-          # Coverage is warn-only even when run
-          if [ "${{ needs.coverage.result }}" = "failure" ]; then
-            echo "WARNING: Coverage job encountered an error (non-blocking)"
-          elif [ "${{ needs.coverage.result }}" = "skipped" ]; then
-            echo "INFO: Coverage skipped"
-          else
-            echo "INFO: Coverage finished (${{ needs.coverage.result }})"
+          # Coverage is diagnostic/advisory only, but distinguish valid measurement from
+          # missing/malformed evidence and checker/infrastructure failures.
+          COVERAGE_RESULT="${{ needs.coverage.result }}"
+          COVERAGE_STATUS="${{ needs.coverage.outputs.coverage_status }}"
+          COVERAGE_DETAIL="${{ needs.coverage.outputs.coverage_detail }}"
+          case "$COVERAGE_STATUS" in
+            measured_pass)
+              echo "OK: Coverage measured and above threshold (${COVERAGE_DETAIL})"
+              ;;
+            measured_below_threshold)
+              echo "WARNING: Coverage below advisory threshold (${COVERAGE_DETAIL})"
+              ;;
+            missing_evidence|malformed_evidence|checker_error)
+              echo "WARNING: Coverage diagnostic failed [${COVERAGE_STATUS}] (${COVERAGE_DETAIL})"
+              ;;
+            *)
+              if [ "$COVERAGE_RESULT" = "failure" ]; then
+                echo "WARNING: Coverage job encountered an infrastructure error (non-blocking)"
+              elif [ "$COVERAGE_RESULT" = "skipped" ]; then
+                echo "INFO: Coverage skipped"
+              else
+                echo "INFO: Coverage finished (${COVERAGE_RESULT}; status=${COVERAGE_STATUS:-unknown})"
+              fi
+              ;;
+          esac
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            echo "- Coverage diagnostic: \`${COVERAGE_STATUS:-$COVERAGE_RESULT}\`${COVERAGE_DETAIL:+ — ${COVERAGE_DETAIL}}" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$FAILED" -eq 1 ]; then
