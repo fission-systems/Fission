@@ -27,6 +27,7 @@ mod native {
     pub use tracing::Level as LogLevel;
 
     static TRACING_INIT: Once = Once::new();
+    static ERROR_CALLSITE_HOOK: OnceLock<ErrorCallsiteHook> = OnceLock::new();
     static FILE_LOGGING_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
     static LOG_GUARDS: OnceLock<Vec<WorkerGuard>> = OnceLock::new();
 
@@ -217,6 +218,38 @@ mod native {
         }
     }
 
+    /// Receives the static callsite metadata (target, file, line) of every
+    /// `ERROR` tracing event that passes the subscriber's filter.
+    ///
+    /// The hook gets the callsite and nothing else: the event's message and
+    /// fields are never visited, so text formatted from analyzed data cannot
+    /// reach it. Opt-in error reporting (`fission-cli`'s `sentry` feature)
+    /// is the only intended consumer.
+    pub type ErrorCallsiteHook = fn(&'static tracing::Metadata<'static>);
+
+    /// Install the [`ErrorCallsiteHook`]. Call before the first
+    /// `init_with_options`; the subscriber is built once and reads the hook
+    /// then. Returns `false` if a hook was already installed.
+    pub fn set_error_callsite_hook(hook: ErrorCallsiteHook) -> bool {
+        ERROR_CALLSITE_HOOK.set(hook).is_ok()
+    }
+
+    /// Forwards `ERROR` callsites to an [`ErrorCallsiteHook`].
+    struct ErrorCallsiteLayer(ErrorCallsiteHook);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ErrorCallsiteLayer {
+        fn on_event(
+            &self,
+            event: &tracing::Event<'_>,
+            _ctx: tracing_subscriber::layer::Context<'_, S>,
+        ) {
+            let metadata = event.metadata();
+            if *metadata.level() == tracing::Level::ERROR {
+                (self.0)(metadata);
+            }
+        }
+    }
+
     /// Build an [`EnvFilter`] from `RUST_LOG` when set and parseable; otherwise `default_filter`
     /// (e.g. `"warn"`, `"info"`).
     pub fn env_filter_from_rust_log_or_default(default_filter: &str) -> EnvFilter {
@@ -240,9 +273,8 @@ mod native {
 
             let registry = Registry::default()
                 .with(env_filter)
-                .with(ErrorLayer::default());
-            #[cfg(feature = "sentry")]
-            let registry = registry.with(sentry_tracing::layer());
+                .with(ErrorLayer::default())
+                .with(ERROR_CALLSITE_HOOK.get().copied().map(ErrorCallsiteLayer));
             let _ = match (options.format, options.include_timestamp) {
                 (LoggingFormat::Compact, true) => registry
                     .with(
@@ -391,6 +423,30 @@ mod native {
             unsafe { std::env::remove_var("RUST_LOG") };
         }
 
+        static SEEN: std::sync::Mutex<Vec<(&'static str, Option<u32>)>> =
+            std::sync::Mutex::new(Vec::new());
+
+        fn record_callsite(metadata: &'static tracing::Metadata<'static>) {
+            SEEN.lock()
+                .unwrap()
+                .push((metadata.target(), metadata.line()));
+        }
+
+        #[test]
+        fn error_callsite_layer_sees_only_error_callsites() {
+            use tracing_subscriber::layer::SubscriberExt;
+            let subscriber = Registry::default().with(ErrorCallsiteLayer(record_callsite));
+            let line = tracing::subscriber::with_default(subscriber, || {
+                let secret = "decrypt_license_key";
+                tracing::warn!("not an error {secret}");
+                let line = line!() + 1;
+                tracing::error!(field = secret, "failed on {secret}");
+                line
+            });
+            let seen = SEEN.lock().unwrap().clone();
+            assert_eq!(seen, vec![(module_path!(), Some(line))]);
+        }
+
         #[test]
         fn logging_init_is_idempotent() {
             init_with_options(LoggingOptions::new("warn"));
@@ -471,6 +527,15 @@ pub fn init_with_options(_opts: LoggingOptions) {}
 
 #[cfg(target_arch = "wasm32")]
 pub fn init_logging() {}
+
+/// See the native `ErrorCallsiteHook`; WASM builds have no subscriber.
+#[cfg(target_arch = "wasm32")]
+pub type ErrorCallsiteHook = fn(&'static tracing::Metadata<'static>);
+
+#[cfg(target_arch = "wasm32")]
+pub fn set_error_callsite_hook(_hook: ErrorCallsiteHook) -> bool {
+    false
+}
 
 #[cfg(target_arch = "wasm32")]
 pub fn capture_span_trace() -> Option<String> {
