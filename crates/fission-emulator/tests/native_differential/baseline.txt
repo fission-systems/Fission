@@ -21,18 +21,6 @@
 # does not, on the same tree), the reason says `@host`: no run calls it stale.
 
 # ── x86-64 ──────────────────────────────────────────────────────────────────
-# Spec: arithmetic never writes AF (SDM 2, ADD..CMPS "Flags Affected").
-x86_64 * AF #1048 arithmetic instructions leave AF unchanged
-# Spec: ties round away from zero, not by MXCSR.RC (#1049); NaN and
-# out-of-range inputs do not give the integer indefinite (#1050).
-x86_64 CVTSD2SI * #1049 rounding; also #1050
-x86_64 CVTSS2SI * #1049 rounding; also #1050
-x86_64 CVTPD2DQ * #1049 rounding; also #1050
-x86_64 CVTPS2DQ * #1049 rounding; also #1050
-x86_64 CVTTSD2SI * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTSS2SI * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTPD2DQ * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTPS2DQ * #1050 NaN/out-of-range is not the integer indefinite
 # Evaluator: which NaN propagates is left to the host's float ops; x86
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
 x86_64 * ~nan #1055 NaN payload / operand order

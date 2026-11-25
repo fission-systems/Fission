@@ -133,6 +133,21 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `shrdflags` had the two cases swapped. `PUSHF`/`PUSHFD`/`PUSHFQ` store reserved bit 1 as 1
   (#1052). Evidence: an x86-64 host run natively (the native differential) and the SDM
   sections cited in the script. Re-apply with `scripts/sleigh/apply_x86_prefix_and_flag_fixes.py`.
+- `x86/ia.sinc`, `x86/lockable.sinc` (and the compiled `x86.sla`, `x86-64.sla`): AF is set
+  by every add/subtract form, as the carry or borrow out of bit 3 (SDM Vol. 1, 3.4.3.1);
+  upstream never wrote it (#1048). `addflags`, `subflags`, `addCarryFlags`,
+  `subCarryFlags` and `negflags` compute `AF = ((a ^ b ^ result) & 0x10) != 0` from their
+  operands, and INC/DEC set it from the low nibble, so ADD, ADC, SUB, SBB, CMP, CMPS,
+  SCAS, NEG, INC, DEC, XADD, CMPXCHG and CMPccXADD all write it. The SSE
+  float-to-integer conversions `CVTSD2SI`/`CVTSS2SI`/`CVTPD2DQ`/`CVTPS2DQ` round to
+  nearest with ties to even (MXCSR.RC = 00, the default; other modes are not modelled)
+  instead of upstream's ties-away `round` or, for the packed forms, no rounding (#1049),
+  and they and `CVTTSD2SI`/`CVTTSS2SI`/`CVTTPD2DQ`/`CVTTPS2DQ` return the integer
+  indefinite (`0x80000000`, `0x8000000000000000`) for a NaN, an infinity or an
+  out-of-range result (#1050). The rounding is built exactly from `floor`, as
+  `apply_aarch64_frint_exact.py` does. The VEX/EVEX `VCVT*` and MMX `CVT*PI` forms are
+  unchanged. Evidence: an x86-64 host run natively (the native differential) and the SDM
+  sections cited in the script. Re-apply with `scripts/sleigh/apply_x86_af_and_cvt.py`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

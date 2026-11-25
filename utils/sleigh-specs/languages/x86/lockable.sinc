@@ -680,7 +680,7 @@
 {
     build lockx;
     build m8;
-    OF = sborrow(m8,1);
+    OF = sborrow(m8,1); AF = (m8 & 0xf) == 0;
     m8 =  m8 - 1;
     resultflags(m8);
     build unlock; 
@@ -690,7 +690,7 @@
 {
     build lockx;
     build m16;
-    OF = sborrow(m16,1);
+    OF = sborrow(m16,1); AF = (m16 & 0xf) == 0;
     m16 = m16 - 1;
     resultflags(m16);
     build unlock; 
@@ -700,7 +700,7 @@
 {
     build lockx;
     build m32;
-    OF = sborrow(m32,1);
+    OF = sborrow(m32,1); AF = (m32 & 0xf) == 0;
     m32 = m32 - 1;
     resultflags(m32);
     build unlock; 
@@ -711,7 +711,7 @@
 {
     build lockx;
     build m64;
-    OF = sborrow(m64,1);
+    OF = sborrow(m64,1); AF = (m64 & 0xf) == 0;
     m64 = m64 - 1;
     resultflags(m64);
     build unlock; 
@@ -722,7 +722,7 @@
 {
     build lockx;
     build m8;
-    OF = scarry(m8,1);
+    OF = scarry(m8,1); AF = (m8 & 0xf) == 0xf;
     m8 =  m8 + 1;
     resultflags( m8);
     build unlock; 
@@ -732,7 +732,7 @@
 {
     build lockx;
     build m16;
-    OF = scarry(m16,1);
+    OF = scarry(m16,1); AF = (m16 & 0xf) == 0xf;
     m16 = m16 + 1;
     resultflags(m16);
     build unlock; 
@@ -742,7 +742,7 @@
 {
     build lockx;
     build m32;
-    OF = scarry(m32,1);
+    OF = scarry(m32,1); AF = (m32 & 0xf) == 0xf;
     m32 = m32 + 1;
     resultflags(m32);
     build unlock; 
@@ -753,7 +753,7 @@
 {
     build lockx;
     build m64;
-    OF = scarry(m64,1);
+    OF = scarry(m64,1); AF = (m64 & 0xf) == 0xf;
     m64 = m64 + 1;
     resultflags(m64);
     build unlock; 

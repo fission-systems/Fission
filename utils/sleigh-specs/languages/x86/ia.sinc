@@ -2114,6 +2114,7 @@ macro packeflags(tmp) {
 macro addflags(op1,op2) {
  CF = carry(op1,op2);
  OF = scarry(op1,op2);
+ AF = ((op1 ^ op2 ^ (op1 + op2)) & 0x10) != 0;
 }
 
 #
@@ -2126,8 +2127,9 @@ macro addCarryFlags ( op1, op2 ) {
 	local result = op1 + op2;
 	CF = CF || carry( result, CFcopy );
 	OF = OF ^^ scarry( result, CFcopy );
-	op1 = result + CFcopy;
-	# AF not implemented
+	local sum = result + CFcopy;
+	AF = ((op1 ^ op2 ^ sum) & 0x10) != 0;
+	op1 = sum;
 }
 
 
@@ -2138,8 +2140,9 @@ macro subCarryFlags ( op1, op2 ) {
 	local result = op1 - op2;
 	CF = CF || (result < CFcopy);
 	OF = OF ^^ sborrow( result, CFcopy );
-	op1 = result - CFcopy;
-	# AF not implemented
+	local diff = result - CFcopy;
+	AF = ((op1 ^ op2 ^ diff) & 0x10) != 0;
+	op1 = diff;
 }
 
 macro resultflags(result) {
@@ -2167,11 +2170,13 @@ macro shiftresultflags(result,count) {
 macro subflags(op1,op2) {
  CF = op1 < op2;
  OF = sborrow(op1,op2);
+ AF = ((op1 ^ op2 ^ (op1 - op2)) & 0x10) != 0;
 }
 
 macro negflags(op1) {
  CF = (op1 != 0);
  OF = sborrow(0,op1);
+ AF = ((op1 ^ (0 - op1)) & 0x10) != 0;
 }
 
 macro logicalflags() {
@@ -3257,15 +3262,15 @@ define pcodeop cpuid_brand_part3_info;
                            resultflags(AL); }
 
 # See 'lockable.sinc' for memory destination, lockable variants
-:DEC Rmr8       is vexMode=0 & byte=0xfe; mod=3 & Rmr8 & reg_opcode=1         { OF = sborrow(Rmr8,1);   Rmr8 =  Rmr8 - 1; resultflags( Rmr8); }
-:DEC Rmr16      is vexMode=0 & opsize=0 & byte=0xff; mod=3 & Rmr16 & reg_opcode=1 { OF = sborrow(Rmr16,1); Rmr16 = Rmr16 - 1; resultflags(Rmr16); }
-:DEC Rmr32      is vexMode=0 & opsize=1 & byte=0xff; mod=3 & Rmr32 & check_rm32_dest & reg_opcode=1 { OF = sborrow(Rmr32,1); Rmr32 = Rmr32 - 1; build check_rm32_dest; resultflags(Rmr32); }
+:DEC Rmr8       is vexMode=0 & byte=0xfe; mod=3 & Rmr8 & reg_opcode=1         { OF = sborrow(Rmr8,1); AF = (Rmr8 & 0xf) == 0;   Rmr8 =  Rmr8 - 1; resultflags( Rmr8); }
+:DEC Rmr16      is vexMode=0 & opsize=0 & byte=0xff; mod=3 & Rmr16 & reg_opcode=1 { OF = sborrow(Rmr16,1); AF = (Rmr16 & 0xf) == 0; Rmr16 = Rmr16 - 1; resultflags(Rmr16); }
+:DEC Rmr32      is vexMode=0 & opsize=1 & byte=0xff; mod=3 & Rmr32 & check_rm32_dest & reg_opcode=1 { OF = sborrow(Rmr32,1); AF = (Rmr32 & 0xf) == 0; Rmr32 = Rmr32 - 1; build check_rm32_dest; resultflags(Rmr32); }
 @ifdef IA64
-:DEC Rmr64      is $(LONGMODE_ON) & vexMode=0 & opsize=2 & byte=0xff; mod=3 & Rmr64 & reg_opcode=1 { OF = sborrow(Rmr64,1); Rmr64 = Rmr64 - 1; resultflags(Rmr64); }
+:DEC Rmr64      is $(LONGMODE_ON) & vexMode=0 & opsize=2 & byte=0xff; mod=3 & Rmr64 & reg_opcode=1 { OF = sborrow(Rmr64,1); AF = (Rmr64 & 0xf) == 0; Rmr64 = Rmr64 - 1; resultflags(Rmr64); }
 @endif
 
-:DEC Rmr16     is $(LONGMODE_OFF) & vexMode=0 & opsize=0 & row=4 & page=1 & Rmr16  { OF = sborrow(Rmr16,1);   Rmr16 =  Rmr16 - 1; resultflags( Rmr16); }
-:DEC Rmr32     is $(LONGMODE_OFF) & vexMode=0 & opsize=1 & row=4 & page=1 & Rmr32 & check_Rmr32_dest  { OF = sborrow(Rmr32,1);   Rmr32 =  Rmr32 - 1; build check_Rmr32_dest; resultflags( Rmr32); }
+:DEC Rmr16     is $(LONGMODE_OFF) & vexMode=0 & opsize=0 & row=4 & page=1 & Rmr16  { OF = sborrow(Rmr16,1); AF = (Rmr16 & 0xf) == 0;   Rmr16 =  Rmr16 - 1; resultflags( Rmr16); }
+:DEC Rmr32     is $(LONGMODE_OFF) & vexMode=0 & opsize=1 & row=4 & page=1 & Rmr32 & check_Rmr32_dest  { OF = sborrow(Rmr32,1); AF = (Rmr32 & 0xf) == 0;   Rmr32 =  Rmr32 - 1; build check_Rmr32_dest; resultflags( Rmr32); }
 
 :DIV rm8        is vexMode=0 & byte=0xf6; rm8 & reg_opcode=6 ...            { rm8ext:2 = zext(rm8);
                                                   local quotient = AX / rm8ext;  # DE exception if quotient doesn't fit in AL
@@ -3680,15 +3685,15 @@ define pcodeop ibhf;
 @endif
 
 # See 'lockable.sinc' for memory destination, lockable variants
-:INC  Rmr8	is vexMode=0 & byte=0xfe;  mod=3 & Rmr8 & reg_opcode=0			{ OF = scarry(Rmr8,1);   Rmr8 =  Rmr8 + 1; resultflags( Rmr8); }
-:INC Rmr16	is vexMode=0 & opsize=0 & byte=0xff; mod=3 & Rmr16 & reg_opcode=0	{ OF = scarry(Rmr16,1); Rmr16 = Rmr16 + 1; resultflags(Rmr16); }
-:INC Rmr32	is vexMode=0 & opsize=1 & byte=0xff; mod=3 & Rmr32 & check_Rmr32_dest & reg_opcode=0	{ OF = scarry(Rmr32,1); Rmr32 = Rmr32 + 1; build check_Rmr32_dest; resultflags(Rmr32); }
+:INC  Rmr8	is vexMode=0 & byte=0xfe;  mod=3 & Rmr8 & reg_opcode=0			{ OF = scarry(Rmr8,1); AF = (Rmr8 & 0xf) == 0xf;   Rmr8 =  Rmr8 + 1; resultflags( Rmr8); }
+:INC Rmr16	is vexMode=0 & opsize=0 & byte=0xff; mod=3 & Rmr16 & reg_opcode=0	{ OF = scarry(Rmr16,1); AF = (Rmr16 & 0xf) == 0xf; Rmr16 = Rmr16 + 1; resultflags(Rmr16); }
+:INC Rmr32	is vexMode=0 & opsize=1 & byte=0xff; mod=3 & Rmr32 & check_Rmr32_dest & reg_opcode=0	{ OF = scarry(Rmr32,1); AF = (Rmr32 & 0xf) == 0xf; Rmr32 = Rmr32 + 1; build check_Rmr32_dest; resultflags(Rmr32); }
 @ifdef IA64
-:INC      Rmr64	is $(LONGMODE_ON) & vexMode=0 & opsize=2 & byte=0xff; mod=3 & Rmr64 & reg_opcode=0	{ OF = scarry(Rmr64,1); Rmr64 = Rmr64 + 1; resultflags(Rmr64); }
+:INC      Rmr64	is $(LONGMODE_ON) & vexMode=0 & opsize=2 & byte=0xff; mod=3 & Rmr64 & reg_opcode=0	{ OF = scarry(Rmr64,1); AF = (Rmr64 & 0xf) == 0xf; Rmr64 = Rmr64 + 1; resultflags(Rmr64); }
 @endif
 
-:INC          Rmr16	is $(LONGMODE_OFF) & vexMode=0 & opsize=0 & row = 4 & page = 0 & Rmr16 { OF = scarry(Rmr16,1);   Rmr16 =  Rmr16 + 1; resultflags( Rmr16); }
-:INC          Rmr32	is $(LONGMODE_OFF) & vexMode=0 & opsize=1 & row = 4 & page = 0 & Rmr32 { OF = scarry(Rmr32,1);   Rmr32 =  Rmr32 + 1; resultflags( Rmr32); }
+:INC          Rmr16	is $(LONGMODE_OFF) & vexMode=0 & opsize=0 & row = 4 & page = 0 & Rmr16 { OF = scarry(Rmr16,1); AF = (Rmr16 & 0xf) == 0xf;   Rmr16 =  Rmr16 + 1; resultflags( Rmr16); }
+:INC          Rmr32	is $(LONGMODE_OFF) & vexMode=0 & opsize=1 & row = 4 & page = 0 & Rmr32 { OF = scarry(Rmr32,1); AF = (Rmr32 & 0xf) == 0xf;   Rmr32 =  Rmr32 + 1; resultflags( Rmr32); }
 
 :INSB^rep^reptail eseDI1,DX is vexMode=0 & rep & reptail & byte=0x6c & eseDI1 & DX      { build rep; build eseDI1; eseDI1 = in(DX); build reptail; }
 :INSW^rep^reptail eseDI2,DX is vexMode=0 & rep & reptail & opsize=0 & byte=0x6d & eseDI2 & DX   { build rep; build eseDI2; eseDI2 = in(DX); build reptail; }
@@ -6995,17 +7000,55 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTPD2DQ     XmmReg, m128      is vexMode=0 &  $(PRE_F2) & byte=0x0F; byte=0xE6; m128 & XmmReg ...
 {
+  # Fission: MXCSR rounding and the integer indefinite
     local m:16 = m128;
-    XmmReg[0,32] = trunc( m[0,64] );
-    XmmReg[32,32] = trunc( m[64,64] );
+    local cx0:8 = m[0,64];
+    local cf0:8 = floor(cx0);
+    local cd0:8 = cx0 f- cf0;
+    local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+    local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+    local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+    local cv0:1 = (cr0 f>= 0xc1e0000000000000:8) && (cr0 f< 0x41e0000000000000:8);
+    local ci0:4 = trunc(cr0);
+    local cm0:4 = 0 - zext(cv0);
+    XmmReg[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+    local cx1:8 = m[64,64];
+    local cf1:8 = floor(cx1);
+    local cd1:8 = cx1 f- cf1;
+    local ch1:8 = cf1 f* 0x3fe0000000000000:8;
+    local cu1:1 = (cd1 f> 0x3fe0000000000000:8) || ((cd1 f== 0x3fe0000000000000:8) && ((ch1 f- floor(ch1)) f!= 0:8));
+    local cr1:8 = cf1 f+ (zext(cu1) * 0x3ff0000000000000:8);
+    local cv1:1 = (cr1 f>= 0xc1e0000000000000:8) && (cr1 f< 0x41e0000000000000:8);
+    local ci1:4 = trunc(cr1);
+    local cm1:4 = 0 - zext(cv1);
+    XmmReg[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
     XmmReg[64,32] = 0;
     XmmReg[96,32] = 0;
 }
 
 :CVTPD2DQ     XmmReg1, XmmReg2  is vexMode=0 &  $(PRE_F2) & byte=0x0F; byte=0xE6; xmmmod=3 & XmmReg1 & XmmReg2
 {
-    XmmReg1[0,32] = trunc( XmmReg2[0,64] );
-    XmmReg1[32,32] = trunc( XmmReg2[64,64] );
+  # Fission: MXCSR rounding and the integer indefinite
+    local cx0:8 = XmmReg2[0,64];
+    local cf0:8 = floor(cx0);
+    local cd0:8 = cx0 f- cf0;
+    local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+    local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+    local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+    local cv0:1 = (cr0 f>= 0xc1e0000000000000:8) && (cr0 f< 0x41e0000000000000:8);
+    local ci0:4 = trunc(cr0);
+    local cm0:4 = 0 - zext(cv0);
+    XmmReg1[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+    local cx1:8 = XmmReg2[64,64];
+    local cf1:8 = floor(cx1);
+    local cd1:8 = cx1 f- cf1;
+    local ch1:8 = cf1 f* 0x3fe0000000000000:8;
+    local cu1:1 = (cd1 f> 0x3fe0000000000000:8) || ((cd1 f== 0x3fe0000000000000:8) && ((ch1 f- floor(ch1)) f!= 0:8));
+    local cr1:8 = cf1 f+ (zext(cu1) * 0x3ff0000000000000:8);
+    local cv1:1 = (cr1 f>= 0xc1e0000000000000:8) && (cr1 f< 0x41e0000000000000:8);
+    local ci1:4 = trunc(cr1);
+    local cm1:4 = 0 - zext(cv1);
+    XmmReg1[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
     XmmReg1[64,32] = 0;
     XmmReg1[96,32] = 0;
 }
@@ -7068,19 +7111,93 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTPS2DQ      XmmReg, m128        is vexMode=0 &  $(PRE_66) & byte=0x0F; byte=0x5B; m128 & XmmReg ...
 {
+  # Fission: MXCSR rounding and the integer indefinite
     local m:16 = m128;
-    XmmReg[0,32] = trunc( m[0,32] );
-    XmmReg[32,32] = trunc( m[32,32] );
-    XmmReg[64,32] = trunc( m[64,32] );
-    XmmReg[96,32] = trunc( m[96,32] );
+    local cx0:4 = m[0,32];
+    local cf0:4 = floor(cx0);
+    local cd0:4 = cx0 f- cf0;
+    local ch0:4 = cf0 f* 0x3f000000:4;
+    local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+    local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+    local cv0:1 = (cr0 f>= 0xcf000000:4) && (cr0 f< 0x4f000000:4);
+    local ci0:4 = trunc(cr0);
+    local cm0:4 = 0 - zext(cv0);
+    XmmReg[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+    local cx1:4 = m[32,32];
+    local cf1:4 = floor(cx1);
+    local cd1:4 = cx1 f- cf1;
+    local ch1:4 = cf1 f* 0x3f000000:4;
+    local cu1:1 = (cd1 f> 0x3f000000:4) || ((cd1 f== 0x3f000000:4) && ((ch1 f- floor(ch1)) f!= 0:4));
+    local cr1:4 = cf1 f+ (zext(cu1) * 0x3f800000:4);
+    local cv1:1 = (cr1 f>= 0xcf000000:4) && (cr1 f< 0x4f000000:4);
+    local ci1:4 = trunc(cr1);
+    local cm1:4 = 0 - zext(cv1);
+    XmmReg[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
+    local cx2:4 = m[64,32];
+    local cf2:4 = floor(cx2);
+    local cd2:4 = cx2 f- cf2;
+    local ch2:4 = cf2 f* 0x3f000000:4;
+    local cu2:1 = (cd2 f> 0x3f000000:4) || ((cd2 f== 0x3f000000:4) && ((ch2 f- floor(ch2)) f!= 0:4));
+    local cr2:4 = cf2 f+ (zext(cu2) * 0x3f800000:4);
+    local cv2:1 = (cr2 f>= 0xcf000000:4) && (cr2 f< 0x4f000000:4);
+    local ci2:4 = trunc(cr2);
+    local cm2:4 = 0 - zext(cv2);
+    XmmReg[64,32] = (ci2 & cm2) | (0x80000000:4 & ~cm2);
+    local cx3:4 = m[96,32];
+    local cf3:4 = floor(cx3);
+    local cd3:4 = cx3 f- cf3;
+    local ch3:4 = cf3 f* 0x3f000000:4;
+    local cu3:1 = (cd3 f> 0x3f000000:4) || ((cd3 f== 0x3f000000:4) && ((ch3 f- floor(ch3)) f!= 0:4));
+    local cr3:4 = cf3 f+ (zext(cu3) * 0x3f800000:4);
+    local cv3:1 = (cr3 f>= 0xcf000000:4) && (cr3 f< 0x4f000000:4);
+    local ci3:4 = trunc(cr3);
+    local cm3:4 = 0 - zext(cv3);
+    XmmReg[96,32] = (ci3 & cm3) | (0x80000000:4 & ~cm3);
 }
 
 :CVTPS2DQ      XmmReg1, XmmReg2    is vexMode=0 &  $(PRE_66) & byte=0x0F; byte=0x5B; xmmmod=3 & XmmReg1 & XmmReg2
 {
-    XmmReg1[0,32] = trunc( XmmReg2[0,32] );
-    XmmReg1[32,32] = trunc( XmmReg2[32,32] );
-    XmmReg1[64,32] = trunc( XmmReg2[64,32] );
-    XmmReg1[96,32] = trunc( XmmReg2[96,32] );
+  # Fission: MXCSR rounding and the integer indefinite
+    local cx0:4 = XmmReg2[0,32];
+    local cf0:4 = floor(cx0);
+    local cd0:4 = cx0 f- cf0;
+    local ch0:4 = cf0 f* 0x3f000000:4;
+    local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+    local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+    local cv0:1 = (cr0 f>= 0xcf000000:4) && (cr0 f< 0x4f000000:4);
+    local ci0:4 = trunc(cr0);
+    local cm0:4 = 0 - zext(cv0);
+    XmmReg1[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+    local cx1:4 = XmmReg2[32,32];
+    local cf1:4 = floor(cx1);
+    local cd1:4 = cx1 f- cf1;
+    local ch1:4 = cf1 f* 0x3f000000:4;
+    local cu1:1 = (cd1 f> 0x3f000000:4) || ((cd1 f== 0x3f000000:4) && ((ch1 f- floor(ch1)) f!= 0:4));
+    local cr1:4 = cf1 f+ (zext(cu1) * 0x3f800000:4);
+    local cv1:1 = (cr1 f>= 0xcf000000:4) && (cr1 f< 0x4f000000:4);
+    local ci1:4 = trunc(cr1);
+    local cm1:4 = 0 - zext(cv1);
+    XmmReg1[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
+    local cx2:4 = XmmReg2[64,32];
+    local cf2:4 = floor(cx2);
+    local cd2:4 = cx2 f- cf2;
+    local ch2:4 = cf2 f* 0x3f000000:4;
+    local cu2:1 = (cd2 f> 0x3f000000:4) || ((cd2 f== 0x3f000000:4) && ((ch2 f- floor(ch2)) f!= 0:4));
+    local cr2:4 = cf2 f+ (zext(cu2) * 0x3f800000:4);
+    local cv2:1 = (cr2 f>= 0xcf000000:4) && (cr2 f< 0x4f000000:4);
+    local ci2:4 = trunc(cr2);
+    local cm2:4 = 0 - zext(cv2);
+    XmmReg1[64,32] = (ci2 & cm2) | (0x80000000:4 & ~cm2);
+    local cx3:4 = XmmReg2[96,32];
+    local cf3:4 = floor(cx3);
+    local cd3:4 = cx3 f- cf3;
+    local ch3:4 = cf3 f* 0x3f000000:4;
+    local cu3:1 = (cd3 f> 0x3f000000:4) || ((cd3 f== 0x3f000000:4) && ((ch3 f- floor(ch3)) f!= 0:4));
+    local cr3:4 = cf3 f+ (zext(cu3) * 0x3f800000:4);
+    local cv3:1 = (cr3 f>= 0xcf000000:4) && (cr3 f< 0x4f000000:4);
+    local ci3:4 = trunc(cr3);
+    local cm3:4 = 0 - zext(cv3);
+    XmmReg1[96,32] = (ci3 & cm3) | (0x80000000:4 & ~cm3);
 }
 
 :CVTPS2PD     XmmReg, m64       is vexMode=0 &  mandover=0 & byte=0x0F; byte=0x5A; m64 & XmmReg ...
@@ -7114,25 +7231,65 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTSD2SI     Reg32, m64    is vexMode=0 & $(PRE_F2) & byte=0x0F; byte=0x2D; (Reg32 & check_Reg32_dest) ... & m64
 {
-  Reg32 = trunc(round(m64));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = m64;
+  local cf0:8 = floor(cx0);
+  local cd0:8 = cx0 f- cf0;
+  local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+  local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+  local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+  local cv0:1 = (cr0 f>= 0xc1e0000000000000:8) && (cr0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cr0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 :CVTSD2SI     Reg32, XmmReg2 is vexMode=0 & $(PRE_F2) & byte=0x0F; byte=0x2D; xmmmod=3 & Reg32 & check_Reg32_dest & XmmReg2
 {
-  Reg32 = trunc(round(XmmReg2[0,64]));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = XmmReg2[0,64];
+  local cf0:8 = floor(cx0);
+  local cd0:8 = cx0 f- cf0;
+  local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+  local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+  local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+  local cv0:1 = (cr0 f>= 0xc1e0000000000000:8) && (cr0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cr0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 @ifdef IA64
 :CVTSD2SI     Reg64, m64    is $(LONGMODE_ON) & vexMode=0 & opsize=2 & $(PRE_F2) & byte=0x0F; byte=0x2D; Reg64 ... & m64
 {
-  Reg64 = trunc(round(m64));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = m64;
+  local cf0:8 = floor(cx0);
+  local cd0:8 = cx0 f- cf0;
+  local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+  local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+  local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+  local cv0:1 = (cr0 f>= 0xc3e0000000000000:8) && (cr0 f< 0x43e0000000000000:8);
+  local ci0:8 = trunc(cr0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 
 :CVTSD2SI     Reg64, XmmReg2 is vexMode=0 & opsize=2 & $(PRE_F2) & byte=0x0F; byte=0x2D; xmmmod=3 & Reg64 & XmmReg2
 {
-  Reg64 = trunc(round(XmmReg2[0,64]));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = XmmReg2[0,64];
+  local cf0:8 = floor(cx0);
+  local cd0:8 = cx0 f- cf0;
+  local ch0:8 = cf0 f* 0x3fe0000000000000:8;
+  local cu0:1 = (cd0 f> 0x3fe0000000000000:8) || ((cd0 f== 0x3fe0000000000000:8) && ((ch0 f- floor(ch0)) f!= 0:8));
+  local cr0:8 = cf0 f+ (zext(cu0) * 0x3ff0000000000000:8);
+  local cv0:1 = (cr0 f>= 0xc3e0000000000000:8) && (cr0 f< 0x43e0000000000000:8);
+  local ci0:8 = trunc(cr0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 @endif
 
@@ -7182,25 +7339,65 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTSS2SI     Reg32, m32    is vexMode=0 & $(PRE_F3) & byte=0x0F; byte=0x2D; (Reg32 & check_Reg32_dest) ... & m32
 {
-  Reg32 = trunc(round(m32));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = m32;
+  local cf0:4 = floor(cx0);
+  local cd0:4 = cx0 f- cf0;
+  local ch0:4 = cf0 f* 0x3f000000:4;
+  local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+  local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+  local cv0:1 = (cr0 f>= 0xcf000000:4) && (cr0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cr0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 :CVTSS2SI     Reg32, XmmReg2 is vexMode=0 & $(PRE_F3) & byte=0x0F; byte=0x2D; xmmmod=3 & Reg32 & check_Reg32_dest & XmmReg2
 {
-  Reg32 = trunc(round(XmmReg2[0,32]));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = XmmReg2[0,32];
+  local cf0:4 = floor(cx0);
+  local cd0:4 = cx0 f- cf0;
+  local ch0:4 = cf0 f* 0x3f000000:4;
+  local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+  local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+  local cv0:1 = (cr0 f>= 0xcf000000:4) && (cr0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cr0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 @ifdef IA64
 :CVTSS2SI     Reg64, m32    is $(LONGMODE_ON) & vexMode=0 & opsize=2 & $(PRE_F3) & byte=0x0F; byte=0x2D; Reg64 ... & m32
 {
-  Reg64 = trunc(round(m32));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = m32;
+  local cf0:4 = floor(cx0);
+  local cd0:4 = cx0 f- cf0;
+  local ch0:4 = cf0 f* 0x3f000000:4;
+  local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+  local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+  local cv0:1 = (cr0 f>= 0xdf000000:4) && (cr0 f< 0x5f000000:4);
+  local ci0:8 = trunc(cr0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 
 :CVTSS2SI     Reg64, XmmReg2 is vexMode=0 & opsize=2 & $(PRE_F3) & byte=0x0F; byte=0x2D; xmmmod=3 & Reg64 & XmmReg2
 {
-  Reg64 = trunc(round(XmmReg2[0,32]));
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = XmmReg2[0,32];
+  local cf0:4 = floor(cx0);
+  local cd0:4 = cx0 f- cf0;
+  local ch0:4 = cf0 f* 0x3f000000:4;
+  local cu0:1 = (cd0 f> 0x3f000000:4) || ((cd0 f== 0x3f000000:4) && ((ch0 f- floor(ch0)) f!= 0:4));
+  local cr0:4 = cf0 f+ (zext(cu0) * 0x3f800000:4);
+  local cv0:1 = (cr0 f>= 0xdf000000:4) && (cr0 f< 0x5f000000:4);
+  local ci0:8 = trunc(cr0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 @endif
                 
@@ -7221,36 +7418,88 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTTPD2DQ    XmmReg, m128        is vexMode=0 &  $(PRE_66) & byte=0x0F; byte=0xE6; m128 & XmmReg ...
 {
+  # Fission: MXCSR rounding and the integer indefinite
   local m:16 = m128;
-  XmmReg[0,32] = trunc(m[0,64]);
-  XmmReg[32,32] = trunc(m[64,64]);
+  local cx0:8 = m[0,64];
+  local cv0:1 = (cx0 f> 0xc1e0000000200000:8) && (cx0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  XmmReg[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+  local cx1:8 = m[64,64];
+  local cv1:1 = (cx1 f> 0xc1e0000000200000:8) && (cx1 f< 0x41e0000000000000:8);
+  local ci1:4 = trunc(cx1);
+  local cm1:4 = 0 - zext(cv1);
+  XmmReg[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
   XmmReg[64,32] = 0;
   XmmReg[96,32] = 0;
 }
 
 :CVTTPD2DQ    XmmReg1, XmmReg2    is vexMode=0 &  $(PRE_66) & byte=0x0F; byte=0xE6; xmmmod=3 & XmmReg1 & XmmReg2
 {
-  XmmReg1[0,32] = trunc(XmmReg2[0,64]);
-  XmmReg1[32,32] = trunc(XmmReg2[64,64]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = XmmReg2[0,64];
+  local cv0:1 = (cx0 f> 0xc1e0000000200000:8) && (cx0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  XmmReg1[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+  local cx1:8 = XmmReg2[64,64];
+  local cv1:1 = (cx1 f> 0xc1e0000000200000:8) && (cx1 f< 0x41e0000000000000:8);
+  local ci1:4 = trunc(cx1);
+  local cm1:4 = 0 - zext(cv1);
+  XmmReg1[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
   XmmReg1[64,32] = 0;
   XmmReg1[96,32] = 0;
 }
 
 :CVTTPS2DQ    XmmReg, m128        is vexMode=0 &  $(PRE_F3) & byte=0x0F; byte=0x5B; m128 & XmmReg ...
 {
+  # Fission: MXCSR rounding and the integer indefinite
   local m:16 = m128;
-  XmmReg[0,32] = trunc(m[0,32]);
-  XmmReg[32,32] = trunc(m[32,32]);
-  XmmReg[64,32] = trunc(m[64,32]);
-  XmmReg[96,32] = trunc(m[96,32]);
+  local cx0:4 = m[0,32];
+  local cv0:1 = (cx0 f>= 0xcf000000:4) && (cx0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  XmmReg[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+  local cx1:4 = m[32,32];
+  local cv1:1 = (cx1 f>= 0xcf000000:4) && (cx1 f< 0x4f000000:4);
+  local ci1:4 = trunc(cx1);
+  local cm1:4 = 0 - zext(cv1);
+  XmmReg[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
+  local cx2:4 = m[64,32];
+  local cv2:1 = (cx2 f>= 0xcf000000:4) && (cx2 f< 0x4f000000:4);
+  local ci2:4 = trunc(cx2);
+  local cm2:4 = 0 - zext(cv2);
+  XmmReg[64,32] = (ci2 & cm2) | (0x80000000:4 & ~cm2);
+  local cx3:4 = m[96,32];
+  local cv3:1 = (cx3 f>= 0xcf000000:4) && (cx3 f< 0x4f000000:4);
+  local ci3:4 = trunc(cx3);
+  local cm3:4 = 0 - zext(cv3);
+  XmmReg[96,32] = (ci3 & cm3) | (0x80000000:4 & ~cm3);
 }
 
 :CVTTPS2DQ    XmmReg1, XmmReg2    is vexMode=0 &  $(PRE_F3) & byte=0x0F; byte=0x5B; xmmmod=3 & XmmReg1 & XmmReg2
 {
-  XmmReg1[0,32] = trunc(XmmReg2[0,32]);
-  XmmReg1[32,32] = trunc(XmmReg2[32,32]);
-  XmmReg1[64,32] = trunc(XmmReg2[64,32]);
-  XmmReg1[96,32] = trunc(XmmReg2[96,32]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = XmmReg2[0,32];
+  local cv0:1 = (cx0 f>= 0xcf000000:4) && (cx0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  XmmReg1[0,32] = (ci0 & cm0) | (0x80000000:4 & ~cm0);
+  local cx1:4 = XmmReg2[32,32];
+  local cv1:1 = (cx1 f>= 0xcf000000:4) && (cx1 f< 0x4f000000:4);
+  local ci1:4 = trunc(cx1);
+  local cm1:4 = 0 - zext(cv1);
+  XmmReg1[32,32] = (ci1 & cm1) | (0x80000000:4 & ~cm1);
+  local cx2:4 = XmmReg2[64,32];
+  local cv2:1 = (cx2 f>= 0xcf000000:4) && (cx2 f< 0x4f000000:4);
+  local ci2:4 = trunc(cx2);
+  local cm2:4 = 0 - zext(cv2);
+  XmmReg1[64,32] = (ci2 & cm2) | (0x80000000:4 & ~cm2);
+  local cx3:4 = XmmReg2[96,32];
+  local cv3:1 = (cx3 f>= 0xcf000000:4) && (cx3 f< 0x4f000000:4);
+  local ci3:4 = trunc(cx3);
+  local cm3:4 = 0 - zext(cv3);
+  XmmReg1[96,32] = (ci3 & cm3) | (0x80000000:4 & ~cm3);
 }
 
 :CVTTPS2PI    mmxreg, m64         is vexMode=0 &  mandover=0 & byte=0x0F; byte=0x2C; mmxreg ... & m64
@@ -7270,49 +7519,89 @@ CMPSS_OPERAND: ", "^imm8 is imm8   { }
 
 :CVTTSD2SI    Reg32, m64  is vexMode=0 & $(PRE_F2) & byte=0x0F; byte=0x2C; (Reg32 & check_Reg32_dest) ... & m64
 {
-  Reg32 = trunc(m64);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = m64;
+  local cv0:1 = (cx0 f> 0xc1e0000000200000:8) && (cx0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 :CVTTSD2SI    Reg32, XmmReg2  is vexMode=0 & $(PRE_F2) & byte=0x0F; byte=0x2C; xmmmod=3 & Reg32 & check_Reg32_dest & XmmReg2
 {
-  Reg32 = trunc(XmmReg2[0,64]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = XmmReg2[0,64];
+  local cv0:1 = (cx0 f> 0xc1e0000000200000:8) && (cx0 f< 0x41e0000000000000:8);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 @ifdef IA64
 :CVTTSD2SI    Reg64, m64  is $(LONGMODE_ON) & vexMode=0 & opsize=2 & $(PRE_F2) & byte=0x0F; byte=0x2C; Reg64 ... & m64
 {
-  Reg64 = trunc(m64);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = m64;
+  local cv0:1 = (cx0 f>= 0xc3e0000000000000:8) && (cx0 f< 0x43e0000000000000:8);
+  local ci0:8 = trunc(cx0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 
 :CVTTSD2SI    Reg64, XmmReg2  is vexMode=0 & opsize=2 & $(PRE_F2) & byte=0x0F; byte=0x2C; xmmmod=3 & Reg64 & XmmReg2
 {
-  Reg64 = trunc(XmmReg2[0,64]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:8 = XmmReg2[0,64];
+  local cv0:1 = (cx0 f>= 0xc3e0000000000000:8) && (cx0 f< 0x43e0000000000000:8);
+  local ci0:8 = trunc(cx0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 @endif
                 
 :CVTTSS2SI    Reg32, m32  is vexMode=0 & $(PRE_F3) & byte=0x0F; byte=0x2C; (Reg32 & check_Reg32_dest) ... & m32
 {
-  Reg32 = trunc(m32);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = m32;
+  local cv0:1 = (cx0 f>= 0xcf000000:4) && (cx0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 :CVTTSS2SI    Reg32, XmmReg2  is vexMode=0 & $(PRE_F3) & byte=0x0F; byte=0x2C; xmmmod=3 & Reg32 & check_Reg32_dest & XmmReg2
 {
-  Reg32 = trunc(XmmReg2[0,32]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = XmmReg2[0,32];
+  local cv0:1 = (cx0 f>= 0xcf000000:4) && (cx0 f< 0x4f000000:4);
+  local ci0:4 = trunc(cx0);
+  local cm0:4 = 0 - zext(cv0);
+  Reg32 = (ci0 & cm0) | (0x80000000:4 & ~cm0);
   build check_Reg32_dest;
 }
 
 @ifdef IA64
 :CVTTSS2SI    Reg64, m32  is $(LONGMODE_ON) & vexMode=0 & opsize=2 & $(PRE_F3) & byte=0x0F; byte=0x2C; Reg64 ... & m32
 {
-  Reg64 = trunc(m32);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = m32;
+  local cv0:1 = (cx0 f>= 0xdf000000:4) && (cx0 f< 0x5f000000:4);
+  local ci0:8 = trunc(cx0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 
 :CVTTSS2SI    Reg64, XmmReg2  is vexMode=0 & opsize=2 & $(PRE_F3) & byte=0x0F; byte=0x2C; xmmmod=3 & Reg64 & XmmReg2
 {
-  Reg64 = trunc(XmmReg2[0,32]);
+  # Fission: MXCSR rounding and the integer indefinite
+  local cx0:4 = XmmReg2[0,32];
+  local cv0:1 = (cx0 f>= 0xdf000000:4) && (cx0 f< 0x5f000000:4);
+  local ci0:8 = trunc(cx0);
+  local cm0:8 = 0 - zext(cv0);
+  Reg64 = (ci0 & cm0) | (0x8000000000000000:8 & ~cm0);
 }
 @endif
 

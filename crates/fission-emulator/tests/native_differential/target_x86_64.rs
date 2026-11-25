@@ -1048,6 +1048,11 @@ fn mask(bytes: &[u8], lifted: &Lifted, input: &CpuState) -> Mask {
         // SDM 2, BT / BTS / BTR / BTC, Flags Affected: "The OF, SF, AF, and PF
         // flags are undefined." (ZF is unaffected.)
         "BT" | "BTS" | "BTR" | "BTC" => flags(OF | SF | AF | PF),
+        // SDM 2, ANDN / BLSI / BLSMSK / BLSR / BZHI, Flags Affected: "The AF
+        // and PF flags are undefined." BEXTR: "The AF, SF, and PF flags are
+        // undefined." (Listed since #1048 dropped the spec-wide AF entry.)
+        "ANDN" | "BLSI" | "BLSMSK" | "BLSR" | "BZHI" => flags(AF | PF),
+        "BEXTR" => flags(AF | SF | PF),
         _ => Mask::default(),
     }
 }
