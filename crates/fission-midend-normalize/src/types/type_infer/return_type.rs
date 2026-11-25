@@ -1399,6 +1399,11 @@ fn rewrite_i32_compatible_constants_in_expr(expr: &mut PreHirExpr, narrowed_ty: 
         PreHirExpr::Unary { expr: inner, .. } => {
             rewrite_i32_compatible_constants_in_expr(inner, narrowed_ty)
         }
+        // The operands of `/ % >> < ==` carry the operation's numeric domain:
+        // turning `(ulong)x / (ulong)y` into `(int)x / (int)y` makes an
+        // unsigned divide signed. Only modular operators may be narrowed
+        // through.
+        PreHirExpr::Binary { op, .. } if op.reads_operand_domain() => false,
         PreHirExpr::Binary { lhs, rhs, .. } => {
             rewrite_i32_compatible_constants_in_expr(lhs, narrowed_ty)
                 | rewrite_i32_compatible_constants_in_expr(rhs, narrowed_ty)
