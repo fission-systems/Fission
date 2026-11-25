@@ -184,6 +184,9 @@ cargo fmt --all --check
 
 # Before pushing: CI Fast Gate checks for your commits, via CI's own scripts (--fast, --full, --release)
 cargo xtask preflight
+
+# Disk nearly full: list stale target*/ dirs and merged/closed worktrees (read-only; --apply removes)
+cargo xtask cleanup
 ```
 
 The workspace is fully rustfmt-clean and CI enforces it across every file, so
