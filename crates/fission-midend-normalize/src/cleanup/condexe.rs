@@ -678,17 +678,11 @@ fn iblock_phi_pass(
             get_variables_in_expr(&cond, &mut dep_vars);
             get_variables_in_expr(&val_true, &mut dep_vars);
             get_variables_in_expr(&val_false, &mut dep_vars);
-            let deps_read_memory = expr_reads_memory(&cond)
-                || expr_reads_memory(&val_true)
-                || expr_reads_memory(&val_false);
-            let deps_need_mem_guard =
-                deps_read_memory || dep_vars.iter().any(|v| address_taken.contains(v));
 
             if let Some(use_offset) = find_safe_single_phi_use(
                 &stmts[idx + 1..],
                 &lhs_var,
                 &dep_vars,
-                deps_need_mem_guard,
                 address_taken,
                 is_top_level,
             ) {
@@ -719,7 +713,6 @@ fn find_safe_single_phi_use(
     rest: &[PreHirStmt],
     lhs_var: &str,
     dep_vars: &HashSet<String>,
-    deps_need_mem_guard: bool,
     address_taken: &HashSet<String>,
     is_top_level: bool,
 ) -> Option<usize> {
@@ -764,7 +757,11 @@ fn find_safe_single_phi_use(
             ) || stmt_has_nonlocal_jump_or_label(stmt)
                 || stmt_assigns_var(stmt, lhs_var)
                 || dep_vars.iter().any(|v| stmt_assigns_var(stmt, v))
-                || (deps_need_mem_guard && stmt_may_write_memory(stmt))
+                // The diamond's variable may itself be a stack slot whose
+                // address reaches a store or a call without an `&local` in
+                // the tree (a frame pointer held in a register), so any write
+                // to memory may change it, not only one its operands read.
+                || stmt_may_write_memory(stmt)
             {
                 return None;
             }
@@ -775,7 +772,7 @@ fn find_safe_single_phi_use(
             return None;
         }
 
-        if deps_need_mem_guard && stmt_contains_call(stmt) {
+        if stmt_contains_call(stmt) {
             return None;
         }
 

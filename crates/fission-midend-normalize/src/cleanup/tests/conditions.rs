@@ -734,3 +734,65 @@ fn iblock_phi_elimination_keeps_a_diamond_read_after_its_nested_list() {
         "{body:#?}"
     );
 }
+
+/// A local can be a stack slot whose address reaches a call without any
+/// `&local` in the tree: `frame = sp; ... mktime(frame)` (#1328's certtool
+/// shape). The call may rewrite the slot, so the read after it is not the
+/// diamond's value, and folding the diamond into it is unsound.
+#[test]
+fn iblock_phi_elimination_does_not_fold_across_a_call_that_may_write_the_slot() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    let call = |arg: &str| {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: "mktime".to_string(),
+            args: vec![PreHirExpr::Var(arg.to_string())],
+            ty: int(64),
+        })
+    };
+    let diamond = || PreHirStmt::If {
+        cond: PreHirExpr::Var("cond".to_string()),
+        then_body: vec![assign_var("slot", 1)].into(),
+        else_body: vec![assign_var("slot", 2)].into(),
+    };
+
+    // Call between the diamond and the read.
+    let mut between = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("frame".to_string()),
+            rhs: PreHirExpr::Var("sp".to_string()),
+        },
+        diamond(),
+        call("frame"),
+        PreHirStmt::Return(Some(PreHirExpr::Var("slot".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut between), "{between:#?}");
+
+    // Call in the statement that reads it: `y = mktime(frame) + slot`.
+    let mut same_stmt = vec![
+        diamond(),
+        PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Call {
+                origin: None,
+                target: "mktime".to_string(),
+                args: vec![PreHirExpr::Var("frame".to_string())],
+                ty: int(32),
+            }),
+            rhs: Box::new(PreHirExpr::Var("slot".to_string())),
+            ty: int(32),
+        })),
+    ];
+    assert!(
+        !apply_iblock_phi_elimination(&mut same_stmt),
+        "{same_stmt:#?}"
+    );
+
+    // Control: no call, the diamond still folds.
+    let mut plain = vec![
+        diamond(),
+        PreHirStmt::Return(Some(PreHirExpr::Var("slot".to_string()))),
+    ];
+    assert!(apply_iblock_phi_elimination(&mut plain));
+}
