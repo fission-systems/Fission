@@ -791,11 +791,15 @@ impl FactStore {
         let decode_seeds = std::sync::Mutex::new(
             crate::analysis::control_flow_facts::prepare_fid_decode_seeds(binary),
         );
-        let hashed_functions: Vec<HashedFidFunction> = binary
-            .functions
+        // Decode and hash each address once: the loader keeps every entry that
+        // claims an address (an ELF symbol and its `.eh_frame` FDE), and the
+        // decode and hash depend only on the address. Each entry still gets
+        // its own row below, since naming eligibility is per entry.
+        let entries = crate::analysis::distinct_code_entries(binary);
+        let hash_rows: HashMap<u64, (u16, u64, u64)> = entries
             .par_iter()
-            .filter(|func| !func.is_import)
-            .filter_map(|func| {
+            .filter_map(|&index| {
+                let func = &binary.functions[index];
                 let diag_start = std::time::Instant::now();
                 // Same decode-mode question every other path answers with
                 // `decode_context_for_address`: a bare even address in a
@@ -860,11 +864,20 @@ impl FactStore {
                     n_hashed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
+                Some((func.address, (_full_count, full_hash, specific_hash)))
+            })
+            .collect();
+        let hashed_functions: Vec<HashedFidFunction> = binary
+            .functions
+            .iter()
+            .filter(|func| !func.is_import)
+            .filter_map(|func| {
+                let &(code_unit_count, full_hash, specific_hash) = hash_rows.get(&func.address)?;
                 Some(HashedFidFunction {
                     address: func.address,
                     full_hash,
                     specific_hash,
-                    code_unit_count: _full_count,
+                    code_unit_count,
                     // Preserve the old naming policy: loader exports and PDB
                     // facts remain authoritative, but their hashes still
                     // participate in relation context for neighbouring FID
@@ -1484,6 +1497,101 @@ mod tests {
         let databases = [FidDatabase::Eager(Box::new(database))];
         store.ingest_signature_matches_with_databases(&binary, &databases);
 
+        assert_eq!(store.resolved_name(0x401100), Some("known_prologue"));
+        assert_eq!(
+            store.chosen_name_fact(0x401100).map(|f| f.provenance),
+            Some(FactProvenance::StrongFid)
+        );
+    }
+
+    /// The loader keeps an ELF symbol and the `.eh_frame` FDE for the same code
+    /// as two entries. FID decodes and hashes that address once, but naming
+    /// eligibility stays per entry: an export at the address is not renamed,
+    /// while the unnamed FDE entry beside it still is, as before.
+    #[test]
+    fn fid_hashes_a_shared_address_once_but_keeps_each_entrys_naming_eligibility() {
+        let _lock = sleigh_runtime_facts_lock();
+
+        let func_bytes: [u8; 11] = [
+            0x55, 0x48, 0x89, 0xE5, 0xB8, 0x2A, 0x00, 0x00, 0x00, 0x5D, 0xC3,
+        ];
+        let mut bytes = vec![0xCCu8; 0x1000];
+        bytes[0x100..0x100 + func_bytes.len()].copy_from_slice(&func_bytes);
+        let mut binary =
+            LoadedBinaryBuilder::new("fid_dup_test.bin".to_string(), DataBuffer::Heap(bytes))
+                .format("ELF")
+                .image_base(0x400000)
+                .entry_point(0x401100)
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .add_section(SectionInfo {
+                    name: ".text".to_string(),
+                    virtual_address: 0x401000,
+                    virtual_size: 0x1000,
+                    file_offset: 0,
+                    file_size: 0x1000,
+                    is_executable: true,
+                    is_readable: true,
+                    is_writable: false,
+                })
+                .build()
+                .expect("synthetic binary");
+        binary.functions = vec![
+            FunctionInfo {
+                address: 0x401100,
+                name: "exported".to_string(),
+                size: func_bytes.len() as u64,
+                is_export: true,
+                kind: Some("code".to_string()),
+                ..Default::default()
+            },
+            FunctionInfo {
+                address: 0x401100,
+                size: func_bytes.len() as u64,
+                kind: Some("eh_frame".to_string()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(crate::analysis::distinct_code_entries(&binary), vec![0]);
+
+        let database = FidbfDatabase::new(
+            "synthetic".to_string(),
+            vec![FidbfLibrary {
+                key: 1,
+                family_name: "synthetic_libc".to_string(),
+                version: "1.0".to_string(),
+                variant: String::new(),
+                ghidra_version: "12.0.4".to_string(),
+                language_id: "x86:LE:64:default".to_string(),
+                language_version: 1,
+                language_minor_version: 0,
+                compiler_spec_id: "gcc".to_string(),
+            }],
+            vec![FidbfFunction {
+                key: 1,
+                library_id: 1,
+                name: "known_prologue".to_string(),
+                full_hash: 0x37783a7364fbdfe5,
+                specific_hash: 0xdead_beef,
+                code_unit_size: 20,
+                entry_point: 0,
+                has_terminator: true,
+                specific_hash_additional_size: 0,
+                domain_path: String::new(),
+                flags: 0,
+                auto_pass: false,
+                auto_fail: false,
+                force_specific: false,
+                force_relation: false,
+            }],
+            vec![],
+        );
+        let mut store = FactStore::default();
+        let databases = [FidDatabase::Eager(Box::new(database))];
+        store.ingest_signature_matches_with_databases(&binary, &databases);
+
+        // Hashing only the first (exported, ineligible) entry would leave no
+        // FID fact here at all.
         assert_eq!(store.resolved_name(0x401100), Some("known_prologue"));
         assert_eq!(
             store.chosen_name_fact(0x401100).map(|f| f.provenance),

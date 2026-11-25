@@ -196,11 +196,9 @@ fn compute_no_return_functions(
     // bounded scoped queue for both ordinary preparation and FID capture:
     // its workers decode immutable inputs and its joins cannot steal jobs.
     let capture = seeds.is_some();
-    let decode = |index: usize| {
-        let f = &binary.functions[index];
-        if f.is_import {
-            return None;
-        }
+    let entries = crate::analysis::distinct_code_entries(binary);
+    let decode = |slot: usize| {
+        let f = &binary.functions[entries[slot]];
         let address_state = frontend.normalize_low_bit_code_address(f.address);
         let decode_address = address_state.address;
         let context_override = crate::analysis::decode_context_for_address(
@@ -244,13 +242,13 @@ fn compute_no_return_functions(
     };
     let workers = rayon::current_num_threads();
     let rows = if workers > 1 {
-        scoped_decode::collect_scoped(binary.functions.len(), workers, decode)
+        scoped_decode::collect_scoped(entries.len(), workers, decode)
     } else {
-        (0..binary.functions.len()).filter_map(decode).collect()
+        (0..entries.len()).filter_map(decode).collect()
     };
     let mut decoded = StdHashMap::<u64, NoReturnFlow>::new();
-    // Restore original input order before map insertion, including duplicate
-    // address last-writer behavior. Fixed-point iteration remains unchanged.
+    // Rows arrive in input order, one per address. Fixed-point iteration
+    // remains unchanged.
     for (address, flow, seed) in rows {
         decoded.insert(address, flow);
         if let (Some(seeds), Some(seed)) = (seeds.as_deref_mut(), seed) {
