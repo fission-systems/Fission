@@ -48,32 +48,38 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
         .expect("write");
     emu.state.set_shadow_memory(ram, 0x7000_0000, 77);
 
-    let emu_ptr = &mut emu as *mut Emulator;
-
     // LOAD: mem → unique:0x10 (simulating dest varnode)
-    jit_shadow_load(emu_ptr, uniq, 0x10, 1, ram, 0x7000_0000, 0, 0, 0);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe { jit_shadow_load(&raw mut emu, uniq, 0x10, 1, ram, 0x7000_0000, 0, 0, 0) };
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x10), Some(77));
 
     // COPY to unique:0x20
-    jit_shadow_copy(emu_ptr, uniq, 0x20, 1, uniq, 0x10);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe { jit_shadow_copy(&raw mut emu, uniq, 0x20, 1, uniq, 0x10) };
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x20), Some(77));
 
     // BINOP builds a full AST (Add of tainted leaf + const), not mere taint union.
-    jit_shadow_binop(
-        emu_ptr,
-        uniq,
-        0x30,
-        1,
-        uniq,
-        0x20,
-        0x2A,
-        1,
-        0,
-        0,
-        1,
-        1,
-        SymBinOpKind::Add as u32,
-    );
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe {
+        jit_shadow_binop(
+            &raw mut emu,
+            uniq,
+            0x30,
+            1,
+            uniq,
+            0x20,
+            0x2A,
+            1,
+            0,
+            0,
+            1,
+            1,
+            SymBinOpKind::Add as u32,
+        )
+    };
     let add_id = emu.state.get_shadow_memory(uniq, 0x30).expect("add shadow");
     assert_ne!(
         add_id, 77,
@@ -87,32 +93,41 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
     );
 
     // Compare AST → condition for gate
-    jit_shadow_binop(
-        emu_ptr,
-        uniq,
-        0x40,
-        1,
-        uniq,
-        0x30,
-        0,
-        1,
-        0,
-        0,
-        0,
-        1,
-        SymBinOpKind::Neq as u32,
-    );
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe {
+        jit_shadow_binop(
+            &raw mut emu,
+            uniq,
+            0x40,
+            1,
+            uniq,
+            0x30,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            SymBinOpKind::Neq as u32,
+        )
+    };
     let cond_id = emu.state.get_shadow_memory(uniq, 0x40).expect("cmp shadow");
 
     // STORE taint back to memory
-    jit_shadow_store(emu_ptr, ram, 0x7000_0010, 1, uniq, 0x40, 0, 0, 0);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe { jit_shadow_store(&raw mut emu, ram, 0x7000_0010, 1, uniq, 0x40, 0, 0, 0) };
     assert_eq!(emu.state.get_shadow_memory(ram, 0x7000_0010), Some(cond_id));
 
     // CBranch gate: record always; stop only when concolic_stop_on_branch.
     emu.sym_events.clear();
     emu.sym_stop_requested = false;
     emu.concolic_stop_on_branch = false;
-    let stop_record = jit_sym_cbranch_gate(emu_ptr, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    let stop_record =
+        unsafe { jit_sym_cbranch_gate(&raw mut emu, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010) };
     assert_eq!(stop_record, 0, "record-only must not stop");
     assert!(!emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);
@@ -120,24 +135,31 @@ fn shadow_load_copy_binop_reaches_cbranch_gate() {
 
     emu.sym_events.clear();
     emu.concolic_stop_on_branch = true;
-    let stop = jit_sym_cbranch_gate(emu_ptr, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    let stop =
+        unsafe { jit_sym_cbranch_gate(&raw mut emu, 0x400FF0, 1, uniq, 0x40, 0x401000, 0x401010) };
     assert_eq!(stop, 1);
     assert!(emu.sym_stop_requested);
     assert_eq!(emu.sym_events.len(), 1);
     assert_eq!(emu.sym_events[0].condition_node, Some(cond_id));
 
     // Unary: IntNegate → Not AST
-    jit_shadow_unop(
-        emu_ptr,
-        uniq,
-        0x50,
-        1,
-        uniq,
-        0x20,
-        0x2A,
-        1,
-        SymUnOpKind::Not as u32,
-    );
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe {
+        jit_shadow_unop(
+            &raw mut emu,
+            uniq,
+            0x50,
+            1,
+            uniq,
+            0x20,
+            0x2A,
+            1,
+            SymUnOpKind::Not as u32,
+        )
+    };
     let not_id = emu.state.get_shadow_memory(uniq, 0x50).expect("not shadow");
     let not_expr = emu.solver.nodes.get(&not_id).expect("not node");
     // new_not may be Xor with mask or Const; just ensure a node was registered.
@@ -180,9 +202,10 @@ fn shadow_copy_keeps_each_bytes_own_node() {
     emu.state.set_shadow_memory(uniq, 0x11, 202);
     emu.state.set_shadow_memory(uniq, 0x12, 303);
     // Byte 3 is concrete.
-    let emu_ptr = &mut emu as *mut Emulator;
 
-    jit_shadow_copy(emu_ptr, uniq, 0x20, 4, uniq, 0x10);
+    // SAFETY: a fresh pointer to the live `emu`, not borrowed elsewhere
+    // during the call.
+    unsafe { jit_shadow_copy(&raw mut emu, uniq, 0x20, 4, uniq, 0x10) };
 
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x20), Some(101));
     assert_eq!(emu.state.get_shadow_memory(uniq, 0x21), Some(202));

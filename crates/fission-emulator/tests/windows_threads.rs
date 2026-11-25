@@ -60,7 +60,7 @@ fn dispatch(emu: &mut Emulator, name: &str, args: &[u64], return_to: u64) -> Hle
         .write_space(space, sp, &return_to.to_le_bytes())
         .expect("return address");
 
-    let os = std::mem::replace(&mut emu.os, Box::new(BareMetalEnv::new()));
+    let os = std::mem::replace(&mut emu.os, std::sync::Arc::new(BareMetalEnv::new()));
     let result = os.dispatch_hle(emu, name).expect("dispatch");
     emu.os = os;
     if matches!(result, HleResult::Continue) {
