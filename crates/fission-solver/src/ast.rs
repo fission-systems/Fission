@@ -46,6 +46,27 @@ fn supported_bit_width(width_bits: u32) -> bool {
     (1..=64).contains(&width_bits)
 }
 
+fn pair_validates_as_bv(a: &SymExpr, b: &SymExpr) -> Option<(u32, u32)> {
+    let mut env = crate::validate::VarSortEnv::new();
+    let sa = crate::validate::validate_expr_in_env(a, &mut env).ok()?;
+    let sb = crate::validate::validate_expr_in_env(b, &mut env).ok()?;
+    match (sa, sb) {
+        (Sort::BitVector(wa), Sort::BitVector(wb))
+            if supported_bit_width(wa) && supported_bit_width(wb) =>
+        {
+            Some((wa, wb))
+        }
+        _ => None,
+    }
+}
+
+fn pair_is_pure_supported_bv(a: &SymExpr, b: &SymExpr) -> Option<u32> {
+    let mut env = crate::validate::VarSortEnv::new();
+    let wa = crate::validate::is_pure_supported_bv(a, &mut env).ok()?;
+    let wb = crate::validate::is_pure_supported_bv(b, &mut env).ok()?;
+    Some(wa.max(wb))
+}
+
 fn signed_value(value: u64, width_bits: u32) -> i128 {
     match width_bits {
         0 => 0,
@@ -192,10 +213,10 @@ impl SymExpr {
     }
 
     pub fn new_add(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
             return Self::Add(Box::new(a), Box::new(b));
-        }
-        let width_bits = a.get_bit_width().max(b.get_bit_width());
+        };
+        let width_bits = wa.max(wb);
         match (&a, &b) {
             (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
                 // The payload as lowering reads it: `size` bits and no more.
@@ -205,19 +226,19 @@ impl SymExpr {
                     size: width_bits,
                 }
             }
-            (Self::Const { val: 0, size }, _) if *size <= b.get_bit_width() => b,
-            (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
+            (Self::Const { val: 0, size }, _) if *size <= wb => b,
+            (_, Self::Const { val: 0, size }) if *size <= wa => a,
             _ => Self::Add(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_sub(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, _wb)) = pair_validates_as_bv(&a, &b) else {
             return Self::Sub(Box::new(a), Box::new(b));
-        }
-        let width_bits = a.get_bit_width().max(b.get_bit_width());
+        };
         match (&a, &b) {
             (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
+                let width_bits = (*s1).max(*s2);
                 // The payload as lowering reads it: `size` bits and no more.
                 let (v1, v2) = (v1 & bitvector_mask(*s1), v2 & bitvector_mask(*s2));
                 Self::Const {
@@ -225,20 +246,26 @@ impl SymExpr {
                     size: width_bits,
                 }
             }
-            (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
-            (a_expr, b_expr) if a_expr == b_expr => Self::Const {
-                val: 0,
-                size: width_bits,
-            },
+            (_, Self::Const { val: 0, size }) if *size <= wa => a,
+            (a_expr, b_expr) if a_expr == b_expr => {
+                if let Some(width_bits) = pair_is_pure_supported_bv(a_expr, b_expr) {
+                    Self::Const {
+                        val: 0,
+                        size: width_bits,
+                    }
+                } else {
+                    Self::Sub(Box::new(a), Box::new(b))
+                }
+            }
             _ => Self::Sub(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_and(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
             return Self::And(Box::new(a), Box::new(b));
-        }
-        let width_bits = a.get_bit_width().max(b.get_bit_width());
+        };
+        let width_bits = wa.max(wb);
         match (&a, &b) {
             (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
                 // The payload as lowering reads it: `size` bits and no more.
@@ -248,24 +275,26 @@ impl SymExpr {
                     size: width_bits,
                 }
             }
-            (Self::Const { val: 0, .. }, _) => Self::Const {
-                val: 0,
-                size: width_bits,
-            },
-            (_, Self::Const { val: 0, .. }) => Self::Const {
-                val: 0,
-                size: width_bits,
-            },
-            (a, b) if a == b => a.clone(),
+            (Self::Const { val: 0, .. }, _) | (_, Self::Const { val: 0, .. }) => {
+                if let Some(pure_width) = pair_is_pure_supported_bv(&a, &b) {
+                    Self::Const {
+                        val: 0,
+                        size: pure_width,
+                    }
+                } else {
+                    Self::And(Box::new(a), Box::new(b))
+                }
+            }
+            (a_expr, b_expr) if a_expr == b_expr => a.clone(),
             _ => Self::And(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_xor(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
             return Self::Xor(Box::new(a), Box::new(b));
-        }
-        let width_bits = a.get_bit_width().max(b.get_bit_width());
+        };
+        let width_bits = wa.max(wb);
         match (&a, &b) {
             (Self::Const { val: v1, size: s1 }, Self::Const { val: v2, size: s2 }) => {
                 // The payload as lowering reads it: `size` bits and no more.
@@ -275,18 +304,33 @@ impl SymExpr {
                     size: width_bits,
                 }
             }
-            (Self::Const { val: 0, size }, _) if *size <= b.get_bit_width() => b,
-            (_, Self::Const { val: 0, size }) if *size <= a.get_bit_width() => a,
-            (a, b) if a == b => Self::Const {
-                val: 0,
-                size: width_bits,
-            },
+            (Self::Const { val: 0, size }, _) if *size <= wb => b,
+            (_, Self::Const { val: 0, size }) if *size <= wa => a,
+            (a_expr, b_expr) if a_expr == b_expr => {
+                if let Some(pure_width) = pair_is_pure_supported_bv(a_expr, b_expr) {
+                    Self::Const {
+                        val: 0,
+                        size: pure_width,
+                    }
+                } else {
+                    Self::Xor(Box::new(a), Box::new(b))
+                }
+            }
             _ => Self::Xor(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_not(a: SymExpr) -> Self {
-        let width_bits = a.get_bit_width();
+        let Ok(Sort::BitVector(width_bits)) = crate::validate::validate_expr(&a) else {
+            let w = a.get_bit_width();
+            return Self::Xor(
+                Box::new(a),
+                Box::new(Self::Const {
+                    val: bitvector_mask(w),
+                    size: w,
+                }),
+            );
+        };
         if !supported_bit_width(width_bits) {
             return Self::Xor(
                 Box::new(a),
@@ -302,15 +346,20 @@ impl SymExpr {
                 size: *size,
             },
             _ => {
-                let size = a.get_bit_width();
-                let mask = bitvector_mask(size);
-                Self::new_xor(a, Self::Const { val: mask, size })
+                let mask = bitvector_mask(width_bits);
+                Self::new_xor(
+                    a,
+                    Self::Const {
+                        val: mask,
+                        size: width_bits,
+                    },
+                )
             }
         }
     }
 
     pub fn new_eq(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        if pair_validates_as_bv(&a, &b).is_none() {
             return Self::Eq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -322,13 +371,19 @@ impl SymExpr {
                     size: 1,
                 }
             }
-            (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 1, size: 1 },
+            (a_expr, b_expr) if a_expr == b_expr => {
+                if pair_is_pure_supported_bv(a_expr, b_expr).is_some() {
+                    Self::Const { val: 1, size: 1 }
+                } else {
+                    Self::Eq(Box::new(a), Box::new(b))
+                }
+            }
             _ => Self::Eq(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_neq(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        if pair_validates_as_bv(&a, &b).is_none() {
             return Self::Neq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -340,13 +395,19 @@ impl SymExpr {
                     size: 1,
                 }
             }
-            (a_expr, b_expr) if a_expr == b_expr => Self::Const { val: 0, size: 1 },
+            (a_expr, b_expr) if a_expr == b_expr => {
+                if pair_is_pure_supported_bv(a_expr, b_expr).is_some() {
+                    Self::Const { val: 0, size: 1 }
+                } else {
+                    Self::Neq(Box::new(a), Box::new(b))
+                }
+            }
             _ => Self::Neq(Box::new(a), Box::new(b)),
         }
     }
 
     pub fn new_ult(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        if pair_validates_as_bv(&a, &b).is_none() {
             return Self::Ult(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -364,7 +425,10 @@ impl SymExpr {
 
     /// Signed less-than: interpret both sides as two's-complement signed integers.
     pub fn new_slt(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+            return Self::Slt(Box::new(a), Box::new(b));
+        };
+        if wa != wb {
             return Self::Slt(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -383,7 +447,10 @@ impl SymExpr {
     }
 
     pub fn new_sle(a: SymExpr, b: SymExpr) -> Self {
-        if !supported_bit_width(a.get_bit_width()) || !supported_bit_width(b.get_bit_width()) {
+        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+            return Self::Sle(Box::new(a), Box::new(b));
+        };
+        if wa != wb {
             return Self::Sle(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -572,6 +639,28 @@ impl SymExpr {
         }
     }
 
+    /// Elaborate and validate `self` standalone, returning its checked sort.
+    pub fn checked_sort(&self) -> Result<Sort, crate::validate::ValidationError> {
+        crate::validate::validate_expr(self)
+    }
+
+    /// Elaborate and validate `self` standalone, returning its scalar bit width
+    /// (or array element width for well-formed arrays).
+    pub fn checked_bit_width(&self) -> Result<u32, crate::validate::ValidationError> {
+        match self.checked_sort()? {
+            Sort::BitVector(bits) | Sort::Float(bits) => Ok(bits),
+            Sort::Array { range, .. } => match range.as_ref() {
+                Sort::BitVector(bits) | Sort::Float(bits) => Ok(*bits),
+                other @ Sort::Array { .. } => {
+                    Err(crate::validate::ValidationError::NonScalarOperand {
+                        op: "bit_width",
+                        sort: other.clone(),
+                    })
+                }
+            },
+        }
+    }
+
     pub fn get_sort(&self) -> Sort {
         match self {
             Self::Const { size, .. } => Sort::BitVector(*size),
@@ -619,23 +708,26 @@ impl SymExpr {
                 }
             }
             Self::Extract { size, .. } => Sort::BitVector(*size),
-            Self::Concat(a, b) => Sort::BitVector(a.get_bit_width() + b.get_bit_width()),
-            Self::ArraySelect { array, .. } => {
-                if let Sort::Array { range, .. } = array.get_sort() {
-                    *range
-                } else {
-                    panic!("ArraySelect on non-array")
-                }
+            Self::Concat(a, b) => {
+                Sort::BitVector(a.get_bit_width().saturating_add(b.get_bit_width()))
             }
+            Self::ArraySelect { array, .. } => match array.get_sort() {
+                Sort::Array { range, .. } => *range,
+                _ => Sort::BitVector(0),
+            },
             Self::ArrayStore { array, .. } => array.get_sort(),
         }
     }
 
-    /// Return this expression's bit width. For arrays, this is the element width.
+    /// Return this expression's bit width. For arrays, this is the element width
+    /// (or `0` for malformed/nested non-scalar terms).
     pub fn get_bit_width(&self) -> u32 {
         match self.get_sort() {
             Sort::BitVector(bits) | Sort::Float(bits) => bits,
-            Sort::Array { range, .. } => range.expect_bv(),
+            Sort::Array { range, .. } => match range.as_ref() {
+                Sort::BitVector(bits) | Sort::Float(bits) => *bits,
+                Sort::Array { .. } => 0,
+            },
         }
     }
 

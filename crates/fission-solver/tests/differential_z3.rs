@@ -307,6 +307,9 @@ const REFINED_OUT: &str = "oracle refinement rounds";
 
 fn why_unknown(solver: &Solver) -> Vec<String> {
     match solver.last_unknown() {
+        Some(UnknownReason::InvalidExpression(errs)) => {
+            errs.iter().map(ToString::to_string).collect()
+        }
         Some(UnknownReason::Unsupported(what)) => what.clone(),
         Some(UnknownReason::ConflictBudget) => vec![GAVE_UP.to_string()],
         Some(UnknownReason::OracleRefinement) => vec![REFINED_OUT.to_string()],

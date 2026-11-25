@@ -1,6 +1,10 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
 use crate::cnf::Lit;
 use crate::theory::bitvector::LoweredAssumption;
+use crate::validate::{
+    validate_assertion_in_env, validate_expr_in_env, validate_query_with_nodes, ValidatedQuery,
+    ValidationError, VarSortEnv,
+};
 use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 
@@ -15,6 +19,9 @@ pub enum SatResult {
 /// Why a query came back [`SatResult::Unknown`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UnknownReason {
+    /// The problem holds an ill-sorted expression, overflowing width, or
+    /// conflicting variable ID declaration rejected prior to lowering.
+    InvalidExpression(Vec<ValidationError>),
     /// The problem holds something lowering has no circuit for; these are
     /// the entries of `bv_theory.unsupported()`.
     Unsupported(Vec<String>),
@@ -246,16 +253,58 @@ impl Solver {
         id
     }
 
+    /// Validate all assertions currently recorded in [`Self::assertions`] and
+    /// registered variable declarations in [`Self::nodes`].
+    pub fn validate_assertions(&self) -> std::result::Result<ValidatedQuery, ValidationError> {
+        validate_query_with_nodes(&self.assertions, &[], &self.nodes)
+    }
+
+    /// Validate all permanent assertions, temporary `extra` assumptions, and
+    /// registered variable declarations under one shared sort/identity table.
+    pub fn validate_query(
+        &self,
+        extra: &[SymExpr],
+    ) -> std::result::Result<ValidatedQuery, ValidationError> {
+        validate_query_with_nodes(&self.assertions, extra, &self.nodes)
+    }
+
+    fn validate_scalar_query_expr(
+        &self,
+        expr: &SymExpr,
+        require_bool: bool,
+    ) -> std::result::Result<ValidatedQuery, ValidationError> {
+        let mut env = VarSortEnv::new();
+        let mut ids: Vec<SymNodeId> = self.nodes.keys().copied().collect();
+        ids.sort_unstable();
+        for reg_id in ids {
+            if let Some(SymExpr::Var { id, sort, .. }) = self.nodes.get(&reg_id) {
+                env.bind_var(*id, sort)?;
+            }
+        }
+        for assertion in &self.assertions {
+            validate_assertion_in_env(assertion, &mut env)?;
+        }
+        if require_bool {
+            validate_assertion_in_env(expr, &mut env)?;
+        } else {
+            let sort = validate_expr_in_env(expr, &mut env)?;
+            if matches!(sort, Sort::Array { .. }) {
+                return Err(ValidationError::NonScalarOperand { op: "eval", sort });
+            }
+        }
+        Ok(env.into_summary())
+    }
+
     /// Add a constraint (boolean expression) to the solver context.
     pub fn assert(&mut self, expr: SymExpr) {
         self.invalidate_model();
-        if expr.get_bit_width() != 1 {
-            tracing::warn!("Asserted expression does not evaluate to a boolean (size != 1)");
+        if expr.checked_sort() != Ok(Sort::BitVector(1)) {
+            tracing::warn!("Asserted expression is invalid or does not evaluate to BitVector(1)");
         }
         self.assertions.push(expr);
         // Catch up through the same cursor used by queries, including any
         // assertions appended through the public compatibility list.
-        self.lower_pending_assertions();
+        let _ = self.lower_pending_assertions();
     }
 
     fn assert_array_lemmas_for(&mut self, expr: &SymExpr) {
@@ -266,6 +315,9 @@ impl Solver {
     }
 
     fn lower_pending_assertions(&mut self) -> bool {
+        if self.validate_assertions().is_err() {
+            return false;
+        }
         while self.lowered_assertions < self.assertions.len() {
             let expr = self.assertions[self.lowered_assertions].clone();
             self.lowered_assertions += 1;
@@ -379,6 +431,13 @@ impl Solver {
         self.last_unknown = None;
         let mut loop_count = 0;
         let mut remaining_conflicts = self.sat.conflict_budget();
+
+        // Elaborate and validate every variable sort, identity, and operator
+        // well-formedness rule before short-circuiting or lowering.
+        if let Err(err) = self.validate_query(extra) {
+            self.last_unknown = Some(UnknownReason::InvalidExpression(vec![err]));
+            return Ok(SatResult::Unknown);
+        }
 
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
@@ -621,6 +680,16 @@ impl Solver {
         }
 
         self.invalidate_model();
+        if let Err(err) = self.validate_scalar_query_expr(expr, false) {
+            let reason = UnknownReason::InvalidExpression(vec![err]);
+            self.last_unknown = Some(reason.clone());
+            return EvalReport {
+                values: Vec::new(),
+                witnesses: Vec::new(),
+                termination: EvalTermination::Unknown(reason),
+                base_satisfiable: false,
+            };
+        }
         // Catch up any pending permanent assertions first so pre-existing
         // persistent unsupported errors stay distinct from this temporary query.
         if !self.lower_pending_assertions() {
@@ -832,6 +901,10 @@ impl Solver {
     /// Returns true if `expr` is definitely true under all satisfying assignments.
     /// Concrete shortcut: if const, compare directly.
     pub fn is_true(&mut self, expr: &SymExpr) -> bool {
+        if let Err(err) = self.validate_scalar_query_expr(expr, true) {
+            self.last_unknown = Some(UnknownReason::InvalidExpression(vec![err]));
+            return false;
+        }
         match expr {
             SymExpr::Const { .. } => constant_value(expr) != 0,
             _ => {
@@ -851,6 +924,10 @@ impl Solver {
     /// Returns true if `expr` is definitely false under all satisfying assignments.
     /// Concrete shortcut: if const, compare directly.
     pub fn is_false(&mut self, expr: &SymExpr) -> bool {
+        if let Err(err) = self.validate_scalar_query_expr(expr, true) {
+            self.last_unknown = Some(UnknownReason::InvalidExpression(vec![err]));
+            return false;
+        }
         match expr {
             SymExpr::Const { .. } => constant_value(expr) == 0,
             _ => {

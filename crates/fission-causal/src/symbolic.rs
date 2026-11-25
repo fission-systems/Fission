@@ -490,6 +490,13 @@ pub fn solve(
         }
         Ok(Ok(SatResult::Unsat)) => QueryResult::Unsat,
         Ok(Ok(SatResult::Unknown)) => QueryResult::Unknown(match solver.last_unknown() {
+            Some(UnknownReason::InvalidExpression(errs)) => format!(
+                "invalid expression: {}",
+                errs.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Some(UnknownReason::ConflictBudget) => format!("conflict budget ({conflicts})"),
             Some(UnknownReason::Unsupported(what)) => format!("unsupported: {}", what.join(", ")),
             Some(UnknownReason::OracleRefinement) => "memory-oracle refinement".into(),
