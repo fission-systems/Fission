@@ -807,7 +807,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "fission-analysis-db"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-loader",
  "serde",
@@ -816,15 +816,31 @@ dependencies = [
 
 [[package]]
 name = "fission-analysis-protocol"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "serde",
  "serde_json",
 ]
 
 [[package]]
+name = "fission-causal"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "fission-emulator",
+ "fission-loader",
+ "fission-pcode-ir",
+ "fission-sleigh",
+ "fission-solver",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "fission-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -838,7 +854,9 @@ dependencies = [
  "fission-emulator",
  "fission-loader",
  "fission-project",
+ "fission-quotient",
  "fission-script",
+ "fission-signatures",
  "fission-sleigh",
  "fission-static",
  "jemallocator",
@@ -855,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "fission-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -873,7 +891,7 @@ dependencies = [
 
 [[package]]
 name = "fission-cspec"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "fission-core",
@@ -885,7 +903,7 @@ dependencies = [
 
 [[package]]
 name = "fission-decompiler"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-analysis-db",
  "fission-analysis-protocol",
@@ -908,7 +926,7 @@ dependencies = [
 
 [[package]]
 name = "fission-dir"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "fission-decompiler",
@@ -928,7 +946,7 @@ dependencies = [
 
 [[package]]
 name = "fission-dynamic"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "crossbeam-channel",
@@ -949,7 +967,7 @@ dependencies = [
 
 [[package]]
 name = "fission-emulator"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -974,7 +992,7 @@ dependencies = [
 
 [[package]]
 name = "fission-loader"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "blake3",
@@ -998,7 +1016,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-loader",
@@ -1013,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-normalize"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-midend-core",
@@ -1028,7 +1046,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-prehir"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-midend-core",
@@ -1039,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "fission-midend-structuring"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-midend-core",
@@ -1051,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "fission-pcode"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-cspec",
@@ -1073,7 +1091,7 @@ dependencies = [
 
 [[package]]
 name = "fission-pcode-ir"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "rustc-hash",
  "serde",
@@ -1082,7 +1100,7 @@ dependencies = [
 
 [[package]]
 name = "fission-plugin"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -1093,7 +1111,7 @@ dependencies = [
 
 [[package]]
 name = "fission-project"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-loader",
  "serde",
@@ -1103,8 +1121,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-quotient"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "fission-decompiler",
+ "fission-dir",
+ "fission-emulator",
+ "fission-loader",
+ "fission-pcode-ir",
+ "fission-signatures",
+ "fission-sleigh",
+ "fission-solver",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "fission-script"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "fission-dynamic",
@@ -1118,7 +1154,7 @@ dependencies = [
 
 [[package]]
 name = "fission-signatures"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
  "flate2",
@@ -1135,7 +1171,7 @@ dependencies = [
 
 [[package]]
 name = "fission-sleigh"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -1154,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "fission-solver"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "tracing",
@@ -1162,7 +1198,7 @@ dependencies = [
 
 [[package]]
 name = "fission-static"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -1188,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "fission-ttd"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "fission-core",
 ]
@@ -2912,6 +2948,10 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+name = "xtask"
+version = "0.0.0"
 
 [[package]]
 name = "zerocopy"

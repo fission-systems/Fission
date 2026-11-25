@@ -46,6 +46,7 @@ jobs:
           components: clippy,rustfmt
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -62,40 +63,7 @@ jobs:
         env:
           CRATES: ${{ inputs.crates }}
           EXCLUDE_CRATES: ${{ inputs.exclude_crates }}
-        run: |
-          package_flags=()
-          exclude_flags=()
-          if [ -n "$CRATES" ]; then
-            IFS=',' read -ra PACKAGES <<< "$CRATES"
-            IFS=',' read -ra EX <<< "$EXCLUDE_CRATES"
-            for p in "${PACKAGES[@]}"; do
-              p="$(echo "$p" | tr -d '[:space:]')"
-              [ -z "$p" ] && continue
-              skip=false
-              for c in "${EX[@]}"; do
-                c="$(echo "$c" | tr -d '[:space:]')"
-                [ "$p" = "$c" ] && skip=true
-              done
-              [ "$skip" = true ] || package_flags+=(-p "$p")
-            done
-            if [ "${#package_flags[@]}" -eq 0 ]; then
-              echo "No selected packages remain after exclusions; skipping Clippy."
-              exit 0
-            fi
-          fi
-          if [ -n "$EXCLUDE_CRATES" ]; then
-            IFS=',' read -ra EX <<< "$EXCLUDE_CRATES"
-            for c in "${EX[@]}"; do
-              c="$(echo "$c" | tr -d '[:space:]')"
-              [ -z "$c" ] && continue
-              exclude_flags+=(--exclude "$c")
-            done
-          fi
-          if [ "${#package_flags[@]}" -gt 0 ]; then
-            cargo clippy "${package_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
-          else
-            cargo clippy --workspace "${exclude_flags[@]}" --locked -- -D warnings -A clippy::style -A clippy::complexity
-          fi
+        run: bash scripts/ci/clippy.sh
 
       # Static audit for Rust tests missed by harness discovery. Keep it in
       # Fast Gate while exhaustive feature compilation runs in Heavy.
@@ -103,7 +71,8 @@ jobs:
         shell: bash
         run: scripts/audit/unrun_tests_scan.py
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true

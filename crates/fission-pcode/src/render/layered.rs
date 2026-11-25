@@ -9,13 +9,16 @@ use super::layer::LayeredPseudocode;
 use super::layer::{PrintProfile, RecoveredLineMapping};
 use super::presentation::apply_hir_presentation_with_globals;
 use super::printer::has_unknown_arity_declaration;
-use super::printer::surface_type_definition_source;
+use super::printer::{
+    call_argument_type, print_inferred_extern, print_unknown_arity_extern,
+    surface_type_definition_source,
+};
 use super::{
     HirExpr, HirFunction, HirLValue, HirStmt, MlilPreviewOptions, NirBinding, NirBindingOrigin,
     NirFunctionType, NirType, expr_type, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_type,
 };
-use fission_midend_core::ir::sanitize_c_identifier;
+use fission_midend_core::ir::{NirCallPrototypeSummary, NirTypeContext, sanitize_c_identifier};
 use fission_signatures::{
     ApiSignature, SIGNATURE_RESOURCES, canonical_variadic_runtime_symbol,
     is_known_variadic_runtime_symbol, runtime_api_parameter_surface_type,
@@ -40,7 +43,7 @@ pub(crate) fn render_pseudocode_with_provenance(
     definitions: &HashMap<String, u64>,
 ) -> (String, Vec<RecoveredLineMapping>) {
     let hir_tree = printed_hir_tree(hir, options);
-    render_hir_function_with_provenance(&hir_tree, options, PrintProfile::Hir, definitions)
+    render_hir_function_with_provenance(&hir_tree, options, None, PrintProfile::Hir, definitions)
 }
 
 /// The tree [`render_pseudocode_with_provenance`] prints: `hir` after HIR
@@ -94,7 +97,7 @@ pub(crate) fn render_layered_pseudocode_with_provenance(
     definitions: &HashMap<String, u64>,
 ) -> LayeredPseudocode {
     let (nir, nir_line_mappings) =
-        render_hir_function_with_provenance(hir, options, PrintProfile::Nir, definitions);
+        render_hir_function_with_provenance(hir, options, None, PrintProfile::Nir, definitions);
     let (hir_code, hir_line_mappings) =
         render_pseudocode_with_provenance(hir, options, definitions);
     LayeredPseudocode {
@@ -187,7 +190,7 @@ mod layered_tests {
         let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
 
         assert!(
-            rendered.contains(&format!("extern unsigned long long {symbol}();")),
+            rendered.contains(&format!("extern unsigned long long {symbol}(void);")),
             "{rendered}"
         );
         assert!(rendered.contains(&format!("{symbol}();")), "{rendered}");
@@ -195,7 +198,7 @@ mod layered_tests {
     }
 
     #[test]
-    fn render_import_thunk_uses_c11_unknown_arity_declaration() {
+    fn render_import_thunk_declares_unknown_arity_in_both_dialects() {
         let hir = HirFunction {
             name: "import_thunk".to_string(),
             has_unknown_arity_prototype: true,
@@ -219,15 +222,217 @@ mod layered_tests {
             "{rendered}"
         );
         assert!(!rendered.contains("import_thunk()\n{"), "{rendered}");
-        assert!(!rendered.contains("import_thunk(...)"), "{rendered}");
+        assert!(
+            rendered.contains("extern unsigned long long import_thunk(...);"),
+            "{rendered}"
+        );
         assert!(!rendered.contains("__fission_branchind"), "{rendered}");
     }
 
     #[test]
-    fn unknown_arity_called_extern_uses_c11_unspecified_parameter_list() {
+    fn unknown_arity_called_extern_accepts_arguments_in_both_dialects() {
         assert_eq!(
-            render_called_extern("callee", &NirType::Float { bits: 64 }, None,),
-            "extern double callee();\n"
+            render_called_extern("callee", &NirType::Float { bits: 64 }, None, None),
+            print_unknown_arity_extern("double", "callee")
+        );
+    }
+
+    #[test]
+    fn called_externs_follow_typed_arguments_and_fall_back_on_conflicts() {
+        let int = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let call = |target: &str, args| HirExpr::Call {
+            origin: None,
+            target: target.into(),
+            args,
+            ty: int.clone(),
+        };
+        let hir = HirFunction {
+            name: "caller".into(),
+            return_type: int.clone(),
+            params: vec![NirBinding {
+                name: "value".into(),
+                ty: NirType::Float { bits: 64 },
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                HirStmt::Expr(call("conflicting", vec![])),
+                HirStmt::While {
+                    cond: call("conflicting", vec![HirExpr::Const(1, int.clone())]),
+                    body: vec![HirStmt::Break],
+                },
+                HirStmt::Return(Some(call("sub_1234", vec![HirExpr::Var("value".into())]))),
+            ],
+            ..HirFunction::default()
+        };
+        let rendered = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
+        assert!(
+            rendered.contains("extern int sub_1234(double); /* inferred from calls */"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("#if defined(__STDC_VERSION__) && __STDC_VERSION__ > 201710L\nextern int conflicting(...);"), "{rendered}");
+        assert!(
+            rendered.contains("#else\nextern int conflicting();\n#endif"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn called_extern_uses_the_type_of_a_printed_string_literal() {
+        let address = 0x2000;
+        let int = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let hir = HirFunction {
+            name: "caller".into(),
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
+                target: "take_string".into(),
+                args: vec![HirExpr::Const(address, int.clone())],
+                ty: int,
+            })],
+            ..HirFunction::default()
+        };
+        let options = MlilPreviewOptions {
+            global_names: HashMap::from([(address as u64, "\"text\"".into())]),
+            ..MlilPreviewOptions::default()
+        };
+        let output = render_hir_function_with_global_decls(&hir, &options);
+        assert!(
+            output.contains("extern long long take_string(const char *);"),
+            "{output}"
+        );
+        assert!(output.contains("take_string(\"text\");"), "{output}");
+    }
+
+    #[test]
+    fn called_extern_respects_pointer_arguments_in_printed_c() {
+        let int = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let hir = HirFunction {
+            name: "caller".into(),
+            params: vec![NirBinding {
+                name: "p".into(),
+                ty: int.clone(),
+                surface_type_name: Some("unsigned long long *".into()),
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
+                target: "take_pointer".into(),
+                args: vec![HirExpr::Binary {
+                    op: super::super::HirBinaryOp::Add,
+                    lhs: Box::new(HirExpr::Var("p".into())),
+                    rhs: Box::new(HirExpr::Const(1, int.clone())),
+                    ty: int.clone(),
+                }],
+                ty: int,
+            })],
+            ..HirFunction::default()
+        };
+        let output = render_hir_function_with_global_decls(&hir, &MlilPreviewOptions::default());
+        assert!(output.contains("take_pointer(p + 1);"), "{output}");
+        assert!(
+            output.contains("extern unsigned long long take_pointer(...);"),
+            "{output}"
+        );
+        assert!(
+            !output.contains("extern unsigned long long take_pointer(unsigned long long);"),
+            "{output}"
+        );
+    }
+
+    #[test]
+    fn declared_variadic_arity_controls_call_site_inference() {
+        let int = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let fixed = [HirExpr::Const(1, int.clone())];
+        let with_tail = [
+            HirExpr::Const(2, int.clone()),
+            HirExpr::Const(3, int.clone()),
+        ];
+        let call = CalledExtern {
+            return_type: int,
+            arguments: vec![&fixed, &with_tail],
+        };
+        let callee = NirCallPrototypeSummary {
+            variadic_fixed_arity: Some(1),
+            ..Default::default()
+        };
+        let hir = HirFunction::default();
+        let global_names = HashMap::new();
+        let argument_type = call_argument_type(&hir, &global_names, PrintProfile::Hir);
+        assert_eq!(call.inferred_parameters(&argument_type, None), None);
+        assert_eq!(
+            call.inferred_parameters(&argument_type, Some(&callee)),
+            Some(vec!["int".into(), "...".into()])
+        );
+    }
+
+    #[test]
+    fn called_externs_find_calls_in_initializers_and_nested_memory_expressions() {
+        let call = |target: &str| HirExpr::Call {
+            origin: None,
+            target: target.into(),
+            args: vec![],
+            ty: NirType::Unknown,
+        };
+        let hir = HirFunction {
+            name: "caller".into(),
+            locals: vec![NirBinding {
+                name: "initial".into(),
+                ty: NirType::Unknown,
+                surface_type_name: None,
+                origin: None,
+                initializer: Some(call("initialize")),
+            }],
+            body: vec![
+                HirStmt::Assign {
+                    lhs: HirLValue::Index {
+                        base: Box::new(HirExpr::PtrOffset {
+                            base: Box::new(call("array_base")),
+                            offset: 8,
+                        }),
+                        index: Box::new(call("array_index")),
+                        elem_ty: NirType::Unknown,
+                    },
+                    rhs: HirExpr::AggregateCopy {
+                        src: Box::new(call("copy_source")),
+                        size: 16,
+                    },
+                },
+                HirStmt::Assign {
+                    lhs: HirLValue::FieldAccess {
+                        base: Box::new(call("field_base")),
+                        field_name: "member".into(),
+                        offset: 0,
+                        ty: NirType::Unknown,
+                    },
+                    rhs: HirExpr::Var("initial".into()),
+                },
+            ],
+            ..HirFunction::default()
+        };
+        let names = collect_called_externs(&hir).into_keys().collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "array_base",
+                "array_index",
+                "copy_source",
+                "field_base",
+                "initialize"
+            ]
         );
     }
 
@@ -239,6 +444,7 @@ mod layered_tests {
                 bits: 32,
                 signed: true,
             },
+            None,
             None,
         );
         assert_eq!(
@@ -321,6 +527,7 @@ mod layered_tests {
                 bits: 32,
                 signed: true,
             },
+            None,
             None,
         );
         assert_eq!(
@@ -687,12 +894,13 @@ fn render_hir_function_with_profile(
     options: &MlilPreviewOptions,
     profile: PrintProfile,
 ) -> String {
-    render_hir_function_with_provenance(hir, options, profile, &HashMap::new()).0
+    render_hir_function_with_provenance(hir, options, None, profile, &HashMap::new()).0
 }
 
 pub(crate) fn render_hir_function_with_provenance(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
+    type_context: Option<&NirTypeContext>,
     profile: PrintProfile,
     definitions: &HashMap<String, u64>,
 ) -> (String, Vec<super::RecoveredLineMapping>) {
@@ -712,23 +920,20 @@ pub(crate) fn render_hir_function_with_provenance(
         .locals
         .retain(|binding| !decls.contains_key(&binding.name));
     let aggregate_typedefs = collect_referenced_aggregate_typedefs(&printable, decls.values());
-    let opaque_pcodeop_stubs = collect_opaque_pcodeop_stubs(&printable);
     // A call to a name this unit does not define needs a declaration for the
     // result to compile as a project rather than as one loose function.
     let undefined_types = collect_undefined_surface_types(&printable, options);
-    let mut called_externs = collect_called_externs(&printable, &printable.name);
+    let mut called_externs = collect_called_externs(&printable);
     let calls_stdio = called_externs
         .keys()
         .any(|name| is_stdio_declared_symbol(name) || called_api_uses_file_surface(name));
     called_externs.retain(|name, _| {
         !decls.contains_key(name)
-            && !opaque_pcodeop_stubs.contains_key(name)
             && (!is_stdio_declared_symbol(name) || options.declared_signatures.contains_key(name))
     });
     let include_stdio = function_uses_file_surface(&printable) || calls_stdio;
     if decls.is_empty()
         && aggregate_typedefs.is_empty()
-        && opaque_pcodeop_stubs.is_empty()
         && called_externs.is_empty()
         && undefined_types.is_empty()
         && !include_stdio
@@ -748,9 +953,6 @@ pub(crate) fn render_hir_function_with_provenance(
     for (size, fields) in aggregate_typedefs {
         rendered.push_str(&render_aggregate_typedef(size, &fields));
     }
-    for (target, return_ty) in opaque_pcodeop_stubs {
-        rendered.push_str(&render_opaque_pcodeop_stub(&target, &return_ty));
-    }
     for (name, ty) in decls {
         rendered.push_str(&format!(
             "{} {};\n",
@@ -768,11 +970,14 @@ pub(crate) fn render_hir_function_with_provenance(
             rendered.push_str(&format!("typedef {definition} {name};\n"));
         }
     }
-    for (target, return_ty) in &called_externs {
+    let argument_type = call_argument_type(&printable, &options.global_names, profile);
+    for (target, call) in &called_externs {
+        let callee = type_context.and_then(|context| context.call_prototype_summaries.get(target));
         rendered.push_str(&render_called_extern(
             target,
-            return_ty,
+            &call.return_type,
             options.declared_signatures.get(target),
+            call.inferred_parameters(&argument_type, callee),
         ));
     }
     rendered.push('\n');
@@ -1001,41 +1206,98 @@ fn called_api_uses_file_surface(name: &str) -> bool {
     })
 }
 
-/// Names this function calls but does not define.
-///
-/// A restored project has to compile as a unit, and a call to a name with no
-/// declaration is not portable C -- gcc warns, clang refuses. These get an
-/// `extern` declaration rather than a stub body: a stub would compile and
-/// then behave differently from the original, which for a rebuild is worse
-/// than not compiling.
-fn collect_called_externs(hir: &HirFunction, defined: &str) -> BTreeMap<String, NirType> {
+/// Call-site evidence used only for forward declarations in the emitted C.
+struct CalledExtern<'a> {
+    return_type: NirType,
+    arguments: Vec<&'a [HirExpr]>,
+}
+
+impl CalledExtern<'_> {
+    fn inferred_parameters(
+        &self,
+        argument_type: &impl Fn(&HirExpr) -> Option<String>,
+        callee: Option<&NirCallPrototypeSummary>,
+    ) -> Option<Vec<String>> {
+        let variadic = callee.and_then(|summary| summary.variadic_fixed_arity);
+        let fixed = callee.and_then(|summary| summary.locked_exact_arity);
+        if variadic == Some(0) {
+            return None;
+        }
+        let mut sites = self.arguments.iter();
+        let parameter_types = |args: &&[HirExpr]| {
+            if fixed.is_some_and(|arity| args.len() != arity) {
+                return None;
+            }
+            let args = args.get(..variadic.unwrap_or(args.len()))?;
+            args.iter().map(argument_type).collect::<Option<Vec<_>>>()
+        };
+        let mut first = parameter_types(sites.next()?)?;
+        if !sites.all(|args| parameter_types(args).as_ref() == Some(&first)) {
+            return None;
+        }
+        if variadic.is_some() {
+            first.push("...".into());
+        }
+        Some(first)
+    }
+}
+
+fn collect_called_externs(hir: &HirFunction) -> BTreeMap<String, CalledExtern<'_>> {
     let mut calls = BTreeMap::new();
     collect_called_externs_from_stmts(&hir.body, &mut calls);
-    calls.retain(|name, _| name != defined && !name.starts_with("__pcodeop_"));
+    for initializer in hir
+        .locals
+        .iter()
+        .filter_map(|local| local.initializer.as_ref())
+    {
+        collect_called_externs_from_expr(initializer, &mut calls);
+    }
+    calls.retain(|name, _| {
+        *name != hir.name
+            && !hir
+                .params
+                .iter()
+                .chain(&hir.locals)
+                .any(|binding| *name == binding.name)
+    });
     calls
 }
 
-fn collect_called_externs_from_stmts(stmts: &[HirStmt], out: &mut BTreeMap<String, NirType>) {
+fn collect_called_externs_from_stmts<'a>(
+    stmts: &'a [HirStmt],
+    calls: &mut BTreeMap<String, CalledExtern<'a>>,
+) {
     for stmt in stmts {
         match stmt {
             HirStmt::Assign { lhs, rhs } => {
-                collect_called_externs_from_lvalue(lhs, out);
-                collect_called_externs_from_expr(rhs, out);
+                match lhs {
+                    HirLValue::Var(_) => {}
+                    HirLValue::Deref { ptr: base, .. } | HirLValue::FieldAccess { base, .. } => {
+                        collect_called_externs_from_expr(base, calls);
+                    }
+                    HirLValue::Index { base, index, .. } => {
+                        collect_called_externs_from_expr(base, calls);
+                        collect_called_externs_from_expr(index, calls);
+                    }
+                }
+                collect_called_externs_from_expr(rhs, calls);
             }
-            HirStmt::VaStart { va_list: e, .. } | HirStmt::Expr(e) | HirStmt::Return(Some(e)) => {
-                collect_called_externs_from_expr(e, out)
-            }
-            HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-                collect_called_externs_from_stmts(body, out);
+            HirStmt::VaStart { va_list: expr, .. }
+            | HirStmt::Expr(expr)
+            | HirStmt::Return(Some(expr)) => collect_called_externs_from_expr(expr, calls),
+            HirStmt::Block(body) => collect_called_externs_from_stmts(body, calls),
+            HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+                collect_called_externs_from_expr(cond, calls);
+                collect_called_externs_from_stmts(body, calls);
             }
             HirStmt::If {
                 cond,
                 then_body,
                 else_body,
             } => {
-                collect_called_externs_from_expr(cond, out);
-                collect_called_externs_from_stmts(then_body, out);
-                collect_called_externs_from_stmts(else_body, out);
+                collect_called_externs_from_expr(cond, calls);
+                collect_called_externs_from_stmts(then_body, calls);
+                collect_called_externs_from_stmts(else_body, calls);
             }
             HirStmt::For {
                 init,
@@ -1043,49 +1305,63 @@ fn collect_called_externs_from_stmts(stmts: &[HirStmt], out: &mut BTreeMap<Strin
                 update,
                 body,
             } => {
-                if let Some(init) = init {
-                    collect_called_externs_from_stmts(std::slice::from_ref(init.as_ref()), out);
+                for stmt in [init, update].into_iter().flatten() {
+                    collect_called_externs_from_stmts(std::slice::from_ref(stmt.as_ref()), calls);
                 }
                 if let Some(cond) = cond {
-                    collect_called_externs_from_expr(cond, out);
+                    collect_called_externs_from_expr(cond, calls);
                 }
-                if let Some(update) = update {
-                    collect_called_externs_from_stmts(std::slice::from_ref(update.as_ref()), out);
-                }
-                collect_called_externs_from_stmts(body, out);
+                collect_called_externs_from_stmts(body, calls);
             }
             HirStmt::Switch {
                 expr,
                 cases,
                 default,
             } => {
-                collect_called_externs_from_expr(expr, out);
+                collect_called_externs_from_expr(expr, calls);
                 for case in cases {
-                    collect_called_externs_from_stmts(&case.body, out);
+                    collect_called_externs_from_stmts(&case.body, calls);
                 }
-                collect_called_externs_from_stmts(default, out);
+                collect_called_externs_from_stmts(default, calls);
             }
-            _ => {}
+            HirStmt::Label(_)
+            | HirStmt::Goto(_)
+            | HirStmt::Return(None)
+            | HirStmt::Break
+            | HirStmt::Continue => {}
         }
     }
 }
 
-fn collect_called_externs_from_lvalue(lvalue: &HirLValue, out: &mut BTreeMap<String, NirType>) {
-    if let HirLValue::Deref { ptr, .. } = lvalue {
-        collect_called_externs_from_expr(ptr, out);
-    }
-}
-
-fn collect_called_externs_from_expr(expr: &HirExpr, out: &mut BTreeMap<String, NirType>) {
+fn collect_called_externs_from_expr<'a>(
+    expr: &'a HirExpr,
+    calls: &mut BTreeMap<String, CalledExtern<'a>>,
+) {
     match expr {
         HirExpr::Call {
             target, args, ty, ..
         } => {
-            if is_c_identifier(target) {
-                out.entry(target.clone()).or_insert_with(|| ty.clone());
+            if is_c_identifier(target) || target.starts_with("__pcodeop_") {
+                let name = if target.starts_with("__pcodeop_") {
+                    sanitize_c_identifier(target)
+                } else {
+                    target.clone()
+                };
+                let call = calls.entry(name).or_insert_with(|| CalledExtern {
+                    return_type: ty.clone(),
+                    arguments: Vec::new(),
+                });
+                if target.starts_with("__pcodeop_") {
+                    call.return_type = merge_opaque_pcodeop_return_type(&call.return_type, ty);
+                } else if matches!(call.return_type, NirType::Unknown)
+                    && !matches!(ty, NirType::Unknown)
+                {
+                    call.return_type = ty.clone();
+                }
+                call.arguments.push(args);
             }
             for arg in args {
-                collect_called_externs_from_expr(arg, out);
+                collect_called_externs_from_expr(arg, calls);
             }
         }
         HirExpr::Binary { lhs, rhs, .. }
@@ -1094,162 +1370,31 @@ fn collect_called_externs_from_expr(expr: &HirExpr, out: &mut BTreeMap<String, N
             index: rhs,
             ..
         } => {
-            collect_called_externs_from_expr(lhs, out);
-            collect_called_externs_from_expr(rhs, out);
+            collect_called_externs_from_expr(lhs, calls);
+            collect_called_externs_from_expr(rhs, calls);
         }
         HirExpr::Unary { expr: inner, .. }
         | HirExpr::Cast { expr: inner, .. }
         | HirExpr::Load { ptr: inner, .. }
-        | HirExpr::FieldAccess { base: inner, .. } => collect_called_externs_from_expr(inner, out),
+        | HirExpr::PtrOffset { base: inner, .. }
+        | HirExpr::AggregateCopy { src: inner, .. }
+        | HirExpr::FieldAccess { base: inner, .. } => {
+            collect_called_externs_from_expr(inner, calls)
+        }
         HirExpr::Select {
             cond,
             then_expr,
             else_expr,
             ..
         } => {
-            collect_called_externs_from_expr(cond, out);
-            collect_called_externs_from_expr(then_expr, out);
-            collect_called_externs_from_expr(else_expr, out);
+            collect_called_externs_from_expr(cond, calls);
+            collect_called_externs_from_expr(then_expr, calls);
+            collect_called_externs_from_expr(else_expr, calls);
         }
-        _ => {}
-    }
-}
-
-fn collect_opaque_pcodeop_stubs(hir: &HirFunction) -> BTreeMap<String, NirType> {
-    let mut stubs = BTreeMap::new();
-    collect_opaque_pcodeop_stubs_from_stmts(&hir.body, &mut stubs);
-    stubs
-}
-
-fn collect_opaque_pcodeop_stubs_from_stmts(
-    stmts: &[HirStmt],
-    stubs: &mut BTreeMap<String, NirType>,
-) {
-    for stmt in stmts {
-        collect_opaque_pcodeop_stubs_from_stmt(stmt, stubs);
-    }
-}
-
-fn collect_opaque_pcodeop_stubs_from_stmt(stmt: &HirStmt, stubs: &mut BTreeMap<String, NirType>) {
-    match stmt {
-        HirStmt::Assign { lhs, rhs } => {
-            collect_opaque_pcodeop_stubs_from_lvalue(lhs, stubs);
-            collect_opaque_pcodeop_stubs_from_expr(rhs, stubs);
-        }
-        HirStmt::VaStart { va_list, .. }
-        | HirStmt::Expr(va_list)
-        | HirStmt::Return(Some(va_list)) => {
-            collect_opaque_pcodeop_stubs_from_expr(va_list, stubs);
-        }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
-            collect_opaque_pcodeop_stubs_from_stmts(body, stubs);
-        }
-        HirStmt::If {
-            cond,
-            then_body,
-            else_body,
-        } => {
-            collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
-            collect_opaque_pcodeop_stubs_from_stmts(then_body, stubs);
-            collect_opaque_pcodeop_stubs_from_stmts(else_body, stubs);
-        }
-        HirStmt::For {
-            init,
-            cond,
-            update,
-            body,
-        } => {
-            if let Some(init) = init {
-                collect_opaque_pcodeop_stubs_from_stmt(init, stubs);
-            }
-            if let Some(cond) = cond {
-                collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
-            }
-            if let Some(update) = update {
-                collect_opaque_pcodeop_stubs_from_stmt(update, stubs);
-            }
-            collect_opaque_pcodeop_stubs_from_stmts(body, stubs);
-        }
-        HirStmt::Switch {
-            expr,
-            cases,
-            default,
-        } => {
-            collect_opaque_pcodeop_stubs_from_expr(expr, stubs);
-            for case in cases {
-                collect_opaque_pcodeop_stubs_from_stmts(&case.body, stubs);
-            }
-            collect_opaque_pcodeop_stubs_from_stmts(default, stubs);
-        }
-        HirStmt::Label(_)
-        | HirStmt::Goto(_)
-        | HirStmt::Return(None)
-        | HirStmt::Break
-        | HirStmt::Continue => {}
-    }
-}
-
-fn collect_opaque_pcodeop_stubs_from_lvalue(
-    lhs: &HirLValue,
-    stubs: &mut BTreeMap<String, NirType>,
-) {
-    match lhs {
-        HirLValue::Var(_) => {}
-        HirLValue::Deref { ptr, .. } => collect_opaque_pcodeop_stubs_from_expr(ptr, stubs),
-        HirLValue::Index { base, index, .. } => {
-            collect_opaque_pcodeop_stubs_from_expr(base, stubs);
-            collect_opaque_pcodeop_stubs_from_expr(index, stubs);
-        }
-        HirLValue::FieldAccess { base, .. } => {
-            collect_opaque_pcodeop_stubs_from_expr(base, stubs);
-        }
-    }
-}
-
-fn collect_opaque_pcodeop_stubs_from_expr(expr: &HirExpr, stubs: &mut BTreeMap<String, NirType>) {
-    match expr {
         HirExpr::Var(_)
+        | HirExpr::Const(_, _)
         | HirExpr::AddressOfGlobal(_)
-        | HirExpr::AddressOfLocal(_)
-        | HirExpr::Const(_, _) => {}
-        HirExpr::Cast { expr, .. }
-        | HirExpr::Unary { expr, .. }
-        | HirExpr::Load { ptr: expr, .. }
-        | HirExpr::PtrOffset { base: expr, .. }
-        | HirExpr::AggregateCopy { src: expr, .. }
-        | HirExpr::FieldAccess { base: expr, .. } => {
-            collect_opaque_pcodeop_stubs_from_expr(expr, stubs);
-        }
-        HirExpr::Binary { lhs, rhs, .. }
-        | HirExpr::Index {
-            base: lhs,
-            index: rhs,
-            ..
-        } => {
-            collect_opaque_pcodeop_stubs_from_expr(lhs, stubs);
-            collect_opaque_pcodeop_stubs_from_expr(rhs, stubs);
-        }
-        HirExpr::Call {
-            target, args, ty, ..
-        } => {
-            if target.starts_with("__pcodeop_") {
-                let entry = stubs.entry(target.clone()).or_insert_with(|| ty.clone());
-                *entry = merge_opaque_pcodeop_return_type(entry, ty);
-            }
-            for arg in args {
-                collect_opaque_pcodeop_stubs_from_expr(arg, stubs);
-            }
-        }
-        HirExpr::Select {
-            cond,
-            then_expr,
-            else_expr,
-            ..
-        } => {
-            collect_opaque_pcodeop_stubs_from_expr(cond, stubs);
-            collect_opaque_pcodeop_stubs_from_expr(then_expr, stubs);
-            collect_opaque_pcodeop_stubs_from_expr(else_expr, stubs);
-        }
+        | HirExpr::AddressOfLocal(_) => {}
     }
 }
 
@@ -1288,25 +1433,14 @@ fn merge_opaque_pcodeop_return_type(existing: &NirType, next: &NirType) -> NirTy
     }
 }
 
-/// `extern` for a called name, never a definition.
-///
-/// Deliberately not a stub with a body: a stub compiles and then behaves
-/// differently from the original, and for a rebuild that is worse than not
-/// compiling. The parameter list is left open because the call sites are the
-/// only evidence of arity, and they disagree often enough not to be trusted.
-///
-/// In the C11 output contract, an empty parameter list means that the arity is
-/// unspecified, so `extern T f();` accepts the argument shapes seen at its
-/// call sites. A bare `...` is not a valid C declaration: C requires a named
-/// parameter before an ellipsis. The output target is C11 because the
-/// recompilation harness and generated corpus wrappers use that dialect.
-///
-/// `declared` is authoritative when somebody wrote a signature down. Known
-/// variadic runtime APIs are the other exception: their bundled signature
-/// supplies a fixed prefix and the runtime-symbol metadata supplies `...`.
-/// Other callees keep the open list because call sites alone are not reliable
-/// declaration evidence.
-fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&String>) -> String {
+/// Explicit declarations and modeled runtime prototypes take precedence over
+/// call-site evidence. Only consistent argument lists get a fixed prototype.
+fn render_called_extern(
+    target: &str,
+    return_ty: &NirType,
+    declared: Option<&String>,
+    inferred_params: Option<Vec<String>>,
+) -> String {
     if let Some(declaration) = declared {
         return format!("extern {declaration};\n");
     }
@@ -1338,23 +1472,14 @@ fn render_called_extern(target: &str, return_ty: &NirType, declared: Option<&Str
             );
         }
     }
-    let return_type = opaque_pcodeop_return_type_name(return_ty);
-    format!("extern {return_type} {target}();\n")
-}
-
-fn render_opaque_pcodeop_stub(target: &str, return_ty: &NirType) -> String {
-    let return_type = opaque_pcodeop_return_type_name(return_ty);
-    format!(
-        "extern {return_type} {}();\n",
-        sanitize_c_identifier(target)
-    )
-}
-
-fn opaque_pcodeop_return_type_name(return_ty: &NirType) -> String {
-    match return_ty {
+    let return_type = match return_ty {
         NirType::Unknown => "unsigned long long".to_string(),
         _ => print_type(return_ty),
-    }
+    };
+    let Some(params) = inferred_params.filter(|_| !is_known_variadic_runtime_symbol(target)) else {
+        return print_unknown_arity_extern(&return_type, target);
+    };
+    print_inferred_extern(&return_type, target, &params)
 }
 
 /// size → (offset → (field_name, field_ty)). Fields are merged across all
@@ -1373,6 +1498,13 @@ fn collect_referenced_aggregate_typedefs<'a>(
         collect_aggregate_typedefs_from_type(ty, &mut aggs);
     }
     collect_aggregate_typedefs_from_stmts(&hir.body, &mut aggs);
+    for initializer in hir
+        .locals
+        .iter()
+        .filter_map(|local| local.initializer.as_ref())
+    {
+        collect_aggregate_typedefs_from_expr(initializer, &mut aggs);
+    }
     aggs
 }
 
@@ -1429,7 +1561,9 @@ fn collect_aggregate_typedefs_from_stmt(
         | HirStmt::Return(Some(va_list)) => {
             collect_aggregate_typedefs_from_expr(va_list, aggs);
         }
-        HirStmt::Block(body) | HirStmt::While { body, .. } | HirStmt::DoWhile { body, .. } => {
+        HirStmt::Block(body) => collect_aggregate_typedefs_from_stmts(body, aggs),
+        HirStmt::While { cond, body } | HirStmt::DoWhile { cond, body } => {
+            collect_aggregate_typedefs_from_expr(cond, aggs);
             collect_aggregate_typedefs_from_stmts(body, aggs);
         }
         HirStmt::If {
@@ -1905,7 +2039,7 @@ pub(crate) fn printed_declared_callees(
     hir: &HirFunction,
     options: &MlilPreviewOptions,
 ) -> std::collections::BTreeSet<String> {
-    collect_called_externs(hir, &hir.name)
+    collect_called_externs(hir)
         .into_keys()
         .filter(|name| {
             options.declared_signatures.contains_key(name) || is_stdio_declared_symbol(name)
@@ -2999,9 +3133,141 @@ mod global_decl_tests {
             "{rendered}"
         );
         assert!(
-            rendered.contains("extern fission_agg16 __pcodeop_294();"),
+            rendered.contains("extern fission_agg16 __pcodeop_294(void);"),
             "{rendered}"
         );
         assert!(rendered.contains("xVar30 = __pcodeop_294();"), "{rendered}");
+    }
+
+    #[test]
+    fn global_symbol_recovery_handles_blocks_loops_and_switch_invalidation() {
+        use crate::midend::HirSwitchCase;
+        use crate::render::recover_global_symbol_accesses;
+
+        let mut options = preview_options_with_global("g_val");
+        options.global_sizes.insert(0x2000, 4);
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let ptr_u32 = NirType::Ptr(Box::new(u32_ty.clone()));
+        let assign_global = |name: &str| HirStmt::Assign {
+            lhs: HirLValue::Var(name.into()),
+            rhs: HirExpr::Const(0x2000, u64_ty.clone()),
+        };
+        let deref_store = |name: &str, val: i64| HirStmt::Assign {
+            lhs: HirLValue::Deref {
+                ptr: Box::new(HirExpr::Var(name.into())),
+                ty: u32_ty.clone(),
+            },
+            rhs: HirExpr::Const(val, u32_ty.clone()),
+        };
+        let mut hir = HirFunction {
+            name: "f".into(),
+            params: vec![NirBinding {
+                name: "cond".into(),
+                ty: u32_ty.clone(),
+                surface_type_name: None,
+                origin: Some(NirBindingOrigin::ParamIndex(0)),
+                initializer: None,
+            }],
+            locals: vec![
+                NirBinding {
+                    name: "p_block".into(),
+                    ty: ptr_u32.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "p_loop".into(),
+                    ty: ptr_u32.clone(),
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+                NirBinding {
+                    name: "p_sw".into(),
+                    ty: ptr_u32,
+                    surface_type_name: None,
+                    origin: Some(NirBindingOrigin::Temp),
+                    initializer: None,
+                },
+            ],
+            body: vec![
+                // Block alias propagates out to subsequent deref.
+                HirStmt::Block(vec![assign_global("p_block")]),
+                deref_store("p_block", 1),
+                // Pre-loop alias invalidated because loop body reassigns p_loop.
+                assign_global("p_loop"),
+                HirStmt::While {
+                    cond: HirExpr::Var("cond".into()),
+                    body: vec![
+                        deref_store("p_loop", 2),
+                        HirStmt::Assign {
+                            lhs: HirLValue::Var("p_loop".into()),
+                            rhs: HirExpr::Const(0x3000, u64_ty.clone()),
+                        },
+                    ],
+                },
+                deref_store("p_loop", 3),
+                // Pre-switch alias invalidated when a case reassigns p_sw.
+                assign_global("p_sw"),
+                HirStmt::Switch {
+                    expr: HirExpr::Var("cond".into()),
+                    cases: vec![HirSwitchCase {
+                        values: vec![0],
+                        body: vec![
+                            HirStmt::Assign {
+                                lhs: HirLValue::Var("p_sw".into()),
+                                rhs: HirExpr::Const(0x4000, u64_ty),
+                            },
+                            HirStmt::Break,
+                        ],
+                    }],
+                    default: vec![],
+                },
+                deref_store("p_sw", 4),
+            ],
+            ..HirFunction::default()
+        };
+        recover_global_symbol_accesses(&mut hir, &options);
+        assert!(matches!(
+            &hir.body[1],
+            HirStmt::Assign { lhs: HirLValue::Var(name), .. } if name == "g_val"
+        ));
+        if let HirStmt::While { body, .. } = &hir.body[3] {
+            assert!(
+                matches!(
+                    &body[0],
+                    HirStmt::Assign {
+                        lhs: HirLValue::Deref { .. },
+                        ..
+                    }
+                ),
+                "loop body deref must not use invalidated alias: {:?}",
+                body[0]
+            );
+        } else {
+            panic!("expected While");
+        }
+        assert!(matches!(
+            &hir.body[4],
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. },
+                ..
+            }
+        ));
+        assert!(matches!(
+            &hir.body[7],
+            HirStmt::Assign {
+                lhs: HirLValue::Deref { .. },
+                ..
+            }
+        ));
     }
 }

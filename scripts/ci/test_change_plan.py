@@ -39,6 +39,24 @@ class ChangePlanTests(unittest.TestCase):
         for job in lanes:
             self.assertFalse(jobs[job], job)
 
+    def test_lift_and_interpreter_changes_run_the_native_differential(self):
+        for path in ("crates/fission-sleigh/src/runtime/lift.rs",
+                     "utils/sleigh-specs/languages/AARCH64/AARCH64instructions.sinc",
+                     "crates/fission-emulator/src/pcode/eval.rs",
+                     "crates/fission-emulator/src/interp.rs",
+                     "crates/fission-emulator/src/arch/vector.rs",
+                     "crates/fission-emulator/src/arch/vector/x86.rs",
+                     "crates/fission-emulator/src/jit/float_ops.rs",
+                     "crates/fission-emulator/src/jit/softfloat.rs",
+                     "crates/fission-emulator/tests/native_differential/baseline.txt",
+                     ".github/workflows/native-differential.yml",
+                     ".github/workflows/reusable-premerge.yml"):
+            self.assertTrue(plan([path], "pull_request")[1]["run_native_diff"], path)
+            self.assertTrue(plan([path], "merge_group")[1]["run_native_diff"], path)
+            self.assertFalse(plan([path], "push")[1]["run_native_diff"], path)
+        for path in ("crates/fission-emulator/src/os/linux/mod.rs", "crates/fission-pcode/src/lib.rs"):
+            self.assertFalse(plan([path], "pull_request")[1]["run_native_diff"], path)
+
     def test_sweep_changes_run_the_sweep_smoke_before_merge(self):
         for path in (".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
                      "scripts/quality/decbench-ci-requirements.txt"):
@@ -46,6 +64,15 @@ class ChangePlanTests(unittest.TestCase):
             self.assertTrue(plan([path], "merge_group")[1]["run_sweep_smoke"], path)
             self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)
         self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sweep_smoke"])
+
+    def test_sccache_setup_changes_run_the_outage_fallback_self_test(self):
+        for path in (".github/actions/setup-sccache/action.yml", ".github/actions/setup-sccache/probe.sh",
+                     ".github/workflows/ci.yml"):
+            for event in ("pull_request", "merge_group", "push"):
+                self.assertTrue(plan([path], event)[1]["run_sccache_fallback"], (path, event))
+        self.assertTrue(plan([], "workflow_dispatch")[1]["run_sccache_fallback"])
+        self.assertFalse(plan(["crates/fission-pcode/src/lib.rs"], "pull_request")[1]["run_sccache_fallback"])
+        self.assertFalse(plan([".github/workflows/fuzz.yml"], "pull_request")[1]["run_sccache_fallback"])
 
     def test_advisories_gate_a_pr_only_when_it_changes_dependencies(self):
         for path in ("Cargo.lock", "Cargo.toml", "crates/fission-cli/Cargo.toml",
@@ -74,6 +101,7 @@ class ChangePlanTests(unittest.TestCase):
 
     def test_cli_contract_and_replay_gates_are_selected_for_their_owners(self):
         self.assertTrue(plan(["crates/fission-cli/src/cli/contract/schema.rs"], "merge_group")[1]["run_doc_checks"])
+        self.assertTrue(plan(["crates/fission-quotient/src/report.rs"], "pull_request")[1]["run_doc_checks"])
         self.assertTrue(plan(["crates/fission-dir/src/eval.rs"], "pull_request")[1]["run_replay_checks"])
         self.assertFalse(plan(["docs/CLI.md"], "merge_group")[1]["run_replay_checks"])
 

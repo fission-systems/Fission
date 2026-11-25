@@ -82,6 +82,8 @@ pub trait StructuringHost {
     /// `try_lower_if`/`try_lower_while` attempts a single function's
     /// structuring makes. Reset alongside `reset_sese_region_proof_budget`.
     fn structuring_total_work_counter(&self) -> std::rc::Rc<std::cell::Cell<u64>>;
+    /// Observed use of the work limits (telemetry; never read to decide).
+    fn resource_usage(&self) -> std::rc::Rc<fission_midend_core::ir::ResourceUsage>;
     fn reset_structuring_total_work_counter(&mut self);
 
     // ── Address / block identity ───────────────────────────────────────────
@@ -98,6 +100,15 @@ pub trait StructuringHost {
         &mut self,
         block_idx: usize,
     ) -> Result<LoweredTerminator, MlilPreviewError>;
+    /// What `lower_block_terminator` returns for `block_idx` when the block
+    /// is already lowered, so that asking again only reads a memo.
+    ///
+    /// `None` when it is not: lowering it now would mint names and record
+    /// bindings (see `lower_isolated`), so a caller that must not change the
+    /// host cannot learn the answer. Hosts without a memo answer `None`.
+    fn cached_block_terminator(&self, _block_idx: usize) -> Option<LoweredTerminator> {
+        None
+    }
     /// Run a speculative lowering against forked host state, committing only
     /// if it succeeds.
     ///

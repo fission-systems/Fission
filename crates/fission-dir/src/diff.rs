@@ -11,32 +11,201 @@
 //! with each other and disagree with reality) -- see [`crate::ground_truth`]
 //! for the tier that checks against the real emulator instead.
 
+use std::collections::BTreeMap;
+
 use fission_midend_core::ir::HirFunction;
 use fission_midend_prehir::PreHirFunction;
 
-use crate::eval::{interpret_hir, interpret_prehir};
+use crate::eval::{UndefinedRead, interpret_hir, interpret_prehir};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 
-/// Differentially interpret `prehir` and `hir` -- the real, independently-typed
-/// [`PreHirFunction`]/[`HirFunction`] `fission-pcode`'s production pipeline
-/// produces for the same source function -- over each tuple in `samples`,
-/// in order, and report the outcome. Taking the distinct types here (rather
-/// than two same-shaped slices) means an accidentally swapped argument
-/// order is a compile error, not a silent runtime bug.
+/// Bounded, deterministic category for why a concrete evaluation sample failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum SampleErrorKind {
+    DivisionOrModuloByZero,
+    FuelExhausted,
+    UndefinedOrUnmappedMemory,
+    UnboundVariable,
+    UnmodeledCallOrIntrinsic,
+    UnsupportedConstruct,
+    ArgumentMismatch,
+    MixedErrorCategories,
+    Other,
+}
+
+impl SampleErrorKind {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::DivisionOrModuloByZero => "division_or_modulo_by_zero",
+            Self::FuelExhausted => "fuel_exhausted",
+            Self::UndefinedOrUnmappedMemory => "undefined_or_unmapped_memory",
+            Self::UnboundVariable => "unbound_variable",
+            Self::UnmodeledCallOrIntrinsic => "unmodeled_call_or_intrinsic",
+            Self::UnsupportedConstruct => "unsupported_construct",
+            Self::ArgumentMismatch => "argument_mismatch",
+            Self::MixedErrorCategories => "mixed_error_categories",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Explicit sampled-coverage status for the concrete PreHIR/HIR comparator.
 ///
-/// A concrete input that makes *both* sides return `Err` (e.g. a shared
-/// division-by-zero) is treated as inconclusive for that sample, not a
-/// divergence -- both interpreters hit the same unmodeled/undefined
-/// behavior along the same expression, which isn't evidence structuring
-/// changed anything. A sample where exactly one side errors *is* reported:
-/// that asymmetry is itself suspicious and worth surfacing.
-pub fn diff_prehir_hir(
+/// The concrete tier evaluates finite sample tuples and never establishes
+/// universal equivalence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcreteDiffStatus {
+    /// Every requested sample was comparable and agreed (`requested > 0`,
+    /// `agreed == requested`, zero divergences and zero errors).
+    CompleteSampledAgreement,
+    /// At least one sample was comparable and every comparable sample agreed,
+    /// with zero divergences or asymmetric errors, but one or more samples
+    /// failed symmetrically on both sides (`0 < agreed < requested`).
+    PartialSampledAgreement,
+    /// At least one sample diverged (value mismatch or asymmetric error).
+    Diverged,
+    /// No requested sample produced a comparable `(Ok, Ok)` result and no
+    /// asymmetric error occurred (empty sample list or all symmetric errors).
+    NoComparableEvidence,
+}
+
+impl ConcreteDiffStatus {
+    /// Stable lowercase identifier for serialization and telemetry projections.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CompleteSampledAgreement => "complete_sampled_agreement",
+            Self::PartialSampledAgreement => "partial_sampled_agreement",
+            Self::Diverged => "diverged",
+            Self::NoComparableEvidence => "no_comparable_evidence",
+        }
+    }
+}
+
+/// Reconciled per-sample accounting for a concrete PreHIR/HIR comparison run.
+///
+/// Invariants:
+/// - `requested == comparable + symmetric_errors + asymmetric_errors`
+/// - `requested == agreed + divergent + symmetric_errors`
+/// - `divergent == (comparable - agreed) + asymmetric_errors`
+/// - `symmetric_error_reasons.values().sum::<usize>() == symmetric_errors`
+/// - `asymmetric_error_reasons.values().sum::<usize>() == asymmetric_errors`
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConcreteSampleCounts {
+    pub requested: usize,
+    pub comparable: usize,
+    pub agreed: usize,
+    pub divergent: usize,
+    pub symmetric_errors: usize,
+    pub asymmetric_errors: usize,
+    pub symmetric_error_reasons: BTreeMap<SampleErrorKind, usize>,
+    pub asymmetric_error_reasons: BTreeMap<SampleErrorKind, usize>,
+}
+
+impl ConcreteSampleCounts {
+    /// Verifies that all sample totals and reason maps reconcile.
+    #[must_use]
+    pub fn reconciles(&self) -> bool {
+        let value_divergences = self.comparable.saturating_sub(self.agreed);
+        self.agreed <= self.comparable
+            && self.divergent == value_divergences + self.asymmetric_errors
+            && self.requested == self.comparable + self.symmetric_errors + self.asymmetric_errors
+            && self.requested == self.agreed + self.divergent + self.symmetric_errors
+            && self.symmetric_error_reasons.values().sum::<usize>() == self.symmetric_errors
+            && self.asymmetric_error_reasons.values().sum::<usize>() == self.asymmetric_errors
+    }
+}
+
+/// Typed concrete PreHIR/HIR comparison report preserving the full sample
+/// denominator and bounded error reasons alongside [`VerifyOutcome`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteDiffReport {
+    pub status: ConcreteDiffStatus,
+    pub counts: ConcreteSampleCounts,
+    pub outcome: VerifyOutcome,
+}
+
+impl ConcreteDiffReport {
+    /// True only when every requested sample was comparable and agreed.
+    #[must_use]
+    pub const fn is_complete_sampled_agreement(&self) -> bool {
+        matches!(self.status, ConcreteDiffStatus::CompleteSampledAgreement)
+    }
+
+    /// True when comparable samples agreed, but some requested samples were
+    /// excluded due to symmetric evaluation errors.
+    #[must_use]
+    pub const fn is_partial_sampled_agreement(&self) -> bool {
+        matches!(self.status, ConcreteDiffStatus::PartialSampledAgreement)
+    }
+
+    /// True when at least one sample produced a comparable `(Ok, Ok)` pair.
+    #[must_use]
+    pub const fn has_comparable_evidence(&self) -> bool {
+        self.counts.comparable > 0
+    }
+
+    /// The concrete tier tests finite samples and never produces a universal
+    /// proof of equivalence.
+    #[must_use]
+    pub const fn is_universally_proven(&self) -> bool {
+        false
+    }
+}
+
+fn classify_eval_error(err: &anyhow::Error) -> SampleErrorKind {
+    if let Some(undef) = err.downcast_ref::<UndefinedRead>() {
+        if undef.what.contains("frame byte") {
+            return SampleErrorKind::UndefinedOrUnmappedMemory;
+        }
+        return SampleErrorKind::UnboundVariable;
+    }
+    let msg = err.to_string();
+    if msg.contains("division by zero") || msg.contains("modulo by zero") {
+        SampleErrorKind::DivisionOrModuloByZero
+    } else if msg.contains("did not finish within") || msg.contains("more than ") {
+        SampleErrorKind::FuelExhausted
+    } else if msg.contains("unmapped address")
+        || msg.contains("no address for global")
+        || msg.contains("no frame address for local")
+    {
+        SampleErrorKind::UndefinedOrUnmappedMemory
+    } else if msg.contains("no declared type for variable") || msg.contains("never assigned") {
+        SampleErrorKind::UnboundVariable
+    } else if msg.contains("pseudo-call")
+        || msg.contains("no machine call instruction")
+        || msg.contains("call")
+        || msg.contains("intrinsic")
+    {
+        SampleErrorKind::UnmodeledCallOrIntrinsic
+    } else if msg.contains("args given, function has") {
+        SampleErrorKind::ArgumentMismatch
+    } else if msg.contains("unsupported")
+        || msg.contains("variadic")
+        || msg.contains("member access on a non-pointer")
+        || msg.contains("unexpected control state")
+    {
+        SampleErrorKind::UnsupportedConstruct
+    } else {
+        SampleErrorKind::Other
+    }
+}
+
+/// Differentially interpret `prehir` and `hir` over `samples`, returning full
+/// reconciled sample accounting, bounded error categories, and explicit
+/// complete/partial/no-comparable-evidence status alongside [`VerifyOutcome`].
+pub fn diff_prehir_hir_detailed(
     prehir: &PreHirFunction,
     hir: &HirFunction,
     samples: &[Vec<i64>],
-) -> VerifyOutcome {
+) -> ConcreteDiffReport {
     let mut divergences = Vec::new();
-    let mut checked = 0usize;
+    let mut counts = ConcreteSampleCounts {
+        requested: samples.len(),
+        ..ConcreteSampleCounts::default()
+    };
 
     for args in samples {
         let prehir_r = interpret_prehir(&prehir.body, &prehir.params, &prehir.locals, args);
@@ -44,8 +213,11 @@ pub fn diff_prehir_hir(
 
         match (prehir_r, hir_r) {
             (Ok(prehir_result), Ok(hir_result)) => {
-                checked += 1;
-                if prehir_result != hir_result {
+                counts.comparable += 1;
+                if prehir_result == hir_result {
+                    counts.agreed += 1;
+                } else {
+                    counts.divergent += 1;
                     divergences.push(Divergence {
                         run: None,
                         args: args.clone(),
@@ -56,11 +228,22 @@ pub fn diff_prehir_hir(
                     });
                 }
             }
-            (Err(_), Err(_)) => {
-                // Both sides hit the same unmodeled construct/UB on this
-                // input -- inconclusive, not a pass or a fail.
+            (Err(prehir_err), Err(hir_err)) => {
+                counts.symmetric_errors += 1;
+                let pre_kind = classify_eval_error(&prehir_err);
+                let hir_kind = classify_eval_error(&hir_err);
+                let kind = if pre_kind == hir_kind {
+                    pre_kind
+                } else {
+                    SampleErrorKind::MixedErrorCategories
+                };
+                *counts.symmetric_error_reasons.entry(kind).or_default() += 1;
             }
             (Ok(prehir_result), Err(hir_err)) => {
+                let kind = classify_eval_error(&hir_err);
+                counts.asymmetric_errors += 1;
+                counts.divergent += 1;
+                *counts.asymmetric_error_reasons.entry(kind).or_default() += 1;
                 tracing::debug!("HIR-only eval error for {args:?}: {hir_err}");
                 divergences.push(Divergence {
                     run: None,
@@ -68,10 +251,14 @@ pub fn diff_prehir_hir(
                     prehir_result,
                     hir_result: None,
                     emulator_result: None,
-                    detail: None,
+                    detail: Some(format!("HIR-only eval error ({})", kind.as_str())),
                 });
             }
             (Err(prehir_err), Ok(hir_result)) => {
+                let kind = classify_eval_error(&prehir_err);
+                counts.asymmetric_errors += 1;
+                counts.divergent += 1;
+                *counts.asymmetric_error_reasons.entry(kind).or_default() += 1;
                 tracing::debug!("PreHIR-only eval error for {args:?}: {prehir_err}");
                 divergences.push(Divergence {
                     run: None,
@@ -79,22 +266,68 @@ pub fn diff_prehir_hir(
                     prehir_result: None,
                     hir_result,
                     emulator_result: None,
-                    detail: None,
+                    detail: Some(format!("PreHIR-only eval error ({})", kind.as_str())),
                 });
             }
         }
     }
 
-    if !divergences.is_empty() {
-        return VerifyOutcome::Diverged(divergences);
+    let (status, outcome) = if !divergences.is_empty() {
+        (
+            ConcreteDiffStatus::Diverged,
+            VerifyOutcome::Diverged(divergences),
+        )
+    } else if counts.requested == 0 {
+        (
+            ConcreteDiffStatus::NoComparableEvidence,
+            VerifyOutcome::Unsupported(UnsupportedReason::Construct(
+                "no concrete samples were requested",
+            )),
+        )
+    } else if counts.comparable == 0 {
+        (
+            ConcreteDiffStatus::NoComparableEvidence,
+            VerifyOutcome::Unsupported(UnsupportedReason::Construct(
+                "no sample produced a comparable (Ok, Ok) result -- function likely uses an \
+                 unmodeled construct (Load/Store/Call/etc, see eval's module doc)",
+            )),
+        )
+    } else if counts.symmetric_errors > 0 {
+        (
+            ConcreteDiffStatus::PartialSampledAgreement,
+            VerifyOutcome::Equivalent {
+                checked: counts.agreed,
+            },
+        )
+    } else {
+        (
+            ConcreteDiffStatus::CompleteSampledAgreement,
+            VerifyOutcome::Equivalent {
+                checked: counts.agreed,
+            },
+        )
+    };
+
+    ConcreteDiffReport {
+        status,
+        counts,
+        outcome,
     }
-    if checked == 0 {
-        return VerifyOutcome::Unsupported(UnsupportedReason::Construct(
-            "no sample produced a comparable (Ok, Ok) result -- function likely uses an \
-             unmodeled construct (Load/Store/Call/etc, see eval's module doc)",
-        ));
-    }
-    VerifyOutcome::Equivalent { checked }
+}
+
+/// Differentially interpret `prehir` and `hir` -- the real, independently-typed
+/// [`PreHirFunction`]/[`HirFunction`] `fission-pcode`'s production pipeline
+/// produces for the same source function -- over each tuple in `samples`,
+/// in order, and report the legacy [`VerifyOutcome`].
+///
+/// Prefer [`diff_prehir_hir_detailed`] when callers need the full sample
+/// denominator, partial-agreement distinction, or bounded error categories.
+pub fn diff_prehir_hir(
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    samples: &[Vec<i64>],
+) -> VerifyOutcome {
+    diff_prehir_hir_detailed(prehir, hir, samples).outcome
 }
 
 /// Maximum number of concrete samples generated by [`default_samples`].
@@ -465,5 +698,175 @@ mod tests {
         for s in &samples_6 {
             assert_eq!(s.len(), 6);
         }
+    }
+
+    fn div_ten_by_x_pair() -> (PreHirFunction, HirFunction) {
+        let pre = PreHirFunction {
+            params: vec![prehir_param("x", 0)],
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Div,
+                lhs: Box::new(PreHirExpr::Const(10, i32_ty())),
+                rhs: Box::new(prehir_var("x")),
+                ty: i32_ty(),
+            }))],
+            ..Default::default()
+        };
+        let hir = HirFunction {
+            params: vec![hir_param("x", 0)],
+            body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                op: HirBinaryOp::Div,
+                lhs: Box::new(HirExpr::Const(10, i32_ty())),
+                rhs: Box::new(hvar("x")),
+                ty: i32_ty(),
+            }))],
+            ..Default::default()
+        };
+        (pre, hir)
+    }
+
+    #[test]
+    fn detailed_diff_accounts_for_complete_partial_empty_all_error_and_asymmetric_samples() {
+        // 1. Complete sampled agreement: all requested samples comparable and agreed.
+        let samples_ok = vec![vec![1, 2], vec![5, 3], vec![-1, -4]];
+        let complete = diff_prehir_hir_detailed(&max_dir(), &max_hir(), &samples_ok);
+        assert_eq!(
+            complete.status,
+            ConcreteDiffStatus::CompleteSampledAgreement
+        );
+        assert!(complete.is_complete_sampled_agreement());
+        assert!(!complete.is_partial_sampled_agreement());
+        assert!(complete.has_comparable_evidence());
+        assert!(!complete.is_universally_proven());
+        assert!(complete.counts.reconciles());
+        assert_eq!(complete.counts.requested, 3);
+        assert_eq!(complete.counts.comparable, 3);
+        assert_eq!(complete.counts.agreed, 3);
+        assert_eq!(complete.counts.divergent, 0);
+        assert_eq!(complete.counts.symmetric_errors, 0);
+        assert_eq!(complete.counts.asymmetric_errors, 0);
+        assert!(complete.counts.symmetric_error_reasons.is_empty());
+        assert_eq!(complete.outcome, VerifyOutcome::Equivalent { checked: 3 });
+
+        // 2. Mixed successful and symmetric-error samples (`10 / x` over `[1, 2, 0, 5, 0]`):
+        //    report preserves the full 5-sample denominator and `DivisionOrModuloByZero: 2`.
+        let (pre_div, hir_div) = div_ten_by_x_pair();
+        let mixed_samples = vec![vec![1], vec![2], vec![0], vec![5], vec![0]];
+        let partial = diff_prehir_hir_detailed(&pre_div, &hir_div, &mixed_samples);
+        assert_eq!(partial.status, ConcreteDiffStatus::PartialSampledAgreement);
+        assert!(!partial.is_complete_sampled_agreement());
+        assert!(partial.is_partial_sampled_agreement());
+        assert!(partial.has_comparable_evidence());
+        assert!(!partial.is_universally_proven());
+        assert!(partial.counts.reconciles());
+        assert_eq!(partial.counts.requested, 5);
+        assert_eq!(partial.counts.comparable, 3);
+        assert_eq!(partial.counts.agreed, 3);
+        assert_eq!(partial.counts.divergent, 0);
+        assert_eq!(partial.counts.symmetric_errors, 2);
+        assert_eq!(partial.counts.asymmetric_errors, 0);
+        assert_eq!(
+            partial
+                .counts
+                .symmetric_error_reasons
+                .get(&SampleErrorKind::DivisionOrModuloByZero),
+            Some(&2)
+        );
+        assert_eq!(partial.outcome, VerifyOutcome::Equivalent { checked: 3 });
+
+        // 3. Empty sample list -> NoComparableEvidence and Unsupported.
+        let empty = diff_prehir_hir_detailed(&pre_div, &hir_div, &[]);
+        assert_eq!(empty.status, ConcreteDiffStatus::NoComparableEvidence);
+        assert!(!empty.has_comparable_evidence());
+        assert!(!empty.is_universally_proven());
+        assert!(empty.counts.reconciles());
+        assert_eq!(empty.counts.requested, 0);
+        assert!(matches!(empty.outcome, VerifyOutcome::Unsupported(_)));
+
+        // 4. All-errors (`x == 0` repeated) -> NoComparableEvidence with exact error counts.
+        let all_err = diff_prehir_hir_detailed(&pre_div, &hir_div, &[vec![0], vec![0]]);
+        assert_eq!(all_err.status, ConcreteDiffStatus::NoComparableEvidence);
+        assert!(!all_err.has_comparable_evidence());
+        assert!(all_err.counts.reconciles());
+        assert_eq!(all_err.counts.requested, 2);
+        assert_eq!(all_err.counts.comparable, 0);
+        assert_eq!(all_err.counts.symmetric_errors, 2);
+        assert_eq!(
+            all_err
+                .counts
+                .symmetric_error_reasons
+                .get(&SampleErrorKind::DivisionOrModuloByZero),
+            Some(&2)
+        );
+        assert!(matches!(all_err.outcome, VerifyOutcome::Unsupported(_)));
+
+        // 5. Asymmetric error + value divergence + symmetric error + agreed in one batch:
+        //    - x = 0: both take `10 / x` -> divide by 0 (symmetric error)
+        //    - x = 1: PreHIR `10 / 1 = 10`, HIR `10 / (1 - 2) = -10` (value divergence)
+        //    - x = 2: PreHIR `10 / 2 = 5`, HIR `10 / (2 - 2)` -> Err (asymmetric error)
+        //    - x = 5: both take `10 / 5 = 2` (agreed)
+        let hir_asym = HirFunction {
+            params: vec![hir_param("x", 0)],
+            body: vec![HirStmt::If {
+                cond: HirExpr::Binary {
+                    op: HirBinaryOp::LogicalOr,
+                    lhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::SLe,
+                        lhs: Box::new(hvar("x")),
+                        rhs: Box::new(HirExpr::Const(0, i32_ty())),
+                        ty: bool_ty(),
+                    }),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::SGt,
+                        lhs: Box::new(hvar("x")),
+                        rhs: Box::new(HirExpr::Const(2, i32_ty())),
+                        ty: bool_ty(),
+                    }),
+                    ty: bool_ty(),
+                },
+                then_body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                    op: HirBinaryOp::Div,
+                    lhs: Box::new(HirExpr::Const(10, i32_ty())),
+                    rhs: Box::new(hvar("x")),
+                    ty: i32_ty(),
+                }))],
+                else_body: vec![HirStmt::Return(Some(HirExpr::Binary {
+                    op: HirBinaryOp::Div,
+                    lhs: Box::new(HirExpr::Const(10, i32_ty())),
+                    rhs: Box::new(HirExpr::Binary {
+                        op: HirBinaryOp::Sub,
+                        lhs: Box::new(hvar("x")),
+                        rhs: Box::new(HirExpr::Const(2, i32_ty())),
+                        ty: i32_ty(),
+                    }),
+                    ty: i32_ty(),
+                }))],
+            }],
+            ..Default::default()
+        };
+        let asym_report =
+            diff_prehir_hir_detailed(&pre_div, &hir_asym, &[vec![0], vec![1], vec![2], vec![5]]);
+        assert_eq!(asym_report.status, ConcreteDiffStatus::Diverged);
+        assert!(asym_report.counts.reconciles());
+        assert_eq!(asym_report.counts.requested, 4);
+        assert_eq!(asym_report.counts.comparable, 2); // x=1 (value mismatch) and x=5 (agreed)
+        assert_eq!(asym_report.counts.agreed, 1);
+        assert_eq!(asym_report.counts.divergent, 2); // x=1 (mismatch) and x=2 (asymmetric error)
+        assert_eq!(asym_report.counts.symmetric_errors, 1); // x=0
+        assert_eq!(asym_report.counts.asymmetric_errors, 1); // x=2
+        assert_eq!(
+            asym_report
+                .counts
+                .symmetric_error_reasons
+                .get(&SampleErrorKind::DivisionOrModuloByZero),
+            Some(&1)
+        );
+        assert_eq!(
+            asym_report
+                .counts
+                .asymmetric_error_reasons
+                .get(&SampleErrorKind::DivisionOrModuloByZero),
+            Some(&1)
+        );
+        assert!(matches!(asym_report.outcome, VerifyOutcome::Diverged(ref d) if d.len() == 2));
     }
 }

@@ -200,7 +200,7 @@ cargo check -p fission-emulator
 cargo nextest run -p fission-emulator
 # optional large musl binary (explicit path only — no /tmp auto-discovery):
 #   zig cc -target x86_64-linux-musl -O0 -o /tmp/fission-emu-test/hello_linux_x64 hello.c
-#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator smoke_optional
+#   FISSION_SMOKE_ELF=/tmp/fission-emu-test/hello_linux_x64 cargo nextest run -p fission-emulator --run-ignored only smoke_optional
 cargo check -p fission-cli
 ./target/release/fission_cli sandbox crates/fission-emulator/testdata/linux_x64_hello_sys.elf \
   --max-inst 64 --json --fail-on-budget --max-unimpl-events 0 --max-unimpl-kinds 0

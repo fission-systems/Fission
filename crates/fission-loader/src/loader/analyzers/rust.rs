@@ -19,6 +19,7 @@ impl RustVTableInfo {
             name: self.name.clone(),
             mangled_name: String::new(),
             kind: "rust_vtable".to_string(),
+            source: "rust_vtable".to_string(),
             fields: self
                 .methods
                 .iter()

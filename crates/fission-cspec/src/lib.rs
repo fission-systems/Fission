@@ -875,9 +875,11 @@ mod tests {
             .join("languages")
             .join("x86")
             .join("x86win.cspec");
-        if !path.exists() {
-            return;
-        }
+        assert!(
+            path.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            path.display()
+        );
         let doc = CspecDocument::parse_file(&path).expect("parse x86win.cspec");
 
         let mut targets = doc.callfixup_targets("alloca_probe");

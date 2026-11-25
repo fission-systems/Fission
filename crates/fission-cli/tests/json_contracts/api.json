@@ -1,0 +1,22 @@
+{
+  "command": [
+    "api",
+    "memcpy",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "is_variadic": "bool",
+      "name": "string",
+      "params": {
+        "array": {
+          "object": {
+            "name": "string",
+            "type_name": "string"
+          }
+        }
+      },
+      "return_type": "string"
+    }
+  }
+}

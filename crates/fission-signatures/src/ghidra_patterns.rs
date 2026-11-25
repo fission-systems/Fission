@@ -1131,9 +1131,8 @@ mod tests {
         // dropped token is a pattern that silently stopped existing.
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../utils/signatures/patterns/ghidra");
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            return;
-        };
+        let entries = std::fs::read_dir(&dir)
+            .unwrap_or_else(|e| panic!("committed {} unreadable: {e}", dir.display()));
         let mut checked = 0;
         for entry in entries.flatten() {
             let path = entry.path();

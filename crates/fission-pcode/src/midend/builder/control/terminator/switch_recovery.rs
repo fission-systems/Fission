@@ -8,9 +8,84 @@
 use super::*;
 
 impl<'a> PreviewBuilder<'a> {
-    pub(super) fn infer_switch_default_target(&self, idx: usize, targets: &[u64]) -> Option<u64> {
-        let fallthrough = self.next_block_address(idx)?;
+    /// The switch's `default`: where the selector goes when no listed case
+    /// takes it.
+    ///
+    /// A compiled `switch` guards the table with a range check whose
+    /// out-of-range edge is the `default` label, and the compiler fills every
+    /// unused in-range entry with that same label. So when every predecessor
+    /// of the dispatch block is a conditional whose other edge leaves to one
+    /// block, and the table also targets that block, it is the default: the
+    /// unused entries fold into it instead of printing as cases of their own,
+    /// and every other in-range value keeps its own case.
+    ///
+    /// A table whose only known target is the guard's exit has no case left
+    /// to list (its entries were not decoded), so it keeps the old choice.
+    ///
+    /// Without that evidence the block laid out after the dispatch is used,
+    /// as before. Either choice is sound, because the cases list every
+    /// in-range value whose target is not the default; this only decides
+    /// which target is spelled `default`.
+    pub(super) fn infer_switch_default_target(
+        &mut self,
+        idx: usize,
+        targets: &[u64],
+    ) -> Option<u64> {
+        if let Some(exit) = self.switch_guard_exit_target(idx)
+            && targets.contains(&exit)
+            && targets.iter().any(|&target| target != exit)
+        {
+            return Some(exit);
+        }
+        let fallthrough = self.pcode_fallthrough_address(idx)?;
         targets.contains(&fallthrough).then_some(fallthrough)
+    }
+
+    /// The one block every guarding conditional sends the selector to
+    /// instead of the dispatch block `idx`, if there is exactly one.
+    ///
+    /// Lowering a predecessor's terminator can come back to `idx` (a
+    /// dispatcher that loops to itself, or two dispatchers guarding each
+    /// other), so the probe shares the re-entry guard of the bound probes.
+    fn switch_guard_exit_target(&mut self, idx: usize) -> Option<u64> {
+        if !self.branchind_bound_probes.insert(idx) {
+            return None;
+        }
+        let exit = self.switch_guard_exit_target_unguarded(idx);
+        self.branchind_bound_probes.remove(&idx);
+        exit
+    }
+
+    fn switch_guard_exit_target_unguarded(&mut self, idx: usize) -> Option<u64> {
+        let predecessors = self.predecessors.get(idx)?.clone();
+        if predecessors.is_empty() {
+            return None;
+        }
+        let current = self.block_target_key(idx);
+        let mut exit: Option<u64> = None;
+        for pred_idx in predecessors {
+            if pred_idx == idx {
+                return None;
+            }
+            let LoweredTerminator::Cond {
+                true_target,
+                false_target,
+                ..
+            } = self.lower_block_terminator(pred_idx).ok()?
+            else {
+                return None;
+            };
+            let other = match (true_target == current, false_target == Some(current)) {
+                (true, false) => false_target?,
+                (false, true) => true_target,
+                _ => return None,
+            };
+            if other == current || exit.is_some_and(|known| known != other) {
+                return None;
+            }
+            exit = Some(other);
+        }
+        exit
     }
 
     pub(super) fn infer_unconditional_branch_successor_target(&self, idx: usize) -> Option<u64> {
@@ -43,7 +118,7 @@ impl<'a> PreviewBuilder<'a> {
                     .any(|succ| *succ >= self.pcode.blocks.len())
             });
         let block = self.pcode.blocks.get(idx);
-        let fallthrough = self.next_block_address(idx);
+        let fallthrough = self.pcode_fallthrough_address(idx);
         let mut candidates = Vec::new();
         if use_current_cfg {
             for succ_idx in self.successors.get(idx)? {
@@ -1037,7 +1112,6 @@ impl<'a> PreviewBuilder<'a> {
         min_val: i64,
     ) -> Option<u64> {
         let normalized = strip_casts(selector);
-        let mut best: Option<u64> = None;
         let predecessors = self.predecessors.get(idx)?.clone();
 
         let mut selector_names = HashSet::default();
@@ -1108,43 +1182,60 @@ impl<'a> PreviewBuilder<'a> {
             stripped == normalized
         };
 
+        let mut best =
+            self.infer_bound_across_predecessors(idx, min_val, |_this, _pred, cond, on_true| {
+                extract_selector_upper_bound_from_cond(cond, &is_match, on_true)
+            });
+
+        if best.is_none() {
+            if let Some(bound) = Self::extract_modulo_bound(selector) {
+                best = normalize_selector_bound(bound, min_val);
+            }
+        }
+
+        best
+    }
+
+    fn infer_bound_across_predecessors(
+        &mut self,
+        idx: usize,
+        min_val: i64,
+        mut extract_for_edge: impl FnMut(&Self, usize, &PreHirExpr, bool) -> Option<u64>,
+    ) -> Option<u64> {
+        let predecessors = self.predecessors.get(idx)?.clone();
+        if predecessors.is_empty() {
+            return None;
+        }
+        let current_target = self.block_target_key(idx);
+        let mut best: Option<u64> = None;
+
+        // Every predecessor must enforce an upper bound along its edge(s) into
+        // `idx`, and the join upper bound is the maximum across all incoming
+        // paths (using `.min()` or skipping unbounded predecessors would drop
+        // valid switch targets or claim a false bound).
         for pred_idx in predecessors {
-            let terminator = self.lower_block_terminator(pred_idx);
             let LoweredTerminator::Cond {
                 cond,
                 true_target,
                 false_target,
-            } = terminator.ok()?
+            } = self.lower_block_terminator(pred_idx).ok()?
             else {
-                continue;
+                return None;
             };
-            let current_target = self.block_target_key(idx);
-            let Some(bound) = (if true_target == current_target {
-                extract_selector_upper_bound_from_cond(&cond, &is_match, true)
-            } else if false_target == Some(current_target) {
-                extract_selector_upper_bound_from_cond(&cond, &is_match, false)
-            } else {
-                None
-            }) else {
-                continue;
+            let on_true = true_target == current_target;
+            let on_false = false_target == Some(current_target);
+            let bound = match (on_true, on_false) {
+                (true, true) => {
+                    let b_true = extract_for_edge(self, pred_idx, &cond, true)?;
+                    let b_false = extract_for_edge(self, pred_idx, &cond, false)?;
+                    b_true.max(b_false)
+                }
+                (true, false) => extract_for_edge(self, pred_idx, &cond, true)?,
+                (false, true) => extract_for_edge(self, pred_idx, &cond, false)?,
+                (false, false) => return None,
             };
-            let normalized_bound = if min_val <= 0 {
-                bound.checked_add((-min_val) as u64)?
-            } else {
-                bound.checked_sub(min_val as u64)?
-            };
-            best = Some(best.map_or(normalized_bound, |existing| existing.min(normalized_bound)));
-        }
-
-        if best.is_none() {
-            if let Some(bound) = Self::extract_modulo_bound(selector) {
-                let normalized_bound = if min_val <= 0 {
-                    bound.checked_add((-min_val) as u64)
-                } else {
-                    bound.checked_sub(min_val as u64)
-                };
-                best = normalized_bound;
-            }
+            let normalized_bound = normalize_selector_bound(bound, min_val)?;
+            best = Some(best.map_or(normalized_bound, |existing| existing.max(normalized_bound)));
         }
 
         best
@@ -1175,41 +1266,14 @@ impl<'a> PreviewBuilder<'a> {
         selector_alias: &Varnode,
         min_val: i64,
     ) -> Option<u64> {
-        let mut best: Option<u64> = None;
-        let predecessors = self.predecessors.get(idx)?.clone();
         let selector_family = (selector_alias.space_id, selector_alias.offset);
-
-        for pred_idx in predecessors {
-            let current_target = self.block_target_key(idx);
-            let LoweredTerminator::Cond {
-                true_target,
-                false_target,
-                ..
-            } = self.lower_block_terminator(pred_idx).ok()?
-            else {
-                continue;
-            };
-            let current_on_true = if true_target == current_target {
-                true
-            } else if false_target == Some(current_target) {
-                false
-            } else {
-                continue;
-            };
-            let bound = self.extract_selector_upper_bound_from_predicate_family(
+        self.infer_bound_across_predecessors(idx, min_val, |this, pred_idx, _cond, on_true| {
+            this.extract_selector_upper_bound_from_predicate_family(
                 pred_idx,
                 selector_family,
-                current_on_true,
-            )?;
-            let normalized_bound = if min_val <= 0 {
-                bound.checked_add((-min_val) as u64)?
-            } else {
-                bound.checked_sub(min_val as u64)?
-            };
-            best = Some(best.map_or(normalized_bound, |existing| existing.min(normalized_bound)));
-        }
-
-        best
+                on_true,
+            )
+        })
     }
 
     pub(super) fn extract_selector_upper_bound_from_predicate_family(
@@ -1220,60 +1284,379 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Option<u64> {
         let pcode_idx = self.pcode_block_idx(pred_idx);
         let block = self.pcode.blocks.get(pcode_idx)?;
-        let term_idx = self
-            .block_terminator_index(block)
-            .unwrap_or(block.ops.len());
-        let mut less_than_bound: Option<u64> = None;
-        let mut equality_bound: Option<u64> = None;
+        let term_idx = self.block_terminator_index(block)?;
+        let term_op = block.ops.get(term_idx)?;
+        if term_op.opcode != PcodeOpcode::CBranch || term_op.inputs.len() < 2 {
+            return None;
+        }
+        let scope = LoweringSite {
+            block_idx: pcode_idx,
+            op_idx: term_idx,
+        };
+        self.extract_selector_upper_bound_from_predicate_vn(
+            &term_op.inputs[1],
+            scope,
+            selector_family,
+            current_on_true,
+            0,
+        )
+    }
 
-        for op in block.ops.iter().take(term_idx) {
-            match op.opcode {
-                PcodeOpcode::IntLess | PcodeOpcode::IntSLess if op.inputs.len() == 2 => {
-                    let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
-                    let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
-                    if same_family_varnode(&in0, selector_family) && in1.is_constant {
-                        less_than_bound = u64::try_from(in1.constant_val).ok();
-                    } else if in0.is_constant && same_family_varnode(&in1, selector_family) {
-                        less_than_bound = u64::try_from(in0.constant_val).ok();
+    fn extract_selector_upper_bound_from_predicate_vn(
+        &self,
+        vn: &Varnode,
+        scope: LoweringSite,
+        selector_family: (u64, u64),
+        current_on_true: bool,
+        depth: usize,
+    ) -> Option<u64> {
+        if depth > 16 {
+            return None;
+        }
+        let (def_site, def_op) = self.peel_predicate_def_at(vn, scope)?;
+        match def_op.opcode {
+            PcodeOpcode::BoolNegate if def_op.inputs.len() == 1 => self
+                .extract_selector_upper_bound_from_predicate_vn(
+                    &def_op.inputs[0],
+                    def_site,
+                    selector_family,
+                    !current_on_true,
+                    depth + 1,
+                ),
+            PcodeOpcode::BoolAnd if def_op.inputs.len() == 2 => {
+                let lhs = self.extract_selector_upper_bound_from_predicate_vn(
+                    &def_op.inputs[0],
+                    def_site,
+                    selector_family,
+                    current_on_true,
+                    depth + 1,
+                );
+                let rhs = self.extract_selector_upper_bound_from_predicate_vn(
+                    &def_op.inputs[1],
+                    def_site,
+                    selector_family,
+                    current_on_true,
+                    depth + 1,
+                );
+                combine_and_bounds(lhs, rhs, current_on_true)
+            }
+            PcodeOpcode::BoolOr if def_op.inputs.len() == 2 => {
+                let lhs = self.extract_selector_upper_bound_from_predicate_vn(
+                    &def_op.inputs[0],
+                    def_site,
+                    selector_family,
+                    current_on_true,
+                    depth + 1,
+                );
+                let rhs = self.extract_selector_upper_bound_from_predicate_vn(
+                    &def_op.inputs[1],
+                    def_site,
+                    selector_family,
+                    current_on_true,
+                    depth + 1,
+                );
+                combine_and_bounds(lhs, rhs, !current_on_true)
+            }
+            PcodeOpcode::IntLess | PcodeOpcode::IntSLess if def_op.inputs.len() == 2 => self
+                .extract_bound_from_lt_pair(
+                    &def_op.inputs[0],
+                    &def_op.inputs[1],
+                    def_site,
+                    selector_family,
+                    current_on_true,
+                ),
+            PcodeOpcode::IntLessEqual | PcodeOpcode::IntSLessEqual if def_op.inputs.len() == 2 => {
+                let in0 = &def_op.inputs[0];
+                let in1 = &def_op.inputs[1];
+                if self.matches_selector_family_at(in0, def_site, selector_family)
+                    && let Some(bound) = self.extract_nonneg_const_at(in1, def_site)
+                {
+                    current_on_true.then_some(bound)
+                } else if let Some(bound) = self.extract_nonneg_const_at(in0, def_site)
+                    && self.matches_selector_family_at(in1, def_site, selector_family)
+                {
+                    (!current_on_true).then(|| bound.checked_sub(1)).flatten()
+                } else {
+                    None
+                }
+            }
+            PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual if def_op.inputs.len() == 2 => {
+                let eq_holds = if def_op.opcode == PcodeOpcode::IntEqual {
+                    current_on_true
+                } else {
+                    !current_on_true
+                };
+                if eq_holds
+                    && let Some(bound) = self.extract_equality_bound_from_pair(
+                        &def_op.inputs[0],
+                        &def_op.inputs[1],
+                        def_site,
+                        selector_family,
+                    )
+                {
+                    return Some(bound);
+                }
+                let lt_holds = if def_op.opcode == PcodeOpcode::IntNotEqual {
+                    current_on_true
+                } else {
+                    !current_on_true
+                };
+                self.extract_signed_cmp_pair_bound(
+                    &def_op.inputs[0],
+                    &def_op.inputs[1],
+                    def_site,
+                    selector_family,
+                    lt_holds,
+                )
+            }
+            PcodeOpcode::BoolXor if def_op.inputs.len() == 2 => self.extract_signed_cmp_pair_bound(
+                &def_op.inputs[0],
+                &def_op.inputs[1],
+                def_site,
+                selector_family,
+                current_on_true,
+            ),
+            _ => None,
+        }
+    }
+
+    fn extract_bound_from_lt_pair(
+        &self,
+        lhs: &Varnode,
+        rhs: &Varnode,
+        scope: LoweringSite,
+        selector_family: (u64, u64),
+        lt_holds: bool,
+    ) -> Option<u64> {
+        if self.matches_selector_family_at(lhs, scope, selector_family)
+            && let Some(bound) = self.extract_nonneg_const_at(rhs, scope)
+        {
+            lt_holds.then(|| bound.checked_sub(1)).flatten()
+        } else if let Some(bound) = self.extract_nonneg_const_at(lhs, scope)
+            && self.matches_selector_family_at(rhs, scope, selector_family)
+        {
+            (!lt_holds).then_some(bound)
+        } else {
+            None
+        }
+    }
+
+    fn extract_equality_bound_from_pair(
+        &self,
+        in0: &Varnode,
+        in1: &Varnode,
+        scope: LoweringSite,
+        selector_family: (u64, u64),
+    ) -> Option<u64> {
+        if self.matches_selector_family_at(in0, scope, selector_family)
+            && let Some(bound) = self.extract_nonneg_const_at(in1, scope)
+        {
+            return Some(bound);
+        }
+        if let Some(bound) = self.extract_nonneg_const_at(in0, scope)
+            && self.matches_selector_family_at(in1, scope, selector_family)
+        {
+            return Some(bound);
+        }
+        let check_diff = |diff_vn: &Varnode, zero_vn: &Varnode| -> Option<u64> {
+            if self.extract_nonneg_const_at(zero_vn, scope) != Some(0) {
+                return None;
+            }
+            let (diff_site, diff_op) = self.peel_predicate_def_at(diff_vn, scope)?;
+            if diff_op.opcode != PcodeOpcode::IntSub || diff_op.inputs.len() != 2 {
+                return None;
+            }
+            if self.matches_selector_family_at(&diff_op.inputs[0], diff_site, selector_family)
+                && let Some(bound) = self.extract_nonneg_const_at(&diff_op.inputs[1], diff_site)
+            {
+                return Some(bound);
+            }
+            if let Some(bound) = self.extract_nonneg_const_at(&diff_op.inputs[0], diff_site)
+                && self.matches_selector_family_at(&diff_op.inputs[1], diff_site, selector_family)
+            {
+                return Some(bound);
+            }
+            None
+        };
+        check_diff(in0, in1).or_else(|| check_diff(in1, in0))
+    }
+
+    fn extract_signed_cmp_pair_bound(
+        &self,
+        in0: &Varnode,
+        in1: &Varnode,
+        scope: LoweringSite,
+        selector_family: (u64, u64),
+        lt_holds: bool,
+    ) -> Option<u64> {
+        let is_sf = |vn: &Varnode| -> bool {
+            let Some((s, op)) = self.peel_predicate_def_at(vn, scope) else {
+                return false;
+            };
+            op.opcode == PcodeOpcode::IntSLess
+                && op.inputs.len() == 2
+                && self.extract_nonneg_const_at(&op.inputs[1], s) == Some(0)
+        };
+        let match_of = |vn: &Varnode| -> Option<(LoweringSite, &PcodeOp)> {
+            let (s, op) = self.peel_predicate_def_at(vn, scope)?;
+            (op.opcode == PcodeOpcode::IntSBorrow && op.inputs.len() == 2).then_some((s, op))
+        };
+        let (of_site, of_op) = if is_sf(in0) {
+            match_of(in1)?
+        } else if is_sf(in1) {
+            match_of(in0)?
+        } else {
+            return None;
+        };
+        self.extract_bound_from_lt_pair(
+            &of_op.inputs[0],
+            &of_op.inputs[1],
+            of_site,
+            selector_family,
+            lt_holds,
+        )
+    }
+
+    fn peel_predicate_def_at(
+        &self,
+        vn: &Varnode,
+        scope: LoweringSite,
+    ) -> Option<(LoweringSite, &'a PcodeOp)> {
+        let mut cur = vn.clone();
+        let mut cur_scope = scope;
+        for _ in 0..PASSTHROUGH_PEEL_MAX_STEPS {
+            let (def_site, def_op) = self.lookup_def_site_at(&cur, Some(cur_scope))?;
+            match def_op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                    if def_op.inputs.len() == 1 =>
+                {
+                    cur = def_op.inputs[0].clone();
+                    cur_scope = def_site;
+                }
+                PcodeOpcode::IntAdd | PcodeOpcode::IntSub if def_op.inputs.len() == 2 => {
+                    if const_offset(&def_op.inputs[0]) == Some(0) {
+                        cur = def_op.inputs[1].clone();
+                        cur_scope = def_site;
+                    } else if const_offset(&def_op.inputs[1]) == Some(0) {
+                        cur = def_op.inputs[0].clone();
+                        cur_scope = def_site;
+                    } else {
+                        return Some((def_site, def_op));
                     }
                 }
-                PcodeOpcode::IntLessEqual | PcodeOpcode::IntSLessEqual if op.inputs.len() == 2 => {
-                    let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
-                    let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
-                    if same_family_varnode(&in0, selector_family) && in1.is_constant {
-                        less_than_bound = u64::try_from(in1.constant_val)
-                            .ok()
-                            .and_then(|value| value.checked_add(1));
-                    } else if in0.is_constant && same_family_varnode(&in1, selector_family) {
-                        less_than_bound = u64::try_from(in0.constant_val).ok();
-                    }
-                }
-                PcodeOpcode::IntEqual | PcodeOpcode::IntNotEqual if op.inputs.len() == 2 => {
-                    let in0 = self.peel_passthrough_varnode(&op.inputs[0]);
-                    let in1 = self.peel_passthrough_varnode(&op.inputs[1]);
-                    if in1.is_zero()
-                        && let Some(operands) = self.match_cmp_diff_from_peeled(&in0)
-                        && same_family_varnode(&operands.lhs, selector_family)
-                        && operands.rhs.is_constant
-                    {
-                        equality_bound = u64::try_from(operands.rhs.constant_val).ok();
-                    } else if in0.is_zero()
-                        && let Some(operands) = self.match_cmp_diff_from_peeled(&in1)
-                        && same_family_varnode(&operands.lhs, selector_family)
-                        && operands.rhs.is_constant
-                    {
-                        equality_bound = u64::try_from(operands.rhs.constant_val).ok();
-                    }
-                }
-                _ => {}
+                _ => return Some((def_site, def_op)),
             }
         }
+        None
+    }
 
-        match (current_on_true, less_than_bound, equality_bound) {
-            (false, Some(less), Some(eq)) if less == eq || less.checked_add(1) == Some(eq) => {
-                Some(eq)
+    fn matches_selector_family_at(
+        &self,
+        vn: &Varnode,
+        scope: LoweringSite,
+        selector_family: (u64, u64),
+    ) -> bool {
+        let mut cur = vn.clone();
+        let mut cur_scope = scope;
+        for _ in 0..PASSTHROUGH_PEEL_MAX_STEPS {
+            if same_family_varnode(&cur, selector_family) {
+                return true;
             }
-            (true, Some(less), _) => less.checked_sub(1),
+            let Some((def_site, def_op)) = self.lookup_def_site_at(&cur, Some(cur_scope)) else {
+                return false;
+            };
+            match def_op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                    if def_op.inputs.len() == 1 =>
+                {
+                    cur = def_op.inputs[0].clone();
+                    cur_scope = def_site;
+                }
+                PcodeOpcode::SubPiece
+                    if def_op.inputs.len() >= 2 && const_offset(&def_op.inputs[1]) == Some(0) =>
+                {
+                    cur = def_op.inputs[0].clone();
+                    cur_scope = def_site;
+                }
+                PcodeOpcode::IntAdd | PcodeOpcode::IntSub if def_op.inputs.len() == 2 => {
+                    if const_offset(&def_op.inputs[0]) == Some(0) {
+                        cur = def_op.inputs[1].clone();
+                        cur_scope = def_site;
+                    } else if const_offset(&def_op.inputs[1]) == Some(0) {
+                        cur = def_op.inputs[0].clone();
+                        cur_scope = def_site;
+                    } else {
+                        return false;
+                    }
+                }
+                _ => return false,
+            }
+        }
+        same_family_varnode(&cur, selector_family)
+    }
+
+    fn extract_nonneg_const_at(&self, vn: &Varnode, scope: LoweringSite) -> Option<u64> {
+        let mut cur = vn.clone();
+        let mut cur_scope = scope;
+        for _ in 0..PASSTHROUGH_PEEL_MAX_STEPS {
+            if cur.is_constant {
+                return u64::try_from(cur.constant_val).ok();
+            }
+            let (def_site, def_op) = self.lookup_def_site_at(&cur, Some(cur_scope))?;
+            match def_op.opcode {
+                PcodeOpcode::Copy
+                | PcodeOpcode::Cast
+                | PcodeOpcode::IntZExt
+                | PcodeOpcode::IntSExt
+                    if def_op.inputs.len() == 1 =>
+                {
+                    cur = def_op.inputs[0].clone();
+                    cur_scope = def_site;
+                }
+                PcodeOpcode::IntAdd | PcodeOpcode::IntSub if def_op.inputs.len() == 2 => {
+                    if const_offset(&def_op.inputs[0]) == Some(0) {
+                        cur = def_op.inputs[1].clone();
+                        cur_scope = def_site;
+                    } else if const_offset(&def_op.inputs[1]) == Some(0) {
+                        cur = def_op.inputs[0].clone();
+                        cur_scope = def_site;
+                    } else {
+                        return None;
+                    }
+                }
+                _ => return None,
+            }
+        }
+        cur.is_constant
+            .then(|| u64::try_from(cur.constant_val).ok())
+            .flatten()
+    }
+}
+
+fn normalize_selector_bound(bound: u64, min_val: i64) -> Option<u64> {
+    if min_val <= 0 {
+        bound.checked_add(min_val.unsigned_abs())
+    } else {
+        bound.checked_sub(min_val as u64)
+    }
+}
+
+fn combine_and_bounds(lhs: Option<u64>, rhs: Option<u64>, conjunction: bool) -> Option<u64> {
+    if conjunction {
+        match (lhs, rhs) {
+            (Some(l), Some(r)) => Some(l.min(r)),
+            (Some(b), None) | (None, Some(b)) => Some(b),
+            (None, None) => None,
+        }
+    } else {
+        match (lhs, rhs) {
+            (Some(l), Some(r)) => Some(l.max(r)),
             _ => None,
         }
     }

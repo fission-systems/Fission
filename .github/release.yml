@@ -1,0 +1,44 @@
+# Categories for GitHub's generated release notes (`gh release create
+# --generate-notes`). The release notes Fission publishes are drafted by
+# scripts/release/draft_notes.py, which uses the same sections and labels and
+# adds a fallback from conventional title prefixes; its tests keep the two in
+# step. The first matching category wins.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot
+      - dependabot[bot]
+      - github-actions
+      - github-actions[bot]
+  categories:
+    - title: Breaking Changes
+      labels:
+        - risk:breaking
+    - title: Correctness Fixes
+      labels:
+        - bug
+        - risk:semantic
+    - title: Reliability
+      labels:
+        - phase:2-reliability
+    - title: Performance
+      labels:
+        - type:performance
+    - title: New Capabilities
+      labels:
+        - enhancement
+    - title: Internal
+      labels:
+        - type:refactor
+    - title: Testing & Infrastructure
+      labels:
+        - type:test
+        - area:ci
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other
+      labels:
+        - "*"

@@ -1,0 +1,27 @@
+{
+  "command": [
+    "similar",
+    "crates/fission-sleigh/testdata/a64_csel_select.so",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "object": {
+      "results": {
+        "array": {
+          "object": {
+            "function": "string",
+            "matches": {
+              "array": {
+                "object": {
+                  "name": "string",
+                  "score": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

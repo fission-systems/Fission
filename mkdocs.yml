@@ -74,6 +74,7 @@ nav:
     - CI and release gates: CI_RELEASE_GATES.md
     - Release: RELEASE.md
   - Release Notes:
+    - Fission 0.4.0: changelog/v0.4.0.md
     - Fission 0.3.0: changelog/v0.3.0.md
     - Fission 0.2.3: changelog/v0.2.3.md
     - Fission 0.2.2: changelog/v0.2.2.md

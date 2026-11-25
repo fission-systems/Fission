@@ -430,9 +430,11 @@ pub(crate) fn decode_instruction_no_pcode(
     bytes: &[u8],
     address: u64,
     context_override: Option<PackedContextOverride>,
+    read_end: Option<&std::cell::Cell<usize>>,
 ) -> Result<DecodedInstruction> {
     clear_bind_cache();
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.track_reads(read_end);
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     if let Some(context_override) = context_override {

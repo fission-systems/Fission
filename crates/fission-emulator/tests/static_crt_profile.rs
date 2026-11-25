@@ -197,13 +197,10 @@ fn profile_static_crt_50k_surface() {
     }
 }
 
-/// Optional: push toward full halt (expensive; opt-in).
+/// Optional: push toward full halt (expensive; opt-in with `--ignored`).
 #[test]
+#[ignore = "expensive full-halt attempt on the static CRT; run with --ignored"]
 fn profile_static_crt_full_halt_optional() {
-    if std::env::var("FISSION_SMOKE_STATIC_PRINTF").ok().as_deref() != Some("1") {
-        eprintln!("skip full-halt attempt (FISSION_SMOKE_STATIC_PRINTF=1)");
-        return;
-    }
     let emu = run_budgeted(2_000_000);
     dump("2M", &emu);
     assert!(

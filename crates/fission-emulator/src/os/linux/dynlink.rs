@@ -81,12 +81,45 @@ pub const PLT_RESOLVER_STUB_32: u64 = 0x7FFF_FFF0;
 pub const PLT_LAZY_MARK: u64 = 0xFFFFFFF1_8000_0000;
 pub const PLT_LAZY_MARK_32: u64 = 0x7FFF_8000;
 
-/// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
-pub fn lazy_bind_enabled() -> bool {
+/// Dynamic-linking choices a caller makes for the whole process, in place of
+/// the `FISSION_ENABLE_DYNLINK` / `FISSION_LD_SO` / `FISSION_LIB_PATH` /
+/// `FISSION_LAZY_BIND` environment variables. Each option that is set wins
+/// over its variable; an unset one leaves the variable in charge.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DynlinkOptions {
+    /// Map the guest's own `PT_INTERP` loader from the host and let it bind
+    /// the GOT, instead of high-level emulation of the imports.
+    pub host_interpreter: Option<bool>,
+    /// The host `ld.so` to map in that mode.
+    pub ld_so: Option<PathBuf>,
+    /// Directories searched first for `DT_NEEDED` libraries.
+    pub lib_paths: Vec<PathBuf>,
+    /// Bind PLT slots on first call instead of at load.
+    pub lazy_bind: Option<bool>,
+}
+
+static DYNLINK_OPTIONS: std::sync::OnceLock<DynlinkOptions> = std::sync::OnceLock::new();
+
+/// Set the process's dynamic-linking options. Only the first call takes
+/// effect, like the environment it replaces, so every emulator in the
+/// process links the same way; returns `false` when options were already set.
+pub fn set_dynlink_options(options: DynlinkOptions) -> bool {
+    DYNLINK_OPTIONS.set(options).is_ok()
+}
+
+fn env_flag(name: &str) -> bool {
     matches!(
-        std::env::var("FISSION_LAZY_BIND").as_deref(),
+        std::env::var(name).as_deref(),
         Ok("1") | Ok("true") | Ok("yes")
     )
+}
+
+/// True when lazy PLT binding is requested (`FISSION_LAZY_BIND=1`).
+pub fn lazy_bind_enabled() -> bool {
+    DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.lazy_bind)
+        .unwrap_or_else(|| env_flag("FISSION_LAZY_BIND"))
 }
 
 /// Decode a lazy GOT marker into a table index.
@@ -302,6 +335,14 @@ pub fn parse_pt_interp(data: &[u8]) -> Option<String> {
 }
 
 pub(crate) fn host_interp_candidate(guest_path: &str) -> Option<PathBuf> {
+    if let Some(pb) = DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.ld_so.clone())
+    {
+        if pb.is_file() {
+            return Some(pb);
+        }
+    }
     if let Ok(p) = std::env::var("FISSION_LD_SO") {
         let pb = PathBuf::from(p);
         if pb.is_file() {
@@ -317,10 +358,10 @@ pub(crate) fn host_interp_candidate(guest_path: &str) -> Option<PathBuf> {
 }
 
 pub(crate) fn dynlink_enabled() -> bool {
-    matches!(
-        std::env::var("FISSION_ENABLE_DYNLINK").as_deref(),
-        Ok("1") | Ok("true") | Ok("yes")
-    )
+    DYNLINK_OPTIONS
+        .get()
+        .and_then(|options| options.host_interpreter)
+        .unwrap_or_else(|| env_flag("FISSION_ENABLE_DYNLINK"))
 }
 
 /// True when GOT should be left for a host-mapped ld.so (opt-in interpreter mode).
@@ -550,7 +591,10 @@ struct SharedLoadResult {
 }
 
 fn lib_search_paths() -> Vec<PathBuf> {
-    let mut paths = Vec::new();
+    let mut paths: Vec<PathBuf> = DYNLINK_OPTIONS
+        .get()
+        .map(|options| options.lib_paths.clone())
+        .unwrap_or_default();
     if let Ok(p) = std::env::var("FISSION_LIB_PATH") {
         for part in p.split(':') {
             if !part.is_empty() {
@@ -925,13 +969,13 @@ fn load_shared_libraries(
     if eager {
         // Eager BIND_NOW: RELATIVE + symbols found in loaded modules.
         // Unresolved JUMP_SLOT left for LinuxEnv::patch_imports HLE trampolines.
-        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_base, |name| {
+        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_bias, |name| {
             globals.get(name).copied()
         })?;
         bind_now_applied = stats.jump_slot > 0 || stats.relative > 0 || stats.glob_dat > 0;
     } else {
         // Lazy mode: still apply RELATIVE (base fixups), leave JUMP_SLOT for lazy PLT.
-        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_base, |_name| None)?;
+        let stats = apply_rela_x86_64(&mut staged_state, main_data, main_bias, |_name| None)?;
         tracing::info!(
             "dynlink: lazy bind mode — applied {} RELATIVE, JUMP_SLOT deferred",
             stats.relative
@@ -1024,7 +1068,8 @@ fn map_interpreter(
         );
     }
     let e_entry = u64::from_le_bytes(data[24..32].try_into().unwrap());
-    let phoff = u64::from_le_bytes(data[32..40].try_into().unwrap()) as usize;
+    let phoff = usize::try_from(u64::from_le_bytes(data[32..40].try_into().unwrap()))
+        .context("interpreter phoff overflows usize")?;
     let phentsize = u16::from_le_bytes(data[54..56].try_into().unwrap()) as usize;
     let phnum = u16::from_le_bytes(data[56..58].try_into().unwrap()) as usize;
     if phentsize < 56 {
@@ -1215,6 +1260,7 @@ pub fn apply_rela_x86_64(
     }
     let e_type = u16::from_le_bytes(elf_bytes[16..18].try_into().unwrap());
     let is_et_dyn = e_type == ET_DYN;
+    let effective_bias = if is_et_dyn { load_bias } else { 0 };
 
     let mut stats = RelaApplyStats::default();
 
@@ -1234,22 +1280,18 @@ pub fn apply_rela_x86_64(
                     let r_type = (r_info & 0xffff_ffff) as u32;
                     let r_sym = (r_info >> 32) as usize;
 
-                    let slot = if is_et_dyn {
-                        load_bias.wrapping_add(r_offset)
-                    } else {
-                        r_offset
-                    };
+                    let slot = effective_bias.wrapping_add(r_offset);
 
                     match r_type {
                         R_X86_64_NONE => {}
                         R_X86_64_RELATIVE => {
-                            let val = (load_bias as i64).wrapping_add(r_addend) as u64;
+                            let val = (effective_bias as i64).wrapping_add(r_addend) as u64;
                             state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                             stats.relative += 1;
                         }
                         R_X86_64_JUMP_SLOT | R_X86_64_GLOB_DAT => {
                             let (name, defined_value) =
-                                elf64_dynamic_symbol(elf_bytes, &tables, r_sym, load_bias)
+                                elf64_dynamic_symbol(elf_bytes, &tables, r_sym, effective_bias)
                                     .unwrap_or_default();
                             let bare = name.split('@').next().unwrap_or(&name);
                             let target = if !bare.is_empty() {
@@ -1271,13 +1313,12 @@ pub fn apply_rela_x86_64(
                         }
                         R_X86_64_64 => {
                             if r_sym == 0 {
-                                let val = (if is_et_dyn { load_bias } else { 0 })
-                                    .wrapping_add(r_addend as u64);
+                                let val = effective_bias.wrapping_add(r_addend as u64);
                                 state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                                 stats.absolute += 1;
                             } else {
                                 let (name, defined_value) =
-                                    elf64_dynamic_symbol(elf_bytes, &tables, r_sym, load_bias)
+                                    elf64_dynamic_symbol(elf_bytes, &tables, r_sym, effective_bias)
                                         .unwrap_or_default();
                                 let bare = name.split('@').next().unwrap_or(&name);
                                 let target = if !bare.is_empty() {
@@ -1354,16 +1395,12 @@ pub fn apply_rela_x86_64(
             let r_addend = i64::from_le_bytes(relocation[16..24].try_into().unwrap());
             let r_type = (r_info & 0xffff_ffff) as u32;
             let r_sym = (r_info >> 32) as usize;
-            let slot = if is_et_dyn {
-                load_bias.wrapping_add(r_offset)
-            } else {
-                r_offset
-            };
+            let slot = effective_bias.wrapping_add(r_offset);
 
             match r_type {
                 R_X86_64_NONE => {}
                 R_X86_64_RELATIVE => {
-                    let val = (load_bias as i64).wrapping_add(r_addend) as u64;
+                    let val = (effective_bias as i64).wrapping_add(r_addend) as u64;
                     state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                     stats.relative += 1;
                 }
@@ -1371,7 +1408,7 @@ pub fn apply_rela_x86_64(
                     let name = sym_name(elf_bytes, symtab, strtab, r_sym).unwrap_or_default();
                     let bare = name.split('@').next().unwrap_or(&name);
                     let defined_value =
-                        section_sym_value(elf_bytes, symtab, r_sym, load_bias, is_et_dyn);
+                        section_sym_value(elf_bytes, symtab, r_sym, effective_bias, is_et_dyn);
                     let target = if !bare.is_empty() {
                         resolve(bare).or(defined_value)
                     } else {
@@ -1391,15 +1428,14 @@ pub fn apply_rela_x86_64(
                 }
                 R_X86_64_64 => {
                     if r_sym == 0 {
-                        let val =
-                            (if is_et_dyn { load_bias } else { 0 }).wrapping_add(r_addend as u64);
+                        let val = effective_bias.wrapping_add(r_addend as u64);
                         state.write_space(state.ram_space(), slot, &val.to_le_bytes())?;
                         stats.absolute += 1;
                     } else {
                         let name = sym_name(elf_bytes, symtab, strtab, r_sym).unwrap_or_default();
                         let bare = name.split('@').next().unwrap_or(&name);
                         let defined_value =
-                            section_sym_value(elf_bytes, symtab, r_sym, load_bias, is_et_dyn);
+                            section_sym_value(elf_bytes, symtab, r_sym, effective_bias, is_et_dyn);
                         let target = if !bare.is_empty() {
                             resolve(bare).or(defined_value)
                         } else {
@@ -1738,7 +1774,12 @@ fn elf64_dynamic_tables(data: &[u8]) -> Result<Elf64DynamicTables> {
                             .checked_mul(4)
                             .and_then(|nb| buckets_off.checked_add(nb))
                         {
-                            if nbuckets > 0 && buckets_off + nbuckets * 4 <= data.len() {
+                            if nbuckets > 0
+                                && nbuckets
+                                    .checked_mul(4)
+                                    .and_then(|n| buckets_off.checked_add(n))
+                                    .is_some_and(|end| end <= data.len())
+                            {
                                 let mut max_bucket = 0usize;
                                 for b in 0..nbuckets {
                                     let b_val = u32::from_le_bytes(
@@ -1752,19 +1793,22 @@ fn elf64_dynamic_tables(data: &[u8]) -> Result<Elf64DynamicTables> {
                                 }
                                 if max_bucket >= symoffset {
                                     let mut chain_idx = max_bucket - symoffset;
-                                    while chains_off + (chain_idx + 1) * 4 <= data.len() {
+                                    while chain_idx
+                                        .checked_add(1)
+                                        .and_then(|n| n.checked_mul(4))
+                                        .and_then(|n| chains_off.checked_add(n))
+                                        .is_some_and(|end| end <= data.len())
+                                    {
+                                        let entry_off = chains_off + chain_idx * 4;
                                         let hash_val = u32::from_le_bytes(
-                                            data[chains_off + chain_idx * 4
-                                                ..chains_off + chain_idx * 4 + 4]
-                                                .try_into()
-                                                .unwrap(),
+                                            data[entry_off..entry_off + 4].try_into().unwrap(),
                                         );
                                         chain_idx += 1;
                                         if (hash_val & 1) != 0 {
                                             break;
                                         }
                                     }
-                                    symbol_count = Some(symoffset + chain_idx);
+                                    symbol_count = Some(symoffset.saturating_add(chain_idx));
                                 } else if max_bucket == 0 {
                                     symbol_count = Some(symoffset);
                                 }
@@ -1973,7 +2017,42 @@ fn sym_name(
 
 #[cfg(test)]
 mod tests {
+    /// A directory given through `DynlinkOptions` is searched before the
+    /// environment's and the system's. (Only `lib_paths` is set, so the
+    /// process-wide options cannot change what another test in the same
+    /// process sees about binding or the host interpreter.)
+    #[test]
+    fn option_lib_paths_are_searched_first() {
+        let first = PathBuf::from("/opt/fission-test-libs");
+        let set = super::set_dynlink_options(super::DynlinkOptions {
+            lib_paths: vec![first.clone()],
+            ..Default::default()
+        });
+        if set {
+            assert_eq!(super::lib_search_paths().first(), Some(&first));
+        } else {
+            // Another test in this process set them first; the order rule
+            // is still that options come before everything else.
+            let options = super::DYNLINK_OPTIONS.get().unwrap();
+            assert_eq!(
+                super::lib_search_paths()[..options.lib_paths.len()],
+                options.lib_paths[..]
+            );
+        }
+    }
+
     use super::*;
+
+    /// Committed under `testdata/`; a missing copy is a broken checkout.
+    fn dyn_puts_fixture() -> PathBuf {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
+        assert!(
+            path.is_file(),
+            "committed fixture missing: {}",
+            path.display()
+        );
+        path
+    }
 
     fn testdata(name: &str) -> Vec<u8> {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -2065,10 +2144,7 @@ mod tests {
 
     #[test]
     fn parse_interp_from_dyn_puts_fixture() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let data = std::fs::read(&path).unwrap();
         let interp = parse_pt_interp(&data).expect("PT_INTERP");
         assert!(
@@ -2079,10 +2155,7 @@ mod tests {
 
     #[test]
     fn prepare_dynlink_defaults_to_hle_without_env() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         // Ensure env is off for this unit test (Rust 2024: env mut is unsafe).
         unsafe {
             std::env::remove_var("FISSION_ENABLE_DYNLINK");
@@ -2096,10 +2169,7 @@ mod tests {
 
     #[test]
     fn apply_rela_writes_jump_slots_for_dyn_puts() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let binary = LoadedBinary::from_file(&path).unwrap();
         let mut state = MachineState::new();
         // Map sections like the image loader would.
@@ -2128,10 +2198,7 @@ mod tests {
 
     #[test]
     fn parse_dt_needed_from_dyn_puts() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let data = std::fs::read(&path).unwrap();
         let (needed, bind_now) = parse_dt_needed(&data);
         // musl dynamic hello typically needs libc.so
@@ -2223,10 +2290,7 @@ mod tests {
     /// After full image load, RELA JUMP_SLOT writes must stick (map → rela order).
     #[test]
     fn load_elf_then_rela_jump_slot_persists() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let binary = LoadedBinary::from_file(&path).unwrap();
         let mut state = MachineState::new();
         let info = crate::os::linux::image_info::load_elf_image(
@@ -2422,10 +2486,7 @@ mod tests {
 
     #[test]
     fn stripped_elf_applies_relocations_via_pt_dynamic() {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_dyn_puts.elf");
-        if !path.is_file() {
-            return;
-        }
+        let path = dyn_puts_fixture();
         let mut data = std::fs::read(&path).unwrap();
         // Strip section headers: e_shoff = 0, e_shentsize = 0, e_shnum = 0.
         data[40..48].fill(0);
@@ -2619,5 +2680,120 @@ mod tests {
         // Verify slot 0x30008 received load_bias + 0x100 = 0x10100
         let bytes1 = state.read_space(state.ram_space(), 0x30008, 8).unwrap();
         assert_eq!(u64::from_le_bytes(bytes1.try_into().unwrap()), 0x10100);
+    }
+
+    #[test]
+    fn apply_rela_et_exec_does_not_bias_with_nonzero_arg_and_gnu_hash_checked() {
+        // Non-PIE ET_EXEC image at fixed virtual address 0x400000 with non-zero load_bias arg:
+        // R_X86_64_RELATIVE / defined symbols must NOT receive the bias again, and
+        // malformed GNU hash tables near usize::MAX must not overflow.
+        let mut elf = vec![0u8; 0x500];
+        elf[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
+        elf[4] = 2; // ELF64
+        elf[5] = 1; // LE
+        elf[6] = 1;
+        elf[16..18].copy_from_slice(&ET_EXEC.to_le_bytes());
+        elf[18..20].copy_from_slice(&EM_X86_64.to_le_bytes());
+        elf[20..24].copy_from_slice(&1u32.to_le_bytes());
+        elf[32..40].copy_from_slice(&64u64.to_le_bytes());
+        elf[52..54].copy_from_slice(&64u16.to_le_bytes());
+        elf[54..56].copy_from_slice(&56u16.to_le_bytes());
+        elf[56..58].copy_from_slice(&2u16.to_le_bytes());
+
+        // PT_LOAD covering 0x400000..0x401000 at offset 0
+        let ph0 = 64;
+        elf[ph0..ph0 + 4].copy_from_slice(&PT_LOAD.to_le_bytes());
+        elf[ph0 + 4..ph0 + 8].copy_from_slice(&7u32.to_le_bytes());
+        elf[ph0 + 8..ph0 + 16].copy_from_slice(&0u64.to_le_bytes());
+        elf[ph0 + 16..ph0 + 24].copy_from_slice(&0x400000u64.to_le_bytes());
+        elf[ph0 + 32..ph0 + 40].copy_from_slice(&0x500u64.to_le_bytes());
+        elf[ph0 + 40..ph0 + 48].copy_from_slice(&0x1000u64.to_le_bytes());
+
+        // PT_DYNAMIC
+        let ph1 = 64 + 56;
+        let dyn_off = 0x100u64;
+        let dyn_sz = 9 * 16u64;
+        elf[ph1..ph1 + 4].copy_from_slice(&PT_DYNAMIC.to_le_bytes());
+        elf[ph1 + 4..ph1 + 8].copy_from_slice(&6u32.to_le_bytes());
+        elf[ph1 + 8..ph1 + 16].copy_from_slice(&dyn_off.to_le_bytes());
+        elf[ph1 + 16..ph1 + 24].copy_from_slice(&(0x400000u64 + dyn_off).to_le_bytes());
+        elf[ph1 + 32..ph1 + 40].copy_from_slice(&dyn_sz.to_le_bytes());
+        elf[ph1 + 40..ph1 + 48].copy_from_slice(&dyn_sz.to_le_bytes());
+
+        let rela_off = 0x200u64;
+        let symtab_off = 0x260u64;
+        let strtab_off = 0x2c0u64;
+        let gnuhash_off = 0x300u64;
+        let entries = [
+            (DT_RELA, 0x400000 + rela_off),
+            (DT_RELASZ, 48),
+            (DT_RELAENT, 24),
+            (DT_SYMTAB, 0x400000 + symtab_off),
+            (DT_SYMENT, 24),
+            (DT_STRTAB, 0x400000 + strtab_off),
+            (DT_STRSZ, 16),
+            (DT_GNU_HASH, 0x400000 + gnuhash_off),
+            (DT_NULL, 0),
+        ];
+        for (i, &(tag, val)) in entries.iter().enumerate() {
+            let off = dyn_off as usize + i * 16;
+            elf[off..off + 8].copy_from_slice(&tag.to_le_bytes());
+            elf[off + 8..off + 16].copy_from_slice(&val.to_le_bytes());
+        }
+
+        // strtab: "\0local_fn\0"
+        elf[strtab_off as usize..strtab_off as usize + 10].copy_from_slice(b"\0local_fn\0");
+        // sym 1 at symtab + 24: st_name=1, st_info=GLOBAL(0x10), st_shndx=1, st_value=0x400777
+        let sym1 = symtab_off as usize + 24;
+        elf[sym1..sym1 + 4].copy_from_slice(&1u32.to_le_bytes());
+        elf[sym1 + 4] = 0x10;
+        elf[sym1 + 6..sym1 + 8].copy_from_slice(&1u16.to_le_bytes());
+        elf[sym1 + 8..sym1 + 16].copy_from_slice(&0x400777u64.to_le_bytes());
+
+        // RELA 0: R_X86_64_RELATIVE at 0x400900 addend=0x400888
+        let r0 = rela_off as usize;
+        elf[r0..r0 + 8].copy_from_slice(&0x400900u64.to_le_bytes());
+        elf[r0 + 8..r0 + 16].copy_from_slice(&(R_X86_64_RELATIVE as u64).to_le_bytes());
+        elf[r0 + 16..r0 + 24].copy_from_slice(&0x400888i64.to_le_bytes());
+        // RELA 1: R_X86_64_GLOB_DAT referencing defined sym 1 at 0x400908
+        let r1 = r0 + 24;
+        elf[r1..r1 + 8].copy_from_slice(&0x400908u64.to_le_bytes());
+        elf[r1 + 8..r1 + 16]
+            .copy_from_slice(&((1u64 << 32) | R_X86_64_GLOB_DAT as u64).to_le_bytes());
+        elf[r1 + 16..r1 + 24].copy_from_slice(&0i64.to_le_bytes());
+
+        // Malformed GNU_HASH: bucket holds 0xffffffff so chain_idx + 1 would wrap in 32/64-bit math.
+        let gh = gnuhash_off as usize;
+        elf[gh..gh + 4].copy_from_slice(&1u32.to_le_bytes()); // nbuckets
+        elf[gh + 4..gh + 8].copy_from_slice(&1u32.to_le_bytes()); // symoffset
+        elf[gh + 8..gh + 12].copy_from_slice(&1u32.to_le_bytes()); // bloom_size
+        elf[gh + 12..gh + 16].copy_from_slice(&1u32.to_le_bytes()); // bloom_shift
+        // bucket[0] at gh + 16 + 8 = gh + 24
+        elf[gh + 24..gh + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+
+        let mut state = MachineState::new();
+        state.page_map.map_region(0x400000, 0x1000, prot::RW, true);
+
+        let stats = apply_rela_x86_64(&mut state, &elf, 0x400000, |_| None)
+            .expect("ET_EXEC relocation with bogus GNU_HASH must not fail or double-bias");
+        assert_eq!(stats.relative, 1);
+        assert_eq!(stats.glob_dat, 1);
+
+        let rel_val = u64::from_le_bytes(
+            state
+                .read_space(state.ram_space(), 0x400900, 8)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+        let glob_val = u64::from_le_bytes(
+            state
+                .read_space(state.ram_space(), 0x400908, 8)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(rel_val, 0x400888);
+        assert_eq!(glob_val, 0x400777);
     }
 }

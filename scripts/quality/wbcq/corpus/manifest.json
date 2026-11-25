@@ -1,0 +1,31 @@
+{
+  "description": "WBCQ P3 evaluation corpus (RFC #1093). Each entry is a step function `unsigned step(ctx *, unsigned in)`; `context_bytes` is sizeof(ctx). `calls` (P4) bounds how many calls one step makes; each call's return is an input. `regions` (P4 step 2) gives a pointer field the bytes of a named table (`region_tables.py`), on both the engine's side and the ground truth's. `globals` (P4 step 3) lists the global variables the ground truth keeps as state. `expect` is what the RFC requires of the engine: `machine` (a quotient), or for a negative case any of `fail_closed` statuses.",
+  "functions": [
+    {"name": "tcp_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "RFC 793 connection states"},
+    {"name": "http_reqline_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "HTTP/1.x request line (RFC 9112 section 3)"},
+    {"name": "utf8_step", "source": "state_machines.c", "context_bytes": 16, "expect": "machine", "origin": "UTF-8 validation (RFC 3629 section 4)"},
+    {"name": "telnet_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "Telnet commands (RFC 854/855)"},
+    {"name": "slip_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "SLIP decoding (RFC 1055)"},
+    {"name": "pin_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "keypad lock with lockout"},
+    {"name": "debounce_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "switch debouncer"},
+    {"name": "vending_step", "source": "state_machines.c", "context_bytes": 4, "expect": "machine", "origin": "coin acceptor"},
+    {"name": "traffic_step", "source": "state_machines.c", "context_bytes": 8, "expect": "machine", "origin": "traffic light with pedestrian request"},
+    {"name": "base64_step", "source": "state_machines.c", "context_bytes": 12, "expect": "machine", "origin": "Base64 decoding (RFC 4648)"},
+    {"name": "frame_step", "source": "state_machines.c", "context_bytes": 12, "expect": "large", "origin": "serial frame with XOR checksum"},
+    {"name": "lex_step", "source": "call_machines.c", "context_bytes": 4, "calls": 2, "expect": "machine", "origin": "lexer over the C library's isdigit/isalpha (P4: classifier calls)"},
+    {"name": "door_step", "source": "call_machines.c", "context_bytes": 8, "calls": 1, "expect": "machine", "origin": "garage door controller logging each change with putchar (P4: logging call)"},
+    {"name": "turnstile_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "coin turnstile with an application logger no library describes (P4: unknown callee)"},
+    {"name": "hs_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "greeting handshake that aborts on a protocol violation (P4: no-return callee)"},
+    {"name": "emit_step", "source": "call_machines.c", "context_bytes": 4, "calls": 1, "expect": "machine", "origin": "parity reporter returning what putchar returned (P4: tail call)"},
+    {"name": "tdfa_step", "source": "region_machines.c", "context_bytes": 24, "regions": [{"field": 0, "table": "number_classes"}, {"field": 8, "table": "number_delta"}], "expect": "machine", "origin": "table-driven number lexer: class and transition tables behind context pointers (P4 step 2: indexed reads)"},
+    {"name": "kw_step", "source": "region_machines.c", "context_bytes": 16, "regions": [{"field": 0, "table": "helo_keyword"}], "expect": "machine", "origin": "SMTP HELO keyword matcher reading its keyword at the match position (P4 step 2: a read indexed by the state)"},
+    {"name": "ring_step", "source": "region_machines.c", "context_bytes": 16, "regions": [{"field": 0, "table": "ring4"}], "expect": "machine", "origin": "four-bit delay line over a ring buffer written at its head (P4 step 2: indexed writes)"},
+    {"name": "gcmd_step", "source": "global_machines.c", "context_bytes": 4, "globals": [{"symbol": "g_mode", "bytes": 4}], "expect": "machine", "origin": "command parser over a constant class table, its mode in a global (P4 step 3: globals, indexed read-only data)"},
+    {"name": "abp_step", "source": "global_machines.c", "context_bytes": 4, "globals": [{"symbol": "g_expect", "bytes": 4}], "expect": "machine", "origin": "alternating-bit protocol receiver with its expected bit in a global (P4 step 3: writable globals)"},
+    {"name": "gring_step", "source": "global_machines.c", "context_bytes": 4, "globals": [{"symbol": "g_head", "bytes": 4}, {"symbol": "g_cells", "bytes": 4}], "expect": "machine", "origin": "four-bit delay line behind a global pointer (P4 step 3: a region behind a global)"},
+    {"name": "sha256_round_step", "source": "negatives.c", "context_bytes": 32, "expect": "fail_closed", "origin": "SHA-256 compression round (FIPS 180-4)"},
+    {"name": "list_walk_step", "source": "negatives.c", "context_bytes": 16, "expect": "fail_closed", "origin": "linked-list traversal"},
+    {"name": "clock_step", "source": "negatives.c", "context_bytes": 4, "expect": "fail_closed", "origin": "time stamp counter"},
+    {"name": "syscall_step", "source": "negatives.c", "context_bytes": 4, "expect": "fail_closed", "origin": "system call"}
+  ]
+}

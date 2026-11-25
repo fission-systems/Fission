@@ -59,6 +59,7 @@ pub fn lower_linear_body_with_budget(
             start_addr,
             "lower_linear_body_auto",
             host.structuring_total_work_counter(),
+            host.resource_usage(),
         ));
         auto_budget.as_mut().unwrap()
     };
@@ -86,6 +87,7 @@ pub fn lower_linear_body_for_region_recovery_detailed(
             start_addr,
             "lower_linear_body_detailed_auto",
             host.structuring_total_work_counter(),
+            host.resource_usage(),
         ));
         auto_budget.as_mut().unwrap()
     };
@@ -461,6 +463,7 @@ pub fn linear_exit(
         block_addr,
         "linear_exit_standalone",
         host.structuring_total_work_counter(),
+        host.resource_usage(),
     );
     linear_exit_with_budget(host, start_idx, Some(&mut budget))
 }

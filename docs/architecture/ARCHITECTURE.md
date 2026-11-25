@@ -40,6 +40,13 @@ executes foundation observations with the emulator, and uses the solver for a
 universal proof or replayable counterexample. Until the foundation carries
 SLEIGH address-space classes, the caller must explicitly admit non-memory value
 spaces and the report remains conditionally proven on that classification.
+When concrete emulator traces agree but symbolic proof returns `Unknown` or
+errors, the verifier reports `ValidationVerdict::Equivalent` at
+`EvidenceStrength::Traces` (`AssuranceBand::TraceValidated` /
+`AssuranceClassification::TraceSampledOnly`) with preserved assumptions and
+unresolved effects; consumers must query `AssuranceReport::is_proven()` or
+`AssuranceReport::classification()` rather than treating `ValidationVerdict::Equivalent`
+alone as universal proof.
 Memory, calls, control flow, and overlapping varnodes remain explicit
 unsupported boundaries.
 See ADR 0014.
@@ -146,7 +153,7 @@ or data-derived metadata. User-facing and decompile-seed function lists must go
 through `loader::function_view`; the CLI and scripts must not reconstruct independent
 function/import/export filtering rules.
 
-**Loader Parity and Enrichment Features.** To achieve strict parity with Ghidra's binary analysis ecosystem, `fission-loader` implements advanced metadata enrichment and validation layers:
+**Loader Enrichment Features.** `fission-loader` covers the metadata Ghidra's loaders recover, using Ghidra as a reference for formats and edge cases rather than as the definition of a correct result ([ADR 0017](../adr/0017-ghidra-is-not-an-oracle.md)):
 - **PE Delay-Load Imports**: Classifies delayed import directories (`ImgDelayDescr`) and generates placeholder/import symbols to feed downstream call analysis.
 - **Rich Header Decryption**: Recovers and decrypts MSVC compiler telemetry headers, validating checksum matches against section/PE hashes to verify compiler/linker provenance.
 - **ELF Version Symbols**: Parses GNU/SVR4 dynamic version symbols (`.gnu.version`, `.gnu.version_r`) to map version-dependent dynamic symbols to their precise external libraries/libraries requirements.
@@ -205,7 +212,10 @@ Fission uses an explicit `Pass` pipeline framework (`nir::action_pipeline`) for 
 Decompiler-quality changes are accepted at the architecture boundary, not at the
 CI/dashboard boundary. A benchmark row, AI review prompt, Ghidra comparison, or
 validation-pool result may motivate a change, but none of those surfaces own the
-semantic decision.
+semantic decision, and none of them is a correctness oracle: Ghidra shares
+Fission's Sleigh input ([ADR 0017](../adr/0017-ghidra-is-not-an-oracle.md)) and
+DecBench measures similarity to the source
+([ADR 0018](../adr/0018-decbench-is-not-a-correctness-oracle.md)).
 
 The architectural admission path is:
 

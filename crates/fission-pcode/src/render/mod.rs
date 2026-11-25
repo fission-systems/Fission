@@ -63,7 +63,10 @@ pub use layer::{PrintProfile, RecoveredLineMapping};
 pub(crate) use pipeline::render_layered_pseudocode;
 pub(crate) use pipeline::{recover_global_symbol_accesses, render_hir_function_with_global_decls};
 pub(crate) use presentation::apply_hir_presentation;
-pub use printer::render_contracted_wrapper_summary;
+pub use printer::{
+    INFERRED_PROTOTYPE_MARKER, print_inferred_extern, print_unknown_arity_extern,
+    render_contracted_wrapper_summary,
+};
 pub(crate) use printer::{
     print_expr, print_hir_function, print_hir_function_with_global_names,
     print_hir_function_with_profile, print_stmt, print_type,

@@ -23,6 +23,9 @@ fn payload_schema(command: &str) -> Option<Value> {
         "info" => include_str!("../../../../../docs/schemas/cli-info-data.v1.schema.json"),
         "list" => include_str!("../../../../../docs/schemas/cli-list-data.v1.schema.json"),
         "decomp" => include_str!("../../../../../docs/schemas/cli-decomp-data.v1.schema.json"),
+        "quotient" => {
+            include_str!("../../../../../docs/schemas/cli-quotient-data.v1.schema.json")
+        }
         _ => return None,
     };
     let mut value: Value =
@@ -192,6 +195,27 @@ mod tests {
             committed_text,
             "regenerate with `fission_cli schema --error-codes > docs/schemas/cli-error-codes.v1.json`"
         );
+    }
+
+    /// A payload schema is embedded under the envelope's `data`, so a `$ref`
+    /// in it would resolve against the envelope, not against itself.
+    #[test]
+    fn payload_schemas_are_self_contained() {
+        for command in contract_commands() {
+            let Some(schema) = payload_schema(command) else {
+                continue;
+            };
+            let text = schema.to_string();
+            assert!(
+                !text.contains("\"$ref\""),
+                "{command}: payload schema uses $ref"
+            );
+            assert!(
+                !text.contains("\"$defs\""),
+                "{command}: payload schema uses $defs"
+            );
+        }
+        assert!(payload_schema("quotient").is_some());
     }
 
     #[test]

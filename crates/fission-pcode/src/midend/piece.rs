@@ -145,7 +145,7 @@ impl<'a> PreviewBuilder<'a> {
         })
     }
 
-    fn lower_register_subpiece_lane(
+    pub(in crate::midend) fn lower_register_subpiece_lane(
         &mut self,
         wide: &Varnode,
         output: &Varnode,
@@ -185,27 +185,33 @@ impl<'a> PreviewBuilder<'a> {
         };
         let requested_start = requested.offset;
         let requested_end = requested_start.saturating_add(output_size);
-        let Some((def_idx, def)) = block
+        let mut found = None;
+        for (idx, candidate) in block
             .ops
             .iter()
             .enumerate()
             .take(scope.op_idx.min(block.ops.len()))
             .rev()
-            .find(|(_, candidate)| {
-                candidate.output.as_ref().is_some_and(|candidate_output| {
-                    if candidate_output.is_constant
-                        || candidate_output.space_id != requested.space_id
-                    {
-                        return false;
-                    }
-                    let candidate_start = candidate_output.offset;
-                    let candidate_end =
-                        candidate_start.saturating_add(u64::from(candidate_output.size));
-                    candidate_start < requested_end && requested_start < candidate_end
-                })
-            })
-            .map(|(idx, def)| (idx, def.clone()))
-        else {
+        {
+            if matches!(candidate.opcode, PcodeOpcode::Call | PcodeOpcode::CallInd)
+                && self.call_clobbers_register_varnode(&requested, candidate)
+            {
+                return Ok(None);
+            }
+            if candidate.output.as_ref().is_some_and(|candidate_output| {
+                if candidate_output.is_constant || candidate_output.space_id != requested.space_id {
+                    return false;
+                }
+                let candidate_start = candidate_output.offset;
+                let candidate_end =
+                    candidate_start.saturating_add(u64::from(candidate_output.size));
+                candidate_start < requested_end && requested_start < candidate_end
+            }) {
+                found = Some((idx, candidate.clone()));
+                break;
+            }
+        }
+        let Some((def_idx, def)) = found else {
             return Ok(None);
         };
         let def_output = def

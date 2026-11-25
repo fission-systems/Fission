@@ -303,16 +303,17 @@ fn try_recover_while_at(
     }
 
     // Every goto targeting Lcond must be accounted for by either the header jump
-    // at `stmts[i]` or `continue` jumps inside `body`. Any external reference
-    // would be left dangling once `Label(Lcond)` is consumed.
-    let internal_lcond_refs = 1 + count_goto_refs(&body, &lcond);
+    // at `stmts[i]` or uncaptured `goto Lcond` jumps inside `body` (jumps
+    // nested inside inner loops cannot be rewritten to `continue` without
+    // changing their target loop).
+    let internal_lcond_refs = 1 + count_uncaptured_goto_refs(&body, &lcond);
     if global_goto_refs.get(&lcond).copied() != Some(internal_lcond_refs)
         || count_goto_refs(stmts, &lcond) != internal_lcond_refs
     {
         return false;
     }
 
-    // `goto Lcond` inside body → continue (recheck condition).
+    // uncaptured `goto Lcond` inside body → continue (recheck outer condition).
     rewrite_goto_to_continue(&mut body, &lcond);
 
     let mut rebuilt = Vec::with_capacity(stmts.len());
@@ -324,16 +325,41 @@ fn try_recover_while_at(
     true
 }
 
+fn count_uncaptured_goto_refs(stmts: &[HirStmt], label: &str) -> usize {
+    let mut count = 0;
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Goto(l) if l == label => count += 1,
+            HirStmt::Block(b) => count += count_uncaptured_goto_refs(b, label),
+            HirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                count += count_uncaptured_goto_refs(then_body, label);
+                count += count_uncaptured_goto_refs(else_body, label);
+            }
+            HirStmt::Switch { cases, default, .. } => {
+                for case in cases {
+                    count += count_uncaptured_goto_refs(&case.body, label);
+                }
+                count += count_uncaptured_goto_refs(default, label);
+            }
+            // Inner loops capture `continue`, so jumps inside them cannot be rewritten.
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {}
+            _ => {}
+        }
+    }
+    count
+}
+
 fn rewrite_goto_to_continue(stmts: &mut [HirStmt], label: &str) {
     for stmt in stmts.iter_mut() {
         match stmt {
             HirStmt::Goto(l) if l == label => {
                 *stmt = HirStmt::Continue;
             }
-            HirStmt::Block(b)
-            | HirStmt::While { body: b, .. }
-            | HirStmt::DoWhile { body: b, .. }
-            | HirStmt::For { body: b, .. } => rewrite_goto_to_continue(b, label),
+            HirStmt::Block(b) => rewrite_goto_to_continue(b, label),
             HirStmt::If {
                 then_body,
                 else_body,
@@ -348,6 +374,7 @@ fn rewrite_goto_to_continue(stmts: &mut [HirStmt], label: &str) {
                 }
                 rewrite_goto_to_continue(default, label);
             }
+            HirStmt::While { .. } | HirStmt::DoWhile { .. } | HirStmt::For { .. } => {}
             _ => {}
         }
     }

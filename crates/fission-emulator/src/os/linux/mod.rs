@@ -177,6 +177,10 @@ impl Default for LinuxEnv {
 const ENOSYS: u64 = (-38i64) as u64;
 
 impl OsEnvironment for LinuxEnv {
+    fn delivers_fault_signals(&self) -> bool {
+        true
+    }
+
     fn patch_imports(&self, state: &mut MachineState, binary: &LoadedBinary) -> Result<()> {
         // Loader uses "ELF64" / "ELF32" / "ELF".
         if !binary.format.starts_with("ELF") {

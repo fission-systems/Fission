@@ -53,6 +53,22 @@ impl Config {
     }
 }
 
+/// Overrides for the decompiler's deterministic work limits.
+///
+/// Each limit counts a unit of work, not time (see `ResourceLimits` in
+/// `fission-midend-core`, which owns the built-in defaults). A `None` field
+/// keeps the built-in value, so this carries only what a user chose to set.
+/// The field names are the limit names used by `fission.toml`
+/// (`[decompiler.work_limits]`) and by `decomp --work-limit NAME=VALUE`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct WorkLimitOverrides {
+    pub structuring_total_work: Option<u64>,
+    pub condition_recovery_subcalls: Option<usize>,
+    pub sese_region_proof_calls: Option<u64>,
+    pub varnode_lowering_work: Option<u64>,
+}
+
 /// Decompiler configuration
 #[derive(Debug, Clone)]
 pub struct DecompilerConfig {
@@ -78,6 +94,8 @@ pub struct DecompilerConfig {
     pub log_verbose: bool,
     /// If non-empty, append decompiler logs to this file (in addition to or instead of stderr when verbose).
     pub log_file: String,
+    /// Deterministic work-limit overrides (`[decompiler.work_limits]`).
+    pub work_limits: WorkLimitOverrides,
 }
 
 /// Analysis configuration
@@ -267,6 +285,7 @@ impl Default for DecompilerConfig {
             sla_dir: String::new(),
             log_verbose: false,
             log_file: String::new(),
+            work_limits: WorkLimitOverrides::default(),
         }
     }
 }

@@ -7,11 +7,12 @@
 //! **Deferred:** explicit fall-through edges (Ghidra `FALL_THROUGH`) and indirect/computed
 //! flow placeholders are out of scope for this module; track as a follow-up if CFG consumers need them.
 
+use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{
     DecodeContract, DecodeMemoryContext, DecodeStopReason, DecodedFlowKind, DecodedReferenceKind,
-    PackedContextOverride, RuntimeSleighFrontend,
+    RuntimeSleighFrontend,
 };
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 
 use crate::analysis::xref_coverage::{
     XrefAnalysisLayer, XrefAnalysisState, XrefCoverageUnit, XrefLayerCoverage, XrefOmissionReason,
@@ -50,7 +51,12 @@ pub struct Xref {
     pub flow_kind: Option<DecodedFlowKind>,
 }
 
+mod code;
 pub mod pointer_sweep;
+
+pub(super) use code::visit_code_flow_xrefs;
+
+use code::{scan_executable_code, visit_instruction_xrefs};
 
 /// Database of all cross-references in a binary.
 #[derive(Debug, Clone, Default)]
@@ -170,35 +176,12 @@ impl XrefDatabase {
             })
             .collect();
 
-        for section in binary.executable_sections() {
-            if section.file_size == 0 {
-                continue;
-            }
-            let Some(code) = usize::try_from(section.file_offset)
-                .ok()
-                .and_then(|start| {
-                    usize::try_from(section.file_size)
-                        .ok()
-                        .and_then(|sz| start.checked_add(sz))
-                        .map(|end| (start, end))
-                })
-                .and_then(|(start, end)| binary.data.as_slice().get(start..end))
-            else {
-                coverage.omit(XrefOmissionReason::SectionBytesUnavailable, 1);
-                continue;
-            };
-            let address_state = frontend.normalize_low_bit_code_address(section.virtual_address);
-            let base_addr = address_state.address;
-            let context_override = crate::analysis::decode_context_for_address(
-                binary,
-                frontend,
-                section.virtual_address,
-                address_state.context_override,
-            );
-            match db.analyze_code(frontend, code, base_addr, context_override, &mapped) {
-                Some(reason) => coverage.omit(reason, 1),
-                None => coverage.completed_units += 1,
-            }
+        let (completed, omitted) = scan_executable_code(binary, frontend, |instruction| {
+            visit_instruction_xrefs(&instruction, Some(&mapped), |xref| db.add_xref(xref));
+        });
+        coverage.completed_units += completed;
+        for reason in omitted {
+            coverage.omit(reason, 1);
         }
 
         // Sweep data sections for hardcoded pointers to enrich xref coverage
@@ -277,125 +260,6 @@ impl XrefDatabase {
             }
         }
     }
-
-    fn analyze_code(
-        &mut self,
-        frontend: &RuntimeSleighFrontend,
-        code: &[u8],
-        base_addr: u64,
-        context_override: Option<PackedContextOverride>,
-        mapped: &[(u64, u64)],
-    ) -> Option<XrefOmissionReason> {
-        let decode_result = if context_override.is_some() {
-            frontend.decode_window_with_context_override(
-                code,
-                base_addr,
-                usize::MAX,
-                context_override,
-            )
-        } else {
-            frontend.decode_window_parallel(code, base_addr)
-        };
-        let Ok(instructions) = decode_result else {
-            return Some(XrefOmissionReason::InstructionDecodeFailed);
-        };
-        let decoded_bytes = instructions
-            .iter()
-            .map(|instruction| usize::from(instruction.length))
-            .sum::<usize>();
-        let omission = if decoded_bytes < code.len() {
-            Some(if instructions.is_empty() {
-                XrefOmissionReason::InstructionDecodeFailed
-            } else {
-                XrefOmissionReason::UndecodedExecutableTail
-            })
-        } else {
-            None
-        };
-
-        for instr in instructions {
-            let mut emitted_flow_targets: FxHashSet<u64> = FxHashSet::default();
-
-            for reference in &instr.references {
-                let xref_type = xref_type_from_sleigh_kind(reference.kind);
-                // A data reference is kept when it points somewhere the image
-                // maps. This used to require the target to land inside the
-                // *code section currently being decoded* (`base_addr` up to
-                // `base_addr + code.len() * 2`), so every reference into
-                // `.rodata` or `.data` was dropped: `mov ESI, 0x40201f`
-                // loading a string never reached the index, `strings --xrefs`
-                // printed an empty "Referenced by" column for strings that are
-                // plainly used, and "who references this address" could only
-                // ever answer for targets inside the same section.
-                if matches!(xref_type, XrefType::Data)
-                    && !mapped
-                        .iter()
-                        .any(|(start, end)| (*start..*end).contains(&reference.target))
-                {
-                    continue;
-                }
-
-                if matches!(xref_type, XrefType::Call | XrefType::Jump) {
-                    emitted_flow_targets.insert(reference.target);
-                }
-
-                let flow_kind_opt = if matches!(xref_type, XrefType::Call | XrefType::Jump) {
-                    Some(instr.flow_kind)
-                } else {
-                    None
-                };
-
-                self.add_xref(Xref {
-                    from_addr: instr.address,
-                    to_addr: reference.target,
-                    xref_type,
-                    operand_index: usize_to_operand_index(reference.operand_index),
-                    sleigh_kind: Some(reference.kind),
-                    flow_kind: flow_kind_opt,
-                });
-            }
-
-            if let Some(dt) = instr.direct_target {
-                let is_flow = matches!(
-                    instr.flow_kind,
-                    DecodedFlowKind::Call
-                        | DecodedFlowKind::Jump
-                        | DecodedFlowKind::ConditionalJump
-                );
-                if is_flow && !emitted_flow_targets.contains(&dt) {
-                    let xref_type = match instr.flow_kind {
-                        DecodedFlowKind::Call => XrefType::Call,
-                        _ => XrefType::Jump,
-                    };
-                    self.add_xref(Xref {
-                        from_addr: instr.address,
-                        to_addr: dt,
-                        xref_type,
-                        operand_index: OPERAND_INDEX_MNEMONIC,
-                        sleigh_kind: None,
-                        flow_kind: Some(instr.flow_kind),
-                    });
-                }
-            }
-        }
-        omission
-    }
-}
-
-#[inline]
-fn xref_type_from_sleigh_kind(kind: DecodedReferenceKind) -> XrefType {
-    match kind {
-        DecodedReferenceKind::CallTarget => XrefType::Call,
-        DecodedReferenceKind::BranchTarget => XrefType::Jump,
-        DecodedReferenceKind::MemoryAddress
-        | DecodedReferenceKind::ImmediateAddress
-        | DecodedReferenceKind::RipRelativeAddress => XrefType::Data,
-    }
-}
-
-#[inline]
-fn usize_to_operand_index(op: usize) -> i32 {
-    i32::try_from(op).unwrap_or(i32::MAX)
 }
 
 impl Xref {
@@ -459,10 +323,12 @@ mod tests {
     fn a_reference_into_a_data_section_is_kept() {
         use fission_loader::loader::{DataBuffer, LoadedBinaryBuilder, SectionInfo};
 
-        // .text at 0x1000: `mov ESI, 0x2000` then `ret`. 0x2000 is in
-        // .rodata -- outside the code section, which is the whole point.
+        // .text at 0x1000: `mov esi, 0x2000; call 0x100c; jmp 0x100e`.
+        // The load points into .rodata, outside the code section.
         let mut image = vec![0u8; 0x3000];
-        image[0x1000..0x1006].copy_from_slice(&[0xbe, 0x00, 0x20, 0x00, 0x00, 0xc3]);
+        image[0x1000..0x100f].copy_from_slice(&[
+            0xbe, 0, 0x20, 0, 0, 0xe8, 2, 0, 0, 0, 0xeb, 2, 0xc3, 0x90, 0xc3,
+        ]);
         image[0x2000..0x2006].copy_from_slice(b"hello\0");
 
         let binary = LoadedBinaryBuilder::new("data_xref.bin".to_string(), DataBuffer::Heap(image))
@@ -507,6 +373,19 @@ mod tests {
             !db.get_refs_to(0x2000).is_empty(),
             "the instruction at 0x1000 loads 0x2000; that reference must reach the index"
         );
+
+        let edges = |xref: &Xref| (xref.from_addr, xref.to_addr);
+        let mut flow = Vec::new();
+        visit_code_flow_xrefs(&binary, &frontend, |xref| flow.push(edges(&xref)));
+        flow.sort_unstable();
+        let mut indexed: Vec<_> = db
+            .iter()
+            .filter(|xref| matches!(xref.xref_type, XrefType::Call | XrefType::Jump))
+            .map(edges)
+            .collect();
+        indexed.sort_unstable();
+        assert_eq!(flow, [(0x1005, 0x100c), (0x100a, 0x100e)]);
+        assert_eq!(flow, indexed);
     }
 
     #[test]

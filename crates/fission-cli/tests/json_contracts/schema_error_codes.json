@@ -1,0 +1,22 @@
+{
+  "command": [
+    "schema",
+    "--error-codes"
+  ],
+  "shape": {
+    "object": {
+      "contract": "string",
+      "error_codes": {
+        "array": {
+          "object": {
+            "code": "string",
+            "exit_code": "number",
+            "kind": "string",
+            "retryable": "bool",
+            "summary": "string"
+          }
+        }
+      }
+    }
+  }
+}

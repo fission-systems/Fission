@@ -1497,47 +1497,43 @@ fn merge_covers(cover: impl IntoIterator<Item = SsaCoverBlock>) -> Vec<SsaCoverB
         .collect()
 }
 
-fn build_value_cover(
-    pcode: &PcodeFunction,
-    ssa: &NirScalarSsa,
-    value_id: SsaValueId,
-    uses: &[ValueUsePoint],
+fn collect_value_cover(
+    definition: SsaValueDefinition,
+    use_spans: impl IntoIterator<Item = (u32, u32)>,
+    block_end: impl Fn(u32) -> u32,
     predecessors: &[Vec<usize>],
     dominance: &Dominance,
 ) -> Vec<SsaCoverBlock> {
-    let value = ssa.value(value_id).expect("known value");
-    let (definition_block, definition_start) = match value.definition {
+    let (definition_block, definition_start) = match definition {
         SsaValueDefinition::Input => (0, 0),
         SsaValueDefinition::Phi { block } => (block, 0),
         SsaValueDefinition::Operation(site) => {
             (site.block, site.op.saturating_mul(2).saturating_add(2))
         }
     };
-    let block_end = |block: u32| {
-        pcode.blocks.get(block as usize).map_or(1, |block| {
-            (block.ops.len() as u32).saturating_mul(2).saturating_add(3)
-        })
-    };
-    if uses.is_empty() {
+    let mut use_spans = use_spans.into_iter().peekable();
+    if use_spans.peek().is_none() {
         return vec![SsaCoverBlock {
             block: definition_block,
             start: definition_start,
             end_exclusive: definition_start.saturating_add(1),
         }];
     }
-
+    let is_input = matches!(definition, SsaValueDefinition::Input);
     let mut cover = Vec::new();
-    for use_point in uses {
-        let use_end = use_point.op.map_or_else(
-            || block_end(use_point.block),
-            |op| op.saturating_mul(2).saturating_add(2),
-        );
-        let mut queue = VecDeque::from([(use_point.block, use_end)]);
-        let mut visited = BTreeSet::new();
+    for (use_block, use_end) in use_spans {
+        let mut queue = VecDeque::from([(use_block, use_end)]);
+        // Track the widest `end` visited per block rather than a bare bool set:
+        // a loop back-edge re-entry can reach the same block with a larger
+        // `end` (`block_end(B) > use_end`) that extends live-range interference.
+        let mut visited_max_end: BTreeMap<u32, u32> = BTreeMap::new();
         while let Some((block, end)) = queue.pop_front() {
-            if !visited.insert(block) {
-                continue;
-            }
+            let first_visit = match visited_max_end.get(&block) {
+                None => true,
+                Some(&prev_max) if end > prev_max => false,
+                Some(_) => continue,
+            };
+            visited_max_end.insert(block, end);
             if block == definition_block {
                 if definition_start < end {
                     cover.push(SsaCoverBlock {
@@ -1548,8 +1544,8 @@ fn build_value_cover(
                 }
                 continue;
             }
-            let definition_can_reach = matches!(value.definition, SsaValueDefinition::Input)
-                || dominance.dominates(definition_block as usize, block as usize);
+            let definition_can_reach =
+                is_input || dominance.dominates(definition_block as usize, block as usize);
             if !definition_can_reach {
                 continue;
             }
@@ -1558,12 +1554,38 @@ fn build_value_cover(
                 start: 0,
                 end_exclusive: end,
             });
-            for &predecessor in predecessors.get(block as usize).into_iter().flatten() {
-                queue.push_back((predecessor as u32, block_end(predecessor as u32)));
+            if first_visit {
+                for &predecessor in predecessors.get(block as usize).into_iter().flatten() {
+                    queue.push_back((predecessor as u32, block_end(predecessor as u32)));
+                }
             }
         }
     }
     merge_covers(cover)
+}
+
+fn build_value_cover(
+    pcode: &PcodeFunction,
+    ssa: &NirScalarSsa,
+    value_id: SsaValueId,
+    uses: &[ValueUsePoint],
+    predecessors: &[Vec<usize>],
+    dominance: &Dominance,
+) -> Vec<SsaCoverBlock> {
+    let value = ssa.value(value_id).expect("known value");
+    let block_end = |block: u32| {
+        pcode.blocks.get(block as usize).map_or(1, |block| {
+            (block.ops.len() as u32).saturating_mul(2).saturating_add(3)
+        })
+    };
+    let spans = uses.iter().map(|use_point| {
+        let end = use_point.op.map_or_else(
+            || block_end(use_point.block),
+            |op| op.saturating_mul(2).saturating_add(2),
+        );
+        (use_point.block, end)
+    });
+    collect_value_cover(value.definition, spans, block_end, predecessors, dominance)
 }
 
 fn find_root(parents: &mut [usize], value: usize) -> usize {
@@ -1720,64 +1742,19 @@ fn build_memory_value_cover(
     dominance: &Dominance,
 ) -> Vec<SsaCoverBlock> {
     let value = ssa.memory_value(value_id).expect("known memory value");
-    let (definition_block, definition_start) = match value.definition {
-        SsaValueDefinition::Input => (0, 0),
-        SsaValueDefinition::Phi { block } => (block, 0),
-        SsaValueDefinition::Operation(site) => {
-            (site.block, site.op.saturating_mul(2).saturating_add(2))
-        }
-    };
     let block_end = |block: u32| {
         pcode.blocks.get(block as usize).map_or(1, |block| {
             (block.ops.len() as u32).saturating_mul(2).saturating_add(3)
         })
     };
-    if uses.is_empty() {
-        return vec![SsaCoverBlock {
-            block: definition_block,
-            start: definition_start,
-            end_exclusive: definition_start.saturating_add(1),
-        }];
-    }
-
-    let mut cover = Vec::new();
-    for use_point in uses {
-        let use_end = use_point.op.map_or_else(
+    let spans = uses.iter().map(|use_point| {
+        let end = use_point.op.map_or_else(
             || block_end(use_point.block),
             |op| op.saturating_mul(2).saturating_add(2),
         );
-        let mut queue = VecDeque::from([(use_point.block, use_end)]);
-        let mut visited = BTreeSet::new();
-        while let Some((block, end)) = queue.pop_front() {
-            if !visited.insert(block) {
-                continue;
-            }
-            if block == definition_block {
-                if definition_start < end {
-                    cover.push(SsaCoverBlock {
-                        block,
-                        start: definition_start,
-                        end_exclusive: end,
-                    });
-                }
-                continue;
-            }
-            let definition_can_reach = matches!(value.definition, SsaValueDefinition::Input)
-                || dominance.dominates(definition_block as usize, block as usize);
-            if !definition_can_reach {
-                continue;
-            }
-            cover.push(SsaCoverBlock {
-                block,
-                start: 0,
-                end_exclusive: end,
-            });
-            for &predecessor in predecessors.get(block as usize).into_iter().flatten() {
-                queue.push_back((predecessor as u32, block_end(predecessor as u32)));
-            }
-        }
-    }
-    merge_covers(cover)
+        (use_point.block, end)
+    });
+    collect_value_cover(value.definition, spans, block_end, predecessors, dominance)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -3840,6 +3817,65 @@ mod tests {
             ),
             None,
             "a width-changing CAST does not encode its extension semantics"
+        );
+    }
+
+    #[test]
+    fn loop_back_edge_extends_value_cover_past_use_op_to_block_end() {
+        let pcode = function(vec![
+            vec![copy(0x1000, register(0), Varnode::constant(7, 4))],
+            vec![
+                copy(0x1010, unique(0), register(0)),
+                copy(0x1014, unique(1), Varnode::constant(9, 4)),
+            ],
+        ]);
+        let successors = vec![vec![1], vec![1]];
+        let predecessors = vec![vec![], vec![0, 1]];
+
+        let ssa = build_scalar_ssa(&pcode, &successors, &predecessors);
+        validate_scalar_ssa(&pcode, &successors, &predecessors, &ssa).unwrap();
+        let dominance = Dominance::analyze(&successors, &predecessors);
+
+        let def_value = ssa.operation_outputs[&SsaOpSite { block: 0, op: 0 }][0].value;
+        let uses = collect_value_uses(&ssa);
+        let cover = build_value_cover(
+            &pcode,
+            &ssa,
+            def_value,
+            uses.get(&def_value).map(Vec::as_slice).unwrap_or(&[]),
+            &predecessors,
+            &dominance,
+        );
+        let block1_span = cover
+            .iter()
+            .find(|entry| entry.block == 1)
+            .expect("loop body block 1 must be covered");
+        // Block 1 has 2 ops -> block_end = 2*2 + 3 = 7, whereas op 0 use_end = 2.
+        assert_eq!(block1_span.end_exclusive, 7, "{cover:?}");
+
+        let mem_uses: Vec<MemoryValueUsePoint> = vec![MemoryValueUsePoint {
+            block: 1,
+            op: Some(0),
+        }];
+        let mem_cover = collect_value_cover(
+            SsaValueDefinition::Operation(SsaOpSite { block: 0, op: 0 }),
+            mem_uses.iter().map(|use_pt| {
+                let end = use_pt
+                    .op
+                    .map_or(7, |op_idx| op_idx.saturating_mul(2).saturating_add(2));
+                (use_pt.block, end)
+            }),
+            |blk| if blk == 1 { 7 } else { 5 },
+            &predecessors,
+            &dominance,
+        );
+        assert_eq!(
+            mem_cover
+                .iter()
+                .find(|entry| entry.block == 1)
+                .map(|e| e.end_exclusive),
+            Some(7),
+            "{mem_cover:?}"
         );
     }
 }

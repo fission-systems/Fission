@@ -42,6 +42,16 @@ fn negative_at_declared_width(value: i64, ty: &NirType) -> Option<i64> {
     i64::try_from(span - value).ok()
 }
 
+fn same_int_width(a: &NirType, b: &NirType) -> bool {
+    matches!(
+        (a, b),
+        (
+            NirType::Int { bits: ba, .. },
+            NirType::Int { bits: bb, .. }
+        ) if ba == bb
+    )
+}
+
 /// The magnitude to subtract for `x + c`, whether `c` is stored negative or
 /// is negative only at its declared width.
 fn subtractable_magnitude(value: i64, ty: &NirType) -> Option<i64> {
@@ -60,6 +70,7 @@ pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
             ty,
         } => {
             if let PreHirExpr::Const(c, cty) = rhs.as_ref()
+                && (same_int_width(cty, ty) || (matches!(ty, NirType::Ptr(_)) && *c < 0))
                 && let Some(magnitude) = subtractable_magnitude(*c, cty)
             {
                 return Some(PreHirExpr::Binary {
@@ -70,6 +81,7 @@ pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
                 });
             }
             if let PreHirExpr::Const(c, cty) = lhs.as_ref()
+                && (same_int_width(cty, ty) || (matches!(ty, NirType::Ptr(_)) && *c < 0))
                 && let Some(magnitude) = subtractable_magnitude(*c, cty)
             {
                 return Some(PreHirExpr::Binary {
@@ -88,6 +100,7 @@ pub fn simplify_negated_const(expr: &PreHirExpr) -> Option<PreHirExpr> {
             ty,
         } => {
             if let PreHirExpr::Const(c, cty) = rhs.as_ref()
+                && (same_int_width(cty, ty) || (matches!(ty, NirType::Ptr(_)) && *c < 0))
                 && let Some(magnitude) = subtractable_magnitude(*c, cty)
             {
                 return Some(PreHirExpr::Binary {
@@ -137,24 +150,31 @@ pub fn simplify_factor_common_mul(expr: &PreHirExpr) -> Option<PreHirExpr> {
         return None;
     };
 
-    // Helper: if `term` matches `common * const`, return (common, const)
+    // Helper: if `term` matches `common * const` at matching width, return (common, const)
     let match_mul_const =
         |term: &PreHirExpr, common: &PreHirExpr| -> Option<(Box<PreHirExpr>, i64, NirType)> {
             if let PreHirExpr::Binary {
                 op: PreHirBinaryOp::Mul,
                 lhs: mul_lhs,
                 rhs: mul_rhs,
-                ..
+                ty: mul_ty,
             } = term
             {
+                if !same_int_width(mul_ty, ty) {
+                    return None;
+                }
                 if mul_lhs.as_ref() == common {
                     if let PreHirExpr::Const(c, cty) = mul_rhs.as_ref() {
-                        return Some((mul_lhs.clone(), *c, cty.clone()));
+                        if same_int_width(cty, ty) {
+                            return Some((mul_lhs.clone(), *c, cty.clone()));
+                        }
                     }
                 }
                 if mul_rhs.as_ref() == common {
                     if let PreHirExpr::Const(c, cty) = mul_lhs.as_ref() {
-                        return Some((mul_rhs.clone(), *c, cty.clone()));
+                        if same_int_width(cty, ty) {
+                            return Some((mul_rhs.clone(), *c, cty.clone()));
+                        }
                     }
                 }
             }
@@ -205,14 +225,19 @@ pub fn simplify_nested_adds_subs(expr: &PreHirExpr) -> Option<PreHirExpr> {
             let PreHirExpr::Const(c2, cty2) = const2_expr.as_ref() else {
                 return None;
             };
+            if !same_int_width(cty2, ty) {
+                return None;
+            }
             match lhs.as_ref() {
                 PreHirExpr::Binary {
                     op: PreHirBinaryOp::Add,
                     lhs: a,
                     rhs: const1_expr,
-                    ..
-                } => {
-                    if let PreHirExpr::Const(c1, _) = const1_expr.as_ref() {
+                    ty: inner_ty,
+                } if same_int_width(inner_ty, ty) => {
+                    if let PreHirExpr::Const(c1, cty1) = const1_expr.as_ref()
+                        && same_int_width(cty1, ty)
+                    {
                         let new_c = c1.checked_add(*c2)?;
                         return Some(PreHirExpr::Binary {
                             op: PreHirBinaryOp::Add,
@@ -226,9 +251,11 @@ pub fn simplify_nested_adds_subs(expr: &PreHirExpr) -> Option<PreHirExpr> {
                     op: PreHirBinaryOp::Sub,
                     lhs: a,
                     rhs: const1_expr,
-                    ..
-                } => {
-                    if let PreHirExpr::Const(c1, _) = const1_expr.as_ref() {
+                    ty: inner_ty,
+                } if same_int_width(inner_ty, ty) => {
+                    if let PreHirExpr::Const(c1, cty1) = const1_expr.as_ref()
+                        && same_int_width(cty1, ty)
+                    {
                         let new_c = c2.checked_sub(*c1)?;
                         return Some(PreHirExpr::Binary {
                             op: PreHirBinaryOp::Add,
@@ -251,14 +278,19 @@ pub fn simplify_nested_adds_subs(expr: &PreHirExpr) -> Option<PreHirExpr> {
             let PreHirExpr::Const(c2, cty2) = const2_expr.as_ref() else {
                 return None;
             };
+            if !same_int_width(cty2, ty) {
+                return None;
+            }
             match lhs.as_ref() {
                 PreHirExpr::Binary {
                     op: PreHirBinaryOp::Add,
                     lhs: a,
                     rhs: const1_expr,
-                    ..
-                } => {
-                    if let PreHirExpr::Const(c1, _) = const1_expr.as_ref() {
+                    ty: inner_ty,
+                } if same_int_width(inner_ty, ty) => {
+                    if let PreHirExpr::Const(c1, cty1) = const1_expr.as_ref()
+                        && same_int_width(cty1, ty)
+                    {
                         let new_c = c1.checked_sub(*c2)?;
                         return Some(PreHirExpr::Binary {
                             op: PreHirBinaryOp::Add,
@@ -272,9 +304,11 @@ pub fn simplify_nested_adds_subs(expr: &PreHirExpr) -> Option<PreHirExpr> {
                     op: PreHirBinaryOp::Sub,
                     lhs: a,
                     rhs: const1_expr,
-                    ..
-                } => {
-                    if let PreHirExpr::Const(c1, _) = const1_expr.as_ref() {
+                    ty: inner_ty,
+                } if same_int_width(inner_ty, ty) => {
+                    if let PreHirExpr::Const(c1, cty1) = const1_expr.as_ref()
+                        && same_int_width(cty1, ty)
+                    {
                         let new_c = c1.checked_add(*c2)?;
                         return Some(PreHirExpr::Binary {
                             op: PreHirBinaryOp::Sub,
@@ -311,12 +345,19 @@ pub fn simplify_collect_mul_terms(expr: &PreHirExpr) -> Option<PreHirExpr> {
                         op: PreHirBinaryOp::Mul,
                         lhs: mul_lhs,
                         rhs: mul_rhs,
-                        ..
+                        ty: mul_ty,
                     } => {
-                        if let PreHirExpr::Const(c, cty) = mul_rhs.as_ref() {
+                        if !same_int_width(mul_ty, ty) {
+                            return None;
+                        }
+                        if let PreHirExpr::Const(c, cty) = mul_rhs.as_ref()
+                            && same_int_width(cty, ty)
+                        {
                             return Some((mul_lhs.as_ref().clone(), *c, cty.clone()));
                         }
-                        if let PreHirExpr::Const(c, cty) = mul_lhs.as_ref() {
+                        if let PreHirExpr::Const(c, cty) = mul_lhs.as_ref()
+                            && same_int_width(cty, ty)
+                        {
                             return Some((mul_rhs.as_ref().clone(), *c, cty.clone()));
                         }
                     }
@@ -551,5 +592,56 @@ mod width_signed_const_tests {
     #[test]
     fn leaves_a_constant_outside_its_declared_width_alone() {
         assert!(simplify_negated_const(&add_const(0x1_0000_0000)).is_none());
+    }
+
+    #[test]
+    fn rejects_width_mismatches_in_negated_const_nested_add_and_collect_mul() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let x = PreHirExpr::Var("x".to_string());
+
+        // 1. `x_u64 + Const(0xffff_ff58, u32)` must not become `x_u64 - 168`.
+        let mismatched_neg = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(x.clone()),
+            rhs: Box::new(PreHirExpr::Const(0xffff_ff58, u32_ty())),
+            ty: u64_ty.clone(),
+        };
+        assert!(simplify_negated_const(&mismatched_neg).is_none());
+
+        // 2. `(u32)(a + 1) + 2_u64` inside u64 Add must not drop u32 wraparound.
+        let nested_width_mismatch = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Add,
+                lhs: Box::new(x.clone()),
+                rhs: Box::new(PreHirExpr::Const(1, u32_ty())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Const(2, u64_ty.clone())),
+            ty: u64_ty.clone(),
+        };
+        assert!(simplify_nested_adds_subs(&nested_width_mismatch).is_none());
+
+        // 3. `(u32)(a * 2) + (u32)(a * 3)` inside u64 Add must not fold to u64 `a * 5`.
+        let mul_width_mismatch = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mul,
+                lhs: Box::new(x.clone()),
+                rhs: Box::new(PreHirExpr::Const(2, u32_ty())),
+                ty: u32_ty(),
+            }),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mul,
+                lhs: Box::new(x),
+                rhs: Box::new(PreHirExpr::Const(3, u32_ty())),
+                ty: u32_ty(),
+            }),
+            ty: u64_ty,
+        };
+        assert!(simplify_collect_mul_terms(&mul_width_mismatch).is_none());
     }
 }

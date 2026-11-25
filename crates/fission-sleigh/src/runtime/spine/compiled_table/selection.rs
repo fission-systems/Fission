@@ -70,10 +70,10 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     .cursor
                     .checked_add(usize::from(offset))
                     .ok_or_else(|| anyhow!("instruction byte probe cursor overflow"))?;
-                let byte =
-                    *self.ctx.bytes.get(absolute).ok_or_else(|| {
-                        anyhow!("missing instruction byte probe at offset {offset}")
-                    })?;
+                let byte = self
+                    .ctx
+                    .read_byte(absolute)
+                    .ok_or_else(|| anyhow!("missing instruction byte probe at offset {offset}"))?;
                 smallvec::smallvec![(byte & mask) >> shift]
             }
             CompiledDecisionProbe::ContextBitSlice {
@@ -115,7 +115,7 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
                     let absolute = start
                         .checked_add(i)
                         .ok_or_else(|| anyhow!("instruction bit probe range overflow"))?;
-                    let byte = self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
+                    let byte = self.ctx.read_byte(absolute).ok_or_else(|| {
                         anyhow!("instruction bit read out of range at bit {start_bit}")
                     })?;
                     word = append_decision_probe_byte(word, byte)?;
@@ -164,10 +164,10 @@ impl DecisionProbeEvaluator for CompiledDecisionProbeEvaluator<'_, '_> {
             let absolute = start
                 .checked_add(i)
                 .ok_or_else(|| anyhow!("instruction byte read range overflow"))?;
-            let byte =
-                self.ctx.bytes.get(absolute).copied().ok_or_else(|| {
-                    anyhow!("instruction byte read out of range at offset {offset}")
-                })?;
+            let byte = self
+                .ctx
+                .read_byte(absolute)
+                .ok_or_else(|| anyhow!("instruction byte read out of range at offset {offset}"))?;
             word <<= 8;
             word |= u32::from(byte);
         }
@@ -299,7 +299,7 @@ pub(super) fn constructor_matches(
                 .cursor
                 .checked_add(bytes.len())
                 .ok_or_else(|| anyhow!("exact opcode range overflow"))?;
-            if ctx.bytes.get(ctx.cursor..end) != Some(bytes.as_slice()) {
+            if ctx.read_slice(ctx.cursor..end) != Some(bytes.as_slice()) {
                 bail!("exact opcode mismatch");
             }
         }
@@ -308,21 +308,19 @@ pub(super) fn constructor_matches(
                 .cursor
                 .checked_add(prefix.len())
                 .ok_or_else(|| anyhow!("row prefix range overflow"))?;
-            if ctx.bytes.get(ctx.cursor..prefix_end) != Some(prefix.as_slice()) {
+            if ctx.read_slice(ctx.cursor..prefix_end) != Some(prefix.as_slice()) {
                 bail!("prefix mismatch");
             }
-            let opcode = *ctx
-                .bytes
-                .get(prefix_end)
+            let opcode = ctx
+                .read_byte(prefix_end)
                 .ok_or_else(|| anyhow!("missing row opcode"))?;
             if (opcode >> 4) != *row {
                 bail!("row mismatch");
             }
         }
         CompiledPatternMatcher::RowPage { row, page } => {
-            let opcode = *ctx
-                .bytes
-                .get(ctx.cursor)
+            let opcode = ctx
+                .read_byte(ctx.cursor)
                 .ok_or_else(|| anyhow!("missing row/page opcode"))?;
             if (opcode >> 4) != *row || ((opcode >> 3) & 0x1) != *page {
                 bail!("row/page mismatch");
@@ -354,7 +352,7 @@ pub(super) fn constructor_matches(
                             let absolute = start
                                 .checked_add(i)
                                 .ok_or_else(|| anyhow!("instruction constraint range overflow"))?;
-                            let byte = ctx.bytes.get(absolute).copied().ok_or_else(|| {
+                            let byte = ctx.read_byte(absolute).ok_or_else(|| {
                                 anyhow!("instruction bit constraint byte out of range")
                             })?;
                             inst_val |= shifted_instruction_constraint_byte(byte, i)?;

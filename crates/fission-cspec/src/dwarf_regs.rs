@@ -267,9 +267,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let dwarf_path = repo_root.join("utils/sleigh-specs/languages/x86/x86-64.dwarf");
-        if !dwarf_path.exists() {
-            return; // skip if not in full repo checkout
-        }
+        assert!(
+            dwarf_path.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            dwarf_path.display()
+        );
         let doc = DwarfRegisterMappings::parse_file(&dwarf_path).expect("parse x86-64.dwarf");
         assert_eq!(doc.ghidra_name_for(5), Some("RDI"));
         assert_eq!(doc.ghidra_name_for(4), Some("RSI"));
@@ -288,9 +290,11 @@ mod tests {
             .unwrap()
             .to_path_buf();
         let languages_root = repo_root.join("utils/sleigh-specs/languages");
-        if !languages_root.exists() {
-            return;
-        }
+        assert!(
+            languages_root.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            languages_root.display()
+        );
         let doc = load_dwarf_regs_for_pair(&languages_root, "x86:LE:64:default", "gcc")
             .expect("x86-64.dwarf via .ldefs index");
         assert_eq!(doc.ghidra_name_for(5), Some("RDI"));

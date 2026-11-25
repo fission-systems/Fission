@@ -347,6 +347,47 @@ fn lvalue_address_contains_var(lvalue: &PreHirLValue, target: &str) -> bool {
     }
 }
 
+fn lvalue_contains_call(lvalue: &PreHirLValue) -> bool {
+    match lvalue {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_contains_call(ptr),
+        PreHirLValue::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirLValue::FieldAccess { base, .. } => expr_contains_call(base),
+    }
+}
+
+fn expr_contains_call(expr: &PreHirExpr) -> bool {
+    match expr {
+        PreHirExpr::Call { .. } => true,
+        PreHirExpr::Cast { expr, .. }
+        | PreHirExpr::Unary { expr, .. }
+        | PreHirExpr::Load { ptr: expr, .. }
+        | PreHirExpr::AggregateCopy { src: expr, .. }
+        | PreHirExpr::FieldAccess { base: expr, .. }
+        | PreHirExpr::PtrOffset { base: expr, .. } => expr_contains_call(expr),
+        PreHirExpr::Binary { lhs, rhs, .. } => expr_contains_call(lhs) || expr_contains_call(rhs),
+        PreHirExpr::Index { base, index, .. } => {
+            expr_contains_call(base) || expr_contains_call(index)
+        }
+        PreHirExpr::Select {
+            cond,
+            then_expr,
+            else_expr,
+            ..
+        } => {
+            expr_contains_call(cond)
+                || expr_contains_call(then_expr)
+                || expr_contains_call(else_expr)
+        }
+        PreHirExpr::Var(_)
+        | PreHirExpr::AddressOfGlobal(_)
+        | PreHirExpr::AddressOfLocal(_)
+        | PreHirExpr::Const(_, _) => false,
+    }
+}
+
 fn expr_contains_var(expr: &PreHirExpr, target: &str) -> bool {
     match expr {
         PreHirExpr::Var(name)
@@ -801,40 +842,50 @@ pub fn apply_entry_param_promotion_pass(func: &mut PreHirFunction) -> bool {
     let mut seen_lhs = HashSet::default();
     let mut spill_to_slot: Vec<(String, usize, NirType)> = Vec::new();
     let definitions = DefUseMap::build(&func.body);
+    let mut overwritten_regs: HashSet<String> = HashSet::default();
+    let mut overwritten_slots: HashSet<usize> = HashSet::default();
+    let abi_state = abi_state_for_func(func);
 
     for stmt in &prefix {
         let PreHirStmt::Assign { lhs, rhs } = stmt else {
             continue;
         };
+        if expr_contains_call(rhs) || lvalue_contains_call(lhs) {
+            break;
+        }
         let PreHirLValue::Var(lhs_name) = lhs else {
             continue;
         };
-        if lhs_name.starts_with("param_") {
-            continue;
-        }
-        if !func.locals.iter().any(|b| &b.name == lhs_name) {
-            continue;
-        }
-        // Whole-body renaming is valid only for a stable entry snapshot.
-        // Later writes belong to another lifetime even if the name still
-        // denotes the same physical spill/register storage.
-        if definitions.def_count.get(lhs_name).copied() != Some(1) {
-            continue;
-        }
-        let Some(rhs_name) = peel_var_name(rhs) else {
-            continue;
-        };
-        let Some(slot) = param_slot_for_hw_register(rhs_name, abi, func.is_64bit) else {
-            continue;
-        };
-        if func
-            .variadic_fixed_arity
-            .is_some_and(|fixed_arity| slot >= fixed_arity)
+
+        let mut candidate = None;
+        if !lhs_name.starts_with("param_")
+            && func.locals.iter().any(|b| &b.name == lhs_name)
+            && definitions.def_count.get(lhs_name).copied() == Some(1)
+            && let Some(rhs_name) = peel_var_name(rhs)
+            && !overwritten_regs.contains(rhs_name)
+            && let Some(slot) = param_slot_for_hw_register(rhs_name, abi, func.is_64bit)
+            && !overwritten_slots.contains(&slot)
+            && !func
+                .variadic_fixed_arity
+                .is_some_and(|fixed_arity| slot >= fixed_arity)
         {
-            // Register-save spills beyond the declared fixed prefix are
-            // locals backing the variadic area, not named formals.
-            continue;
+            candidate = Some((rhs_name, slot));
         }
+
+        // Record register overwrites AFTER evaluating this statement's RHS so a
+        // subsequent statement reading the overwritten register/slot is not
+        // treated as reading an entry ABI parameter.
+        overwritten_regs.insert(lhs_name.clone());
+        if let Some(written_slot) = param_slot_for_hw_register(lhs_name, abi, func.is_64bit)
+            .or_else(|| abi_state.param_slot_for_name(lhs_name))
+            .or_else(|| abi_state.float_param_slot_for_name(lhs_name))
+        {
+            overwritten_slots.insert(written_slot);
+        }
+
+        let Some((_rhs_name, slot)) = candidate else {
+            continue;
+        };
         if !seen_lhs.insert(lhs_name.clone()) {
             continue;
         }
@@ -1040,5 +1091,39 @@ mod tests {
             },
             "promoted param on 32-bit ABI must have 32-bit type, not 64-bit"
         );
+    }
+
+    #[test]
+    fn overwritten_abi_register_in_prefix_is_not_promoted() {
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let mut func = PreHirFunction {
+            name: "overwritten_abi_reg".to_string(),
+            locals: vec![PreHirBinding {
+                name: "uVar1".to_string(),
+                ty: i64_ty.clone(),
+                surface_type_name: None,
+                origin: None,
+                initializer: None,
+            }],
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("rcx".to_string()),
+                    rhs: PreHirExpr::Const(0, i64_ty),
+                },
+                spill("uVar1", "rcx"),
+                PreHirStmt::Return(Some(PreHirExpr::Var("uVar1".to_string()))),
+            ],
+            calling_convention: CallingConvention::WindowsX64,
+            is_64bit: true,
+            int_param_offsets: vec![0x08],
+            ..Default::default()
+        };
+
+        assert!(!apply_entry_param_promotion_pass(&mut func));
+        assert!(func.params.is_empty());
+        assert!(func.locals.iter().any(|b| b.name == "uVar1"));
     }
 }

@@ -32,12 +32,121 @@
 //! Both are bounded and rerun to a fixpoint, because folding exposes new
 //! single-read temps that a first pass could not see.
 use crate::analysis::defuse::collect_expr_vars;
+use crate::cleanup::expr_reads_memory;
 use crate::prelude::*;
 use crate::{HashMap, HashSet};
 
 use super::scratch_liveness::is_builder_minted_temp;
 
 const MAX_ROUNDS: usize = 8;
+
+/// Collects every local whose address is taken anywhere in `stmts` (including loop conditions).
+fn collect_addr_taken_locals(stmts: &[PreHirStmt], out: &mut HashSet<String>) {
+    fn walk_expr(expr: &PreHirExpr, out: &mut HashSet<String>) {
+        match expr {
+            PreHirExpr::AddressOfLocal(name) => {
+                out.insert(name.clone());
+            }
+            PreHirExpr::Var(_) | PreHirExpr::AddressOfGlobal(_) | PreHirExpr::Const(..) => {}
+            PreHirExpr::Cast { expr, .. }
+            | PreHirExpr::Unary { expr, .. }
+            | PreHirExpr::Load { ptr: expr, .. }
+            | PreHirExpr::PtrOffset { base: expr, .. }
+            | PreHirExpr::FieldAccess { base: expr, .. }
+            | PreHirExpr::AggregateCopy { src: expr, .. } => walk_expr(expr, out),
+            PreHirExpr::Binary { lhs, rhs, .. } => {
+                walk_expr(lhs, out);
+                walk_expr(rhs, out);
+            }
+            PreHirExpr::Index { base, index, .. } => {
+                walk_expr(base, out);
+                walk_expr(index, out);
+            }
+            PreHirExpr::Select {
+                cond,
+                then_expr,
+                else_expr,
+                ..
+            } => {
+                walk_expr(cond, out);
+                walk_expr(then_expr, out);
+                walk_expr(else_expr, out);
+            }
+            PreHirExpr::Call { args, .. } => {
+                for a in args {
+                    walk_expr(a, out);
+                }
+            }
+        }
+    }
+
+    for s in stmts {
+        match s {
+            PreHirStmt::Assign { lhs, rhs } => {
+                match lhs {
+                    PreHirLValue::Var(_) => {}
+                    PreHirLValue::Deref { ptr, .. } => walk_expr(ptr, out),
+                    PreHirLValue::Index { base, index, .. } => {
+                        walk_expr(base, out);
+                        walk_expr(index, out);
+                    }
+                    PreHirLValue::FieldAccess { base, .. } => walk_expr(base, out),
+                }
+                walk_expr(rhs, out);
+            }
+            PreHirStmt::VaStart { va_list: e, .. }
+            | PreHirStmt::Expr(e)
+            | PreHirStmt::Return(Some(e)) => walk_expr(e, out),
+            PreHirStmt::Block(body) => collect_addr_taken_locals(body, out),
+            PreHirStmt::While { cond, body } | PreHirStmt::DoWhile { body, cond } => {
+                walk_expr(cond, out);
+                collect_addr_taken_locals(body, out);
+            }
+            PreHirStmt::If {
+                cond,
+                then_body,
+                else_body,
+            } => {
+                walk_expr(cond, out);
+                collect_addr_taken_locals(then_body, out);
+                collect_addr_taken_locals(else_body, out);
+            }
+            PreHirStmt::For {
+                init,
+                cond,
+                update,
+                body,
+            } => {
+                if let Some(i) = init {
+                    collect_addr_taken_locals(std::slice::from_ref(i.as_ref()), out);
+                }
+                if let Some(c) = cond {
+                    walk_expr(c, out);
+                }
+                collect_addr_taken_locals(body, out);
+                if let Some(u) = update {
+                    collect_addr_taken_locals(std::slice::from_ref(u.as_ref()), out);
+                }
+            }
+            PreHirStmt::Switch {
+                expr,
+                cases,
+                default,
+            } => {
+                walk_expr(expr, out);
+                for c in cases {
+                    collect_addr_taken_locals(&c.body, out);
+                }
+                collect_addr_taken_locals(default, out);
+            }
+            PreHirStmt::Return(None)
+            | PreHirStmt::Label(_)
+            | PreHirStmt::Goto(_)
+            | PreHirStmt::Break
+            | PreHirStmt::Continue => {}
+        }
+    }
+}
 
 /// Propagate aliases and fold single-read temps within straight-line runs.
 pub fn propagate_copies_in_runs(func: &mut PreHirFunction) -> bool {
@@ -65,11 +174,21 @@ pub fn propagate_copies_in_runs(func: &mut PreHirFunction) -> bool {
         .map(|b| b.name.clone())
         .collect();
 
+    let mut addr_taken = HashSet::default();
+    collect_addr_taken_locals(&func.body, &mut addr_taken);
+
     let mut any = false;
     for _ in 0..MAX_ROUNDS {
         let reads = count_reads(&func.body);
         let mut changed = false;
-        run(&mut func.body, &scratch, &foldable, &reads, &mut changed);
+        run(
+            &mut func.body,
+            &scratch,
+            &foldable,
+            &addr_taken,
+            &reads,
+            &mut changed,
+        );
         if !changed {
             break;
         }
@@ -77,8 +196,9 @@ pub fn propagate_copies_in_runs(func: &mut PreHirFunction) -> bool {
     }
     if any {
         let live = count_reads(&func.body);
-        func.locals
-            .retain(|b| !scratch.contains(&b.name) || live.contains_key(&b.name));
+        func.locals.retain(|b| {
+            !scratch.contains(&b.name) || addr_taken.contains(&b.name) || live.contains_key(&b.name)
+        });
     }
     any
 }
@@ -246,10 +366,50 @@ fn expr_has_call(e: &PreHirExpr) -> bool {
     }
 }
 
+fn lvalue_has_call(lhs: &PreHirLValue) -> bool {
+    match lhs {
+        PreHirLValue::Var(_) => false,
+        PreHirLValue::Deref { ptr, .. } => expr_has_call(ptr),
+        PreHirLValue::Index { base, index, .. } => expr_has_call(base) || expr_has_call(index),
+        PreHirLValue::FieldAccess { base, .. } => expr_has_call(base),
+    }
+}
+
 fn stmt_has_call(s: &PreHirStmt) -> bool {
     match s {
-        PreHirStmt::Assign { rhs, .. } => expr_has_call(rhs),
+        PreHirStmt::Assign { lhs, rhs } => lvalue_has_call(lhs) || expr_has_call(rhs),
         PreHirStmt::Expr(e) | PreHirStmt::Return(Some(e)) => expr_has_call(e),
+        PreHirStmt::VaStart { .. } => true,
+        _ => false,
+    }
+}
+
+fn expr_root_var(e: &PreHirExpr) -> Option<&str> {
+    let mut cur = e;
+    loop {
+        match cur {
+            PreHirExpr::Var(n) => return Some(n.as_str()),
+            PreHirExpr::FieldAccess { base, .. }
+            | PreHirExpr::Index { base, .. }
+            | PreHirExpr::Cast { expr: base, .. } => cur = base,
+            _ => return None,
+        }
+    }
+}
+
+fn lvalue_base_var(lhs: &PreHirLValue) -> Option<&str> {
+    match lhs {
+        PreHirLValue::Var(_) | PreHirLValue::Deref { .. } => None,
+        PreHirLValue::FieldAccess { base, .. } | PreHirLValue::Index { base, .. } => {
+            expr_root_var(base)
+        }
+    }
+}
+
+fn stmt_writes_memory(s: &PreHirStmt) -> bool {
+    match s {
+        PreHirStmt::Assign { lhs, .. } => !matches!(lhs, PreHirLValue::Var(_)),
+        PreHirStmt::VaStart { .. } => true,
         _ => false,
     }
 }
@@ -331,15 +491,23 @@ fn writes_of(s: &PreHirStmt, out: &mut HashSet<String>) {
         // A store to a global is spelled `*&g = v` while its reads are `g`:
         // it writes `g` all the same. Missing it carried `x = g` across the
         // store, so `x = g; *&g = x + 1; buf[x] = c` printed `buf[g]`.
-        PreHirStmt::Assign {
-            lhs: PreHirLValue::Deref { ptr, .. },
-            ..
-        } => {
-            let mut target = ptr.as_ref();
-            while let PreHirExpr::Cast { expr, .. } = target {
-                target = expr;
+        PreHirStmt::Assign { lhs, .. } => {
+            if let PreHirLValue::Deref { ptr, .. } = lhs {
+                let mut target = ptr.as_ref();
+                while let PreHirExpr::Cast { expr, .. } = target {
+                    target = expr;
+                }
+                if let PreHirExpr::AddressOfGlobal(n) = target {
+                    out.insert(n.clone());
+                }
+            } else if let Some(base) = lvalue_base_var(lhs) {
+                out.insert(base.to_string());
             }
-            if let PreHirExpr::AddressOfGlobal(n) = target {
+        }
+        PreHirStmt::VaStart { va_list, .. } => {
+            if let Some(n) = expr_root_var(va_list) {
+                out.insert(n.to_string());
+            } else if let PreHirExpr::AddressOfLocal(n) = va_list {
                 out.insert(n.clone());
             }
         }
@@ -389,6 +557,7 @@ fn run(
     stmts: &mut Vec<PreHirStmt>,
     scratch: &HashSet<String>,
     foldable: &HashSet<String>,
+    addr_taken: &HashSet<String>,
     reads: &HashMap<String, usize>,
     changed: &mut bool,
 ) {
@@ -404,6 +573,7 @@ fn run(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                     scratch,
                     foldable,
+                    addr_taken,
                     reads,
                     changed,
                 );
@@ -411,6 +581,7 @@ fn run(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                     scratch,
                     foldable,
+                    addr_taken,
                     reads,
                     changed,
                 );
@@ -423,6 +594,7 @@ fn run(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                     scratch,
                     foldable,
+                    addr_taken,
                     reads,
                     changed,
                 );
@@ -433,6 +605,7 @@ fn run(
                         std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut c.body),
                         scratch,
                         foldable,
+                        addr_taken,
                         reads,
                         changed,
                     );
@@ -441,6 +614,7 @@ fn run(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                     scratch,
                     foldable,
+                    addr_taken,
                     reads,
                     changed,
                 );
@@ -488,14 +662,26 @@ fn run(
         // it, on either side.
         let mut written = HashSet::default();
         writes_of(&stmts[i], &mut written);
-        if !written.is_empty() {
+        let writes_mem = stmt_writes_memory(&stmts[i]);
+        if !written.is_empty() || writes_mem {
             map.retain(|dst, src| {
                 if written.contains(dst) {
                     return false;
                 }
                 let mut names = HashSet::default();
                 collect_expr_vars(src, &mut names);
-                names.is_disjoint(&written)
+                if !names.is_disjoint(&written) {
+                    return false;
+                }
+                if writes_mem {
+                    if expr_reads_memory(src)
+                        || addr_taken.contains(dst)
+                        || !names.is_disjoint(addr_taken)
+                    {
+                        return false;
+                    }
+                }
+                true
             });
         }
 
@@ -535,7 +721,7 @@ fn run(
         else {
             continue;
         };
-        if !scratch.contains(dst) || expr_has_call(rhs) {
+        if !scratch.contains(dst) || addr_taken.contains(dst) || expr_has_call(rhs) {
             continue;
         }
         // A `for` header reads names defined in its body -- `for (; ; p = t)`
@@ -600,6 +786,7 @@ fn run(
             // reads may still be read by an enclosing `for` header, so the
             // whole-function count has to agree that it is dead.
             !(scratch.contains(dst)
+                && !addr_taken.contains(dst)
                 && after.get(dst).copied().unwrap_or(0) == 0
                 && reads.get(dst).copied().unwrap_or(0) <= run_reads.get(dst).copied().unwrap_or(0)
                 && !expr_has_call(rhs))
@@ -894,5 +1081,85 @@ mod tests {
         );
         assert!(!propagate_copies_in_runs(&mut f));
         assert!(render(&f).contains("result_sink"), "{}", render(&f));
+    }
+
+    #[test]
+    fn does_not_fold_memory_load_across_store() {
+        let mut f = func(
+            vec![temp("xVar1"), local("p"), local("q")],
+            vec![
+                set(
+                    "xVar1",
+                    PreHirExpr::Load {
+                        ptr: Box::new(var("p")),
+                        ty: ty(),
+                    },
+                ),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(var("p")),
+                        ty: ty(),
+                    },
+                    rhs: PreHirExpr::Load {
+                        ptr: Box::new(var("q")),
+                        ty: ty(),
+                    },
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(var("q")),
+                        ty: ty(),
+                    },
+                    rhs: var("xVar1"),
+                },
+            ],
+        );
+        assert!(!propagate_copies_in_runs(&mut f));
+        assert!(
+            matches!(
+                f.body.last(),
+                Some(PreHirStmt::Assign {
+                    rhs: PreHirExpr::Var(n),
+                    ..
+                }) if n == "xVar1"
+            ),
+            "memory load must not fold past intervening store: {}",
+            render(&f)
+        );
+    }
+
+    #[test]
+    fn treats_call_in_assign_lhs_as_boundary() {
+        let mut f = func(
+            vec![temp("xVar1"), local("x"), local("y")],
+            vec![
+                set("xVar1", var("x")),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(PreHirExpr::Call {
+                            origin: None,
+                            target: "pick".into(),
+                            args: vec![PreHirExpr::AddressOfLocal("x".into())],
+                            ty: NirType::Ptr(Box::new(ty())),
+                        }),
+                        ty: ty(),
+                    },
+                    rhs: k(1),
+                },
+                set("y", var("xVar1")),
+            ],
+        );
+        propagate_copies_in_runs(&mut f);
+        assert!(
+            matches!(
+                f.body.last(),
+                Some(PreHirStmt::Assign {
+                    rhs: PreHirExpr::Var(n),
+                    ..
+                }) if n == "xVar1"
+            ),
+            "call in lhs must clear active copy map: {}",
+            render(&f)
+        );
     }
 }

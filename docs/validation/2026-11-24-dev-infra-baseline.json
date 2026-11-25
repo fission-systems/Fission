@@ -1,0 +1,1762 @@
+{
+ "action": {
+  "changes_requested": [],
+  "main": "success",
+  "out_of_date": [
+   {
+    "behind": 1051,
+    "conflicting": true,
+    "number": 176,
+    "title": "Project Fission: A Unified Semantic Engine"
+   },
+   {
+    "behind": 141,
+    "conflicting": false,
+    "number": 1045,
+    "title": "fix(debug): Windows session reads the thread it stopped; no poll error while frozen"
+   },
+   {
+    "behind": 62,
+    "conflicting": false,
+    "number": 1073,
+    "title": "test(emulator): native single-instruction differential against the SLEIGH lift (x86-64 + AArch64)"
+   },
+   {
+    "behind": 141,
+    "conflicting": false,
+    "number": 1099,
+    "title": "structuring: opt-in SAILR driver (fourth candidate)"
+   }
+  ],
+  "ready_to_enqueue": [
+   {
+    "age_in_state_h": 0.0,
+    "number": 1073,
+    "title": "test(emulator): native single-instruction differential against the SLEIGH lift (x86-64 + AArch64)"
+   },
+   {
+    "age_in_state_h": 22.703055555555554,
+    "number": 1096,
+    "title": "quotient: WBCQ prototype -- behavioural quotients of P-code slices (RFC #1093, P0/P1)"
+   },
+   {
+    "age_in_state_h": 0.33944444444444444,
+    "number": 1106,
+    "title": "causal: CSIC P0/P1/P2 -- counterfactual runner, input-first candidates, solver-backed joint search (RFC #1101 Track B)"
+   },
+   {
+    "age_in_state_h": 0.5327777777777778,
+    "number": 1285,
+    "title": "fix(normalize): preserve offsets, strides, and structured reads in MemSSA and RLE"
+   },
+   {
+    "age_in_state_h": 0.47194444444444444,
+    "number": 1292,
+    "title": "fix(normalize): eliminate None==None, control-flow leak, and 1-bit/effect bugs in double_precision and three_way"
+   },
+   {
+    "age_in_state_h": 0.015,
+    "number": 1294,
+    "title": "fix(midend-normalize): fix constant folding, cast stripping, iblock phi, and subvar flow soundness (#875)"
+   },
+   {
+    "age_in_state_h": 0.3775,
+    "number": 1295,
+    "title": "docs: adopt correctness-first implementation and validation workflow for Fission 1.0"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1300,
+    "title": "fix(midend-normalize): fix soundness bugs across cleanup and global_opt passes (#890)"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1306,
+    "title": "fix(normalize): resolve soundness bugs in copy_prop, sccp, post_assign, subflow, split_flow, loops_conds, and rule_normalizer"
+   }
+  ],
+  "stale": [
+   {
+    "age_d": 54.77211805555555,
+    "number": 176,
+    "title": "Project Fission: A Unified Semantic Engine"
+   }
+  ]
+ },
+ "ci": {
+  "merge_group": {
+   "cancelled": 0,
+   "failed": 8,
+   "failure_rate": 0.125,
+   "other": 0,
+   "runs": 64
+  },
+  "pull_request": {
+   "cancelled": 0,
+   "failed": 79,
+   "failure_rate": 0.25901639344262295,
+   "other": 7,
+   "runs": 305
+  }
+ },
+ "intervention": {
+  "force_pushes": 12,
+  "merge_main_commits": 27,
+  "queue_adds_by_actor": {
+   "sjkim1127": 58
+  },
+  "requeues_after_ejection": 6,
+  "workflow_reruns": 7
+ },
+ "issues": {
+  "closed": 54,
+  "open_unlabeled": 190,
+  "opened": 231
+ },
+ "lead_time_h": {
+  "checks_to_queue": {
+   "max": 22.793333333333333,
+   "n": 45,
+   "p50": 0.8602777777777778,
+   "p95": 20.614444444444445
+  },
+  "push_to_checks": {
+   "max": 12.725833333333334,
+   "n": 45,
+   "p50": 0.23055555555555557,
+   "p95": 3.9252777777777776
+  },
+  "queue_to_merged": {
+   "max": 0.8119444444444445,
+   "n": 45,
+   "p50": 0.36,
+   "p95": 0.665
+  },
+  "total": {
+   "max": 23.565555555555555,
+   "n": 45,
+   "p50": 2.211388888888889,
+   "p95": 21.295555555555556
+  }
+ },
+ "merged": 123,
+ "merged_peak_hour": 13,
+ "merged_per_day": 17.571428571428573,
+ "merged_per_hour": 0.7321428571428571,
+ "merged_without_queue": [
+  899,
+  900,
+  901,
+  902,
+  903,
+  918,
+  919,
+  926,
+  927,
+  928,
+  929,
+  930,
+  931,
+  932,
+  933,
+  934,
+  935,
+  936,
+  937,
+  938,
+  939,
+  940,
+  941,
+  942,
+  943,
+  944,
+  945,
+  946,
+  947,
+  948,
+  949,
+  950,
+  951,
+  952,
+  953,
+  954,
+  955,
+  956,
+  957,
+  958,
+  960,
+  961,
+  962,
+  963,
+  964,
+  965,
+  966,
+  967,
+  968,
+  969,
+  970,
+  973,
+  974,
+  975,
+  976,
+  977,
+  978,
+  979,
+  980,
+  981,
+  982,
+  983,
+  984,
+  985,
+  986,
+  1009,
+  1010,
+  1018,
+  1021,
+  1022,
+  1024,
+  1025,
+  1026,
+  1027,
+  1028,
+  1029,
+  1030,
+  1031
+ ],
+ "merged_without_required_checks": [],
+ "open_prs": {
+  "age_max_d": 54.77211805555555,
+  "age_p50_d": 0.17162037037037037,
+  "count": 34,
+  "drafts": 3
+ },
+ "queue": {
+  "by_reason": {
+   "failed_checks": 4,
+   "invalid_merge_commit": 3
+  },
+  "ejections": 7,
+  "requeues_after_ejection": 6
+ },
+ "runners": {
+  "by_event": {
+   "merge_group": {
+    "jobs": 680,
+    "jobs_per_hour": 4.0476190476190474,
+    "oldest_queued_min": null,
+    "queue_min": {
+     "max": 18.716666666666665,
+     "p50": 0.11666666666666667,
+     "p95": 6.466666666666667
+    },
+    "queued_now": null,
+    "run_min": {
+     "p50": 1.3333333333333333,
+     "p95": 10.366666666666667
+    },
+    "run_start_min": {
+     "max": 2.6333333333333333,
+     "p50": 0.05,
+     "p95": 1.1333333333333333
+    },
+    "runs": 64
+   },
+   "pull_request": {
+    "jobs": 3342,
+    "jobs_per_hour": 19.892857142857142,
+    "oldest_queued_min": null,
+    "queue_min": {
+     "max": 21.233333333333334,
+     "p50": 0.03333333333333333,
+     "p95": 5.083333333333333
+    },
+    "queued_now": null,
+    "run_min": {
+     "p50": 1.2166666666666666,
+     "p95": 12.033333333333333
+    },
+    "run_start_min": {
+     "max": 13.716666666666667,
+     "p50": 0.05,
+     "p95": 4.366666666666666
+    },
+    "runs": 312
+   },
+   "push": {
+    "jobs": 918,
+    "jobs_per_hour": 5.464285714285714,
+    "oldest_queued_min": null,
+    "queue_min": {
+     "max": 18.5,
+     "p50": 0.03333333333333333,
+     "p95": 2.933333333333333
+    },
+    "queued_now": null,
+    "run_min": {
+     "p50": 1.0833333333333333,
+     "p95": 8.516666666666667
+    },
+    "run_start_min": {
+     "max": 9.733333333333333,
+     "p50": 0.05,
+     "p95": 6.1
+    },
+    "runs": 155
+   }
+  },
+  "concurrency": {
+   "all": {
+    "hourly_peak_p50": 10,
+    "peak": 30,
+    "per_hour": {
+     "2026-11-17 07": 1,
+     "2026-11-17 09": 2,
+     "2026-11-17 10": 7,
+     "2026-11-17 11": 2,
+     "2026-11-18 01": 1,
+     "2026-11-18 09": 2,
+     "2026-11-18 10": 7,
+     "2026-11-18 12": 15,
+     "2026-11-18 13": 3,
+     "2026-11-18 22": 5,
+     "2026-11-19 02": 8,
+     "2026-11-19 05": 7,
+     "2026-11-19 06": 6,
+     "2026-11-19 07": 6,
+     "2026-11-19 08": 1,
+     "2026-11-19 09": 2,
+     "2026-11-19 10": 11,
+     "2026-11-19 11": 11,
+     "2026-11-19 12": 11,
+     "2026-11-19 14": 5,
+     "2026-11-19 15": 5,
+     "2026-11-19 16": 5,
+     "2026-11-20 01": 10,
+     "2026-11-20 02": 10,
+     "2026-11-20 03": 11,
+     "2026-11-20 04": 6,
+     "2026-11-20 05": 6,
+     "2026-11-20 06": 6,
+     "2026-11-20 07": 7,
+     "2026-11-20 08": 8,
+     "2026-11-20 09": 2,
+     "2026-11-20 10": 7,
+     "2026-11-20 11": 12,
+     "2026-11-20 12": 7,
+     "2026-11-20 13": 1,
+     "2026-11-20 14": 5,
+     "2026-11-20 21": 8,
+     "2026-11-20 22": 5,
+     "2026-11-20 23": 8,
+     "2026-11-21 00": 7,
+     "2026-11-21 05": 10,
+     "2026-11-21 06": 4,
+     "2026-11-21 08": 2,
+     "2026-11-21 09": 20,
+     "2026-11-21 10": 20,
+     "2026-11-21 11": 10,
+     "2026-11-21 12": 18,
+     "2026-11-21 13": 20,
+     "2026-11-21 14": 20,
+     "2026-11-21 15": 20,
+     "2026-11-21 16": 20,
+     "2026-11-21 17": 20,
+     "2026-11-21 18": 1,
+     "2026-11-22 03": 13,
+     "2026-11-22 04": 19,
+     "2026-11-22 05": 9,
+     "2026-11-22 06": 6,
+     "2026-11-22 08": 12,
+     "2026-11-22 09": 20,
+     "2026-11-22 10": 20,
+     "2026-11-22 13": 20,
+     "2026-11-22 14": 20,
+     "2026-11-22 15": 13,
+     "2026-11-22 16": 14,
+     "2026-11-22 17": 8,
+     "2026-11-22 20": 15,
+     "2026-11-22 21": 11,
+     "2026-11-22 22": 2,
+     "2026-11-23 00": 13,
+     "2026-11-23 01": 9,
+     "2026-11-23 02": 28,
+     "2026-11-23 03": 30,
+     "2026-11-23 04": 20,
+     "2026-11-23 05": 20,
+     "2026-11-23 06": 27,
+     "2026-11-23 07": 20,
+     "2026-11-23 08": 3,
+     "2026-11-23 09": 12,
+     "2026-11-23 10": 15,
+     "2026-11-23 11": 10,
+     "2026-11-23 12": 3,
+     "2026-11-23 14": 20,
+     "2026-11-23 15": 17,
+     "2026-11-23 20": 1,
+     "2026-11-23 21": 6,
+     "2026-11-23 22": 1,
+     "2026-11-24 00": 20,
+     "2026-11-24 01": 20,
+     "2026-11-24 02": 20,
+     "2026-11-24 03": 20,
+     "2026-11-24 04": 4,
+     "2026-11-24 05": 20,
+     "2026-11-24 06": 20
+    }
+   },
+   "all but macOS": {
+    "hourly_peak_p50": 9,
+    "peak": 30,
+    "per_hour": {
+     "2026-11-17 07": 1,
+     "2026-11-17 09": 2,
+     "2026-11-17 10": 6,
+     "2026-11-17 11": 2,
+     "2026-11-18 01": 1,
+     "2026-11-18 09": 2,
+     "2026-11-18 10": 6,
+     "2026-11-18 12": 14,
+     "2026-11-18 13": 2,
+     "2026-11-18 22": 5,
+     "2026-11-19 02": 7,
+     "2026-11-19 05": 7,
+     "2026-11-19 06": 6,
+     "2026-11-19 07": 6,
+     "2026-11-19 08": 1,
+     "2026-11-19 09": 2,
+     "2026-11-19 10": 10,
+     "2026-11-19 11": 10,
+     "2026-11-19 12": 10,
+     "2026-11-19 14": 5,
+     "2026-11-19 15": 5,
+     "2026-11-19 16": 5,
+     "2026-11-20 01": 9,
+     "2026-11-20 02": 10,
+     "2026-11-20 03": 10,
+     "2026-11-20 04": 5,
+     "2026-11-20 05": 5,
+     "2026-11-20 06": 5,
+     "2026-11-20 07": 7,
+     "2026-11-20 08": 7,
+     "2026-11-20 09": 2,
+     "2026-11-20 10": 6,
+     "2026-11-20 11": 11,
+     "2026-11-20 12": 6,
+     "2026-11-20 13": 1,
+     "2026-11-20 14": 5,
+     "2026-11-20 21": 7,
+     "2026-11-20 22": 5,
+     "2026-11-20 23": 7,
+     "2026-11-21 00": 7,
+     "2026-11-21 05": 10,
+     "2026-11-21 06": 4,
+     "2026-11-21 08": 2,
+     "2026-11-21 09": 20,
+     "2026-11-21 10": 18,
+     "2026-11-21 11": 10,
+     "2026-11-21 12": 17,
+     "2026-11-21 13": 16,
+     "2026-11-21 14": 19,
+     "2026-11-21 15": 16,
+     "2026-11-21 16": 18,
+     "2026-11-21 17": 18,
+     "2026-11-21 18": 1,
+     "2026-11-22 03": 11,
+     "2026-11-22 04": 17,
+     "2026-11-22 05": 9,
+     "2026-11-22 06": 6,
+     "2026-11-22 08": 12,
+     "2026-11-22 09": 19,
+     "2026-11-22 10": 19,
+     "2026-11-22 13": 20,
+     "2026-11-22 14": 18,
+     "2026-11-22 15": 13,
+     "2026-11-22 16": 14,
+     "2026-11-22 17": 8,
+     "2026-11-22 20": 15,
+     "2026-11-22 21": 11,
+     "2026-11-22 22": 2,
+     "2026-11-23 00": 13,
+     "2026-11-23 01": 9,
+     "2026-11-23 02": 27,
+     "2026-11-23 03": 30,
+     "2026-11-23 04": 18,
+     "2026-11-23 05": 20,
+     "2026-11-23 06": 25,
+     "2026-11-23 07": 20,
+     "2026-11-23 08": 3,
+     "2026-11-23 09": 12,
+     "2026-11-23 10": 14,
+     "2026-11-23 11": 10,
+     "2026-11-23 12": 3,
+     "2026-11-23 14": 18,
+     "2026-11-23 15": 15,
+     "2026-11-23 20": 1,
+     "2026-11-23 21": 6,
+     "2026-11-23 22": 1,
+     "2026-11-24 00": 20,
+     "2026-11-24 01": 20,
+     "2026-11-24 02": 19,
+     "2026-11-24 03": 18,
+     "2026-11-24 04": 4,
+     "2026-11-24 05": 20,
+     "2026-11-24 06": 20
+    }
+   },
+   "macos-15-intel": {
+    "hourly_peak_p50": 1,
+    "peak": 3,
+    "per_hour": {
+     "2026-11-21 11": 1,
+     "2026-11-21 12": 1,
+     "2026-11-21 13": 1,
+     "2026-11-21 14": 2,
+     "2026-11-21 15": 3,
+     "2026-11-23 10": 1
+    }
+   },
+   "macos-latest": {
+    "hourly_peak_p50": 2,
+    "peak": 5,
+    "per_hour": {
+     "2026-11-17 10": 1,
+     "2026-11-18 10": 1,
+     "2026-11-18 12": 1,
+     "2026-11-18 13": 1,
+     "2026-11-19 02": 1,
+     "2026-11-19 10": 1,
+     "2026-11-19 11": 1,
+     "2026-11-19 12": 1,
+     "2026-11-20 01": 1,
+     "2026-11-20 03": 1,
+     "2026-11-20 04": 1,
+     "2026-11-20 05": 1,
+     "2026-11-20 06": 1,
+     "2026-11-20 08": 1,
+     "2026-11-20 10": 1,
+     "2026-11-20 11": 1,
+     "2026-11-20 12": 1,
+     "2026-11-20 21": 1,
+     "2026-11-20 23": 1,
+     "2026-11-21 09": 1,
+     "2026-11-21 10": 2,
+     "2026-11-21 11": 1,
+     "2026-11-21 12": 4,
+     "2026-11-21 13": 3,
+     "2026-11-21 14": 4,
+     "2026-11-21 15": 4,
+     "2026-11-21 16": 2,
+     "2026-11-21 17": 4,
+     "2026-11-22 03": 2,
+     "2026-11-22 04": 2,
+     "2026-11-22 09": 1,
+     "2026-11-22 10": 5,
+     "2026-11-22 13": 4,
+     "2026-11-22 14": 4,
+     "2026-11-22 16": 1,
+     "2026-11-22 20": 1,
+     "2026-11-23 02": 3,
+     "2026-11-23 03": 4,
+     "2026-11-23 04": 2,
+     "2026-11-23 05": 4,
+     "2026-11-23 06": 4,
+     "2026-11-23 07": 3,
+     "2026-11-23 10": 2,
+     "2026-11-23 11": 1,
+     "2026-11-23 14": 2,
+     "2026-11-23 15": 2,
+     "2026-11-24 01": 2,
+     "2026-11-24 02": 2,
+     "2026-11-24 03": 2,
+     "2026-11-24 05": 3,
+     "2026-11-24 06": 2
+    }
+   },
+   "ubuntu-22.04": {
+    "hourly_peak_p50": 1,
+    "peak": 3,
+    "per_hour": {
+     "2026-11-21 11": 1,
+     "2026-11-21 12": 2,
+     "2026-11-21 13": 2,
+     "2026-11-21 14": 3,
+     "2026-11-21 15": 3,
+     "2026-11-21 16": 1,
+     "2026-11-21 17": 1,
+     "2026-11-22 04": 1,
+     "2026-11-22 13": 1,
+     "2026-11-22 14": 1,
+     "2026-11-23 02": 1,
+     "2026-11-23 03": 1,
+     "2026-11-23 05": 1,
+     "2026-11-23 06": 1,
+     "2026-11-23 07": 1,
+     "2026-11-23 10": 1,
+     "2026-11-23 14": 1,
+     "2026-11-23 15": 1,
+     "2026-11-24 02": 1,
+     "2026-11-24 03": 1,
+     "2026-11-24 05": 1,
+     "2026-11-24 06": 1
+    }
+   },
+   "ubuntu-22.04-arm": {
+    "hourly_peak_p50": 1,
+    "peak": 3,
+    "per_hour": {
+     "2026-11-21 11": 1,
+     "2026-11-21 12": 1,
+     "2026-11-21 13": 1,
+     "2026-11-21 14": 2,
+     "2026-11-21 15": 3,
+     "2026-11-23 10": 1
+    }
+   },
+   "ubuntu-24.04": {
+    "hourly_peak_p50": 3,
+    "peak": 12,
+    "per_hour": {
+     "2026-11-21 12": 1,
+     "2026-11-21 13": 2,
+     "2026-11-21 14": 3,
+     "2026-11-21 15": 3,
+     "2026-11-21 16": 2,
+     "2026-11-21 17": 3,
+     "2026-11-21 18": 1,
+     "2026-11-22 03": 1,
+     "2026-11-22 04": 1,
+     "2026-11-22 08": 12,
+     "2026-11-22 13": 2,
+     "2026-11-22 14": 4,
+     "2026-11-22 15": 3,
+     "2026-11-22 16": 2,
+     "2026-11-22 17": 1,
+     "2026-11-22 20": 1,
+     "2026-11-22 21": 2,
+     "2026-11-22 22": 2,
+     "2026-11-23 00": 4,
+     "2026-11-23 01": 4,
+     "2026-11-23 02": 6,
+     "2026-11-23 03": 9,
+     "2026-11-23 04": 6,
+     "2026-11-23 05": 3,
+     "2026-11-23 06": 10,
+     "2026-11-23 07": 7,
+     "2026-11-23 08": 3,
+     "2026-11-23 09": 12,
+     "2026-11-23 10": 2,
+     "2026-11-23 11": 2,
+     "2026-11-23 12": 2,
+     "2026-11-23 14": 3,
+     "2026-11-23 15": 2,
+     "2026-11-23 21": 1,
+     "2026-11-23 22": 1,
+     "2026-11-24 00": 5,
+     "2026-11-24 01": 2,
+     "2026-11-24 02": 6,
+     "2026-11-24 03": 3,
+     "2026-11-24 04": 2,
+     "2026-11-24 05": 4,
+     "2026-11-24 06": 10
+    }
+   },
+   "ubuntu-24.04-arm": {
+    "hourly_peak_p50": 1,
+    "peak": 1,
+    "per_hour": {
+     "2026-11-23 03": 1,
+     "2026-11-23 05": 1,
+     "2026-11-23 06": 1,
+     "2026-11-23 07": 1,
+     "2026-11-24 06": 1
+    }
+   },
+   "ubuntu-cca-77785908-7ef3-498a-9ae0-bbebb95125d3": {
+    "hourly_peak_p50": 1,
+    "peak": 1,
+    "per_hour": {
+     "2026-11-19 06": 1
+    }
+   },
+   "ubuntu-latest": {
+    "hourly_peak_p50": 9,
+    "peak": 21,
+    "per_hour": {
+     "2026-11-17 07": 1,
+     "2026-11-17 09": 2,
+     "2026-11-17 10": 4,
+     "2026-11-17 11": 1,
+     "2026-11-18 01": 1,
+     "2026-11-18 09": 2,
+     "2026-11-18 10": 4,
+     "2026-11-18 12": 14,
+     "2026-11-18 13": 2,
+     "2026-11-18 22": 5,
+     "2026-11-19 02": 7,
+     "2026-11-19 05": 7,
+     "2026-11-19 06": 6,
+     "2026-11-19 07": 6,
+     "2026-11-19 08": 1,
+     "2026-11-19 09": 2,
+     "2026-11-19 10": 9,
+     "2026-11-19 11": 10,
+     "2026-11-19 12": 10,
+     "2026-11-19 14": 5,
+     "2026-11-19 15": 5,
+     "2026-11-19 16": 5,
+     "2026-11-20 01": 9,
+     "2026-11-20 02": 10,
+     "2026-11-20 03": 10,
+     "2026-11-20 04": 5,
+     "2026-11-20 05": 5,
+     "2026-11-20 06": 5,
+     "2026-11-20 07": 7,
+     "2026-11-20 08": 7,
+     "2026-11-20 09": 2,
+     "2026-11-20 10": 6,
+     "2026-11-20 11": 11,
+     "2026-11-20 12": 6,
+     "2026-11-20 13": 1,
+     "2026-11-20 14": 5,
+     "2026-11-20 21": 7,
+     "2026-11-20 22": 5,
+     "2026-11-20 23": 7,
+     "2026-11-21 00": 7,
+     "2026-11-21 05": 10,
+     "2026-11-21 06": 4,
+     "2026-11-21 08": 2,
+     "2026-11-21 09": 20,
+     "2026-11-21 10": 17,
+     "2026-11-21 11": 10,
+     "2026-11-21 12": 17,
+     "2026-11-21 13": 12,
+     "2026-11-21 14": 15,
+     "2026-11-21 15": 11,
+     "2026-11-21 16": 16,
+     "2026-11-21 17": 17,
+     "2026-11-22 03": 10,
+     "2026-11-22 04": 14,
+     "2026-11-22 05": 9,
+     "2026-11-22 06": 6,
+     "2026-11-22 08": 6,
+     "2026-11-22 09": 17,
+     "2026-11-22 10": 17,
+     "2026-11-22 13": 19,
+     "2026-11-22 14": 16,
+     "2026-11-22 15": 11,
+     "2026-11-22 16": 12,
+     "2026-11-22 17": 7,
+     "2026-11-22 20": 15,
+     "2026-11-22 21": 9,
+     "2026-11-23 00": 10,
+     "2026-11-23 01": 7,
+     "2026-11-23 02": 19,
+     "2026-11-23 03": 21,
+     "2026-11-23 04": 12,
+     "2026-11-23 05": 20,
+     "2026-11-23 06": 18,
+     "2026-11-23 07": 14,
+     "2026-11-23 09": 6,
+     "2026-11-23 10": 12,
+     "2026-11-23 11": 9,
+     "2026-11-23 12": 3,
+     "2026-11-23 14": 13,
+     "2026-11-23 15": 11,
+     "2026-11-23 20": 1,
+     "2026-11-23 21": 5,
+     "2026-11-24 00": 16,
+     "2026-11-24 01": 19,
+     "2026-11-24 02": 13,
+     "2026-11-24 03": 14,
+     "2026-11-24 04": 2,
+     "2026-11-24 05": 16,
+     "2026-11-24 06": 15
+    }
+   },
+   "windows-latest": {
+    "hourly_peak_p50": 2,
+    "peak": 5,
+    "per_hour": {
+     "2026-11-17 10": 2,
+     "2026-11-17 11": 1,
+     "2026-11-18 10": 2,
+     "2026-11-19 10": 2,
+     "2026-11-20 10": 2,
+     "2026-11-21 09": 2,
+     "2026-11-21 10": 2,
+     "2026-11-21 11": 1,
+     "2026-11-21 12": 2,
+     "2026-11-21 13": 2,
+     "2026-11-21 14": 4,
+     "2026-11-21 15": 5,
+     "2026-11-21 16": 2,
+     "2026-11-21 17": 2,
+     "2026-11-22 03": 1,
+     "2026-11-22 04": 1,
+     "2026-11-22 09": 2,
+     "2026-11-22 10": 2,
+     "2026-11-22 13": 3,
+     "2026-11-22 14": 2,
+     "2026-11-23 02": 3,
+     "2026-11-23 03": 2,
+     "2026-11-23 05": 3,
+     "2026-11-23 06": 3,
+     "2026-11-23 07": 3,
+     "2026-11-23 10": 2,
+     "2026-11-23 11": 2,
+     "2026-11-23 14": 1,
+     "2026-11-23 15": 1,
+     "2026-11-24 02": 1,
+     "2026-11-24 03": 1,
+     "2026-11-24 05": 3,
+     "2026-11-24 06": 1
+    }
+   }
+  },
+  "duplicate_min_by_job": {
+   "CI Summary": 2.3333333333333335,
+   "CLI Smoke (Linux \u00b7 PE sample) / Smoke": 79.96666666666667,
+   "DecBench sweep smoke / Build static decompiler and CFG parser": 6.616666666666666,
+   "DecBench sweep smoke / DecBench sweep smoke": 1.2,
+   "Detect changes": 20.099999999999994,
+   "Documentation examples and schemas": 37.45,
+   "Lint & Format / lint": 45.28333333333334,
+   "Native Debugger Tests (Linux) / test": 31.2,
+   "Native fixture replay and Python port": 258.3166666666666,
+   "Pass-Gate Lint (anti-overfitting)": 5.900000000000002,
+   "Script Checks": 2.3499999999999996,
+   "Security Check / security": 9.283333333333333,
+   "Tests (Linux) / test (core)": 289.7333333333333,
+   "Tests (Linux) / test (extras)": 167.0666666666667,
+   "decomp-corpus / Binary fixtures (ubuntu-latest)": 132.71666666666667,
+   "loader-fixtures / Binary fixtures (macos-latest)": 44.35,
+   "loader-fixtures / Binary fixtures (ubuntu-latest)": 32.083333333333336,
+   "platform-debugger / Debugger process control (macos-latest)": 38.11666666666667,
+   "platform-debugger / Debugger process control (ubuntu-latest)": 36.53333333333333,
+   "platform-debugger / Debugger process control (windows-latest)": 66.53333333333333,
+   "sccache outage fallback": 0.65,
+   "solver-diff / Solver differential (Z3)": 2.5833333333333335
+  },
+  "duplicate_min_total": 1310.3666666666666,
+  "merge_group_cancelled": 0,
+  "merge_group_regenerations": 13,
+  "per_pr": [
+   {
+    "merge_group_runs": 0,
+    "number": 899,
+    "pr_runs": 3,
+    "runner_min": 34.666666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 900,
+    "pr_runs": 2,
+    "runner_min": 15.65
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 901,
+    "pr_runs": 1,
+    "runner_min": 9.266666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 902,
+    "pr_runs": 1,
+    "runner_min": 9.083333333333332
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 903,
+    "pr_runs": 1,
+    "runner_min": 9.183333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 918,
+    "pr_runs": 1,
+    "runner_min": 10.716666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 919,
+    "pr_runs": 1,
+    "runner_min": 9.75
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 926,
+    "pr_runs": 1,
+    "runner_min": 8.566666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 927,
+    "pr_runs": 3,
+    "runner_min": 44.55
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 928,
+    "pr_runs": 2,
+    "runner_min": 22.433333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 929,
+    "pr_runs": 1,
+    "runner_min": 9.35
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 930,
+    "pr_runs": 1,
+    "runner_min": 12.116666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 931,
+    "pr_runs": 1,
+    "runner_min": 8.666666666666668
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 932,
+    "pr_runs": 1,
+    "runner_min": 8.55
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 933,
+    "pr_runs": 1,
+    "runner_min": 10.15
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 934,
+    "pr_runs": 1,
+    "runner_min": 8.416666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 935,
+    "pr_runs": 1,
+    "runner_min": 12.416666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 936,
+    "pr_runs": 2,
+    "runner_min": 33.516666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 937,
+    "pr_runs": 1,
+    "runner_min": 20.433333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 938,
+    "pr_runs": 1,
+    "runner_min": 20.28333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 939,
+    "pr_runs": 1,
+    "runner_min": 0.6166666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 940,
+    "pr_runs": 1,
+    "runner_min": 8.233333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 941,
+    "pr_runs": 1,
+    "runner_min": 14.4
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 942,
+    "pr_runs": 1,
+    "runner_min": 12.616666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 943,
+    "pr_runs": 2,
+    "runner_min": 22.566666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 944,
+    "pr_runs": 1,
+    "runner_min": 15.433333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 945,
+    "pr_runs": 1,
+    "runner_min": 20.916666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 946,
+    "pr_runs": 1,
+    "runner_min": 16.1
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 947,
+    "pr_runs": 2,
+    "runner_min": 35.18333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 948,
+    "pr_runs": 1,
+    "runner_min": 12.966666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 949,
+    "pr_runs": 1,
+    "runner_min": 12.0
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 950,
+    "pr_runs": 1,
+    "runner_min": 13.233333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 951,
+    "pr_runs": 2,
+    "runner_min": 30.46666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 952,
+    "pr_runs": 1,
+    "runner_min": 8.883333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 953,
+    "pr_runs": 1,
+    "runner_min": 8.283333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 954,
+    "pr_runs": 1,
+    "runner_min": 9.783333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 955,
+    "pr_runs": 1,
+    "runner_min": 15.666666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 956,
+    "pr_runs": 1,
+    "runner_min": 13.366666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 957,
+    "pr_runs": 2,
+    "runner_min": 45.43333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 958,
+    "pr_runs": 2,
+    "runner_min": 25.55
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 960,
+    "pr_runs": 2,
+    "runner_min": 39.15
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 961,
+    "pr_runs": 1,
+    "runner_min": 8.116666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 962,
+    "pr_runs": 1,
+    "runner_min": 20.71666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 963,
+    "pr_runs": 1,
+    "runner_min": 13.950000000000001
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 964,
+    "pr_runs": 2,
+    "runner_min": 25.03333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 965,
+    "pr_runs": 2,
+    "runner_min": 48.7
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 966,
+    "pr_runs": 2,
+    "runner_min": 20.35
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 967,
+    "pr_runs": 3,
+    "runner_min": 50.95
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 968,
+    "pr_runs": 3,
+    "runner_min": 57.65
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 969,
+    "pr_runs": 2,
+    "runner_min": 35.06666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 970,
+    "pr_runs": 3,
+    "runner_min": 48.416666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 973,
+    "pr_runs": 2,
+    "runner_min": 37.666666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 974,
+    "pr_runs": 1,
+    "runner_min": 20.8
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 975,
+    "pr_runs": 1,
+    "runner_min": 34.800000000000004
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 976,
+    "pr_runs": 1,
+    "runner_min": 9.65
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 977,
+    "pr_runs": 1,
+    "runner_min": 22.016666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 978,
+    "pr_runs": 2,
+    "runner_min": 10.966666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 979,
+    "pr_runs": 1,
+    "runner_min": 8.866666666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 980,
+    "pr_runs": 8,
+    "runner_min": 561.7833333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 981,
+    "pr_runs": 1,
+    "runner_min": 0.5
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 982,
+    "pr_runs": 3,
+    "runner_min": 32.75
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 983,
+    "pr_runs": 2,
+    "runner_min": 22.65
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 984,
+    "pr_runs": 7,
+    "runner_min": 197.81666666666666
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 985,
+    "pr_runs": 6,
+    "runner_min": 430.21666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 986,
+    "pr_runs": 1,
+    "runner_min": 14.833333333333334
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 987,
+    "pr_runs": 2,
+    "runner_min": 42.56666666666667
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 988,
+    "pr_runs": 1,
+    "runner_min": 64.5
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 989,
+    "pr_runs": 2,
+    "runner_min": 101.05
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 990,
+    "pr_runs": 2,
+    "runner_min": 65.56666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 991,
+    "pr_runs": 4,
+    "runner_min": 27.766666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 993,
+    "pr_runs": 5,
+    "runner_min": 167.38333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 996,
+    "pr_runs": 4,
+    "runner_min": 176.38333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 997,
+    "pr_runs": 5,
+    "runner_min": 356.6666666666667
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1006,
+    "pr_runs": 4,
+    "runner_min": 332.65
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1008,
+    "pr_runs": 4,
+    "runner_min": 397.1333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1009,
+    "pr_runs": 1,
+    "runner_min": 26.483333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1010,
+    "pr_runs": 5,
+    "runner_min": 167.65
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1011,
+    "pr_runs": 5,
+    "runner_min": 178.2
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1012,
+    "pr_runs": 4,
+    "runner_min": 425.25
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1013,
+    "pr_runs": 4,
+    "runner_min": 116.31666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1014,
+    "pr_runs": 1,
+    "runner_min": 92.56666666666666
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1015,
+    "pr_runs": 2,
+    "runner_min": 100.16666666666667
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1016,
+    "pr_runs": 3,
+    "runner_min": 205.65
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1017,
+    "pr_runs": 4,
+    "runner_min": 304.4166666666667
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1018,
+    "pr_runs": 2,
+    "runner_min": 27.216666666666665
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1019,
+    "pr_runs": 13,
+    "runner_min": 773.6666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1020,
+    "pr_runs": 4,
+    "runner_min": 221.83333333333334
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1021,
+    "pr_runs": 1,
+    "runner_min": 32.9
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1022,
+    "pr_runs": 1,
+    "runner_min": 30.766666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1023,
+    "pr_runs": 2,
+    "runner_min": 42.333333333333336
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1024,
+    "pr_runs": 1,
+    "runner_min": 17.4
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1025,
+    "pr_runs": 1,
+    "runner_min": 14.399999999999999
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1026,
+    "pr_runs": 2,
+    "runner_min": 41.25
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1027,
+    "pr_runs": 2,
+    "runner_min": 43.166666666666664
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1028,
+    "pr_runs": 2,
+    "runner_min": 44.38333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1029,
+    "pr_runs": 2,
+    "runner_min": 41.38333333333333
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1030,
+    "pr_runs": 2,
+    "runner_min": 39.3
+   },
+   {
+    "merge_group_runs": 0,
+    "number": 1031,
+    "pr_runs": 2,
+    "runner_min": 30.333333333333332
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1033,
+    "pr_runs": 1,
+    "runner_min": 22.183333333333334
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1034,
+    "pr_runs": 1,
+    "runner_min": 78.78333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1035,
+    "pr_runs": 1,
+    "runner_min": 101.06666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1036,
+    "pr_runs": 2,
+    "runner_min": 93.55
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1037,
+    "pr_runs": 2,
+    "runner_min": 98.33333333333333
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1038,
+    "pr_runs": 3,
+    "runner_min": 305.9166666666667
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1039,
+    "pr_runs": 5,
+    "runner_min": 175.45000000000002
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1040,
+    "pr_runs": 2,
+    "runner_min": 66.43333333333334
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1041,
+    "pr_runs": 2,
+    "runner_min": 81.81666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1042,
+    "pr_runs": 5,
+    "runner_min": 105.31666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1043,
+    "pr_runs": 1,
+    "runner_min": 4.266666666666667
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1044,
+    "pr_runs": 4,
+    "runner_min": 328.5333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1047,
+    "pr_runs": 1,
+    "runner_min": 4.116666666666667
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1066,
+    "pr_runs": 5,
+    "runner_min": 260.26666666666665
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1092,
+    "pr_runs": 1,
+    "runner_min": 83.38333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1098,
+    "pr_runs": 1,
+    "runner_min": 93.06666666666666
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1103,
+    "pr_runs": 1,
+    "runner_min": 10.75
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1105,
+    "pr_runs": 1,
+    "runner_min": 81.98333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1108,
+    "pr_runs": 1,
+    "runner_min": 84.93333333333334
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1109,
+    "pr_runs": 1,
+    "runner_min": 125.23333333333333
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1110,
+    "pr_runs": 1,
+    "runner_min": 84.55
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1111,
+    "pr_runs": 1,
+    "runner_min": 104.96666666666667
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1112,
+    "pr_runs": 1,
+    "runner_min": 118.75
+   },
+   {
+    "merge_group_runs": 2,
+    "number": 1113,
+    "pr_runs": 1,
+    "runner_min": 132.1
+   },
+   {
+    "merge_group_runs": 1,
+    "number": 1127,
+    "pr_runs": 1,
+    "runner_min": 81.39999999999999
+   }
+  ],
+  "runner_min_per_merged_pr": {
+   "mean": 80.55880758807588,
+   "p50": 33.516666666666666,
+   "p95": 332.65
+  }
+ },
+ "triage": {
+  "changes_requested": [],
+  "queued": [
+   {
+    "age_in_state_h": 0.0,
+    "number": 1094,
+    "title": "structuring: a loop that exits from the middle of its body is a loop"
+   },
+   {
+    "age_in_state_h": 0.07916666666666666,
+    "number": 1114,
+    "title": "fix(emulator): support half-precision (2-byte) float varnodes"
+   },
+   {
+    "age_in_state_h": 0.07861111111111112,
+    "number": 1115,
+    "title": "fix(emulator): handle wide (>16-byte) integer shifts and ops in evaluator and JIT"
+   },
+   {
+    "age_in_state_h": 0.08,
+    "number": 1148,
+    "title": "fix(sleigh): sign-extend AArch64 W-register byte/halfword loads to 32 bits"
+   },
+   {
+    "age_in_state_h": 0.20305555555555554,
+    "number": 1156,
+    "title": "fix(dynamic): overlay breakpoints, guard handles, rollback step-off, reset timeline"
+   },
+   {
+    "age_in_state_h": 0.08277777777777778,
+    "number": 1169,
+    "title": "fix(emulator): fix ET_EXEC relocation bias and sync Windows heap base"
+   },
+   {
+    "age_in_state_h": 0.08194444444444444,
+    "number": 1202,
+    "title": "fix(emulator): keep symbolic expressions through the interpreter's in-place ops and stores"
+   },
+   {
+    "age_in_state_h": 0.08083333333333333,
+    "number": 1214,
+    "title": "fix(sleigh): Thumb stmia Rn! writeback and Thumb-2 logical-op carry"
+   },
+   {
+    "age_in_state_h": 0.16444444444444445,
+    "number": 1240,
+    "title": "fix(structuring): validate and tombstone rotated loop bodies by sorted position"
+   },
+   {
+    "age_in_state_h": 0.20722222222222222,
+    "number": 1299,
+    "title": "chore: establish managed issue labels and correctness-first PR lifecycle"
+   },
+   {
+    "age_in_state_h": 0.2063888888888889,
+    "number": 1301,
+    "title": "ci: remove unnecessary Linux test dependency from CLI smoke critical path"
+   }
+  ],
+  "ready_to_enqueue": [
+   {
+    "age_in_state_h": 0.0,
+    "number": 1073,
+    "title": "test(emulator): native single-instruction differential against the SLEIGH lift (x86-64 + AArch64)"
+   },
+   {
+    "age_in_state_h": 22.703055555555554,
+    "number": 1096,
+    "title": "quotient: WBCQ prototype -- behavioural quotients of P-code slices (RFC #1093, P0/P1)"
+   },
+   {
+    "age_in_state_h": 0.33944444444444444,
+    "number": 1106,
+    "title": "causal: CSIC P0/P1/P2 -- counterfactual runner, input-first candidates, solver-backed joint search (RFC #1101 Track B)"
+   },
+   {
+    "age_in_state_h": 0.5327777777777778,
+    "number": 1285,
+    "title": "fix(normalize): preserve offsets, strides, and structured reads in MemSSA and RLE"
+   },
+   {
+    "age_in_state_h": 0.47194444444444444,
+    "number": 1292,
+    "title": "fix(normalize): eliminate None==None, control-flow leak, and 1-bit/effect bugs in double_precision and three_way"
+   },
+   {
+    "age_in_state_h": 0.015,
+    "number": 1294,
+    "title": "fix(midend-normalize): fix constant folding, cast stripping, iblock phi, and subvar flow soundness (#875)"
+   },
+   {
+    "age_in_state_h": 0.3775,
+    "number": 1295,
+    "title": "docs: adopt correctness-first implementation and validation workflow for Fission 1.0"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1300,
+    "title": "fix(midend-normalize): fix soundness bugs across cleanup and global_opt passes (#890)"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1306,
+    "title": "fix(normalize): resolve soundness bugs in copy_prop, sccp, post_assign, subflow, split_flow, loops_conds, and rule_normalizer"
+   }
+  ],
+  "waiting_ci": [
+   {
+    "age_in_state_h": 0.2538888888888889,
+    "number": 1116,
+    "title": "fix(emulator): enforce ISA NaN propagation rules in float evaluation"
+   },
+   {
+    "age_in_state_h": 0.19944444444444445,
+    "number": 1128,
+    "title": "fix(emulator): implement SSE/MMX and AArch64 NEON vector userops"
+   },
+   {
+    "age_in_state_h": 0.0811111111111111,
+    "number": 1302,
+    "title": "fix(midend-normalize): fix arithmetic soundness, width, and overflow bugs across arith passes (#906)"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1303,
+    "title": "docs: defect intake needs a probe and an acceptance check"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1304,
+    "title": "docs: review policy by area and risk, with SHA-bound review records"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1305,
+    "title": "ci: label pull requests with area:* from changed paths"
+   },
+   {
+    "age_in_state_h": 0.0,
+    "number": 1307,
+    "title": "release: draft notes from merged PRs and open the Release PR"
+   }
+  ],
+  "waiting_dependency": [
+   {
+    "age_in_state_h": 22.770833333333332,
+    "number": 1097,
+    "title": "cli: `quotient` -- WBCQ behavioural quotients from the CLI (RFC #1093, P2)"
+   },
+   {
+    "age_in_state_h": 18.915555555555557,
+    "number": 1102,
+    "title": "quotient: P3 evaluation -- obfuscated corpus, native ground truth, DecBench reach (RFC #1093)"
+   },
+   {
+    "age_in_state_h": 15.307222222222222,
+    "number": 1107,
+    "title": "quotient: calls are effects, not refusals (WBCQ P4 step 1, RFC #1093)"
+   },
+   {
+    "age_in_state_h": 2.5122222222222224,
+    "number": 1229,
+    "title": "quotient: pointer fields are regions of their own (WBCQ P4 step 2, RFC #1093)"
+   }
+  ],
+  "waiting_review": []
+ },
+ "window": {
+  "days": 7.0,
+  "now": "2026-11-24T06:30:00+00:00",
+  "open_state_at": "2026-11-24T06:55:58+00:00",
+  "since": "2026-11-17T06:30:00+00:00"
+ }
+}

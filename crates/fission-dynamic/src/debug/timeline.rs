@@ -347,6 +347,7 @@ impl Timeline {
             #[cfg(target_os = "linux")]
             Backend::RR(_) => {}
         }
+        self.events_recorded = 0;
         self.current_position = None;
         self.replay_mode = false;
         self.current_snapshot = None;
@@ -548,6 +549,26 @@ mod tests {
 
         // A new recording is a new timeline; its first event is ordinal 0
         // again, not 3 carried over from the one that was discarded.
+        timeline.start_recording();
+        timeline.record_event(RegisterState::at(0x2000), 1);
+        assert_eq!(timeline.latest_snapshot().map(|s| s.step_index), Some(0));
+    }
+
+    #[test]
+    fn clearing_a_timeline_resets_event_ordinals() {
+        let mut timeline = Timeline::new();
+        timeline.start_recording();
+        for pc in [0x1000u64, 0x1004, 0x1008] {
+            timeline.record_event(RegisterState::at(pc), 1);
+        }
+        assert_eq!(timeline.latest_snapshot().map(|s| s.step_index), Some(2));
+        assert_eq!(timeline.events_recorded, 3);
+
+        // Clearing resets the event ordinal alongside the snapshots and replay state.
+        timeline.clear();
+        assert_eq!(timeline.events_recorded, 0);
+        assert_eq!(timeline.snapshot_count(), 0);
+
         timeline.start_recording();
         timeline.record_event(RegisterState::at(0x2000), 1);
         assert_eq!(timeline.latest_snapshot().map(|s| s.step_index), Some(0));

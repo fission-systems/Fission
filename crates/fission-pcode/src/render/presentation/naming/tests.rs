@@ -251,3 +251,35 @@ fn does_not_rename_already_meaningful_names() {
     assert!(!apply_semantic_naming(&mut func));
     assert_eq!(func.params[0].name, "count");
 }
+
+#[test]
+fn size_naming_strips_module_and_import_prefixes() {
+    for target in [
+        "msvcrt.dll!memcpy",
+        "__imp_memcpy",
+        "ucrtbase.dll!__imp_memcpy",
+    ] {
+        let mut func = HirFunction {
+            name: "f".into(),
+            params: vec![
+                param("param_1", ptr_ty()),
+                param("param_2", ptr_ty()),
+                param("param_3", int_ty(64, false)),
+            ],
+            return_type: NirType::Unknown,
+            body: vec![HirStmt::Expr(HirExpr::Call {
+                origin: None,
+                target: target.into(),
+                args: vec![
+                    HirExpr::Var("param_1".into()),
+                    HirExpr::Var("param_2".into()),
+                    HirExpr::Var("param_3".into()),
+                ],
+                ty: NirType::Unknown,
+            })],
+            ..Default::default()
+        };
+        assert!(apply_semantic_naming(&mut func), "target={target}");
+        assert_eq!(func.params[2].name, "n", "target={target}");
+    }
+}

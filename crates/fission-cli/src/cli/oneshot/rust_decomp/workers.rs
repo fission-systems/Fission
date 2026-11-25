@@ -57,6 +57,17 @@ pub(crate) fn resolve_render_timeout_ms(requested: Option<u64>) -> Option<u64> {
     requested.or(Some(fission_core::CONFIG.decompiler.timeout_ms))
 }
 
+/// Resolve the deterministic work limits for a `decomp` run: built-in
+/// defaults, then `[decompiler.work_limits]` from the configuration, then any
+/// `--work-limit` flags (the last flag for a limit wins).
+pub(crate) fn resolve_resource_limits(
+    flags: &[crate::cli::args::WorkLimitFlag],
+) -> fission_decompiler::midend_core::ir::ResourceLimits {
+    let overrides =
+        crate::cli::args::overrides_with_flags(fission_core::CONFIG.decompiler.work_limits, flags);
+    fission_decompiler::midend_core::ir::ResourceLimits::DEFAULT.with_overrides(&overrides)
+}
+
 pub(crate) fn render_one_function_on_large_stack(
     binary: Arc<fission_loader::loader::LoadedBinary>,
     facts: Arc<FactStore>,
@@ -391,7 +402,8 @@ pub(crate) fn run_worker_fanout_fanin(
 
 #[cfg(test)]
 mod tests {
-    use super::{render_timeout_message, resolve_render_timeout_ms};
+    use super::{render_timeout_message, resolve_render_timeout_ms, resolve_resource_limits};
+    use fission_decompiler::midend_core::ir::ResourceLimits;
 
     #[test]
     fn configured_timeout_is_used_when_cli_does_not_override_it() {
@@ -477,6 +489,7 @@ mod tests {
             debug_decomp_bundle: false,
             requested_address: None,
             timeout_ms: Some(0),
+            resource_limits: Default::default(),
             prehir: false,
         };
 
@@ -495,5 +508,22 @@ mod tests {
         let impossible_stack =
             super::run_worker_fanout_fanin(binary, facts, &functions, config, 2, usize::MAX / 2);
         assert_eq!(impossible_stack.len(), 2);
+    }
+
+    #[test]
+    fn work_limits_default_when_nothing_is_configured_or_passed() {
+        // the repository configuration sets no work limits
+        assert_eq!(resolve_resource_limits(&[]), ResourceLimits::DEFAULT);
+    }
+
+    #[test]
+    fn a_flag_overrides_only_its_own_limit() {
+        let flags = ["sese_region_proof_calls=7".parse().unwrap()];
+        let limits = resolve_resource_limits(&flags);
+        assert_eq!(limits.sese_region_proof_calls, 7);
+        assert_eq!(
+            limits.structuring_total_work,
+            ResourceLimits::DEFAULT.structuring_total_work
+        );
     }
 }

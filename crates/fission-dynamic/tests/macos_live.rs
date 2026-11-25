@@ -5,8 +5,9 @@
 //! `com.apple.security.cs.debugger` entitlement **and** authorized for
 //! Developer Tools (`sudo DevToolsSecurity -enable`, once). An unsigned caller
 //! is refused at once; a signed one on a machine without Developer Tools access
-//! waits on a prompt. So the tests are opt-in and are run through the script
-//! that signs the test binary first:
+//! waits on a prompt. So the tests are `#[ignore]`d -- nextest reports them as
+//! ignored rather than passed -- and are run through the script that signs the
+//! test binary first and passes `--ignored`:
 //!
 //! ```text
 //! scripts/macos/run-live-debugger-tests.sh
@@ -21,10 +22,6 @@ use fission_dynamic::debug::platform::macos::MacOSDebugger;
 use fission_dynamic::debug::traits::ExecutionBackend;
 use fission_dynamic::debug::types::DebugEvent;
 use std::path::PathBuf;
-
-fn enabled() -> bool {
-    std::env::var_os("FISSION_MACOS_LIVE_DEBUG_TESTS").is_some()
-}
 
 /// Build the target once per test into its own directory.
 fn build_target(name: &str) -> PathBuf {
@@ -55,10 +52,8 @@ fn next_event(debugger: &mut MacOSDebugger) -> DebugEvent {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn launch_stops_at_exec_and_runs_to_exit() {
-    if !enabled() {
-        return;
-    }
     let target = build_target("exit");
     let mut debugger = MacOSDebugger::new();
     let pid = debugger
@@ -86,10 +81,8 @@ fn launch_stops_at_exec_and_runs_to_exit() {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn single_step_moves_the_program_counter() {
-    if !enabled() {
-        return;
-    }
     let target = build_target("step");
     let mut debugger = MacOSDebugger::new();
     let pid = debugger
@@ -146,10 +139,8 @@ int main(int argc, char **argv) {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn a_breakpoint_hits_hides_its_instruction_and_steps_off() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_reporting_target("breakpoint");
     let mut debugger = MacOSDebugger::new();
     let pid = debugger
@@ -197,10 +188,8 @@ fn a_breakpoint_hits_hides_its_instruction_and_steps_off() {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn removing_a_breakpoint_restores_the_instruction() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_reporting_target("remove");
     let mut debugger = MacOSDebugger::new();
     debugger
@@ -226,10 +215,8 @@ fn removing_a_breakpoint_restores_the_instruction() {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn modules_are_listed_once_dyld_has_run() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_reporting_target("modules");
     let mut debugger = MacOSDebugger::new();
     let pid = debugger
@@ -268,10 +255,8 @@ fn reported_addresses(report: &std::path::Path) -> (u64, u64) {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn memory_and_registers_can_be_written() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_reporting_target("write");
     let mut debugger = MacOSDebugger::new();
     // A second argument makes the target return `cell` instead of `marker(2)`.
@@ -316,10 +301,8 @@ fn memory_and_registers_can_be_written() {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn attach_to_a_running_process_and_let_it_go() {
-    if !enabled() {
-        return;
-    }
     let dir =
         std::env::temp_dir().join(format!("fission-macos-live-{}-attach", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -436,10 +419,8 @@ int main(int argc, char **argv) {
 /// thread parked in `pthread_join`, called the stop a single step, and left
 /// the worker to execute the breakpoint instruction again for ever.
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn a_breakpoint_hit_on_another_thread_is_reported_for_that_thread() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_c_target("worker-hit", WORKER_THREAD_TARGET);
     let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     let main_pc = debugger.fetch_registers(pid).unwrap().pc;
@@ -476,10 +457,8 @@ fn a_breakpoint_hit_on_another_thread_is_reported_for_that_thread() {
 
 /// A step from a breakpoint on another thread moves that thread, and only it.
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_c_target("worker-step", WORKER_THREAD_TARGET);
     let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(marker).expect("set breakpoint");
@@ -523,11 +502,13 @@ fn stepping_from_a_breakpoint_on_another_thread_steps_that_thread() {
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn dropping_an_active_worker_step_releases_the_target() {
     check_drop_during_worker_step(false);
 }
 
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn dropping_an_active_worker_step_detaches_a_target_that_keeps_running() {
     check_drop_during_worker_step(true);
 }
@@ -536,9 +517,6 @@ fn check_drop_during_worker_step(keep_running: bool) {
     use std::os::unix::process::ExitStatusExt;
     use std::time::{Duration, Instant};
 
-    if !enabled() {
-        return;
-    }
     let fixture = if keep_running {
         "drop-worker-detach"
     } else {
@@ -644,10 +622,8 @@ int main(int argc, char **argv) {
 /// fault at that instruction, and is hit again when the instruction is
 /// reached a second time.
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn a_breakpoint_on_a_faulting_instruction_reports_the_fault_and_stays_set() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_c_target("fault", FAULTING_INSTRUCTION_TARGET);
     let (mut debugger, pid, load) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(load).expect("set breakpoint");
@@ -726,10 +702,8 @@ int main(int argc, char **argv) {
 /// with its own trap. The breakpoint has to be back in place all the same:
 /// the second call must hit it again.
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn a_breakpoint_is_put_back_when_a_signal_ends_the_step_off_it() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_c_target("signal", SIGNALLING_INSTRUCTION_TARGET);
     let (mut debugger, _pid, syscall) = launch_to_self_stop(&target, &report, None);
     debugger.set_sw_breakpoint(syscall).expect("set breakpoint");
@@ -766,10 +740,8 @@ fn a_breakpoint_is_put_back_when_a_signal_ends_the_step_off_it() {
 /// instruction was read as a hit of the breakpoint just left and the counter
 /// was moved back onto it.
 #[test]
+#[ignore = "needs a signed test binary and Developer Tools access; run scripts/macos/run-live-debugger-tests.sh"]
 fn a_step_that_lands_on_a_breakpoint_is_a_step() {
-    if !enabled() {
-        return;
-    }
     let (target, report) = build_reporting_target("step-onto");
     let (mut debugger, pid, marker) = launch_to_self_stop(&target, &report, None);
     // The first instruction of an unoptimised function: `sub sp, sp, #16`

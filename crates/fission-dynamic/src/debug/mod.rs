@@ -112,6 +112,8 @@ pub struct DebugSession {
 pub struct DebugSessionBuilder {
     with_timeline: bool,
     use_emulator: bool,
+    /// Emulator only: record a snapshot every this many instructions.
+    emulator_ttd_interval: u64,
     #[cfg(target_os = "linux")]
     rr: Option<crate::debug::rr::RRDebugger>,
 }
@@ -121,6 +123,14 @@ impl DebugSessionBuilder {
     /// Enable automatic TTD timeline recording.
     pub fn with_timeline(mut self) -> Self {
         self.with_timeline = true;
+        self
+    }
+
+    /// Emulator backend: record execution so the session can seek back to an
+    /// earlier instruction (a snapshot every `interval` instructions; the
+    /// seek re-executes from the nearest one).
+    pub fn with_emulator_recording(mut self, interval: u64) -> Self {
+        self.emulator_ttd_interval = interval;
         self
     }
 
@@ -153,6 +163,7 @@ impl DebugSessionBuilder {
         if self.use_emulator {
             let timeline = make_timeline(self.with_timeline);
             let mut debugger = crate::debug::EmulatorBackend::new();
+            debugger.set_ttd_recording(self.emulator_ttd_interval);
             if let Some(arc) = &timeline {
                 debugger.set_timeline(arc.clone());
             }
@@ -199,6 +210,7 @@ impl DebugSession {
         DebugSessionBuilder {
             with_timeline: false,
             use_emulator: false,
+            emulator_ttd_interval: 0,
             #[cfg(target_os = "linux")]
             rr: None,
         }

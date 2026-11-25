@@ -1,0 +1,31 @@
+{
+  "command": [
+    "types",
+    "crates/fission-loader/testdata/x64_dwarf5_strx.elf",
+    "--json",
+    "--no-db"
+  ],
+  "shape": {
+    "array": {
+      "object": {
+        "fields": {
+          "array": {
+            "object": {
+              "name": "string",
+              "offset": "number",
+              "size": "number",
+              "type": "string"
+            }
+          }
+        },
+        "kind": "string",
+        "mangled_name": "string",
+        "metadata_address": "string",
+        "name": "string",
+        "size": "number",
+        "source": "string",
+        "verified": "bool"
+      }
+    }
+  }
+}

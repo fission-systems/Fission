@@ -229,6 +229,17 @@ impl AigManager {
         std::mem::take(&mut self.unsupported)
     }
 
+    /// Drains any unsupported notes recorded at or beyond `prior_len`,
+    /// preserving earlier persistent notes (for example from permanent
+    /// assertions) across a query-local transaction.
+    pub(crate) fn drain_unsupported_since(&mut self, prior_len: usize) -> Vec<String> {
+        if prior_len >= self.unsupported.len() {
+            Vec::new()
+        } else {
+            self.unsupported.drain(prior_len..).collect()
+        }
+    }
+
     pub fn note_unsupported(&mut self, what: String) {
         if !self.unsupported.contains(&what) {
             self.unsupported.push(what);

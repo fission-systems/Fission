@@ -2057,11 +2057,8 @@ impl<'a> PreviewBuilder<'a> {
                 if let Some(boolor_output) = consumer_op.output.as_ref() {
                     let downstream_uses =
                         Self::collect_output_use_sites_in_block(block, consumer_idx, boolor_output);
-                    let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-                        &self.pcode.blocks,
-                        block.start_address,
-                        boolor_output,
-                    );
+                    let (cross_block_consumers, _) = self
+                        .collect_output_use_sites_outside_block(block.start_address, boolor_output);
                     if downstream_uses.is_empty() && cross_block_consumers == 0 {
                         (CarryIntrinsicFinalPredicateContext::BoolOrOnly, None)
                     } else if downstream_uses.len() == 1 && cross_block_consumers == 0 {
@@ -2358,11 +2355,8 @@ impl<'a> PreviewBuilder<'a> {
             if let Some(popcount_output) = consumer_op.output.as_ref() {
                 let downstream_uses =
                     Self::collect_output_use_sites_in_block(block, consumer_idx, popcount_output);
-                let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-                    &self.pcode.blocks,
-                    block.start_address,
-                    popcount_output,
-                );
+                let (cross_block_consumers, _) = self
+                    .collect_output_use_sites_outside_block(block.start_address, popcount_output);
                 if downstream_uses.is_empty() && cross_block_consumers == 0 {
                     (PopCountResultUseFamily::PopCountResultUnused, None)
                 } else if downstream_uses.len() == 1 && cross_block_consumers == 0 {
@@ -2450,11 +2444,8 @@ impl<'a> PreviewBuilder<'a> {
         {
             let intand_output_uses =
                 Self::collect_output_use_sites_in_block(block, intand_idx, intand_output);
-            let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-                &self.pcode.blocks,
-                block.start_address,
-                intand_output,
-            );
+            let (cross_block_consumers, _) =
+                self.collect_output_use_sites_outside_block(block.start_address, intand_output);
             if intand_output_uses.len() == 1 && cross_block_consumers == 0 {
                 let (_, use_op) = intand_output_uses[0];
                 let intand_output_key = VarnodeKey::from(intand_output);
@@ -2566,11 +2557,8 @@ impl<'a> PreviewBuilder<'a> {
         output: &Varnode,
     ) -> Result<(usize, &'b PcodeOp, u64), ParityChainKeepReason> {
         let uses = Self::collect_output_use_sites_in_block(block, producer_idx, output);
-        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-            &self.pcode.blocks,
-            block.start_address,
-            output,
-        );
+        let (cross_block_consumers, _) =
+            self.collect_output_use_sites_outside_block(block.start_address, output);
         if uses.len() != 1 || cross_block_consumers != 0 {
             return Err(ParityChainKeepReason::IntAndHasMultipleConsumers);
         }
@@ -2632,11 +2620,8 @@ impl<'a> PreviewBuilder<'a> {
                     return Some(Err(ParityChainKeepReason::RhsHasCall));
                 }
                 let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
-                let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-                    &self.pcode.blocks,
-                    block.start_address,
-                    output,
-                );
+                let (cross_block_consumers, _) =
+                    self.collect_output_use_sites_outside_block(block.start_address, output);
                 if uses.len() != 1 || cross_block_consumers != 0 {
                     return Some(Err(ParityChainKeepReason::PopCountHasMultipleConsumers));
                 }
@@ -2750,11 +2735,8 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         let uses = Self::collect_output_use_sites_in_block(block, op_idx, output);
-        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-            &self.pcode.blocks,
-            block.start_address,
-            output,
-        );
+        let (cross_block_consumers, _) =
+            self.collect_output_use_sites_outside_block(block.start_address, output);
         let Some((popcount_idx, popcount_op)) = uses.first().copied() else {
             return None;
         };
@@ -2782,11 +2764,8 @@ impl<'a> PreviewBuilder<'a> {
         }
         let popcount_output = popcount_op.output.as_ref()?;
         let uses = Self::collect_output_use_sites_in_block(block, popcount_idx, popcount_output);
-        let (cross_block_consumers, _) = Self::collect_output_use_sites_outside_block(
-            &self.pcode.blocks,
-            block.start_address,
-            popcount_output,
-        );
+        let (cross_block_consumers, _) =
+            self.collect_output_use_sites_outside_block(block.start_address, popcount_output);
         if uses.len() != 1 || cross_block_consumers != 0 {
             return Some(Err(ParityChainKeepReason::PopCountHasMultipleConsumers));
         }

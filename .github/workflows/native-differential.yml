@@ -1,0 +1,73 @@
+name: Native differential
+
+# Single instructions on the real CPU against Fission's SLEIGH lift and p-code
+# interpreter, nightly with ~25x the pull-request case count. The PR lane
+# (reusable-premerge.yml, suite native-diff) runs the same test with the
+# defaults; both use the same seed, so every PR case is also a nightly case.
+# A divergence only this run finds needs a curated case before it can be
+# baselined (crates/fission-emulator/tests/native_differential/baseline.txt).
+# Measured on an x86-64 4-vCPU VM: 50 s for 503 curated x 128 states plus
+# 100,000 random byte strings, after the build.
+
+on:
+  schedule:
+    - cron: "10 3 * * *"
+  workflow_dispatch:
+    inputs:
+      random:
+        description: "Random byte strings per ISA"
+        required: false
+        default: "100000"
+      seed:
+        description: "RNG seed (hex or decimal); empty for the fixed default"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-differential-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-differential:
+    name: Native differential (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    env:
+      FISSION_NATIVE_DIFF_STATES: "128"
+      FISSION_NATIVE_DIFF_RANDOM: ${{ inputs.random || '100000' }}
+      FISSION_NATIVE_DIFF_SEED: ${{ inputs.seed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: native-diff-${{ matrix.os }}
+      - uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
+      - name: Build
+        run: cargo nextest run --locked --no-run -p fission-emulator --test native_differential
+      - name: Compare against the CPU
+        run: cargo nextest run --locked --no-tests=fail -p fission-emulator --test native_differential --no-capture
+
+  report:
+    needs: native-differential
+    if: always()
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ needs.native-differential.result }}
+      detail: "the job log lists each new divergence with a one-line REPRO and each stale baseline entry"

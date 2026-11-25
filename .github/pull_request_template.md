@@ -2,6 +2,18 @@
 
 <!-- What does this PR change and why? Link issues (e.g. `Closes #123`). -->
 
+## Issue / Stabilization Context
+
+- Linked issue(s), primary phase, priority and owner:
+- Base revision / reproduction (or preventive-work rationale):
+- Probe (defect before, gone after) and acceptance test (fails on base, passes on head; path):
+- Violated invariant / expected behavior:
+- Dependencies, risk, and out-of-scope changes:
+
+<!-- See docs/ISSUE_PR_WORKFLOW.md. Apply the corresponding labels after
+reviewing the actual change. Use Refs for partial/umbrella work; Closes only
+when all acceptance criteria are verified. -->
+
 ## Change Type
 
 - [ ] Decompiler semantics / IR / structuring / types
@@ -35,9 +47,10 @@
 ## Validation
 
 - [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --locked -- -D warnings -A clippy::style -A clippy::complexity` (CI's exact line)
+- [ ] `cargo clippy --workspace --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity` (CI's exact line)
 - [ ] `cargo nextest run -p <crates touched>`
 - [ ] Each new test fails with the fix disabled (positive control)
+- [ ] Correctness evidence, if this fixes wrong output (see below)
 - [ ] DecBench measurement, if decompiler output can change (see below)
 - [ ] Not run — reason:
 
@@ -49,6 +62,18 @@
 ```
 
 </details>
+
+## Correctness Evidence
+
+<!--
+Required when this PR claims wrong output became right. DecBench measures
+similarity to the source, not correctness (docs/adr/0018). Cite what checks
+meaning: native replay (docs/VERIFY_REPLAY.md), `fission_cli verify --tier
+ground-truth` (divergences before -> after), the architecture manual, DWARF/PDB,
+call sites counted by instruction address, and two or three raw before/after
+hunks. If the DecBench score got worse, say what the output now prints that
+costs it. Use `n/a` otherwise.
+-->
 
 ## Benchmark Impact
 
