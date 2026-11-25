@@ -262,6 +262,9 @@ fn render_mlil_preview_with_binary_and_context_output(
         return Err(MlilPreviewError::UnsupportedArchitectureDetailed);
     }
 
+    let validation_mode = fission_midend_core::ir::ValidationMode::from_env();
+    fission_midend_prehir::action_pipeline::clear_last_pipeline_validation_error();
+
     if let Err(err) = pcode.validate() {
         if debug.diag || debug.preview_debug {
             eprintln!("[mlil-preview] invalid pcode shape fn=0x{address:x} err={err}");
@@ -303,6 +306,21 @@ fn render_mlil_preview_with_binary_and_context_output(
             builder.debug_cfa_stack_offset_bias(),
             pointer_size,
         );
+    }
+    if validation_mode != fission_midend_core::ir::ValidationMode::Off
+        && let Err(report) = fission_midend_prehir::ir::validate_prehir_function(
+            &hir,
+            fission_midend_core::ir::IrInvariantSet::PREHIR_STAGE,
+            "stage:build_hir",
+            0,
+        )
+    {
+        if debug.diag || debug.preview_debug {
+            eprintln!(
+                "[mlil-preview] invariant violation after build_hir fn=0x{address:x}: {report}"
+            );
+        }
+        return Err(MlilPreviewError::IrInvariantViolation);
     }
     // Returned raw observation, captured for the typed output for the same
     // reason the legacy compatibility snapshot exists below
@@ -360,11 +378,35 @@ fn render_mlil_preview_with_binary_and_context_output(
     // function for minimal diff, but its type is PreHIR until the explicit
     // conversion below.
     let mut decomp_facts = decomp_facts;
+    fission_midend_prehir::action_pipeline::clear_last_pipeline_validation_error();
     normalize_hir_function_with_context_and_facts(
         &mut hir,
         &normalize_context,
         reborrow_decomp_facts(&mut decomp_facts),
     );
+    if let Some(report) =
+        fission_midend_prehir::action_pipeline::take_last_pipeline_validation_error()
+    {
+        if debug.diag || debug.preview_debug {
+            eprintln!("[mlil-preview] pipeline verify-each violation fn=0x{address:x}: {report}");
+        }
+        return Err(MlilPreviewError::IrInvariantViolation);
+    }
+    if validation_mode != fission_midend_core::ir::ValidationMode::Off
+        && let Err(report) = fission_midend_prehir::ir::validate_prehir_function(
+            &hir,
+            fission_midend_core::ir::IrInvariantSet::PREHIR_STAGE,
+            "stage:normalize",
+            1,
+        )
+    {
+        if debug.diag || debug.preview_debug {
+            eprintln!(
+                "[mlil-preview] invariant violation after normalize fn=0x{address:x}: {report}"
+            );
+        }
+        return Err(MlilPreviewError::IrInvariantViolation);
+    }
     // Returned observation (the typed output owns this snapshot)
     // below): the real `PreHirFunction` structuring is about to consume,
     // captured before any structuring rewrite touches it. Zero effect on
@@ -483,6 +525,21 @@ fn render_mlil_preview_with_binary_and_context_output(
     hir.has_unknown_arity_prototype = binary
         .and_then(|binary| binary.function_at_exact(address))
         .is_some_and(is_unknown_arity_thunk);
+    if validation_mode != fission_midend_core::ir::ValidationMode::Off
+        && let Err(report) = fission_midend_core::ir::validate_hir_function(
+            &hir,
+            fission_midend_core::ir::IrInvariantSet::HIR_STAGE,
+            "stage:hir_boundary",
+            2,
+        )
+    {
+        if debug.diag || debug.preview_debug {
+            eprintln!(
+                "[mlil-preview] invariant violation at HIR boundary fn=0x{address:x}: {report}"
+            );
+        }
+        return Err(MlilPreviewError::IrInvariantViolation);
+    }
     // Returned structured observation, captured for the typed output for the
     // same reason the legacy compatibility snapshot exists below
     // above: the fully-finalized `HirFunction` (structured body, plus the

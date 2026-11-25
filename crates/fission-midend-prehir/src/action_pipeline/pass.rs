@@ -3,8 +3,39 @@
 use super::budget::hir_shape;
 use super::concept::{GhidraActionConcept, record_ghidra_action_stage};
 use crate::ir::{DecompFacts, NirBuildStats, PreHirFunction};
+use fission_midend_core::ir::{PassContract, StructuralValidationReport};
+use std::cell::RefCell;
 use std::time::Instant;
 use tracing::{debug, debug_span};
+
+thread_local! {
+    static LAST_PIPELINE_VALIDATION_ERROR: RefCell<Option<StructuralValidationReport>> =
+        const { RefCell::new(None) };
+}
+
+/// Clear any recorded thread-local PreHIR pipeline structural validation failure
+/// before beginning a new decompilation stage.
+pub fn clear_last_pipeline_validation_error() {
+    LAST_PIPELINE_VALIDATION_ERROR.with(|slot| *slot.borrow_mut() = None);
+}
+
+/// Record a PreHIR pipeline structural validation failure when running via the
+/// infallible `Pipeline::run` entrypoint under `VerifyEach` mode.
+pub fn record_last_pipeline_validation_error(report: StructuralValidationReport) {
+    LAST_PIPELINE_VALIDATION_ERROR.with(|slot| {
+        let mut cell = slot.borrow_mut();
+        if cell.is_none() {
+            *cell = Some(report);
+        }
+    });
+}
+
+/// Take the first structural validation failure recorded by the most recent
+/// `Pipeline::run` on this thread, if any.
+#[must_use]
+pub fn take_last_pipeline_validation_error() -> Option<StructuralValidationReport> {
+    LAST_PIPELINE_VALIDATION_ERROR.with(|slot| slot.borrow_mut().take())
+}
 
 // TEMP DIAGNOSTIC: per-pass HIR body hash, gated by FISSION_NORM_TRACE.
 // Bisects which normalize pass first diverges between a "good" and "bad"
@@ -76,6 +107,9 @@ impl<'func, 'facts> PassCtx<'func, 'facts> {
 pub trait Pass {
     fn name(&self) -> &'static str;
     fn concept(&self) -> GhidraActionConcept;
+    fn contract(&self) -> PassContract {
+        PassContract::default_prehir()
+    }
     fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome;
 }
 
@@ -83,7 +117,16 @@ pub trait Pass {
 pub struct FnPass {
     pub name: &'static str,
     pub concept: GhidraActionConcept,
+    pub contract: PassContract,
     pub f: fn(&mut PreHirFunction) -> bool,
+}
+
+impl FnPass {
+    #[must_use]
+    pub fn with_contract(mut self, contract: PassContract) -> Self {
+        self.contract = contract;
+        self
+    }
 }
 
 impl Pass for FnPass {
@@ -93,6 +136,10 @@ impl Pass for FnPass {
 
     fn concept(&self) -> GhidraActionConcept {
         self.concept
+    }
+
+    fn contract(&self) -> PassContract {
+        self.contract
     }
 
     fn run(&self, ctx: &mut PassCtx<'_, '_>) -> PassOutcome {
@@ -105,7 +152,26 @@ pub fn fn_pass(
     concept: GhidraActionConcept,
     f: fn(&mut PreHirFunction) -> bool,
 ) -> Box<dyn Pass> {
-    Box::new(FnPass { name, concept, f })
+    Box::new(FnPass {
+        name,
+        concept,
+        contract: PassContract::default_prehir(),
+        f,
+    })
+}
+
+pub fn fn_pass_with_contract(
+    name: &'static str,
+    concept: GhidraActionConcept,
+    contract: PassContract,
+    f: fn(&mut PreHirFunction) -> bool,
+) -> Box<dyn Pass> {
+    Box::new(FnPass {
+        name,
+        concept,
+        contract,
+        f,
+    })
 }
 
 /// Runs a pass with telemetry, timing, and wave stats recording.

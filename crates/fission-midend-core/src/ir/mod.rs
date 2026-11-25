@@ -22,6 +22,7 @@ mod procedure;
 mod resource_usage;
 mod ssa;
 mod stats_merge;
+mod validation;
 
 pub use build_stats::*;
 pub use decomp_facts::*;
@@ -30,3 +31,4 @@ pub use options::*;
 pub use procedure::*;
 pub use resource_usage::*;
 pub use ssa::*;
+pub use validation::*;

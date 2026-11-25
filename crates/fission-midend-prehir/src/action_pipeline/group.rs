@@ -3,7 +3,8 @@
 use super::budget::hir_shape;
 use super::concept::GhidraActionConcept;
 use super::pass::{Pass, PassCtx, PassOutcome, run_pass_logged};
-use crate::ir::PreHirFunction;
+use crate::ir::{PreHirFunction, validate_prehir_function};
+use fission_midend_core::ir::{StructuralValidationReport, ValidationMode};
 use std::time::Instant;
 
 #[derive(Debug, Clone, Copy)]
@@ -69,14 +70,33 @@ impl ActionGroup {
     }
 
     pub fn run(&self, ctx: &mut PassCtx<'_, '_>) -> bool {
+        self.run_with_mode(ctx, ValidationMode::Off, &mut 0)
+            .unwrap_or(false)
+    }
+
+    pub fn run_validated(
+        &self,
+        ctx: &mut PassCtx<'_, '_>,
+        mode: ValidationMode,
+        revision: &mut u64,
+    ) -> Result<bool, StructuralValidationReport> {
+        self.run_with_mode(ctx, mode, revision)
+    }
+
+    fn run_with_mode(
+        &self,
+        ctx: &mut PassCtx<'_, '_>,
+        mode: ValidationMode,
+        revision: &mut u64,
+    ) -> Result<bool, StructuralValidationReport> {
         if !self.gate.allows(ctx.func) {
-            return false;
+            return Ok(false);
         }
 
         let mut group_changed = false;
         match self.repeat {
             Repeat::Once => {
-                group_changed = self.run_passes_once(ctx);
+                group_changed = self.run_passes_once(ctx, mode, revision)?;
             }
             Repeat::UntilStable { max_rounds } => {
                 for round in 0..max_rounds {
@@ -86,7 +106,7 @@ impl ActionGroup {
                     } else {
                         (0, 0)
                     };
-                    let round_changed = self.run_passes_once(ctx);
+                    let round_changed = self.run_passes_once(ctx, mode, revision)?;
                     group_changed |= round_changed;
 
                     if ctx.diag {
@@ -121,14 +141,31 @@ impl ActionGroup {
         }
 
         ctx.record_stage(self.concept);
-        group_changed
+        Ok(group_changed)
     }
 
-    fn run_passes_once(&self, ctx: &mut PassCtx<'_, '_>) -> bool {
+    fn run_passes_once(
+        &self,
+        ctx: &mut PassCtx<'_, '_>,
+        mode: ValidationMode,
+        revision: &mut u64,
+    ) -> Result<bool, StructuralValidationReport> {
         let mut changed = false;
         for pass in &self.passes {
-            changed |= run_pass_logged(ctx, pass.as_ref()).changed();
+            let contract = pass.contract();
+            if mode == ValidationMode::VerifyEach && !contract.required.is_empty() {
+                let pre_label = format!("pre:{}", pass.name());
+                validate_prehir_function(ctx.func, contract.required, &pre_label, *revision)?;
+            }
+
+            let pass_changed = run_pass_logged(ctx, pass.as_ref()).changed();
+            changed |= pass_changed;
+            *revision += 1;
+
+            if mode == ValidationMode::VerifyEach && !contract.guaranteed.is_empty() {
+                validate_prehir_function(ctx.func, contract.guaranteed, pass.name(), *revision)?;
+            }
         }
-        changed
+        Ok(changed)
     }
 }

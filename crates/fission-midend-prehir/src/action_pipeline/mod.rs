@@ -35,8 +35,9 @@ pub use gates::{
 };
 pub use group::{ActionGroup, Gate, Repeat};
 pub use pass::{
-    FnPass, Pass, PassCtx, PassOutcome, fn_pass, norm_trace_enabled, norm_trace_hash,
-    run_pass_logged,
+    FnPass, Pass, PassCtx, PassOutcome, clear_last_pipeline_validation_error, fn_pass,
+    fn_pass_with_contract, norm_trace_enabled, norm_trace_hash,
+    record_last_pipeline_validation_error, run_pass_logged, take_last_pipeline_validation_error,
 };
 pub use pipeline::{Pipeline, group};
 pub use pool::{ActionPool, Rule, apply_rules_to_stmts};

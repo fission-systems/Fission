@@ -36,7 +36,7 @@ impl CollapseDriver {
     ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         use crate::midend::pass::{
             AnalysisStore, EarlyReturnPass, IrreducibleReductionPass, NirFunc,
-            OrphanGotoRepairPass, PassManager, RepeatMode, SeseStructuringPass,
+            OrphanGotoRepairPass, PassManager, PassRunError, RepeatMode, SeseStructuringPass,
         };
 
         builder.structuring_start = Some(std::time::Instant::now());
@@ -52,7 +52,7 @@ impl CollapseDriver {
         pm.add_pass(Box::new(SeseStructuringPass));
         pm.add_pass(Box::new(OrphanGotoRepairPass));
 
-        match pm.run(&mut ir, &mut store) {
+        match pm.run_checked(&mut ir, &mut store) {
             Ok(_) => {
                 if let Some(body) = ir.structured_body() {
                     Ok(body.to_vec())
@@ -60,7 +60,13 @@ impl CollapseDriver {
                     Err(MlilPreviewError::UnsupportedCfgRegionShape)
                 }
             }
-            Err(err_str) => Err(parse_preview_error(&err_str)),
+            Err(PassRunError::InvariantViolation(report)) => {
+                if fission_midend_structuring::structuring_diag_enabled() {
+                    eprintln!("[DIAG] structuring invariant violation: {report}");
+                }
+                Err(MlilPreviewError::IrInvariantViolation)
+            }
+            Err(PassRunError::PassFailed(err_str)) => Err(parse_preview_error(&err_str)),
         }
     }
 }

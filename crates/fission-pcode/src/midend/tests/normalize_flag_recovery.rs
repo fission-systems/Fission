@@ -454,7 +454,7 @@ fn flag_recovery_jb_cf_becomes_ult() {
             b_binary(PreHirBinaryOp::Lt, var("a"), var("b")),
         )],
         var("cf"),
-        vec![flag_binding("cf"), u32_binding("a"), u32_binding("b")],
+        vec![flag_binding("cf")],
     );
     // Override to use unsigned params
     func.params = vec![u32_binding("a"), u32_binding("b")];
