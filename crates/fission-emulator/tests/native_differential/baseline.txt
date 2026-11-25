@@ -23,7 +23,9 @@
 # ── x86-64 ──────────────────────────────────────────────────────────────────
 # Evaluator: which NaN propagates is left to the host's float ops; x86
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
-x86_64 * ~nan #1055 NaN payload / operand order
+# Since #1049/#1050 the PR-size run hits it only in DPPS on Intel hosts; an
+# AMD EPYC host agrees with Fission there, so it is `@host`.
+x86_64 * ~nan #1055 NaN payload / operand order @host
 # Host: f3 41 90 is xchg r8d, eax (90+rd with REX.B, SDM) and Fission decodes it so;
 # a host CPU that runs it as PAUSE leaves RAX and R8 alone.
 x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
