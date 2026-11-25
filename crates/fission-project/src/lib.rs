@@ -32,6 +32,20 @@
 //! with empty history and upgraded on the first recorded edit.
 //! [`Project::write_unconditional`] replaces unconditionally when explicitly
 //! requested, while checked commits reject stale revisions without overwriting.
+//!
+//! # Concurrency guarantees
+//!
+//! Checked commits are compare-and-swap **between cooperating writers**,
+//! i.e. everything that commits through [`ProjectLock`]: no update is lost
+//! as long as nobody deletes a live lock (a writer that notices its lock is
+//! gone refuses to commit, but cannot close every window).
+//! Writers that ignore the lock are detected only if they finish before the
+//! comparison; one landing between the comparison and the rename is
+//! overwritten, because atomic replacement is not atomic compare-and-replace.
+//! Create-if-absent is the exception and is atomic against every writer
+//! (exclusive hard link) where the filesystem supports hard links. A revision
+//! is equal only for byte-identical files, so a stale commit that is accepted
+//! never discards state. See `docs/CLI.md` ("Storage and compatibility").
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -159,6 +173,11 @@ pub enum ProjectError {
         "project is being edited (lock {0}); if its writer has stopped, remove this stale lock"
     )]
     Locked(PathBuf),
+    #[error(
+        "project lock {0} was removed or replaced while this writer held it; another writer may \
+         be active, so nothing was saved"
+    )]
+    LockLost(PathBuf),
     #[error("could not read project at {path}: {source}")]
     Read {
         path: PathBuf,

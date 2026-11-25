@@ -1061,7 +1061,21 @@ apply changes. `show`, `history`, and `diff` never create or rewrite a project.
 - Writers hold `<project>.lock` throughout read/edit/save. Another cooperating
   writer fails rather than overwriting a concurrent edit. A process crash can
   leave a lock: stop or confirm the writer has exited before removing that
-  lock. External editors do not participate in this lock protocol.
+  lock. A writer whose lock was removed while it ran refuses to save and does
+  not delete the next writer's lock.
+- Every save is a compare-and-swap against the revision that was read (a
+  blake3 digest of the file plus file identity and timestamps); a stale save
+  fails with a conflict and leaves the file untouched. Between Fission
+  writers, which all honour the lock, this prevents lost updates.
+- External editors and tools do not take the lock, and the guarantee against
+  them is narrower: a change completed before Fission compares is detected,
+  but a change landing between the comparison and the rename is overwritten.
+  Atomic replacement is not atomic compare-and-replace; no portable
+  filesystem primitive provides that. Creating a project that does not exist
+  yet is the exception: it uses an exclusive hard link and never overwrites a
+  file created concurrently (on filesystems without hard links it falls back
+  to rename, with the same window). Do not edit a project file by hand while
+  a Fission writer may be running. Network filesystems are untested.
 - Saving syncs a temporary file beside the destination, then renames it over
   the project. A failed save preserves the committed project; a symlink
   destination is refused. Existing permissions are retained. This is atomic
@@ -1070,8 +1084,9 @@ apply changes. `show`, `history`, and `diff` never create or rewrite a project.
 - Undo/redo checks that touched decisions still match the recorded revision.
   A conflicting manual edit refuses the entire operation without partial
   changes. Malformed revision cursors/IDs are rejected on read and save.
-- Library callers use `ProjectLock` across read/edit/`record_edit`/write to
-  record a transaction. Low-level setters remain usable for constructing a
+- Library callers use `ProjectLock` across read/edit/`record_edit`/
+  `write_if_revision` to record a transaction, or `Project::commit_edit`
+  (read without the lock, commit under it, retry on conflict). Low-level setters remain usable for constructing a
   project; setters alone do not create revisions. Watchpoint changes are
   supported in the project journal; this milestone adds no watchpoint `db`
   subcommand.
