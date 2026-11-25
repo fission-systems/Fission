@@ -300,7 +300,7 @@ class JunitTests(unittest.TestCase):
 
 class NativeDifferentialTests(unittest.TestCase):
     def test_local_aarch64_run(self):
-        ledger = sd.parse_native_log(DATA / "native-diff.log", CTX, "defect-evidence-native-diff-ubuntu-24.04-arm")
+        ledger = sd.parse_native_log(DATA / "native-diff-aarch64.txt", CTX, "defect-evidence-native-diff-ubuntu-24.04-arm")
         self.assertEqual(sorted(d.invariant for d in ledger.defects),
                          ["native.aarch64.fcvtzu.x0", "native.aarch64.fmax.q0"])
         for d in ledger.defects:
@@ -506,7 +506,7 @@ class TriageAcceptsTests(unittest.TestCase):
         import sentry_triage
 
         ledger = sd.Ledger()
-        for path, parse in ((DATA / "junit.xml", sd.parse_junit), (DATA / "native-diff.log", sd.parse_native_log),
+        for path, parse in ((DATA / "junit.xml", sd.parse_junit), (DATA / "native-diff-aarch64.txt", sd.parse_native_log),
                             (DATA / "replay-witness.json", sd.parse_replay_witness)):
             ledger.extend(parse(path, CTX, "defect-evidence-x"))
         ledger.extend(sd.scan_fuzz_dir(DATA / FUZZ_ARTIFACT, "fuzz_coff_object", CTX))
@@ -562,7 +562,7 @@ class ScanAndSendTests(unittest.TestCase):
         shutil.copy(DATA / "junit.xml", self.evidence / "defect-evidence-junit-linux" / "junit.xml")
         native = self.evidence / "defect-evidence-native-diff-ubuntu-24.04-arm"
         native.mkdir()
-        shutil.copy(DATA / "native-diff.log", native / "native-diff.log")
+        shutil.copy(DATA / "native-diff-aarch64.txt", native / "native-diff.log")
         replay = self.evidence / "defect-evidence-replay-witness"
         replay.mkdir()
         shutil.copy(DATA / "replay-witness.json", replay / "replay-witness.json")
@@ -703,7 +703,7 @@ class NoAnalyzedTextTests(unittest.TestCase):
             (junit / "junit.xml").write_text(xml)
             native = evidence / "defect-evidence-native-diff"
             native.mkdir()
-            log = DATA.joinpath("native-diff.log").read_text().replace("fcvtzu x0, d1", s)
+            log = DATA.joinpath("native-diff-aarch64.txt").read_text().replace("fcvtzu x0, d1", s)
             (native / "native-diff.log").write_text(log)
             replay = evidence / "defect-evidence-replay-witness"
             replay.mkdir()
