@@ -33,23 +33,12 @@ x86_64 CVTTSD2SI * #1050 NaN/out-of-range is not the integer indefinite
 x86_64 CVTTSS2SI * #1050 NaN/out-of-range is not the integer indefinite
 x86_64 CVTTPD2DQ * #1050 NaN/out-of-range is not the integer indefinite
 x86_64 CVTTPS2DQ * #1050 NaN/out-of-range is not the integer indefinite
-# Spec: a masked count of 0 must leave the flags alone (SDM 2, SHR / SHRD).
-x86_64 SHR OF #1051 count 0 changes OF
-x86_64 SHRD OF #1051 count 0 changes OF
-# Spec: reserved RFLAGS bit 1 is stored as 0.
-x86_64 PUSHFQ mem #1052 stored RFLAGS bit 1 is 0
-x86_64 PUSHF mem #1052 stored FLAGS bit 1 is 0
-# Spec: the store re-reads an address register the instruction just wrote.
-x86_64 XADD mem,fault #1053 store address formed after the source register is written
 # Evaluator: which NaN propagates is left to the host's float ops; x86
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
 x86_64 * ~nan #1055 NaN payload / operand order
-# Decode: 0x90 ignores REX.B (f3 41 90 is xchg r8d, eax); 90 with REX is a NOP.
-x86_64 PAUSE * #1059 f3 41 90 decoded as PAUSE; runners disagree on it @host
-x86_64 XCHG * #1059 42 90 clears RAX[63:32]; also #1060 (xchg m32, r32 no zero-extension)
-x86_64 XCHG.XACQUIRE * #1060 xchg m32, r32 no zero-extension
-# Decode: 66 66 cancels the operand-size override.
-x86_64 ADD CF,PF,ZF,SF,OF,RBP #1061 66 66 03 e8 decoded as add ebp, eax (drop with #1061)
+# Host: f3 41 90 is xchg r8d, eax (90+rd with REX.B, SDM) and Fission decodes it so;
+# a host CPU that runs it as PAUSE leaves RAX and R8 alone.
+x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
 
 # ── AArch64 ─────────────────────────────────────────────────────────────────
 # Spec: no FPToFixed saturation for NaN/out-of-range; unsigned forms convert as signed.

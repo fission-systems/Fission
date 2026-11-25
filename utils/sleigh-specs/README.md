@@ -116,6 +116,23 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `# neglected zexts`. The 41 constructors now call `zext_zd`, as the spec's other 64-bit
   SIMD results do (#1067, native evidence). Re-apply with
   `scripts/sleigh/apply_aarch64_ld_vpr64_zero_upper.py`.
+- `x86/lockable.sinc` (and the compiled `x86.sla`, `x86-64.sla`): `XADD m, r` stores the
+  sum before it writes the register, and reads the memory operand once (SDM: `TEMP := SRC +
+  DEST; SRC := DEST; DEST := TEMP` with the address formed before execution). Upstream wrote
+  the register first, so `xadd byte ptr [rbx], bh` stored through the updated RBX (#1053).
+  `XCHG m32, r32` zero-extends the register into 64 bits (`check_Reg32_dest`), as every
+  32-bit register write does in 64-bit mode (#1060). Re-apply with
+  `scripts/sleigh/apply_x86_xadd_xchg_memory_forms.py`.
+- `x86/ia.sinc` (and the compiled `x86.sla`, `x86-64.sla`): `0x90` is a NOP, and `F3 90`
+  PAUSE, only when REX.B is 0; with REX.B it is `xchg r8d, eax` (`90+rd`), and REX.W/R/X
+  alone no longer turn it into a 32-bit `xchg eax, eax` that clears RAX[63:32] (#1059). A
+  repeated `0x66` prefix keeps the operand-size override instead of toggling it back
+  (`66 66 03 e8` is `add bp, ax`, #1061): the first one sets `prefix_66` and later ones
+  match a constructor that changes nothing. `SHR` and `SHRD` leave OF alone when the masked
+  count is 0 and set it per the SDM for a count of 1 (#1051); upstream's `shrflags`/
+  `shrdflags` had the two cases swapped. `PUSHF`/`PUSHFD`/`PUSHFQ` store reserved bit 1 as 1
+  (#1052). Evidence: an x86-64 host run natively (the native differential) and the SDM
+  sections cited in the script. Re-apply with `scripts/sleigh/apply_x86_prefix_and_flag_fixes.py`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

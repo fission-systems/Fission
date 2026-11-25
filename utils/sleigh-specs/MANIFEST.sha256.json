@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "utils/sleigh-specs/README.md",
-      "sha256": "a314c5082d5e7b575a1e48efa79dc0a9b1994cbe8c6465ab782b09628fa0a83e",
-      "size": 8980,
+      "sha256": "96c46b9fdf29e8cc4e7c37c0bd044f4f5528f1f616d7c43b1fc008d721836afd",
+      "size": 10453,
       "source_path": "local migration note"
     },
     {
@@ -819,14 +819,14 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/x86/x86-64.sla",
-      "sha256": "de384b094f2a72cf0f91a9e5de4d171237b9fb39a21fcad916a32abeffed1e19",
-      "size": 501071,
+      "sha256": "9c6598b42e6271b5a1741c4837fb8cd9ec0b4e0ac0e9c71051d5b4615d75f83a",
+      "size": 501222,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/x86/x86.sla",
-      "sha256": "ac545a8c854eeb7a3089641669c989b583441d014f577b3c04e9d413157c2bdf",
-      "size": 439244,
+      "sha256": "64a69153ed082292ad4157be2f37d3310a2d5acf53882b31ab46f73fa960d4dd",
+      "size": 439346,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
@@ -4695,14 +4695,14 @@
     },
     {
       "path": "utils/sleigh-specs/languages/x86/ia.sinc",
-      "sha256": "32a723931726561212b1f51c05d0d4324e880c4a49958e16bdc80e5066e98115",
-      "size": 551705,
+      "sha256": "b02bb47ad388fd017fb9660e147329efb6cb192318aa3bf74919f0908e90ba7b",
+      "size": 551898,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/ia.sinc"
     },
     {
       "path": "utils/sleigh-specs/languages/x86/lockable.sinc",
-      "sha256": "de3639160b248e993c53986ac59b4f8d8ea8d449373c9771c76a19a0914b7d10",
-      "size": 32508,
+      "sha256": "b2b4350e0761efc52ec9a77ed7af1ef00893ecea1683de8c43d4d229943472c9",
+      "size": 32630,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/x86/data/languages/lockable.sinc"
     },
     {

@@ -2103,7 +2103,7 @@ macro packflags(tmp) {
                 | (0x0800 * zext(OF&1))
                 | (0x0400 * zext(DF&1)) | (0x0200 * zext(IF&1))   | (0x0100 * zext(TF&1))
                 | (0x0080 * zext(SF&1)) | (0x0040 * zext(ZF&1))   | (0x0010 * zext(AF&1))
-                | (0x0004 * zext(PF&1)) | (0x0001 * zext(CF&1));
+                | (0x0004 * zext(PF&1)) | 0x0002 | (0x0001 * zext(CF&1));
 }
 
 macro packeflags(tmp) {
@@ -2211,12 +2211,12 @@ macro sarflags(op1,result,count) {
 
 macro shrflags(op1,result,count) {
  conditionalAssign(CF, count==0, CF, ( (op1 >> (count - 1)) & 1 ) != 0 );
- conditionalAssign(OF, count==1, 0, (op1 s< 0)); 
+ conditionalAssign(OF, count==0, OF, (op1 s< 0)); 
 }
 
 macro shrdflags(op1,result,count) {
  conditionalAssign(CF, count==0, CF, ( (op1 >> (count - 1)) & 1 ) != 0 );
- conditionalAssign(OF, count==1, 0, ((op1 s< 0) ^ (result s< 0))); 
+ conditionalAssign(OF, count==0, OF, ((op1 s< 0) ^ (result s< 0))); 
 }
 
 macro fdec() {
@@ -2317,7 +2317,8 @@ macro fucompe(val1, val2) {
 :^instruction is instrPhase=0 & over=0x26; instruction     [ segover=4; ]  {} # ES override
 :^instruction is instrPhase=0 & over=0x64; instruction     [ segover=5; ]  {} # FS override
 :^instruction is instrPhase=0 & over=0x65; instruction     [ segover=6; ]  {} # GS override
-:^instruction is instrPhase=0 & over=0x66; instruction     [ opsize=opsize $xor 1; mandover = mandover $xor 1; ] {} # Operand size override
+:^instruction is instrPhase=0 & over=0x66 & prefix_66=0; instruction     [ opsize=opsize $xor 1; mandover = mandover $xor 1; ] {} # Operand size override
+:^instruction is instrPhase=0 & over=0x66 & prefix_66=1; instruction     {} # A repeated operand size override changes nothing
 :^instruction is instrPhase=0 & over=0x67; instruction     [ addrsize=addrsize $xor 1; ] {} # Address size override
 :^instruction is instrPhase=0 & over=0xf2; instruction     [ repneprefx=1; repprefx=0; ] {}
 :^instruction is instrPhase=0 & over=0xf3; instruction     [ repneprefx=0; repprefx=1; ] {}
@@ -4236,7 +4237,7 @@ define pcodeop TaskRegister;
 :NEG Rmr64      is $(LONGMODE_ON) & vexMode=0 & opsize=2 & byte=0xf7; mod=3 & Rmr64 & reg_opcode=3 { negflags(Rmr64); Rmr64 = -Rmr64; resultflags(Rmr64); }
 @endif
 
-:NOP            is vexMode=0 & byte=0x90 & (mandover=0 | mandover=4 | mandover=1) & (rexprefix=0 | rexWRXBprefix=8 | rexWRXBprefix=0)  { }
+:NOP            is vexMode=0 & byte=0x90 & (mandover=0 | mandover=4 | mandover=1) & (rexprefix=0 | rexBprefix=0)  { }
 :NOP rm16       is vexMode=0 & mandover & opsize=0 & byte=0x0f; high5=3; rm16  ...    { }
 :NOP rm32       is vexMode=0 & mandover & opsize=1 & byte=0x0f; high5=3; rm32  ...    { }
 :NOP^"/reserved" rm16 is vexMode=0 & mandover & opsize=0 & byte=0x0f; byte=0x18; rm16 & reg_opcode_hb=1 ...    { }
@@ -4294,8 +4295,8 @@ define pcodeop TaskRegister;
 :OUTSW^rep^reptail DX,dseSI2    is vexMode=0 & rep & reptail & opsize=0 & byte=0x6f & DX & dseSI2   { build rep; build dseSI2; out(dseSI2,DX); build reptail;}
 :OUTSD^rep^reptail DX,dseSI4    is vexMode=0 & rep & reptail &            byte=0x6f & DX & dseSI4   { build rep; build dseSI4; out(dseSI4,DX); build reptail;}
 
-:PAUSE          is vexMode=0 & opsize=0 & $(PRE_F3) & byte=0x90     {  }
-:PAUSE          is vexMode=0 & opsize=1 & $(PRE_F3) & byte=0x90     {  }
+:PAUSE          is vexMode=0 & opsize=0 & $(PRE_F3) & (rexprefix=0 | rexBprefix=0) & byte=0x90     {  }
+:PAUSE          is vexMode=0 & opsize=1 & $(PRE_F3) & (rexprefix=0 | rexBprefix=0) & byte=0x90     {  }
 
 @ifdef IA64
 define pcodeop pbndkb;
