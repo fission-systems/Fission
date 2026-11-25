@@ -31,6 +31,7 @@ pub(crate) use instruction_loops::InstructionLoop;
 pub(in crate::midend::builder) use self::contracts::MaterializeOwnerRepartition;
 use self::contracts::*;
 pub(in crate::midend::builder) use self::loop_carried::LoopCarriedDefinitionProof;
+pub(in crate::midend::builder) use self::no_consumer::SpaceOpIndex;
 use self::scans::DefinitionReachesReturnProof;
 
 struct SameBlockRegisterJoinProof {
@@ -137,7 +138,7 @@ impl<'a> PreviewBuilder<'a> {
     ) -> Result<Vec<PreHirStmt>, MlilPreviewError> {
         let block_idx = self.pcode_block_idx(block.index as usize);
         if let Some(cached) = self.lowered_block_stmts_cache.get(&block_idx) {
-            return Ok(cached.clone());
+            return Ok(cached.as_ref().clone());
         }
 
         // Tail-of-block cmov (absolute CBranch + guarded body still in this BB)
@@ -186,7 +187,7 @@ impl<'a> PreviewBuilder<'a> {
         }
 
         self.lowered_block_stmts_cache
-            .insert(block_idx, body.clone());
+            .insert(block_idx, std::rc::Rc::new(body.clone()));
         Ok(body)
     }
 

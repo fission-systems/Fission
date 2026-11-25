@@ -112,13 +112,9 @@ fn instruction_throughput() {
         // Two points, so translation and set-up fall out of the difference.
         let small = 2_000_000u64;
         let large = 20_000_000u64;
-        let Some((n1, t1)) = run(code, small) else {
-            eprintln!("skipping: fixture not present");
-            return;
-        };
-        let Some((n2, t2)) = run(code, large) else {
-            return;
-        };
+        // `run` fails only when the committed host fixture does not load.
+        let (n1, t1) = run(code, small).expect("emulator over the committed fixture");
+        let (n2, t2) = run(code, large).expect("emulator over the committed fixture");
         let delta_n = n2.saturating_sub(n1) as f64;
         let delta_t = t2 - t1;
         eprintln!(

@@ -161,6 +161,13 @@ pub struct PeIdentitySummary {
     pub tls_directory_present: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tls_callback_count: Option<usize>,
+    /// Addresses of the TLS callbacks counted above.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub tls_callbacks: Vec<u64>,
+    /// The CodeView record naming the program database: where the PDB was
+    /// built, and the GUID and age a symbol server indexes it by.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub codeview: Option<CodeViewSummary>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub debug_directory_kinds: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,10 +195,31 @@ pub struct OverlayInfo {
     pub size: u64,
 }
 
-/// PE Rich header summary placeholder — populated in later phases when parsed explicitly.
+/// PE Rich header: whether one is present, and its records when the loader parsed them.
 #[derive(Debug, Clone, Serialize)]
 pub struct PeRichHeaderSummary {
     pub present: bool,
+    /// One entry per tool that contributed objects: the linker's record of
+    /// the toolchain (`comp_id` = product id << 16 | build number).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub records: Vec<RichRecordSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RichRecordSummary {
+    pub product_id: u16,
+    pub build_number: u16,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CodeViewSummary {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub guid: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]

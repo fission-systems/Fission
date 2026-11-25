@@ -107,9 +107,12 @@ pub fn recognize_wide_integer_recombine(expr: &PreHirExpr) -> Option<PreHirExpr>
     };
     let high = extract_high_part(hi_expr, *shift_amount, total_bits)?;
     let low = extract_low_part(rhs, *shift_amount)?;
-    if high.source != low.source
+    if *shift_amount <= 0
+        || high.source != low.source
         || high.width_bits != low.width_bits
         || high.shift_bits != low.shift_bits
+        || i64::from(low.width_bits) != *shift_amount
+        || high.width_bits + low.width_bits != total_bits
     {
         return None;
     }
@@ -182,12 +185,15 @@ fn extract_high_part(expr: &PreHirExpr, shift_amount: i64, total_bits: u32) -> O
 }
 
 fn extract_low_part(expr: &PreHirExpr, shift_amount: i64) -> Option<WidePart> {
+    if shift_amount <= 0 {
+        return None;
+    }
     match expr {
         PreHirExpr::Cast { ty, expr: inner } => {
             // For a double cast Cast(IntM, Cast(IntN, x)) use the INNER (narrower)
             // width as the true data width, since the outer cast is just for the
-            // Piece output type.
-            let (width_bits, real_inner) = match inner.as_ref() {
+            // Piece output type. Only unsigned integer casts zero-extend cleanly.
+            let (effective_ty, real_inner) = match inner.as_ref() {
                 PreHirExpr::Cast {
                     ty: inner_ty,
                     expr: inner_inner,
@@ -195,16 +201,23 @@ fn extract_low_part(expr: &PreHirExpr, shift_amount: i64) -> Option<WidePart> {
                     let outer_bits = int_type_bits(ty).unwrap_or(0);
                     let mid_bits = int_type_bits(inner_ty).unwrap_or(0);
                     if outer_bits >= mid_bits && mid_bits > 0 {
-                        (mid_bits, inner_inner.as_ref())
+                        (inner_ty, inner_inner.as_ref())
                     } else {
-                        (int_type_bits(ty)?, inner.as_ref())
+                        (ty, inner.as_ref())
                     }
                 }
-                _ => (int_type_bits(ty)?, inner.as_ref()),
+                _ => (ty, inner.as_ref()),
+            };
+            let NirType::Int {
+                bits: width_bits,
+                signed: false,
+            } = effective_ty
+            else {
+                return None;
             };
             Some(WidePart {
                 source: real_inner.clone(),
-                width_bits,
+                width_bits: *width_bits,
                 shift_bits: shift_amount,
             })
         }
@@ -217,7 +230,7 @@ fn extract_low_part(expr: &PreHirExpr, shift_amount: i64) -> Option<WidePart> {
             let PreHirExpr::Const(mask, _) = rhs.as_ref() else {
                 return None;
             };
-            let width_bits = shift_amount as u32;
+            let width_bits = u32::try_from(shift_amount).ok()?;
             let expected_mask = full_mask_for_bits(width_bits)?;
             if *mask != expected_mask {
                 return None;
@@ -232,12 +245,17 @@ fn extract_low_part(expr: &PreHirExpr, shift_amount: i64) -> Option<WidePart> {
             op: PreHirBinaryOp::Mod,
             lhs,
             rhs,
-            ..
+            ty,
         } => {
+            if !matches!(ty, NirType::Int { signed: false, .. })
+                || matches!(expr_type(lhs), NirType::Int { signed: true, .. })
+            {
+                return None;
+            }
             let PreHirExpr::Const(modulus, _) = rhs.as_ref() else {
                 return None;
             };
-            let width_bits = shift_amount as u32;
+            let width_bits = u32::try_from(shift_amount).ok()?;
             let expected_modulus = 1i64.checked_shl(width_bits)?;
             if *modulus != expected_modulus {
                 return None;
@@ -386,5 +404,107 @@ mod tests {
         };
 
         assert!(canonicalize_integer_expr(&expr).is_none());
+    }
+
+    #[test]
+    fn recombine_rejects_partial_width_and_signed_low_parts() {
+        let u16_ty = int_ty(16, false);
+        let i32_ty = int_ty(32, true);
+        let u32_ty = int_ty(32, false);
+        let i64_ty = int_ty(64, true);
+        let u64_ty = int_ty(64, false);
+        let x = PreHirExpr::Var("x".to_string());
+
+        // `(((u16)(x >> 48)) << 48) | ((u16)x)` drops middle bits 16..47 and must not fold to `x`.
+        let partial_width = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(PreHirExpr::Cast {
+                        ty: u16_ty.clone(),
+                        expr: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shr,
+                            lhs: Box::new(x.clone()),
+                            rhs: Box::new(PreHirExpr::Const(48, u64_ty.clone())),
+                            ty: u64_ty.clone(),
+                        }),
+                    }),
+                }),
+                rhs: Box::new(PreHirExpr::Const(48, u64_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(PreHirExpr::Cast {
+                    ty: u16_ty,
+                    expr: Box::new(x.clone()),
+                }),
+            }),
+            ty: u64_ty.clone(),
+        };
+        assert!(recognize_wide_integer_recombine(&partial_width).is_none());
+
+        // Signed inner cast `(u64)(i32)x` in low part sign-extends bit 31 and must be rejected.
+        let signed_low = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(PreHirExpr::Cast {
+                        ty: u32_ty.clone(),
+                        expr: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shr,
+                            lhs: Box::new(x.clone()),
+                            rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
+                            ty: u64_ty.clone(),
+                        }),
+                    }),
+                }),
+                rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Cast {
+                ty: u64_ty.clone(),
+                expr: Box::new(PreHirExpr::Cast {
+                    ty: i32_ty,
+                    expr: Box::new(x.clone()),
+                }),
+            }),
+            ty: u64_ty.clone(),
+        };
+        assert!(recognize_wide_integer_recombine(&signed_low).is_none());
+
+        // Signed `% (1 << 32)` can produce negative values and must not act as unsigned low part.
+        let signed_mod_low = PreHirExpr::Binary {
+            op: PreHirBinaryOp::Or,
+            lhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Shl,
+                lhs: Box::new(PreHirExpr::Cast {
+                    ty: u64_ty.clone(),
+                    expr: Box::new(PreHirExpr::Cast {
+                        ty: u32_ty,
+                        expr: Box::new(PreHirExpr::Binary {
+                            op: PreHirBinaryOp::Shr,
+                            lhs: Box::new(x.clone()),
+                            rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
+                            ty: u64_ty.clone(),
+                        }),
+                    }),
+                }),
+                rhs: Box::new(PreHirExpr::Const(32, u64_ty.clone())),
+                ty: u64_ty.clone(),
+            }),
+            rhs: Box::new(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Mod,
+                lhs: Box::new(x),
+                rhs: Box::new(PreHirExpr::Const(1_i64 << 32, i64_ty.clone())),
+                ty: i64_ty,
+            }),
+            ty: u64_ty,
+        };
+        assert!(recognize_wide_integer_recombine(&signed_mod_low).is_none());
     }
 }

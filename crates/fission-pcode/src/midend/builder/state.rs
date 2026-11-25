@@ -8,6 +8,8 @@ pub(super) type BuilderCacheSet<T> = rustc_hash::FxHashSet<T>;
 #[derive(Debug, Clone)]
 pub(crate) struct PreviewBuilder<'a> {
     pub(crate) pcode: &'a PcodeFunction,
+    /// Ops touching each address space, derived once from `pcode`.
+    pub(in crate::midend::builder) space_op_index: std::rc::Rc<super::materialize::SpaceOpIndex>,
     pub(crate) options: &'a MlilPreviewOptions,
     pub(crate) binary: Option<&'a LoadedBinary>,
     pub(crate) type_context: Option<&'a PreviewTypeContext>,
@@ -72,7 +74,10 @@ pub(crate) struct PreviewBuilder<'a> {
     /// which has irreducible edges removed and so can call a block a
     /// dominator that the lifted program can go around.
     pub(crate) heritage_idom: Vec<Option<usize>>,
-    pub(crate) scalar_ssa: NirScalarSsa,
+    /// Shared, not copied, by every trial fork: built once in `new` and only
+    /// read afterwards, while structuring forks the builder once per region
+    /// it tries.
+    pub(crate) scalar_ssa: std::rc::Rc<NirScalarSsa>,
     pub(super) ssa_emission: super::ssa_emission::SsaEmissionPlan,
     pub(crate) successors: Vec<Vec<usize>>,
     pub(crate) predecessors: Vec<Vec<usize>>,
@@ -240,7 +245,9 @@ pub(crate) struct PreviewBuilder<'a> {
     /// over budget. These edges are skipped during normal block terminator
     /// lowering and emitted as explicit `PreHirStmt::Goto` stmts instead.
     pub(crate) fas_virtual_edges: Vec<(usize, usize)>,
-    pub(crate) lowered_block_stmts_cache: BuilderCacheMap<usize, Vec<PreHirStmt>>,
+    /// Values are shared with trial forks and copied only when a fork edits
+    /// one (`Rc::make_mut`), so forking does not copy every lowered block.
+    pub(crate) lowered_block_stmts_cache: BuilderCacheMap<usize, std::rc::Rc<Vec<PreHirStmt>>>,
     pub(crate) partial_gpr_live_binding_cache: BuilderCacheMap<usize, bool>,
     pub(crate) follow_blocks: Vec<Option<usize>>,
     pub(crate) failed_loop_subgraphs: HashSet<(usize, usize)>,
@@ -277,6 +284,9 @@ pub(crate) struct PreviewBuilder<'a> {
     /// (which don't hold a `&host` reference) can share a live handle. See
     /// PROJECT.md.
     pub(crate) structuring_total_work_units: std::rc::Rc<std::cell::Cell<u64>>,
+    /// Observed use of the work limits. Shared with every clone and fork of
+    /// this builder, and read only for telemetry.
+    pub(crate) resource_usage: std::rc::Rc<fission_midend_core::ir::ResourceUsage>,
     /// Loop heads whose lowering is in progress on the current call path, innermost last. A plain
     /// `Vec` (not shared like the work counter): a builder cloned for an observation inherits the
     /// path it was cloned on, so the trial cannot re-enter a head either.

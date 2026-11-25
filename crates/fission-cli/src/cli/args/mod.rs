@@ -4,15 +4,32 @@ mod decomp;
 mod inventory;
 mod legacy;
 mod oneshot;
+mod work_limit;
 
 pub use decomp::DecompArgs;
 pub use inventory::{InventoryArgs, InventoryCommand};
 pub use legacy::{LegacyCliArgs, LegacyInvocationKind, ParsedOneShotArgs, normalize_legacy};
 pub use oneshot::OneShotArgs;
+pub use work_limit::{WorkLimitFlag, overrides_with_flags};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::ffi::OsString;
 use std::path::PathBuf;
+
+/// `ADDR:SIZE`: a hex address and a decimal byte count.
+pub fn parse_memory_range(s: &str) -> Result<(u64, usize), String> {
+    let (address, size) = s
+        .split_once(':')
+        .ok_or_else(|| format!("expected ADDR:SIZE, got `{s}`"))?;
+    let address = parse_hex_address(address)?;
+    let size: usize = size
+        .parse()
+        .map_err(|_| format!("size `{size}` is not a number"))?;
+    if size == 0 || size > 1 << 20 {
+        return Err(format!("size must be 1..=1048576 bytes, got {size}"));
+    }
+    Ok((address, size))
+}
 
 /// Parse hexadecimal address string (supports 0x prefix)
 pub fn parse_hex_address(s: &str) -> Result<u64, String> {
@@ -51,6 +68,219 @@ pub enum ParsedInvocation {
     Skill,
     /// The SLEIGH language IDs this build can lift
     Languages(LanguagesArgs),
+    /// Call one function in the emulator with chosen arguments
+    Call(CallArgs),
+    /// A known API's prototype from the bundled type library
+    Api(ApiArgs),
+    /// The minimal observable state machine of a step function (experimental)
+    Quotient(QuotientArgs),
+}
+
+/// `fission_cli call`: run one function of the binary in the emulator, from
+/// the loaded image, with the arguments given, and report how it ended.
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Call one function in the emulator with chosen arguments and report how it ended.\n\nThe image is loaded as `sandbox` loads it, the function is entered with the arguments in the calling convention's integer argument slots and a return address nothing maps, and the run ends when it returns there. Every call starts from the same freshly loaded image, so one call cannot see another's writes.\n\nWith `--stub-calls VALUE` every call the function makes is stopped at the call instruction instead of run: its arguments are recorded, VALUE is put in the return register, and execution continues after the call. The report then lists those calls and every byte the function stored outside its own stack frame.\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
+    after_help = "Examples:\n  fission_cli call app.elf --name add --arg 2 --arg 3 --json\n  fission_cli call app.elf --addr 0x401130 --arg 0x10 --stub-calls 0 --json"
+)]
+pub struct CallArgs {
+    /// Path to the binary (ELF or PE)
+    pub binary: PathBuf,
+
+    /// Address of the function to call
+    #[arg(long, value_parser = parse_hex_address, required_unless_present = "name", conflicts_with = "name")]
+    pub addr: Option<u64>,
+
+    /// Name of the function to call (exact, as `list` prints it)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// An integer argument, in order: decimal, `0x` hex, or negative; repeatable
+    #[arg(long = "arg", value_name = "VALUE", value_parser = parse_call_argument, allow_hyphen_values = true)]
+    pub args: Vec<u64>,
+
+    /// Stop at every call the function makes and return this value from it
+    /// instead of running the callee
+    #[arg(long, value_name = "VALUE", value_parser = parse_call_argument, allow_hyphen_values = true)]
+    pub stub_calls: Option<u64>,
+
+    /// Instruction budget for the call
+    #[arg(long, default_value_t = 1_000_000)]
+    pub max_inst: u64,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+/// `fission_cli quotient`: the minimal observable state machine of one step
+/// function (experimental, RFC #1093).
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Compute the minimal observable state machine of a step function (experimental).\n\nThe function is treated as one step of a protocol or state machine: each call receives fresh inputs in argument registers and a pointer to a context buffer that persists between calls. Instead of structuring its control-flow graph, the command learns the smallest machine with the same observable behaviour -- the result of every call, for every input sequence -- and asks the solver to certify it.\n\nThe lifted P-code is executed symbolically to get every feasible path of one call; branch sides no input or state can take (opaque predicates) are pruned. Context fields that reach a branch or the result become control state; the rest become data registers with symbolic updates. The emulator answers the learner's queries, and every pair of states comes with an input sequence the emulator re-ran to tell them apart. `status` says how far the result reaches: `proved_under_model` (the solver refuted every distinguishing word up to the reported horizon: --horizon, deepened for results towards states + --max-states), `empirically_consistent` (the solver could not decide; probes found no difference), `partial_frontier` (more than --max-states states), `refuted` (a data effect the control states cannot express) or `unsupported_semantics` (calls, user-defined operations, globals or other effects outside the model).\n\nThis runs the binary's code (emulated, not on the host): use it only on binaries you are allowed to execute.",
+    after_help = "Examples:\n  fission_cli quotient proto.elf --name parser_step --json\n  fission_cli quotient proto.elf --addr 0x401130 --input cmd:1:8 --context-bytes 16 --horizon 6 --json"
+)]
+pub struct QuotientArgs {
+    /// Path to the binary (ELF or PE)
+    pub binary: PathBuf,
+
+    /// Address of the step function
+    #[arg(long, value_parser = parse_hex_address, required_unless_present = "name", conflicts_with = "name")]
+    pub addr: Option<u64>,
+
+    /// Name of the step function (exact, as `list` prints it)
+    #[arg(long)]
+    pub name: Option<String>,
+
+    /// An input port, `NAME:ARG:BITS`: the low BITS of integer argument ARG
+    /// (0-based), drawn afresh at every step; repeatable. Default `input:1:32`
+    #[arg(long = "input", value_name = "NAME:ARG:BITS", value_parser = parse_input_port)]
+    pub inputs: Vec<QuotientInputArg>,
+
+    /// Integer argument (0-based) that carries the context pointer
+    #[arg(long, default_value_t = 0)]
+    pub context_arg: usize,
+
+    /// Size of the context buffer, zero-filled at the start
+    #[arg(long, default_value_t = 8, conflicts_with = "context_init")]
+    pub context_bytes: usize,
+
+    /// Initial context bytes as hex (e.g. `0100000000000000`); its length is
+    /// the context size
+    #[arg(long, value_name = "HEX", value_parser = parse_hex_bytes)]
+    pub context_init: Option<HexBytes>,
+
+    /// Bits of the return register that are observed
+    #[arg(long, default_value_t = 32)]
+    pub output_bits: u32,
+
+    /// A context pointer field with a memory region of its own:
+    /// `FIELD=HEX` (the region's initial bytes) or `FIELD:SIZE` (zeroed);
+    /// repeatable. Fields the step dereferences without one are found and
+    /// given a zeroed region automatically.
+    #[arg(long = "region", value_name = "FIELD=HEX|FIELD:SIZE", value_parser = parse_region)]
+    pub regions: Vec<QuotientRegionArg>,
+
+    /// Shortest input words the certificate covers (H); the result check is
+    /// deepened from here towards states + --max-states
+    #[arg(long, default_value_t = 4)]
+    pub horizon: u32,
+
+    /// Largest machine to learn (K_max); past it the result is partial
+    #[arg(long, default_value_t = 32)]
+    pub max_states: usize,
+
+    /// SAT conflicts per solver query; past it the query is undecided
+    #[arg(long, default_value_t = 200_000)]
+    pub conflict_budget: u64,
+
+    /// Instruction budget for each emulated step
+    #[arg(long, default_value_t = 1_000_000)]
+    pub max_inst: u64,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+/// One `--region` of `quotient`: a context pointer field and its region's
+/// initial bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientRegionArg {
+    pub field: u32,
+    pub initial: Vec<u8>,
+}
+
+/// `FIELD=HEX` or `FIELD:SIZE`; FIELD and SIZE are decimal or `0x` hex.
+pub fn parse_region(s: &str) -> Result<QuotientRegionArg, String> {
+    let number = |text: &str| -> Result<u32, String> {
+        let t = text.trim();
+        match t.strip_prefix("0x") {
+            Some(hex) => u32::from_str_radix(hex, 16),
+            None => t.parse::<u32>(),
+        }
+        .map_err(|e| format!("`{s}`: {e}"))
+    };
+    let (field, initial) = if let Some((field, hex)) = s.split_once('=') {
+        (number(field)?, parse_hex_bytes(hex)?.0)
+    } else if let Some((field, size)) = s.split_once(':') {
+        let size = number(size)?;
+        if size == 0 || size > 1 << 16 {
+            return Err(format!("`{s}`: a region holds 1 to 65536 bytes"));
+        }
+        (number(field)?, vec![0; size as usize])
+    } else {
+        return Err(format!(
+            "`{s}`: expected FIELD=HEX or FIELD:SIZE, e.g. 8:256"
+        ));
+    };
+    Ok(QuotientRegionArg { field, initial })
+}
+
+/// One `--input` port of `quotient`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotientInputArg {
+    pub name: String,
+    pub arg_index: usize,
+    pub bits: u32,
+}
+
+/// `NAME:ARG:BITS`, e.g. `cmd:1:8`.
+pub fn parse_input_port(s: &str) -> Result<QuotientInputArg, String> {
+    let parts = s.split(':').collect::<Vec<_>>();
+    let [name, arg, bits] = parts.as_slice() else {
+        return Err(format!("`{s}`: expected NAME:ARG:BITS, e.g. cmd:1:8"));
+    };
+    if name.is_empty() {
+        return Err(format!("`{s}`: the port needs a name"));
+    }
+    let arg_index = arg
+        .parse::<usize>()
+        .map_err(|e| format!("`{s}`: argument index: {e}"))?;
+    let bits = bits
+        .parse::<u32>()
+        .map_err(|e| format!("`{s}`: bit width: {e}"))?;
+    if bits == 0 || bits > 64 || bits % 8 != 0 {
+        return Err(format!("`{s}`: the width must be 8, 16, ..., 64 bits"));
+    }
+    Ok(QuotientInputArg {
+        name: (*name).to_string(),
+        arg_index,
+        bits,
+    })
+}
+
+/// Bytes given on the command line as hex.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HexBytes(pub Vec<u8>);
+
+/// An even-length hex string as bytes.
+pub fn parse_hex_bytes(s: &str) -> Result<HexBytes, String> {
+    let t = s.trim().trim_start_matches("0x");
+    if t.is_empty() || t.len() % 2 != 0 {
+        return Err(format!("`{s}`: expected an even number of hex digits"));
+    }
+    (0..t.len())
+        .step_by(2)
+        .map(|at| u8::from_str_radix(&t[at..at + 2], 16).map_err(|e| format!("`{s}`: {e}")))
+        .collect::<Result<_, _>>()
+        .map(HexBytes)
+}
+
+/// An integer argument for `call`: decimal, `0x` hex, or a negative decimal
+/// taken as its two's-complement 64-bit pattern.
+pub fn parse_call_argument(s: &str) -> Result<u64, String> {
+    let t = s.trim();
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        return u64::from_str_radix(hex, 16).map_err(|e| format!("`{s}`: {e}"));
+    }
+    if t.starts_with('-') {
+        return t
+            .parse::<i64>()
+            .map(|v| v as u64)
+            .map_err(|e| format!("`{s}`: {e}"));
+    }
+    t.parse::<u64>().map_err(|e| format!("`{s}`: {e}"))
 }
 
 /// `fission_cli languages`: the lift-ready SLEIGH language IDs, i.e. the
@@ -120,6 +350,7 @@ struct CommonBinaryOutputArgs {
 #[command(name = "fission_cli")]
 #[command(author = "Fission Dev Team")]
 #[command(version = env!("CARGO_PKG_VERSION"))]
+#[command(long_version = crate::cli::build_identity::long_version())]
 #[command(about = "Rust-native binary analysis and decompilation")]
 #[command(
     long_about = "Fission is a headless-first binary analysis and decompilation tool with explicit one-shot subcommands.\n\nCanonical human-facing entrypoints:\n  fission_cli info binary.exe\n  fission_cli list binary.exe --json\n  fission_cli disasm binary.exe --addr 0x1400\n  fission_cli raw-pcode binary.exe --addr 0x1400\n  fission_cli pcode-stages binary.exe --addr 0x1400 --json\n  fission_cli nir-stats binary.exe --addr 0x1400 --json\n  fission_cli pcode-topology binary.exe --addr 0x1400 --json\n  fission_cli decomp binary.exe --addr 0x1400\n  fission_cli strings binary.exe --min-len 6\n  fission_cli xrefs binary.exe --json\n  fission_cli callgraph binary.exe --json\n\nOperator-oriented inventory lives under:\n  fission_cli inventory <SUBCOMMAND> ...\n"
@@ -237,6 +468,12 @@ enum CliCommand {
     Callgraph(CallgraphArgs),
     /// Identify functions against bundled Ghidra FID (Function ID) signature databases
     Identify(IdentifyArgs),
+    /// List the types (classes, structs, enums) the loader recovered from metadata
+    Types(TypesArgs),
+    /// Say what is at an address: function, section, symbols, relocations, source line
+    Whatis(WhatisArgs),
+    /// Look up a known API's prototype in the bundled type library
+    Api(ApiArgs),
     /// Fuzzy function similarity (structural, not exact-match -- a BSim-inspired analog)
     Similar(SimilarArgs),
     /// Operator-oriented inventory and batch emitters
@@ -268,6 +505,10 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
     Schema(SchemaArgs),
     /// List the SLEIGH language IDs this build can lift (values for `--language`)
     Languages(LanguagesArgs),
+    /// Call one function in the emulator with chosen arguments
+    Call(CallArgs),
+    /// Minimal observable state machine of a step function (experimental)
+    Quotient(QuotientArgs),
     /// Print the agent usage guide (SKILL.md) built into this binary
     #[command(
         long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
@@ -369,6 +610,25 @@ pub enum DbCommand {
         #[arg(value_parser = parse_hex_address)]
         addr: u64,
     },
+    /// Remember a data watchpoint for the next debug session
+    Watch {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+        /// Bytes watched from the address
+        #[arg(long, default_value_t = 1)]
+        size: u64,
+        /// Also stop when the bytes are read
+        #[arg(long)]
+        read: bool,
+        /// Do not stop when the bytes are written (with --read: reads only)
+        #[arg(long, requires = "read")]
+        no_write: bool,
+    },
+    /// Forget a watchpoint
+    RmWatch {
+        #[arg(value_parser = parse_hex_address)]
+        addr: u64,
+    },
     /// Show everything recorded
     Show,
     /// Show reversible edits, including the redo branch
@@ -444,12 +704,20 @@ pub struct SandboxArgs {
     #[arg(value_name = "BINARY")]
     pub binary: Option<PathBuf>,
 
-    /// Take a snapshot when execution reaches this address
+    /// Take a snapshot when execution reaches this address (the start of a
+    /// translated block); write it with `--snapshot-out`
     #[arg(long, value_parser = parse_hex_address)]
     pub snapshot_at: Option<u64>,
 
-    /// Restore snapshot from this directory before executing
-    #[arg(long)]
+    /// Write the `--snapshot-at` snapshot to this file, for `--restore-snapshot`
+    ///
+    /// Fails if the run never reached the address, rather than leaving no
+    /// file and no word about it.
+    #[arg(long, value_name = "FILE", requires = "snapshot_at")]
+    pub snapshot_out: Option<PathBuf>,
+
+    /// Restore a snapshot file (written by `--snapshot-out`) before executing
+    #[arg(long, value_name = "FILE")]
     pub restore_snapshot: Option<PathBuf>,
 
     /// Maximum number of instructions to execute (for infinite loop prevention)
@@ -460,7 +728,11 @@ pub struct SandboxArgs {
     #[arg(long)]
     pub stdin_mock: Option<String>,
 
-    /// Dump execution trace to the specified JSON file
+    /// Write the emulator's event trace as JSON lines to this file
+    ///
+    /// The trace records decode errors and high-level-emulation dispatches,
+    /// not every executed instruction; use `--coverage` for which code ran
+    /// and `--ttd-record`/`--ttd-seek` for the machine at a given step.
     #[arg(long)]
     pub dump_trace: Option<PathBuf>,
 
@@ -469,12 +741,68 @@ pub struct SandboxArgs {
     pub ttd_record: Option<u64>,
 
     /// Seek to a specific instruction step (via TTD) after execution halts
+    ///
+    /// Needs `--ttd-record`. The machine at that step -- registers, and any
+    /// `--ttd-read` ranges -- is reported under `ttd_state` with `--json`.
     #[arg(long)]
     pub ttd_seek: Option<u64>,
 
+    /// Memory to report after `--ttd-seek`, as `ADDR:SIZE` (hex address,
+    /// decimal size); repeatable
+    #[arg(long, value_name = "ADDR:SIZE", value_parser = parse_memory_range, requires = "ttd_seek")]
+    pub ttd_read: Vec<(u64, usize)>,
+
     /// Enable concolic/symbolic path exploration on TTD (fork on CBranch)
+    ///
+    /// Standard input is the symbolic input. With `--json` the report's
+    /// `symbolic` section lists each finished and found path with the input
+    /// bytes that drive execution down it.
     #[arg(long)]
     pub sym_explore: bool,
+
+    /// Exploration target: a path reaching this address is `found` and stops there
+    #[arg(long, value_name = "ADDR", value_parser = parse_hex_address, requires = "sym_explore")]
+    pub find: Option<u64>,
+
+    /// Exploration dead end: a path reaching this address is dropped; repeatable
+    #[arg(long, value_name = "ADDR", value_parser = parse_hex_address, requires = "find")]
+    pub avoid: Vec<u64>,
+
+    /// Exploration bound: how many rounds of stepping every live path
+    #[arg(long, value_name = "N", default_value_t = 64, requires = "sym_explore")]
+    pub sym_max_steps: u64,
+
+    /// Run on the p-code interpreter instead of the JIT
+    ///
+    /// Slower, but covers every opcode and every host; use it to cross-check
+    /// a result that looks wrong. Same as `FISSION_EMU_INTERP=1`.
+    #[arg(long)]
+    pub interp: bool,
+
+    /// Stop the run after this many milliseconds of wall-clock time
+    #[arg(long, value_name = "MS")]
+    pub timeout_ms: Option<u64>,
+
+    /// Linux ELF: map the guest's own dynamic loader (`PT_INTERP`) from the
+    /// host and let it bind imports, instead of emulating them
+    ///
+    /// Same as `FISSION_ENABLE_DYNLINK=1`. Needs the loader on this host, at
+    /// the guest's path or at `--ld-so`.
+    #[arg(long)]
+    pub dynlink: bool,
+
+    /// Host path of the dynamic loader for `--dynlink` (`FISSION_LD_SO`)
+    #[arg(long, value_name = "PATH", requires = "dynlink")]
+    pub ld_so: Option<PathBuf>,
+
+    /// Directory searched first for the guest's `DT_NEEDED` libraries;
+    /// repeatable (`FISSION_LIB_PATH`)
+    #[arg(long, value_name = "DIR")]
+    pub lib_path: Vec<PathBuf>,
+
+    /// Bind PLT slots on first call instead of at load (`FISSION_LAZY_BIND=1`)
+    #[arg(long)]
+    pub lazy_bind: bool,
 
     /// Track where untrusted input flows
     ///
@@ -953,6 +1281,63 @@ struct IdentifyArgs {
 
 #[derive(Args, Debug)]
 #[command(
+    long_about = "List the types the loader recovered from the binary's own metadata: C++ RTTI classes, DWARF and PDB structs and enums, Go types, Objective-C classes, Swift types, Rust vtables, and the container's header structures.\n\nEach type says which analysis produced it (`source`). Objective-C, Swift and Rust-vtable recovery have no test coverage yet, so those types carry `\"verified\": false`.",
+    after_help = "Examples:\n  fission_cli types app.elf --json\n  fission_cli types app.elf --source dwarf --name point"
+)]
+struct TypesArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// Only types from this analysis (`cpp_rtti`, `dwarf`, `pdb`, `go`,
+    /// `rust_vtable`, `objc`, `swift`, `pe_header`, `elf_header`, `te_header`)
+    #[arg(long, value_name = "SOURCE")]
+    source: Option<String>,
+
+    /// Only types whose name contains this (case-insensitive)
+    #[arg(long, value_name = "TEXT")]
+    name: Option<String>,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Debug)]
+#[command(
+    long_about = "Say what is at an address in one call: the function containing it, the section or memory block, the symbols and relocations there, and the DWARF source line. (Names and notes recorded with `db` are shown by `db show`.)",
+    after_help = "Examples:\n  fission_cli whatis app.elf --addr 0x401130 --json"
+)]
+struct WhatisArgs {
+    /// Path to the binary file to analyze
+    binary: PathBuf,
+
+    /// The address to describe
+    #[arg(long, value_parser = parse_hex_address)]
+    addr: u64,
+
+    #[command(flatten)]
+    common: CommonBinaryOutputArgs,
+}
+
+#[derive(Args, Clone, Debug, PartialEq, Eq)]
+#[command(
+    long_about = "Look up a known API (Windows API, C runtime) in the bundled type library and print its prototype: return type, parameter names and types, and whether it is variadic. No binary is needed.",
+    after_help = "Examples:\n  fission_cli api CreateFileW\n  fission_cli api memcpy --json"
+)]
+pub struct ApiArgs {
+    /// The function name, e.g. `CreateFileW`
+    pub name: String,
+
+    /// Use the 32-bit library instead of the 64-bit one
+    #[arg(long = "32")]
+    pub bits32: bool,
+
+    /// Output in JSON format
+    #[arg(short, long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+#[command(
     long_about = "Fuzzy function similarity: find functions that are structurally similar but not byte-identical (different compiler/optimization level, renamed duplicate helper, patched-but-related versions).\n\nA Fission-native, BSim-inspired analog -- NOT a byte-compatible clone of Ghidra's BSim. Without `--index`, functions are compared within the input binary. Build or update a portable offline feature index with `--update-index`, then query it with `--index`. Index identity is based on binary content hash and function entry; names and paths are result provenance.",
     after_help = "Examples:\n  fission_cli similar app.exe\n  fission_cli similar app.exe --function 0x140001000\n  fission_cli similar app.exe --update-index corpus.json\n  fission_cli similar query.exe --index corpus.json --function 0x140001000 --json"
 )]
@@ -1096,6 +1481,11 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "schema",
     "skill",
     "languages",
+    "call",
+    "quotient",
+    "types",
+    "whatis",
+    "api",
 ];
 
 fn should_use_canonical_parser(argv: &[OsString]) -> bool {
@@ -1151,6 +1541,15 @@ where
             ParsedInvocation::Db(mut db) => {
                 db.project_path = analysis_db.clone();
                 ParsedInvocation::Db(db)
+            }
+            // A session restores the breakpoints saved for its binary; the
+            // global `--db` / `--no-db` say from where, or not at all.
+            ParsedInvocation::Debug(mut debug) => {
+                if let crate::cli::args::DebugCommand::Session(session) = &mut debug.command {
+                    session.analysis_db = analysis_db.clone();
+                    session.no_analysis_db = no_analysis_db;
+                }
+                ParsedInvocation::Debug(debug)
             }
             other => other,
         };
@@ -1222,14 +1621,28 @@ fn ignored_option_warnings(
                 ignored("--engine", command);
             }
         }
+        ParsedInvocation::Debug(debug)
+            if !matches!(debug.command, crate::cli::args::DebugCommand::Session(_)) =>
+        {
+            if no_analysis_db {
+                ignored("--no-db", "debug");
+            }
+            if analysis_db.is_some() {
+                ignored("--db", "debug");
+            }
+        }
         ParsedInvocation::Script(_)
         | ParsedInvocation::Sandbox(_)
         | ParsedInvocation::Verify(_)
+        | ParsedInvocation::Call(_)
+        | ParsedInvocation::Quotient(_)
         | ParsedInvocation::Db(_) => {
             let command = match invocation {
                 ParsedInvocation::Script(_) => "script",
                 ParsedInvocation::Sandbox(_) => "sandbox",
                 ParsedInvocation::Verify(_) => "verify",
+                ParsedInvocation::Call(_) => "call",
+                ParsedInvocation::Quotient(_) => "quotient",
                 _ => "db",
             };
             if language.is_some() {
@@ -1268,6 +1681,9 @@ fn raw_load_warnings(
         ParsedInvocation::Schema(_) => "schema",
         ParsedInvocation::Skill => "skill",
         ParsedInvocation::Languages(_) => "languages",
+        ParsedInvocation::Call(_) => "call",
+        ParsedInvocation::Quotient(_) => "quotient",
+        ParsedInvocation::Api(_) => "api",
     };
     [
         ("--base", raw_base.is_some()),
@@ -1398,6 +1814,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.engine = decomp.engine;
                     args.compiler_id = decomp.compiler_id;
                     args.timeout_ms = decomp.timeout_ms;
+                    args.work_limits = decomp.work_limit;
                     args.json = decomp.json;
                     args.output = decomp.output;
                     args.verbose = decomp.verbose;
@@ -1476,6 +1893,26 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                     args.verbose = callgraph.common.verbose;
                     args
                 }
+                CliCommand::Types(types) => {
+                    let mut args = OneShotArgs::with_binary(types.binary);
+                    args.lookup = Some(crate::cli::oneshot::LookupQuery::Types {
+                        source: types.source,
+                        name: types.name,
+                    });
+                    args.json = types.common.json;
+                    args.verbose = types.common.verbose;
+                    args
+                }
+                CliCommand::Whatis(whatis) => {
+                    let mut args = OneShotArgs::with_binary(whatis.binary);
+                    args.lookup = Some(crate::cli::oneshot::LookupQuery::Whatis {
+                        address: whatis.addr,
+                    });
+                    args.json = whatis.common.json;
+                    args.verbose = whatis.common.verbose;
+                    args
+                }
+                CliCommand::Api(api) => return ParsedInvocation::Api(api),
                 CliCommand::Identify(identify) => {
                     let mut args = OneShotArgs::with_binary(identify.binary);
                     args.identify_cmd = true;
@@ -1552,6 +1989,8 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 CliCommand::Languages(languages) => {
                     return ParsedInvocation::Languages(languages);
                 }
+                CliCommand::Call(call) => return ParsedInvocation::Call(call),
+                CliCommand::Quotient(quotient) => return ParsedInvocation::Quotient(quotient),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -1595,6 +2034,9 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Skill => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Languages(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Call(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Api(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Quotient(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -1612,6 +2054,96 @@ mod tests {
             ParsedInvocation::Schema(_) => panic!("legacy parser cannot emit schema"),
             ParsedInvocation::Skill => panic!("legacy parser cannot emit skill"),
             ParsedInvocation::Languages(_) => panic!("legacy parser cannot emit languages"),
+            ParsedInvocation::Call(_) => panic!("legacy parser cannot emit call"),
+            ParsedInvocation::Api(_) => panic!("legacy parser cannot emit api"),
+            ParsedInvocation::Quotient(_) => panic!("legacy parser cannot emit quotient"),
+        }
+    }
+
+    #[test]
+    fn quotient_ports_and_context_bytes_parse() {
+        assert_eq!(
+            parse_input_port("cmd:1:8"),
+            Ok(QuotientInputArg {
+                name: "cmd".to_string(),
+                arg_index: 1,
+                bits: 8,
+            })
+        );
+        for bad in ["cmd:1:7", "cmd:1:72", "cmd:1", ":1:8", "cmd:-1:8"] {
+            assert!(parse_input_port(bad).is_err(), "{bad}");
+        }
+        assert_eq!(parse_hex_bytes("0x0102ff"), Ok(HexBytes(vec![1, 2, 0xff])));
+        assert!(parse_hex_bytes("012").is_err());
+        assert!(parse_hex_bytes("zz").is_err());
+
+        let ParsedInvocation::Quotient(args) = parse_oneshot_args_from([
+            "fission_cli",
+            "quotient",
+            "a.elf",
+            "--addr",
+            "0x1000",
+            "--input",
+            "cmd:1:8",
+            "--input",
+            "key:2:32",
+            "--horizon",
+            "6",
+        ]) else {
+            panic!("expected quotient");
+        };
+        assert_eq!(args.addr, Some(0x1000));
+        assert_eq!(args.inputs.len(), 2);
+        assert_eq!(args.horizon, 6);
+        assert_eq!((args.context_arg, args.context_bytes), (0, 8));
+    }
+
+    #[test]
+    fn decomp_work_limit_flags_reach_the_normalized_args_in_order() {
+        let parsed = parse_canonical(&[
+            "fission_cli",
+            "decomp",
+            "bin.exe",
+            "--addr",
+            "0x401000",
+            "--work-limit",
+            "structuring_total_work=10",
+            "--work-limit",
+            "sese_region_proof_calls=5",
+        ]);
+        let overrides = overrides_with_flags(
+            fission_core::WorkLimitOverrides::default(),
+            &parsed.args.work_limits,
+        );
+        assert_eq!(parsed.args.work_limits.len(), 2);
+        assert_eq!(overrides.structuring_total_work, Some(10));
+        assert_eq!(overrides.sese_region_proof_calls, Some(5));
+    }
+
+    #[test]
+    fn decomp_without_work_limit_flags_carries_none() {
+        let parsed = parse_canonical(&["fission_cli", "decomp", "bin.exe", "--addr", "0x401000"]);
+        assert!(parsed.args.work_limits.is_empty());
+    }
+
+    #[test]
+    fn a_malformed_work_limit_is_rejected_at_parse_time() {
+        for bad in [
+            "structuring_total_work",
+            "nope=3",
+            "structuring_total_work=-4",
+        ] {
+            let err = CliArgs::try_parse_from([
+                "fission_cli",
+                "decomp",
+                "bin.exe",
+                "--addr",
+                "0x401000",
+                "--work-limit",
+                bad,
+            ])
+            .expect_err(bad);
+            assert_eq!(err.kind(), ErrorKind::ValueValidation, "{bad}");
         }
     }
 

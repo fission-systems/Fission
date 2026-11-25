@@ -3,6 +3,7 @@
 //! CLI [`set_cli_resource_bundle_root`] must run before the first [`crate::PATHS`] access when using `--resource-root`.
 
 use crate::core::path_config::PathConfig;
+use crate::core::resource_manifest::{BuildIdentity, ResourceManifestStatus, manifest_status};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
@@ -142,6 +143,15 @@ pub fn signatures_base_from_bundle_root(bundle_root: &Path) -> Option<PathBuf> {
     None
 }
 
+/// The bundle root the signatures resolve from (explicit, then installed
+/// layouts): the root whose manifest describes the installed resources.
+#[must_use]
+pub fn resolved_bundle_root() -> Option<PathBuf> {
+    prioritized_bundle_roots()
+        .into_iter()
+        .find(|root| root.exists() && signatures_base_from_bundle_root(root).is_some())
+}
+
 #[must_use]
 pub fn resolve_signatures_base_from_bundles() -> Option<PathBuf> {
     resolve_signatures_base_from_roots(prioritized_bundle_roots())
@@ -270,6 +280,10 @@ pub struct ResourceAvailability {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ResourceStatusSnapshot {
+    /// The release the running binary was built from.
+    pub build: BuildIdentity,
+    /// The resolved bundle's manifest, compared with [`Self::build`].
+    pub resource_manifest: ResourceManifestStatus,
     pub resource_roots: Vec<ResourceRootProbe>,
     pub resources: ResourceAvailability,
     /// Directories named by `--signature-path` / `FISSION_SIGNATURE_PATH`.
@@ -318,8 +332,10 @@ fn push_probe(out: &mut Vec<ResourceRootProbe>, kind: &str, path: PathBuf) {
     });
 }
 
+/// Resolved resources for `resources status`, with `build` (the caller's own
+/// compile-time identity) compared against the resolved bundle's manifest.
 #[must_use]
-pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
+pub fn resource_status_snapshot(build: BuildIdentity) -> ResourceStatusSnapshot {
     let cfg = PathConfig::detect();
     let roots = probe_resource_root_candidates();
     let die_pe = cfg.get_die_signatures_path();
@@ -360,7 +376,10 @@ pub fn resource_status_snapshot() -> ResourceStatusSnapshot {
             fid_databases: PathConfig::fid_databases_in_dir(&dir).len(),
         })
         .collect();
+    let resource_manifest = manifest_status(resolved_bundle_root().as_deref(), &build);
     ResourceStatusSnapshot {
+        build,
+        resource_manifest,
         resource_roots: roots,
         resources,
         signature_paths,

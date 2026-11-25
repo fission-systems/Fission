@@ -14,6 +14,30 @@ pub enum Endianness {
     Big,
 }
 
+/// Architectural rule for propagating NaN payloads across binary float ops.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NanPolicy {
+    /// Intel SDM Vol. 1 §4.8.3.5 Table 4-7 / IEEE first-NaN order: when either
+    /// operand is NaN, return the first NaN operand quieted (`QNaN1` beats
+    /// `SNaN2`). Used on x86/x86-64/MIPS/PPC.
+    #[default]
+    FirstOperand = 0,
+    /// Arm ARM `FPProcessNaNs` (`FPCR.DN = 0`): any signaling NaN takes
+    /// priority over a quiet NaN (the first sNaN if both are sNaNs), quieted;
+    /// otherwise the first quiet NaN. Used on AArch64/ARM32.
+    SignalingFirst = 1,
+}
+
+impl NanPolicy {
+    pub fn from_u32(value: u32) -> Self {
+        match value {
+            1 => Self::SignalingFirst,
+            _ => Self::FirstOperand,
+        }
+    }
+}
+
 /// All architecture-specific facts needed by the emulator.
 /// Derived once at startup from the Sleigh Language ID; no runtime branching needed.
 pub struct ArchInfo {
@@ -23,6 +47,8 @@ pub struct ArchInfo {
     pub pointer_size: u8,
     /// Byte order of the target.
     pub endian: Endianness,
+    /// Architectural NaN payload propagation rule.
+    pub nan_policy: NanPolicy,
     /// Name of the program counter register (as in the Sleigh register map).
     pub pc_reg: &'static str,
     /// Name of the stack pointer register.
@@ -49,6 +75,7 @@ impl ArchInfo {
             name: "x86:LE:64:default",
             pointer_size: 8,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "rip",
             sp_reg: "rsp",
             gp_regs: &[
@@ -65,6 +92,7 @@ impl ArchInfo {
             name: "x86:LE:64:default",
             pointer_size: 8,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "rip",
             sp_reg: "rsp",
             gp_regs: &[
@@ -81,6 +109,7 @@ impl ArchInfo {
             name: "x86:LE:32:default",
             pointer_size: 4,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "eip",
             sp_reg: "esp",
             gp_regs: &["EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"],
@@ -94,6 +123,7 @@ impl ArchInfo {
             name: "x86:LE:32:default",
             pointer_size: 4,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "eip",
             sp_reg: "esp",
             gp_regs: &["EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "EBP"],
@@ -109,6 +139,7 @@ impl ArchInfo {
             name: "AARCH64:LE:64:v8A",
             pointer_size: 8,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::SignalingFirst,
             pc_reg: "pc",
             sp_reg: "sp",
             gp_regs: &[
@@ -126,6 +157,7 @@ impl ArchInfo {
             name: "ARM:LE:32:v7",
             pointer_size: 4,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::SignalingFirst,
             pc_reg: "r15",
             sp_reg: "r13",
             gp_regs: &[
@@ -144,6 +176,7 @@ impl ArchInfo {
             name: "MIPS:BE:32:default",
             pointer_size: 4,
             endian: Endianness::Big,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "pc",
             sp_reg: "sp",
             gp_regs: &[
@@ -160,6 +193,7 @@ impl ArchInfo {
             name: "MIPS:LE:32:default",
             pointer_size: 4,
             endian: Endianness::Little,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "pc",
             sp_reg: "sp",
             gp_regs: &[
@@ -178,6 +212,7 @@ impl ArchInfo {
             name: "PowerPC:BE:32:default",
             pointer_size: 4,
             endian: Endianness::Big,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "pc",
             sp_reg: "r1",
             gp_regs: &[
@@ -195,6 +230,7 @@ impl ArchInfo {
             name: "PowerPC:BE:64:default",
             pointer_size: 8,
             endian: Endianness::Big,
+            nan_policy: NanPolicy::FirstOperand,
             pc_reg: "pc",
             sp_reg: "r1",
             gp_regs: &[

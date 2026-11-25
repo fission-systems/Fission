@@ -191,11 +191,10 @@ fn compute_no_return_functions(
         return no_return;
     };
 
-    // A global Rayon wait under CF OnceLock can steal another CF caller
-    // and block on itself. Only seed-producing FID preparation may use the
-    // scoped OS queue: workers decode immutable inputs and cannot call CF;
-    // neither caller work nor std::thread joins execute unrelated Rayon jobs.
-    // Ordinary no-return callers retain sequential preparation.
+    // Control-flow facts can initialize under a OnceLock. A Rayon wait
+    // there could steal another caller waiting on the same slot. Use the
+    // bounded scoped queue for both ordinary preparation and FID capture:
+    // its workers decode immutable inputs and its joins cannot steal jobs.
     let capture = seeds.is_some();
     let decode = |index: usize| {
         let f = &binary.functions[index];
@@ -243,8 +242,9 @@ fn compute_no_return_functions(
             seed,
         ))
     };
-    let rows = if capture {
-        scoped_decode::collect_scoped(binary.functions.len(), rayon::current_num_threads(), decode)
+    let workers = rayon::current_num_threads();
+    let rows = if workers > 1 {
+        scoped_decode::collect_scoped(binary.functions.len(), workers, decode)
     } else {
         (0..binary.functions.len()).filter_map(decode).collect()
     };
@@ -576,11 +576,23 @@ mod tests {
             })
             .build()
             .unwrap();
-        let serial = compute_no_return_functions(&binary, None);
+        let serial_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(1)
+            .build()
+            .unwrap();
+        let parallel_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build()
+            .unwrap();
+        let serial = serial_pool.install(|| compute_no_return_functions(&binary, None));
         assert!(serial.contains(&abort));
+        assert_eq!(
+            parallel_pool.install(|| compute_no_return_functions(&binary, None)),
+            serial
+        );
         let mut seeds = DecodeSeeds::new();
         assert_eq!(
-            compute_no_return_functions(&binary, Some(&mut seeds)),
+            parallel_pool.install(|| compute_no_return_functions(&binary, Some(&mut seeds))),
             serial
         );
         assert_eq!(seeds.len(), 16);

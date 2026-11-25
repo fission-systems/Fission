@@ -21,7 +21,7 @@ pub use crate::core::path_config;
 pub use crate::core::prelude;
 pub use crate::core::settings;
 
-pub use crate::core::config::{LogConfig, LogLevel};
+pub use crate::core::config::{LogConfig, LogLevel, WorkLimitOverrides};
 pub use crate::core::{CONFIG, CallingConvention, FissionError, PATHS, Result};
 
 pub use crate::core::path_config::find_sla_dir;
@@ -29,6 +29,11 @@ pub use crate::core::path_config::find_sla_dir;
 /// Identity / packed-score numeric thresholds (`EvidencePolicy::DEFAULT`).
 pub mod evidence_policy {
     pub use crate::core::evidence_policy::*;
+}
+
+/// Release identity of the binary and of its resource bundle's manifest.
+pub mod resource_manifest {
+    pub use crate::core::resource_manifest::*;
 }
 
 /// Runtime resource bundle roots (`--resource-root`, `FISSION_RESOURCE_ROOT`, install layouts).
@@ -44,6 +49,8 @@ pub mod resources {
 pub mod utils {
     pub use crate::core::utils::*;
 }
+
+pub mod test_inputs;
 
 // Commonly used standalone utilities
 pub use crate::core::utils::{

@@ -541,14 +541,15 @@ mod tests {
         assert_eq!(binary_format_to_ghidra_format("RAW"), None);
     }
 
-    /// Integration test against the real `utils/ghidra-data` tree (only runs
-    /// if the workspace root is accessible at compile time).
+    /// Integration test against the committed `utils/ghidra-data` tree.
     #[test]
     fn test_is_no_return_pe_exit_process_real_data() {
         let root = crate::core::resource_roots::find_ghidra_data_root();
-        if !root.exists() {
-            return;
-        }
+        assert!(
+            root.exists(),
+            "{} is committed under utils/; a missing copy is a broken checkout",
+            root.display()
+        );
         let idx = GhidraNoReturnIndex::load(&root);
         assert!(
             idx.is_no_return(GHIDRA_FORMAT_PE, None, None, "ExitProcess"),

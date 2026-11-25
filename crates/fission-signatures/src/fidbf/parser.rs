@@ -172,17 +172,17 @@ mod tests {
         let _ = std::fs::remove_file(path);
     }
 
+    /// Path resolution counts a database present when its `.fn.fpk` pack is
+    /// committed, but the raw `.fidbf` it names is not: before this was
+    /// opt-in it returned at the `exists` check in every checkout.
     #[test]
+    #[ignore = "needs a raw Ghidra .fidbf, which is not committed (only its .fpk pack is); run with --ignored"]
     fn detects_raw_ghidra_fidbf() {
-        let Some(path) = ResourceProvider::global()
+        let path = ResourceProvider::global()
             .paths()
             .get_fid_path(true, Some("vs2019"))
-        else {
-            return;
-        };
-        if !path.exists() {
-            return;
-        }
+            .expect("vs2019 FID database resolves from the committed packs");
+        assert!(path.exists(), "raw database absent: {}", path.display());
         let parsed = parse_fidbf(&path).expect("parse raw fidbf records");
         assert!(!parsed.libraries.is_empty());
         assert!(!parsed.functions.is_empty());
@@ -242,14 +242,15 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "needs a raw Ghidra .fidbf, which is not committed (only its .fpk pack is); run with --ignored"]
     fn parses_packed_gcc_fidbf() {
-        let Some(fid_dir) = ResourceProvider::global().paths().fid_dir.clone() else {
-            return;
-        };
+        let fid_dir = ResourceProvider::global()
+            .paths()
+            .fid_dir
+            .clone()
+            .expect("the committed utils/signatures/fid directory resolves");
         let path = fid_dir.join("gcc-x86.LE.64.default.fidbf");
-        if !path.exists() {
-            return;
-        }
+        assert!(path.exists(), "raw database absent: {}", path.display());
         let parsed = parse_fidbf(&path).expect("parse Java-packed gcc fidbf");
         assert!(!parsed.libraries.is_empty(), "no libraries parsed");
         assert!(!parsed.functions.is_empty(), "no functions parsed");

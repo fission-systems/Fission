@@ -33,14 +33,25 @@
 use super::utils::expr_has_side_effects;
 use super::utils::retain_unmarked_stmts;
 use crate::HashSet;
+use crate::analysis::defuse::collect_address_taken_locals;
 use crate::prelude::*;
 use std::rc::Rc;
 
 /// Names whose storage a write can reach other than by the name itself --
-/// stack homes, parameters, slots. A clobber of one of those may still be
-/// observable through an aliasing pointer, so none of them are candidates.
+/// stack homes, parameters, slots, or address-taken locals. A clobber of one
+/// of those may still be observable through an aliasing pointer, so none of
+/// them are candidates.
 fn aliasable_names(func: &PreHirFunction) -> HashSet<String> {
-    let mut out: HashSet<String> = func.params.iter().map(|b| b.name.clone()).collect();
+    let mut out = collect_address_taken_locals(&func.body);
+    let init_stmts: Vec<PreHirStmt> = func
+        .locals
+        .iter()
+        .filter_map(|b| b.initializer.clone().map(PreHirStmt::Expr))
+        .collect();
+    if !init_stmts.is_empty() {
+        out.extend(collect_address_taken_locals(&init_stmts));
+    }
+    out.extend(func.params.iter().map(|b| b.name.clone()));
     for binding in &func.locals {
         let stack_backed = matches!(
             binding.origin,
@@ -167,7 +178,7 @@ fn lvalue_reads_var(lhs: &PreHirLValue, name: &str) -> bool {
 fn expr_mentions_var(expr: &PreHirExpr, name: &str) -> bool {
     let mut found = false;
     walk(expr, &mut |e| {
-        if matches!(e, PreHirExpr::Var(v) if v == name) {
+        if matches!(e, PreHirExpr::Var(v) | PreHirExpr::AddressOfLocal(v) if v == name) {
             found = true;
         }
     });
@@ -425,5 +436,25 @@ mod tests {
             panic!("shape changed");
         };
         assert_eq!(then_body.len(), 2, "{then_body:?}");
+    }
+
+    #[test]
+    fn preserves_store_to_address_taken_local_before_call() {
+        let mut f = func(
+            vec![binding("x", Some(NirBindingOrigin::Temp))],
+            vec![
+                set("x", konst(1)),
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "foo".to_string(),
+                    args: vec![PreHirExpr::AddressOfLocal("x".to_string())],
+                    ty: NirType::Unknown,
+                }),
+                set("x", konst(2)),
+                PreHirStmt::Return(Some(var("x"))),
+            ],
+        );
+        assert!(!eliminate_overwritten_assigns(&mut f));
+        assert_eq!(assigned(&f).len(), 2);
     }
 }

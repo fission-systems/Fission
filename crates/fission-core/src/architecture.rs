@@ -1137,10 +1137,8 @@ mod tests {
     fn shipped_cr16_ldefs_keeps_only_its_uncommented_language() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../utils/sleigh-specs/languages/CR16/CR16.ldefs");
-        let Ok(contents) = std::fs::read_to_string(&path) else {
-            eprintln!("skipped: {} not present in this checkout", path.display());
-            return;
-        };
+        let contents = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("committed {} unreadable: {e}", path.display()));
         let tags = scan_xml_tags(&contents);
         let languages: Vec<_> = tags
             .iter()

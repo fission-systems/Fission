@@ -116,9 +116,7 @@ mod tests {
     fn analyze_lines_returns_empty_without_debug_info() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("testdata/x64_pdb_struct_test.exe");
-        let Ok(binary) = LoadedBinary::from_file(&path) else {
-            return;
-        };
+        let binary = LoadedBinary::from_file(&path).expect("load committed PDB fixture");
         let analyzer = DwarfAnalyzer::new(&binary);
         assert!(analyzer.analyze_lines().is_empty());
     }

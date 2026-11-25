@@ -1,6 +1,6 @@
 [package]
 name = "fission-cli"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 authors = ["Fission Dev Team"]
 description = "Fission CLI and entrypoint"
@@ -43,11 +43,13 @@ fission-project = { path = "../fission-project" }
 fission-loader = { path = "../fission-loader" }
 fission-analysis-db = { path = "../fission-analysis-db" }
 fission-static = { path = "../fission-static" }
+fission-signatures = { path = "../fission-signatures" }
 fission-decompiler = { path = "../fission-decompiler" }
 fission-sleigh = { path = "../fission-sleigh" }
 
 fission-emulator = { path = "../fission-emulator" }
 fission-dir = { path = "../fission-dir" }
+fission-quotient = { path = "../fission-quotient" }
 fission-dynamic = { path = "../fission-dynamic", optional = true, features = ["interactive_runtime"] }
 tracing = "0.1"
 anyhow = "1.0"

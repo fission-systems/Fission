@@ -19,6 +19,14 @@
  log_verbose = false
  log_file = ""
 
+ # Deterministic work limits: units of work, not time. Uncomment a key to
+ # override its built-in default (see docs/CLI.md, `decomp --work-limit`).
+ # [decompiler.work_limits]
+ # structuring_total_work = 200000
+ # condition_recovery_subcalls = 512
+ # sese_region_proof_calls = 20000
+ # varnode_lowering_work = 20000
+
  [analysis]
  max_string_search_size = 262144
  min_string_length = 4

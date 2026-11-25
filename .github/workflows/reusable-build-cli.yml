@@ -46,6 +46,7 @@ jobs:
           targets: ${{ inputs.target || '' }}
 
       - name: Setup sccache
+        id: sccache
         uses: ./.github/actions/setup-sccache
 
       - name: Cache Rust Build
@@ -63,8 +64,9 @@ jobs:
           if [ -n "${FISSION_IN_TARGET}" ]; then args+=(--target "${FISSION_IN_TARGET}"); fi
           cargo build -p fission-cli --locked ${args[@]+"${args[@]}"} --verbose
 
+      # Only when the build used sccache: otherwise this would start a server.
       - name: sccache stats
-        if: always()
+        if: always() && steps.sccache.outputs.enabled == 'true'
         shell: bash
         run: sccache --show-stats || true
 

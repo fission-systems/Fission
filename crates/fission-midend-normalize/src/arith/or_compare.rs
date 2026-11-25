@@ -277,6 +277,9 @@ fn simplify_expr(expr: &mut PreHirExpr) -> bool {
             ..
         } = or_expr
         {
+            if expr_has_side_effects(or_lhs) || expr_has_side_effects(or_rhs) {
+                return changed;
+            }
             let mut left_cmp = PreHirExpr::Binary {
                 op: *cmp_op,
                 lhs: or_lhs.clone(),
@@ -310,4 +313,38 @@ fn simplify_expr(expr: &mut PreHirExpr) -> bool {
     }
 
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn does_not_short_circuit_or_when_operand_has_side_effects() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let mut func = PreHirFunction {
+            body: vec![PreHirStmt::Return(Some(PreHirExpr::Binary {
+                op: PreHirBinaryOp::Eq,
+                lhs: Box::new(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Or,
+                    lhs: Box::new(PreHirExpr::Var("a".to_string())),
+                    rhs: Box::new(PreHirExpr::Call {
+                        origin: None,
+                        target: "foo".to_string(),
+                        args: vec![],
+                        ty: u32_ty.clone(),
+                    }),
+                    ty: u32_ty.clone(),
+                }),
+                rhs: Box::new(PreHirExpr::Const(0, u32_ty)),
+                ty: NirType::Bool,
+            }))],
+            ..Default::default()
+        };
+
+        assert!(!apply_or_compare_pass(&mut func));
+    }
 }

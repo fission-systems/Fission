@@ -588,13 +588,15 @@ mod tests {
         assert!(resolve_json_path("go1.22.3", &tmp).is_none());
     }
 
-    fn workspace_typeinfo_dir() -> Option<std::path::PathBuf> {
+    /// `utils/signatures/typeinfo` is committed, so not finding it is a
+    /// broken checkout rather than an absent optional input.
+    fn workspace_typeinfo_dir() -> std::path::PathBuf {
         // Walk up from CARGO_MANIFEST_DIR to workspace root
         let mut dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         for _ in 0..5 {
             let candidate = dir.join("utils").join("signatures").join("typeinfo");
             if candidate.join("golang").exists() {
-                return Some(candidate);
+                return candidate;
             }
             if let Some(parent) = dir.parent() {
                 dir = parent.to_path_buf();
@@ -602,7 +604,7 @@ mod tests {
                 break;
             }
         }
-        None
+        panic!("utils/signatures/typeinfo/golang not found above CARGO_MANIFEST_DIR")
     }
 
     #[test]
@@ -611,19 +613,15 @@ mod tests {
         // what has to resolve for a version string is the packed pair. The
         // stem is derived from the version rather than found on disk, which is
         // what lets a tree without the sources still load.
-        let Some(typeinfo_dir) = workspace_typeinfo_dir() else {
-            eprintln!("skipped: typeinfo dir not found");
-            return;
-        };
+        let typeinfo_dir = workspace_typeinfo_dir();
         assert_eq!(packed_stem_for("go1.22.3", &typeinfo_dir), "go1.22.0");
         assert_eq!(packed_stem_for("1.22", &typeinfo_dir), "go1.22.0");
 
         let golang = typeinfo_dir.join("golang");
-        let packed = golang.join("go1.22.0.fn.fpk");
-        if !packed.exists() {
-            eprintln!("skipped: packed tables not built here");
-            return;
-        }
+        assert!(
+            golang.join("go1.22.0.fn.fpk").exists(),
+            "the packed go1.22.0 tables are committed under utils/"
+        );
         assert!(
             golang.join("go1.22.0.ty.fpk").exists(),
             "both halves ship together"
@@ -632,10 +630,7 @@ mod tests {
 
     #[test]
     fn test_load_go1_22_linux_amd64() {
-        let Some(typeinfo_dir) = workspace_typeinfo_dir() else {
-            eprintln!("skipped: typeinfo dir not found");
-            return;
-        };
+        let typeinfo_dir = workspace_typeinfo_dir();
         let db = GoTypeinfoDatabase::load_for_binary("go1.22.3", "linux", "amd64", &typeinfo_dir);
         assert!(db.is_some(), "should load go1.22.0.json");
         let db = db.unwrap();
@@ -662,10 +657,7 @@ mod tests {
 
     #[test]
     fn test_load_go1_22_darwin_arm64() {
-        let Some(typeinfo_dir) = workspace_typeinfo_dir() else {
-            eprintln!("skipped: typeinfo dir not found");
-            return;
-        };
+        let typeinfo_dir = workspace_typeinfo_dir();
         let db = GoTypeinfoDatabase::load_for_binary("go1.22.3", "darwin", "arm64", &typeinfo_dir);
         assert!(db.is_some(), "should load go1.22.0.json for darwin/arm64");
         let db = db.unwrap();
@@ -686,14 +678,20 @@ mod packed_tests {
     /// The packed path must answer exactly as the JSON one did, including the
     /// tag merge order -- a symbol defined in both `all` and `windows-amd64`
     /// has to resolve the same way it did when the tags were merged at load.
+    ///
+    /// Needs the JSON the tables were packed from, which lives in the
+    /// gitignored `utils/source/`; without it every platform used to
+    /// `continue`, and the test passed having compared nothing.
     #[test]
+    #[ignore = "needs the gitignored utils/source/ Go typeinfo JSON; run with --ignored"]
     fn packed_and_json_agree_across_platforms() {
         let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../utils/signatures/typeinfo");
         let dir = dir.as_path();
-        if !dir.join("golang").exists() {
-            return; // bundle not present in this checkout
-        }
+        assert!(
+            dir.join("golang").exists(),
+            "utils/signatures/typeinfo/golang is committed"
+        );
         for (version, goos, goarch) in [
             ("go1.25.0", "windows", "amd64"),
             ("go1.20.0", "linux", "amd64"),
@@ -703,12 +701,13 @@ mod packed_tests {
             // checkout that carries only the packed tables has nothing to
             // compare, and must not have its tracked `.fpk` files moved aside
             // to find that out.
-            if resolve_json_path(version, dir).is_none() {
-                continue;
-            }
+            assert!(
+                resolve_json_path(version, dir).is_some(),
+                "{version}: no source JSON under utils/source/ to compare against"
+            );
             let packed = match GoTypeinfoDatabase::load_for_binary(version, goos, goarch, dir) {
                 Some(db) if db.packed.is_some() => db,
-                _ => continue, // packed tables not built here
+                _ => panic!("{version}: the packed tables are committed but did not load"),
             };
 
             // Hide the packed tables so the same call takes the JSON path.
@@ -726,7 +725,7 @@ mod packed_tests {
             for (from, to) in &hidden {
                 std::fs::rename(to, from).ok();
             }
-            let Some(json) = json else { continue };
+            let json = json.unwrap_or_else(|| panic!("{version}: the JSON path did not load"));
 
             for (name, sig) in &json.funcs {
                 let got = packed.get_func(name).unwrap_or_else(|| {

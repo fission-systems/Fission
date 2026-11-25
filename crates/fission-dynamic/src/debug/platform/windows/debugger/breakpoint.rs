@@ -3,8 +3,18 @@ use fission_core::{FissionError, Result as FissionResult};
 
 impl WindowsDebugger {
     pub(super) fn set_sw_breakpoint(&mut self, address: u64) -> FissionResult<()> {
-        // Read original byte
-        let original_byte = self.read_memory(address, 1)?[0];
+        if self.state.breakpoints.contains_key(&address) {
+            return Err(FissionError::debug(
+                "Breakpoint already exists at this address",
+            ));
+        }
+
+        // Read original byte from raw target memory before patching.
+        let original_byte = self
+            .read_raw_memory(address, 1)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| FissionError::debug(format!("Failed to read byte at 0x{address:x}")))?;
         if original_byte == 0xCC {
             return Err(FissionError::debug(
                 "Breakpoint already exists at this address",
@@ -48,7 +58,7 @@ impl WindowsDebugger {
         Ok(())
     }
 
-    pub(super) fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+    pub(super) fn read_raw_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
         #[cfg(test)]
         if self.process_handle.is_none() {
             if let Some(mem) = &self.test_memory {
@@ -93,6 +103,26 @@ impl WindowsDebugger {
             buffer.truncate(bytes_read);
             Ok(buffer)
         }
+    }
+
+    pub(super) fn read_memory(&self, address: u64, size: usize) -> FissionResult<Vec<u8>> {
+        let mut buffer = self.read_raw_memory(address, size)?;
+        // Overlay armed software breakpoints so disassembly/callers see original code bytes.
+        let originals: Vec<(u64, [u8; 1])> = self
+            .state
+            .breakpoints
+            .values()
+            .filter(|bp| bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software)
+            .map(|bp| (bp.address, [bp.original_byte]))
+            .collect();
+        crate::debug::platform::trap::overlay_original_bytes(
+            &mut buffer,
+            address,
+            originals
+                .iter()
+                .map(|(address, original)| (*address, original.as_slice())),
+        );
+        Ok(buffer)
     }
 
     pub(super) fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {
@@ -184,21 +214,29 @@ impl WindowsDebugger {
 
         if is_call && insn_len > 0 {
             let next_rip = rip + insn_len as u64;
-            let original_byte = self.read_memory(next_rip, 1)?[0];
-            if original_byte != 0xCC {
-                self.write_memory(next_rip, &[0xCC])?;
-                self.state.breakpoints.insert(
-                    next_rip,
-                    Breakpoint {
-                        address: next_rip,
-                        original_byte,
-                        enabled: true,
-                        temporary: true,
-                        kind: crate::debug::types::BreakpointKind::Software,
-                        hits: 0,
-                        condition: None,
-                    },
-                );
+            if !self.state.breakpoints.contains_key(&next_rip) {
+                let original_byte = self
+                    .read_raw_memory(next_rip, 1)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        FissionError::debug(format!("Failed to read byte at 0x{next_rip:x}"))
+                    })?;
+                if original_byte != 0xCC {
+                    self.write_memory(next_rip, &[0xCC])?;
+                    self.state.breakpoints.insert(
+                        next_rip,
+                        Breakpoint {
+                            address: next_rip,
+                            original_byte,
+                            enabled: true,
+                            temporary: true,
+                            kind: crate::debug::types::BreakpointKind::Software,
+                            hits: 0,
+                            condition: None,
+                        },
+                    );
+                }
             }
             self.continue_execution()
         } else {
@@ -234,21 +272,29 @@ impl WindowsDebugger {
 
         let ret_addr = self.find_return_address(tid, &regs)?;
 
-        let original_byte = self.read_memory(ret_addr, 1)?[0];
-        if original_byte != 0xCC {
-            self.write_memory(ret_addr, &[0xCC])?;
-            self.state.breakpoints.insert(
-                ret_addr,
-                Breakpoint {
-                    address: ret_addr,
-                    original_byte,
-                    enabled: true,
-                    temporary: true,
-                    kind: crate::debug::types::BreakpointKind::Software,
-                    hits: 0,
-                    condition: None,
-                },
-            );
+        if !self.state.breakpoints.contains_key(&ret_addr) {
+            let original_byte = self
+                .read_raw_memory(ret_addr, 1)?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    FissionError::debug(format!("Failed to read byte at 0x{ret_addr:x}"))
+                })?;
+            if original_byte != 0xCC {
+                self.write_memory(ret_addr, &[0xCC])?;
+                self.state.breakpoints.insert(
+                    ret_addr,
+                    Breakpoint {
+                        address: ret_addr,
+                        original_byte,
+                        enabled: true,
+                        temporary: true,
+                        kind: crate::debug::types::BreakpointKind::Software,
+                        hits: 0,
+                        condition: None,
+                    },
+                );
+            }
         }
         self.continue_execution()
     }
@@ -562,7 +608,11 @@ impl WindowsDebugger {
         if bp.enabled {
             return Ok(false);
         }
-        let original_byte = self.read_memory(address, 1)?[0];
+        let original_byte = self
+            .read_raw_memory(address, 1)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| FissionError::debug(format!("Failed to read byte at 0x{address:x}")))?;
         self.write_memory(address, &[0xCC])?;
         let bp = self
             .state

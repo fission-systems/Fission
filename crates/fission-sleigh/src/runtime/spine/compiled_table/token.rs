@@ -467,9 +467,8 @@ pub(super) fn read_sla_token_field_at(
         let absolute_off = base_cursor
             .checked_add(off)
             .ok_or_else(|| anyhow!("tokenfield absolute byte offset overflow"))?;
-        let byte = *ctx
-            .bytes
-            .get(absolute_off)
+        let byte = ctx
+            .read_byte(absolute_off)
             .ok_or_else(|| anyhow!("tokenfield byte {} out of range", off))?;
         res = append_tokenfield_byte(res, byte)?;
     }

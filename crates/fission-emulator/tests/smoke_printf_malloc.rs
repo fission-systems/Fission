@@ -65,15 +65,12 @@ fn smoke_dyn_printf_malloc_hle() {
 /// cleanly halt within 500k insns in sandbox (CRT path incomplete: more
 /// syscalls/TLS/locale). Keep checked-in for manual progress tracking.
 ///
-/// Enable: `FISSION_SMOKE_STATIC_PRINTF=1 cargo nextest run -p fission-emulator smoke_static`
+/// Enable: `cargo nextest run -p fission-emulator --run-ignored only smoke_static`.
+/// It was gated on `FISSION_SMOKE_STATIC_PRINTF=1` and returned without it,
+/// which nextest counted as a pass.
 #[test]
+#[ignore = "not CI-stable: the static musl CRT does not halt yet; run with --ignored"]
 fn smoke_static_printf_malloc_optional() {
-    if std::env::var("FISSION_SMOKE_STATIC_PRINTF").ok().as_deref() != Some("1") {
-        eprintln!(
-            "skip static printf_malloc (not CI-stable; set FISSION_SMOKE_STATIC_PRINTF=1 to try)"
-        );
-        return;
-    }
     let path =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/x64_static_printf_malloc.elf");
     assert!(path.is_file(), "missing {}", path.display());

@@ -29,6 +29,35 @@ pub fn apply_memory_heritage(func: &mut PreHirFunction) -> bool {
         }
     }
 
+    // Heritage rewrites `Deref` stores and `Load`s only. A slot that a
+    // `FieldAccess` / `Index` / `AggregateCopy` also writes or reads keeps that
+    // access as a memory op, so promoting the rest would split the slot's
+    // value between memory and the new names (and hand the structured def's
+    // name to the next `Deref` store of the same key).
+    let structured_keys: Vec<&AliasKey> = mem_ssa
+        .defs
+        .iter()
+        .filter(|def| def.structured)
+        .map(|def| &def.key)
+        .chain(
+            mem_ssa
+                .uses
+                .iter()
+                .filter(|use_node| !use_node.from_load)
+                .map(|use_node| &use_node.key),
+        )
+        .collect();
+    promotable_keys.retain(|key: &AliasKey| {
+        !structured_keys
+            .iter()
+            .any(|structured| match (structured, key) {
+                (AliasKey::Partition(s), AliasKey::Partition(k)) => {
+                    s.base_object == k.base_object && !structured.is_no_alias(key)
+                }
+                _ => false,
+            })
+    });
+
     if promotable_keys.is_empty() {
         return false;
     }
@@ -100,16 +129,21 @@ pub fn apply_memory_heritage(func: &mut PreHirFunction) -> bool {
     new_locals.sort_by(|a, b| a.name.cmp(&b.name));
     func.locals.extend(new_locals);
 
+    let mut phis_by_site: HashMap<usize, Vec<&MemPhi>> = HashMap::default();
+    for phi in &mem_ssa.phis {
+        phis_by_site.entry(phi.merge_site_id).or_default().push(phi);
+    }
+
     // Rewrite statements and expressions, inserting phi assignments at merges
     let mut rewriter = Rewriter {
         promotable_keys: &promotable_keys,
         var_names: &var_names,
         defs: &mem_ssa.defs,
         uses: &mem_ssa.uses,
-        phis: &mem_ssa.phis,
+        phis_by_site,
         current_def_idx: 0,
         current_use_idx: 0,
-        current_phi_idx: 0,
+        next_merge_site: 0,
     };
 
     let mut body = std::mem::take(&mut func.body);
@@ -267,13 +301,29 @@ struct Rewriter<'a> {
     var_names: &'a HashMap<(AliasKey, usize), String>,
     defs: &'a [MemDef],
     uses: &'a [MemUse],
-    phis: &'a [MemPhi],
+    phis_by_site: HashMap<usize, Vec<&'a MemPhi>>,
     current_def_idx: usize,
     current_use_idx: usize,
-    current_phi_idx: usize,
+    next_merge_site: usize,
 }
 
 impl<'a> Rewriter<'a> {
+    fn alloc_merge_site(&mut self) -> usize {
+        let site_id = self.next_merge_site;
+        self.next_merge_site += 1;
+        site_id
+    }
+
+    fn take_site_merge_phis(&mut self, site_id: usize) -> Vec<MemPhi> {
+        self.phis_by_site
+            .remove(&site_id)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|phi| self.promotable_keys.contains(&phi.key))
+            .cloned()
+            .collect()
+    }
+
     fn rewrite_stmts(&mut self, stmts: &mut Vec<PreHirStmt>) {
         let mut i = 0;
         while i < stmts.len() {
@@ -321,29 +371,6 @@ impl<'a> Rewriter<'a> {
                             }
                         }
                     }
-                    PreHirLValue::Index {
-                        base,
-                        index: _,
-                        elem_ty,
-                    } => {
-                        let size = nir_byte_size(elem_ty);
-                        let key = alias_key_for_ptr(base, size);
-                        if self.promotable_keys.contains(&key) {
-                            while self.current_def_idx < self.defs.len()
-                                && self.defs[self.current_def_idx].key != key
-                            {
-                                self.current_def_idx += 1;
-                            }
-                            if self.current_def_idx < self.defs.len() {
-                                let def = &self.defs[self.current_def_idx];
-                                if let Some(var_name) = self.var_names.get(&(key, def.id)) {
-                                    new_var_name = Some(var_name.clone());
-                                    is_promoted = true;
-                                }
-                                self.current_def_idx += 1;
-                            }
-                        }
-                    }
                     _ => {}
                 }
 
@@ -364,21 +391,15 @@ impl<'a> Rewriter<'a> {
                 then_body,
                 else_body,
             } => {
+                let site_id = self.alloc_merge_site();
                 self.rewrite_expr(cond);
 
                 // Rewrite then/else branches
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body));
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body));
 
-                // Find MemPhis created by this If branch merge.
-                let mut merge_phis = Vec::new();
-                while self.current_phi_idx < self.phis.len() {
-                    let phi = &self.phis[self.current_phi_idx];
-                    if self.promotable_keys.contains(&phi.key) {
-                        merge_phis.push(phi.clone());
-                    }
-                    self.current_phi_idx += 1;
-                }
+                // Collect only the MemPhis created by this If branch merge.
+                let merge_phis = self.take_site_merge_phis(site_id);
 
                 // Insert phi assignments at the end of each branch.
                 for phi in merge_phis {
@@ -416,16 +437,10 @@ impl<'a> Rewriter<'a> {
                 }
             }
             PreHirStmt::While { cond, body } => {
+                let site_id = self.alloc_merge_site();
                 self.rewrite_expr(cond);
 
-                let mut merge_phis = Vec::new();
-                while self.current_phi_idx < self.phis.len() {
-                    let phi = &self.phis[self.current_phi_idx];
-                    if self.promotable_keys.contains(&phi.key) {
-                        merge_phis.push(phi.clone());
-                    }
-                    self.current_phi_idx += 1;
-                }
+                let merge_phis = self.take_site_merge_phis(site_id);
 
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
 
@@ -461,14 +476,8 @@ impl<'a> Rewriter<'a> {
                 }
             }
             PreHirStmt::DoWhile { body, cond } => {
-                let mut merge_phis = Vec::new();
-                while self.current_phi_idx < self.phis.len() {
-                    let phi = &self.phis[self.current_phi_idx];
-                    if self.promotable_keys.contains(&phi.key) {
-                        merge_phis.push(phi.clone());
-                    }
-                    self.current_phi_idx += 1;
-                }
+                let site_id = self.alloc_merge_site();
+                let merge_phis = self.take_site_merge_phis(site_id);
 
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
                 self.rewrite_expr(cond);
@@ -507,6 +516,7 @@ impl<'a> Rewriter<'a> {
                 update,
                 body,
             } => {
+                let site_id = self.alloc_merge_site();
                 if let Some(s) = init {
                     let mut dummy = vec![(**s).clone()];
                     self.rewrite_stmts(&mut dummy);
@@ -520,14 +530,7 @@ impl<'a> Rewriter<'a> {
                     self.rewrite_expr(e);
                 }
 
-                let mut merge_phis = Vec::new();
-                while self.current_phi_idx < self.phis.len() {
-                    let phi = &self.phis[self.current_phi_idx];
-                    if self.promotable_keys.contains(&phi.key) {
-                        merge_phis.push(phi.clone());
-                    }
-                    self.current_phi_idx += 1;
-                }
+                let merge_phis = self.take_site_merge_phis(site_id);
 
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body));
 
@@ -574,6 +577,7 @@ impl<'a> Rewriter<'a> {
                 cases,
                 default,
             } => {
+                let site_id = self.alloc_merge_site();
                 self.rewrite_expr(expr);
 
                 for case in cases.iter_mut() {
@@ -581,15 +585,8 @@ impl<'a> Rewriter<'a> {
                 }
                 self.rewrite_stmts(std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default));
 
-                // Collect MemPhis for the switch
-                let mut merge_phis = Vec::new();
-                while self.current_phi_idx < self.phis.len() {
-                    let phi = &self.phis[self.current_phi_idx];
-                    if self.promotable_keys.contains(&phi.key) {
-                        merge_phis.push(phi.clone());
-                    }
-                    self.current_phi_idx += 1;
-                }
+                // Collect MemPhis for this switch only.
+                let merge_phis = self.take_site_merge_phis(site_id);
 
                 // Group merge_phis by key and process
                 let mut phis_by_key: HashMap<AliasKey, Vec<MemPhi>> = HashMap::default();
@@ -661,9 +658,10 @@ impl<'a> Rewriter<'a> {
                 let mut promoted_var = None;
 
                 if self.promotable_keys.contains(&key) {
-                    // Find the matching MemUse
+                    // Find the matching MemUse (skip structured non-Load memory reads).
                     while self.current_use_idx < self.uses.len()
-                        && self.uses[self.current_use_idx].key != key
+                        && (!self.uses[self.current_use_idx].from_load
+                            || self.uses[self.current_use_idx].key != key)
                     {
                         self.current_use_idx += 1;
                     }
@@ -997,5 +995,279 @@ mod tests {
         } else {
             panic!("expected Block");
         }
+    }
+
+    fn heritage_func(body: Vec<PreHirStmt>) -> PreHirFunction {
+        PreHirFunction {
+            variadic_fixed_arity: None,
+            name: "f".to_string(),
+            int_param_offsets: Vec::new(),
+            float_param_offsets: Vec::new(),
+            float_shares_int_slots: false,
+            params: Vec::new(),
+            locals: Vec::new(),
+            return_type: NirType::Unknown,
+            surface_return_type_name: None,
+            body,
+            calling_convention: CallingConvention::default(),
+            is_64bit: true,
+            is_big_endian: false,
+            suppress_entry_register_params: false,
+            callee_observed_max_arity: Default::default(),
+            callee_summaries: Default::default(),
+        }
+    }
+
+    /// Heritage rewrites only `Deref` stores and `Load`s. A slot that a
+    /// structured access (`FieldAccess` / `Index`) also writes or reads cannot
+    /// be promoted: the structured access stays a memory op, and the in-order
+    /// def cursor would hand the structured def's name to the next `Deref`.
+    #[test]
+    fn heritage_does_not_promote_a_slot_touched_by_structured_accesses() {
+        let u32_ty = NirType::Int {
+            bits: 32,
+            signed: false,
+        };
+        let slot_plus_4 = || PreHirExpr::PtrOffset {
+            base: Box::new(PreHirExpr::Var("local_20".to_string())),
+            offset: 4,
+        };
+        let deref_store = |v: i64| PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(slot_plus_4()),
+                ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(v, u32_ty.clone()),
+        };
+        let field_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::FieldAccess {
+                base: Box::new(PreHirExpr::Var("local_20".to_string())),
+                field_name: "field_4".to_string(),
+                offset: 4,
+                ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(1, u32_ty.clone()),
+        };
+        let index_store = PreHirStmt::Assign {
+            lhs: PreHirLValue::Index {
+                base: Box::new(PreHirExpr::Var("local_20".to_string())),
+                index: Box::new(PreHirExpr::Const(1, u32_ty.clone())),
+                elem_ty: u32_ty.clone(),
+            },
+            rhs: PreHirExpr::Const(1, u32_ty.clone()),
+        };
+        let load = PreHirStmt::Return(Some(PreHirExpr::Load {
+            ptr: Box::new(slot_plus_4()),
+            ty: u32_ty.clone(),
+        }));
+        // The value returned must be the `Deref` store's 2, through memory or
+        // through a promoted name that is assigned 2.
+        let returns_two = |func: &PreHirFunction| {
+            match func.body.last() {
+            Some(PreHirStmt::Return(Some(PreHirExpr::Load { .. }))) => true,
+            Some(PreHirStmt::Return(Some(PreHirExpr::Var(v)))) => func.body.iter().any(|s| {
+                matches!(s, PreHirStmt::Assign { lhs: PreHirLValue::Var(n), rhs: PreHirExpr::Const(2, _) } if n == v)
+            }),
+            _ => false,
+        }
+        };
+
+        for (label, structured) in [("field", field_store), ("index", index_store)] {
+            let mut func = heritage_func(vec![structured, deref_store(2), load.clone()]);
+            apply_memory_heritage(&mut func);
+            assert!(returns_two(&func), "{label}: {:#?}", func.body);
+        }
+
+        // Control: with only `Deref`/`Load` accesses the slot is promoted.
+        let mut func = heritage_func(vec![deref_store(1), deref_store(2), load]);
+        assert!(apply_memory_heritage(&mut func));
+        assert!(
+            matches!(
+                func.body.last(),
+                Some(PreHirStmt::Return(Some(PreHirExpr::Var(_))))
+            ),
+            "{:#?}",
+            func.body
+        );
+        assert!(returns_two(&func), "{:#?}", func.body);
+    }
+
+    fn i32_ty() -> NirType {
+        NirType::Int {
+            bits: 32,
+            signed: true,
+        }
+    }
+
+    fn slot_store(slot_name: &str, val: i64) -> PreHirStmt {
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var(format!("stack_{slot_name}"))),
+                ty: i32_ty(),
+            },
+            rhs: PreHirExpr::Const(val, i32_ty()),
+        }
+    }
+
+    fn slot_load(slot_name: &str) -> PreHirExpr {
+        PreHirExpr::Load {
+            ptr: Box::new(PreHirExpr::Var(format!("stack_{slot_name}"))),
+            ty: i32_ty(),
+        }
+    }
+
+    fn count_phi_assigns(stmts: &[PreHirStmt]) -> usize {
+        stmts
+            .iter()
+            .filter(|s| {
+                matches!(
+                    s,
+                    PreHirStmt::Assign {
+                        lhs: PreHirLValue::Var(name),
+                        ..
+                    } if name.contains("_phi")
+                )
+            })
+            .count()
+    }
+
+    #[test]
+    fn sequential_ifs_receive_only_their_own_merge_phis() {
+        let mut func = PreHirFunction {
+            name: "seq_ifs".to_string(),
+            body: vec![
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c1".to_string()),
+                    then_body: vec![slot_store("s1", 10)].into(),
+                    else_body: vec![slot_store("s1", 20)].into(),
+                },
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c2".to_string()),
+                    then_body: vec![slot_store("s2", 30)].into(),
+                    else_body: vec![slot_store("s2", 40)].into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(slot_load("s1")),
+                    rhs: Box::new(slot_load("s2")),
+                    ty: i32_ty(),
+                })),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_memory_heritage(&mut func));
+
+        let PreHirStmt::If {
+            then_body: then1,
+            else_body: else1,
+            ..
+        } = &func.body[0]
+        else {
+            panic!("expected first If");
+        };
+        let PreHirStmt::If {
+            then_body: then2,
+            else_body: else2,
+            ..
+        } = &func.body[1]
+        else {
+            panic!("expected second If");
+        };
+        // Previously the first If drained ALL phis from `self.phis`, giving the
+        // first If phi assignments for s2 and leaving the second If with none.
+        assert_eq!(count_phi_assigns(then1), 1);
+        assert_eq!(count_phi_assigns(else1), 1);
+        assert_eq!(count_phi_assigns(then2), 1);
+        assert_eq!(count_phi_assigns(else2), 1);
+    }
+
+    #[test]
+    fn nested_if_and_outer_if_keep_distinct_merge_sites() {
+        let mut func = PreHirFunction {
+            name: "nested_ifs".to_string(),
+            body: vec![
+                slot_store("outer", 0),
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c_outer".to_string()),
+                    then_body: vec![PreHirStmt::If {
+                        cond: PreHirExpr::Var("c_inner".to_string()),
+                        then_body: vec![slot_store("inner", 1)].into(),
+                        else_body: vec![slot_store("inner", 2)].into(),
+                    }]
+                    .into(),
+                    else_body: vec![slot_store("outer", 3)].into(),
+                },
+                PreHirStmt::Return(Some(slot_load("outer"))),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_memory_heritage(&mut func));
+
+        let PreHirStmt::If {
+            then_body: outer_then,
+            else_body: outer_else,
+            ..
+        } = &func.body[1]
+        else {
+            panic!("expected outer If");
+        };
+        let PreHirStmt::If {
+            then_body: inner_then,
+            else_body: inner_else,
+            ..
+        } = &outer_then[0]
+        else {
+            panic!("expected inner If");
+        };
+        assert_eq!(count_phi_assigns(inner_then), 1);
+        assert_eq!(count_phi_assigns(inner_else), 1);
+        // `outer` differs only on the outer If: outer_then gets [inner_if, outer_phi],
+        // outer_else gets [store, outer_phi].
+        assert_eq!(count_phi_assigns(outer_then), 1);
+        assert_eq!(count_phi_assigns(outer_else), 1);
+    }
+
+    #[test]
+    fn if_before_while_loop_does_not_steal_loop_phi() {
+        let mut func = PreHirFunction {
+            name: "if_then_while".to_string(),
+            body: vec![
+                slot_store("loop_v", 1),
+                PreHirStmt::If {
+                    cond: PreHirExpr::Var("c1".to_string()),
+                    then_body: vec![slot_store("flag", 10)].into(),
+                    else_body: vec![slot_store("flag", 20)].into(),
+                },
+                PreHirStmt::While {
+                    cond: PreHirExpr::Var("c_loop".to_string()),
+                    body: vec![slot_store("loop_v", 2)].into(),
+                },
+                PreHirStmt::Return(Some(PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Add,
+                    lhs: Box::new(slot_load("flag")),
+                    rhs: Box::new(slot_load("loop_v")),
+                    ty: i32_ty(),
+                })),
+            ],
+            ..Default::default()
+        };
+
+        assert!(apply_memory_heritage(&mut func));
+
+        // Expected pre-loop phi init inserted right before While:
+        // body[0]=store, body[1]=If, body[2]=phi_init, body[3]=While
+        assert!(matches!(
+            &func.body[2],
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(name),
+                ..
+            } if name.contains("loop_v") && name.contains("_phi")
+        ));
+        let PreHirStmt::While { body, .. } = &func.body[3] else {
+            panic!("expected While");
+        };
+        assert_eq!(count_phi_assigns(body), 1);
     }
 }

@@ -65,6 +65,8 @@ pub struct OneShotArgs {
     pub decomp_limit: Option<usize>,
     pub include_nonuser_functions: bool,
     pub timeout_ms: Option<u64>,
+    /// `decomp --work-limit` overrides, in command-line order.
+    pub work_limits: Vec<super::WorkLimitFlag>,
     pub format: Option<String>,
     pub preview_candidate_inventory: bool,
     pub preview_candidate_limit: Option<usize>,
@@ -102,6 +104,8 @@ pub struct OneShotArgs {
     pub identify_cmd: bool,
     /// Optional single function VA to identify (`identify --function`).
     pub identify_function: Option<u64>,
+    /// `types` / `whatis`: a query over the loaded binary's facts.
+    pub lookup: Option<crate::cli::oneshot::LookupQuery>,
     /// Canonical `similar` subcommand (fuzzy function similarity).
     pub similar_cmd: bool,
     /// Optional single function VA to query (`similar --function`); reports
@@ -186,6 +190,7 @@ impl Default for OneShotArgs {
             decomp_limit: None,
             include_nonuser_functions: false,
             timeout_ms: None,
+            work_limits: Vec::new(),
             format: None,
             preview_candidate_inventory: false,
             preview_candidate_limit: None,
@@ -211,6 +216,7 @@ impl Default for OneShotArgs {
             callgraph_function: None,
             identify_cmd: false,
             identify_function: None,
+            lookup: None,
             similar_cmd: false,
             similar_function: None,
             similar_top_k: 5,

@@ -228,6 +228,8 @@ pub fn build_linear_multiblock_body(
                         host.lower_return_join_expr_for_predecessor(idx, target_idx)?
                 {
                     body.push(PreHirStmt::Return(Some(expr)));
+                } else if host.next_block_address(idx) != Some(target) {
+                    body.push(PreHirStmt::Goto(block_label(target)));
                 }
             }
             LoweredTerminator::Cond {

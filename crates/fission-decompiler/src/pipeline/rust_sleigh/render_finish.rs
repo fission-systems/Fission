@@ -209,6 +209,7 @@ pub(crate) fn finish_rust_sleigh_render(
     let mut options = crate::seed_nir_render_options(binary);
     options.pe_x64_only = config.pe_x64_only;
     options.conservative_irreducible_fallback = config.conservative_irreducible_fallback;
+    options.resource_limits = config.resource_limits;
     options.userops = userops;
     apply_spec_overrides(binary, &mut options);
 

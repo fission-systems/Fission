@@ -11,6 +11,8 @@ pub const NSIG: usize = 64;
 
 /// Do not prevent the signal from being received from within its own handler.
 pub const SA_NODEFER: u64 = 0x4000_0000;
+/// The handler takes `(signo, siginfo_t *, ucontext_t *)`.
+pub const SA_SIGINFO: u64 = 0x4;
 /// Restore the signal action to the default upon entry to the signal handler.
 pub const SA_RESETHAND: u64 = 0x8000_0000;
 

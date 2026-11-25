@@ -19,6 +19,16 @@ pub(super) fn summarize_pe_identity(binary: &LoadedBinary) -> Option<PeIdentityS
     Some(PeIdentitySummary {
         tls_directory_present: Some(facts.tls_directory_present),
         tls_callback_count: Some(facts.tls_callback_count),
+        tls_callbacks: facts.tls_callbacks,
+        codeview: binary
+            .pdb_debug_info
+            .as_ref()
+            .filter(|info| info.has_codeview)
+            .map(|info| super::model::CodeViewSummary {
+                path: info.path_hint.clone(),
+                guid: info.guid_hex.clone(),
+                age: info.age,
+            }),
         debug_directory_kinds: facts.debug_directory_kinds,
         entry_section,
     })

@@ -692,7 +692,6 @@ mod location_list_tests {
 
 #[cfg(test)]
 mod specification_tests {
-    use super::*;
     use crate::loader::dwarf::DwarfAnalyzer;
 
     /// `g++ -O0 -g -fno-pie -no-pie` builds of `testdata/x64_cpp_methods_{a,b}.cpp`.

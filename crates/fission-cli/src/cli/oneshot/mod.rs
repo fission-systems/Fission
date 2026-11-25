@@ -5,6 +5,7 @@
 mod analysis_db;
 mod assessment;
 mod binary_info;
+mod call;
 mod callgraph;
 #[cfg(feature = "debugger")]
 mod debug;
@@ -19,11 +20,13 @@ mod hex;
 mod identify;
 mod inventory;
 mod languages;
+mod lookup;
 mod nir_stats;
 mod patch;
 mod pcode_diagnostics;
 mod pcode_stages;
 mod pcode_topology;
+mod quotient;
 mod raw_pcode;
 mod rust_decomp;
 mod script;
@@ -43,6 +46,7 @@ pub use functions::{build_functions_response, function_info_to_fn_entry};
 use hex::print_hex;
 use identify::run_identify;
 use inventory::{emit_function_facts_inventory, emit_program_metadata};
+pub use lookup::LookupQuery;
 use nir_stats::emit_nir_stats;
 pub use patch::PatchRequest;
 use patch::run_patch;
@@ -356,6 +360,9 @@ fn run() -> Result<()> {
         ParsedInvocation::Schema(args) => crate::cli::contract::run_schema(&args),
         ParsedInvocation::Skill => crate::cli::skill::run_skill(),
         ParsedInvocation::Languages(args) => languages::run(&args),
+        ParsedInvocation::Call(args) => call::run(&args),
+        ParsedInvocation::Quotient(args) => quotient::run(&args),
+        ParsedInvocation::Api(args) => lookup::run_api(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
 }
@@ -470,13 +477,14 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
             Ok(pair) => {
                 if run_concrete {
                     let samples = fission_dir::default_samples(pair.hir.params.len());
-                    let outcome = fission_dir::diff_prehir_hir(&pair.prehir, &pair.hir, &samples);
+                    let report =
+                        fission_dir::diff_prehir_hir_detailed(&pair.prehir, &pair.hir, &samples);
                     tiers.push((
                         "concrete",
-                        outcome.category().into(),
-                        format!("{outcome:?}"),
-                        verify_outcome_reason(&outcome),
-                        verify_outcome_fields(&outcome),
+                        report.outcome.category().into(),
+                        concrete_diff_detail(&report),
+                        concrete_diff_reason(&report),
+                        concrete_diff_fields(&report),
                     ));
                 }
                 if let Some(harness) = harness.as_mut() {
@@ -527,6 +535,7 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                                 "counterexamples": [{
                                     // Numbers, as the ground-truth tier's are.
                                     "args": cx.args,
+                                    "arg_widths": cx.arg_widths,
                                 }],
                             }),
                         ),
@@ -534,6 +543,12 @@ fn run_verify(args: crate::cli::args::VerifyArgs) -> Result<()> {
                             "unsupported",
                             format!("Unsupported({reason})"),
                             reason.to_string(),
+                            serde_json::json!({}),
+                        ),
+                        fission_dir::symbolic::SymbolicOutcome::Inconclusive { reason } => (
+                            "inconclusive",
+                            format!("Inconclusive({reason})"),
+                            reason,
                             serde_json::json!({}),
                         ),
                     };
@@ -601,6 +616,76 @@ fn ground_truth_plan(args: &crate::cli::args::VerifyArgs) -> fission_dir::RunPla
         runs: args.runs,
         seed: args.seed,
     }
+}
+
+fn concrete_diff_detail(report: &fission_dir::ConcreteDiffReport) -> String {
+    let c = &report.counts;
+    match report.status {
+        fission_dir::ConcreteDiffStatus::CompleteSampledAgreement => format!(
+            "CompleteSampledAgreement ({}/{} samples agreed; not a universal proof)",
+            c.agreed, c.requested
+        ),
+        fission_dir::ConcreteDiffStatus::PartialSampledAgreement => format!(
+            "PartialSampledAgreement ({}/{} comparable samples agreed, {} symmetric errors; not a universal proof)",
+            c.agreed, c.requested, c.symmetric_errors
+        ),
+        fission_dir::ConcreteDiffStatus::Diverged => format!(
+            "Diverged ({} divergent out of {} requested samples; {} asymmetric errors, {} symmetric errors)",
+            c.divergent, c.requested, c.asymmetric_errors, c.symmetric_errors
+        ),
+        fission_dir::ConcreteDiffStatus::NoComparableEvidence => format!(
+            "NoComparableEvidence (0/{} comparable samples; {} symmetric errors)",
+            c.requested, c.symmetric_errors
+        ),
+    }
+}
+
+fn concrete_diff_reason(report: &fission_dir::ConcreteDiffReport) -> String {
+    match report.status {
+        fission_dir::ConcreteDiffStatus::PartialSampledAgreement => format!(
+            "partial sampled agreement: {} of {} samples failed symmetrically",
+            report.counts.symmetric_errors, report.counts.requested
+        ),
+        _ => verify_outcome_reason(&report.outcome),
+    }
+}
+
+fn concrete_diff_fields(report: &fission_dir::ConcreteDiffReport) -> serde_json::Value {
+    let mut obj = match verify_outcome_fields(&report.outcome) {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    let sym_reasons: serde_json::Map<String, serde_json::Value> = report
+        .counts
+        .symmetric_error_reasons
+        .iter()
+        .map(|(k, &v)| (k.as_str().to_string(), serde_json::json!(v)))
+        .collect();
+    let asym_reasons: serde_json::Map<String, serde_json::Value> = report
+        .counts
+        .asymmetric_error_reasons
+        .iter()
+        .map(|(k, &v)| (k.as_str().to_string(), serde_json::json!(v)))
+        .collect();
+    obj.insert(
+        "sample_status".into(),
+        serde_json::json!(report.status.as_str()),
+    );
+    obj.insert("proved".into(), serde_json::json!(false));
+    obj.insert(
+        "samples".into(),
+        serde_json::json!({
+            "requested": report.counts.requested,
+            "comparable": report.counts.comparable,
+            "agreed": report.counts.agreed,
+            "divergent": report.counts.divergent,
+            "symmetric_errors": report.counts.symmetric_errors,
+            "asymmetric_errors": report.counts.asymmetric_errors,
+            "symmetric_error_reasons": sym_reasons,
+            "asymmetric_error_reasons": asym_reasons,
+        }),
+    );
+    serde_json::Value::Object(obj)
 }
 
 /// A tier's outcome as fields, so a caller does not have to parse the
@@ -694,6 +779,10 @@ fn report_tier(
     }
 }
 
+/// How many explored states the sandbox report lists with solved inputs;
+/// each one costs a solver query, and the counts per stash cover the rest.
+const SYMBOLIC_REPORT_STATE_CAP: usize = 64;
+
 fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     // Offline SRD diff: no guest execution required.
     if let Some(paths) = &args.srd_diff {
@@ -719,6 +808,35 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let binary_path = args.binary.as_ref().ok_or_else(|| {
         anyhow::anyhow!("sandbox requires BINARY (or use --srd-diff LEFT RIGHT for offline SRD)")
     })?;
+
+    // A loader or library directory that is not there would quietly fall back
+    // to emulated imports, and the run would not be the one asked for.
+    if let Some(path) = &args.ld_so {
+        anyhow::ensure!(
+            path.is_file(),
+            "--ld-so {} is not a file on this host",
+            path.display()
+        );
+    }
+    for dir in &args.lib_path {
+        anyhow::ensure!(
+            dir.is_dir(),
+            "--lib-path {} is not a directory",
+            dir.display()
+        );
+    }
+    // Dynamic linking is decided once for the process, before any image is
+    // mapped. Options left unset keep reading their environment variables.
+    if args.dynlink || args.ld_so.is_some() || !args.lib_path.is_empty() || args.lazy_bind {
+        fission_emulator::os::linux::dynlink::set_dynlink_options(
+            fission_emulator::os::linux::dynlink::DynlinkOptions {
+                host_interpreter: args.dynlink.then_some(true),
+                ld_so: args.ld_so.clone(),
+                lib_paths: args.lib_path.clone(),
+                lazy_bind: args.lazy_bind.then_some(true),
+            },
+        );
+    }
 
     let mut logging_options =
         fission_core::logging::LoggingOptions::from_config(&fission_core::CONFIG.logging);
@@ -794,6 +912,10 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
 
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
+        .with_deadline(
+            args.timeout_ms
+                .map(|ms| std::time::Instant::now() + std::time::Duration::from_millis(ms)),
+        )
         .with_max_inst(args.max_inst)
         // The guest's console reads reach this process's stdin only when a
         // person is at it. Piped or backgrounded, an open stdin that never
@@ -847,19 +969,45 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
 
+    if args.interp {
+        emu.force_interpreter = true;
+    }
+
+    let mut symbolic_report = None;
     if args.sym_explore {
-        let mut sym_runner = fission_emulator::sym::SymbolicExecutor::new(emu);
+        let mut sym_runner =
+            fission_emulator::sym::SymbolicExecutor::new(emu).with_max_steps(args.sym_max_steps);
+        if let Some(target) = args.find {
+            sym_runner.use_technique(Box::new(
+                fission_emulator::sym::exploration::DirectedSearch::new(target, args.avoid.clone()),
+            ));
+        }
         sym_runner.explore()?;
+        symbolic_report = Some(sym_runner.report(SYMBOLIC_REPORT_STATE_CAP));
         emu = sym_runner.emu;
     } else {
         emu.run()?;
     }
 
+    let mut ttd_state = None;
     if let Some(seek_step) = args.ttd_seek {
         tracing::info!("Seeking to TTD step {} after execution", seek_step);
         emu.ttd_seek(seek_step)?;
         tracing::info!("PC after seek: 0x{:X}", emu.pc);
-        // We could also dump registers here if requested, but for now we just seek.
+        ttd_state = Some(emu.machine_state_report(&args.ttd_read));
+    }
+
+    if let Some(path) = &args.snapshot_out {
+        let snapshot = emu.snapshots.first().ok_or_else(|| {
+            anyhow::anyhow!(
+                "the run never reached --snapshot-at 0x{:x}, so there is no snapshot to write",
+                args.snapshot_at.unwrap_or_default()
+            )
+        })?;
+        snapshot
+            .save_to_disk(path)
+            .with_context(|| format!("write snapshot to {}", path.display()))?;
+        tracing::info!("Wrote snapshot to {}", path.display());
     }
 
     if let Some(trace_path) = args.dump_trace {
@@ -931,6 +1079,14 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     let report = report
         .with_exit_code(emu.exit_code)
         .with_guest_output(&emu.vfs);
+    let report = match symbolic_report {
+        Some(symbolic) => report.with_symbolic(symbolic),
+        None => report,
+    };
+    let report = match ttd_state {
+        Some(state) => report.with_ttd_state(state),
+        None => report,
+    };
 
     if let Some(path) = args.metrics_out {
         let json = report
@@ -1127,6 +1283,10 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
 
     if cli.callgraph_cmd {
         return Ok(run_callgraph(cli, &binary)?);
+    }
+
+    if let Some(query) = &cli.lookup {
+        return lookup::run(cli, &binary, query);
     }
 
     if cli.identify_cmd {
@@ -1474,5 +1634,60 @@ mod verify_fields_tests {
         let fields = verify_outcome_fields(&fission_dir::VerifyOutcome::Equivalent { checked: 9 });
         assert_eq!(fields["checked"], 9);
         assert!(fields.get("counterexamples").is_none());
+    }
+
+    #[test]
+    fn concrete_diff_projection_preserves_sample_denominator_and_no_universal_proof() {
+        use fission_dir::{
+            ConcreteDiffReport, ConcreteDiffStatus, ConcreteSampleCounts, SampleErrorKind,
+            UnsupportedReason, VerifyOutcome,
+        };
+        use std::collections::BTreeMap;
+
+        let partial = ConcreteDiffReport {
+            status: ConcreteDiffStatus::PartialSampledAgreement,
+            counts: ConcreteSampleCounts {
+                requested: 5,
+                comparable: 3,
+                agreed: 3,
+                divergent: 0,
+                symmetric_errors: 2,
+                asymmetric_errors: 0,
+                symmetric_error_reasons: BTreeMap::from([(
+                    SampleErrorKind::DivisionOrModuloByZero,
+                    2,
+                )]),
+                asymmetric_error_reasons: BTreeMap::new(),
+            },
+            outcome: VerifyOutcome::Equivalent { checked: 3 },
+        };
+        assert!(partial.counts.reconciles());
+        let fields = super::concrete_diff_fields(&partial);
+        assert_eq!(fields["proved"], false);
+        assert_eq!(fields["checked"], 3);
+        assert_eq!(fields["sample_status"], "partial_sampled_agreement");
+        assert_eq!(fields["samples"]["requested"], 5);
+        assert_eq!(fields["samples"]["comparable"], 3);
+        assert_eq!(fields["samples"]["agreed"], 3);
+        assert_eq!(fields["samples"]["symmetric_errors"], 2);
+        assert_eq!(
+            fields["samples"]["symmetric_error_reasons"]["division_or_modulo_by_zero"],
+            2
+        );
+        assert!(super::concrete_diff_reason(&partial).contains("2 of 5"));
+        assert!(super::concrete_diff_detail(&partial).contains("PartialSampledAgreement"));
+
+        let empty = ConcreteDiffReport {
+            status: ConcreteDiffStatus::NoComparableEvidence,
+            counts: ConcreteSampleCounts::default(),
+            outcome: VerifyOutcome::Unsupported(UnsupportedReason::Construct(
+                "no concrete samples were requested",
+            )),
+        };
+        assert!(empty.counts.reconciles());
+        let empty_fields = super::concrete_diff_fields(&empty);
+        assert_eq!(empty_fields["proved"], false);
+        assert_eq!(empty_fields["sample_status"], "no_comparable_evidence");
+        assert_eq!(empty_fields["samples"]["requested"], 0);
     }
 }

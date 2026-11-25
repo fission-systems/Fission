@@ -15,12 +15,13 @@ use crate::driver_pure::{region_kind_for_stmt, region_selector_or_condition};
 use crate::graph::{StructureNode, capture_structuring_failure};
 use crate::guarded_tail::promote_guarded_tail_regions_until_stable;
 use crate::host::StructuringHost;
-use crate::linear_recovery::{SESE_REGION_PROOF_BUDGET_CALLS, try_recover_region_linearized_body};
+use crate::linear_recovery::try_recover_region_linearized_body;
 use crate::linear_types::structuring_diag_enabled;
 use crate::loop_analysis::LoopBody;
 use crate::loops::{
     try_lower_dowhile, try_lower_for, try_lower_infloop, try_lower_infloop_with_break,
-    try_lower_multiblock_dowhile, try_lower_multiblock_infloop, try_lower_while,
+    try_lower_multiblock_dowhile, try_lower_multiblock_infloop, try_lower_single_exit_loop,
+    try_lower_while,
 };
 use crate::regions::{RegionKind, RegionProof};
 use crate::switch::try_lower_switch;
@@ -104,6 +105,9 @@ pub fn apply_collapse_rule(
             let mut inf = try_lower_infloop(host, idx);
             if inf.is_err() || matches!(inf, Ok(None)) {
                 inf = try_lower_multiblock_infloop(host, idx);
+            }
+            if inf.is_err() || matches!(inf, Ok(None)) {
+                inf = try_lower_single_exit_loop(host, idx);
             }
             inf
         }
@@ -323,7 +327,7 @@ fn build_sese_region_body_impl(
         if diag {
             eprintln!(
                 "[DIAG] build_sese_region_body: aborting structuring entry due to {} proof-attempt ceiling",
-                SESE_REGION_PROOF_BUDGET_CALLS
+                host.options().resource_limits.sese_region_proof_calls
             );
         }
         return Err(MlilPreviewError::UnsupportedCfgRegionShape);
@@ -349,7 +353,7 @@ fn build_sese_region_body_impl(
             if diag {
                 eprintln!(
                     "[DIAG] build_sese_region_body: aborting collapse loop due to {} proof-attempt ceiling",
-                    SESE_REGION_PROOF_BUDGET_CALLS
+                    host.options().resource_limits.sese_region_proof_calls
                 );
             }
             return Err(MlilPreviewError::UnsupportedCfgRegionShape);
@@ -500,6 +504,10 @@ fn build_sese_region_body_impl(
                         rule.name()
                     );
                 }
+                // Ownership reported during this rule's attempt is drained by
+                // `consider_structured_candidate`; anything recorded earlier by
+                // an attempt nobody drained must not be credited to it.
+                let _ = host.take_extra_absorbed_members();
                 let res =
                     if matches!(rule, CollapseRule::Conditional) && virtual_exit_plan.is_some() {
                         let mut cond = try_lower_short_circuit_if(host, idx);
@@ -1015,13 +1023,15 @@ fn reconstruct_sese_final_body_impl(
                 }
             }
             LoweredTerminator::Fallthrough(Some(target)) => {
-                if let Some(target_idx) = host.find_block_index_by_address(target) {
-                    if let Some(expr) =
+                if let Some(target_idx) = host.find_block_index_by_address(target)
+                    && let Some(expr) =
                         host.lower_return_join_expr_for_predecessor(idx, target_idx)?
-                    {
-                        node_body.push(PreHirStmt::Return(Some(expr)));
-                        explicit_edge_surface = true;
-                    }
+                {
+                    node_body.push(PreHirStmt::Return(Some(expr)));
+                    explicit_edge_surface = true;
+                } else if host.next_block_address(idx) != Some(target) {
+                    node_body.push(PreHirStmt::Goto(block_label(target)));
+                    explicit_edge_surface = true;
                 }
             }
             LoweredTerminator::Cond {

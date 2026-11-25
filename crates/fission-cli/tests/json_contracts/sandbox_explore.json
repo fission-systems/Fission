@@ -1,0 +1,123 @@
+{
+  "command": [
+    "sandbox",
+    "crates/fission-emulator/testdata/x64_concolic_branch_sys.elf",
+    "--stdin-mock",
+    "B",
+    "--sym-explore",
+    "--find",
+    "0x4000a2",
+    "--avoid",
+    "0x4000ab",
+    "--json"
+  ],
+  "shape": {
+    "object": {
+      "behavior": {
+        "object": {
+          "events": {
+            "array": {
+              "object": {
+                "kind": "string",
+                "line": "string",
+                "name": "string",
+                "number": "number",
+                "pc": "number"
+              }
+            }
+          }
+        }
+      },
+      "binary": "string",
+      "format": "string",
+      "guest_output": {
+        "object": {
+          "stderr": {
+            "array": "empty"
+          },
+          "stdout": {
+            "array": "empty"
+          }
+        }
+      },
+      "halt_requested": "bool",
+      "metrics": {
+        "object": {
+          "decode_errors": "number",
+          "exit_reason": "string",
+          "guest_syscalls": {
+            "map": "number"
+          },
+          "hard_chains": "number",
+          "hle_misses": {
+            "object": {}
+          },
+          "instructions": "number",
+          "memory_faults": "number",
+          "reg_cache_hits": "number",
+          "reg_cache_misses": "number",
+          "soft_chains": "number",
+          "stop_pc": "number",
+          "syscalls": {
+            "map": "number"
+          },
+          "tbs_cache_hits": "number",
+          "tbs_compiled": "number",
+          "unhandled_userops": {
+            "object": {}
+          },
+          "unimplemented_opcodes": {
+            "object": {}
+          },
+          "unknown_syscalls": {
+            "object": {}
+          },
+          "userops": {
+            "object": {
+              "syscall": "number"
+            }
+          }
+        }
+      },
+      "pc": "number",
+      "symbolic": {
+        "object": {
+          "deadended": {
+            "array": "empty"
+          },
+          "found": {
+            "array": {
+              "object": {
+                "constraints": "number",
+                "inputs": {
+                  "array": {
+                    "object": {
+                      "name": "string",
+                      "value": "number"
+                    }
+                  }
+                },
+                "pc": "number",
+                "step": "number"
+              }
+            }
+          },
+          "max_steps": "number",
+          "omitted": "number",
+          "stashes": {
+            "object": {
+              "active": "number",
+              "avoid": "number",
+              "deadended": "number",
+              "deferred": "number",
+              "found": "number",
+              "unconstrained": "number",
+              "unsat": "number"
+            }
+          },
+          "steps": "number"
+        }
+      }
+    }
+  }
+}

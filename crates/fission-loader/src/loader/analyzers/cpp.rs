@@ -524,6 +524,7 @@ impl<'a> CppAnalyzer<'a> {
                     },
                     mangled_name: c.mangled_name,
                     kind: "CppClass".to_string(),
+                    source: "cpp_rtti".to_string(),
                     fields,
                     size: 0,
                     metadata_address: c.type_info_address,

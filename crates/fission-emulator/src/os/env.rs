@@ -66,6 +66,13 @@ pub trait OsEnvironment: Send + Sync {
     ///    when modeled guest tasks cannot make progress.
     fn dispatch_hle(&self, emu: &mut Emulator, func_name: &str) -> Result<HleResult>;
 
+    /// Whether a faulting guest memory access becomes a signal to the guest
+    /// (`SIGSEGV` on Linux) rather than an error from the run. Only an OS
+    /// whose fault delivery is modelled says yes.
+    fn delivers_fault_signals(&self) -> bool {
+        false
+    }
+
     /// Dispatch a Sleigh USEROP (`CallOther`) operation.
     ///
     /// `userop_name` is the name from the `.sla` `<userop_head>` table, e.g.

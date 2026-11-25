@@ -812,6 +812,16 @@ impl RuntimeSleighFrontend {
         address: u64,
         context_override: Option<PackedContextOverride>,
     ) -> Result<DecodedInstruction> {
+        self.decode_single_no_pcode_impl(bytes, address, context_override, None)
+    }
+
+    fn decode_single_no_pcode_impl(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+        read_end: Option<&std::cell::Cell<usize>>,
+    ) -> Result<DecodedInstruction> {
         if bytes.is_empty() {
             return Err(RuntimeSleighError::DecodeNoMatch {
                 language: self.entry.entry_id.clone(),
@@ -835,6 +845,7 @@ impl RuntimeSleighFrontend {
                 bytes,
                 address,
                 context_override,
+                read_end,
             ),
         }
     }
@@ -874,6 +885,40 @@ impl RuntimeSleighFrontend {
         limit: usize,
         base_context: Option<PackedContextOverride>,
     ) -> Result<Vec<DecodedInstruction>> {
+        self.decode_no_pcode_run(bytes, address, limit, base_context, false, |inst, _| inst)
+    }
+
+    /// Report the byte prefix needed to reproduce an instruction with the
+    /// same frontend, address, and default starting context. A missing bound
+    /// means the decode attempted an out-of-window read or used a context
+    /// override.
+    pub fn decode_window_no_pcode_with_read_prefixes(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+        base_context: Option<PackedContextOverride>,
+        track_reads: bool,
+    ) -> Result<Vec<(DecodedInstruction, Option<usize>)>> {
+        self.decode_no_pcode_run(
+            bytes,
+            address,
+            limit,
+            base_context,
+            track_reads,
+            |inst, prefix| (inst, prefix),
+        )
+    }
+
+    fn decode_no_pcode_run<T>(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+        base_context: Option<PackedContextOverride>,
+        track_reads: bool,
+        project: impl Fn(DecodedInstruction, Option<usize>) -> T,
+    ) -> Result<Vec<T>> {
         if limit == 0 || bytes.is_empty() {
             return Ok(Vec::new());
         }
@@ -891,7 +936,14 @@ impl RuntimeSleighFrontend {
                 pending_overrides.get(&current).copied(),
             );
 
-            let instruction = match self.decode_single_no_pcode(remaining, current, ctx_override) {
+            let read_end = std::cell::Cell::new(0);
+            let capture = track_reads && ctx_override.is_none();
+            let instruction = match self.decode_single_no_pcode_impl(
+                remaining,
+                current,
+                ctx_override,
+                capture.then_some(&read_end),
+            ) {
                 Ok(instruction) => instruction,
                 Err(err) if decoded.is_empty() => return Err(err),
                 Err(_) => break,
@@ -920,7 +972,9 @@ impl RuntimeSleighFrontend {
             offset = offset
                 .checked_add(step)
                 .ok_or_else(|| anyhow!("decode byte offset overflowed at 0x{current:x}"))?;
-            decoded.push(instruction);
+            let prefix = read_end.get().max(step);
+            let reusable_prefix = (capture && prefix <= remaining.len()).then_some(prefix);
+            decoded.push(project(instruction, reusable_prefix));
         }
         Ok(decoded)
     }
@@ -962,6 +1016,28 @@ mod decode_context_merge_tests {
     use super::*;
 
     #[test]
+    fn no_pcode_read_prefix_replays_the_same_instruction_at_the_same_address() {
+        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        // ENDBR64, a RIP-relative read, a relative call, and a return.
+        let bytes = [
+            0xf3, 0x0f, 0x1e, 0xfa, 0x48, 0x8b, 0x05, 0x01, 0, 0, 0, 0xe8, 0x0a, 0, 0, 0, 0xc3,
+            0x90, 0x90,
+        ];
+        let decoded = frontend
+            .decode_window_no_pcode_with_read_prefixes(&bytes, 0x1000, 5, None, true)
+            .unwrap();
+        assert_eq!(decoded.len(), 5);
+        for (instruction, prefix) in decoded {
+            let start = (instruction.address - 0x1000) as usize;
+            let end = start + prefix.expect("all reads in the original window");
+            let replay = frontend
+                .decode_single_no_pcode(&bytes[start..end], instruction.address, None)
+                .unwrap();
+            assert_eq!(replay, instruction);
+        }
+    }
+
+    #[test]
     fn decode_window_no_pcode_in_context_merges_pending_commits_with_base_context() {
         let frontend = RuntimeSleighFrontend::new_for_language("ARM8m_le").unwrap();
         let address = frontend.normalize_low_bit_code_address(0x1001);
@@ -983,6 +1059,20 @@ mod decode_context_merge_tests {
                 address.context_override,
             )
             .expect("decode Thumb IT window without pcode");
+        let with_prefixes = frontend
+            .decode_window_no_pcode_with_read_prefixes(
+                &bytes,
+                address.address,
+                10,
+                address.context_override,
+                true,
+            )
+            .unwrap();
+        assert_eq!(with_prefixes.len(), no_pcode.len());
+        for ((instruction, prefix), expected) in with_prefixes.iter().zip(&no_pcode) {
+            assert!(prefix.is_none());
+            assert_eq!(instruction, expected);
+        }
         let with_pcode = frontend
             .decode_window_with_context_override(
                 &bytes,

@@ -611,3 +611,117 @@ fn lower_linear_body_lowers_trampoline_tail_shape() {
         .expect("detailed lowering should not error");
     assert!(lowered.is_some());
 }
+
+/// A block whose unconditional jump leaves the function (a tail jump to an
+/// address no block of this function starts at) has no CFG successor. The
+/// surface printed for that jump must end the path: the next block in address
+/// order is not a successor, so its statements must not run after it.
+///
+/// Shape: `if (c) goto L2; *g1 = 11; jmp <outside>; L2: *g2 = 22; ret`.
+#[test]
+fn unresolved_tail_jump_does_not_fall_into_next_block() {
+    let cond = uniq(0x480, 1);
+    let func = PcodeFunction {
+        blocks: vec![
+            PcodeBasicBlock {
+                index: 0,
+                start_address: 0x6000,
+                successors: vec![2, 1],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Copy,
+                        address: 0x6000,
+                        output: Some(cond.clone()),
+                        inputs: vec![reg(0x00, 1)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::CBranch,
+                        address: 0x6002,
+                        output: None,
+                        inputs: vec![cst(0x6020, 4), cond],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 1,
+                start_address: 0x6010,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x6010,
+                        output: None,
+                        inputs: vec![cst(0, 4), cst(0x402100, 4), cst(11, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Branch,
+                        address: 0x6016,
+                        output: None,
+                        inputs: vec![cst(0x7000, 4)],
+                        asm_mnemonic: Some("JMP 0x7000".to_string()),
+                    },
+                ],
+            },
+            PcodeBasicBlock {
+                index: 2,
+                start_address: 0x6020,
+                successors: vec![],
+                ops: vec![
+                    PcodeOp {
+                        seq_num: 0,
+                        opcode: PcodeOpcode::Store,
+                        address: 0x6020,
+                        output: None,
+                        inputs: vec![cst(0, 4), cst(0x402104, 4), cst(22, 4)],
+                        asm_mnemonic: None,
+                    },
+                    PcodeOp {
+                        seq_num: 1,
+                        opcode: PcodeOpcode::Return,
+                        address: 0x6026,
+                        output: None,
+                        inputs: vec![cst(0, 4)],
+                        asm_mnemonic: None,
+                    },
+                ],
+            },
+        ],
+    };
+
+    // The layout walk prints blocks in address order and lets one run into
+    // the next unless its last statement ends the path, so it is the walk
+    // that shows the defect.
+    let mut options = preview_options_x86();
+    options.force_linear_structuring = true;
+    let code =
+        render_mlil_preview(&func, "tail_jump_exit", 0x6000, &options).expect("preview render");
+    let lines: Vec<&str> = code.lines().map(str::trim).collect();
+    let jump_line = lines
+        .iter()
+        .position(|line| {
+            line.starts_with("__fission_branchind(")
+                || line.starts_with("return __fission_branchind(")
+        })
+        .unwrap_or_else(|| panic!("the tail jump surface must be printed:\n{code}"));
+    let ends_path = lines[jump_line].starts_with("return ")
+        || lines[jump_line + 1..]
+            .iter()
+            .find(|line| !line.is_empty())
+            .is_some_and(|line| line.starts_with("return"));
+    assert!(
+        ends_path,
+        "the tail jump has no successor, so nothing may run after it:\n{code}"
+    );
+    assert_eq!(
+        code.matches("= 22;").count(),
+        1,
+        "the jump target's neighbour must keep its single owner:\n{code}"
+    );
+}

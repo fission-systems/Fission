@@ -76,6 +76,10 @@ pub struct TraceDag<'a> {
     /// `push_branches`, so the hot loop doesn't allocate a fresh `Vec` on
     /// every one of its (up to 500) steps.
     active_list_scratch: Vec<usize>,
+    /// `check_retirement` results for the current `push_branches` step, by
+    /// branch point. Traces sharing a branch point ask the same question, and
+    /// nothing a step's scan reads changes before the scan stops.
+    retirement_scratch: HashMap<usize, Option<Option<usize>>>,
 }
 
 impl<'a> TraceDag<'a> {
@@ -94,6 +98,7 @@ impl<'a> TraceDag<'a> {
             node_visit_counts: HashMap::default(),
             likely_gotos: Vec::new(),
             active_list_scratch: Vec::new(),
+            retirement_scratch: HashMap::default(),
         }
     }
 
@@ -389,6 +394,7 @@ impl<'a> TraceDag<'a> {
             self.active_list_scratch.clear();
             self.active_list_scratch
                 .extend(self.active_traces.iter().copied());
+            self.retirement_scratch.clear();
             let mut progress = false;
 
             for i in 0..self.active_list_scratch.len() {
@@ -398,7 +404,15 @@ impl<'a> TraceDag<'a> {
                 }
                 let parent_bp = self.traces[trace_id].parent_bp;
 
-                if let Some(exit_opt) = self.check_retirement(parent_bp) {
+                let retirement = match self.retirement_scratch.get(&parent_bp) {
+                    Some(&cached) => cached,
+                    None => {
+                        let computed = self.check_retirement(parent_bp);
+                        self.retirement_scratch.insert(parent_bp, computed);
+                        computed
+                    }
+                };
+                if let Some(exit_opt) = retirement {
                     if parent_bp == root_bp {
                         return exit_opt;
                     }
