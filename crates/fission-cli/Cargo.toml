@@ -33,10 +33,16 @@ debugger = ["dep:fission-dynamic", "dep:windows-sys", "fission-script/emulator"]
 windows_native_debugger = ["debugger", "fission-dynamic/windows_native_debugger"]
 allocator-mimalloc = ["dep:mimalloc"]
 allocator-jemallocator = ["dep:jemallocator"]
+# Opt-in error reporting to Sentry. Nothing is sent unless FISSION_SENTRY=1
+# and SENTRY_DSN are set at run time (see src/telemetry.rs).
+sentry = ["dep:sentry"]
 
 [dependencies]
 unicode-width = "0.2"
 fission-core = { path = "../fission-core" }
+# One HTTP client (ureq) over rustls; no contexts, tracing, logs, metrics or
+# session integrations (see docs/TELEMETRY.md for what an event can carry).
+sentry = { version = "0.49.6", default-features = false, features = ["panic", "backtrace", "ureq", "rustls"], optional = true }
 fission-analysis-protocol = { path = "../fission-analysis-protocol" }
 fission-script = { path = "../fission-script" }
 fission-project = { path = "../fission-project" }
