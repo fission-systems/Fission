@@ -129,7 +129,12 @@ fn print_types(types: &Value) {
 
 pub(crate) fn whatis_json(binary: &LoadedBinary, address: u64) -> Value {
     let mut out = json!({ "address": hex(address) });
-    match fission_analysis_db::ProgramSnapshot::try_from_loaded_binary(binary) {
+    let outcome =
+        fission_analysis_db::ProgramSnapshot::publish_loaded_binary_quarantining_rows(binary);
+    if !outcome.rejected_rows.is_empty() {
+        out["rejected_rows"] = serde_json::to_value(&outcome.rejected_rows).unwrap_or(Value::Null);
+    }
+    match outcome.publication.into_result() {
         Ok(snapshot) => {
             out["function"] = snapshot
                 .function_containing(address)
