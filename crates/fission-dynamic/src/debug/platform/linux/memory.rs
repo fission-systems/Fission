@@ -183,11 +183,19 @@ impl PlatformMemory for LinuxMemory {
 
     fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError> {
         let pid = self.get_pid()?;
+        if buffer.is_empty() {
+            return Ok(0);
+        }
         let mem_path = Self::proc_mem_path(pid);
 
-        let mut file = File::open(&mem_path).map_err(|e| MemoryError::ReadFailed {
-            address,
-            reason: format!("Failed to open {}: {}", mem_path, e),
+        let mut file = File::open(&mem_path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::PermissionDenied => MemoryError::AccessDenied { address },
+            std::io::ErrorKind::NotFound => MemoryError::ProcessExited { address },
+            _ if matches!(e.raw_os_error(), Some(3)) => MemoryError::ProcessExited { address },
+            _ => MemoryError::ReadFailed {
+                address,
+                reason: format!("Failed to open {}: {}", mem_path, e),
+            },
         })?;
 
         file.seek(SeekFrom::Start(address))
@@ -196,12 +204,20 @@ impl PlatformMemory for LinuxMemory {
                 reason: format!("Seek failed: {}", e),
             })?;
 
-        let bytes_read = file.read(buffer).map_err(|e| MemoryError::ReadFailed {
-            address,
-            reason: format!("Read failed: {}", e),
+        let bytes_read = file.read(buffer).map_err(|e| match e.raw_os_error() {
+            Some(13) => MemoryError::AccessDenied { address }, // EACCES
+            Some(3) => MemoryError::ProcessExited { address }, // ESRCH
+            Some(5 | 14) => MemoryError::Unmapped {
+                address,
+                size: buffer.len(),
+            }, // EIO / EFAULT
+            _ => MemoryError::ReadFailed {
+                address,
+                reason: format!("Read failed: {}", e),
+            },
         })?;
 
-        Ok(bytes_read)
+        crate::debug::memory::checked_transfer_len(address, buffer.len(), bytes_read)
     }
 
     fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {

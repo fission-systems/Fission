@@ -78,6 +78,9 @@ impl PlatformMemory for WindowsMemory {
         use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
 
         let handle_val = self.get_handle()?;
+        if buffer.is_empty() {
+            return Ok(0);
+        }
         // SAFETY: HANDLE is repr(transparent) wrapper around isize
         let handle: HANDLE = unsafe { std::mem::transmute(handle_val) };
         let mut bytes_read = 0usize;
@@ -90,13 +93,21 @@ impl PlatformMemory for WindowsMemory {
                 buffer.len(),
                 Some(&mut bytes_read),
             )
-            .map_err(|e| MemoryError::ReadFailed {
-                address,
-                reason: e.to_string(),
+            .map_err(|e| match e.code().0 as u32 & 0xFFFF {
+                5 => MemoryError::AccessDenied { address }, // ERROR_ACCESS_DENIED
+                6 => MemoryError::ProcessExited { address }, // ERROR_INVALID_HANDLE
+                299 => MemoryError::Unmapped {
+                    address,
+                    size: buffer.len(),
+                }, // ERROR_PARTIAL_COPY
+                _ => MemoryError::ReadFailed {
+                    address,
+                    reason: e.to_string(),
+                },
             })?;
         }
 
-        Ok(bytes_read)
+        crate::debug::memory::checked_transfer_len(address, buffer.len(), bytes_read)
     }
 
     fn write(&self, address: u64, data: &[u8]) -> Result<usize, MemoryError> {

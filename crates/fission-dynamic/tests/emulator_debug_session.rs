@@ -383,3 +383,52 @@ fn register_access_refuses_a_thread_the_emulator_does_not_have() {
     let set = backend.set_registers(99, &regs);
     assert!(set.is_err(), "no thread 99, got {set:?}");
 }
+
+#[test]
+fn sparse_emulator_read_preserves_observed_bytes_and_tags_unmapped_and_budget_gaps() {
+    use fission_dynamic::debug::memory::{
+        MemoryError, MemoryGapReason, SparseByte, SparseReadOptions,
+    };
+
+    let mut backend = EmulatorBackend::new();
+    backend.launch(&fixture(), &[]).expect("launch");
+
+    let sp = backend
+        .fetch_registers(1)
+        .expect("registers")
+        .get("RSP")
+        .expect("RSP");
+    // Find the first unmapped page past SP so we span mapped stack + unmapped gap.
+    let mut probe_page = sp & !0xfff;
+    while backend.read_memory(probe_page, 4096).is_ok() {
+        probe_page = probe_page.saturating_add(4096);
+    }
+    let start = probe_page - 4096;
+    let capture = backend
+        .read_memory_sparse(start, 2 * 4096, SparseReadOptions::default())
+        .expect("sparse read");
+
+    assert_eq!(capture.coverage().requested_bytes, 2 * 4096);
+    assert_eq!(capture.coverage().observed_bytes, 4096);
+    assert_eq!(capture.coverage().missing_bytes, 4096);
+    assert!(!capture.is_complete());
+    assert_eq!(
+        capture.byte_at(probe_page),
+        Some(SparseByte::Missing(&MemoryGapReason::Unmapped))
+    );
+    assert!(matches!(
+        capture.read_exact_slice(probe_page - 4, 8).unwrap_err(),
+        MemoryError::Unmapped { .. }
+    ));
+
+    // Tight byte budget leaves unread mapped bytes explicitly tagged as Budget.
+    let budgeted = backend
+        .read_memory_sparse(start, 4096, SparseReadOptions::with_max_bytes(64))
+        .expect("budgeted sparse read");
+    assert_eq!(budgeted.coverage().observed_bytes, 64);
+    assert_eq!(budgeted.coverage().missing_bytes, 4096 - 64);
+    assert_eq!(
+        budgeted.byte_at(start + 64),
+        Some(SparseByte::Missing(&MemoryGapReason::Budget))
+    );
+}
