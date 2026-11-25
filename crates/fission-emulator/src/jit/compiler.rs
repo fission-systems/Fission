@@ -21,6 +21,100 @@ use std::collections::{HashMap, HashSet};
 use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
 
+/// Maximum host stack buffer size permitted for a single wide-varnode JIT
+/// helper temporary (`Copy`/`Cast`/`Load`/`Store`).
+pub const MAX_JIT_STACK_BUFFER_BYTES: u32 = 4096;
+
+/// Maximum operand count permitted for a single JIT `CallOther` argument buffer.
+pub const MAX_JIT_CALLOTHER_ARGS: usize = 64;
+
+/// True only when a register varnode at `(offset, size)` can be read or written
+/// directly inside `MachineState::host_reg_file` using exact-width host IR ops.
+///
+/// Enforces:
+/// 1. Exact power-of-two width in `{1, 2, 4, 8}` so narrow or odd-sized varnodes
+///    cannot issue an out-of-bounds wider host load/store near the tail of the
+///    buffer.
+/// 2. Checked addition (`offset + size <= HOST_REG_FILE_SIZE`) with no `u64` or
+///    `usize` overflow.
+#[must_use]
+pub fn can_direct_host_reg_access(offset: u64, size: u32) -> bool {
+    if !matches!(size, 1 | 2 | 4 | 8) {
+        return false;
+    }
+    usize::try_from(offset)
+        .ok()
+        .and_then(|off| off.checked_add(size as usize))
+        .is_some_and(|end| end <= crate::pcode::state::HOST_REG_FILE_SIZE)
+}
+
+fn checked_stack_slot_bytes(bytes: u32) -> Result<u32> {
+    anyhow::ensure!(
+        bytes > 0 && bytes <= MAX_JIT_STACK_BUFFER_BYTES,
+        "JIT wide varnode size {bytes} exceeds bounded stack buffer [1..={MAX_JIT_STACK_BUFFER_BYTES}]"
+    );
+    bytes
+        .div_ceil(8)
+        .checked_mul(8)
+        .ok_or_else(|| anyhow::anyhow!("JIT stack slot size overflow for {bytes} bytes"))
+}
+
+fn validate_tb_buffer_bounds(ops: &[PcodeOp]) -> Result<()> {
+    for op in ops {
+        match op.opcode {
+            PcodeOpcode::Copy | PcodeOpcode::Cast => {
+                if let (Some(out), Some(src)) = (op.output.as_ref(), op.inputs.first())
+                    && (out.size > 8 || src.size > 8)
+                {
+                    checked_stack_slot_bytes(out.size.max(src.size))?;
+                }
+            }
+            PcodeOpcode::Load => {
+                if let Some(out) = op.output.as_ref()
+                    && op.inputs.len() >= 2
+                    && out.size > 8
+                {
+                    checked_stack_slot_bytes(out.size)?;
+                }
+            }
+            PcodeOpcode::Store => {
+                if let Some(val_vn) = op.inputs.get(2)
+                    && val_vn.size > 8
+                {
+                    checked_stack_slot_bytes(val_vn.size)?;
+                }
+            }
+            PcodeOpcode::CallOther => {
+                let argc = op.inputs.len().saturating_sub(1);
+                anyhow::ensure!(
+                    argc <= MAX_JIT_CALLOTHER_ARGS,
+                    "JIT CallOther argc {argc} exceeds maximum {MAX_JIT_CALLOTHER_ARGS}"
+                );
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn emit_host_reg_load(
+    builder: &mut FunctionBuilder<'_>,
+    host_reg_base: cranelift_codegen::ir::Value,
+    offset: u64,
+    size: u32,
+) -> cranelift_codegen::ir::Value {
+    debug_assert!(can_direct_host_reg_access(offset, size));
+    let ptr = builder.ins().iadd_imm(host_reg_base, offset as i64);
+    let flags = MemFlagsData::trusted();
+    match size {
+        1 => builder.ins().uload8(types::I64, flags, ptr, 0),
+        2 => builder.ins().uload16(types::I64, flags, ptr, 0),
+        4 => builder.ins().uload32(flags, ptr, 0),
+        8 => builder.ins().load(types::I64, flags, ptr, 0),
+        _ => unreachable!("can_direct_host_reg_access only admits 1/2/4/8"),
+    }
+}
+
 /// One guest instruction already lifted to P-Code.
 #[derive(Clone, Debug)]
 pub struct GuestInsn {
@@ -271,7 +365,6 @@ impl JitCompiler {
         wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
-        use crate::pcode::state::HOST_REG_FILE_SIZE;
 
         let start_pc = insns[0].pc;
         // Collected locally because `self` is borrowed by the function builder
@@ -295,6 +388,9 @@ impl JitCompiler {
                 flat.push(op);
             }
         }
+        // Validate buffer/argument bounds before mutating `self.ctx` or `self.builder_ctx`
+        // so rejected TBs leave the compiler reusable without poisoning `builder_ctx`.
+        validate_tb_buffer_bounds(&flat)?;
 
         // A space that is neither constant, register nor unique is memory:
         // RAM, or whatever else a language names directly by varnode. Only
@@ -815,23 +911,15 @@ impl JitCompiler {
                         let c = builder.ins().iconst(types::I64, $offset as i64);
                         builder.def_var(v, c);
                     } else if $space == register_space
-                        && ($offset as usize) + ($size as usize).min(8) <= HOST_REG_FILE_SIZE
+                        && can_direct_host_reg_access($offset, ($size as u32).min(8))
                     {
-                        // Zero-callout register load from host_reg_file.
-                        let ptr = builder.ins().iadd_imm(host_reg_base, $offset as i64);
-                        let flags = MemFlagsData::trusted();
-                        let val = builder.ins().load(types::I64, flags, ptr, 0);
-                        // Mask to size if < 8
-                        let val = if ($size as u32) < 8 && ($size as u32) > 0 {
-                            let mask = if $size >= 8 {
-                                u64::MAX
-                            } else {
-                                (1u64 << ($size * 8)) - 1
-                            };
-                            builder.ins().band_imm(val, mask as i64)
-                        } else {
-                            val
-                        };
+                        // Zero-callout width-exact register load from host_reg_file.
+                        let val = emit_host_reg_load(
+                            &mut builder,
+                            host_reg_base,
+                            $offset,
+                            ($size as u32).min(8),
+                        );
                         builder.def_var(v, val);
                     } else {
                         let sp = builder.ins().iconst(types::I64, $space as i64);
@@ -1052,10 +1140,10 @@ impl JitCompiler {
                     };
                     builder.def_var(v, val);
                     // Zero-callout register store into host_reg_file (size-correct).
-                    let rsz = vn.size.min(8) as u32;
-                    if vn.space_id == register_space
-                        && (vn.offset as usize) + (rsz as usize) <= HOST_REG_FILE_SIZE
-                    {
+                    let rsz = vn.size.min(8);
+                    let direct_reg_mirror =
+                        vn.space_id == register_space && can_direct_host_reg_access(vn.offset, rsz);
+                    if direct_reg_mirror {
                         let ptr = builder.ins().iadd_imm(host_reg_base, vn.offset as i64);
                         let flags = MemFlagsData::trusted();
                         match rsz {
@@ -1068,9 +1156,10 @@ impl JitCompiler {
                             4 => {
                                 builder.ins().istore32(flags, val, ptr, 0);
                             }
-                            _ => {
+                            8 => {
                                 builder.ins().store(flags, val, ptr, 0);
                             }
+                            _ => unreachable!("can_direct_host_reg_access only admits 1/2/4/8"),
                         }
                     }
                     // Unique space is per-instruction scratch: SLEIGH scopes a
@@ -1102,13 +1191,7 @@ impl JitCompiler {
                     // which took the register loop from 41M instructions a
                     // second to 10M.
                     if vn.space_id == register_space {
-                        if (vn.offset as usize) + (rsz as usize) > HOST_REG_FILE_SIZE {
-                            // Outside the mirror, so the store above did not
-                            // happen and the value is only in `dirty`. Write it
-                            // through, or re-seeding reads a stale one. No
-                            // architecture here lands in this branch now that
-                            // the mirror covers aarch64; it is what keeps the
-                            // invariant true if one does.
+                        if !direct_reg_mirror {
                             let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
                             let off = builder.ins().iconst(types::I64, vn.offset as i64);
                             let sz = builder.ins().iconst(types::I64, rsz as i64);
@@ -1116,15 +1199,17 @@ impl JitCompiler {
                                 .ins()
                                 .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
                         }
-                        let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
-                        let written = (vn.space_id, vn.offset, rsz as u64);
-                        var_map.retain(|key, _| {
-                            let (space, offset, size) = *key;
-                            *key == written
-                                || space != vn.space_id
-                                || offset >= whi
-                                || offset + size <= wlo
-                        });
+                        if let Some(whi) = vn.offset.checked_add(u64::from(rsz)) {
+                            let wlo = vn.offset;
+                            let written = (vn.space_id, vn.offset, u64::from(rsz));
+                            var_map.retain(|key, _| {
+                                let (space, offset, size) = *key;
+                                *key == written
+                                    || space != vn.space_id
+                                    || offset >= whi
+                                    || offset.saturating_add(size) <= wlo
+                            });
+                        }
                     }
 
                     // A temporary has no backing store to re-seed from, so its
@@ -1476,15 +1561,12 @@ impl JitCompiler {
                             let src = &op.inputs[0];
                             if out.size > 8 || src.size > 8 {
                                 // Bulk copy via stack buffer.
-                                let sz = out.size.max(src.size) as usize;
-                                // Whole words, zeroed first: a stack slot holds
-                                // whatever the last user left, and the
-                                // destination write below copies all `out.size`
-                                // bytes of it.
-                                let words = sz.div_ceil(8);
+                                let sz = out.size.max(src.size);
+                                let slot_bytes = checked_stack_slot_bytes(sz)?;
+                                let words = (slot_bytes / 8) as usize;
                                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                     StackSlotKind::ExplicitSlot,
-                                    (words * 8) as u32,
+                                    slot_bytes,
                                     0,
                                 ));
                                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
@@ -1559,9 +1641,10 @@ impl JitCompiler {
                             let addr = load_vn!(&op.inputs[1]);
                             if out.size > 8 {
                                 flush_unique_views!(out);
+                                let slot_bytes = checked_stack_slot_bytes(out.size)?;
                                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                     StackSlotKind::ExplicitSlot,
-                                    out.size,
+                                    slot_bytes,
                                     0,
                                 ));
                                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
@@ -1630,13 +1713,11 @@ impl JitCompiler {
                         let addr = load_vn!(&op.inputs[1]);
                         let val_vn = &op.inputs[2];
                         if val_vn.size > 8 {
-                            // Whole words, so a constant can be zero-extended
-                            // into it: the buffer is host stack, and copying
-                            // it unfilled put host memory into the guest.
-                            let words = (val_vn.size as usize).div_ceil(8);
+                            let slot_bytes = checked_stack_slot_bytes(val_vn.size)?;
+                            let words = (slot_bytes / 8) as usize;
                             let slot = builder.create_sized_stack_slot(StackSlotData::new(
                                 StackSlotKind::ExplicitSlot,
-                                (words * 8) as u32,
+                                slot_bytes,
                                 0,
                             ));
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
@@ -2531,9 +2612,7 @@ impl JitCompiler {
                             if *sp == 0 {
                                 continue;
                             }
-                            if *sp == register_space
-                                && (*off as usize) + (*sz as usize) <= HOST_REG_FILE_SIZE
-                            {
+                            if *sp == register_space && can_direct_host_reg_access(*off, *sz) {
                                 // The host register file is already current --
                                 // `store_vn!` writes it on every register
                                 // store -- and nothing caches in front of it,
@@ -2560,6 +2639,10 @@ impl JitCompiler {
                         0
                     };
                     let argc = op.inputs.len().saturating_sub(1);
+                    anyhow::ensure!(
+                        argc <= MAX_JIT_CALLOTHER_ARGS,
+                        "JIT CallOther argc {argc} exceeds maximum {MAX_JIT_CALLOTHER_ARGS}"
+                    );
                     let args_ptr = if argc == 0 {
                         builder.ins().iconst(types::I64, 0)
                     } else {
@@ -2610,17 +2693,9 @@ impl JitCompiler {
                         .map(|(key, var)| (*key, *var))
                         .collect();
                     for ((sp, off, size), v) in cached_registers {
-                        if (off as usize) + (size as usize) <= HOST_REG_FILE_SIZE {
-                            let ptr = builder.ins().iadd_imm(host_reg_base, off as i64);
-                            let flags = MemFlagsData::trusted();
-                            let val = builder.ins().load(types::I64, flags, ptr, 0);
-                            let val = if size < 8 && size > 0 {
-                                builder
-                                    .ins()
-                                    .band_imm(val, ((1u64 << (size * 8)) - 1) as i64)
-                            } else {
-                                val
-                            };
+                        let rsz = size.min(8) as u32;
+                        if can_direct_host_reg_access(off, rsz) {
+                            let val = emit_host_reg_load(&mut builder, host_reg_base, off, rsz);
                             builder.def_var(v, val);
                             continue;
                         }
@@ -2729,7 +2804,7 @@ impl JitCompiler {
                 if sp == 0 {
                     continue;
                 }
-                if sp == register_space && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE {
+                if sp == register_space && can_direct_host_reg_access(off, sz) {
                     // See above: registers need nothing at block exit.
                     continue;
                 }
