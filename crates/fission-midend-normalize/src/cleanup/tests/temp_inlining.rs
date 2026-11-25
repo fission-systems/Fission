@@ -614,3 +614,116 @@ fn inline_single_use_temps_keeps_unknown_call_out_of_predicate() {
     assert!(!inline_single_use_temps(&mut stmts, &HashSet::default()));
     assert_eq!(stmts.len(), 2);
 }
+
+/// `xVar0 = C; if (c) { t = *(xVar0 + 1); while (t) { f(xVar0);
+/// xVar0 = xVar0 + 2; t = *(xVar0 + 1); } }` -- every use sits inside the
+/// `if`, so it looked like one inline target, but the loop inside redefines
+/// `xVar0` and every later iteration reads the new value. Substituting `C`
+/// froze the pointer (and then dropped the update as dead): a SAILR-structured
+/// table scan (`movsx edx,[rcx+2]; add rcx,2` in a loop) became an infinite
+/// loop over its first entry.
+#[test]
+fn inline_single_use_temps_does_not_inline_into_a_statement_that_redefines_the_temp() {
+    let var = |n: &str| PreHirExpr::Var(n.to_string());
+    let assign = |n: &str, rhs: PreHirExpr| PreHirStmt::Assign {
+        lhs: PreHirLValue::Var(n.to_string()),
+        rhs,
+    };
+    let plus = |n: &str, k: i64| PreHirExpr::Binary {
+        op: PreHirBinaryOp::Add,
+        lhs: Box::new(var(n)),
+        rhs: Box::new(PreHirExpr::Const(k, int(64))),
+        ty: int(64),
+    };
+    let load = |e: PreHirExpr| PreHirExpr::Load {
+        ptr: Box::new(e),
+        ty: int(8),
+    };
+    let mut stmts = vec![
+        assign("xVar0", PreHirExpr::Const(531_584, int(64))),
+        PreHirStmt::If {
+            cond: var("c"),
+            then_body: vec![
+                assign("t", load(plus("xVar0", 1))),
+                PreHirStmt::While {
+                    cond: var("t"),
+                    body: vec![
+                        PreHirStmt::Expr(PreHirExpr::Call {
+                            origin: None,
+                            target: "f".to_string(),
+                            args: vec![var("xVar0")],
+                            ty: int(32),
+                        }),
+                        assign("xVar0", plus("xVar0", 2)),
+                        assign("t", load(plus("xVar0", 1))),
+                    ]
+                    .into(),
+                },
+            ]
+            .into(),
+            else_body: Vec::new().into(),
+        },
+    ];
+
+    inline_single_use_temps(&mut stmts, &HashSet::default());
+
+    assert!(
+        matches!(
+            &stmts[0],
+            PreHirStmt::Assign { lhs: PreHirLValue::Var(name), rhs: PreHirExpr::Const(531_584, _) }
+                if name == "xVar0"
+        ),
+        "the definition must stay: the loop reads and redefines xVar0\n{stmts:#?}"
+    );
+    let text = format!("{stmts:?}");
+    assert!(
+        text.contains("Assign { lhs: Var(\"xVar0\"), rhs: Binary { op: Add, lhs: Var(\"xVar0\")"),
+        "the loop-carried update must still read xVar0\n{stmts:#?}"
+    );
+}
+
+/// The adjacent-copy form of the same hole: `xVar0 = C;` directly before an
+/// `if` whose loop redefines `xVar0` must not be folded into the `if`.
+#[test]
+fn collapse_adjacent_pure_copy_into_if_keeps_a_copy_the_if_redefines() {
+    let var = |n: &str| PreHirExpr::Var(n.to_string());
+    let next = PreHirStmt::Assign {
+        lhs: PreHirLValue::Var("xVar0".to_string()),
+        rhs: PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(var("xVar0")),
+            rhs: Box::new(PreHirExpr::Const(2, int(64))),
+            ty: int(64),
+        },
+    };
+    let mut stmts = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("xVar0".to_string()),
+            rhs: PreHirExpr::Const(7, int(64)),
+        },
+        PreHirStmt::If {
+            cond: var("c"),
+            then_body: vec![PreHirStmt::While {
+                cond: var("k"),
+                body: vec![
+                    PreHirStmt::Expr(PreHirExpr::Call {
+                        origin: None,
+                        target: "f".to_string(),
+                        args: vec![var("xVar0")],
+                        ty: int(32),
+                    }),
+                    next,
+                ]
+                .into(),
+            }]
+            .into(),
+            else_body: Vec::new().into(),
+        },
+    ];
+
+    assert!(
+        !collapse_adjacent_pure_copy_into_if(&mut stmts),
+        "{stmts:#?}"
+    );
+    assert_eq!(stmts.len(), 2);
+}

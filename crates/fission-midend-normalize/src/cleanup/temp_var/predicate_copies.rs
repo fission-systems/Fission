@@ -116,6 +116,13 @@ fn collapse_adjacent_pure_copy_into_if_linear(
             i += 1;
             continue;
         }
+        // The `if` assigns `t` itself somewhere inside: a read after that
+        // assignment (or on a later trip round a loop in an arm) sees the new
+        // value, and substitution would rewrite it too.
+        if super::binding_liveness::stmt_defines_var(&stmts[i + 1], &t_name) {
+            i += 1;
+            continue;
+        }
         let sequential = count_uses_until_redef(stmts, i, &t_name);
         let total = use_counts.get(t_name.as_str()).copied().unwrap_or(0);
         // All uses of t are on this if (no post-loop / multi-def residual uses).

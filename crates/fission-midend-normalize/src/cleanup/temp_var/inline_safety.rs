@@ -43,6 +43,13 @@ pub(super) fn find_inline_forward_target(
         if redefines {
             return None;
         }
+        // A target that assigns `name` somewhere inside it -- in an arm, or in
+        // a loop it holds -- has uses after that assignment (later in the arm,
+        // or on the next trip round the loop) that read the new value, and
+        // substitution rewrites every read in the target.
+        if uses > 0 && super::binding_liveness::stmt_defines_var(stmt, name) {
+            return None;
+        }
         if uses > 0 && stmt_allows_inline_target(stmt) {
             if if_arm_use_sees_changed_inputs(stmt, name, &stmts[def_idx]) {
                 return None;
