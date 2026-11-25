@@ -40,6 +40,13 @@ enum Term {
 struct Program {
     stmts: Vec<Vec<PreHirStmt>>,
     terms: Vec<Term>,
+    /// Return joins, as the builder reports them: `(pred, join) -> value`.
+    /// Entering `join` from `pred` returns `value` as it stood at the end of
+    /// `pred`; the join's own statements are epilogue (register restores and
+    /// return-register moves) and its own `return` expression is only right
+    /// for some predecessors -- the builder's generic lowering of a merged
+    /// return, which is why `lower_return_join_expr_for_predecessor` exists.
+    joins: Vec<((usize, usize), PreHirExpr)>,
 }
 
 impl Program {
@@ -69,12 +76,14 @@ impl Program {
                 Term::Ret(e) => LoweredTerminator::Return(e.clone()),
             })
             .collect();
-        MockRotatedLoopHost::new(
+        let mut host = MockRotatedLoopHost::new(
             self.successors(),
             (0..self.terms.len()).map(addr).collect(),
             self.stmts.clone(),
             terminators,
-        )
+        );
+        host.return_join_exprs = self.joins.clone();
+        host
     }
 
     fn all_reachable(&self) -> bool {
@@ -322,13 +331,21 @@ fn exec_effect(s: &PreHirStmt, st: &mut State) {
 /// Run the CFG itself: the reference semantics.
 fn run_cfg(p: &Program, mut st: State) -> Observation {
     let mut b = 0usize;
+    let mut came_from: Option<usize> = None;
     let outcome = 'run: loop {
+        if let Some(pred) = came_from
+            && let Some((_, value)) = p.joins.iter().find(|(edge, _)| *edge == (pred, b))
+        {
+            let value = eval(value, &mut st);
+            break Outcome::Returned(Some(value));
+        }
         for s in &p.stmts[b] {
             if !burn(&mut st) {
                 break 'run Outcome::OutOfFuel;
             }
             exec_effect(s, &mut st);
         }
+        came_from = Some(b);
         match &p.terms[b] {
             Term::Goto(j) => b = *j,
             Term::Cond(cond, t, f) => b = if eval(cond, &mut st) != 0 { *t } else { *f },
@@ -702,7 +719,40 @@ fn random_program(seed: u64) -> Program {
             terms.push(Term::Cond(random_cond(&mut rng), t, f));
         }
     }
-    Program { stmts, terms }
+    // Some merged returns are return joins: each way in carries its own
+    // value (any subset of the ways in), and the join's own statements are
+    // register moves. A join holding a call is never one.
+    let mut joins = Vec::new();
+    for x in first_exit..n {
+        let moves_only = stmts[x]
+            .iter()
+            .all(|s| matches!(s, PreHirStmt::Assign { lhs: PreHirLValue::Var(_), rhs } if !matches!(rhs, PreHirExpr::Call { .. })));
+        let ways_in: Vec<usize> = terms
+            .iter()
+            .enumerate()
+            .filter(|(_, term)| match term {
+                Term::Goto(j) => *j == x,
+                Term::Cond(_, t, f) => *t == x || *f == x,
+                Term::Ret(_) => false,
+            })
+            .map(|(b, _)| b)
+            .collect();
+        // A block with one way in is not a join: its own lowering is that
+        // way's value.
+        if !moves_only || ways_in.len() < 2 || rng.below(3) != 0 {
+            continue;
+        }
+        for b in ways_in {
+            if rng.below(4) != 0 {
+                joins.push(((b, x), random_value(&mut rng)));
+            }
+        }
+    }
+    Program {
+        stmts,
+        terms,
+        joins,
+    }
 }
 
 // ------------------------------------------------------------------ tests --
@@ -772,6 +822,7 @@ fn phi_diamond_with_memory_return() -> Program {
             Term::Goto(r),
             Term::Ret(Some(bin(B::Add, v("r"), load(c(2))))),
         ],
+        joins: Vec::new(),
     }
 }
 
@@ -822,6 +873,7 @@ fn nested_loops_exiting_to_a_shared_return_stay_equivalent() {
             Term::Goto(1),
             Term::Ret(Some(bin(B::Add, v("r"), load(c(0))))),
         ],
+        joins: Vec::new(),
     };
     check(&p, 3);
 }
@@ -846,8 +898,51 @@ fn an_irreducible_cycle_with_a_shared_return_stays_equivalent() {
             Term::Cond(bin(B::SLt, v("a"), c(5)), 1, r),
             Term::Ret(Some(v("r"))),
         ],
+        joins: Vec::new(),
     };
     check(&p, 5);
+}
+
+/// A merged return whose value depends on the way in, as the builder
+/// lowers it on x86-64: the shared block restores registers and moves the
+/// return register, and its own `return` names the value only one
+/// predecessor leaves there. `lower_return_join_expr_for_predecessor` gives
+/// each predecessor's value; the existing structurer returns that value on
+/// each edge instead of entering the join.
+///
+/// `if (!n0) return 0; do { ...; if (!--k) return acc; } while (ok);
+/// u = f(); return u;` with 0 -> {1, R}; 1 -> {2, R}; 2 -> {1, 3}; 3 -> R.
+fn return_join_with_values_per_predecessor() -> Program {
+    use PreHirBinaryOp as B;
+    let r = 4;
+    Program {
+        stmts: vec![
+            vec![tick(), set("k", v("a"))],
+            vec![tick(), set("acc", bin(B::Add, v("acc"), v("b")))],
+            vec![tick(), set("k", bin(B::Sub, v("k"), c(1)))],
+            vec![tick(), set("u", call("f", vec![v("acc")]))],
+            // Epilogue: return-register move and callee-saved restores.
+            vec![set("rax", v("u")), set("k", load(c(5))), set("acc", v("k"))],
+        ],
+        terms: vec![
+            Term::Cond(bin(B::Ne, v("a"), c(0)), 1, r),
+            Term::Cond(bin(B::Ne, v("k"), c(1)), 2, r),
+            Term::Cond(bin(B::SLt, v("acc"), c(20)), 1, 3),
+            Term::Goto(r),
+            Term::Ret(Some(v("rax"))),
+        ],
+        joins: vec![((0, r), c(0)), ((1, r), v("acc")), ((3, r), v("u"))],
+    }
+}
+
+/// Every edge into a return join must return the value that edge carries.
+/// Before the fix SAILR emitted the join's generic body for each way in
+/// (directly, as a jump target, or as a copy), returning `u` -- never
+/// assigned on the first two paths -- where the code returns `0` or `acc`.
+#[test]
+fn each_way_into_a_return_join_returns_its_own_value() {
+    let p = return_join_with_values_per_predecessor();
+    check(&p, 13).expect("SAILR structures the fixture");
 }
 
 /// Thousands of random CFGs -- loops, nested loops, irreducible regions,
@@ -860,6 +955,7 @@ fn random_cfgs_structured_by_sailr_match_the_cfg() {
     let mut structured = 0usize;
     let mut with_split = 0usize;
     let mut with_goto = 0usize;
+    let mut with_join = 0usize;
     let mut programs = 0usize;
     let mut seed = 0u64;
     while programs < PROGRAMS {
@@ -873,6 +969,7 @@ fn random_cfgs_structured_by_sailr_match_the_cfg() {
             continue;
         };
         structured += 1;
+        with_join += usize::from(!p.joins.is_empty());
         if count_returns(&body) > p.reachable_exits() {
             with_split += 1;
         }
@@ -881,11 +978,12 @@ fn random_cfgs_structured_by_sailr_match_the_cfg() {
         }
     }
     eprintln!(
-        "structured {structured} / {PROGRAMS}, with split {with_split}, with goto {with_goto}"
+        "structured {structured} / {PROGRAMS}, with split {with_split}, with goto {with_goto}, with return joins {with_join}"
     );
     assert!(structured >= 1000, "structured only {structured}");
     assert!(with_split >= 100, "split only {with_split}");
     assert!(with_goto >= 100, "goto only {with_goto}");
+    assert!(with_join >= 100, "return joins only {with_join}");
 }
 
 // ------------------------------------------- edge choice: old vs new code --

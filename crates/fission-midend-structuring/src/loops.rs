@@ -2773,6 +2773,10 @@ pub(crate) mod tests {
         block_addrs: Vec<u64>,
         stmts: Vec<Vec<PreHirStmt>>,
         terminators: Vec<LoweredTerminator>,
+        /// `(predecessor, join) -> value`: what
+        /// [`StructuringHost::lower_return_join_expr_for_predecessor`]
+        /// answers. Empty unless a test sets it.
+        pub(crate) return_join_exprs: Vec<((usize, usize), PreHirExpr)>,
     }
 
     impl MockRotatedLoopHost {
@@ -2812,6 +2816,7 @@ pub(crate) mod tests {
                 block_addrs,
                 stmts,
                 terminators,
+                return_join_exprs: Vec::new(),
             }
         }
     }
@@ -2964,10 +2969,14 @@ pub(crate) mod tests {
         }
         fn lower_return_join_expr_for_predecessor(
             &mut self,
-            _pred_idx: usize,
-            _join_idx: usize,
+            pred_idx: usize,
+            join_idx: usize,
         ) -> Result<Option<PreHirExpr>, MlilPreviewError> {
-            Ok(None)
+            Ok(self
+                .return_join_exprs
+                .iter()
+                .find(|(edge, _)| *edge == (pred_idx, join_idx))
+                .map(|(_, expr)| expr.clone()))
         }
         fn lower_linear_body(
             &mut self,

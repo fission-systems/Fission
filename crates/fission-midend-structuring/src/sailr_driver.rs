@@ -23,6 +23,11 @@
 //!    side-effect-free value, reached from several places, is given one copy
 //!    per predecessor. The compiler merged identical `return`s into one block;
 //!    the source had one per path. This adds no jump and removes a join.
+//!    Before the first round, every edge into a *return join* -- a merged
+//!    `ret` whose value depends on the way in -- is given its own `return` of
+//!    the value the builder says that edge carries
+//!    (`collapse_driver::split_return_joins`), the same per-edge
+//!    answer the linear and SESE paths use.
 //! 3. Otherwise **concede one edge**, chosen by the paper's heuristics in
 //!    order: H1, the edge whose target has the fewest other incoming edges;
 //!    H2, the edge whose removal leaves the most nodes with a real immediate
@@ -52,7 +57,7 @@ use crate::HashMap;
 use crate::cfg_analysis::{ImmDomTree, ImmPostDomTree};
 use crate::collapse_driver::{
     blocks_reachable_from_entry, covers_every_reachable_block,
-    fold_accounts_for_every_internal_edge, lower_shape, node_statements,
+    fold_accounts_for_every_internal_edge, lower_shape, node_statements, split_return_joins,
 };
 use crate::collapse_graph::{CollapseGraph, NodeId};
 use crate::collapse_shapes::{Shape, find_shape};
@@ -149,6 +154,9 @@ fn fold_sailr_inner(
     }
     let mut graph = CollapseGraph::from_cfg(&successors);
     let reachable = blocks_reachable_from_entry(&successors);
+    // Before anything folds or copies a merged return, every edge into one
+    // whose value depends on the way in gets its own `return` of that value.
+    split_return_joins(host, &mut graph)?;
     let budget = successors.len().saturating_mul(MAX_ROUNDS_PER_NODE);
     let mut concessions = 0usize;
     let mut copies = 0usize;
@@ -300,11 +308,16 @@ fn explain_unlowerable(
 /// already ran. A value that depends on the incoming edge reaches the block
 /// through copies placed at the end of each predecessor, or through a merge
 /// binding the block itself evaluates; a copy keeps both, in the same order
-/// relative to every load and store. A node with no successors has nothing
-/// after it to reach twice. The size and effect bounds are a code-growth
-/// policy, not what makes the copy sound. A `goto` target is never copied:
-/// its body carries the label, and only variable assignments and the
-/// `return` are admitted, so no label is ever defined twice.
+/// relative to every load and store. The one value the block's own lowering
+/// does *not* get right for every way in is a return join's (a shared `ret`
+/// block whose return register each predecessor sets differently); those
+/// edges were already given their own `return` by
+/// [`split_return_joins`] before anything folded or was copied. A node with
+/// no successors has nothing after it to reach twice. The size and effect
+/// bounds are a code-growth policy, not what makes the copy sound. A `goto`
+/// target is never copied: its body carries the label, and only variable
+/// assignments and the `return` are admitted, so no label is ever defined
+/// twice.
 fn plain_return_body(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
