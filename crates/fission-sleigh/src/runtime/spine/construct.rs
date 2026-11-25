@@ -158,6 +158,7 @@ pub(super) fn test_constructor_metadata(
     display_operands: std::sync::Arc<Vec<crate::compiler::CompiledDisplayOperand>>,
 ) -> std::sync::Arc<CompiledExecutableConstructor> {
     CompiledExecutableConstructor {
+        consumes_sequential_operand_bytes: Default::default(),
         constructor_id: 0,
         sla_identity: None,
         sla_decode_status: crate::compiler::CompiledSlaDecodeStatus::Decoded,

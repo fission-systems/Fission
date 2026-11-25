@@ -520,6 +520,7 @@ mod tests {
         decision_tree: crate::compiler::CompiledDecisionTree,
     ) -> CompiledSubtableDefinition {
         CompiledSubtableDefinition {
+            consumes_sequential_bytes: Default::default(),
             name: "instruction".to_string(),
             sla_subtable_id: 0,
             constructors_by_sla_id: BTreeMap::new(),
