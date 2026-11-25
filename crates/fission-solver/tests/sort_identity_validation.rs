@@ -432,3 +432,50 @@ fn excessive_expression_depth_is_rejected_without_stack_overflow() {
             if matches!(errs.as_slice(), [ValidationError::DepthExceeded { .. }])
     ));
 }
+
+/// Constructor guards read only the operands' top-level sorts (validating
+/// both subtrees on every construction made building a chain quadratic), so
+/// `get_sort` must agree with the validator wherever a fold depends on it.
+/// An `Ite` of a float and a same-width bit-pattern constant is a float to the
+/// validator; `get_sort` called it a bit-vector, and `ite + 0` could fold to
+/// the (valid) `ite`, laundering an ill-sorted addition.
+#[test]
+fn a_float_ite_is_not_folded_as_a_bitvector() {
+    let cond = SymExpr::new_var("c", 1);
+    let float = SymExpr::new_float_var("f", 32);
+    let ite = SymExpr::Ite {
+        cond: Box::new(cond),
+        t: Box::new(float),
+        f: Box::new(SymExpr::new_const(0x3f80_0000, 32)),
+    };
+    assert_eq!(validate_expr(&ite), Ok(Sort::Float(32)));
+    assert_eq!(ite.get_sort(), Sort::Float(32));
+    for built in [
+        SymExpr::new_add(ite.clone(), SymExpr::new_const(0, 32)),
+        SymExpr::new_xor(SymExpr::new_const(0, 32), ite.clone()),
+        SymExpr::new_and(ite.clone(), ite.clone()),
+    ] {
+        assert!(
+            validate_expr(&built).is_err(),
+            "an ill-sorted operation was folded into {built:?}"
+        );
+    }
+}
+
+/// A chain of mixed-width `Ite`s: `get_sort` used to ask each branch for its
+/// sort and then again for its width, doubling the work per level.
+#[test]
+fn mixed_width_ite_chains_have_linear_sort_cost() {
+    let cond = SymExpr::new_var("c", 1);
+    let mut expr = SymExpr::new_var("x", 8);
+    for depth in 0..64u32 {
+        expr = SymExpr::Ite {
+            cond: Box::new(cond.clone()),
+            t: Box::new(expr),
+            f: Box::new(SymExpr::new_const(u64::from(depth), 9 + depth % 2)),
+        };
+    }
+    // 2^64 walks before; finishes immediately now.
+    assert_eq!(expr.get_bit_width(), 10);
+    assert_eq!(validate_expr(&expr).map(|s| s.expect_bv()), Ok(10));
+}

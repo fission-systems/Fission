@@ -46,11 +46,20 @@ fn supported_bit_width(width_bits: u32) -> bool {
     (1..=64).contains(&width_bits)
 }
 
-fn pair_validates_as_bv(a: &SymExpr, b: &SymExpr) -> Option<(u32, u32)> {
-    let mut env = crate::validate::VarSortEnv::new();
-    let sa = crate::validate::validate_expr_in_env(a, &mut env).ok()?;
-    let sb = crate::validate::validate_expr_in_env(b, &mut env).ok()?;
-    match (sa, sb) {
+/// The top-level bit-vector widths of a constructor's operands, when both are
+/// `1..=64`-bit bit-vectors by [`SymExpr::get_sort`]; `None` disables folding.
+///
+/// This reads only the operands' top-level sorts (as `get_bit_width` always
+/// did), not a validation of each subtree: constructors run on every node an
+/// emulator builds, and validating both subtrees made building a chain of `n`
+/// nodes cost `O(n^2)` validator walks. It is enough because the only rules
+/// that keep a sort-guarded fold are those that keep the operand: a constant
+/// fold reads two constants, and `x + 0 => x` keeps `x` -- an ill-formed `x`
+/// is still ill-formed afterwards and is rejected where it is used. The rules
+/// that *drop* an operand (`a - a`, `a ^ a`, `0 & b`, `a == a`, `a != a`)
+/// validate it with [`pair_is_pure_supported_bv`] first.
+fn pair_bv_widths(a: &SymExpr, b: &SymExpr) -> Option<(u32, u32)> {
+    match (a.get_sort(), b.get_sort()) {
         (Sort::BitVector(wa), Sort::BitVector(wb))
             if supported_bit_width(wa) && supported_bit_width(wb) =>
         {
@@ -65,6 +74,18 @@ fn pair_is_pure_supported_bv(a: &SymExpr, b: &SymExpr) -> Option<u32> {
     let wa = crate::validate::is_pure_supported_bv(a, &mut env).ok()?;
     let wb = crate::validate::is_pure_supported_bv(b, &mut env).ok()?;
     Some(wa.max(wb))
+}
+
+/// A sort's bit width as [`SymExpr::get_bit_width`] reports it: the element
+/// width of an array, `0` for an array of arrays.
+fn sort_bit_width(sort: &Sort) -> u32 {
+    match sort {
+        Sort::BitVector(bits) | Sort::Float(bits) => *bits,
+        Sort::Array { range, .. } => match range.as_ref() {
+            Sort::BitVector(bits) | Sort::Float(bits) => *bits,
+            Sort::Array { .. } => 0,
+        },
+    }
 }
 
 fn signed_value(value: u64, width_bits: u32) -> i128 {
@@ -213,7 +234,7 @@ impl SymExpr {
     }
 
     pub fn new_add(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, wb)) = pair_bv_widths(&a, &b) else {
             return Self::Add(Box::new(a), Box::new(b));
         };
         let width_bits = wa.max(wb);
@@ -233,7 +254,7 @@ impl SymExpr {
     }
 
     pub fn new_sub(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, _wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, _wb)) = pair_bv_widths(&a, &b) else {
             return Self::Sub(Box::new(a), Box::new(b));
         };
         match (&a, &b) {
@@ -262,7 +283,7 @@ impl SymExpr {
     }
 
     pub fn new_and(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, wb)) = pair_bv_widths(&a, &b) else {
             return Self::And(Box::new(a), Box::new(b));
         };
         let width_bits = wa.max(wb);
@@ -291,7 +312,7 @@ impl SymExpr {
     }
 
     pub fn new_xor(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, wb)) = pair_bv_widths(&a, &b) else {
             return Self::Xor(Box::new(a), Box::new(b));
         };
         let width_bits = wa.max(wb);
@@ -321,7 +342,9 @@ impl SymExpr {
     }
 
     pub fn new_not(a: SymExpr) -> Self {
-        let Ok(Sort::BitVector(width_bits)) = crate::validate::validate_expr(&a) else {
+        // Keeps `a`, so the top-level sort is all a fold needs (see
+        // `pair_bv_widths`).
+        let Sort::BitVector(width_bits) = a.get_sort() else {
             let w = a.get_bit_width();
             return Self::Xor(
                 Box::new(a),
@@ -359,7 +382,7 @@ impl SymExpr {
     }
 
     pub fn new_eq(a: SymExpr, b: SymExpr) -> Self {
-        if pair_validates_as_bv(&a, &b).is_none() {
+        if pair_bv_widths(&a, &b).is_none() {
             return Self::Eq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -383,7 +406,7 @@ impl SymExpr {
     }
 
     pub fn new_neq(a: SymExpr, b: SymExpr) -> Self {
-        if pair_validates_as_bv(&a, &b).is_none() {
+        if pair_bv_widths(&a, &b).is_none() {
             return Self::Neq(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -407,7 +430,7 @@ impl SymExpr {
     }
 
     pub fn new_ult(a: SymExpr, b: SymExpr) -> Self {
-        if pair_validates_as_bv(&a, &b).is_none() {
+        if pair_bv_widths(&a, &b).is_none() {
             return Self::Ult(Box::new(a), Box::new(b));
         }
         match (&a, &b) {
@@ -425,7 +448,7 @@ impl SymExpr {
 
     /// Signed less-than: interpret both sides as two's-complement signed integers.
     pub fn new_slt(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, wb)) = pair_bv_widths(&a, &b) else {
             return Self::Slt(Box::new(a), Box::new(b));
         };
         if wa != wb {
@@ -447,7 +470,7 @@ impl SymExpr {
     }
 
     pub fn new_sle(a: SymExpr, b: SymExpr) -> Self {
-        let Some((wa, wb)) = pair_validates_as_bv(&a, &b) else {
+        let Some((wa, wb)) = pair_bv_widths(&a, &b) else {
             return Self::Sle(Box::new(a), Box::new(b));
         };
         if wa != wb {
@@ -699,12 +722,23 @@ impl SymExpr {
             | Self::FLe(_, _)
             | Self::FIsNan(_) => Sort::BitVector(1),
             Self::Ite { t, f, .. } => {
+                // Each branch's sort is computed once: asking for the widths
+                // again on a mismatch walked both branches twice per level,
+                // exponential in the depth of a mixed-width `Ite` chain.
                 let t_sort = t.get_sort();
                 let f_sort = f.get_sort();
-                if t_sort == f_sort {
-                    t_sort
-                } else {
-                    Sort::BitVector(t.get_bit_width().max(f.get_bit_width()))
+                match (&t_sort, &f_sort) {
+                    _ if t_sort == f_sort => t_sort,
+                    // A float branch and a same-width bit-pattern branch: the
+                    // validator types this `Float`, and so must this, or a
+                    // fold guarded on `BitVector` could accept it.
+                    (Sort::Float(wt), Sort::BitVector(wf))
+                    | (Sort::BitVector(wf), Sort::Float(wt))
+                        if wt == wf =>
+                    {
+                        Sort::Float(*wt)
+                    }
+                    _ => Sort::BitVector(sort_bit_width(&t_sort).max(sort_bit_width(&f_sort))),
                 }
             }
             Self::Extract { size, .. } => Sort::BitVector(*size),
@@ -722,13 +756,7 @@ impl SymExpr {
     /// Return this expression's bit width. For arrays, this is the element width
     /// (or `0` for malformed/nested non-scalar terms).
     pub fn get_bit_width(&self) -> u32 {
-        match self.get_sort() {
-            Sort::BitVector(bits) | Sort::Float(bits) => bits,
-            Sort::Array { range, .. } => match range.as_ref() {
-                Sort::BitVector(bits) | Sort::Float(bits) => *bits,
-                Sort::Array { .. } => 0,
-            },
-        }
+        sort_bit_width(&self.get_sort())
     }
 
     /// Legacy name retained for source compatibility; the returned unit is bits.
