@@ -44,23 +44,11 @@ impl WindowsDebugger {
         self.set_trap_flag_state(thread_id, false)
     }
 
-    /// If the current thread stands on one of our persistent breakpoints, run
-    /// its instruction with the original byte back in place and resume.
-    ///
-    /// Returns whether it did; the single-step exception that ends the step
-    /// re-arms the breakpoint (see `process_debug_event`). Without this a
-    /// thread resumed on a breakpoint executes the `INT3` again and stops
-    /// where it stood, for ever.
-    fn step_off_breakpoint(&mut self, report: bool) -> FissionResult<bool> {
-        let Some(thread_id) = self.state.last_thread_id.or(self.state.main_thread_id) else {
-            return Ok(false);
-        };
-        let Ok(registers) = self.fetch_registers(thread_id) else {
-            return Ok(false);
-        };
-        let address = registers.pc;
-        let Some(original_byte) = self
-            .state
+    /// The address and original byte of one of our persistent breakpoints the
+    /// thread's instruction pointer stands on, if any.
+    fn armed_breakpoint_under(&self, thread_id: u32) -> Option<(u64, u8)> {
+        let address = self.fetch_registers(thread_id).ok()?.pc;
+        self.state
             .breakpoints
             .get(&address)
             .filter(|bp| {
@@ -68,8 +56,22 @@ impl WindowsDebugger {
                     && !bp.temporary
                     && bp.kind == crate::debug::types::BreakpointKind::Software
             })
-            .map(|bp| bp.original_byte)
-        else {
+            .map(|bp| (address, bp.original_byte))
+    }
+
+    /// If the event thread stands on one of our persistent breakpoints, run
+    /// its instruction with the original byte back in place and resume.
+    ///
+    /// Returns whether it did; the single-step exception that ends the step
+    /// re-arms the breakpoint (see `process_debug_event`). Without this a
+    /// thread resumed on a breakpoint executes the `INT3` again and stops
+    /// where it stood, for ever. Only the event thread can be standing on a
+    /// breakpoint it hit, whichever thread is selected.
+    fn step_off_breakpoint(&mut self, report: bool) -> FissionResult<bool> {
+        let Some(thread_id) = self.event_thread_id() else {
+            return Ok(false);
+        };
+        let Some((address, original_byte)) = self.armed_breakpoint_under(thread_id) else {
             return Ok(false);
         };
         self.write_memory(address, &[original_byte])?;
@@ -103,15 +105,35 @@ impl WindowsDebugger {
         Ok(())
     }
 
+    /// Step the selected thread one instruction.
+    ///
+    /// It used to step the event thread whatever was selected, so
+    /// `switch-thread` followed by `step` moved a thread nobody asked about.
+    /// A selected thread other than the event thread is stepped by its trap
+    /// flag while the event is continued -- unless the event thread stands on
+    /// one of our breakpoints: resuming it would execute that `INT3` again and
+    /// report a hit that never happened, so that case is refused.
     pub(super) fn single_step(&mut self) -> FissionResult<()> {
-        if self.step_off_breakpoint(true)? {
-            return Ok(());
-        }
+        let event_thread = self.event_thread_id();
         let tid = self
             .state
-            .last_thread_id
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id"))?;
+        if Some(tid) == event_thread {
+            if self.step_off_breakpoint(true)? {
+                return Ok(());
+            }
+        } else if let Some(event_thread) = event_thread {
+            if self.pending_continue_status.is_some() {
+                if let Some((address, _)) = self.armed_breakpoint_under(event_thread) {
+                    return Err(FissionError::debug(format!(
+                        "thread {event_thread} is stopped on the breakpoint at 0x{address:x}; \
+                         continue or step that thread before stepping thread {tid}, \
+                         or it would hit the breakpoint again"
+                    )));
+                }
+            }
+        }
         unsafe {
             let h_thread = super::super::OwnedHandle(
                 OpenThread(THREAD_ALL_ACCESS, false, tid)

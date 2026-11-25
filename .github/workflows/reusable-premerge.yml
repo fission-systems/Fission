@@ -15,7 +15,7 @@ jobs:
     if: inputs.suite == 'native-debugger'
     name: Debugger process control (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 35
+    timeout-minutes: 50
     strategy:
       fail-fast: false
       matrix:
@@ -39,7 +39,9 @@ jobs:
         run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features interactive_runtime --test linux_debug_launch
       - name: Windows live debugger
         if: runner.os == 'Windows'
-        run: cargo nextest run --locked --no-tests=fail -p fission-dynamic --features windows_native_debugger -E 'test(windows_native_backend_)'
+        run: |
+          cargo nextest run --locked --no-tests=fail -p fission-dynamic --features windows_native_debugger -E 'test(windows_native_backend_)'
+          cargo nextest run --locked --no-tests=fail -p fission-cli --features windows_native_debugger --test debug_session_cli -E 'test(windows_native_)'
       - name: macOS live debugger
         if: runner.os == 'macOS'
         run: |
