@@ -13,11 +13,19 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
+fn exit(code: i32) -> ! {
+    #[cfg(feature = "sentry")]
+    fission_cli::telemetry::flush();
+    std::process::exit(code)
+}
+
 fn main() {
+    #[cfg(feature = "sentry")]
+    let _telemetry = fission_cli::telemetry::init();
     // `--contract v1` runs this binary again under supervision and wraps the
     // result; without it nothing below changes.
     if let Some(code) = fission_cli::cli::contract::maybe_supervise() {
-        std::process::exit(code);
+        exit(code);
     }
     if let Err(error) = fission_cli::cli::oneshot::run_oneshot() {
         if fission_cli::cli::contract::is_child() {
@@ -25,6 +33,6 @@ fn main() {
         } else {
             eprintln!("{:?}", miette::Report::msg(format!("{error:#}")));
         }
-        std::process::exit(1);
+        exit(1);
     }
 }

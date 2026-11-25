@@ -241,6 +241,8 @@ mod native {
             let registry = Registry::default()
                 .with(env_filter)
                 .with(ErrorLayer::default());
+            #[cfg(feature = "sentry")]
+            let registry = registry.with(sentry_tracing::layer());
             let _ = match (options.format, options.include_timestamp) {
                 (LoggingFormat::Compact, true) => registry
                     .with(
