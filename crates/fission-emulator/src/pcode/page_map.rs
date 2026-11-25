@@ -48,6 +48,16 @@ pub fn page_align_up(addr: u64) -> u64 {
         .map_or(PAGE_MASK, |end| end & PAGE_MASK)
 }
 
+/// Contiguous byte span from `addr` to the end of the guest address space
+/// (`2^32` for 32-bit guests, `2^64` for 64-bit guests) without wrapping.
+#[inline]
+pub fn guest_addr_span(addr: u64, is_64bit: bool) -> u64 {
+    let space_end: u128 = if is_64bit { 1u128 << 64 } else { 1u128 << 32 };
+    space_end
+        .saturating_sub(u128::from(addr))
+        .min(u128::from(u64::MAX)) as u64
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AccessKind {
     Read,
@@ -364,20 +374,75 @@ impl PageMap {
         }
     }
 
+    /// Calculate the contiguous accessible byte count starting at `addr`, up to
+    /// `max_len`, without wrapping past the guest address-space limit.
+    ///
+    /// When `allow_unmapped` is `true`, unmapped gaps count as accessible up to
+    /// the next mapped page that refuses `kind` (matching lazy-memory demand
+    /// paging, which preserves protections on already-mapped pages).
+    pub fn accessible_extent(
+        &self,
+        addr: u64,
+        max_len: usize,
+        kind: AccessKind,
+        allow_unmapped: bool,
+    ) -> usize {
+        let limit = (max_len as u64).min(guest_addr_span(addr, self.is_64bit));
+        let mut available = 0u64;
+        while available < limit {
+            let Some(at) = addr.checked_add(available) else {
+                break;
+            };
+            match self.mapping_at(at) {
+                Some(m) => {
+                    if Self::permit(Some(m.prot), at, kind).is_err() {
+                        break;
+                    }
+                    let end = if self.is_64bit {
+                        m.end
+                    } else {
+                        m.end.min(1u64 << 32)
+                    };
+                    if end <= at {
+                        break;
+                    }
+                    available = available.saturating_add(end - at).min(limit);
+                }
+                None => {
+                    if !allow_unmapped {
+                        break;
+                    }
+                    let idx = self.mappings.partition_point(|m| m.end <= at);
+                    let remaining = limit - available;
+                    let gap = self
+                        .mappings
+                        .get(idx)
+                        .map_or(remaining, |m| m.start.saturating_sub(at).min(remaining));
+                    if gap == 0 {
+                        break;
+                    }
+                    available += gap;
+                }
+            }
+        }
+        available as usize
+    }
+
     /// Calculate the contiguous readable byte count starting at `addr`, up to `max_len`.
     ///
     /// If `addr` itself is not readable, returns 0. Otherwise, checks subsequent pages
     /// and returns the number of contiguous readable bytes before the first unmapped
     /// or unreadable page boundary, capped at `max_len`.
     pub fn readable_extent(&self, addr: u64, max_len: usize) -> usize {
-        let mut at = addr;
-        let mut available = 0u64;
-        while available < max_len as u64 && self.check_access(at, AccessKind::Read).is_ok() {
-            let Some(m) = self.mapping_at(at) else { break };
-            available = available.saturating_add(m.end - at);
-            at = m.end;
-        }
-        available.min(max_len as u64) as usize
+        self.accessible_extent(addr, max_len, AccessKind::Read, false)
+    }
+
+    /// Calculate the contiguous writable byte count starting at `addr`, up to `max_len`.
+    ///
+    /// If `addr` itself is not writable, returns 0. Otherwise, walks mapped pages
+    /// until an unmapped or non-writable page or the guest address-space limit.
+    pub fn writable_extent(&self, addr: u64, max_len: usize) -> usize {
+        self.accessible_extent(addr, max_len, AccessKind::Write, false)
     }
 
     /// Whether no page of `[start, start + len)` is mapped.
@@ -880,6 +945,45 @@ mod tests {
         // Requesting across to unmapped 0x3000
         let near_second_edge = 0x3000 - 15;
         assert_eq!(pm.readable_extent(near_second_edge, 100), 15);
+    }
+
+    #[test]
+    fn writable_extent_clamps_to_prot_and_guest_width_bounds() {
+        let mut pm = PageMap::new();
+        pm.map_region(0x1000, 0x1000, prot::RW, true);
+        pm.map_region(0x2000, 0x1000, prot::READ, true);
+        pm.map_region(0x3000, 0x1000, prot::RW, true);
+        pm.map_region(0x4000, 0x1000, prot::NONE, true);
+
+        // First page unmapped or non-writable returns 0.
+        assert_eq!(pm.writable_extent(0x0, 64), 0);
+        assert_eq!(pm.writable_extent(0x2000, 64), 0);
+        assert_eq!(pm.writable_extent(0x4000, 64), 0);
+
+        // Stops at read-only page boundary, PROT_NONE boundary, and unmapped gap.
+        assert_eq!(pm.writable_extent(0x2000 - 12, 64), 12);
+        assert_eq!(pm.writable_extent(0x4000 - 20, 64), 20);
+        assert_eq!(pm.writable_extent(0x1000, 0x2000), 0x1000);
+
+        // Lazy-memory mode skips unmapped gaps but still stops at RO/PROT_NONE.
+        assert_eq!(
+            pm.accessible_extent(0x0800, 0x2000, AccessKind::Write, true),
+            0x1800
+        );
+
+        // 64-bit top-of-space wrap protection.
+        assert_eq!(guest_addr_span(u64::MAX - 3, true), 4);
+        assert_eq!(
+            pm.accessible_extent(u64::MAX - 3, 16, AccessKind::Write, true),
+            4
+        );
+
+        // 32-bit guest width clamps at 2^32.
+        let mut pm32 = PageMap::new();
+        pm32.set_64bit(false);
+        pm32.map_region(0xFFFF_F000, 0x1000, prot::RW, true);
+        assert_eq!(pm32.writable_extent(0xFFFF_FFF8, 32), 8);
+        assert_eq!(pm32.writable_extent(0x1_0000_0000, 32), 0);
     }
     #[test]
     fn mprotect_splits_a_mapping_it_only_partly_covers() {

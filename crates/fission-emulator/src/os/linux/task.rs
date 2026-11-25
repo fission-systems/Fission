@@ -1314,4 +1314,595 @@ mod tests {
         assert_eq!(read_syscall_result(&mut emu), -EINTR);
         assert_ne!(emu.signals.pending & (1 << 9), 0);
     }
+
+    #[test]
+    fn read_handles_bad_fd_zero_count_and_eof_without_faulting() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let ram = emu.state.ram_space();
+
+        // Invalid descriptor fails with -EBADF before checking buffer/count.
+        dispatch_syscall(&env, &mut emu, 0, [99, 0, 10, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -9);
+        dispatch_syscall(&env, &mut emu, 0, [99, 0, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -9);
+
+        let ro_page = 0x5000_0000u64;
+        emu.state
+            .page_map
+            .map_region(ro_page, 0x1000, crate::pcode::page_map::prot::READ, true);
+        let fd = emu.vfs.open("data.bin", b"abcdef".to_vec());
+
+        // count == 0 succeeds without faulting or moving cursor/eof.
+        dispatch_syscall(&env, &mut emu, 0, [fd, 0, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        dispatch_syscall(&env, &mut emu, 0, [fd, ro_page, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        assert_eq!(emu.vfs.files[&fd].cursor, 0);
+        assert!(!emu.vfs.files[&fd].eof);
+
+        // Consume all bytes, then verify EOF with NULL, RO, and RW buffers.
+        let rw_buf = emu.heap_alloc(16).expect("rw buffer");
+        dispatch_syscall(&env, &mut emu, 0, [fd, rw_buf, 6, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 6);
+        assert_eq!(emu.state.read_space(ram, rw_buf, 6).unwrap(), b"abcdef");
+
+        for dst in [0, ro_page, rw_buf] {
+            dispatch_syscall(&env, &mut emu, 0, [fd, dst, 10, 0, 0, 0]);
+            assert_eq!(read_syscall_result(&mut emu), 0);
+            assert!(emu.vfs.files[&fd].eof);
+        }
+    }
+
+    #[test]
+    fn read_first_page_fault_returns_efault_and_preserves_cursor_and_memory() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let ram = emu.state.ram_space();
+        let ro_page = 0x5000_0000u64;
+        let none_page = 0x5000_2000u64;
+        emu.state
+            .page_map
+            .map_region(ro_page, 0x1000, crate::pcode::page_map::prot::READ, true);
+        emu.state
+            .page_map
+            .map_region(none_page, 0x1000, crate::pcode::page_map::prot::NONE, true);
+        emu.state.write_ram_unprotected(ro_page, b"KEEPME").unwrap();
+
+        let fd = emu.vfs.open("secret.bin", b"0123456789".to_vec());
+        for bad_buf in [0, ro_page, none_page] {
+            dispatch_syscall(&env, &mut emu, 0, [fd, bad_buf, 10, 0, 0, 0]);
+            assert_eq!(read_syscall_result(&mut emu), -EFAULT);
+            assert_eq!(emu.vfs.files[&fd].cursor, 0);
+            assert!(!emu.vfs.files[&fd].eof);
+        }
+
+        // Unreadable/read-only target bytes stay untouched; force unprotected read.
+        emu.state.enforce_page_faults = false;
+        assert_eq!(emu.state.read_space(ram, ro_page, 6).unwrap(), b"KEEPME");
+        emu.state.enforce_page_faults = true;
+
+        // Repeat read into a valid writable buffer receives all bytes from offset 0.
+        let rw_buf = emu.heap_alloc(16).expect("rw buffer");
+        dispatch_syscall(&env, &mut emu, 0, [fd, rw_buf, 10, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 10);
+        assert_eq!(
+            emu.state.read_space(ram, rw_buf, 10).unwrap(),
+            b"0123456789"
+        );
+    }
+
+    #[test]
+    fn read_partial_page_crossing_commits_only_writable_prefix_and_resumes() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let ram = emu.state.ram_space();
+
+        // Scenario 1: RW page followed by unmapped page.
+        let rw_base = 0x5100_0000u64;
+        emu.state
+            .page_map
+            .map_region(rw_base, 0x1000, crate::pcode::page_map::prot::RW, true);
+        let partial = rw_base + 0x1000 - 4;
+        emu.state.write_space(ram, partial - 1, &[0xAA]).unwrap();
+
+        let fd = emu.vfs.open("cross1.bin", b"0123456789".to_vec());
+        dispatch_syscall(&env, &mut emu, 0, [fd, partial, 10, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 4);
+        assert_eq!(emu.vfs.files[&fd].cursor, 4);
+        assert!(!emu.vfs.files[&fd].eof);
+        assert_eq!(emu.state.read_space(ram, partial, 4).unwrap(), b"0123");
+        assert_eq!(emu.state.read_space(ram, partial - 1, 1).unwrap(), [0xAA]);
+
+        let tail = emu.heap_alloc(16).expect("tail buffer");
+        dispatch_syscall(&env, &mut emu, 0, [fd, tail, 10, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 6);
+        assert_eq!(emu.vfs.files[&fd].cursor, 10);
+        assert!(emu.vfs.files[&fd].eof);
+        assert_eq!(emu.state.read_space(ram, tail, 6).unwrap(), b"456789");
+
+        // Scenario 2: RW page followed by PROT_READ page.
+        let ro_pair = 0x5200_0000u64;
+        emu.state
+            .page_map
+            .map_region(ro_pair, 0x1000, crate::pcode::page_map::prot::RW, true);
+        emu.state.page_map.map_region(
+            ro_pair + 0x1000,
+            0x1000,
+            crate::pcode::page_map::prot::READ,
+            true,
+        );
+        emu.state
+            .write_ram_unprotected(ro_pair + 0x1000, b"UNCHANGED")
+            .unwrap();
+
+        let fd2 = emu.vfs.open("cross2.bin", b"ABCDEFGHIJ".to_vec());
+        dispatch_syscall(&env, &mut emu, 0, [fd2, ro_pair + 0x1000 - 4, 10, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 4);
+        assert_eq!(emu.vfs.files[&fd2].cursor, 4);
+        assert_eq!(
+            emu.state.read_space(ram, ro_pair + 0x1000 - 4, 4).unwrap(),
+            b"ABCD"
+        );
+        assert_eq!(
+            emu.state.read_space(ram, ro_pair + 0x1000, 9).unwrap(),
+            b"UNCHANGED"
+        );
+    }
+
+    #[test]
+    fn read_huge_count_and_multi_chunk_transfer_stay_bounded() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        let ram = emu.state.ram_space();
+
+        let total = (1usize << 20) + 123;
+        let payload: Vec<u8> = (0..total).map(|i| (i % 251) as u8).collect();
+        let fd = emu.vfs.open("big.bin", payload.clone());
+
+        let base = 0x6000_0000u64;
+        let map_len = 0x20_1000u64;
+        emu.state
+            .page_map
+            .map_region(base, map_len, crate::pcode::page_map::prot::RW, true);
+
+        // Full multi-chunk transfer with (size_t)-1 does not panic or OOM.
+        dispatch_syscall(&env, &mut emu, 0, [fd, base, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), total as i64);
+        assert_eq!(emu.vfs.files[&fd].cursor, total);
+        assert_eq!(emu.state.read_space(ram, base, total).unwrap(), payload);
+
+        // Partial crossing in the second IO_CHUNK stops cleanly at the unmapped end.
+        emu.vfs.seek(fd, 0).unwrap();
+        let writable_len = (1usize << 20) + 100;
+        let near_top = base + map_len - writable_len as u64;
+        dispatch_syscall(&env, &mut emu, 0, [fd, near_top, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), writable_len as i64);
+        assert_eq!(emu.vfs.files[&fd].cursor, writable_len);
+        assert!(!emu.vfs.files[&fd].eof);
+        assert_eq!(
+            emu.state.read_space(ram, near_top, writable_len).unwrap(),
+            payload[..writable_len]
+        );
+
+        let rest = emu.heap_alloc(64).expect("rest buffer");
+        dispatch_syscall(&env, &mut emu, 0, [fd, rest, 64, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 23);
+        assert_eq!(
+            emu.state.read_space(ram, rest, 23).unwrap(),
+            payload[writable_len..]
+        );
+    }
+
+    #[test]
+    fn read_stdin_updates_symbolic_and_taint_only_for_transferred_bytes_and_caps_aggregates() {
+        let env = LinuxEnv::new();
+
+        // Symbolic mode: fault preserves stdin and cursor; partial crossing marks only written bytes.
+        let mut sym_emu = emulator();
+        sym_emu.set_shadow_mode(crate::observe::ShadowMode::Symbolic);
+        sym_emu.seed_stdin(b"ABCDEF");
+        let page = 0x5300_0000u64;
+        sym_emu
+            .state
+            .page_map
+            .map_region(page, 0x1000, crate::pcode::page_map::prot::RW, true);
+
+        dispatch_syscall(&env, &mut sym_emu, 0, [0, 0, 4, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut sym_emu), -EFAULT);
+        assert_eq!(sym_emu.stdin_buffer.as_deref(), Some(b"ABCDEF".as_slice()));
+        assert_eq!(sym_emu.vfs.files[&0].cursor, 0);
+        assert_eq!(sym_emu.symbolic_stdin_bytes, 0);
+
+        let partial = page + 0x1000 - 2;
+        dispatch_syscall(&env, &mut sym_emu, 0, [0, partial, 6, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut sym_emu), 2);
+        assert_eq!(sym_emu.stdin_buffer.as_deref(), Some(b"CDEF".as_slice()));
+        assert_eq!(sym_emu.vfs.files[&0].cursor, 2);
+        assert_eq!(sym_emu.symbolic_stdin_bytes, 2);
+        let ram = sym_emu.state.ram_space();
+        assert!(sym_emu.state.get_shadow_memory(ram, partial - 1).is_none());
+        assert!(sym_emu.state.get_shadow_memory(ram, partial).is_some());
+        assert!(sym_emu.state.get_shadow_memory(ram, partial + 1).is_some());
+
+        // Aggregate symbolic stdin limit bounds large reads.
+        let sym_cap_buf = 0x5400_0000u64;
+        let big_len = crate::core::MAX_SYMBOLIC_STDIN_BYTES + 1024;
+        sym_emu.state.page_map.map_region(
+            sym_cap_buf,
+            big_len as u64 + 0x1000,
+            crate::pcode::page_map::prot::RW,
+            true,
+        );
+        sym_emu.seed_stdin(&vec![b'x'; big_len]);
+        dispatch_syscall(
+            &env,
+            &mut sym_emu,
+            0,
+            [0, sym_cap_buf, big_len as u64, 0, 0, 0],
+        );
+        assert_eq!(read_syscall_result(&mut sym_emu), big_len as i64);
+        assert_eq!(
+            sym_emu.symbolic_stdin_bytes,
+            crate::core::MAX_SYMBOLIC_STDIN_BYTES
+        );
+
+        // Taint mode: fault records nothing; partial crossing marks only written bytes and creates no solver vars.
+        let mut taint_emu = emulator();
+        taint_emu.set_shadow_mode(crate::observe::ShadowMode::Taint);
+        taint_emu.seed_stdin(b"XYZ123");
+        let ro_page = 0x5500_0000u64;
+        taint_emu.state.page_map.map_region(
+            ro_page,
+            0x1000,
+            crate::pcode::page_map::prot::READ,
+            true,
+        );
+        taint_emu
+            .state
+            .page_map
+            .map_region(page, 0x1000, crate::pcode::page_map::prot::RW, true);
+
+        dispatch_syscall(&env, &mut taint_emu, 0, [0, ro_page, 6, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut taint_emu), -EFAULT);
+        assert!(taint_emu.taint.is_empty());
+        assert_eq!(taint_emu.taint_marked_bytes, 0);
+
+        let partial3 = page + 0x1000 - 3;
+        dispatch_syscall(&env, &mut taint_emu, 0, [0, partial3, 6, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut taint_emu), 3);
+        assert_eq!(taint_emu.taint.sources().len(), 1);
+        assert_eq!(taint_emu.taint.sources()[0].len, 3);
+        assert_eq!(taint_emu.taint_marked_bytes, 3);
+        assert!(taint_emu.solver.nodes.is_empty());
+        let tram = taint_emu.state.ram_space();
+        assert!(
+            taint_emu
+                .state
+                .get_shadow_memory(tram, partial3 - 1)
+                .is_none()
+        );
+        assert!(taint_emu.state.get_shadow_memory(tram, partial3).is_some());
+
+        // Aggregate taint cap bounds repeated/large reads.
+        let buf5 = 0x5600_0000u64;
+        taint_emu
+            .state
+            .page_map
+            .map_region(buf5, 1 << 20, crate::pcode::page_map::prot::RW, true);
+        let fd_big = taint_emu.vfs.open("taint_big", vec![b'A'; 5 << 20]);
+        for _ in 0..5 {
+            dispatch_syscall(&env, &mut taint_emu, 0, [fd_big, buf5, 1 << 20, 0, 0, 0]);
+            assert_eq!(read_syscall_result(&mut taint_emu), 1 << 20);
+        }
+        assert_eq!(
+            taint_emu.taint_marked_bytes,
+            crate::core::MAX_TAINT_MARKED_BYTES
+        );
+    }
+
+    #[test]
+    fn read_respects_32bit_guest_address_space_top_without_wrapping() {
+        let env = LinuxEnv::new();
+        let mut emu = emulator();
+        emu.state.page_map.set_64bit(false);
+        emu.state
+            .page_map
+            .map_region(0xFFFF_F000, 0x1000, crate::pcode::page_map::prot::RW, true);
+        let fd = emu.vfs.open("top32.bin", b"0123456789ABCDEF".to_vec());
+
+        // Starting 8 bytes below 4 GiB transfers only 8 bytes, never wrapping to 0.
+        dispatch_syscall(&env, &mut emu, 0, [fd, 0xFFFF_FFF8, 32, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 8);
+        assert_eq!(emu.vfs.files[&fd].cursor, 8);
+        assert_eq!(
+            emu.state
+                .read_space(emu.state.ram_space(), 0xFFFF_FFF8, 8)
+                .unwrap(),
+            b"01234567"
+        );
+
+        // An address above 2^32 is rejected with -EFAULT without advancing cursor.
+        dispatch_syscall(&env, &mut emu, 0, [fd, 0x1_0000_0000, 8, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -EFAULT);
+        assert_eq!(emu.vfs.files[&fd].cursor, 8);
+    }
+
+    // ── Host stdin read errors (#1319 review) ───────────────────────────────
+    //
+    // A real terminal cannot be made to return `EINTR` or `EIO` on demand, so
+    // these drive `read(0, ...)` through an injected host reader that follows
+    // a script. Each failing case checks the whole guest-visible state: the
+    // return value, the destination bytes, the shadow memory over them, the
+    // symbolic-stdin budget and the stdin mock.
+
+    const EIO: i64 = 5;
+
+    #[derive(Clone)]
+    enum HostStep {
+        Data(Vec<u8>),
+        Fail(std::io::ErrorKind),
+        /// Fails with this kind on every call from here on.
+        FailForever(std::io::ErrorKind),
+        /// Claims one byte more than the buffer it was handed.
+        Overrun,
+    }
+
+    struct ScriptedStdin {
+        steps: VecDeque<HostStep>,
+        requested: std::sync::Arc<std::sync::Mutex<Vec<usize>>>,
+    }
+
+    impl std::io::Read for ScriptedStdin {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.requested.lock().unwrap().push(buf.len());
+            let step = match self.steps.front() {
+                Some(HostStep::FailForever(kind)) => {
+                    return Err(std::io::Error::new(*kind, "scripted host stdin failure"));
+                }
+                _ => self.steps.pop_front(),
+            };
+            match step {
+                None => Ok(0),
+                Some(HostStep::Data(data)) => {
+                    let n = data.len().min(buf.len());
+                    buf[..n].copy_from_slice(&data[..n]);
+                    Ok(n)
+                }
+                Some(HostStep::Fail(kind)) | Some(HostStep::FailForever(kind)) => {
+                    Err(std::io::Error::new(kind, "scripted host stdin failure"))
+                }
+                Some(HostStep::Overrun) => Ok(buf.len() + 1),
+            }
+        }
+    }
+
+    /// An emulator whose fd 0 has no mock and falls through to a scripted
+    /// host stdin; returns the log of buffer sizes the host was asked for.
+    fn host_stdin_emulator(
+        steps: Vec<HostStep>,
+    ) -> (Emulator, std::sync::Arc<std::sync::Mutex<Vec<usize>>>) {
+        let mut emu = emulator();
+        emu.host_stdin = true;
+        let requested = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        emu.set_host_stdin_reader(Box::new(ScriptedStdin {
+            steps: steps.into(),
+            requested: requested.clone(),
+        }));
+        (emu, requested)
+    }
+
+    const SENTINEL: &[u8; 16] = b"SENTINEL-SENTINE";
+
+    /// Nothing the guest can observe moved: the buffer still holds the
+    /// sentinel, no shadow node covers it, no symbolic stdin byte was spent,
+    /// and fd 0 / the mock are where they were.
+    fn assert_read_left_no_trace(emu: &Emulator, buf: u64) {
+        let ram = emu.state.ram_space();
+        assert_eq!(
+            emu.state
+                .read_space_readonly(ram, buf, SENTINEL.len())
+                .unwrap(),
+            SENTINEL,
+            "destination bytes changed"
+        );
+        for i in 0..SENTINEL.len() as u64 {
+            assert_eq!(emu.state.get_shadow_memory(ram, buf + i), None);
+        }
+        assert_eq!(emu.symbolic_stdin_bytes, 0);
+        assert!(emu.taint.is_empty());
+        assert!(emu.stdin_buffer.is_none());
+        assert_eq!(emu.vfs.files[&0].cursor, 0);
+        assert!(!emu.vfs.files[&0].eof);
+    }
+
+    #[test]
+    fn host_stdin_hard_error_is_eio_not_eof_and_leaves_no_trace() {
+        for kind in [
+            std::io::ErrorKind::Other,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::InvalidData,
+        ] {
+            let env = LinuxEnv::new();
+            let (mut emu, requested) = host_stdin_emulator(vec![HostStep::Fail(kind)]);
+            let buf = guest_bytes(&mut emu, SENTINEL);
+            dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+            assert_eq!(
+                read_syscall_result(&mut emu),
+                -EIO,
+                "{kind:?} must not read as end-of-file"
+            );
+            assert_eq!(
+                requested.lock().unwrap().len(),
+                1,
+                "hard errors are not retried"
+            );
+            assert_read_left_no_trace(&emu, buf);
+        }
+    }
+
+    #[test]
+    fn host_stdin_would_block_is_eagain_and_leaves_no_trace() {
+        let env = LinuxEnv::new();
+        let (mut emu, _) =
+            host_stdin_emulator(vec![HostStep::Fail(std::io::ErrorKind::WouldBlock)]);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -EAGAIN);
+        assert_read_left_no_trace(&emu, buf);
+    }
+
+    #[test]
+    fn host_stdin_interrupted_read_is_retried_and_then_transfers() {
+        let env = LinuxEnv::new();
+        let (mut emu, requested) = host_stdin_emulator(vec![
+            HostStep::Fail(std::io::ErrorKind::Interrupted),
+            HostStep::Fail(std::io::ErrorKind::Interrupted),
+            HostStep::Data(b"abc".to_vec()),
+        ]);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 3);
+        assert_eq!(requested.lock().unwrap().as_slice(), [16, 16, 16]);
+
+        let ram = emu.state.ram_space();
+        let after = emu.state.read_space_readonly(ram, buf, 16).unwrap();
+        assert_eq!(&after[..3], b"abc");
+        assert_eq!(&after[3..], &SENTINEL[3..], "bytes past the transfer moved");
+        for i in 0..3 {
+            assert!(emu.state.get_shadow_memory(ram, buf + i).is_some());
+        }
+        for i in 3..16 {
+            assert_eq!(emu.state.get_shadow_memory(ram, buf + i), None);
+        }
+        assert_eq!(emu.symbolic_stdin_bytes, 3);
+    }
+
+    #[test]
+    fn host_stdin_persistent_eintr_is_reported_after_bounded_retries() {
+        let env = LinuxEnv::new();
+        let (mut emu, requested) =
+            host_stdin_emulator(vec![HostStep::FailForever(std::io::ErrorKind::Interrupted)]);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -EINTR);
+        let calls = requested.lock().unwrap().len();
+        assert!(
+            (2..=64).contains(&calls),
+            "EINTR must be retried a bounded number of times, was {calls}"
+        );
+        assert_read_left_no_trace(&emu, buf);
+    }
+
+    #[test]
+    fn host_stdin_reader_claiming_more_than_its_buffer_is_eio() {
+        let env = LinuxEnv::new();
+        let (mut emu, _) = host_stdin_emulator(vec![HostStep::Overrun]);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -EIO);
+        assert_read_left_no_trace(&emu, buf);
+    }
+
+    #[test]
+    fn host_stdin_short_read_commits_only_transferred_bytes_then_eof() {
+        let env = LinuxEnv::new();
+        let (mut emu, _) = host_stdin_emulator(vec![HostStep::Data(b"12345".to_vec())]);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+        let ram = emu.state.ram_space();
+
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 5);
+        let after = emu.state.read_space_readonly(ram, buf, 16).unwrap();
+        assert_eq!(&after[..5], b"12345");
+        assert_eq!(&after[5..], &SENTINEL[5..]);
+        assert_eq!(emu.symbolic_stdin_bytes, 5);
+
+        // The script is exhausted: the host reports a clean end-of-file.
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        assert_eq!(emu.symbolic_stdin_bytes, 5);
+    }
+
+    #[test]
+    fn host_stdin_is_asked_only_for_the_writable_bounded_prefix() {
+        let env = LinuxEnv::new();
+        let (mut emu, requested) = host_stdin_emulator(vec![
+            HostStep::Data(vec![b'x'; 8]),
+            HostStep::Data(vec![b'y'; 8]),
+        ]);
+        let ram = emu.state.ram_space();
+
+        // A buffer four bytes before an unmapped page: the host is offered
+        // four bytes, not `count`, so nothing is consumed that cannot land.
+        let rw_base = 0x5100_0000u64;
+        emu.state
+            .page_map
+            .map_region(rw_base, 0x1000, crate::pcode::page_map::prot::RW, true);
+        let edge = rw_base + 0x1000 - 4;
+        dispatch_syscall(&env, &mut emu, 0, [0, edge, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 4);
+        assert_eq!(emu.state.read_space(ram, edge, 4).unwrap(), b"xxxx");
+
+        // A huge count over a large writable region holds at most one I/O
+        // chunk on the host.
+        let big = 0x5200_0000u64;
+        emu.state
+            .page_map
+            .map_region(big, 4 << 20, crate::pcode::page_map::prot::RW, true);
+        dispatch_syscall(&env, &mut emu, 0, [0, big, u64::MAX, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 8);
+        assert_eq!(requested.lock().unwrap().as_slice(), [4, 1 << 20]);
+    }
+
+    #[test]
+    fn host_stdin_is_not_consumed_by_zero_count_or_unwritable_buffers() {
+        let env = LinuxEnv::new();
+        let (mut emu, requested) = host_stdin_emulator(vec![HostStep::Data(b"kept".to_vec())]);
+        let ro_page = 0x5000_0000u64;
+        emu.state
+            .page_map
+            .map_region(ro_page, 0x1000, crate::pcode::page_map::prot::READ, true);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 0, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 0);
+        for bad in [0, ro_page, u64::MAX - 1] {
+            dispatch_syscall(&env, &mut emu, 0, [0, bad, 16, 0, 0, 0]);
+            assert_eq!(read_syscall_result(&mut emu), -EFAULT, "buffer {bad:#x}");
+        }
+        assert!(
+            requested.lock().unwrap().is_empty(),
+            "host stdin was consumed"
+        );
+        assert_read_left_no_trace(&emu, buf);
+
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 4);
+    }
+
+    #[test]
+    fn host_stdin_under_taint_marks_only_transferred_bytes_and_nothing_on_error() {
+        let env = LinuxEnv::new();
+        let (mut emu, _) = host_stdin_emulator(vec![
+            HostStep::Fail(std::io::ErrorKind::Other),
+            HostStep::Data(b"ab".to_vec()),
+        ]);
+        emu.set_shadow_mode(crate::observe::ShadowMode::Taint);
+        let buf = guest_bytes(&mut emu, SENTINEL);
+
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), -EIO);
+        assert!(emu.taint.is_empty());
+
+        dispatch_syscall(&env, &mut emu, 0, [0, buf, 16, 0, 0, 0]);
+        assert_eq!(read_syscall_result(&mut emu), 2);
+        assert_eq!(emu.taint.sources().len(), 1);
+        assert_eq!(emu.taint.sources()[0].len, 2);
+        assert_eq!(
+            emu.symbolic_stdin_bytes, 0,
+            "taint mode owns the shadow slots"
+        );
+    }
 }

@@ -60,19 +60,33 @@ impl SimFile {
         self
     }
 
-    pub fn read(&mut self, count: usize) -> Vec<u8> {
-        let remaining = self.content.len().saturating_sub(self.cursor);
-        let to_read = std::cmp::min(count, remaining);
-        if count > 0 && to_read < count {
+    /// How many bytes remain between `cursor` and end of file.
+    pub fn remaining(&self) -> usize {
+        self.content.len().saturating_sub(self.cursor)
+    }
+
+    /// Borrow up to `max_len` unread bytes from the current cursor without
+    /// advancing `cursor`, setting `eof`, or allocating a copy.
+    pub fn peek_at_cursor(&self, max_len: usize) -> &[u8] {
+        let start = self.cursor.min(self.content.len());
+        let end = start.saturating_add(max_len).min(self.content.len());
+        &self.content[start..end]
+    }
+
+    /// Commit a read transfer after destination bytes have been copied out.
+    pub fn advance_read(&mut self, bytes_committed: usize, reached_eof: bool) {
+        let step = bytes_committed.min(self.remaining());
+        self.cursor = self.cursor.saturating_add(step);
+        if reached_eof {
             self.eof = true;
         }
-        if to_read == 0 {
-            return Vec::new();
-        }
-        let start = self.cursor;
-        let end = start + to_read;
-        self.cursor = end;
-        self.content[start..end].to_vec()
+    }
+
+    pub fn read(&mut self, count: usize) -> Vec<u8> {
+        let data = self.peek_at_cursor(count).to_vec();
+        let reached_eof = count > 0 && data.len() < count;
+        self.advance_read(data.len(), reached_eof);
+        data
     }
 
     /// Store `data` at the cursor and advance it, growing the file (with
@@ -211,6 +225,35 @@ impl SimVFS {
         (fallback, None)
     }
 
+    pub fn contains_fd(&self, fd: u64) -> bool {
+        self.files.contains_key(&fd)
+    }
+
+    pub fn remaining(&self, fd: u64) -> Result<usize> {
+        let file = self.files.get(&fd).ok_or(VfsError::BadFd(fd))?;
+        Ok(file.remaining())
+    }
+
+    /// Borrow up to `max_len` unread bytes starting at `fd`'s current cursor
+    /// without mutating `cursor` or `eof`.
+    pub fn peek_read(&self, fd: u64, max_len: usize) -> Result<&[u8]> {
+        let file = self.files.get(&fd).ok_or(VfsError::BadFd(fd))?;
+        Ok(file.peek_at_cursor(max_len))
+    }
+
+    /// Advance `fd`'s cursor (and optional `eof` flag) by `bytes_committed`
+    /// after guest copy-out has succeeded.
+    pub fn commit_read(
+        &mut self,
+        fd: u64,
+        bytes_committed: usize,
+        reached_eof: bool,
+    ) -> Result<()> {
+        let file = self.files.get_mut(&fd).ok_or(VfsError::BadFd(fd))?;
+        file.advance_read(bytes_committed, reached_eof);
+        Ok(())
+    }
+
     pub fn read(&mut self, fd: u64, count: usize) -> Result<Vec<u8>> {
         let file = self.files.get_mut(&fd).ok_or(VfsError::BadFd(fd))?;
         Ok(file.read(count))
@@ -314,5 +357,27 @@ mod tests {
         assert_eq!(vfs.file_bytes(fd, 1, usize::MAX).unwrap(), b"ello");
         assert_eq!(vfs.file_bytes(fd, usize::MAX, usize::MAX).unwrap(), b"");
         assert_eq!(vfs.peek(fd, 3, 4).unwrap(), [b'l', b'o', 0, 0]);
+    }
+
+    #[test]
+    fn peek_read_preserves_cursor_until_commit_read() {
+        let mut vfs = SimVFS::new();
+        let fd = vfs.open("data", b"abcdef".to_vec());
+
+        assert_eq!(vfs.remaining(fd), Ok(6));
+        assert_eq!(vfs.peek_read(fd, 4).unwrap(), b"abcd");
+        assert_eq!(vfs.files[&fd].cursor, 0);
+        assert!(!vfs.files[&fd].eof);
+
+        vfs.commit_read(fd, 2, false).unwrap();
+        assert_eq!(vfs.files[&fd].cursor, 2);
+        assert!(!vfs.files[&fd].eof);
+        assert_eq!(vfs.peek_read(fd, 10).unwrap(), b"cdef");
+
+        vfs.commit_read(fd, 4, true).unwrap();
+        assert_eq!(vfs.files[&fd].cursor, 6);
+        assert!(vfs.files[&fd].eof);
+        assert_eq!(vfs.remaining(fd), Ok(0));
+        assert_eq!(vfs.peek_read(fd, 10).unwrap(), b"");
     }
 }
