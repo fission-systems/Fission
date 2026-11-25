@@ -1238,7 +1238,20 @@ fn eval_binary(
             _ => None,
         }
     };
+    // Shifts and divisions read their operands at the operands' own width (C
+    // promotes, then narrows the result; so does the evaluator `verify`
+    // runs). Folding them at the result width is only the same computation
+    // when the widths agree, so a mixed-width one is left unfolded.
+    let operands_at_result_width = |both: bool| -> Option<()> {
+        let a_bits = int_or_bool_bits(a_ty)?;
+        let b_ok = !both || int_or_bool_bits(b_ty)? == bits;
+        (a_bits == bits && b_ok).then_some(())
+    };
+    if matches!(op, PreHirBinaryOp::Div | PreHirBinaryOp::Mod) {
+        operands_at_result_width(true)?;
+    }
     let shift_amount = || -> Option<u32> {
+        operands_at_result_width(false)?;
         let b_bits = int_or_bool_bits(b_ty)?;
         let amount = zero_extend_bits(b, b_bits);
         if b < 0 || amount >= u64::from(bits) {
@@ -2453,6 +2466,70 @@ mod tests {
             ty: i32_ty,
         };
         assert!(!fold_expr_hir(&mut sdiv_overflow));
+    }
+
+    /// A shift or division whose operand is wider than its result: C (and the
+    /// evaluator `verify` checks the printed tree with) shifts and divides at
+    /// the operand's width and only then narrows. Narrowing the operand to the
+    /// result width first drops the bits that shift down into range.
+    #[test]
+    fn fold_shifts_and_divides_at_the_operand_width_not_the_result_width() {
+        let ity = |bits: u32, signed: bool| NirType::Int { bits, signed };
+        let bin = |op, a: i64, a_ty: NirType, b: i64, ty: NirType| PreHirExpr::Binary {
+            op,
+            lhs: Box::new(PreHirExpr::Const(a, a_ty)),
+            rhs: Box::new(PreHirExpr::Const(b, ity(32, false))),
+            ty,
+        };
+        // Each case: (expr, the only value a fold may produce).
+        let cases = [
+            // (u32)(0x1_0000_0000 >> 8) == 0x0100_0000
+            (
+                bin(
+                    PreHirBinaryOp::Shr,
+                    0x1_0000_0000,
+                    ity(64, false),
+                    8,
+                    ity(32, false),
+                ),
+                0x0100_0000,
+            ),
+            // (int)(0x8000_0000LL >> 4) == 0x0800_0000: bit 31 is not the
+            // sign of a 64-bit operand.
+            (
+                bin(
+                    PreHirBinaryOp::Sar,
+                    0x8000_0000,
+                    ity(64, true),
+                    4,
+                    ity(32, true),
+                ),
+                0x0800_0000,
+            ),
+            // (uint)(0x1_0000_0000 / 2) == 0x8000_0000
+            (
+                PreHirExpr::Binary {
+                    op: PreHirBinaryOp::Div,
+                    lhs: Box::new(PreHirExpr::Const(0x1_0000_0000, ity(64, false))),
+                    rhs: Box::new(PreHirExpr::Const(2, ity(64, false))),
+                    ty: ity(32, false),
+                },
+                0x8000_0000,
+            ),
+        ];
+        for (expr, want) in cases {
+            let mut folded = expr.clone();
+            if fold_expr_hir(&mut folded) {
+                let PreHirExpr::Const(got, _) = folded else {
+                    panic!("{folded:?}");
+                };
+                assert_eq!(
+                    zero_extend_bits(got, 32),
+                    want,
+                    "{expr:?} folded to {got:#x}"
+                );
+            }
+        }
     }
 }
 
