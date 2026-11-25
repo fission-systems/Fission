@@ -166,6 +166,28 @@ const CURATED: &[(&str, &[u8])] = &[
     ("srsra v0.4h, v1.4h, #1", &[0x20, 0x34, 0x1f, 0x0f]),
     ("sqdmlal v0.2d, v1.2s, v2.s[3]", &[0x20, 0x38, 0xa2, 0x0f]),
     ("suqadd v0.8b, v1.8b", &[0x20, 0x38, 0x20, 0x0e]),
+    ("fcvtzu v0.4s, v1.4s", &[0x20, 0xb8, 0xa1, 0x6e]),
+    ("fcvtnu v0.2d, v1.2d", &[0x20, 0xa8, 0x61, 0x6e]),
+    ("fcvtas v0.2s, v1.2s", &[0x20, 0xc8, 0x21, 0x0e]),
+    ("fcvtpu d0, d1", &[0x20, 0xa8, 0xe1, 0x7e]),
+    ("fcvtzs w0, s1, #31", &[0x20, 0x84, 0x18, 0x1e]),
+    ("fcvtzu w0, d1, #4", &[0x20, 0xf0, 0x59, 0x1e]),
+    ("fcvtzu x0, d1, #64", &[0x20, 0x00, 0x59, 0x9e]),
+    ("fcvtzu s0, s1, #3", &[0x20, 0xfc, 0x3d, 0x7f]),
+    ("fcvtzu d0, d1, #40", &[0x20, 0xfc, 0x58, 0x7f]),
+    ("sqneg v0.4s, v1.4s", &[0x20, 0x78, 0xa0, 0x6e]),
+    ("sqneg d0, d1", &[0x20, 0x78, 0xe0, 0x7e]),
+    ("sqdmull v0.4s, v1.4h, v2.h[3]", &[0x20, 0xb0, 0x72, 0x0f]),
+    ("sqdmull d0, s1, s2", &[0x20, 0xd0, 0xa2, 0x5e]),
+    ("sqdmlsl d0, s1, s2", &[0x20, 0xb0, 0xa2, 0x5e]),
+    ("sqdmlal2 v0.2d, v1.4s, v2.4s", &[0x20, 0x90, 0xa2, 0x4e]),
+    ("sqdmulh v0.4s, v1.4s, v2.s[1]", &[0x20, 0xc0, 0xa2, 0x4f]),
+    ("sqdmulh h0, h1, v2.h[5]", &[0x20, 0xc8, 0x52, 0x5f]),
+    ("ursra v0.2d, v1.2d, #64", &[0x20, 0x34, 0x40, 0x6f]),
+    ("srsra d0, d1, #64", &[0x20, 0x34, 0x40, 0x5f]),
+    ("ursra v0.16b, v1.16b, #8", &[0x20, 0x34, 0x08, 0x6f]),
+    ("suqadd d0, d1", &[0x20, 0x38, 0xe0, 0x5e]),
+    ("suqadd v0.4s, v1.4s", &[0x20, 0x38, 0xa0, 0x4e]),
     ("frint32z s0, s1", &[0x20, 0x40, 0x28, 0x1e]),
     ("frint32x s0, s1", &[0x20, 0xc0, 0x28, 0x1e]),
     ("frint64z d0, d1", &[0x20, 0x40, 0x69, 0x1e]),
@@ -406,6 +428,17 @@ fn state(rng: &mut Rng, curated: Option<&str>) -> CpuState {
         s.gpr[X1] = buffer_pointer(rng, 16);
         // Rounding instructions get a halfway input half the time: ties are
         // where the rounding modes differ, and a random float is almost never one.
+        // Saturating multiplies overflow only for INT_MIN * INT_MIN, and SQNEG
+        // only for INT_MIN: fill both sources with INT_MIN lanes now and then.
+        if (name.starts_with("sqd") || name.starts_with("sqneg")) && rng.chance(30) {
+            let width = rng.pick(&[2usize, 4, 8]);
+            for v in [1, 2] {
+                for lane in s.vec[v].chunks_mut(width) {
+                    lane.fill(0);
+                    lane[width - 1] = 0x80;
+                }
+            }
+        }
         if (name.starts_with("frint") || name.starts_with("fcvt")) && rng.chance(50) {
             let tie = (rng.below(16) as f64 + 0.5) * if rng.chance(50) { -1.0 } else { 1.0 };
             if name.contains("s1") {

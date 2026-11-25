@@ -1220,20 +1220,22 @@ pub(super) mod tests {
 
     #[test]
     fn aarch64_fcvt_rounding_mode_selects_the_float_rounding_operation() {
-        use PcodeOpcode::{FloatCeil, FloatFloor, FloatRound};
+        use PcodeOpcode::{FloatCeil, FloatFloor};
         // `fcvt<mode>s w0, s0` (scalar, single precision to 32-bit integer) and
         // `fcvt<mode>s s0, s0` (the SIMD scalar form), one word per rounding mode.
         // Upstream lifts every mode to a bare `trunc`; only round-toward-zero is.
+        // Ties to even (N) and ties away (A) are exact (#1056): N floors the
+        // operand and half the floor (the parity test), A floors |x|.
         let cases: [(&str, u32, &[PcodeOpcode]); 10] = [
             ("fcvtms w0, s0", 0x1e30_0000, &[FloatFloor]),
             ("fcvtps w0, s0", 0x1e28_0000, &[FloatCeil]),
-            ("fcvtns w0, s0", 0x1e20_0000, &[FloatRound]),
-            ("fcvtas w0, s0", 0x1e24_0000, &[FloatRound]),
+            ("fcvtns w0, s0", 0x1e20_0000, &[FloatFloor, FloatFloor]),
+            ("fcvtas w0, s0", 0x1e24_0000, &[FloatFloor]),
             ("fcvtzs w0, s0", 0x1e38_0000, &[]),
             ("fcvtms s0, s0", 0x5e21_b800, &[FloatFloor]),
             ("fcvtps s0, s0", 0x5ea1_a800, &[FloatCeil]),
-            ("fcvtns s0, s0", 0x5e21_a800, &[FloatRound]),
-            ("fcvtas s0, s0", 0x5e21_c800, &[FloatRound]),
+            ("fcvtns s0, s0", 0x5e21_a800, &[FloatFloor, FloatFloor]),
+            ("fcvtas s0, s0", 0x5e21_c800, &[FloatFloor]),
             ("fcvtzs s0, s0", 0x5ea1_b800, &[]),
         ];
         for (name, word, expected) in cases {

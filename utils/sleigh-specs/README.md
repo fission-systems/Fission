@@ -81,6 +81,27 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   the most negative N-bit integer for a NaN, an infinity or an out-of-range result), with
   the rest of the register zeroed; upstream lifted them as `trunc`, integer bits (#1070).
   Evidence: an Apple M4 run natively (the native differential).
+  Then `scripts/sleigh/apply_aarch64_fcvt_saturate.py` gives every FCVT{A,M,N,P,Z}{S,U} the
+  Arm ARM FPToFixed semantics (#1056): each mode table is split into one table per mnemonic
+  (`fcvt_vmnemonic_ms`, `..._mu`, ...) so S and U get their own constructors; the operand is
+  rounded exactly (M `floor`, P `ceil`, Z by `trunc` itself, N ties to even and A ties away
+  built from `floor` and the exact fraction), then saturated to the N-bit signed or unsigned
+  range, with 0 for a NaN; the unsigned forms convert values at or above 2^(N-1) as
+  `trunc(r - 2^(N-1)) ^ 2^(N-1)`. Half precision is widened to single first. The same script
+  rewrites the fixed-point `fcvtz{s,u} Wd/Xd, Hn/Sn/Dn, #fbits` (scaled by 2^fbits as two
+  exact power-of-two multiplications; upstream's half-precision FCVTZU multiplied by the
+  integer fbits) and the scalar SIMD `fcvtzu Hd/Sd/Dd, #fbits`, whose H and D forms read the
+  immediate through `Imm_shr_imm32` (wrong fbits and disassembly). The forms lifted as the
+  user ops `NEON_fcvtzs`/`NEON_fcvtzu` are unchanged. Evidence: an Apple M4 run natively.
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the saturating and
+  rounding NEON forms upstream lifts as plain p-code wrap and truncate. `SUQADD`, `SQNEG`,
+  `SQDMULL`/`SQDMULL2`, `SQDMLAL`/`SQDMLAL2`, `SQDMLSL`/`SQDMLSL2` and the by-element
+  `SQDMULH`/`SQRDMULH` now saturate as SatQ does (one saturation for the doubled product and
+  one for the accumulation), `SQRDMULH` adds the rounding constant, and `SRSRA`/`URSRA` add
+  bit `shift-1` of the operand (the rounding constant, without widening, so a shift of the
+  full element width is right too). All sources are read before Vd is written (#1068, native
+  evidence). Forms upstream lifts as `NEON_*` user ops are unchanged. Re-apply with
+  `scripts/sleigh/apply_aarch64_neon_saturate.py`.
 - `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
   `FMAX`/`FMIN`/`FMAXNM`/`FMINNM` (H, S, D) follow FPMax/FPMin/FPMaxNum/FPMinNum. Upstream
   copied Rn into Rd before comparing, so with Rd = Rm (`fmax d0, d1, d0`) the result was

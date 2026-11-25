@@ -31,17 +31,6 @@ x86_64 * ~nan #1055 NaN payload / operand order @host
 x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
 
 # ── AArch64 ─────────────────────────────────────────────────────────────────
-# Spec: no FPToFixed saturation for NaN/out-of-range; unsigned forms convert as signed.
-aarch64 FCVTZS * #1056 no saturation
-aarch64 FCVTZU * #1056 no saturation; converts as signed
-aarch64 FCVTAS * #1056 no saturation
-aarch64 FCVTAU * #1056 no saturation; converts as signed
-aarch64 FCVTMS * #1056 no saturation
-aarch64 FCVTMU * #1056 no saturation; converts as signed
-aarch64 FCVTNS * #1056 no saturation
-aarch64 FCVTNU * #1056 no saturation; converts as signed
-aarch64 FCVTPS * #1056 no saturation
-aarch64 FCVTPU * #1056 no saturation; converts as signed
 # Evaluator: NaN propagation (operand order, sNaN priority and quieting).
 aarch64 * ~nan #1055 NaN payload / operand order
 # Evaluator: half-precision float varnodes read as 0.0 and are not written.
@@ -50,8 +39,3 @@ aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
 aarch64 FMSUB * #1072 not fused @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
-# Spec: saturating NEON ops wrap, rounding ones truncate.
-aarch64 SUQADD * #1068 no saturation
-aarch64 SQDMLAL * #1068 no saturation
-aarch64 SQRDMULH * #1068 no rounding constant
-aarch64 SRSRA * #1068 no rounding constant
