@@ -7723,12 +7723,34 @@ is b_31=0 & b_30=1 & b_2129=0b001110010 & b_1015=0b001101 & Rd_VPR128.8H & Rn_VP
 :fmax Rd_FPR64, Rn_FPR64, Rm_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0x4 & b_1011=2 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = Rn_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
-	local tmp1:1 = Rn_FPR64 f> Rm_FPR64;
-	if (tmp1) goto inst_next;
-	Rd_FPR64 = Rm_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:8 = Rn_FPR64;
+	local fb:8 = Rm_FPR64;
+	local fq:8 = 0x8000000000000;
+	local fr:8 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR64 = fr;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.102 FMAX (scalar) page C7-2250 line 131581 MATCH x1e204800/mask=xff20fc00
@@ -7740,12 +7762,34 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0
 :fmax Rd_FPR32, Rn_FPR32, Rm_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0x4 & b_1011=2 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = Rn_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
-	local tmp1:1 = Rn_FPR32 f> Rm_FPR32;
-	if (tmp1) goto inst_next;
-	Rd_FPR32 = Rm_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:4 = Rn_FPR32;
+	local fb:4 = Rm_FPR32;
+	local fq:4 = 0x400000;
+	local fr:4 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR32 = fr;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 # C7.2.102 FMAX (scalar) page C7-2250 line 131581 MATCH x1e204800/mask=xff20fc00
@@ -7756,12 +7800,34 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0
 :fmax Rd_FPR16, Rn_FPR16, Rm_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & Rm_FPR16 & b_1215=0x4 & b_1011=2 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = Rn_FPR16;
-	zext_zh(Zd); # zero upper 30 bytes of Zd
-	local tmp1:1 = Rn_FPR16 f> Rm_FPR16;
-	if (tmp1) goto inst_next;
-	Rd_FPR16 = Rm_FPR16;
-	zext_zh(Zd);# zero upper 30 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:2 = Rn_FPR16;
+	local fb:2 = Rm_FPR16;
+	local fq:2 = 0x200;
+	local fr:2 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR16 = fr;
+	zext_zh(Zd); # zero the rest of Zd
 }
 
 # C7.2.103 FMAXNM (vector) page C7-2252 line 131688 MATCH x0e20c400/mask=xbfa0fc00
@@ -7830,12 +7896,43 @@ is b_31=0 & b_30=1 & b_2129=0b001110010 & b_1015=0b000001 & Rd_VPR128.8H & Rn_VP
 :fmaxnm Rd_FPR64, Rn_FPR64, Rm_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0x6 & b_1011=2 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = Rn_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
-	local tmp1:1 = Rn_FPR64 f> Rm_FPR64;
-	if (tmp1) goto inst_next;
-	Rd_FPR64 = Rm_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:8 = Rn_FPR64;
+	local fb:8 = Rm_FPR64;
+	local fq:8 = 0x8000000000000;
+	local fr:8 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0xfff0000000000000;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0xfff0000000000000;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR64 = fr;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.104 FMAXNM (scalar) page C7-2254 line 131821 MATCH x1e206800/mask=xff20fc00
@@ -7847,12 +7944,43 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0
 :fmaxnm Rd_FPR32, Rn_FPR32, Rm_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0x6 & b_1011=2 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = Rn_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
-	local tmp1:1 = Rn_FPR32 f> Rm_FPR32;
-	if (tmp1) goto inst_next;
-	Rd_FPR32 = Rm_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:4 = Rn_FPR32;
+	local fb:4 = Rm_FPR32;
+	local fq:4 = 0x400000;
+	local fr:4 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0xff800000;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0xff800000;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR32 = fr;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 # C7.2.104 FMAXNM (scalar) page C7-2254 line 131821 MATCH x1e206800/mask=xff20fc00
@@ -7864,12 +7992,43 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0
 :fmaxnm Rd_FPR16, Rn_FPR16, Rm_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & Rm_FPR16 & b_1215=0x6 & b_1011=2 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = Rn_FPR16;
-	zext_zh(Zd); # zero upper 30 bytes of Zd
-	local tmp1:1 = Rn_FPR16 f> Rm_FPR16;
-	if (tmp1) goto inst_next;
-	Rd_FPR16 = Rm_FPR16;
-	zext_zh(Zd); # zero upper 30 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:2 = Rn_FPR16;
+	local fb:2 = Rm_FPR16;
+	local fq:2 = 0x200;
+	local fr:2 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0xfc00;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0xfc00;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f> fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa & fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR16 = fr;
+	zext_zh(Zd); # zero the rest of Zd
 }
 
 # C7.2.105 FMAXNMP (scalar) page C7-2256 line 131930 MATCH x7e30c800/mask=xffbffc00
@@ -8189,12 +8348,34 @@ is b_31=0 & b_30=1 & b_2129=0b001110110 & b_1015=0b001101 & Rd_VPR128.8H & Rn_VP
 :fmin Rd_FPR64, Rn_FPR64, Rm_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0x5 & b_1011=2 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = Rn_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
-	local tmp1:1 = Rn_FPR64 f<= Rm_FPR64;
-	if (tmp1) goto inst_next;
-	Rd_FPR64 = Rm_FPR64;
-	zext_zd(Zd); # zero upper 24 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:8 = Rn_FPR64;
+	local fb:8 = Rm_FPR64;
+	local fq:8 = 0x8000000000000;
+	local fr:8 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR64 = fr;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.112 FMIN (scalar) page C7-2270 line 132758 MATCH x1e205800/mask=xff20fc00
@@ -8205,12 +8386,34 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0
 :fmin Rd_FPR32, Rn_FPR32, Rm_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0x5 & b_1011=2 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = Rn_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
-	local tmp1:1 = Rn_FPR32 f<= Rm_FPR32;
-	if (tmp1) goto inst_next;
-	Rd_FPR32 = Rm_FPR32;
-	zext_zs(Zd); # zero upper 28 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:4 = Rn_FPR32;
+	local fb:4 = Rm_FPR32;
+	local fq:4 = 0x400000;
+	local fr:4 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR32 = fr;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 # C7.2.112 FMIN (scalar) page C7-2270 line 132758 MATCH x1e205800/mask=xff20fc00
@@ -8221,12 +8424,34 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0
 :fmin Rd_FPR16, Rn_FPR16, Rm_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & Rm_FPR16 & b_1215=0x5 & b_1011=2 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = Rn_FPR16;
-	zext_zh(Zd); # zero upper 30 bytes of Zd
-	local tmp1:1 = Rn_FPR16 f<= Rm_FPR16;
-	if (tmp1) goto inst_next;
-	Rd_FPR16 = Rm_FPR16;
-	zext_zh(Zd);# zero upper 30 bytes of Zd
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:2 = Rn_FPR16;
+	local fb:2 = Rm_FPR16;
+	local fq:2 = 0x200;
+	local fr:2 = fb;
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR16 = fr;
+	zext_zh(Zd); # zero the rest of Zd
 }
 
 # C7.2.113 FMINNM (vector) page C7-2272 line 132865 MATCH x0ea0c400/mask=xbfa0fc00
@@ -8294,7 +8519,43 @@ is b_31=0 & b_30=1 & b_2129=0b001110110 & b_1015=0b000001 & Rd_VPR128.8H & Rn_VP
 :fminnm Rd_FPR64, Rn_FPR64, Rm_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0x7 & b_1011=2 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = NEON_fminnm(Rn_FPR64, Rm_FPR64);
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:8 = Rn_FPR64;
+	local fb:8 = Rm_FPR64;
+	local fq:8 = 0x8000000000000;
+	local fr:8 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0x7ff0000000000000;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0x7ff0000000000000;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR64 = fr;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.114 FMINNM (scalar) page C7-2274 line 132998 MATCH x1e207800/mask=xff20fc00
@@ -8305,7 +8566,43 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=1 & b_2121=1 & Rm_FPR64 & b_1215=0
 :fminnm Rd_FPR32, Rn_FPR32, Rm_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0x7 & b_1011=2 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = NEON_fminnm(Rn_FPR32, Rm_FPR32);
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:4 = Rn_FPR32;
+	local fb:4 = Rm_FPR32;
+	local fq:4 = 0x400000;
+	local fr:4 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0x7f800000;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0x7f800000;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR32 = fr;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 # C7.2.114 FMINNM (scalar) page C7-2274 line 132998 MATCH x1e207800/mask=xff20fc00
@@ -8316,7 +8613,43 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=0 & b_2121=1 & Rm_FPR32 & b_1215=0
 :fminnm Rd_FPR16, Rn_FPR16, Rm_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & Rm_FPR16 & b_1215=0x7 & b_1011=2 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = NEON_fminnm(Rn_FPR16, Rm_FPR16);
+	# Fission: Arm ARM FPMax/FPMin pseudocode
+	local fa:2 = Rn_FPR16;
+	local fb:2 = Rm_FPR16;
+	local fq:2 = 0x200;
+	local fr:2 = fb;
+	# FPMaxNum/FPMinNum: with no signalling NaN, a lone quiet NaN gives way to the number
+	local fsnan:1 = (nan(fa) && ((fa & fq) == 0)) || (nan(fb) && ((fb & fq) == 0));
+	if (fsnan) goto <fp_compare>;
+	if (!nan(fa) || nan(fb)) goto <fp_nm_b>;
+	fa = 0x7c00;
+<fp_nm_b>
+	if (!nan(fb) || nan(fa)) goto <fp_compare>;
+	fb = 0x7c00;
+<fp_compare>
+	if (nan(fa) || nan(fb)) goto <fp_nan>;
+	if (fa f< fb) goto <fp_a>;
+	fr = fb;
+	if (fa f!= fb) goto <fp_done>;
+	fr = fa | fb; # two zeros: combine the signs
+	goto <fp_done>;
+<fp_a>
+	fr = fa;
+	goto <fp_done>;
+<fp_nan>
+	# FPProcessNaNs: signalling op1, signalling op2, quiet op1, quiet op2; quieted
+	fr = fa;
+	if (nan(fa) && ((fa & fq) == 0)) goto <fp_quiet>;
+	fr = fb;
+	if (nan(fb) && ((fb & fq) == 0)) goto <fp_quiet>;
+	fr = fa;
+	if (nan(fa)) goto <fp_quiet>;
+	fr = fb;
+<fp_quiet>
+	fr = fr | fq;
+<fp_done>
+	Rd_FPR16 = fr;
+	zext_zh(Zd); # zero the rest of Zd
 }
 
 # C7.2.115 FMINNMP (scalar) page C7-2276 line 133108 MATCH x7eb0c800/mask=xffbffc00
@@ -10969,11 +11302,36 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_i Rd_VPR64.4H, Rn_VPR64.4H
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_i & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.4H = round(Rn_VPR64.4H) on lane size 2
-	Rd_VPR64.4H[0,16] = round(Rn_VPR64.4H[0,16]);
-	Rd_VPR64.4H[16,16] = round(Rn_VPR64.4H[16,16]);
-	Rd_VPR64.4H[32,16] = round(Rn_VPR64.4H[32,16]);
-	Rd_VPR64.4H[48,16] = round(Rn_VPR64.4H[48,16]);
+	local fx0:2 = Rn_VPR64.4H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR64.4H[0,16] = fr0;
+	local fx1:2 = Rn_VPR64.4H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR64.4H[16,16] = fr1;
+	local fx2:2 = Rn_VPR64.4H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR64.4H[32,16] = fr2;
+	local fx3:2 = Rn_VPR64.4H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR64.4H[48,16] = fr3;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -10991,11 +11349,36 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_n Rd_VPR64.4H, Rn_VPR64.4H
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_n & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.4H = round(Rn_VPR64.4H) on lane size 2
-	Rd_VPR64.4H[0,16] = round(Rn_VPR64.4H[0,16]);
-	Rd_VPR64.4H[16,16] = round(Rn_VPR64.4H[16,16]);
-	Rd_VPR64.4H[32,16] = round(Rn_VPR64.4H[32,16]);
-	Rd_VPR64.4H[48,16] = round(Rn_VPR64.4H[48,16]);
+	local fx0:2 = Rn_VPR64.4H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR64.4H[0,16] = fr0;
+	local fx1:2 = Rn_VPR64.4H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR64.4H[16,16] = fr1;
+	local fx2:2 = Rn_VPR64.4H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR64.4H[32,16] = fr2;
+	local fx3:2 = Rn_VPR64.4H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR64.4H[48,16] = fr3;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11013,26 +11396,64 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_x Rd_VPR64.4H, Rn_VPR64.4H
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_x & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.4H = round(Rn_VPR64.4H) on lane size 2
-	Rd_VPR64.4H[0,16] = round(Rn_VPR64.4H[0,16]);
-	Rd_VPR64.4H[16,16] = round(Rn_VPR64.4H[16,16]);
-	Rd_VPR64.4H[32,16] = round(Rn_VPR64.4H[32,16]);
-	Rd_VPR64.4H[48,16] = round(Rn_VPR64.4H[48,16]);
+	local fx0:2 = Rn_VPR64.4H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR64.4H[0,16] = fr0;
+	local fx1:2 = Rn_VPR64.4H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR64.4H[16,16] = fr1;
+	local fx2:2 = Rn_VPR64.4H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR64.4H[32,16] = fr2;
+	local fx3:2 = Rn_VPR64.4H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR64.4H[48,16] = fr3;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
 :frint^frint_vmode_z Rd_VPR64.4H, Rn_VPR64.4H
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_z & Rd_VPR64.4H & Rn_VPR64.4H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.4H = trunc(Rn_VPR64.4H) on lane size 2
-	local fz0:4 = trunc(Rn_VPR64.4H[0,16]);
-	Rd_VPR64.4H[0,16] = int2float(fz0);
-	local fz1:4 = trunc(Rn_VPR64.4H[16,16]);
-	Rd_VPR64.4H[16,16] = int2float(fz1);
-	local fz2:4 = trunc(Rn_VPR64.4H[32,16]);
-	Rd_VPR64.4H[32,16] = int2float(fz2);
-	local fz3:4 = trunc(Rn_VPR64.4H[48,16]);
-	Rd_VPR64.4H[48,16] = int2float(fz3);
+	local fx0:2 = Rn_VPR64.4H[0,16];
+	local fm0:2 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:2 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_VPR64.4H[0,16] = fr0;
+	local fx1:2 = Rn_VPR64.4H[16,16];
+	local fm1:2 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:2 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	Rd_VPR64.4H[16,16] = fr1;
+	local fx2:2 = Rn_VPR64.4H[32,16];
+	local fm2:2 = zext(fx2 s< 0);
+	fm2 = 0 - fm2;
+	local fr2:2 = (floor(fx2) & ~fm2) | (ceil(fx2) & fm2);
+	Rd_VPR64.4H[32,16] = fr2;
+	local fx3:2 = Rn_VPR64.4H[48,16];
+	local fm3:2 = zext(fx3 s< 0);
+	fm3 = 0 - fm3;
+	local fr3:2 = (floor(fx3) & ~fm3) | (ceil(fx3) & fm3);
+	Rd_VPR64.4H[48,16] = fr3;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11067,15 +11488,64 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_i Rd_VPR128.8H, Rn_VPR128.8H
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_i & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.8H = round(Rn_VPR128.8H) on lane size 2
-	Rd_VPR128.8H[0,16] = round(Rn_VPR128.8H[0,16]);
-	Rd_VPR128.8H[16,16] = round(Rn_VPR128.8H[16,16]);
-	Rd_VPR128.8H[32,16] = round(Rn_VPR128.8H[32,16]);
-	Rd_VPR128.8H[48,16] = round(Rn_VPR128.8H[48,16]);
-	Rd_VPR128.8H[64,16] = round(Rn_VPR128.8H[64,16]);
-	Rd_VPR128.8H[80,16] = round(Rn_VPR128.8H[80,16]);
-	Rd_VPR128.8H[96,16] = round(Rn_VPR128.8H[96,16]);
-	Rd_VPR128.8H[112,16] = round(Rn_VPR128.8H[112,16]);
+	local fx0:2 = Rn_VPR128.8H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR128.8H[0,16] = fr0;
+	local fx1:2 = Rn_VPR128.8H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR128.8H[16,16] = fr1;
+	local fx2:2 = Rn_VPR128.8H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR128.8H[32,16] = fr2;
+	local fx3:2 = Rn_VPR128.8H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR128.8H[48,16] = fr3;
+	local fx4:2 = Rn_VPR128.8H[64,16];
+	local ff4:2 = floor(fx4);
+	local fd4:2 = fx4 f- ff4;
+	local fh4:2 = ff4 f* 0x3800:2;
+	local fu4:1 = (fd4 f> 0x3800:2) || ((fd4 f== 0x3800:2) && ((fh4 f- floor(fh4)) f!= 0:2));
+	local fr4:2 = (ff4 f+ (zext(fu4) * 0x3c00:2)) | (fx4 & 0x8000:2);
+	Rd_VPR128.8H[64,16] = fr4;
+	local fx5:2 = Rn_VPR128.8H[80,16];
+	local ff5:2 = floor(fx5);
+	local fd5:2 = fx5 f- ff5;
+	local fh5:2 = ff5 f* 0x3800:2;
+	local fu5:1 = (fd5 f> 0x3800:2) || ((fd5 f== 0x3800:2) && ((fh5 f- floor(fh5)) f!= 0:2));
+	local fr5:2 = (ff5 f+ (zext(fu5) * 0x3c00:2)) | (fx5 & 0x8000:2);
+	Rd_VPR128.8H[80,16] = fr5;
+	local fx6:2 = Rn_VPR128.8H[96,16];
+	local ff6:2 = floor(fx6);
+	local fd6:2 = fx6 f- ff6;
+	local fh6:2 = ff6 f* 0x3800:2;
+	local fu6:1 = (fd6 f> 0x3800:2) || ((fd6 f== 0x3800:2) && ((fh6 f- floor(fh6)) f!= 0:2));
+	local fr6:2 = (ff6 f+ (zext(fu6) * 0x3c00:2)) | (fx6 & 0x8000:2);
+	Rd_VPR128.8H[96,16] = fr6;
+	local fx7:2 = Rn_VPR128.8H[112,16];
+	local ff7:2 = floor(fx7);
+	local fd7:2 = fx7 f- ff7;
+	local fh7:2 = ff7 f* 0x3800:2;
+	local fu7:1 = (fd7 f> 0x3800:2) || ((fd7 f== 0x3800:2) && ((fh7 f- floor(fh7)) f!= 0:2));
+	local fr7:2 = (ff7 f+ (zext(fu7) * 0x3c00:2)) | (fx7 & 0x8000:2);
+	Rd_VPR128.8H[112,16] = fr7;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11097,15 +11567,64 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_n Rd_VPR128.8H, Rn_VPR128.8H
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_n & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.8H = round(Rn_VPR128.8H) on lane size 2
-	Rd_VPR128.8H[0,16] = round(Rn_VPR128.8H[0,16]);
-	Rd_VPR128.8H[16,16] = round(Rn_VPR128.8H[16,16]);
-	Rd_VPR128.8H[32,16] = round(Rn_VPR128.8H[32,16]);
-	Rd_VPR128.8H[48,16] = round(Rn_VPR128.8H[48,16]);
-	Rd_VPR128.8H[64,16] = round(Rn_VPR128.8H[64,16]);
-	Rd_VPR128.8H[80,16] = round(Rn_VPR128.8H[80,16]);
-	Rd_VPR128.8H[96,16] = round(Rn_VPR128.8H[96,16]);
-	Rd_VPR128.8H[112,16] = round(Rn_VPR128.8H[112,16]);
+	local fx0:2 = Rn_VPR128.8H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR128.8H[0,16] = fr0;
+	local fx1:2 = Rn_VPR128.8H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR128.8H[16,16] = fr1;
+	local fx2:2 = Rn_VPR128.8H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR128.8H[32,16] = fr2;
+	local fx3:2 = Rn_VPR128.8H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR128.8H[48,16] = fr3;
+	local fx4:2 = Rn_VPR128.8H[64,16];
+	local ff4:2 = floor(fx4);
+	local fd4:2 = fx4 f- ff4;
+	local fh4:2 = ff4 f* 0x3800:2;
+	local fu4:1 = (fd4 f> 0x3800:2) || ((fd4 f== 0x3800:2) && ((fh4 f- floor(fh4)) f!= 0:2));
+	local fr4:2 = (ff4 f+ (zext(fu4) * 0x3c00:2)) | (fx4 & 0x8000:2);
+	Rd_VPR128.8H[64,16] = fr4;
+	local fx5:2 = Rn_VPR128.8H[80,16];
+	local ff5:2 = floor(fx5);
+	local fd5:2 = fx5 f- ff5;
+	local fh5:2 = ff5 f* 0x3800:2;
+	local fu5:1 = (fd5 f> 0x3800:2) || ((fd5 f== 0x3800:2) && ((fh5 f- floor(fh5)) f!= 0:2));
+	local fr5:2 = (ff5 f+ (zext(fu5) * 0x3c00:2)) | (fx5 & 0x8000:2);
+	Rd_VPR128.8H[80,16] = fr5;
+	local fx6:2 = Rn_VPR128.8H[96,16];
+	local ff6:2 = floor(fx6);
+	local fd6:2 = fx6 f- ff6;
+	local fh6:2 = ff6 f* 0x3800:2;
+	local fu6:1 = (fd6 f> 0x3800:2) || ((fd6 f== 0x3800:2) && ((fh6 f- floor(fh6)) f!= 0:2));
+	local fr6:2 = (ff6 f+ (zext(fu6) * 0x3c00:2)) | (fx6 & 0x8000:2);
+	Rd_VPR128.8H[96,16] = fr6;
+	local fx7:2 = Rn_VPR128.8H[112,16];
+	local ff7:2 = floor(fx7);
+	local fd7:2 = fx7 f- ff7;
+	local fh7:2 = ff7 f* 0x3800:2;
+	local fu7:1 = (fd7 f> 0x3800:2) || ((fd7 f== 0x3800:2) && ((fh7 f- floor(fh7)) f!= 0:2));
+	local fr7:2 = (ff7 f+ (zext(fu7) * 0x3c00:2)) | (fx7 & 0x8000:2);
+	Rd_VPR128.8H[112,16] = fr7;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11127,38 +11646,112 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 &
 :frint^frint_vmode_x Rd_VPR128.8H, Rn_VPR128.8H
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_x & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.8H = round(Rn_VPR128.8H) on lane size 2
-	Rd_VPR128.8H[0,16] = round(Rn_VPR128.8H[0,16]);
-	Rd_VPR128.8H[16,16] = round(Rn_VPR128.8H[16,16]);
-	Rd_VPR128.8H[32,16] = round(Rn_VPR128.8H[32,16]);
-	Rd_VPR128.8H[48,16] = round(Rn_VPR128.8H[48,16]);
-	Rd_VPR128.8H[64,16] = round(Rn_VPR128.8H[64,16]);
-	Rd_VPR128.8H[80,16] = round(Rn_VPR128.8H[80,16]);
-	Rd_VPR128.8H[96,16] = round(Rn_VPR128.8H[96,16]);
-	Rd_VPR128.8H[112,16] = round(Rn_VPR128.8H[112,16]);
+	local fx0:2 = Rn_VPR128.8H[0,16];
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_VPR128.8H[0,16] = fr0;
+	local fx1:2 = Rn_VPR128.8H[16,16];
+	local ff1:2 = floor(fx1);
+	local fd1:2 = fx1 f- ff1;
+	local fh1:2 = ff1 f* 0x3800:2;
+	local fu1:1 = (fd1 f> 0x3800:2) || ((fd1 f== 0x3800:2) && ((fh1 f- floor(fh1)) f!= 0:2));
+	local fr1:2 = (ff1 f+ (zext(fu1) * 0x3c00:2)) | (fx1 & 0x8000:2);
+	Rd_VPR128.8H[16,16] = fr1;
+	local fx2:2 = Rn_VPR128.8H[32,16];
+	local ff2:2 = floor(fx2);
+	local fd2:2 = fx2 f- ff2;
+	local fh2:2 = ff2 f* 0x3800:2;
+	local fu2:1 = (fd2 f> 0x3800:2) || ((fd2 f== 0x3800:2) && ((fh2 f- floor(fh2)) f!= 0:2));
+	local fr2:2 = (ff2 f+ (zext(fu2) * 0x3c00:2)) | (fx2 & 0x8000:2);
+	Rd_VPR128.8H[32,16] = fr2;
+	local fx3:2 = Rn_VPR128.8H[48,16];
+	local ff3:2 = floor(fx3);
+	local fd3:2 = fx3 f- ff3;
+	local fh3:2 = ff3 f* 0x3800:2;
+	local fu3:1 = (fd3 f> 0x3800:2) || ((fd3 f== 0x3800:2) && ((fh3 f- floor(fh3)) f!= 0:2));
+	local fr3:2 = (ff3 f+ (zext(fu3) * 0x3c00:2)) | (fx3 & 0x8000:2);
+	Rd_VPR128.8H[48,16] = fr3;
+	local fx4:2 = Rn_VPR128.8H[64,16];
+	local ff4:2 = floor(fx4);
+	local fd4:2 = fx4 f- ff4;
+	local fh4:2 = ff4 f* 0x3800:2;
+	local fu4:1 = (fd4 f> 0x3800:2) || ((fd4 f== 0x3800:2) && ((fh4 f- floor(fh4)) f!= 0:2));
+	local fr4:2 = (ff4 f+ (zext(fu4) * 0x3c00:2)) | (fx4 & 0x8000:2);
+	Rd_VPR128.8H[64,16] = fr4;
+	local fx5:2 = Rn_VPR128.8H[80,16];
+	local ff5:2 = floor(fx5);
+	local fd5:2 = fx5 f- ff5;
+	local fh5:2 = ff5 f* 0x3800:2;
+	local fu5:1 = (fd5 f> 0x3800:2) || ((fd5 f== 0x3800:2) && ((fh5 f- floor(fh5)) f!= 0:2));
+	local fr5:2 = (ff5 f+ (zext(fu5) * 0x3c00:2)) | (fx5 & 0x8000:2);
+	Rd_VPR128.8H[80,16] = fr5;
+	local fx6:2 = Rn_VPR128.8H[96,16];
+	local ff6:2 = floor(fx6);
+	local fd6:2 = fx6 f- ff6;
+	local fh6:2 = ff6 f* 0x3800:2;
+	local fu6:1 = (fd6 f> 0x3800:2) || ((fd6 f== 0x3800:2) && ((fh6 f- floor(fh6)) f!= 0:2));
+	local fr6:2 = (ff6 f+ (zext(fu6) * 0x3c00:2)) | (fx6 & 0x8000:2);
+	Rd_VPR128.8H[96,16] = fr6;
+	local fx7:2 = Rn_VPR128.8H[112,16];
+	local ff7:2 = floor(fx7);
+	local fd7:2 = fx7 f- ff7;
+	local fh7:2 = ff7 f* 0x3800:2;
+	local fu7:1 = (fd7 f> 0x3800:2) || ((fd7 f== 0x3800:2) && ((fh7 f- floor(fh7)) f!= 0:2));
+	local fr7:2 = (ff7 f+ (zext(fu7) * 0x3c00:2)) | (fx7 & 0x8000:2);
+	Rd_VPR128.8H[112,16] = fr7;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
 :frint^frint_vmode_z Rd_VPR128.8H, Rn_VPR128.8H
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_1322=0b1111001100 & b_12 & b_1011=0b10 & frint_vmode_z & Rd_VPR128.8H & Rn_VPR128.8H & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.8H = trunc(Rn_VPR128.8H) on lane size 2
-	local fz0:4 = trunc(Rn_VPR128.8H[0,16]);
-	Rd_VPR128.8H[0,16] = int2float(fz0);
-	local fz1:4 = trunc(Rn_VPR128.8H[16,16]);
-	Rd_VPR128.8H[16,16] = int2float(fz1);
-	local fz2:4 = trunc(Rn_VPR128.8H[32,16]);
-	Rd_VPR128.8H[32,16] = int2float(fz2);
-	local fz3:4 = trunc(Rn_VPR128.8H[48,16]);
-	Rd_VPR128.8H[48,16] = int2float(fz3);
-	local fz4:4 = trunc(Rn_VPR128.8H[64,16]);
-	Rd_VPR128.8H[64,16] = int2float(fz4);
-	local fz5:4 = trunc(Rn_VPR128.8H[80,16]);
-	Rd_VPR128.8H[80,16] = int2float(fz5);
-	local fz6:4 = trunc(Rn_VPR128.8H[96,16]);
-	Rd_VPR128.8H[96,16] = int2float(fz6);
-	local fz7:4 = trunc(Rn_VPR128.8H[112,16]);
-	Rd_VPR128.8H[112,16] = int2float(fz7);
+	local fx0:2 = Rn_VPR128.8H[0,16];
+	local fm0:2 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:2 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_VPR128.8H[0,16] = fr0;
+	local fx1:2 = Rn_VPR128.8H[16,16];
+	local fm1:2 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:2 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	Rd_VPR128.8H[16,16] = fr1;
+	local fx2:2 = Rn_VPR128.8H[32,16];
+	local fm2:2 = zext(fx2 s< 0);
+	fm2 = 0 - fm2;
+	local fr2:2 = (floor(fx2) & ~fm2) | (ceil(fx2) & fm2);
+	Rd_VPR128.8H[32,16] = fr2;
+	local fx3:2 = Rn_VPR128.8H[48,16];
+	local fm3:2 = zext(fx3 s< 0);
+	fm3 = 0 - fm3;
+	local fr3:2 = (floor(fx3) & ~fm3) | (ceil(fx3) & fm3);
+	Rd_VPR128.8H[48,16] = fr3;
+	local fx4:2 = Rn_VPR128.8H[64,16];
+	local fm4:2 = zext(fx4 s< 0);
+	fm4 = 0 - fm4;
+	local fr4:2 = (floor(fx4) & ~fm4) | (ceil(fx4) & fm4);
+	Rd_VPR128.8H[64,16] = fr4;
+	local fx5:2 = Rn_VPR128.8H[80,16];
+	local fm5:2 = zext(fx5 s< 0);
+	fm5 = 0 - fm5;
+	local fr5:2 = (floor(fx5) & ~fm5) | (ceil(fx5) & fm5);
+	Rd_VPR128.8H[80,16] = fr5;
+	local fx6:2 = Rn_VPR128.8H[96,16];
+	local fm6:2 = zext(fx6 s< 0);
+	fm6 = 0 - fm6;
+	local fr6:2 = (floor(fx6) & ~fm6) | (ceil(fx6) & fm6);
+	Rd_VPR128.8H[96,16] = fr6;
+	local fx7:2 = Rn_VPR128.8H[112,16];
+	local fm7:2 = zext(fx7 s< 0);
+	fm7 = 0 - fm7;
+	local fr7:2 = (floor(fx7) & ~fm7) | (ceil(fx7) & fm7);
+	Rd_VPR128.8H[112,16] = fr7;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11187,9 +11780,22 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_i Rd_VPR64.2S, Rn_VPR64.2S
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_i & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.2S = round(Rn_VPR64.2S) on lane size 4
-	Rd_VPR64.2S[0,32] = round(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = round(Rn_VPR64.2S[32,32]);
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR64.2S[32,32] = fr1;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11205,9 +11811,22 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_n Rd_VPR64.2S, Rn_VPR64.2S
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_n & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.2S = round(Rn_VPR64.2S) on lane size 4
-	Rd_VPR64.2S[0,32] = round(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = round(Rn_VPR64.2S[32,32]);
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR64.2S[32,32] = fr1;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11223,20 +11842,40 @@ is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_x Rd_VPR64.2S, Rn_VPR64.2S
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_x & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.2S = round(Rn_VPR64.2S) on lane size 4
-	Rd_VPR64.2S[0,32] = round(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = round(Rn_VPR64.2S[32,32]);
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR64.2S[32,32] = fr1;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
 :frint^frint_vmode_z Rd_VPR64.2S, Rn_VPR64.2S
 is b_31=0 & b_30=0 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_z & Rd_VPR64.2S & Rn_VPR64.2S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR64.2S = trunc(Rn_VPR64.2S) on lane size 4
-	local fz0:8 = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[0,32] = int2float(fz0);
-	local fz1:8 = trunc(Rn_VPR64.2S[32,32]);
-	Rd_VPR64.2S[32,32] = int2float(fz1);
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	Rd_VPR64.2S[32,32] = fr1;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11267,11 +11906,36 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_i Rd_VPR128.4S, Rn_VPR128.4S
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_i & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.4S = round(Rn_VPR128.4S) on lane size 4
-	Rd_VPR128.4S[0,32] = round(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = round(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = round(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = round(Rn_VPR128.4S[96,32]);
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local ff2:4 = floor(fx2);
+	local fd2:4 = fx2 f- ff2;
+	local fh2:4 = ff2 f* 0x3f000000:4;
+	local fu2:1 = (fd2 f> 0x3f000000:4) || ((fd2 f== 0x3f000000:4) && ((fh2 f- floor(fh2)) f!= 0:4));
+	local fr2:4 = (ff2 f+ (zext(fu2) * 0x3f800000:4)) | (fx2 & 0x80000000:4);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local ff3:4 = floor(fx3);
+	local fd3:4 = fx3 f- ff3;
+	local fh3:4 = ff3 f* 0x3f000000:4;
+	local fu3:1 = (fd3 f> 0x3f000000:4) || ((fd3 f== 0x3f000000:4) && ((fh3 f- floor(fh3)) f!= 0:4));
+	local fr3:4 = (ff3 f+ (zext(fu3) * 0x3f800000:4)) | (fx3 & 0x80000000:4);
+	Rd_VPR128.4S[96,32] = fr3;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11289,11 +11953,36 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_n Rd_VPR128.4S, Rn_VPR128.4S
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_n & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.4S = round(Rn_VPR128.4S) on lane size 4
-	Rd_VPR128.4S[0,32] = round(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = round(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = round(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = round(Rn_VPR128.4S[96,32]);
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local ff2:4 = floor(fx2);
+	local fd2:4 = fx2 f- ff2;
+	local fh2:4 = ff2 f* 0x3f000000:4;
+	local fu2:1 = (fd2 f> 0x3f000000:4) || ((fd2 f== 0x3f000000:4) && ((fh2 f- floor(fh2)) f!= 0:4));
+	local fr2:4 = (ff2 f+ (zext(fu2) * 0x3f800000:4)) | (fx2 & 0x80000000:4);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local ff3:4 = floor(fx3);
+	local fd3:4 = fx3 f- ff3;
+	local fh3:4 = ff3 f* 0x3f000000:4;
+	local fu3:1 = (fd3 f> 0x3f000000:4) || ((fd3 f== 0x3f000000:4) && ((fh3 f- floor(fh3)) f!= 0:4));
+	local fr3:4 = (ff3 f+ (zext(fu3) * 0x3f800000:4)) | (fx3 & 0x80000000:4);
+	Rd_VPR128.4S[96,32] = fr3;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11311,26 +12000,64 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b10000110
 :frint^frint_vmode_x Rd_VPR128.4S, Rn_VPR128.4S
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_x & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.4S = round(Rn_VPR128.4S) on lane size 4
-	Rd_VPR128.4S[0,32] = round(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = round(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = round(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = round(Rn_VPR128.4S[96,32]);
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local ff2:4 = floor(fx2);
+	local fd2:4 = fx2 f- ff2;
+	local fh2:4 = ff2 f* 0x3f000000:4;
+	local fu2:1 = (fd2 f> 0x3f000000:4) || ((fd2 f== 0x3f000000:4) && ((fh2 f- floor(fh2)) f!= 0:4));
+	local fr2:4 = (ff2 f+ (zext(fu2) * 0x3f800000:4)) | (fx2 & 0x80000000:4);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local ff3:4 = floor(fx3);
+	local fd3:4 = fx3 f- ff3;
+	local fh3:4 = ff3 f* 0x3f000000:4;
+	local fu3:1 = (fd3 f> 0x3f000000:4) || ((fd3 f== 0x3f000000:4) && ((fh3 f- floor(fh3)) f!= 0:4));
+	local fr3:4 = (ff3 f+ (zext(fu3) * 0x3f800000:4)) | (fx3 & 0x80000000:4);
+	Rd_VPR128.4S[96,32] = fr3;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
 :frint^frint_vmode_z Rd_VPR128.4S, Rn_VPR128.4S
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b0 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_z & Rd_VPR128.4S & Rn_VPR128.4S & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.4S = trunc(Rn_VPR128.4S) on lane size 4
-	local fz0:8 = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[0,32] = int2float(fz0);
-	local fz1:8 = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[32,32] = int2float(fz1);
-	local fz2:8 = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[64,32] = int2float(fz2);
-	local fz3:8 = trunc(Rn_VPR128.4S[96,32]);
-	Rd_VPR128.4S[96,32] = int2float(fz3);
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local fm2:4 = zext(fx2 s< 0);
+	fm2 = 0 - fm2;
+	local fr2:4 = (floor(fx2) & ~fm2) | (ceil(fx2) & fm2);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local fm3:4 = zext(fx3 s< 0);
+	fm3 = 0 - fm3;
+	local fr3:4 = (floor(fx3) & ~fm3) | (ceil(fx3) & fm3);
+	Rd_VPR128.4S[96,32] = fr3;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11359,9 +12086,22 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b10000110
 :frint^frint_vmode_i Rd_VPR128.2D, Rn_VPR128.2D
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_i & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.2D = round(Rn_VPR128.2D) on lane size 8
-	Rd_VPR128.2D[0,64] = round(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = round(Rn_VPR128.2D[64,64]);
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local ff1:8 = floor(fx1);
+	local fd1:8 = fx1 f- ff1;
+	local fh1:8 = ff1 f* 0x3fe0000000000000:8;
+	local fu1:1 = (fd1 f> 0x3fe0000000000000:8) || ((fd1 f== 0x3fe0000000000000:8) && ((fh1 f- floor(fh1)) f!= 0:8));
+	local fr1:8 = (ff1 f+ (zext(fu1) * 0x3ff0000000000000:8)) | (fx1 & 0x8000000000000000:8);
+	Rd_VPR128.2D[64,64] = fr1;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11377,9 +12117,22 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b10000110
 :frint^frint_vmode_n Rd_VPR128.2D, Rn_VPR128.2D
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_n & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.2D = round(Rn_VPR128.2D) on lane size 8
-	Rd_VPR128.2D[0,64] = round(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = round(Rn_VPR128.2D[64,64]);
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local ff1:8 = floor(fx1);
+	local fd1:8 = fx1 f- ff1;
+	local fh1:8 = ff1 f* 0x3fe0000000000000:8;
+	local fu1:1 = (fd1 f> 0x3fe0000000000000:8) || ((fd1 f== 0x3fe0000000000000:8) && ((fh1 f- floor(fh1)) f!= 0:8));
+	local fr1:8 = (ff1 f+ (zext(fu1) * 0x3ff0000000000000:8)) | (fx1 & 0x8000000000000000:8);
+	Rd_VPR128.2D[64,64] = fr1;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11395,20 +12148,40 @@ is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b10000110
 :frint^frint_vmode_x Rd_VPR128.2D, Rn_VPR128.2D
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_x & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.2D = round(Rn_VPR128.2D) on lane size 8
-	Rd_VPR128.2D[0,64] = round(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = round(Rn_VPR128.2D[64,64]);
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local ff1:8 = floor(fx1);
+	local fd1:8 = fx1 f- ff1;
+	local fh1:8 = ff1 f* 0x3fe0000000000000:8;
+	local fu1:1 = (fd1 f> 0x3fe0000000000000:8) || ((fd1 f== 0x3fe0000000000000:8) && ((fh1 f- floor(fh1)) f!= 0:8));
+	local fr1:8 = (ff1 f+ (zext(fu1) * 0x3ff0000000000000:8)) | (fx1 & 0x8000000000000000:8);
+	Rd_VPR128.2D[64,64] = fr1;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
 :frint^frint_vmode_z Rd_VPR128.2D, Rn_VPR128.2D
 is b_31=0 & b_30=1 & b_29 & b_2428=0b01110 & b_23 & b_22=0b1 & b_1321=0b100001100 & b_12 & b_1011=0b10 & frint_vmode_z & Rd_VPR128.2D & Rn_VPR128.2D & Zd
 {
+	# Fission: exact FPRoundInt
 	# simd unary Rd_VPR128.2D = trunc(Rn_VPR128.2D) on lane size 8
-	local fz0:8 = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[0,64] = int2float(fz0);
-	local fz1:8 = trunc(Rn_VPR128.2D[64,64]);
-	Rd_VPR128.2D[64,64] = int2float(fz1);
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local fm1:8 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:8 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	Rd_VPR128.2D[64,64] = fr1;
 	zext_zq(Zd); # zero upper 16 bytes of Zd
 }
 
@@ -11447,7 +12220,14 @@ is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_i Rd_FPR16, Rn_FPR16
 is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_i & Rd_FPR16 & Rn_FPR16 & Zd
 {
-	Rd_FPR16 = round(Rn_FPR16);
+	# Fission: exact FPRoundInt
+	local fx0:2 = Rn_FPR16;
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_FPR16 = fr0;
 	zext_zh(Zd); # zero upper 30 bytes of Zd
 }
 
@@ -11461,7 +12241,14 @@ is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_n Rd_FPR16, Rn_FPR16
 is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_n & Rd_FPR16 & Rn_FPR16 & Zd
 {
-	Rd_FPR16 = round(Rn_FPR16);
+	# Fission: exact FPRoundInt
+	local fx0:2 = Rn_FPR16;
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_FPR16 = fr0;
 	zext_zh(Zd); # zero upper 30 bytes of Zd
 }
 
@@ -11475,15 +12262,26 @@ is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_x Rd_FPR16, Rn_FPR16
 is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_x & Rd_FPR16 & Rn_FPR16 & Zd
 {
-	Rd_FPR16 = round(Rn_FPR16);
+	# Fission: exact FPRoundInt
+	local fx0:2 = Rn_FPR16;
+	local ff0:2 = floor(fx0);
+	local fd0:2 = fx0 f- ff0;
+	local fh0:2 = ff0 f* 0x3800:2;
+	local fu0:1 = (fd0 f> 0x3800:2) || ((fd0 f== 0x3800:2) && ((fh0 f- floor(fh0)) f!= 0:2));
+	local fr0:2 = (ff0 f+ (zext(fu0) * 0x3c00:2)) | (fx0 & 0x8000:2);
+	Rd_FPR16 = fr0;
 	zext_zh(Zd); # zero upper 30 bytes of Zd
 }
 
 :frint^frint_smode_z Rd_FPR16, Rn_FPR16
 is b_2431=0b00011110 & b_2223=0b11 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_z & Rd_FPR16 & Rn_FPR16 & Zd
 {
-	local fz0:4 = trunc(Rn_FPR16);
-	Rd_FPR16 = int2float(fz0);
+	# Fission: exact FPRoundInt
+	local fx0:2 = Rn_FPR16;
+	local fm0:2 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:2 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_FPR16 = fr0;
 	zext_zh(Zd); # zero upper 30 bytes of Zd
 }
 
@@ -11510,7 +12308,14 @@ is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_i Rd_FPR32, Rn_FPR32
 is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_i & Rd_FPR32 & Rn_FPR32 & Zd
 {
-	Rd_FPR32 = round(Rn_FPR32);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_FPR32 = fr0;
 	zext_zs(Zd); # zero upper 28 bytes of Zd
 }
 
@@ -11524,7 +12329,14 @@ is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_n Rd_FPR32, Rn_FPR32
 is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_n & Rd_FPR32 & Rn_FPR32 & Zd
 {
-	Rd_FPR32 = round(Rn_FPR32);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_FPR32 = fr0;
 	zext_zs(Zd); # zero upper 28 bytes of Zd
 }
 
@@ -11538,15 +12350,26 @@ is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_x Rd_FPR32, Rn_FPR32
 is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_x & Rd_FPR32 & Rn_FPR32 & Zd
 {
-	Rd_FPR32 = round(Rn_FPR32);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	Rd_FPR32 = fr0;
 	zext_zs(Zd); # zero upper 28 bytes of Zd
 }
 
 :frint^frint_smode_z Rd_FPR32, Rn_FPR32
 is b_2431=0b00011110 & b_2223=0b00 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_z & Rd_FPR32 & Rn_FPR32 & Zd
 {
-	local fz0:8 = trunc(Rn_FPR32);
-	Rd_FPR32 = int2float(fz0);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_FPR32 = fr0;
 	zext_zs(Zd); # zero upper 28 bytes of Zd
 }
 
@@ -11573,7 +12396,14 @@ is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_i Rd_FPR64, Rn_FPR64
 is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_i & Rd_FPR64 & Rn_FPR64 & Zd
 {
-	Rd_FPR64 = round(Rn_FPR64);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_FPR64 = fr0;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11587,7 +12417,14 @@ is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_n Rd_FPR64, Rn_FPR64
 is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_n & Rd_FPR64 & Rn_FPR64 & Zd
 {
-	Rd_FPR64 = round(Rn_FPR64);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_FPR64 = fr0;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -11601,15 +12438,26 @@ is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & f
 :frint^frint_smode_x Rd_FPR64, Rn_FPR64
 is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_x & Rd_FPR64 & Rn_FPR64 & Zd
 {
-	Rd_FPR64 = round(Rn_FPR64);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	Rd_FPR64 = fr0;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
 :frint^frint_smode_z Rd_FPR64, Rn_FPR64
 is b_2431=0b00011110 & b_2223=0b01 & b_1821=0b1001 & b_1517 & b_1014=0b10000 & frint_smode_z & Rd_FPR64 & Rn_FPR64 & Zd
 {
-	local fz0:8 = trunc(Rn_FPR64);
-	Rd_FPR64 = int2float(fz0);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	Rd_FPR64 = fr0;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
 }
 
@@ -32189,28 +33037,104 @@ is b_2131=0b01101110010 & Rm_VPR128.8H & b_1015=0b111011 & Rn_VPR128.8H & Rd_VPR
 # b_0031=0.1011100.100001111010..........
 
 :frint32x Rd_VPR64.2S, Rn_VPR64.2S
-is b_3131=0b0 & Q=0 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR64.2S & Rd_VPR64.2S
+is b_3131=0b0 & Q=0 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR64.2S & Rd_VPR64.2S & Zd
 {
-	Rd_VPR64.2S[0,32] = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = trunc(Rn_VPR64.2S[32,32]);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	local fk1:4 = zext((fr1 f>= 0xcf000000:4) && (fr1 f< 0x4f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xcf000000:4 & ~fk1);
+	Rd_VPR64.2S[32,32] = fr1;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 :frint32x Rd_VPR128.4S, Rn_VPR128.4S
-is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR128.4S & Rd_VPR128.4S
+is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR128.4S & Rd_VPR128.4S & Zd
 {
-	Rd_VPR128.4S[0,32] = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = trunc(Rn_VPR128.4S[96,32]);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	local fk1:4 = zext((fr1 f>= 0xcf000000:4) && (fr1 f< 0x4f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xcf000000:4 & ~fk1);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local ff2:4 = floor(fx2);
+	local fd2:4 = fx2 f- ff2;
+	local fh2:4 = ff2 f* 0x3f000000:4;
+	local fu2:1 = (fd2 f> 0x3f000000:4) || ((fd2 f== 0x3f000000:4) && ((fh2 f- floor(fh2)) f!= 0:4));
+	local fr2:4 = (ff2 f+ (zext(fu2) * 0x3f800000:4)) | (fx2 & 0x80000000:4);
+	local fk2:4 = zext((fr2 f>= 0xcf000000:4) && (fr2 f< 0x4f000000:4));
+	fk2 = 0 - fk2;
+	fr2 = (fr2 & fk2) | (0xcf000000:4 & ~fk2);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local ff3:4 = floor(fx3);
+	local fd3:4 = fx3 f- ff3;
+	local fh3:4 = ff3 f* 0x3f000000:4;
+	local fu3:1 = (fd3 f> 0x3f000000:4) || ((fd3 f== 0x3f000000:4) && ((fh3 f- floor(fh3)) f!= 0:4));
+	local fr3:4 = (ff3 f+ (zext(fu3) * 0x3f800000:4)) | (fx3 & 0x80000000:4);
+	local fk3:4 = zext((fr3 f>= 0xcf000000:4) && (fr3 f< 0x4f000000:4));
+	fk3 = 0 - fk3;
+	fr3 = (fr3 & fk3) | (0xcf000000:4 & ~fk3);
+	Rd_VPR128.4S[96,32] = fr3;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 :frint32x Rd_VPR128.2D, Rn_VPR128.2D
-is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR128.2D & Rd_VPR128.2D
+is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR128.2D & Rd_VPR128.2D & Zd
 {
-	local result:4 = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[0,64] = zext(result);
-	result = trunc(Rn_VPR128.2D[64,64]);
-	Rd_VPR128.2D[64,64] = zext(result);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	local fk0:8 = zext((fr0 f>= 0xc1e0000000000000:8) && (fr0 f< 0x41e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc1e0000000000000:8 & ~fk0);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local ff1:8 = floor(fx1);
+	local fd1:8 = fx1 f- ff1;
+	local fh1:8 = ff1 f* 0x3fe0000000000000:8;
+	local fu1:1 = (fd1 f> 0x3fe0000000000000:8) || ((fd1 f== 0x3fe0000000000000:8) && ((fh1 f- floor(fh1)) f!= 0:8));
+	local fr1:8 = (ff1 f+ (zext(fu1) * 0x3ff0000000000000:8)) | (fx1 & 0x8000000000000000:8);
+	local fk1:8 = zext((fr1 f>= 0xc1e0000000000000:8) && (fr1 f< 0x41e0000000000000:8));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xc1e0000000000000:8 & ~fk1);
+	Rd_VPR128.2D[64,64] = fr1;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 # C7.2.148 FRINT32X (scalar) page C7-2355 line 137767 MATCH x1e28c000/mask=xffbffc00
@@ -32219,16 +33143,37 @@ is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR
 # b_0031=000111100.101000110000..........
 
 :frint32x Rd_FPR32, Rn_FPR32
-is b_2331=0b000111100 & b_22=0 & b_1021=0b101000110000 & Rn_FPR32 & Rd_FPR32
+is b_2331=0b000111100 & b_22=0 & b_1021=0b101000110000 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = trunc(Rn_FPR32);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_FPR32 = fr0;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 :frint32x Rd_FPR64, Rn_FPR64
-is b_2331=0b000111100 & b_22=1 & b_1021=0b101000110000 & Rn_FPR64 & Rd_FPR64
+is b_2331=0b000111100 & b_22=1 & b_1021=0b101000110000 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	local result:4 = trunc(Rn_FPR64);
-	Rd_FPR64 = zext(result);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	local fk0:8 = zext((fr0 f>= 0xc1e0000000000000:8) && (fr0 f< 0x41e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc1e0000000000000:8 & ~fk0);
+	Rd_FPR64 = fr0;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.149 FRINT32Z (vector) page C7-2357 line 137862 MATCH x0e21e800/mask=xbfbffc00
@@ -32237,28 +33182,88 @@ is b_2331=0b000111100 & b_22=1 & b_1021=0b101000110000 & Rn_FPR64 & Rd_FPR64
 # b_0031=0.0011100.100001111010..........
 
 :frint32z Rd_VPR64.2S, Rn_VPR64.2S
-is b_3131=0b0 & Q=0 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR64.2S & Rd_VPR64.2S
+is b_3131=0b0 & Q=0 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR64.2S & Rd_VPR64.2S & Zd
 {
-	Rd_VPR64.2S[0,32] = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[32,32] = trunc(Rn_VPR64.2S[32,32]);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:4 = zext((fr1 f>= 0xcf000000:4) && (fr1 f< 0x4f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xcf000000:4 & ~fk1);
+	Rd_VPR64.2S[32,32] = fr1;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 :frint32z Rd_VPR128.4S, Rn_VPR128.4S
-is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR128.4S & Rd_VPR128.4S
+is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111010 & Rn_VPR128.4S & Rd_VPR128.4S & Zd
 {
-	Rd_VPR128.4S[0,32] = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[32,32] = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[64,32] = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[96,32] = trunc(Rn_VPR128.4S[96,32]);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:4 = zext((fr1 f>= 0xcf000000:4) && (fr1 f< 0x4f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xcf000000:4 & ~fk1);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local fm2:4 = zext(fx2 s< 0);
+	fm2 = 0 - fm2;
+	local fr2:4 = (floor(fx2) & ~fm2) | (ceil(fx2) & fm2);
+	local fk2:4 = zext((fr2 f>= 0xcf000000:4) && (fr2 f< 0x4f000000:4));
+	fk2 = 0 - fk2;
+	fr2 = (fr2 & fk2) | (0xcf000000:4 & ~fk2);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local fm3:4 = zext(fx3 s< 0);
+	fm3 = 0 - fm3;
+	local fr3:4 = (floor(fx3) & ~fm3) | (ceil(fx3) & fm3);
+	local fk3:4 = zext((fr3 f>= 0xcf000000:4) && (fr3 f< 0x4f000000:4));
+	fk3 = 0 - fk3;
+	fr3 = (fr3 & fk3) | (0xcf000000:4 & ~fk3);
+	Rd_VPR128.4S[96,32] = fr3;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 :frint32z Rd_VPR128.2D, Rn_VPR128.2D
-is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR128.2D & Rd_VPR128.2D
+is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR128.2D & Rd_VPR128.2D & Zd
 {
-	local result:4 = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[0,64] = zext(result);
-	result = trunc(Rn_VPR128.2D[64,64]);
-	Rd_VPR128.2D[64,64] = zext(result);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:8 = zext((fr0 f>= 0xc1e0000000000000:8) && (fr0 f< 0x41e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc1e0000000000000:8 & ~fk0);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local fm1:8 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:8 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:8 = zext((fr1 f>= 0xc1e0000000000000:8) && (fr1 f< 0x41e0000000000000:8));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xc1e0000000000000:8 & ~fk1);
+	Rd_VPR128.2D[64,64] = fr1;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 # C7.2.150 FRINT32Z (scalar) page C7-2359 line 137950 MATCH x1e284000/mask=xffbffc00
@@ -32267,16 +33272,33 @@ is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111010 & Rn_VPR
 # b_0031=000111100.101000010000..........
 
 :frint32z Rd_FPR32, Rn_FPR32
-is b_2331=0b000111100 & b_22=0 & b_1021=0b101000010000 & Rn_FPR32 & Rd_FPR32
+is b_2331=0b000111100 & b_22=0 & b_1021=0b101000010000 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = trunc(Rn_FPR32);
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xcf000000:4) && (fr0 f< 0x4f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xcf000000:4 & ~fk0);
+	Rd_FPR32 = fr0;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 :frint32z Rd_FPR64, Rn_FPR64
-is b_2331=0b000111100 & b_22=1 & b_1021=0b101000010000 & Rn_FPR64 & Rd_FPR64
+is b_2331=0b000111100 & b_22=1 & b_1021=0b101000010000 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	local result:4 = trunc(Rn_FPR64);
-	Rd_FPR64 = zext(result);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:8 = zext((fr0 f>= 0xc1e0000000000000:8) && (fr0 f< 0x41e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc1e0000000000000:8 & ~fk0);
+	Rd_FPR64 = fr0;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.151 FRINT64X (vector) page C7-2361 line 138043 MATCH x2e21f800/mask=xbfbffc00
@@ -32285,32 +33307,104 @@ is b_2331=0b000111100 & b_22=1 & b_1021=0b101000010000 & Rn_FPR64 & Rd_FPR64
 # b_0031=0.1011100.100001111110..........
 
 :frint64x Rd_VPR64.2S, Rn_VPR64.2S
-is b_3131=0b0 & Q=0 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR64.2S & Rd_VPR64.2S
+is b_3131=0b0 & Q=0 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR64.2S & Rd_VPR64.2S & Zd
 {
-	local result:8 = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[0,32] = result[0,32];
-	result = trunc(Rn_VPR64.2S[32,32]);
-	Rd_VPR64.2S[32,32] = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	local fk1:4 = zext((fr1 f>= 0xdf000000:4) && (fr1 f< 0x5f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xdf000000:4 & ~fk1);
+	Rd_VPR64.2S[32,32] = fr1;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 :frint64x Rd_VPR128.4S, Rn_VPR128.4S
-is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR128.4S & Rd_VPR128.4S
+is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR128.4S & Rd_VPR128.4S & Zd
 {
-	local result:8 = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[0,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[32,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[64,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[96,32]);
-	Rd_VPR128.4S[96,32] = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local ff1:4 = floor(fx1);
+	local fd1:4 = fx1 f- ff1;
+	local fh1:4 = ff1 f* 0x3f000000:4;
+	local fu1:1 = (fd1 f> 0x3f000000:4) || ((fd1 f== 0x3f000000:4) && ((fh1 f- floor(fh1)) f!= 0:4));
+	local fr1:4 = (ff1 f+ (zext(fu1) * 0x3f800000:4)) | (fx1 & 0x80000000:4);
+	local fk1:4 = zext((fr1 f>= 0xdf000000:4) && (fr1 f< 0x5f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xdf000000:4 & ~fk1);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local ff2:4 = floor(fx2);
+	local fd2:4 = fx2 f- ff2;
+	local fh2:4 = ff2 f* 0x3f000000:4;
+	local fu2:1 = (fd2 f> 0x3f000000:4) || ((fd2 f== 0x3f000000:4) && ((fh2 f- floor(fh2)) f!= 0:4));
+	local fr2:4 = (ff2 f+ (zext(fu2) * 0x3f800000:4)) | (fx2 & 0x80000000:4);
+	local fk2:4 = zext((fr2 f>= 0xdf000000:4) && (fr2 f< 0x5f000000:4));
+	fk2 = 0 - fk2;
+	fr2 = (fr2 & fk2) | (0xdf000000:4 & ~fk2);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local ff3:4 = floor(fx3);
+	local fd3:4 = fx3 f- ff3;
+	local fh3:4 = ff3 f* 0x3f000000:4;
+	local fu3:1 = (fd3 f> 0x3f000000:4) || ((fd3 f== 0x3f000000:4) && ((fh3 f- floor(fh3)) f!= 0:4));
+	local fr3:4 = (ff3 f+ (zext(fu3) * 0x3f800000:4)) | (fx3 & 0x80000000:4);
+	local fk3:4 = zext((fr3 f>= 0xdf000000:4) && (fr3 f< 0x5f000000:4));
+	fk3 = 0 - fk3;
+	fr3 = (fr3 & fk3) | (0xdf000000:4 & ~fk3);
+	Rd_VPR128.4S[96,32] = fr3;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 :frint64x Rd_VPR128.2D, Rn_VPR128.2D
-is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR128.2D & Rd_VPR128.2D
+is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR128.2D & Rd_VPR128.2D & Zd
 {
-	Rd_VPR128.2D[0,64] = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = trunc(Rn_VPR128.2D[64,64]);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	local fk0:8 = zext((fr0 f>= 0xc3e0000000000000:8) && (fr0 f< 0x43e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc3e0000000000000:8 & ~fk0);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local ff1:8 = floor(fx1);
+	local fd1:8 = fx1 f- ff1;
+	local fh1:8 = ff1 f* 0x3fe0000000000000:8;
+	local fu1:1 = (fd1 f> 0x3fe0000000000000:8) || ((fd1 f== 0x3fe0000000000000:8) && ((fh1 f- floor(fh1)) f!= 0:8));
+	local fr1:8 = (ff1 f+ (zext(fu1) * 0x3ff0000000000000:8)) | (fx1 & 0x8000000000000000:8);
+	local fk1:8 = zext((fr1 f>= 0xc3e0000000000000:8) && (fr1 f< 0x43e0000000000000:8));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xc3e0000000000000:8 & ~fk1);
+	Rd_VPR128.2D[64,64] = fr1;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 # C7.2.152 FRINT64X (scalar) page C7-2363 line 138132 MATCH x1e29c000/mask=xffbffc00
@@ -32319,16 +33413,37 @@ is b_3131=0b0 & Q=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR
 # b_0031=000111100.101001110000..........
 
 :frint64x Rd_FPR32, Rn_FPR32
-is b_2331=0b000111100 & b_22=0 & b_1021=0b101001110000 & Rn_FPR32 & Rd_FPR32
+is b_2331=0b000111100 & b_22=0 & b_1021=0b101001110000 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	local result:8 = trunc(Rn_FPR32);
-	Rd_FPR32 = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local ff0:4 = floor(fx0);
+	local fd0:4 = fx0 f- ff0;
+	local fh0:4 = ff0 f* 0x3f000000:4;
+	local fu0:1 = (fd0 f> 0x3f000000:4) || ((fd0 f== 0x3f000000:4) && ((fh0 f- floor(fh0)) f!= 0:4));
+	local fr0:4 = (ff0 f+ (zext(fu0) * 0x3f800000:4)) | (fx0 & 0x80000000:4);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_FPR32 = fr0;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 :frint64x Rd_FPR64, Rn_FPR64
-is b_2331=0b000111100 & b_22=1 & b_1021=0b101001110000 & Rn_FPR64 & Rd_FPR64
+is b_2331=0b000111100 & b_22=1 & b_1021=0b101001110000 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = trunc(Rn_FPR64);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local ff0:8 = floor(fx0);
+	local fd0:8 = fx0 f- ff0;
+	local fh0:8 = ff0 f* 0x3fe0000000000000:8;
+	local fu0:1 = (fd0 f> 0x3fe0000000000000:8) || ((fd0 f== 0x3fe0000000000000:8) && ((fh0 f- floor(fh0)) f!= 0:8));
+	local fr0:8 = (ff0 f+ (zext(fu0) * 0x3ff0000000000000:8)) | (fx0 & 0x8000000000000000:8);
+	local fk0:8 = zext((fr0 f>= 0xc3e0000000000000:8) && (fr0 f< 0x43e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc3e0000000000000:8 & ~fk0);
+	Rd_FPR64 = fr0;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.153 FRINT64Z (vector) page C7-2365 line 138227 MATCH x0e21f800/mask=xbfbffc00
@@ -32337,32 +33452,88 @@ is b_2331=0b000111100 & b_22=1 & b_1021=0b101001110000 & Rn_FPR64 & Rd_FPR64
 # b_0031=0.0011100.100001111110..........
 
 :frint64z Rd_VPR64.2S, Rn_VPR64.2S
-is b_3131=0b0 & Q=0 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR64.2S & Rd_VPR64.2S
+is b_3131=0b0 & Q=0 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR64.2S & Rd_VPR64.2S & Zd
 {
-	local result:8 = trunc(Rn_VPR64.2S[0,32]);
-	Rd_VPR64.2S[0,32] = result[0,32];
-	result = trunc(Rn_VPR64.2S[32,32]);
-	Rd_VPR64.2S[32,32] = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR64.2S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_VPR64.2S[0,32] = fr0;
+	local fx1:4 = Rn_VPR64.2S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:4 = zext((fr1 f>= 0xdf000000:4) && (fr1 f< 0x5f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xdf000000:4 & ~fk1);
+	Rd_VPR64.2S[32,32] = fr1;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 :frint64z Rd_VPR128.4S, Rn_VPR128.4S
-is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR128.4S & Rd_VPR128.4S
+is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=0 & b_1021=0b100001111110 & Rn_VPR128.4S & Rd_VPR128.4S & Zd
 {
-	local result:8 = trunc(Rn_VPR128.4S[0,32]);
-	Rd_VPR128.4S[0,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[32,32]);
-	Rd_VPR128.4S[32,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[64,32]);
-	Rd_VPR128.4S[64,32] = result[0,32];
-	result = trunc(Rn_VPR128.4S[96,32]);
-	Rd_VPR128.4S[96,32] = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_VPR128.4S[0,32];
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_VPR128.4S[0,32] = fr0;
+	local fx1:4 = Rn_VPR128.4S[32,32];
+	local fm1:4 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:4 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:4 = zext((fr1 f>= 0xdf000000:4) && (fr1 f< 0x5f000000:4));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xdf000000:4 & ~fk1);
+	Rd_VPR128.4S[32,32] = fr1;
+	local fx2:4 = Rn_VPR128.4S[64,32];
+	local fm2:4 = zext(fx2 s< 0);
+	fm2 = 0 - fm2;
+	local fr2:4 = (floor(fx2) & ~fm2) | (ceil(fx2) & fm2);
+	local fk2:4 = zext((fr2 f>= 0xdf000000:4) && (fr2 f< 0x5f000000:4));
+	fk2 = 0 - fk2;
+	fr2 = (fr2 & fk2) | (0xdf000000:4 & ~fk2);
+	Rd_VPR128.4S[64,32] = fr2;
+	local fx3:4 = Rn_VPR128.4S[96,32];
+	local fm3:4 = zext(fx3 s< 0);
+	fm3 = 0 - fm3;
+	local fr3:4 = (floor(fx3) & ~fm3) | (ceil(fx3) & fm3);
+	local fk3:4 = zext((fr3 f>= 0xdf000000:4) && (fr3 f< 0x5f000000:4));
+	fk3 = 0 - fk3;
+	fr3 = (fr3 & fk3) | (0xdf000000:4 & ~fk3);
+	Rd_VPR128.4S[96,32] = fr3;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 :frint64z Rd_VPR128.2D, Rn_VPR128.2D
-is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR128.2D & Rd_VPR128.2D
+is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR128.2D & Rd_VPR128.2D & Zd
 {
-	Rd_VPR128.2D[0,64] = trunc(Rn_VPR128.2D[0,64]);
-	Rd_VPR128.2D[64,64] = trunc(Rn_VPR128.2D[64,64]);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_VPR128.2D[0,64];
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:8 = zext((fr0 f>= 0xc3e0000000000000:8) && (fr0 f< 0x43e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc3e0000000000000:8 & ~fk0);
+	Rd_VPR128.2D[0,64] = fr0;
+	local fx1:8 = Rn_VPR128.2D[64,64];
+	local fm1:8 = zext(fx1 s< 0);
+	fm1 = 0 - fm1;
+	local fr1:8 = (floor(fx1) & ~fm1) | (ceil(fx1) & fm1);
+	local fk1:8 = zext((fr1 f>= 0xc3e0000000000000:8) && (fr1 f< 0x43e0000000000000:8));
+	fk1 = 0 - fk1;
+	fr1 = (fr1 & fk1) | (0xc3e0000000000000:8 & ~fk1);
+	Rd_VPR128.2D[64,64] = fr1;
+	zext_zq(Zd); # zero the rest of Zd
 }
 
 # C7.2.154 FRINT64Z (scalar) page C7-2367 line 138315 MATCH x1e294000/mask=xffbffc00
@@ -32371,16 +33542,33 @@ is b_3131=0b0 & Q=1 & b_2329=0b0011100 & b_22=1 & b_1021=0b100001111110 & Rn_VPR
 # b_0031=000111100.101001010000..........
 
 :frint64z Rd_FPR32, Rn_FPR32
-is b_2331=0b000111100 & b_22=0 & b_1021=0b101001010000 & Rn_FPR32 & Rd_FPR32
+is b_2331=0b000111100 & b_22=0 & b_1021=0b101001010000 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	local result:8 = trunc(Rn_FPR32);
-	Rd_FPR32 = result[0,32];
+	# Fission: exact FPRoundInt
+	local fx0:4 = Rn_FPR32;
+	local fm0:4 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:4 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:4 = zext((fr0 f>= 0xdf000000:4) && (fr0 f< 0x5f000000:4));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xdf000000:4 & ~fk0);
+	Rd_FPR32 = fr0;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 :frint64z Rd_FPR64, Rn_FPR64
-is b_2331=0b000111100 & b_22=1 & b_1021=0b101001010000 & Rn_FPR64 & Rd_FPR64
+is b_2331=0b000111100 & b_22=1 & b_1021=0b101001010000 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = trunc(Rn_FPR64);
+	# Fission: exact FPRoundInt
+	local fx0:8 = Rn_FPR64;
+	local fm0:8 = zext(fx0 s< 0);
+	fm0 = 0 - fm0;
+	local fr0:8 = (floor(fx0) & ~fm0) | (ceil(fx0) & fm0);
+	local fk0:8 = zext((fr0 f>= 0xc3e0000000000000:8) && (fr0 f< 0x43e0000000000000:8));
+	fk0 = 0 - fk0;
+	fr0 = (fr0 & fk0) | (0xc3e0000000000000:8 & ~fk0);
+	Rd_FPR64 = fr0;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.278 SMMLA (vector) page C7-2634 line 153703 MATCH x4e80a400/mask=xffe0fc00

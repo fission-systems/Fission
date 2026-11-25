@@ -67,43 +67,12 @@ aarch64 FCVTPU * #1056 no saturation; converts as signed
 aarch64 * ~nan #1055 NaN payload / operand order
 # Evaluator: half-precision float varnodes read as 0.0 and are not written.
 aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
-# Spec: NaN handling of FMAX/FMIN (NaN wins) and FMAXNM/FMINNM (number wins).
-aarch64 FMAX * #1063 a NaN operand is ignored
-aarch64 FMIN * #1063 a NaN operand is ignored
-aarch64 FMAXNM * #1063 returns the NaN instead of the number
-# Spec: the local FRINT patch's approximations (ties away from zero; FRINTZ via an integer).
-aarch64 FRINTI * #1064 ties away from zero instead of FPCR rounding
-aarch64 FRINTX * #1064 ties away from zero instead of FPCR rounding
-aarch64 FRINTZ * #1064 loses -0.0, saturates at 2^63
-aarch64 FRINTN * #1064 ties away from zero instead of to even
 # Spec: fused multiply-adds round twice.
 aarch64 FMSUB * #1072 not fused @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
-# Spec: LDLARH writes the wrong upper bits of Xt (the sign-extending loads
-# of #1057 were fixed by #1148).
-aarch64 LDLARH * #1057 leaves bits 63:32 of Xt unchanged
-# Spec: W and 64-bit vector destinations keep stale upper bits.
-aarch64 LDLAR * #1067 leaves bits 63:32 of Xt unchanged
-aarch64 LDLARB * #1067 leaves bits 63:32 of Xt unchanged
-aarch64 LDADD* * #1067 Wt form leaves bits 63:32
-aarch64 LDCLR* * #1067 Wt form leaves bits 63:32
-aarch64 LDSET* * #1067 Wt form leaves bits 63:32
-aarch64 LDSMIN* * #1067 Wt form leaves bits 63:32
-aarch64 LDUMAX* * #1067 Wt form leaves bits 63:32
-aarch64 LDUMIN* * #1067 Wt form leaves bits 63:32
-aarch64 SWP* * #1067 Wt form leaves bits 63:32
-aarch64 LDSMAX* * #1067 Wt form leaves bits 63:32; also #1069 (byte max stores the register)
-aarch64 LD1 * #1067 64-bit arrangement leaves V[127:64]
-aarch64 LD1R * #1067 64-bit arrangement leaves V[127:64]
-aarch64 LD2 * #1067 64-bit arrangement leaves V[127:64]
-aarch64 LD3 * #1067 64-bit arrangement leaves V[127:64]
-aarch64 LD3R * #1067 64-bit arrangement leaves V[127:64]
-aarch64 LD4 * #1067 64-bit arrangement leaves V[127:64]
 # Spec: saturating NEON ops wrap, rounding ones truncate.
 aarch64 SUQADD * #1068 no saturation
 aarch64 SQDMLAL * #1068 no saturation
 aarch64 SQRDMULH * #1068 no rounding constant
 aarch64 SRSRA * #1068 no rounding constant
-# Spec: FRINT32Z computes nothing.
-aarch64 FRINT32Z * #1070 destination unchanged

@@ -127,7 +127,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rtttt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -172,7 +175,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rtttt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -201,7 +207,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rtttt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -222,7 +231,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 8;
 	Rtttt_VPR64[0,64] = *:8 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -575,7 +587,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0110 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rttt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -612,7 +626,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0110 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rttt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -637,7 +653,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0110 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rttt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -656,7 +674,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0110 & b_1011=
 	tmp_ldXn = tmp_ldXn + 8;
 	Rttt_VPR64[0,64] = *:8 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -917,7 +937,7 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0111 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -938,7 +958,7 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0111 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -955,7 +975,7 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0111 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -970,7 +990,7 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0111 & b_1011=
 	tmp_ldXn = Rn_GPR64xsp;
 	Rt_VPR64[0,64] = *:8 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -1127,7 +1147,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rtt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -1156,7 +1177,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rtt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -1177,7 +1199,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rtt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -1194,7 +1217,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1010 & b_1011=
 	tmp_ldXn = tmp_ldXn + 8;
 	Rtt_VPR64[0,64] = *:8 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -1842,7 +1866,7 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b110 & b_12=0 &
 	Rt_VPR64[48,8] = tmpv;
 	Rt_VPR64[56,8] = tmpv;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -1864,7 +1888,7 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b110 & b_12=0 &
 	Rt_VPR64[32,16] = tmpv;
 	Rt_VPR64[48,16] = tmpv;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -1884,7 +1908,7 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b110 & b_12=0 &
 	Rt_VPR64[0,32] = tmpv;
 	Rt_VPR64[32,32] = tmpv;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -1903,7 +1927,7 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b110 & b_12=0 &
 	tmpv = *:8 tmp_ldXn;
 	Rt_VPR64[0,64] = tmpv;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
 	build ldst_wback;
 }
 
@@ -2050,7 +2074,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rtt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2079,7 +2104,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rtt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2100,7 +2126,8 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b1000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rtt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2818,7 +2845,8 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b110 & b_12=0 &
 	Rtt_VPR64[48,8] = tmpv;
 	Rtt_VPR64[56,8] = tmpv;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2846,7 +2874,8 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b110 & b_12=0 &
 	Rtt_VPR64[32,16] = tmpv;
 	Rtt_VPR64[48,16] = tmpv;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2870,7 +2899,8 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b110 & b_12=0 &
 	Rtt_VPR64[0,32] = tmpv;
 	Rtt_VPR64[32,32] = tmpv;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -2892,7 +2922,8 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b110 & b_12=0 &
 	tmpv = *:8 tmp_ldXn;
 	Rtt_VPR64[0,64] = tmpv;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
 	build ldst_wback;
 }
 
@@ -3093,7 +3124,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0100 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rttt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -3130,7 +3163,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0100 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rttt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -3155,7 +3190,9 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0100 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rttt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -4003,7 +4040,9 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b111 & b_12=0 &
 	Rttt_VPR64[48,8] = tmpv;
 	Rttt_VPR64[56,8] = tmpv;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -4037,7 +4076,9 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b111 & b_12=0 &
 	Rttt_VPR64[32,16] = tmpv;
 	Rttt_VPR64[48,16] = tmpv;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -4065,7 +4106,9 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b111 & b_12=0 &
 	Rttt_VPR64[0,32] = tmpv;
 	Rttt_VPR64[32,32] = tmpv;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -4090,7 +4133,9 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=0 & b_1315=0b111 & b_12=0 &
 	tmpv = *:8 tmp_ldXn;
 	Rttt_VPR64[0,64] = tmpv;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
 	build ldst_wback;
 }
 
@@ -4345,7 +4390,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 1;
 	Rtttt_VPR64[56,8] = *:1 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -4390,7 +4438,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 2;
 	Rtttt_VPR64[48,16] = *:2 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -4419,7 +4470,10 @@ is b_31=0 & b_30=0 & b_2429=0b001100 & b_22=1 & b_21=0 & b_1215=0b0000 & b_1011=
 	tmp_ldXn = tmp_ldXn + 4;
 	Rtttt_VPR64[32,32] = *:4 tmp_ldXn;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -5397,7 +5451,10 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b111 & b_12=0 &
 	Rtttt_VPR64[48,8] = tmpv;
 	Rtttt_VPR64[56,8] = tmpv;
 	tmp_ldXn = tmp_ldXn + 1;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -5437,7 +5494,10 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b111 & b_12=0 &
 	Rtttt_VPR64[32,16] = tmpv;
 	Rtttt_VPR64[48,16] = tmpv;
 	tmp_ldXn = tmp_ldXn + 2;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -5469,7 +5529,10 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b111 & b_12=0 &
 	Rtttt_VPR64[0,32] = tmpv;
 	Rtttt_VPR64[32,32] = tmpv;
 	tmp_ldXn = tmp_ldXn + 4;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
@@ -5497,7 +5560,10 @@ is b_31=0 & b_30=0 & b_2429=0b001101 & b_22=1 & b_21=1 & b_1315=0b111 & b_12=0 &
 	tmpv = *:8 tmp_ldXn;
 	Rtttt_VPR64[0,64] = tmpv;
 	tmp_ldXn = tmp_ldXn + 8;
-	# neglected zexts
+	zext_zd(Zt); # zero upper 24 bytes of Zt
+	zext_zd(Ztt); # zero upper 24 bytes of Ztt
+	zext_zd(Zttt); # zero upper 24 bytes of Zttt
+	zext_zd(Ztttt); # zero upper 24 bytes of Ztttt
 	build ldst_wback;
 }
 
