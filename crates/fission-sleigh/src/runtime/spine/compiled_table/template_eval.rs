@@ -38,6 +38,10 @@ pub(super) fn reject_non_offset_handle_plus(plus: Option<u64>, role: &str) -> Re
     Ok(())
 }
 
+/// Ghidra `UniqueLayout.RUNTIME_BITRANGE_EA`: the unique slot, relative to the
+/// language's `uniqbase`, that holds a bit-range operand's effective address.
+const RUNTIME_BITRANGE_EA: u64 = 0x100;
+
 fn const_varnode(value: u64, size: u32) -> Varnode {
     Varnode::constant(u64_to_i64_bits(value), size)
 }
@@ -315,6 +319,9 @@ pub(super) struct DynamicMemoryTarget {
     ptr: Varnode,
     temp: Varnode,
     size: u32,
+    /// Byte offset of a bit-range operand (`[handle:offset+plus]`) into the
+    /// memory the handle addresses; the STORE goes to `ptr + plus`.
+    plus: u64,
 }
 
 impl<'c> CompiledTableEmitter<'c> {
@@ -628,8 +635,9 @@ impl<'c> CompiledTableEmitter<'c> {
                             target.size
                         );
                     }
+                    let ptr = self.dynamic_pointer(target.ptr, target.plus)?;
                     self.emitter
-                        .emit_store(target.space, target.ptr, store_value, mnemonic)
+                        .emit_store(target.space, ptr, store_value, mnemonic)
                 } else if value.size > out_size && out_size > 0 {
                     // Size mismatch: source is wider than destination.
                     // Emit SUBPIECE to truncate (matches Ghidra's behavior).
@@ -1148,8 +1156,8 @@ impl<'c> CompiledTableEmitter<'c> {
         mnemonic: &str,
     ) -> Result<()> {
         if let Some(target) = self.dynamic_memory_target(template, state)? {
-            self.emitter
-                .emit_store(target.space, target.ptr, value, mnemonic)
+            let ptr = self.dynamic_pointer(target.ptr, target.plus)?;
+            self.emitter.emit_store(target.space, ptr, value, mnemonic)
         } else {
             let _ = (value, mnemonic);
             self.template_write_target(template, state).map(|_| ())
@@ -1197,7 +1205,10 @@ impl<'c> CompiledTableEmitter<'c> {
         else {
             return Ok(None);
         };
-        if !matches_handle_selector(offset, handle_index, CompiledHandleSelector::Offset) {
+        let Some((offset_handle, plus)) = offset_handle_selector(offset) else {
+            return Ok(None);
+        };
+        if offset_handle != handle_index {
             return Ok(None);
         }
         let handle = state
@@ -1244,18 +1255,57 @@ impl<'c> CompiledTableEmitter<'c> {
             is_constant: false,
             constant_val: 0,
         };
+        let temp_offset = match plus {
+            Some(plus) => resolve_offset_plus(handle, plus)?,
+            None => handle.fixed.temp_offset,
+        };
         Ok(Some(DynamicMemoryTarget {
             space: space_id_const_varnode(space, "dynamic memory target")?,
             ptr,
             temp: Varnode {
                 space_id: temp_space.index,
-                offset: handle.fixed.temp_offset,
+                offset: temp_offset,
                 size: target_size,
                 is_constant: false,
                 constant_val: 0,
             },
             size: target_size,
+            plus: plus.map_or(0, |plus| plus & 0xFFFF),
         }))
+    }
+
+    /// The address a dynamic operand's LOAD or STORE uses: the handle's
+    /// pointer, plus the byte offset of a bit range (`m128[64,64]`).
+    ///
+    /// Ghidra `PcodeEmit.generatePointerAdd`: a nonzero `[handle:offset+plus]`
+    /// adds the offset into the runtime bit-range temporary
+    /// (`UniqueLayout.RUNTIME_BITRANGE_EA`, `uniqbase + 0x100`) before the
+    /// access. Without it the access would read or write the operand's
+    /// low bytes.
+    fn dynamic_pointer(&mut self, ptr: Varnode, plus: u64) -> Result<Varnode> {
+        if plus == 0 {
+            return Ok(ptr);
+        }
+        let ea = Varnode {
+            space_id: self.unique_space_index,
+            offset: self
+                .compiled
+                .sla_uniqbase
+                .checked_add(RUNTIME_BITRANGE_EA)
+                .ok_or_else(|| anyhow!("bit-range effective address offset overflowed"))?,
+            size: ptr.size,
+            is_constant: false,
+            constant_val: 0,
+        };
+        let size = ptr.size;
+        self.emitter.emit_int_binop(
+            PcodeOpcode::IntAdd,
+            ea.clone(),
+            ptr,
+            const_varnode(plus, size),
+            "INT_ADD",
+        )?;
+        Ok(ea)
     }
 
     /// Ghidra `VarnodeTpl.isDynamic(walker)` path for **input** varnodes.
@@ -1275,9 +1325,9 @@ impl<'c> CompiledTableEmitter<'c> {
             return Ok(None);
         };
 
-        // isDynamic condition 1: offset.getType() == ConstTpl.HANDLE (selector = Offset)
-        let Some(handle_index) = handle_selector_index(offset, CompiledHandleSelector::Offset)
-        else {
+        // isDynamic condition 1: offset.getType() == ConstTpl.HANDLE, either
+        // `[handle:offset]` or a bit range of it, `[handle:offset+plus]`.
+        let Some((handle_index, plus)) = offset_handle_selector(offset) else {
             return Ok(None);
         };
 
@@ -1321,14 +1371,21 @@ impl<'c> CompiledTableEmitter<'c> {
             is_constant: false,
             constant_val: 0,
         };
+        // generateLocation: a bit range lands at `temp_offset + plus` (ConstTpl
+        // V_OFFSET_PLUS fix), loaded from `ptr + plus` (generatePointerAdd).
+        let (temp_offset, plus) = match plus {
+            Some(plus) => (resolve_offset_plus(handle, plus)?, plus & 0xFFFF),
+            None => (handle.fixed.temp_offset, 0),
+        };
         let temp = Varnode {
             space_id: temp_space.index,
-            offset: handle.fixed.temp_offset,
+            offset: temp_offset,
             size: data_size,
             is_constant: false,
             constant_val: 0,
         };
 
+        let ptr = self.dynamic_pointer(ptr, plus)?;
         self.emitter
             .emit_load(temp.clone(), space_id, ptr, "LOAD")?;
 
