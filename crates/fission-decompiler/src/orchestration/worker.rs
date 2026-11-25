@@ -483,7 +483,7 @@ mod supervise {
         /// Upper bound on one poll(2) sleep while the worker is alive: exit is
         /// observed by polling waitid, not by a SIGCHLD handler (the host's
         /// signal disposition is not ours to change).
-        const POLL_TICK: Duration = Duration::from_millis(10);
+        const POLL_TICK: Duration = Duration::from_millis(5);
         const IO_CHUNK: usize = 64 * 1024;
 
         /// Owns the worker child and its process group (pgid == child pid).
