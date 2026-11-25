@@ -1,12 +1,9 @@
 use crate::render::{nir_diag_event, render_nir_request};
 use crate::types::{NirWorkerRequest, NirWorkerResponse};
 use std::fmt;
-use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::ExitStatus;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
-use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 const NIR_WORKER_BIN_NAME: &str = "fission_nir_worker";
@@ -19,7 +16,9 @@ pub const MAX_WORKER_REQUEST_BYTES: usize = 64 * 1024 * 1024;
 /// Upper bound on serialized NIR worker responses accepted from stdout.
 pub const MAX_WORKER_RESPONSE_BYTES: usize = 32 * 1024 * 1024;
 
-/// Upper bound on captured stderr diagnostics from a worker process.
+/// Upper bound on captured stderr diagnostics from a worker process. stderr
+/// beyond this is still drained (so the worker never blocks or takes SIGPIPE
+/// on a full diagnostics pipe) but discarded and counted.
 pub(crate) const MAX_WORKER_STDERR_BYTES: usize = 64 * 1024;
 
 /// Maximum time the supervisor waits for pipe EOF after the direct child exits.
@@ -122,196 +121,103 @@ impl WorkerRunConfig {
     }
 }
 
-enum PipeReadOutcome {
-    Ok(Vec<u8>),
-    TooLarge { limit: usize, read: usize },
-    Io(std::io::Error),
-}
-
-fn read_pipe_bounded(mut pipe: impl Read, limit: usize) -> PipeReadOutcome {
-    let mut out = Vec::new();
-    let mut chunk = [0u8; 16 * 1024];
-    loop {
-        match pipe.read(&mut chunk) {
-            Ok(0) => return PipeReadOutcome::Ok(out),
-            Ok(n) => {
-                let next_len = out.len().saturating_add(n);
-                if next_len > limit {
-                    return PipeReadOutcome::TooLarge {
-                        limit,
-                        read: next_len,
-                    };
-                }
-                out.extend_from_slice(&chunk[..n]);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(err) => return PipeReadOutcome::Io(err),
-        }
-    }
-}
-
-fn spawn_pipe_reader(
-    pipe: impl Read + Send + 'static,
+/// Bounded stderr capture: keeps the first `limit` bytes, counts the rest.
+struct StderrCapture {
+    bytes: Vec<u8>,
     limit: usize,
-) -> (Receiver<PipeReadOutcome>, JoinHandle<()>) {
-    let (tx, rx) = mpsc::sync_channel(1);
-    let handle = thread::spawn(move || {
-        let outcome = read_pipe_bounded(pipe, limit);
-        let _ = tx.send(outcome);
-    });
-    (rx, handle)
+    dropped: usize,
 }
 
-fn spawn_stdin_writer(
-    mut pipe: impl Write + Send + 'static,
-    payload: Vec<u8>,
-) -> (Receiver<std::io::Result<()>>, JoinHandle<()>) {
-    let (tx, rx) = mpsc::sync_channel(1);
-    let handle = thread::spawn(move || {
-        let result = pipe.write_all(&payload).and_then(|()| pipe.flush());
-        drop(pipe);
-        let _ = tx.send(result);
-    });
-    (rx, handle)
-}
-
-/// Owned child-process lifecycle guard.
-///
-/// Ensures any supervised worker child is killed and reaped on early return,
-/// timeout, or panic.
-///
-/// Platform/descendant limitation: OS pipes (`stdin`, `stdout`, `stderr`) do not
-/// signal EOF when a direct child exits if a spawned descendant still holds an
-/// inherited descriptor open. Rather than hanging forever in `JoinHandle::join`,
-/// cleanup closes/drops channels, kills and reaps the direct child, waits up to
-/// a bounded grace period for worker I/O threads to observe EOF/EPIPE, joins
-/// finished handles, and detaches any thread still blocked inside kernel I/O on
-/// a leaked descriptor.
-struct WorkerProcessGuard {
-    child: Option<Child>,
-    stdin_handle: Option<JoinHandle<()>>,
-    stdout_handle: Option<JoinHandle<()>>,
-    stderr_handle: Option<JoinHandle<()>>,
-}
-
-impl WorkerProcessGuard {
-    fn new(child: Child) -> Self {
+impl StderrCapture {
+    fn new(limit: usize) -> Self {
         Self {
-            child: Some(child),
-            stdin_handle: None,
-            stdout_handle: None,
-            stderr_handle: None,
+            bytes: Vec::new(),
+            limit,
+            dropped: 0,
         }
     }
 
-    fn take_stdout(&mut self) -> Result<std::process::ChildStdout, WorkerFailure> {
-        self.child
-            .as_mut()
-            .and_then(|c| c.stdout.take())
-            .ok_or_else(|| {
-                WorkerFailure::new(
-                    WorkerFailureKind::ProtocolFailure,
-                    "Fission NIR worker stdout unavailable",
-                )
-            })
+    fn push(&mut self, chunk: &[u8]) {
+        let room = self.limit.saturating_sub(self.bytes.len());
+        let keep = room.min(chunk.len());
+        self.bytes.extend_from_slice(&chunk[..keep]);
+        self.dropped = self.dropped.saturating_add(chunk.len() - keep);
     }
 
-    fn take_stderr(&mut self) -> Result<std::process::ChildStderr, WorkerFailure> {
-        self.child
-            .as_mut()
-            .and_then(|c| c.stderr.take())
-            .ok_or_else(|| {
-                WorkerFailure::new(
-                    WorkerFailureKind::ProtocolFailure,
-                    "Fission NIR worker stderr unavailable",
-                )
-            })
-    }
-
-    fn take_stdin(&mut self) -> Result<std::process::ChildStdin, WorkerFailure> {
-        self.child
-            .as_mut()
-            .and_then(|c| c.stdin.take())
-            .ok_or_else(|| {
-                WorkerFailure::new(
-                    WorkerFailureKind::WriteFailed,
-                    "Fission NIR worker stdin unavailable",
-                )
-            })
-    }
-
-    fn try_wait(&mut self) -> Result<Option<ExitStatus>, WorkerFailure> {
-        let Some(child) = self.child.as_mut() else {
-            return Ok(None);
-        };
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                self.child = None;
-                Ok(Some(status))
-            }
-            Ok(None) => Ok(None),
-            Err(error) => Err(WorkerFailure::new(
-                WorkerFailureKind::CrashedWorker,
-                format!("Fission NIR worker wait failed: {error}"),
-            )),
-        }
-    }
-
-    fn join_finished_handles(&mut self) {
-        for slot in [
-            &mut self.stdin_handle,
-            &mut self.stdout_handle,
-            &mut self.stderr_handle,
-        ] {
-            if slot.as_ref().is_some_and(JoinHandle::is_finished)
-                && let Some(handle) = slot.take()
-            {
-                let _ = handle.join();
-            }
-        }
-    }
-
-    fn abort_and_reap(&mut self) {
-        if let Some(mut child) = self.child.take() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        // Give reader/writer threads a brief beat to observe kernel EPIPE/EOF
-        // once the direct child dies, without hanging on leaked grandchild FDs.
-        let grace_end = Instant::now() + Duration::from_millis(50);
-        loop {
-            self.join_finished_handles();
-            let all_joined = self.stdin_handle.is_none()
-                && self.stdout_handle.is_none()
-                && self.stderr_handle.is_none();
-            if all_joined || Instant::now() >= grace_end {
-                break;
-            }
-            thread::sleep(Duration::from_millis(2));
-        }
-    }
-}
-
-impl Drop for WorkerProcessGuard {
-    fn drop(&mut self) {
-        self.abort_and_reap();
-    }
-}
-
-fn recv_until<T>(rx: &Receiver<T>, deadline: Instant) -> Result<T, RecvTimeoutError> {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    rx.recv_timeout(remaining)
-}
-
-fn stderr_note(outcome: Option<&PipeReadOutcome>) -> String {
-    if let Some(PipeReadOutcome::Ok(bytes)) = outcome {
-        let text = String::from_utf8_lossy(bytes);
+    /// `; stderr=...` suffix for failure messages (empty when nothing was written).
+    fn note(&self) -> String {
+        let text = String::from_utf8_lossy(&self.bytes);
         let trimmed = text.trim();
-        if !trimmed.is_empty() {
-            return format!("; stderr={trimmed}");
+        match (trimmed.is_empty(), self.dropped) {
+            (true, 0) => String::new(),
+            (_, 0) => format!("; stderr={trimmed}"),
+            (_, dropped) => {
+                format!("; stderr={trimmed} [stderr truncated: {dropped} further bytes discarded]")
+            }
         }
     }
-    String::new()
+}
+
+/// Everything one worker process run produced, before protocol validation.
+/// Only constructed once the direct child has been reaped, every pipe has
+/// reached EOF and the worker's process tree has been terminated.
+struct WorkerRun {
+    exit_status: ExitStatus,
+    stdout: Vec<u8>,
+    stderr: StderrCapture,
+    /// `None` when the whole request reached the worker's stdin.
+    stdin_error: Option<String>,
+}
+
+fn timeout_failure(transfer_pending: bool, timeout_ms: u64) -> WorkerFailure {
+    if transfer_pending {
+        WorkerFailure::new(
+            WorkerFailureKind::TransferTimeout,
+            format!(
+                "nir_timeout: Fission NIR worker request transfer timed out after {timeout_ms}ms"
+            ),
+        )
+    } else {
+        WorkerFailure::new(
+            WorkerFailureKind::ExecutionTimeout,
+            format!("nir_timeout: Fission NIR worker timed out after {timeout_ms}ms"),
+        )
+    }
+}
+
+fn response_too_large(limit: usize, observed: usize) -> WorkerFailure {
+    WorkerFailure::new(
+        WorkerFailureKind::ProtocolFailure,
+        format!(
+            "Fission NIR worker response exceeded {limit} byte limit (observed >= {observed} bytes)"
+        ),
+    )
+}
+
+fn delayed_eof(open: &[&str], grace: Duration) -> WorkerFailure {
+    WorkerFailure::new(
+        WorkerFailureKind::CleanupFailure,
+        format!(
+            "Fission NIR worker delayed EOF: {} still open {}ms after the worker exited \
+             (a descendant inherited the pipe); worker process tree killed",
+            open.join("/"),
+            grace.as_millis()
+        ),
+    )
+}
+
+fn spawn_failure(error: std::io::Error) -> WorkerFailure {
+    WorkerFailure::new(
+        WorkerFailureKind::CrashedWorker,
+        format!("Fission NIR worker spawn failed: {error}"),
+    )
+}
+
+fn wait_failure(error: std::io::Error) -> WorkerFailure {
+    WorkerFailure::new(
+        WorkerFailureKind::CrashedWorker,
+        format!("Fission NIR worker wait failed: {error}"),
+    )
 }
 
 pub(crate) fn execute_nir_worker_request(
@@ -376,315 +282,20 @@ pub(crate) fn execute_nir_worker_request_with_config(
         ));
     }
 
-    // Start the single overall deadline before spawn and request transfer so a
-    // wedged stdin consumer cannot stall outside the watchdog.
+    // One absolute deadline covers spawn, request transfer and execution, so a
+    // worker that never drains stdin cannot stall outside the watchdog.
     let started_at = Instant::now();
     let deadline =
         (config.timeout_ms > 0).then(|| started_at + Duration::from_millis(config.timeout_ms));
 
-    let child = Command::new(&config.worker_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| {
-            WorkerFailure::new(
-                WorkerFailureKind::CrashedWorker,
-                format!("Fission NIR worker spawn failed: {e}"),
-            )
-        })?;
-    let mut guard = WorkerProcessGuard::new(child);
-
-    // Drain stdout and stderr concurrently alongside non-blocking stdin transfer.
-    let stdout = guard.take_stdout()?;
-    let (stdout_rx, stdout_handle) = spawn_pipe_reader(stdout, config.max_response_bytes);
-    guard.stdout_handle = Some(stdout_handle);
-
-    let stderr = guard.take_stderr()?;
-    let (stderr_rx, stderr_handle) = spawn_pipe_reader(stderr, config.max_stderr_bytes);
-    guard.stderr_handle = Some(stderr_handle);
-
-    let stdin = guard.take_stdin()?;
-    let (stdin_rx, stdin_handle) = spawn_stdin_writer(stdin, request_json);
-    guard.stdin_handle = Some(stdin_handle);
-
-    let mut stdin_done = false;
-    let mut stdin_error: Option<String> = None;
-
-    let exit_status = loop {
-        if !stdin_done {
-            match stdin_rx.try_recv() {
-                Ok(Ok(())) => stdin_done = true,
-                Ok(Err(error)) => {
-                    stdin_done = true;
-                    stdin_error = Some(error.to_string());
-                }
-                Err(TryRecvError::Disconnected) => {
-                    stdin_done = true;
-                    stdin_error = Some("writer thread exited unexpectedly".to_string());
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-        }
-
-        // Fail fast if stdout already overflowed the response limit while the child is still running.
-        match stdout_rx.try_recv() {
-            Ok(PipeReadOutcome::TooLarge { limit, read }) => {
-                guard.abort_and_reap();
-                return Err(WorkerFailure::new(
-                    WorkerFailureKind::ProtocolFailure,
-                    format!(
-                        "Fission NIR worker response exceeded {limit} byte limit (observed >= {read} bytes)"
-                    ),
-                ));
-            }
-            Ok(PipeReadOutcome::Io(err)) => {
-                guard.abort_and_reap();
-                return Err(WorkerFailure::new(
-                    WorkerFailureKind::ProtocolFailure,
-                    format!("Fission NIR worker stdout read failed: {err}"),
-                ));
-            }
-            Ok(PipeReadOutcome::Ok(bytes)) => {
-                // Keep output available only after exit_status completes: re-send locally by storing?
-                // Wait: if stdout closed cleanly before exit_status, wait briefly for exit_status
-                // rather than re-reading an empty receiver! Handle below via option.
-                let status = wait_for_exit_after_stdout_eof(
-                    &mut guard,
-                    &stdin_rx,
-                    &mut stdin_done,
-                    &mut stdin_error,
-                    deadline,
-                    started_at,
-                    request.address,
-                    config.timeout_ms,
-                )?;
-                let stderr_outcome =
-                    recv_until(&stderr_rx, post_exit_deadline(deadline, config.eof_grace));
-                let stdin_cleanup_ok = wait_for_stdin_cleanup(
-                    &stdin_rx,
-                    &mut stdin_done,
-                    &mut stdin_error,
-                    post_exit_deadline(deadline, config.eof_grace),
-                );
-                guard.join_finished_handles();
-                if !stdin_cleanup_ok {
-                    return Err(WorkerFailure::new(
-                        WorkerFailureKind::CleanupFailure,
-                        format!(
-                            "Fission NIR worker cleanup failed: stdin writer stalled after exit status {status}"
-                        ),
-                    ));
-                }
-                if let Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) =
-                    stderr_outcome
-                {
-                    return Err(WorkerFailure::new(
-                        WorkerFailureKind::CleanupFailure,
-                        format!(
-                            "Fission NIR worker delayed EOF on stderr after exit status {status}"
-                        ),
-                    ));
-                }
-                return finalize_worker_result(
-                    request,
-                    sent_request_id,
-                    status,
-                    PipeReadOutcome::Ok(bytes),
-                    stderr_outcome.ok(),
-                    stdin_error,
-                );
-            }
-            Err(TryRecvError::Disconnected) => {
-                guard.abort_and_reap();
-                return Err(WorkerFailure::new(
-                    WorkerFailureKind::ProtocolFailure,
-                    "Fission NIR worker stdout reader disconnected",
-                ));
-            }
-            Err(TryRecvError::Empty) => {}
-        }
-
-        if let Some(status) = guard.try_wait()? {
-            nir_diag_event(
-                request.address,
-                "worker_exit",
-                format!(
-                    "status={status} elapsed_ms={:.1}",
-                    started_at.elapsed().as_secs_f64() * 1000.0
-                ),
-            );
-            break status;
-        }
-
-        if let Some(dl) = deadline
-            && Instant::now() >= dl
-        {
-            nir_diag_event(
-                request.address,
-                "worker_timeout",
-                format!("budget_ms={}", config.timeout_ms),
-            );
-            guard.abort_and_reap();
-            let failure = if !stdin_done {
-                WorkerFailure::new(
-                    WorkerFailureKind::TransferTimeout,
-                    format!(
-                        "nir_timeout: Fission NIR worker request transfer timed out after {}ms",
-                        config.timeout_ms
-                    ),
-                )
-            } else {
-                WorkerFailure::new(
-                    WorkerFailureKind::ExecutionTimeout,
-                    format!(
-                        "nir_timeout: Fission NIR worker timed out after {}ms",
-                        config.timeout_ms
-                    ),
-                )
-            };
-            return Err(failure);
-        }
-
-        thread::sleep(Duration::from_millis(5));
-    };
-
-    let pipe_deadline = post_exit_deadline(deadline, config.eof_grace);
-    let stdout_outcome = recv_until(&stdout_rx, pipe_deadline).map_err(|_| {
-        guard.abort_and_reap();
-        WorkerFailure::new(
-            WorkerFailureKind::CleanupFailure,
-            format!("Fission NIR worker delayed EOF after exit status {exit_status}"),
-        )
-    })?;
-    let stderr_outcome = recv_until(&stderr_rx, pipe_deadline).map_err(|_| {
-        guard.abort_and_reap();
-        WorkerFailure::new(
-            WorkerFailureKind::CleanupFailure,
-            format!("Fission NIR worker delayed EOF on stderr after exit status {exit_status}"),
-        )
-    })?;
-    if !wait_for_stdin_cleanup(&stdin_rx, &mut stdin_done, &mut stdin_error, pipe_deadline) {
-        guard.abort_and_reap();
-        return Err(WorkerFailure::new(
-            WorkerFailureKind::CleanupFailure,
-            format!(
-                "Fission NIR worker cleanup failed: stdin writer stalled after exit status {exit_status}"
-            ),
-        ));
-    }
-    guard.join_finished_handles();
-
-    finalize_worker_result(
-        request,
-        sent_request_id,
-        exit_status,
-        stdout_outcome,
-        Some(stderr_outcome),
-        stdin_error,
-    )
-}
-
-fn post_exit_deadline(deadline: Option<Instant>, grace: Duration) -> Instant {
-    let capped = Instant::now() + grace;
-    match deadline {
-        Some(dl) => dl
-            .min(capped)
-            .max(Instant::now() + Duration::from_millis(25)),
-        None => capped,
-    }
-}
-
-fn wait_for_exit_after_stdout_eof(
-    guard: &mut WorkerProcessGuard,
-    stdin_rx: &Receiver<std::io::Result<()>>,
-    stdin_done: &mut bool,
-    stdin_error: &mut Option<String>,
-    deadline: Option<Instant>,
-    started_at: Instant,
-    address: u64,
-    timeout_ms: u64,
-) -> Result<ExitStatus, WorkerFailure> {
-    loop {
-        if !*stdin_done {
-            match stdin_rx.try_recv() {
-                Ok(Ok(())) => *stdin_done = true,
-                Ok(Err(error)) => {
-                    *stdin_done = true;
-                    *stdin_error = Some(error.to_string());
-                }
-                Err(TryRecvError::Disconnected) => {
-                    *stdin_done = true;
-                    *stdin_error = Some("writer thread exited unexpectedly".to_string());
-                }
-                Err(TryRecvError::Empty) => {}
-            }
-        }
-        if let Some(status) = guard.try_wait()? {
-            nir_diag_event(
-                address,
-                "worker_exit",
-                format!(
-                    "status={status} elapsed_ms={:.1}",
-                    started_at.elapsed().as_secs_f64() * 1000.0
-                ),
-            );
-            return Ok(status);
-        }
-        if let Some(dl) = deadline
-            && Instant::now() >= dl
-        {
-            guard.abort_and_reap();
-            return Err(WorkerFailure::new(
-                if !*stdin_done {
-                    WorkerFailureKind::TransferTimeout
-                } else {
-                    WorkerFailureKind::ExecutionTimeout
-                },
-                format!(
-                    "nir_timeout: Fission NIR worker timed out after {timeout_ms}ms after closing stdout"
-                ),
-            ));
-        }
-        thread::sleep(Duration::from_millis(5));
-    }
-}
-
-fn wait_for_stdin_cleanup(
-    stdin_rx: &Receiver<std::io::Result<()>>,
-    stdin_done: &mut bool,
-    stdin_error: &mut Option<String>,
-    deadline: Instant,
-) -> bool {
-    if *stdin_done {
-        return true;
-    }
-    match recv_until(stdin_rx, deadline) {
-        Ok(Ok(())) => {
-            *stdin_done = true;
-            true
-        }
-        Ok(Err(err)) => {
-            *stdin_done = true;
-            *stdin_error = Some(err.to_string());
-            true
-        }
-        Err(RecvTimeoutError::Disconnected) => {
-            *stdin_done = true;
-            *stdin_error = Some("writer thread exited unexpectedly".to_string());
-            true
-        }
-        Err(RecvTimeoutError::Timeout) => false,
-    }
+    let run = supervise::run(config, &request_json, request.address, started_at, deadline)?;
+    finalize_worker_result(request, sent_request_id, run)
 }
 
 fn finalize_worker_result(
     request: &NirWorkerRequest,
     sent_request_id: u64,
-    exit_status: ExitStatus,
-    stdout_outcome: PipeReadOutcome,
-    stderr_outcome: Option<PipeReadOutcome>,
-    stdin_error: Option<String>,
+    run: WorkerRun,
 ) -> Result<
     (
         String,
@@ -693,44 +304,37 @@ fn finalize_worker_result(
     ),
     WorkerFailure,
 > {
-    let stderr_suffix = stderr_note(stderr_outcome.as_ref());
-    let stdout_bytes = match stdout_outcome {
-        PipeReadOutcome::Ok(bytes) => bytes,
-        PipeReadOutcome::TooLarge { limit, read } => {
-            return Err(WorkerFailure::new(
-                WorkerFailureKind::ProtocolFailure,
-                format!(
-                    "Fission NIR worker response exceeded {limit} byte limit (observed >= {read} bytes){stderr_suffix}"
-                ),
-            ));
-        }
-        PipeReadOutcome::Io(err) => {
-            return Err(WorkerFailure::new(
-                WorkerFailureKind::ProtocolFailure,
-                format!("Fission NIR worker stdout read failed: {err}{stderr_suffix}"),
-            ));
+    let WorkerRun {
+        exit_status,
+        stdout,
+        stderr,
+        stdin_error,
+    } = run;
+    let stderr_suffix = stderr.note();
+    let stdin_suffix = stdin_error
+        .as_deref()
+        .map(|e| format!("; stdin write failed: {e}"))
+        .unwrap_or_default();
+    let failed_exit_kind = || {
+        if exit_status.success() {
+            WorkerFailureKind::ProtocolFailure
+        } else {
+            WorkerFailureKind::CrashedWorker
         }
     };
 
-    let stdout_text = String::from_utf8(stdout_bytes).map_err(|e| {
+    let stdout_text = String::from_utf8(stdout).map_err(|e| {
         WorkerFailure::new(
-            WorkerFailureKind::ProtocolFailure,
-            format!("Fission NIR worker response parse failed: invalid UTF-8: {e}{stderr_suffix}"),
+            failed_exit_kind(),
+            format!(
+                "Fission NIR worker response parse failed (status {exit_status}): invalid UTF-8: {e}{stderr_suffix}"
+            ),
         )
     })?;
 
     if stdout_text.trim().is_empty() {
-        let stdin_suffix = stdin_error
-            .as_deref()
-            .map(|e| format!("; stdin write failed: {e}"))
-            .unwrap_or_default();
-        let kind = if exit_status.success() {
-            WorkerFailureKind::ProtocolFailure
-        } else {
-            WorkerFailureKind::CrashedWorker
-        };
         return Err(WorkerFailure::new(
-            kind,
+            failed_exit_kind(),
             format!(
                 "Fission NIR worker exited with status {exit_status} without JSON response{stdin_suffix}{stderr_suffix}"
             ),
@@ -738,19 +342,15 @@ fn finalize_worker_result(
     }
 
     let response: NirWorkerResponse = serde_json::from_str(&stdout_text).map_err(|e| {
-        let kind = if exit_status.success() {
-            WorkerFailureKind::ProtocolFailure
-        } else {
-            WorkerFailureKind::CrashedWorker
-        };
         WorkerFailure::new(
-            kind,
+            failed_exit_kind(),
             format!(
                 "Fission NIR worker response parse failed (status {exit_status}): {e}{stderr_suffix}"
             ),
         )
     })?;
 
+    // Identity, when present, must match on every response.
     if let Some(got_request_id) = response.request_id
         && got_request_id != sent_request_id
     {
@@ -774,11 +374,31 @@ fn finalize_worker_result(
     }
 
     if response.success {
+        // Publishing requires, in order: a clean exit, the whole request
+        // delivered (a worker that stopped reading cannot have analysed it),
+        // and an answer that names the request it answers.
         if !exit_status.success() {
             return Err(WorkerFailure::new(
                 WorkerFailureKind::CrashedWorker,
                 format!(
                     "Fission NIR worker exited with non-zero status {exit_status} after response{stderr_suffix}"
+                ),
+            ));
+        }
+        if let Some(error) = stdin_error {
+            return Err(WorkerFailure::new(
+                WorkerFailureKind::ProtocolFailure,
+                format!(
+                    "Fission NIR worker stdin write failed: worker answered success before consuming the whole request ({error}){stderr_suffix}"
+                ),
+            ));
+        }
+        if response.request_id.is_none() || response.address.is_none() {
+            return Err(WorkerFailure::new(
+                WorkerFailureKind::ProtocolFailure,
+                format!(
+                    "Fission NIR worker response request identity mismatch: success response must carry request_id {sent_request_id} and address 0x{:x}",
+                    request.address
                 ),
             ));
         }
@@ -806,6 +426,8 @@ fn finalize_worker_result(
             ),
         ))
     } else {
+        // A rejection may legitimately carry no identity: the worker could not
+        // parse the request (or it exceeded the worker's own size limit).
         Err(WorkerFailure::new(
             WorkerFailureKind::WorkerRejected,
             response
@@ -815,16 +437,740 @@ fn finalize_worker_result(
     }
 }
 
+/// Worker process supervision: spawn, bounded concurrent pipe I/O under one
+/// deadline, and teardown of the worker's whole process tree.
+///
+/// Invariant (both platforms): when `run` returns -- success, failure or
+/// panic unwinding through it -- the direct child has been reaped, every
+/// process still in the worker's process group (Unix) / job (Windows) has
+/// been killed, and every pipe end the supervisor owned has been closed.
+/// Unix additionally spawns no threads at all, so nothing can stay blocked
+/// on a pipe that a surviving descendant keeps open.
+///
+/// Platform limitations, by design rather than by omission:
+/// - Unix: a descendant that leaves the worker's process group (`setsid`,
+///   `setpgid`) escapes the group kill. The supervisor still returns on time
+///   and still closes its own pipe ends, but that escaped process is not
+///   killed. Containing it needs cgroups / a subreaper, both host-global.
+/// - Unix: the worker is in its own process group, so a terminal Ctrl-C (or
+///   the host dying without unwinding) does not signal it. The orphan then
+///   sees EOF/EPIPE on its pipes and exits when it next touches them.
+/// - Windows: the worker is assigned to a kill-on-close Job Object right
+///   after `spawn`; a descendant created in that window (the shipped worker
+///   creates none) is outside the job. If the job cannot be created or
+///   assigned, only the direct child is killed and I/O threads that stay
+///   blocked past the cleanup grace are detached; the failure says so.
+mod supervise {
+    #[cfg(unix)]
+    pub(super) use unix::run;
+
+    #[cfg(not(unix))]
+    pub(super) use threaded::run;
+
+    #[cfg(unix)]
+    mod unix {
+        use super::super::{
+            StderrCapture, WorkerFailure, WorkerFailureKind, WorkerRun, WorkerRunConfig,
+            delayed_eof, response_too_large, spawn_failure, timeout_failure, wait_failure,
+        };
+        use crate::render::nir_diag_event;
+        use std::io::{self, ErrorKind, Read, Write};
+        use std::os::fd::{AsRawFd, RawFd};
+        use std::os::unix::process::CommandExt;
+        use std::process::{Child, Command, ExitStatus, Stdio};
+        use std::time::{Duration, Instant};
+
+        /// Upper bound on one poll(2) sleep while the worker is alive: exit is
+        /// observed by polling waitid, not by a SIGCHLD handler (the host's
+        /// signal disposition is not ours to change).
+        const POLL_TICK: Duration = Duration::from_millis(10);
+        const IO_CHUNK: usize = 64 * 1024;
+
+        /// Owns the worker child and its process group (pgid == child pid).
+        struct ProcessGroup {
+            child: Child,
+            pgid: libc::pid_t,
+            reaped: Option<ExitStatus>,
+        }
+
+        impl ProcessGroup {
+            /// Has the leader exited? Checked WITHOUT reaping it (`WNOWAIT`): an
+            /// unreaped leader keeps its pid -- and therefore the group id --
+            /// reserved, so the later `killpg` cannot hit a recycled group.
+            fn leader_exited(&self) -> io::Result<bool> {
+                loop {
+                    // SAFETY: an all-zero siginfo_t is a valid plain C struct.
+                    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+                    // SAFETY: waitid on our own unreaped child with a valid out-pointer.
+                    let rc = unsafe {
+                        libc::waitid(
+                            libc::P_PID,
+                            self.pgid as libc::id_t,
+                            &mut info,
+                            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+                        )
+                    };
+                    if rc == 0 {
+                        // POSIX: with WNOHANG and no state change, si_signo is 0.
+                        return Ok(info.si_signo != 0);
+                    }
+                    let error = io::Error::last_os_error();
+                    if error.kind() != ErrorKind::Interrupted {
+                        return Err(error);
+                    }
+                }
+            }
+
+            /// Kill every member of the worker's process group, then reap the
+            /// leader. Idempotent; bounded (SIGKILL cannot be caught).
+            fn terminate(&mut self) -> io::Result<ExitStatus> {
+                if let Some(status) = self.reaped {
+                    return Ok(status);
+                }
+                // The leader is not reaped yet, so `pgid` still names our group.
+                // SAFETY: plain signal delivery to a process group we created.
+                unsafe {
+                    libc::killpg(self.pgid, libc::SIGKILL);
+                }
+                // The leader itself may have left its group; kill it directly too.
+                let _ = self.child.kill();
+                let status = self.child.wait()?;
+                self.reaped = Some(status);
+                Ok(status)
+            }
+        }
+
+        impl Drop for ProcessGroup {
+            fn drop(&mut self) {
+                let _ = self.terminate();
+            }
+        }
+
+        fn set_nonblocking(fd: RawFd) -> io::Result<()> {
+            // SAFETY: fcntl on a descriptor this process owns.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: as above; only O_NONBLOCK is added to our end of the pipe.
+            if unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        fn poll_ms(timeout: Duration) -> libc::c_int {
+            // Round up so a sub-millisecond remainder does not spin.
+            let ms = timeout.as_micros().div_ceil(1000);
+            libc::c_int::try_from(ms).unwrap_or(libc::c_int::MAX)
+        }
+
+        enum Drain {
+            Open,
+            Eof,
+        }
+
+        /// Read everything currently available. `sink` returns `Err` to abort.
+        fn drain(
+            pipe: &mut impl Read,
+            buf: &mut [u8],
+            mut sink: impl FnMut(&[u8]) -> Result<(), WorkerFailure>,
+        ) -> Result<Drain, WorkerFailure> {
+            loop {
+                match pipe.read(buf) {
+                    Ok(0) => return Ok(Drain::Eof),
+                    Ok(n) => sink(&buf[..n])?,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(Drain::Open),
+                    Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                    Err(e) => {
+                        return Err(WorkerFailure::new(
+                            WorkerFailureKind::ProtocolFailure,
+                            format!("Fission NIR worker stdout read failed: {e}"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        pub(in super::super) fn run(
+            config: &WorkerRunConfig,
+            request: &[u8],
+            address: u64,
+            started_at: Instant,
+            deadline: Option<Instant>,
+        ) -> Result<WorkerRun, WorkerFailure> {
+            let mut child = Command::new(&config.worker_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                // New process group led by the worker: every descendant that
+                // does not explicitly leave it dies with one killpg.
+                .process_group(0)
+                .spawn()
+                .map_err(spawn_failure)?;
+            let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+            let pgid = libc::pid_t::try_from(child.id())
+                .map_err(|_| spawn_failure(io::Error::other("worker pid does not fit pid_t")))?;
+            let mut group = ProcessGroup {
+                child,
+                pgid,
+                reaped: None,
+            };
+            let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
+                return Err(WorkerFailure::new(
+                    WorkerFailureKind::ProtocolFailure,
+                    "Fission NIR worker stdout unavailable",
+                ));
+            };
+            for fd in [stdin.as_raw_fd(), stdout.as_raw_fd(), stderr.as_raw_fd()] {
+                set_nonblocking(fd).map_err(|e| {
+                    WorkerFailure::new(
+                        WorkerFailureKind::WriteFailed,
+                        format!("Fission NIR worker stdin unavailable: O_NONBLOCK: {e}"),
+                    )
+                })?;
+            }
+
+            let mut stdin = (!request.is_empty()).then_some(stdin);
+            let mut written = 0usize;
+            let mut stdin_error = None;
+            let mut stdout = Some(stdout);
+            let mut response = Vec::new();
+            let mut stderr = Some(stderr);
+            let mut diagnostics = StderrCapture::new(config.max_stderr_bytes);
+            let mut exited_at: Option<Instant> = None;
+            let mut buf = vec![0u8; IO_CHUNK];
+
+            loop {
+                if exited_at.is_none() && group.leader_exited().map_err(wait_failure)? {
+                    exited_at = Some(Instant::now());
+                    nir_diag_event(
+                        address,
+                        "worker_exit",
+                        format!(
+                            "elapsed_ms={:.1}",
+                            started_at.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                }
+                if exited_at.is_some() && stdin.is_none() && stdout.is_none() && stderr.is_none() {
+                    break;
+                }
+
+                let now = Instant::now();
+                let wake_at = match exited_at {
+                    // After exit the deadline no longer applies; the bounded
+                    // EOF grace does (cleanup has its own budget).
+                    Some(at) => {
+                        let limit = at + config.eof_grace;
+                        if now >= limit {
+                            let open: Vec<&str> = [
+                                stdin.as_ref().map(|_| "stdin"),
+                                stdout.as_ref().map(|_| "stdout"),
+                                stderr.as_ref().map(|_| "stderr"),
+                            ]
+                            .into_iter()
+                            .flatten()
+                            .collect();
+                            return Err(delayed_eof(&open, config.eof_grace));
+                        }
+                        Some(limit)
+                    }
+                    None => {
+                        if let Some(dl) = deadline
+                            && now >= dl
+                        {
+                            nir_diag_event(
+                                address,
+                                "worker_timeout",
+                                format!("budget_ms={}", config.timeout_ms),
+                            );
+                            return Err(timeout_failure(stdin.is_some(), config.timeout_ms));
+                        }
+                        deadline
+                    }
+                };
+                let sleep = wake_at.map_or(POLL_TICK, |at| {
+                    POLL_TICK.min(at.saturating_duration_since(now))
+                });
+
+                let mut fds = [libc::pollfd {
+                    fd: -1,
+                    events: 0,
+                    revents: 0,
+                }; 3];
+                if let Some(pipe) = &stdin {
+                    fds[0] = libc::pollfd {
+                        fd: pipe.as_raw_fd(),
+                        events: libc::POLLOUT,
+                        revents: 0,
+                    };
+                }
+                if let Some(pipe) = &stdout {
+                    fds[1] = libc::pollfd {
+                        fd: pipe.as_raw_fd(),
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                }
+                if let Some(pipe) = &stderr {
+                    fds[2] = libc::pollfd {
+                        fd: pipe.as_raw_fd(),
+                        events: libc::POLLIN,
+                        revents: 0,
+                    };
+                }
+                // Negative fds are ignored by poll(2), so closed pipes need no compaction.
+                // SAFETY: `fds` is a valid array of 3 pollfd structs.
+                let rc = unsafe { libc::poll(fds.as_mut_ptr(), 3, poll_ms(sleep)) };
+                if rc < 0 {
+                    let error = io::Error::last_os_error();
+                    if error.kind() == ErrorKind::Interrupted {
+                        continue;
+                    }
+                    return Err(WorkerFailure::new(
+                        WorkerFailureKind::ProtocolFailure,
+                        format!("Fission NIR worker stdout read failed: poll: {error}"),
+                    ));
+                }
+
+                if fds[0].revents != 0
+                    && let Some(pipe) = stdin.as_mut()
+                {
+                    loop {
+                        let end = request.len().min(written + IO_CHUNK);
+                        match pipe.write(&request[written..end]) {
+                            Ok(n) => {
+                                written += n;
+                                if written == request.len() {
+                                    // Close our end: the worker sees EOF.
+                                    stdin = None;
+                                    break;
+                                }
+                            }
+                            Err(e) if e.kind() == ErrorKind::WouldBlock => break,
+                            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                            Err(e) => {
+                                // EPIPE: the worker closed stdin early. Recorded,
+                                // judged against the response in finalize.
+                                stdin_error = Some(format!(
+                                    "{e} after {written} of {} request bytes",
+                                    request.len()
+                                ));
+                                stdin = None;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if fds[1].revents != 0
+                    && let Some(pipe) = stdout.as_mut()
+                {
+                    let limit = config.max_response_bytes;
+                    let state = drain(pipe, &mut buf, |chunk| {
+                        let next = response.len().saturating_add(chunk.len());
+                        if next > limit {
+                            // Fail fast: never buffer past the limit.
+                            return Err(response_too_large(limit, next));
+                        }
+                        response.extend_from_slice(chunk);
+                        Ok(())
+                    })?;
+                    if let Drain::Eof = state {
+                        stdout = None;
+                    }
+                }
+
+                if fds[2].revents != 0
+                    && let Some(pipe) = stderr.as_mut()
+                {
+                    // Diagnostics: a read error just ends the capture.
+                    match drain(pipe, &mut buf, |chunk| {
+                        diagnostics.push(chunk);
+                        Ok(())
+                    }) {
+                        Ok(Drain::Open) => {}
+                        Ok(Drain::Eof) | Err(_) => stderr = None,
+                    }
+                }
+            }
+
+            // Leader exited and every pipe reached EOF. Kill any group member
+            // that is still around (it no longer holds our pipes) and reap.
+            let exit_status = group.terminate().map_err(wait_failure)?;
+            Ok(WorkerRun {
+                exit_status,
+                stdout: response,
+                stderr: diagnostics,
+                stdin_error,
+            })
+        }
+    }
+
+    #[cfg(not(unix))]
+    mod threaded {
+        use super::super::{
+            StderrCapture, WorkerFailure, WorkerFailureKind, WorkerRun, WorkerRunConfig,
+            delayed_eof, response_too_large, spawn_failure, timeout_failure, wait_failure,
+        };
+        use crate::render::nir_diag_event;
+        use std::io::{self, ErrorKind, Read, Write};
+        use std::process::{Child, Command, ExitStatus, Stdio};
+        use std::sync::mpsc::{self, Receiver, TryRecvError};
+        use std::thread::{self, JoinHandle};
+        use std::time::{Duration, Instant};
+
+        const POLL_TICK: Duration = Duration::from_millis(5);
+
+        enum StdoutOutcome {
+            Ok(Vec<u8>),
+            TooLarge { limit: usize, observed: usize },
+            Io(io::Error),
+        }
+
+        fn spawn_stdout_reader(
+            mut pipe: impl Read + Send + 'static,
+            limit: usize,
+        ) -> (Receiver<StdoutOutcome>, JoinHandle<()>) {
+            let (tx, rx) = mpsc::sync_channel(1);
+            let handle = thread::spawn(move || {
+                let mut out = Vec::new();
+                let mut chunk = [0u8; 16 * 1024];
+                let outcome = loop {
+                    match pipe.read(&mut chunk) {
+                        Ok(0) => break StdoutOutcome::Ok(out),
+                        Ok(n) => {
+                            let next = out.len().saturating_add(n);
+                            if next > limit {
+                                break StdoutOutcome::TooLarge {
+                                    limit,
+                                    observed: next,
+                                };
+                            }
+                            out.extend_from_slice(&chunk[..n]);
+                        }
+                        Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                        Err(e) => break StdoutOutcome::Io(e),
+                    }
+                };
+                let _ = tx.send(outcome);
+            });
+            (rx, handle)
+        }
+
+        fn spawn_stderr_reader(
+            mut pipe: impl Read + Send + 'static,
+            limit: usize,
+        ) -> (Receiver<StderrCapture>, JoinHandle<()>) {
+            let (tx, rx) = mpsc::sync_channel(1);
+            let handle = thread::spawn(move || {
+                let mut capture = StderrCapture::new(limit);
+                let mut chunk = [0u8; 16 * 1024];
+                loop {
+                    match pipe.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => capture.push(&chunk[..n]),
+                        Err(e) if e.kind() == ErrorKind::Interrupted => {}
+                        Err(_) => break,
+                    }
+                }
+                let _ = tx.send(capture);
+            });
+            (rx, handle)
+        }
+
+        fn spawn_stdin_writer(
+            mut pipe: impl Write + Send + 'static,
+            payload: Vec<u8>,
+        ) -> (Receiver<io::Result<()>>, JoinHandle<()>) {
+            let (tx, rx) = mpsc::sync_channel(1);
+            let handle = thread::spawn(move || {
+                let result = pipe.write_all(&payload).and_then(|()| pipe.flush());
+                drop(pipe);
+                let _ = tx.send(result);
+            });
+            (rx, handle)
+        }
+
+        /// Owns the worker child, its Job Object (Windows) and the I/O threads.
+        struct ProcessTree {
+            child: Child,
+            #[cfg(windows)]
+            job: Option<job::Job>,
+            reaped: Option<ExitStatus>,
+            threads: Vec<JoinHandle<()>>,
+            cleanup_grace: Duration,
+        }
+
+        impl ProcessTree {
+            fn kill_tree(&mut self) {
+                #[cfg(windows)]
+                if let Some(job) = &self.job {
+                    job.terminate();
+                }
+                let _ = self.child.kill();
+            }
+
+            fn terminate(&mut self) -> io::Result<ExitStatus> {
+                self.kill_tree();
+                let status = match self.reaped {
+                    Some(status) => status,
+                    None => {
+                        let status = self.child.wait()?;
+                        self.reaped = Some(status);
+                        status
+                    }
+                };
+                // With the whole tree dead, every pipe peer is closed and the
+                // I/O threads finish promptly; wait for them, bounded.
+                let end = Instant::now() + self.cleanup_grace;
+                while self.threads.iter().any(|h| !h.is_finished()) && Instant::now() < end {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                for handle in std::mem::take(&mut self.threads) {
+                    if handle.is_finished() {
+                        let _ = handle.join();
+                    }
+                    // else: blocked on a pipe held outside the job -- detached
+                    // (documented limitation; see `supervise`).
+                }
+                Ok(status)
+            }
+        }
+
+        impl Drop for ProcessTree {
+            fn drop(&mut self) {
+                let _ = self.terminate();
+            }
+        }
+
+        pub(in super::super) fn run(
+            config: &WorkerRunConfig,
+            request: &[u8],
+            address: u64,
+            started_at: Instant,
+            deadline: Option<Instant>,
+        ) -> Result<WorkerRun, WorkerFailure> {
+            let mut child = Command::new(&config.worker_path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(spawn_failure)?;
+            #[cfg(windows)]
+            let job = job::Job::contain(&child).ok();
+            let pipes = (child.stdin.take(), child.stdout.take(), child.stderr.take());
+            let mut tree = ProcessTree {
+                child,
+                #[cfg(windows)]
+                job,
+                reaped: None,
+                threads: Vec::with_capacity(3),
+                cleanup_grace: config.eof_grace,
+            };
+            let (Some(stdin), Some(stdout), Some(stderr)) = pipes else {
+                return Err(WorkerFailure::new(
+                    WorkerFailureKind::ProtocolFailure,
+                    "Fission NIR worker stdout unavailable",
+                ));
+            };
+            let (stdout_rx, handle) = spawn_stdout_reader(stdout, config.max_response_bytes);
+            tree.threads.push(handle);
+            let (stderr_rx, handle) = spawn_stderr_reader(stderr, config.max_stderr_bytes);
+            tree.threads.push(handle);
+            let (stdin_rx, handle) = spawn_stdin_writer(stdin, request.to_vec());
+            tree.threads.push(handle);
+
+            let mut stdin_result: Option<Option<String>> = None;
+            let mut stdout_bytes: Option<Vec<u8>> = None;
+            let mut diagnostics: Option<StderrCapture> = None;
+            let mut exited_at: Option<Instant> = None;
+
+            loop {
+                if stdin_result.is_none() {
+                    match stdin_rx.try_recv() {
+                        Ok(Ok(())) => stdin_result = Some(None),
+                        Ok(Err(e)) => {
+                            stdin_result =
+                                Some(Some(format!("{e} ({} request bytes)", request.len())))
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            stdin_result = Some(Some("writer thread exited unexpectedly".into()))
+                        }
+                        Err(TryRecvError::Empty) => {}
+                    }
+                }
+                if stdout_bytes.is_none() {
+                    match stdout_rx.try_recv() {
+                        Ok(StdoutOutcome::Ok(bytes)) => stdout_bytes = Some(bytes),
+                        Ok(StdoutOutcome::TooLarge { limit, observed }) => {
+                            return Err(response_too_large(limit, observed));
+                        }
+                        Ok(StdoutOutcome::Io(e)) => {
+                            return Err(WorkerFailure::new(
+                                WorkerFailureKind::ProtocolFailure,
+                                format!("Fission NIR worker stdout read failed: {e}"),
+                            ));
+                        }
+                        Err(TryRecvError::Disconnected) => {
+                            return Err(WorkerFailure::new(
+                                WorkerFailureKind::ProtocolFailure,
+                                "Fission NIR worker stdout read failed: reader disconnected",
+                            ));
+                        }
+                        Err(TryRecvError::Empty) => {}
+                    }
+                }
+                if diagnostics.is_none() {
+                    match stderr_rx.try_recv() {
+                        Ok(capture) => diagnostics = Some(capture),
+                        Err(TryRecvError::Disconnected) => {
+                            diagnostics = Some(StderrCapture::new(0))
+                        }
+                        Err(TryRecvError::Empty) => {}
+                    }
+                }
+                if exited_at.is_none()
+                    && let Some(status) = tree.child.try_wait().map_err(wait_failure)?
+                {
+                    tree.reaped = Some(status);
+                    exited_at = Some(Instant::now());
+                    nir_diag_event(
+                        address,
+                        "worker_exit",
+                        format!(
+                            "status={status} elapsed_ms={:.1}",
+                            started_at.elapsed().as_secs_f64() * 1000.0
+                        ),
+                    );
+                }
+                if exited_at.is_some()
+                    && stdin_result.is_some()
+                    && stdout_bytes.is_some()
+                    && diagnostics.is_some()
+                {
+                    break;
+                }
+                let now = Instant::now();
+                match exited_at {
+                    Some(at) if now >= at + config.eof_grace => {
+                        let open: Vec<&str> = [
+                            stdin_result.is_none().then_some("stdin"),
+                            stdout_bytes.is_none().then_some("stdout"),
+                            diagnostics.is_none().then_some("stderr"),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        return Err(delayed_eof(&open, config.eof_grace));
+                    }
+                    Some(_) => {}
+                    None => {
+                        if let Some(dl) = deadline
+                            && now >= dl
+                        {
+                            nir_diag_event(
+                                address,
+                                "worker_timeout",
+                                format!("budget_ms={}", config.timeout_ms),
+                            );
+                            return Err(timeout_failure(stdin_result.is_none(), config.timeout_ms));
+                        }
+                    }
+                }
+                thread::sleep(POLL_TICK);
+            }
+
+            let exit_status = tree.terminate().map_err(wait_failure)?;
+            Ok(WorkerRun {
+                exit_status,
+                stdout: stdout_bytes.unwrap_or_default(),
+                stderr: diagnostics.unwrap_or_else(|| StderrCapture::new(0)),
+                stdin_error: stdin_result.flatten(),
+            })
+        }
+
+        /// Windows Job Object: every process the worker creates joins the job
+        /// (no breakaway is granted), so one TerminateJobObject -- or closing
+        /// the last handle, via KILL_ON_JOB_CLOSE -- ends the whole tree and
+        /// with it every inherited pipe handle.
+        #[cfg(windows)]
+        mod job {
+            use std::io;
+            use std::os::windows::io::AsRawHandle;
+            use std::process::Child;
+            use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+            use windows_sys::Win32::System::JobObjects::{
+                AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+                SetInformationJobObject, TerminateJobObject,
+            };
+
+            pub(super) struct Job(HANDLE);
+
+            impl Job {
+                pub(super) fn contain(child: &Child) -> io::Result<Self> {
+                    // SAFETY: null attributes/name create an anonymous job.
+                    let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+                    if handle.is_null() {
+                        return Err(io::Error::last_os_error());
+                    }
+                    let job = Self(handle);
+                    let mut info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+                    info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+                    // SAFETY: `info` is a valid JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+                    // of the size passed, for the matching information class.
+                    let ok = unsafe {
+                        SetInformationJobObject(
+                            job.0,
+                            JobObjectExtendedLimitInformation,
+                            (&info as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                        )
+                    };
+                    if ok == 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    // SAFETY: both handles are valid and owned for this call.
+                    let ok = unsafe { AssignProcessToJobObject(job.0, child.as_raw_handle()) };
+                    if ok == 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    Ok(job)
+                }
+
+                pub(super) fn terminate(&self) {
+                    // SAFETY: valid job handle owned by `self`.
+                    unsafe {
+                        TerminateJobObject(self.0, 1);
+                    }
+                }
+            }
+
+            impl Drop for Job {
+                fn drop(&mut self) {
+                    // SAFETY: closing the handle we created; KILL_ON_JOB_CLOSE
+                    // ends any process still in the job.
+                    unsafe {
+                        CloseHandle(self.0);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_WORKER_STDERR_BYTES, PipeReadOutcome, WorkerFailureKind, WorkerRunConfig,
-        execute_nir_worker_request_with_config, spawn_pipe_reader,
+        MAX_WORKER_STDERR_BYTES, WorkerFailureKind, WorkerRunConfig,
+        execute_nir_worker_request_with_config,
     };
     use crate::types::NirWorkerRequest;
     use crate::{NirRenderOptions, NirTypeContext};
     use std::path::PathBuf;
-    use std::process::{Command, Stdio};
+    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{Duration, Instant};
 
@@ -846,12 +1192,25 @@ mod tests {
             Self { dir }
         }
 
+        /// Write a fixture worker and execute it once through a no-op guard.
+        /// The first exec of a new executable is expensive on macOS (it is
+        /// scanned: measured 1.0 s alone, up to 3.2 s with 15 in parallel),
+        /// which would otherwise be charged to the supervisor's timeouts.
         fn write_executable(&self, name: &str, body: &str) -> PathBuf {
             use std::os::unix::fs::PermissionsExt;
             let path = self.dir.join(name);
-            std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+            std::fs::write(
+                &path,
+                format!("#!/bin/sh\n[ -n \"$FISSION_WORKER_FIXTURE_WARM\" ] && exit 0\n{body}\n"),
+            )
+            .expect("write script");
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
                 .expect("chmod +x");
+            let status = Command::new(&path)
+                .env("FISSION_WORKER_FIXTURE_WARM", "1")
+                .status()
+                .expect("warm fixture");
+            assert!(status.success(), "warm-up of {name} failed");
             path
         }
     }
@@ -874,29 +1233,30 @@ mod tests {
         }
     }
 
+    /// Classic pipe deadlock shape: the worker writes a response larger than
+    /// a pipe buffer *before* reading a request larger than a pipe buffer.
+    /// Only concurrent transfer and drain can complete it.
     #[cfg(unix)]
     #[test]
-    fn drains_stdout_larger_than_a_pipe_buffer_before_joining() {
-        let mut child = Command::new("sh")
-            .args([
-                "-c",
-                "i=0; while [ $i -lt 131072 ]; do printf x; i=$((i + 1)); done",
-            ])
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("spawn stdout fixture");
-        let stdout = child.stdout.take().expect("stdout pipe");
-        let (rx, handle) = spawn_pipe_reader(stdout, 1024 * 1024);
-
-        let status = child.wait().expect("wait stdout fixture");
-        assert!(status.success());
-        let outcome = rx.recv().expect("reader outcome");
-        handle.join().expect("reader join");
-        match outcome {
-            PipeReadOutcome::Ok(bytes) => assert_eq!(bytes.len(), 131_072),
-            PipeReadOutcome::TooLarge { .. } => panic!("unexpected size failure"),
-            PipeReadOutcome::Io(err) => panic!("unexpected io error: {err}"),
-        }
+    fn large_response_before_reading_large_request_does_not_deadlock() {
+        let tmp = TempScriptDir::new("both_pipes_full");
+        let chunk = "x".repeat(64);
+        let script = tmp.write_executable(
+            "eager.sh",
+            &format!(
+                "printf '{{\"request_id\":42,\"address\":5368713216,\"success\":true,\"code\":\"'\n\
+                 i=0\nwhile [ $i -lt 3200 ]; do printf '%s' '{chunk}'; i=$((i + 1)); done\n\
+                 printf '\"}}'\ncat >/dev/null"
+            ),
+        );
+        let mut req = sample_request(1024 * 1024);
+        req.request_id = Some(42);
+        let (code, _, _) = execute_nir_worker_request_with_config(
+            &req,
+            &WorkerRunConfig::with_path(script, 20_000),
+        )
+        .expect("concurrent transfer and drain must not deadlock");
+        assert_eq!(code.len(), 3200 * 64);
     }
 
     #[cfg(unix)]
@@ -1101,6 +1461,432 @@ mod tests {
         );
         assert_eq!(err.kind, WorkerFailureKind::CleanupFailure);
         assert!(err.message.contains("delayed EOF"));
+    }
+
+    /// Process-wide resource probes. Counts are only meaningful in a process
+    /// that runs nothing else, so the tests below re-execute this test binary
+    /// on a single test (`run_isolated`).
+    #[cfg(unix)]
+    mod resources {
+        pub(super) fn open_fd_count() -> usize {
+            std::fs::read_dir("/dev/fd").expect("list /dev/fd").count()
+        }
+
+        #[cfg(target_os = "linux")]
+        pub(super) fn thread_count() -> usize {
+            let status = std::fs::read_to_string("/proc/self/status").expect("read status");
+            status
+                .lines()
+                .find_map(|line| line.strip_prefix("Threads:"))
+                .and_then(|value| value.trim().parse().ok())
+                .expect("Threads: line")
+        }
+
+        #[cfg(target_os = "macos")]
+        pub(super) fn thread_count() -> usize {
+            // SAFETY: an all-zero proc_taskinfo is a valid value of a plain C struct.
+            let mut info: libc::proc_taskinfo = unsafe { std::mem::zeroed() };
+            let size = std::mem::size_of::<libc::proc_taskinfo>() as libc::c_int;
+            // SAFETY: `info` is a writable buffer of exactly `size` bytes.
+            let written = unsafe {
+                libc::proc_pidinfo(
+                    libc::getpid(),
+                    libc::PROC_PIDTASKINFO,
+                    0,
+                    (&mut info as *mut libc::proc_taskinfo).cast(),
+                    size,
+                )
+            };
+            assert_eq!(written, size, "proc_pidinfo(PROC_PIDTASKINFO) failed");
+            info.pti_threadnum as usize
+        }
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        pub(super) fn thread_count() -> usize {
+            0
+        }
+
+        /// True while `pid` exists and is not a zombie awaiting its reaper.
+        pub(super) fn process_alive(pid: i32) -> bool {
+            // SAFETY: signal 0 performs only an existence/permission check.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                return false;
+            }
+            #[cfg(target_os = "linux")]
+            if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                && let Some(state) = stat
+                    .rsplit(')')
+                    .next()
+                    .and_then(|rest| rest.split_whitespace().next())
+            {
+                return state != "Z";
+            }
+            true
+        }
+
+        /// True if this process has any child, live or unreaped.
+        pub(super) fn has_children() -> bool {
+            let mut status = 0;
+            // SAFETY: non-blocking status query over this process's own children.
+            let rc = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+            rc != -1
+        }
+
+        pub(super) fn kill(pid: i32) {
+            // SAFETY: plain signal delivery to a pid this test recorded itself.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    const RESOURCE_PROBE_ENV: &str = "FISSION_WORKER_RESOURCE_PROBE";
+
+    /// Re-run test `name` alone in a fresh copy of this test binary, so the
+    /// thread/fd/child counts it takes are not disturbed by parallel tests.
+    #[cfg(unix)]
+    fn run_isolated(name: &str) {
+        let test_name = format!(
+            "{}::{name}",
+            module_path!()
+                .split_once("::")
+                .map_or(module_path!(), |(_, rest)| rest)
+        );
+        let exe = std::env::current_exe().expect("current test binary");
+        let out = Command::new(exe)
+            .args([&test_name, "--exact", "--nocapture", "--test-threads=1"])
+            .env(RESOURCE_PROBE_ENV, "1")
+            .output()
+            .expect("re-run test binary");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        eprintln!("--- isolated {test_name} ---\n{stdout}{stderr}");
+        assert!(
+            out.status.success(),
+            "isolated probe {test_name} failed:\n{stdout}\n{stderr}"
+        );
+        assert!(
+            stdout.contains("1 passed"),
+            "isolated probe {test_name} did not run exactly one test:\n{stdout}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn read_pid(path: &std::path::Path) -> Option<i32> {
+        std::fs::read_to_string(path).ok()?.trim().parse().ok()
+    }
+
+    #[cfg(unix)]
+    fn recorded_pids(dir: &std::path::Path, prefix: &str) -> Vec<i32> {
+        let mut pids: Vec<i32> = std::fs::read_dir(dir)
+            .expect("list fixture dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
+            .filter_map(|entry| read_pid(&entry.path()))
+            .collect();
+        pids.sort_unstable();
+        pids
+    }
+
+    #[cfg(unix)]
+    fn wait_until(limit: Duration, mut done: impl FnMut() -> bool) -> bool {
+        let end = Instant::now() + limit;
+        loop {
+            if done() {
+                return true;
+            }
+            if Instant::now() >= end {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Repeated misbehaving workers whose descendant inherits the IPC pipes
+    /// and outlives them: the supervisor must return within its budget AND
+    /// leave no thread, descriptor, child or pipe-holding descendant behind.
+    #[cfg(unix)]
+    #[test]
+    fn repeated_pipe_holding_descendants_leave_no_threads_fds_or_processes() {
+        if std::env::var_os(RESOURCE_PROBE_ENV).is_none() {
+            run_isolated("repeated_pipe_holding_descendants_leave_no_threads_fds_or_processes");
+            return;
+        }
+        // FISSION_WORKER_RESOURCE_ROUNDS raises the count for manual measurement.
+        let rounds: usize = std::env::var("FISSION_WORKER_RESOURCE_ROUNDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(12);
+        let tmp = TempScriptDir::new("resource_probe");
+        let ok_json = r#"{"request_id":42,"address":5368713216,"success":true,"code":"int f(){}"}"#;
+
+        // Warm-up: a well-behaved worker, so one-time lazy state is not counted.
+        let ok = tmp.write_executable("ok.sh", &format!("cat >/dev/null\nprintf '{ok_json}'"));
+        let mut req = sample_request(16);
+        req.request_id = Some(42);
+        execute_nir_worker_request_with_config(&req, &WorkerRunConfig::with_path(ok, 5_000))
+            .expect("warm-up worker succeeds");
+
+        // Each descendant records its pid in holder_<worker pid>.pid.
+        let d = tmp.dir.display();
+        // 0: worker never reads and never exits; the descendant holds stdin,
+        //    stdout and stderr open (blocked transfer).
+        // 1: worker answers and exits 0; the descendant keeps stdout/stderr.
+        // 2: worker exits 3 at once; the descendant keeps every pipe.
+        let scenarios = [
+            (
+                tmp.write_executable(
+                    "hang.sh",
+                    &format!("sleep 30 <&0 &\necho $! > '{d}/holder_'$$.pid\nsleep 30"),
+                ),
+                1024 * 1024,
+                WorkerFailureKind::TransferTimeout,
+            ),
+            (
+                tmp.write_executable(
+                    "answer_then_exit.sh",
+                    &format!(
+                        "cat >/dev/null\nsleep 30 &\necho $! > '{d}/holder_'$$.pid\nprintf '{ok_json}'\nexit 0"
+                    ),
+                ),
+                16,
+                WorkerFailureKind::CleanupFailure,
+            ),
+            (
+                tmp.write_executable(
+                    "exit_at_once.sh",
+                    &format!("sleep 30 <&0 &\necho $! > '{d}/holder_'$$.pid\nexit 3"),
+                ),
+                1024 * 1024,
+                WorkerFailureKind::CleanupFailure,
+            ),
+        ];
+
+        let base_threads = resources::thread_count();
+        let base_fds = resources::open_fd_count();
+        let mut worst = Duration::ZERO;
+        for round in 0..rounds {
+            let (script, request_len, expected) = &scenarios[round % scenarios.len()];
+            let mut config = WorkerRunConfig::with_path(script.clone(), 300);
+            config.eof_grace = Duration::from_millis(100);
+            let mut req = sample_request(*request_len);
+            req.request_id = Some(42);
+
+            let started = Instant::now();
+            let err = execute_nir_worker_request_with_config(&req, &config)
+                .expect_err("misbehaving worker must not publish success");
+            let elapsed = started.elapsed();
+            worst = worst.max(elapsed);
+            assert_eq!(err.kind, *expected, "round {round}: {}", err.message);
+            assert!(
+                elapsed < Duration::from_secs(2),
+                "round {round}: supervisor took {elapsed:?}"
+            );
+        }
+        let holders = recorded_pids(&tmp.dir, "holder_");
+        assert_eq!(
+            holders.len(),
+            rounds,
+            "every fixture recorded its descendant"
+        );
+
+        let threads_ok = wait_until(Duration::from_secs(2), || {
+            resources::thread_count() <= base_threads
+        });
+        let fds_ok = wait_until(Duration::from_secs(2), || {
+            resources::open_fd_count() <= base_fds
+        });
+        let holders_dead = wait_until(Duration::from_secs(3), || {
+            holders.iter().all(|&pid| !resources::process_alive(pid))
+        });
+        let after_threads = resources::thread_count();
+        let after_fds = resources::open_fd_count();
+        let alive = holders
+            .iter()
+            .filter(|&&pid| resources::process_alive(pid))
+            .count();
+        let children = resources::has_children();
+        println!(
+            "resource probe: rounds={rounds} threads {base_threads}->{after_threads} \
+             fds {base_fds}->{after_fds} pipe_holders_alive={alive}/{rounds} \
+             unreaped_children={children} worst_call={worst:?}"
+        );
+        for &pid in &holders {
+            resources::kill(pid);
+        }
+        assert!(
+            threads_ok,
+            "threads leaked: {base_threads} -> {after_threads}"
+        );
+        assert!(fds_ok, "descriptors leaked: {base_fds} -> {after_fds}");
+        assert!(holders_dead, "{alive} pipe-holding descendants survived");
+        assert!(!children, "worker children left unreaped");
+    }
+
+    /// A descendant that leaves the worker's process group (setsid) cannot be
+    /// killed by a group signal. The supervisor must still return on time and
+    /// reclaim every thread and descriptor it owns; the escaped process itself
+    /// is a documented limitation and is killed here by the test.
+    #[cfg(unix)]
+    #[test]
+    fn descendant_escaping_the_process_group_still_leaves_no_threads_or_fds() {
+        if std::env::var_os(RESOURCE_PROBE_ENV).is_none() {
+            run_isolated("descendant_escaping_the_process_group_still_leaves_no_threads_or_fds");
+            return;
+        }
+        if Command::new("perl")
+            .args(["-MPOSIX", "-e", "exit 0"])
+            .status()
+            .map_or(true, |s| !s.success())
+        {
+            println!("SKIP: perl with POSIX unavailable");
+            return;
+        }
+        const ROUNDS: usize = 4;
+        let tmp = TempScriptDir::new("escape_probe");
+        let base_threads = resources::thread_count();
+        let base_fds = resources::open_fd_count();
+        let script = tmp.write_executable(
+            "escape.sh",
+            &format!(
+                "perl -MPOSIX -e 'POSIX::setsid(); sleep 30' <&0 &\necho $! > '{}/escaped_'$$.pid\nsleep 30",
+                tmp.dir.display()
+            ),
+        );
+        for round in 0..ROUNDS {
+            let mut config = WorkerRunConfig::with_path(script.clone(), 300);
+            config.eof_grace = Duration::from_millis(100);
+            let started = Instant::now();
+            let err = execute_nir_worker_request_with_config(&sample_request(1024 * 1024), &config)
+                .expect_err("hung worker must time out");
+            assert_eq!(
+                err.kind,
+                WorkerFailureKind::TransferTimeout,
+                "round {round}: {}",
+                err.message
+            );
+            assert!(started.elapsed() < Duration::from_secs(2));
+        }
+        let escaped = recorded_pids(&tmp.dir, "escaped_");
+        let threads_ok = wait_until(Duration::from_secs(2), || {
+            resources::thread_count() <= base_threads
+        });
+        let fds_ok = wait_until(Duration::from_secs(2), || {
+            resources::open_fd_count() <= base_fds
+        });
+        let after_threads = resources::thread_count();
+        let after_fds = resources::open_fd_count();
+        let alive = escaped
+            .iter()
+            .filter(|&&pid| resources::process_alive(pid))
+            .count();
+        println!(
+            "escape probe: rounds={ROUNDS} threads {base_threads}->{after_threads} \
+             fds {base_fds}->{after_fds} escaped_alive={alive}/{}",
+            escaped.len()
+        );
+        for &pid in &escaped {
+            resources::kill(pid);
+        }
+        assert!(
+            threads_ok,
+            "threads leaked: {base_threads} -> {after_threads}"
+        );
+        assert!(fds_ok, "descriptors leaked: {base_fds} -> {after_fds}");
+    }
+
+    /// stderr is diagnostics: the capture is bounded, but the pipe must keep
+    /// draining, or a chatty worker blocks/SIGPIPEs on a full stderr pipe.
+    #[cfg(unix)]
+    #[test]
+    fn stderr_beyond_capture_limit_is_drained_not_fatal() {
+        let tmp = TempScriptDir::new("stderr_flood");
+        let line = "x".repeat(63);
+        let script = tmp.write_executable(
+            "chatty.sh",
+            &format!(
+                "cat >/dev/null\ni=0\nwhile [ $i -lt 2048 ]; do echo '{line}' >&2; i=$((i + 1)); done\n\
+                 printf '{{\"request_id\":42,\"address\":5368713216,\"success\":true,\"code\":\"ok\"}}'"
+            ),
+        );
+        let mut config = WorkerRunConfig::with_path(script, 10_000);
+        config.max_stderr_bytes = 4096;
+        let mut req = sample_request(16);
+        req.request_id = Some(42);
+        let (code, _, _) = execute_nir_worker_request_with_config(&req, &config)
+            .expect("stderr overflow must not fail an otherwise valid worker");
+        assert_eq!(code, "ok");
+
+        // On failure, the bounded stderr prefix is still reported.
+        let crash = tmp.write_executable(
+            "chatty_crash.sh",
+            &format!(
+                "cat >/dev/null\necho 'first diagnostic' >&2\ni=0\nwhile [ $i -lt 512 ]; do echo '{line}' >&2; i=$((i + 1)); done\nexit 1"
+            ),
+        );
+        let mut config = WorkerRunConfig::with_path(crash, 10_000);
+        config.max_stderr_bytes = 1024;
+        let err =
+            execute_nir_worker_request_with_config(&req, &config).expect_err("crash must fail");
+        assert_eq!(
+            err.kind,
+            WorkerFailureKind::CrashedWorker,
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("first diagnostic"), "{}", err.message);
+        assert!(err.message.contains("truncated"), "{}", err.message);
+        assert!(err.message.len() < 4096, "stderr in message is unbounded");
+    }
+
+    /// A success response must name the request it answers.
+    #[cfg(unix)]
+    #[test]
+    fn success_response_without_request_identity_is_not_published() {
+        let tmp = TempScriptDir::new("no_identity");
+        let script = tmp.write_executable(
+            "anonymous.sh",
+            "cat >/dev/null\nprintf '{\"success\":true,\"code\":\"int f(){}\"}'",
+        );
+        let err = execute_nir_worker_request_with_config(
+            &sample_request(16),
+            &WorkerRunConfig::with_path(script, 5_000),
+        )
+        .expect_err("anonymous success must be rejected");
+        assert_eq!(
+            err.kind,
+            WorkerFailureKind::ProtocolFailure,
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("identity"), "{}", err.message);
+    }
+
+    /// A worker that stopped reading the request cannot have analysed it, so a
+    /// success answer (even with the right identity) must not be published.
+    #[cfg(unix)]
+    #[test]
+    fn success_after_partial_request_consumption_is_not_published() {
+        let tmp = TempScriptDir::new("partial_request");
+        let script = tmp.write_executable(
+            "partial.sh",
+            "head -c 16 >/dev/null\nprintf '{\"request_id\":42,\"address\":5368713216,\"success\":true,\"code\":\"ok\"}'\nexit 0",
+        );
+        let mut req = sample_request(1024 * 1024);
+        req.request_id = Some(42);
+        let err = execute_nir_worker_request_with_config(
+            &req,
+            &WorkerRunConfig::with_path(script, 5_000),
+        )
+        .expect_err("success over an unread request must be rejected");
+        assert_eq!(
+            err.kind,
+            WorkerFailureKind::ProtocolFailure,
+            "{}",
+            err.message
+        );
+        assert!(err.message.contains("request"), "{}", err.message);
     }
 
     #[test]
