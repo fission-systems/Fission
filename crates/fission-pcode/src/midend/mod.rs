@@ -94,7 +94,7 @@ pub(crate) use crate::render::{
 /// string fields (target-expression descriptions, dispatcher proof units,
 /// `[DIAG]` traces), not into the AST itself, so reusing the real printer
 /// via [`ir::prehir_expr_to_hir_expr`] is correct and avoids duplicating
-/// printer.rs's rendering logic for PreHIR. Not on any hot path -- every call
+/// `render/printer/`'s rendering logic for PreHIR. Not on any hot path -- every call
 /// site is diagnostic-ish or a one-shot summary field, not per-node
 /// expression evaluation.
 pub(crate) fn print_prehir_expr(expr: &fission_midend_prehir::PreHirExpr) -> String {

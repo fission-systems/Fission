@@ -15,7 +15,7 @@ use super::typed_facts::{
 ///    scanning pointer loads/stores and already-recovered field/index accesses.
 /// 2. **Annotates** the `NirType::Aggregate` with a sorted `Vec<StructField>`,
 ///    giving each field the name `field_{offset:x}` (e.g. `field_8`).
-/// 3. **Updates the printer** indirectly: `printer.rs` checks for a non-empty
+/// 3. **Updates the printer** indirectly: `render/printer/` checks for a non-empty
 ///    `fields` vec and emits `base->field_8` instead of the raw byte-offset form.
 ///
 /// ### Algorithm
