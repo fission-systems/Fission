@@ -422,28 +422,43 @@ fn cast_elision_still_strips_casts_that_cannot_extend() {
     assert_eq!(assigned_rhs(&round_trip), &var("x"));
 }
 
-/// The orchestrator re-runs the extension canonicalization after the
-/// post-normalize copy propagation and call-site typing, which can retype an
-/// operand under a cast that normalize already canonicalized. The re-run must
-/// restore the extension the IR means and be a no-op when nothing changed.
+/// The orchestrator re-runs the extension canonicalization, for variable
+/// operands only, after the post-normalize copy propagation and call-site
+/// typing, which can retype a variable under a cast normalize already
+/// canonicalized. The re-run must restore the extension the IR means, leave
+/// an explicit cast pair alone, and be a no-op when nothing changed.
 #[test]
-fn rerunning_the_extension_canonicalization_after_a_late_retype_restores_the_view() {
+fn late_extension_canonicalization_restores_a_retyped_variable_and_keeps_pairs() {
     let mut func = assign_wide(
         vec![binding("x", ty(32, false))],
         cast(ty(64, false), var("x")),
     );
-    assert!(!canonicalize_extension_binding_casts(&mut func));
+    assert!(!canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
 
     // A late pass settles `x` as `int`: C would now sign-extend `(ulong)x`.
     func.params[0].ty = ty(32, true);
-    assert!(canonicalize_extension_binding_casts(&mut func));
+    assert!(canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
     assert_eq!(
         assigned_rhs(&func),
         &cast(ty(64, false), cast(ty(32, false), var("x"))),
         "the zero extension must print as (unsigned long long)(uint)x"
     );
     assert!(
-        !canonicalize_extension_binding_casts(&mut func),
+        !canonicalize_extension_binding_casts_over_variables(&mut func),
         "a second run over a canonical tree changes nothing"
     );
+
+    // `(int)(uchar)c` with `c: int`: by now the pair is the C spelling of a
+    // zero extension (bash's `sh_syntaxtab[(uchar)c]` index); rewriting the
+    // inner cast to `(char)` sign-extends it.
+    let pair = cast(ty(32, true), cast(ty(8, false), var("c")));
+    let mut func = assign_wide(vec![binding("c", ty(32, true))], pair.clone());
+    assert!(!canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
+    assert_eq!(assigned_rhs(&func), &pair);
 }

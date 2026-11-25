@@ -640,17 +640,40 @@ pub fn canonicalize_extension_binding_casts(func: &mut PreHirFunction) -> bool {
         .map(|binding| (binding.name.clone(), binding.ty.clone()))
         .collect();
     rewrite_exprs_in_stmts(&mut func.body, &mut |expr| {
-        canonicalize_extension_cast(expr, &binding_types)
+        canonicalize_extension_cast(expr, &binding_types, false)
+    })
+}
+
+/// [`canonicalize_extension_binding_casts`] for after normalize, limited to
+/// a widening cast applied directly to a variable.
+///
+/// The orchestrator's post-normalize copy propagation and call-site typing
+/// change which binding sits under a cast and what type it has, so a
+/// variable operand can end up with the other signedness (`return
+/// (ulong)local_18` with `local_18: int`). They do not create cast pairs, and
+/// a pair that exists by then (`(int)(uchar)c`) is the explicit C spelling of
+/// a zero extension that later passes chose: its outer destination no longer
+/// says which extension the lowering meant, so it is left alone.
+pub fn canonicalize_extension_binding_casts_over_variables(func: &mut PreHirFunction) -> bool {
+    let binding_types: HashMap<String, NirType> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect();
+    rewrite_exprs_in_stmts(&mut func.body, &mut |expr| {
+        canonicalize_extension_cast(expr, &binding_types, true)
     })
 }
 
 fn canonicalize_extension_cast(
     expr: &mut PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    variables_only: bool,
 ) -> bool {
     let mut changed = false;
     for_each_child_expr_mut(expr, &mut |child| {
-        changed |= canonicalize_extension_cast(child, binding_types);
+        changed |= canonicalize_extension_cast(child, binding_types, variables_only);
     });
     let PreHirExpr::Cast {
         ty: NirType::Int {
@@ -662,7 +685,9 @@ fn canonicalize_extension_cast(
     else {
         return changed;
     };
-    if matches!(inner.as_ref(), PreHirExpr::Const(..)) {
+    if matches!(inner.as_ref(), PreHirExpr::Const(..))
+        || (variables_only && !matches!(inner.as_ref(), PreHirExpr::Var(_)))
+    {
         return changed;
     }
     let NirType::Int {
