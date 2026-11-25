@@ -74,6 +74,7 @@ pub use types::apply_callsite_type_prop_pass;
 pub use types::is_known_api_signature;
 
 pub use analysis::defuse::constant_folding_pass;
+pub use cleanup::canonicalize_extension_binding_casts_over_variables;
 /// Pure `x = x` / adjacent-duplicate assign cleanup (nested Block/If safe).
 pub use cleanup::eliminate_redundant_var_assigns;
 pub use cleanup::propagate_copies_in_runs;

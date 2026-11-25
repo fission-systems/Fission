@@ -550,3 +550,249 @@ fn condexe_folding_keeps_a_test_of_memory_the_loop_around_it_writes() {
     let mut body = looped(assign_var("x", 1));
     assert!(apply_condexe_folding_pass(&mut body));
 }
+
+#[test]
+fn iblock_phi_elimination_blocks_clobber_memory_write_and_multi_use() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    // 1. Intervening write to condition variable `cond` must block hoisting.
+    let mut stmts_clobber_cond = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        assign_var("cond", 0),
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_clobber_cond));
+
+    // 2. Intervening store when branch RHS reads memory must block hoisting.
+    let mut stmts_clobber_mem = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: load_through("p"),
+            }]
+            .into(),
+            else_body: vec![assign_var("x", 0)].into(),
+        },
+        store_through("p", 99),
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_clobber_mem));
+
+    // 3. Multiple uses (`x + x` in one statement and across two statements) must block hoisting.
+    let mut stmts_same_stmt_multi_use = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Var("x".to_string())),
+            rhs: Box::new(PreHirExpr::Var("x".to_string())),
+            ty: int(32),
+        })),
+    ];
+    assert!(!apply_iblock_phi_elimination(
+        &mut stmts_same_stmt_multi_use
+    ));
+
+    let mut stmts_two_stmt_multi_use = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![assign_var("x", 1)].into(),
+            else_body: vec![assign_var("x", 2)].into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("y".to_string()),
+            rhs: PreHirExpr::Var("x".to_string()),
+        },
+        PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut stmts_two_stmt_multi_use));
+}
+
+#[test]
+fn iblock_phi_elimination_tracks_lvalue_base_uses() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    // Single use inside `Assign.lhs` (*x = 7) followed by return: must substitute into Deref ptr.
+    let mut stmts = vec![
+        PreHirStmt::If {
+            cond: PreHirExpr::Var("cond".to_string()),
+            then_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Var("p1".to_string()),
+            }]
+            .into(),
+            else_body: vec![PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("x".to_string()),
+                rhs: PreHirExpr::Var("p2".to_string()),
+            }]
+            .into(),
+        },
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref {
+                ptr: Box::new(PreHirExpr::Var("x".to_string())),
+                ty: int(32),
+            },
+            rhs: PreHirExpr::Const(7, int(32)),
+        },
+        PreHirStmt::Return(None),
+    ];
+
+    assert!(apply_iblock_phi_elimination(&mut stmts));
+    assert_eq!(stmts.len(), 2);
+    assert!(matches!(
+        &stmts[0],
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Deref { ptr, .. },
+            ..
+        } if matches!(ptr.as_ref(), PreHirExpr::Select { .. })
+    ));
+}
+
+/// The cleanup loop runs every pass on every nested list. On a nested list
+/// iblock cannot see a read after the list ends: `if (p) { if (c) x = a;
+/// else x = b; *q = x; } return x;` must keep the definition of `x` that
+/// `return x` reads on the `p` path.
+#[test]
+fn iblock_phi_elimination_keeps_a_diamond_read_after_its_nested_list() {
+    let nested = |inner_tail: Vec<PreHirStmt>| {
+        let mut then_body = vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("c".to_string()),
+                then_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Var("a".to_string()),
+                }]
+                .into(),
+                else_body: vec![PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: PreHirExpr::Var("b".to_string()),
+                }]
+                .into(),
+            },
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Deref {
+                    ptr: Box::new(PreHirExpr::Var("q".to_string())),
+                    ty: int(32),
+                },
+                rhs: PreHirExpr::Var("x".to_string()),
+            },
+        ];
+        then_body.extend(inner_tail);
+        vec![
+            PreHirStmt::If {
+                cond: PreHirExpr::Var("p".to_string()),
+                then_body: then_body.into(),
+                else_body: vec![assign_var("x", 0)].into(),
+            },
+            PreHirStmt::Return(Some(PreHirExpr::Var("x".to_string()))),
+        ]
+    };
+    fn defines_x(stmts: &[PreHirStmt]) -> bool {
+        stmts.iter().any(|s| match s {
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var(n),
+                ..
+            } => n == "x",
+            PreHirStmt::If {
+                then_body,
+                else_body,
+                ..
+            } => defines_x(then_body) && defines_x(else_body),
+            PreHirStmt::Block(body) => defines_x(body),
+            _ => false,
+        })
+    }
+    fn then_arm(body: &[PreHirStmt]) -> Vec<PreHirStmt> {
+        body.iter()
+            .find_map(|s| match s {
+                PreHirStmt::If { then_body, .. } => Some(then_body.to_vec()),
+                _ => None,
+            })
+            .unwrap_or_default()
+    }
+
+    let mut body = nested(Vec::new());
+    crate::normalize_function_body(&mut body);
+    assert!(defines_x(&then_arm(&body)), "{body:#?}");
+
+    // Control: when the nested list overwrites `x` after its single use, the
+    // diamond is dead past the use and is folded into it.
+    let mut body = nested(vec![assign_var("x", 5)]);
+    crate::normalize_function_body(&mut body);
+    let arm = then_arm(&body);
+    assert!(
+        !arm.iter()
+            .any(|s| matches!(s, PreHirStmt::If { then_body, .. } if then_body.len() == 1)),
+        "{body:#?}"
+    );
+}
+
+/// A local can be a stack slot whose address reaches a call without any
+/// `&local` in the tree: `frame = sp; ... mktime(frame)` (#1328's certtool
+/// shape). The call may rewrite the slot, so the read after it is not the
+/// diamond's value, and folding the diamond into it is unsound.
+#[test]
+fn iblock_phi_elimination_does_not_fold_across_a_call_that_may_write_the_slot() {
+    use crate::cleanup::apply_iblock_phi_elimination;
+
+    let call = |arg: &str| {
+        PreHirStmt::Expr(PreHirExpr::Call {
+            origin: None,
+            target: "mktime".to_string(),
+            args: vec![PreHirExpr::Var(arg.to_string())],
+            ty: int(64),
+        })
+    };
+    let diamond = || PreHirStmt::If {
+        cond: PreHirExpr::Var("cond".to_string()),
+        then_body: vec![assign_var("slot", 1)].into(),
+        else_body: vec![assign_var("slot", 2)].into(),
+    };
+
+    // Call between the diamond and the read.
+    let mut between = vec![
+        PreHirStmt::Assign {
+            lhs: PreHirLValue::Var("frame".to_string()),
+            rhs: PreHirExpr::Var("sp".to_string()),
+        },
+        diamond(),
+        call("frame"),
+        PreHirStmt::Return(Some(PreHirExpr::Var("slot".to_string()))),
+    ];
+    assert!(!apply_iblock_phi_elimination(&mut between), "{between:#?}");
+
+    // Call in the statement that reads it: `y = mktime(frame) + slot`.
+    let mut same_stmt = vec![
+        diamond(),
+        PreHirStmt::Return(Some(PreHirExpr::Binary {
+            op: PreHirBinaryOp::Add,
+            lhs: Box::new(PreHirExpr::Call {
+                origin: None,
+                target: "mktime".to_string(),
+                args: vec![PreHirExpr::Var("frame".to_string())],
+                ty: int(32),
+            }),
+            rhs: Box::new(PreHirExpr::Var("slot".to_string())),
+            ty: int(32),
+        })),
+    ];
+    assert!(
+        !apply_iblock_phi_elimination(&mut same_stmt),
+        "{same_stmt:#?}"
+    );
+
+    // Control: no call, the diamond still folds.
+    let mut plain = vec![
+        diamond(),
+        PreHirStmt::Return(Some(PreHirExpr::Var("slot".to_string()))),
+    ];
+    assert!(apply_iblock_phi_elimination(&mut plain));
+}
