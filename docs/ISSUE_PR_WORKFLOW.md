@@ -152,7 +152,10 @@ including `run_url`. It then checks the event against GitHub rather than
 trusting it: the run exists in this repository, was triggered by the event its
 environment stands for (`schedule` for `nightly`; `push`, `merge_group` or
 `workflow_dispatch` for `ci`), tested the reported commit, and that commit is on
-`main`. Anything else is ignored.
+`main`. Anything else is ignored. The `main` check runs at triage time: a
+`merge_group` event names the queue's head commit, which becomes a `main`
+commit only when the group merges, so it is held until then and never filed if
+the group failed.
 
 The issue is built only from validated tags and Sentry's id, counts, first and
 last seen, and the suspect commit SHA if Sentry has one. No event text is

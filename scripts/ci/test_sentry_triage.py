@@ -338,9 +338,18 @@ class RejectionTests(unittest.TestCase):
             tags_for(category="Crash"),
             tags_for(commit=MAIN_SHA[:39]),
             tags_for(commit=MAIN_SHA.upper()),
-            tags_for(repro_id="fixture:tests/fixtures/x64_password.elf@0x401000"),
             tags_for(repro_id="/home/user/corpus/secret binary"),
+            tags_for(repro_id="fixture:tests/fixtures/x.elf@0x401000 "),
+            tags_for(repro_id="fixture:tests/fixtures/x.elf\t"),
+            tags_for(repro_id="fixture:../../etc/passwd"),
+            tags_for(repro_id="run:1/artifact/..hidden"),
+            tags_for(repro_id=".."),
+            tags_for(repro_id='fixture:"x.elf"'),
+            tags_for(repro_id="fixture:'x.elf'"),
+            tags_for(repro_id="fixture:`x.elf`"),
+            tags_for(repro_id="fixture:x.elf<script>"),
             tags_for(repro_id="r" * 129),
+            tags_for(repro_id=""),
             tags_for(run_url="https://github.com/fission-systems/Fission/actions/runs/1001/job/2"),
             tags_for(run_url="http://github.com/fission-systems/Fission/actions/runs/1001"),
         ],
@@ -369,6 +378,36 @@ class RejectionTests(unittest.TestCase):
         world.runs["1001"] = world.run(1001, OTHER_SHA, "schedule")
         world.add(11, tags_for(commit=OTHER_SHA))
         self.assertEqual(run_triage(world)[0].reason, "commit_not_on_main")
+
+    def test_contract_repro_ids_pass(self):
+        for repro in [
+            "fixture:tests/fixtures/x64_password.elf@0x401000",
+            "fuzz:fuzz_target_1/crash-" + "0123456789abcdef0123456789abcdef01234567",
+            "run:123456/Native-Differential+x86_64",
+            "fixture:tests/fixtures/a.b.elf",
+            "r" * 128,
+        ]:
+            with self.subTest(repro=repro):
+                world = World()
+                world.add(11, tags_for(repro_id=repro))
+                [decision] = run_triage(world)
+                self.assertEqual(decision.action, "would_create", decision.reason)
+                self.assertIn(f"`{repro}`", decision.body)
+                # Outside code spans `@` would mention someone; it appears only inside them.
+                self.assertEqual(re.sub(r"`[^`]*`", "", decision.body).count("@"), 0)
+
+    def test_merge_group_event_is_held_until_its_commit_lands_on_main(self):
+        world = World()
+        group_sha = "c" * 40
+        world.runs["1003"] = world.run(1003, group_sha, "merge_group")
+        world.add(11, tags_for(environment="ci", commit=group_sha, run_url=f"https://github.com/{REPO}/actions/runs/1003"))
+        # Sent while the queue is still testing: not on main yet.
+        first = run_triage(world, create=True)
+        self.assertEqual((first[0].action, first[0].reason), ("rejected", "commit_not_on_main"))
+        # The group merged (main fast-forwards to the group's head): the next run files it.
+        world.on_main.add(group_sha)
+        self.assertEqual(run_triage(world, create=True)[0].action, "created")
+        self.assertEqual(len(world.writes()), 1)
 
     def test_ci_environment_with_a_push_run_is_eligible(self):
         world = World()
@@ -428,7 +467,7 @@ def random_tags(rng):
         "invariant": word(64, "_.:-"),
         "category": rng.choice(sorted(st.ELIGIBLE_CATEGORIES)),
         "commit": "".join(rng.choice("0123456789abcdef") for _ in range(40)),
-        "repro_id": word(128, "_.:/-"),
+        "repro_id": re.sub(r"\.{2,}", ".", word(128, "_.:/@+-ABCDEFGHIJKLMNOPQRSTUVWXYZ")),
         "run_url": f"https://github.com/{REPO}/actions/runs/{rng.randint(1, 10**12)}",
     }
 

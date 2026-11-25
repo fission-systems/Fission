@@ -13,7 +13,11 @@ Before an issue is drafted, two facts are checked on GitHub, not taken from
 the event: the reported Actions run exists in this repository, was triggered
 by the event the environment implies, and tested the reported commit; and
 that commit is on `main` (docs/ISSUE_PR_WORKFLOW.md: no issue for work in
-progress, a probe names a `main` SHA).
+progress, a probe names a `main` SHA). The check runs at triage time, not when
+the event was sent: a `merge_group` run tests the queue's head commit, which
+main is fast-forwarded to when the group merges. Its event is held (rejected
+this run, re-checked next run) until then, and stays rejected if the group
+failed, since its defect was then never on main.
 
 Every issue carries a hidden `<!-- sentry-issue: <id> -->` marker. Issues
 already carrying the marker, open or closed, are left alone: a closed one is
@@ -68,7 +72,7 @@ ENVIRONMENTS = frozenset({"ci", "nightly"})
 COMPONENT_RE = re.compile(r"\A(?:fission-[a-z0-9-]+|xtask)\Z")
 INVARIANT_RE = re.compile(r"\A[a-z0-9_.:-]{1,64}\Z")
 COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
-REPRO_RE = re.compile(r"\A[a-z0-9_.:/-]{1,128}\Z")
+REPRO_RE = re.compile(r"\A[A-Za-z0-9_.:/@+-]{1,128}\Z")
 RUN_URL_RE = re.compile(r"\Ahttps://github\.com/([A-Za-z0-9-]+/[A-Za-z0-9._-]+)/actions/runs/([0-9]{1,20})\Z")
 
 # Triage policy on top of the contract.
@@ -88,7 +92,8 @@ TAG_CHECKS: dict[str, Callable[[str], bool]] = {
     "invariant": lambda v: bool(INVARIANT_RE.match(v)),
     "category": lambda v: v in CATEGORIES,
     "commit": lambda v: bool(COMMIT_RE.match(v)),
-    "repro_id": lambda v: bool(REPRO_RE.match(v)),
+    # No `..`: a repro names an in-repo fixture or a CI artifact, never a path out of one.
+    "repro_id": lambda v: bool(REPRO_RE.match(v)) and ".." not in v,
 }
 # Optional in the contract, required here: it is what lets triage check the
 # event against GitHub instead of trusting it.
