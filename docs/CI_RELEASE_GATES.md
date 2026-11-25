@@ -258,6 +258,18 @@ the tag if needed, populates a draft with `docs/changelog/vX.Y.Z.md` as its
 notes, verifies the draft attachments, and publishes. Retry with the same tag
 and SHA after a failed publication.
 
+### Sentry release tracking
+
+After `publish`, the `sentry-release` job records the release in Sentry (org
+`fission-systems`, project `fission`): `releases new`, `set-commits --auto`
+(falling back to `--local`), `finalize`, and a `production` deploy linked to
+the GitHub Release. The name is `fission-cli@<version>` (the tag without its
+`v`), which is what the opt-in CLI telemetry reports when `SENTRY_RELEASE` /
+`FISSION_RELEASE` are unset. It reads the `SENTRY_AUTH_TOKEN` repository
+secret (an org token with `project:releases`); without it the job skips its
+steps and succeeds. It runs only in this repository, only after the release
+is public, and gates nothing. Re-run just this job if Sentry was unavailable.
+
 ### Release notes
 
 `draft_notes.py` is deterministic and uses no AI. A PR is in the range when
