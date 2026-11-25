@@ -164,6 +164,23 @@ impl RuntimeSleighFrontend {
         u64,
         RuntimeExecutionDetails,
     )> {
+        self.decode_instruction_and_lift_reading(bytes, address, context_override, None)
+    }
+
+    /// [`Self::decode_instruction_and_lift_with_context_override`], recording
+    /// into `reads` (when given) what the lift read.
+    pub(super) fn decode_instruction_and_lift_reading<'a>(
+        &self,
+        bytes: &'a [u8],
+        address: u64,
+        context_override: Option<PackedContextOverride>,
+        reads: Option<&'a spine::compiled_table::LiftReads>,
+    ) -> Result<(
+        DecodedInstruction,
+        Vec<PcodeOp>,
+        u64,
+        RuntimeExecutionDetails,
+    )> {
         if bytes.is_empty() {
             return Err(RuntimeSleighError::DecodeNoMatch {
                 language: self.entry.entry_id.clone(),
@@ -180,15 +197,26 @@ impl RuntimeSleighFrontend {
                 .into())
             }
             RuntimeFrontendStatus::ExecutableCandidate => {
-                engine::decode_instruction_and_lift_with_details(
-                    &self.entry,
-                    self.compiled.as_ref().ok_or_else(|| {
-                        anyhow!("missing compiled frontend for {}", self.entry.entry_id)
-                    })?,
-                    bytes,
-                    address,
-                    context_override,
-                )
+                let compiled = self.compiled.as_ref().ok_or_else(|| {
+                    anyhow!("missing compiled frontend for {}", self.entry.entry_id)
+                })?;
+                match reads {
+                    Some(reads) => engine::decode_instruction_and_lift_tracked(
+                        &self.entry,
+                        compiled,
+                        bytes,
+                        address,
+                        context_override,
+                        reads,
+                    ),
+                    None => engine::decode_instruction_and_lift_with_details(
+                        &self.entry,
+                        compiled,
+                        bytes,
+                        address,
+                        context_override,
+                    ),
+                }
             }
         }
     }
@@ -256,6 +284,21 @@ impl RuntimeSleighFrontend {
         limit: usize,
         initial_context_override: Option<PackedContextOverride>,
     ) -> Result<Vec<DecodedInstruction>> {
+        self.decode_window_reusing(bytes, address, limit, initial_context_override, None)
+    }
+
+    /// [`Self::decode_window_with_context_override`], taking an instruction
+    /// from `reuse` wherever it holds one lifted from the same bytes at the
+    /// same address and context. The result is the same `Vec`.
+    pub fn decode_window_reusing(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        limit: usize,
+        initial_context_override: Option<PackedContextOverride>,
+        reuse: Option<&InstructionReuse>,
+    ) -> Result<Vec<DecodedInstruction>> {
+        let reuse = reuse.filter(|reuse| reuse.serves(self));
         if limit == 0 || bytes.is_empty() {
             return Ok(Vec::new());
         }
@@ -270,6 +313,7 @@ impl RuntimeSleighFrontend {
             true,
             false,
             None,
+            reuse,
         );
         match run.end {
             DecodeRunEnd::Failed(err) => Err(err),
@@ -305,6 +349,7 @@ impl RuntimeSleighFrontend {
         window_start: bool,
         speculative: bool,
         join: Option<&[usize]>,
+        reuse: Option<&InstructionReuse>,
     ) -> DecodeRun {
         let mut run = DecodeRun {
             instructions: Vec::with_capacity(limit.min(64)),
@@ -339,11 +384,13 @@ impl RuntimeSleighFrontend {
                 pending_overrides.get(&current).copied(),
             );
 
-            let decoded = match self.decode_instruction_with_context_override(
-                remaining,
-                current,
-                ctx_override,
-            ) {
+            let lifted = match reuse.and_then(|reuse| reuse.get(current, ctx_override, remaining)) {
+                Some(instruction) => Ok(instruction),
+                None => {
+                    self.decode_instruction_with_context_override(remaining, current, ctx_override)
+                }
+            };
+            let decoded = match lifted {
                 Ok(instruction) if instruction.length == 0 => Err(DecodeStepError::Fail(anyhow!(
                     "decoder returned zero length at 0x{:x}",
                     current
@@ -441,12 +488,23 @@ impl RuntimeSleighFrontend {
         bytes: &[u8],
         address: u64,
     ) -> Result<Vec<DecodedInstruction>> {
+        self.decode_window_parallel_reusing(bytes, address, None)
+    }
+
+    /// [`Self::decode_window_parallel`] with an [`InstructionReuse`], as in
+    /// [`Self::decode_window_reusing`].
+    pub fn decode_window_parallel_reusing(
+        &self,
+        bytes: &[u8],
+        address: u64,
+        reuse: Option<&InstructionReuse>,
+    ) -> Result<Vec<DecodedInstruction>> {
         let threads = std::thread::available_parallelism()
             .map(|n| n.get())
             .unwrap_or(1)
             .min(MAX_DECODE_THREADS);
         let chunk_len = (bytes.len() / (threads * 4).max(1)).max(MIN_DECODE_CHUNK_BYTES);
-        self.decode_window_chunked(bytes, address, chunk_len, threads)
+        self.decode_window_chunked(bytes, address, chunk_len, threads, reuse)
     }
 
     pub(crate) fn decode_window_chunked(
@@ -455,7 +513,9 @@ impl RuntimeSleighFrontend {
         address: u64,
         chunk_len: usize,
         threads: usize,
+        reuse: Option<&InstructionReuse>,
     ) -> Result<Vec<DecodedInstruction>> {
+        let reuse = reuse.filter(|reuse| reuse.serves(self));
         let chunks = if chunk_len == 0 {
             1
         } else {
@@ -463,7 +523,7 @@ impl RuntimeSleighFrontend {
         };
         let addresses_are_plain = address.checked_add(bytes.len() as u64).is_some();
         if threads < 2 || chunks < 2 || !addresses_are_plain {
-            return self.decode_window(bytes, address, usize::MAX);
+            return self.decode_window_reusing(bytes, address, usize::MAX, None, reuse);
         }
 
         let stop_of = |k: usize| ((k + 1) * chunk_len).min(bytes.len());
@@ -485,6 +545,7 @@ impl RuntimeSleighFrontend {
             true,
             false,
             None,
+            reuse,
         );
         if let DecodeRunEnd::Failed(err) = first.end {
             return Err(err);
@@ -504,6 +565,7 @@ impl RuntimeSleighFrontend {
                     false,
                     false,
                     None,
+                    reuse,
                 );
                 if let DecodeRunEnd::Failed(err) = rest.end {
                     return Err(err);
@@ -563,6 +625,7 @@ impl RuntimeSleighFrontend {
                     false,
                     true,
                     None,
+                    reuse,
                 );
                 if run.saw_commits {
                     stop_work.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -661,6 +724,7 @@ impl RuntimeSleighFrontend {
                             false,
                             false,
                             join,
+                            reuse,
                         );
                         if let DecodeRunEnd::Failed(err) = redo.end {
                             return Err(err);
@@ -687,6 +751,7 @@ impl RuntimeSleighFrontend {
                                 false,
                                 false,
                                 None,
+                                reuse,
                             );
                             if let DecodeRunEnd::Failed(err) = rest.end {
                                 return Err(err);

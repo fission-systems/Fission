@@ -142,8 +142,33 @@ pub(super) fn emit_pcode_for_state_with_bytes(
     decoded: &RuntimeConstructState,
     flow: FlowEmitOptions,
 ) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
+    emit_pcode_for_state_with_bytes_tracked(
+        compiled,
+        address,
+        memory_window,
+        memory_base,
+        decoded,
+        flow,
+        None,
+    )
+}
+
+/// [`emit_pcode_for_state_with_bytes`], setting `window_read` when emission
+/// decodes another instruction out of `memory_window` (a delay slot or a
+/// CROSSBUILD target). Those reads are outside the instruction context's own
+/// read tracking.
+pub(super) fn emit_pcode_for_state_with_bytes_tracked(
+    compiled: &CompiledFrontend,
+    address: u64,
+    memory_window: &[u8],
+    memory_base: u64,
+    decoded: &RuntimeConstructState,
+    flow: FlowEmitOptions,
+    window_read: Option<&std::cell::Cell<bool>>,
+) -> Result<(Vec<PcodeOp>, RuntimeExecutionDetails)> {
     let mut emitter =
         CompiledTableEmitter::new(compiled, address, memory_window, memory_base, flow);
+    emitter.window_read = window_read;
     // If the template uses InstNext2 (delay-slot architectures), pre-decode the
     // delay-slot instruction to get its actual length.
     if (uses_inst_next2(&decoded.constructor_template.ops)
@@ -307,6 +332,8 @@ pub(super) struct CompiledTableEmitter<'c> {
     in_delay_slot: bool,
     uniq_mask: u64,
     crossbuild_depth: u32,
+    /// Set whenever emission reads `memory_window` itself.
+    window_read: Option<&'c std::cell::Cell<bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -344,6 +371,13 @@ impl<'c> CompiledTableEmitter<'c> {
             in_delay_slot: false,
             uniq_mask: compiled.sla_uniqmask,
             crossbuild_depth: 0,
+            window_read: None,
+        }
+    }
+
+    fn note_window_read(&self) {
+        if let Some(flag) = self.window_read {
+            flag.set(true);
         }
     }
 
@@ -351,6 +385,7 @@ impl<'c> CompiledTableEmitter<'c> {
     /// when instruction bytes are available, so `resolve_const_value(InstNext2)` can
     /// return `inst_next + delay_slot_length` without needing `CompiledFrontend` again.
     fn precompute_delay_slot_length(&mut self, inst_length: usize) -> Result<()> {
+        self.note_window_read();
         let inst_next_address = self
             .address
             .checked_add(
@@ -896,6 +931,7 @@ impl<'c> CompiledTableEmitter<'c> {
                 let section = ptrsub_named_section_index(op)?;
                 let ctx_reg = self.flow.instruction_context_register;
                 let ctx_mask = self.flow.instruction_context_known_mask;
+                self.note_window_read();
                 let cross_state = try_bind_runtime_state_at(
                     self.compiled,
                     self.memory_window,
@@ -938,6 +974,7 @@ impl<'c> CompiledTableEmitter<'c> {
                     );
                 }
                 let delay_total = indirect_placeholder_delay_bytes(op)?;
+                self.note_window_read();
                 self.in_delay_slot = true;
                 let ctx_reg = self.flow.instruction_context_register;
                 let ctx_mask = self.flow.instruction_context_known_mask;

@@ -1569,6 +1569,7 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             None,
             false,
+            None,
         )
     }
 
@@ -1589,6 +1590,7 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             Some(&mut seed),
             true,
+            None,
         )?;
         Ok((decoded, seed))
     }
@@ -1611,7 +1613,40 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             seed.as_mut(),
             false,
+            None,
         )
+    }
+
+    /// Lift as [`Self::lift_raw_pcode_function_with_context_and_memory_context`]
+    /// (capturing a [`RawDecodeSeed`] when `capture_seed`), and also return
+    /// the instructions this lift decoded itself, with the bytes each read,
+    /// for an [`InstructionReuse`].
+    pub fn lift_raw_pcode_function_recording(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+        initial_context_override: Option<PackedContextOverride>,
+        capture_seed: bool,
+    ) -> Result<(
+        DecodedPcodeFunction,
+        Option<RawDecodeSeed>,
+        InstructionRecords,
+    )> {
+        let mut seed = capture_seed.then(|| RawDecodeSeed::new(self, bytes, entry_address));
+        let mut records = InstructionRecords::default();
+        let decoded = self.lift_raw_pcode_function_impl(
+            bytes,
+            entry_address,
+            contract,
+            memory_context,
+            initial_context_override,
+            seed.as_mut(),
+            capture_seed,
+            Some(&mut records),
+        )?;
+        Ok((decoded, seed, records))
     }
 
     fn lift_raw_pcode_function_impl(
@@ -1623,6 +1658,7 @@ impl RuntimeSleighFrontend {
         initial_context_override: Option<PackedContextOverride>,
         mut seed: Option<&mut RawDecodeSeed>,
         capture: bool,
+        mut records: Option<&mut InstructionRecords>,
     ) -> Result<DecodedPcodeFunction> {
         if bytes.is_empty() {
             bail!("No function bytes available at 0x{:x}", entry_address);
@@ -1699,13 +1735,30 @@ impl RuntimeSleighFrontend {
             };
             let raw = match reused {
                 Some(raw) => raw,
-                None => self
-                    .decode_instruction_and_lift_with_context_override(
-                        remaining,
-                        current,
-                        context_override,
-                    )
-                    .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?,
+                None => {
+                    let reads = spine::compiled_table::LiftReads::default();
+                    let raw = self
+                        .decode_instruction_and_lift_reading(
+                            remaining,
+                            current,
+                            context_override,
+                            records.is_some().then_some(&reads),
+                        )
+                        .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
+                    if let Some(records) = records.as_deref_mut() {
+                        if let Some(prefix) =
+                            reads.reproducible_prefix(raw.0.length, remaining.len())
+                        {
+                            records.push(
+                                current,
+                                context_override,
+                                &remaining[..prefix],
+                                raw.0.clone(),
+                            );
+                        }
+                    }
+                    raw
+                }
             };
             if capture {
                 if let Some(seed) = seed.as_mut() {
@@ -2672,6 +2725,7 @@ mod raw_seed_lift_tests {
                     address.context_override,
                     Some(&mut seed),
                     false,
+                    None,
                 )
                 .unwrap();
             assert_eq!(replay, baseline, "{language}");
