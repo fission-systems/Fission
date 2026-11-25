@@ -1,5 +1,6 @@
 use crate::HashMap;
-use crate::analysis::defuse::DefUseMap;
+use crate::HashSet;
+use crate::analysis::defuse::{DefUseMap, collect_address_taken_locals};
 use crate::prelude::*;
 use fission_midend_prehir::util::expr_type;
 
@@ -7,7 +8,32 @@ pub fn apply_subvar_trim_pass(func: &mut PreHirFunction) -> bool {
     let mut assignments = HashMap::default();
     find_all_assignments(&func.body, &mut assignments);
 
-    let defuse = DefUseMap::build(&func.body);
+    // Names storage can change without an assignment: an `&local` taken
+    // anywhere, and stack slots, whose address a frame pointer can carry
+    // into a store or a call with no `&local` in the tree.
+    let mut memory_backed = collect_address_taken_locals(&func.body);
+    memory_backed.extend(
+        func.params
+            .iter()
+            .chain(func.locals.iter())
+            .filter(|b| {
+                matches!(
+                    b.origin,
+                    Some(
+                        NirBindingOrigin::StackOffset(_)
+                            | NirBindingOrigin::DerivedFromStackOffset(_)
+                            | NirBindingOrigin::HomeSlot(_)
+                            | NirBindingOrigin::OutgoingArgSlot(_)
+                            | NirBindingOrigin::VaRegion
+                    )
+                )
+            })
+            .map(|b| b.name.clone()),
+    );
+    let facts = TrimFacts {
+        defuse: DefUseMap::build(&func.body),
+        memory_backed,
+    };
 
     let mut local_types = HashMap::default();
     for local in &func.locals {
@@ -18,8 +44,37 @@ pub fn apply_subvar_trim_pass(func: &mut PreHirFunction) -> bool {
     }
 
     let mut changed = false;
-    changed |= simplify_stmts(&mut func.body, &assignments, &defuse, &local_types);
+    changed |= simplify_stmts(&mut func.body, &assignments, &facts, &local_types);
     changed
+}
+
+struct TrimFacts {
+    defuse: DefUseMap,
+    memory_backed: HashSet<String>,
+}
+
+/// Whether `expr` has the same value wherever it is evaluated in the
+/// function: no memory read or call, and only names nothing writes (no
+/// assignment, and no storage reachable through an address). The cast patterns below
+/// move a temporary's defining expression to the temporary's use, and this
+/// pass has no position facts to show nothing redefines its operands between
+/// the two (`t = (u64)y; y = 7; r = (u32)t;`), so only such an expression may
+/// move.
+fn value_is_position_independent(expr: &PreHirExpr, facts: &TrimFacts) -> bool {
+    match expr {
+        PreHirExpr::Const(..) => true,
+        PreHirExpr::Var(name) => {
+            facts.defuse.def_count.get(name).copied().unwrap_or(0) == 0
+                && !facts.memory_backed.contains(name)
+        }
+        PreHirExpr::Cast { expr, .. } | PreHirExpr::Unary { expr, .. } => {
+            value_is_position_independent(expr, facts)
+        }
+        PreHirExpr::Binary { lhs, rhs, .. } => {
+            value_is_position_independent(lhs, facts) && value_is_position_independent(rhs, facts)
+        }
+        _ => false,
+    }
 }
 
 fn int_type_bits(ty: &NirType) -> Option<u32> {
@@ -94,12 +149,12 @@ fn find_all_assignments(stmts: &[PreHirStmt], assignments: &mut HashMap<String, 
 fn simplify_stmts(
     stmts: &mut [PreHirStmt],
     assignments: &HashMap<String, Vec<PreHirExpr>>,
-    defuse: &DefUseMap,
+    facts: &TrimFacts,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     for stmt in stmts {
-        changed |= simplify_stmt(stmt, assignments, defuse, local_types);
+        changed |= simplify_stmt(stmt, assignments, facts, local_types);
     }
     changed
 }
@@ -107,17 +162,17 @@ fn simplify_stmts(
 fn simplify_stmt(
     stmt: &mut PreHirStmt,
     assignments: &HashMap<String, Vec<PreHirExpr>>,
-    defuse: &DefUseMap,
+    facts: &TrimFacts,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match stmt {
         PreHirStmt::Assign { lhs, rhs } => {
-            changed |= simplify_expr(rhs, assignments, defuse, local_types);
-            changed |= simplify_lvalue(lhs, assignments, defuse, local_types);
+            changed |= simplify_expr(rhs, assignments, facts, local_types);
+            changed |= simplify_lvalue(lhs, assignments, facts, local_types);
         }
         PreHirStmt::Expr(expr) | PreHirStmt::Return(Some(expr)) => {
-            changed |= simplify_expr(expr, assignments, defuse, local_types);
+            changed |= simplify_expr(expr, assignments, facts, local_types);
         }
         PreHirStmt::Block(body)
         | PreHirStmt::While { body, .. }
@@ -125,7 +180,7 @@ fn simplify_stmt(
             changed |= simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 assignments,
-                defuse,
+                facts,
                 local_types,
             );
         }
@@ -136,18 +191,18 @@ fn simplify_stmt(
             body,
         } => {
             if let Some(i) = init {
-                changed |= simplify_stmt(i.as_mut(), assignments, defuse, local_types);
+                changed |= simplify_stmt(i.as_mut(), assignments, facts, local_types);
             }
             if let Some(c) = cond {
-                changed |= simplify_expr(c, assignments, defuse, local_types);
+                changed |= simplify_expr(c, assignments, facts, local_types);
             }
             if let Some(u) = update {
-                changed |= simplify_stmt(u.as_mut(), assignments, defuse, local_types);
+                changed |= simplify_stmt(u.as_mut(), assignments, facts, local_types);
             }
             changed |= simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(body),
                 assignments,
-                defuse,
+                facts,
                 local_types,
             );
         }
@@ -156,17 +211,17 @@ fn simplify_stmt(
             then_body,
             else_body,
         } => {
-            changed |= simplify_expr(cond, assignments, defuse, local_types);
+            changed |= simplify_expr(cond, assignments, facts, local_types);
             changed |= simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(then_body),
                 assignments,
-                defuse,
+                facts,
                 local_types,
             );
             changed |= simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(else_body),
                 assignments,
-                defuse,
+                facts,
                 local_types,
             );
         }
@@ -175,24 +230,24 @@ fn simplify_stmt(
             cases,
             default,
         } => {
-            changed |= simplify_expr(expr, assignments, defuse, local_types);
+            changed |= simplify_expr(expr, assignments, facts, local_types);
             for case in cases {
                 changed |= simplify_stmts(
                     std::rc::Rc::<Vec<PreHirStmt>>::make_mut(&mut case.body),
                     assignments,
-                    defuse,
+                    facts,
                     local_types,
                 );
             }
             changed |= simplify_stmts(
                 std::rc::Rc::<Vec<PreHirStmt>>::make_mut(default),
                 assignments,
-                defuse,
+                facts,
                 local_types,
             );
         }
         PreHirStmt::VaStart { va_list, .. } => {
-            changed |= simplify_expr(va_list, assignments, defuse, local_types);
+            changed |= simplify_expr(va_list, assignments, facts, local_types);
         }
         _ => {}
     }
@@ -202,21 +257,21 @@ fn simplify_stmt(
 fn simplify_lvalue(
     lval: &mut PreHirLValue,
     assignments: &HashMap<String, Vec<PreHirExpr>>,
-    defuse: &DefUseMap,
+    facts: &TrimFacts,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
     match lval {
         PreHirLValue::Var(_) => {}
         PreHirLValue::Deref { ptr, .. } => {
-            changed |= simplify_expr(ptr, assignments, defuse, local_types);
+            changed |= simplify_expr(ptr, assignments, facts, local_types);
         }
         PreHirLValue::Index { base, index, .. } => {
-            changed |= simplify_expr(base, assignments, defuse, local_types);
-            changed |= simplify_expr(index, assignments, defuse, local_types);
+            changed |= simplify_expr(base, assignments, facts, local_types);
+            changed |= simplify_expr(index, assignments, facts, local_types);
         }
         PreHirLValue::FieldAccess { base, .. } => {
-            changed |= simplify_expr(base, assignments, defuse, local_types);
+            changed |= simplify_expr(base, assignments, facts, local_types);
         }
     }
     changed
@@ -225,7 +280,7 @@ fn simplify_lvalue(
 fn simplify_expr(
     expr: &mut PreHirExpr,
     assignments: &HashMap<String, Vec<PreHirExpr>>,
-    defuse: &DefUseMap,
+    facts: &TrimFacts,
     local_types: &HashMap<String, NirType>,
 ) -> bool {
     let mut changed = false;
@@ -238,15 +293,15 @@ fn simplify_expr(
         | PreHirExpr::PtrOffset { base: inner, .. }
         | PreHirExpr::AggregateCopy { src: inner, .. }
         | PreHirExpr::FieldAccess { base: inner, .. } => {
-            changed |= simplify_expr(inner, assignments, defuse, local_types);
+            changed |= simplify_expr(inner, assignments, facts, local_types);
         }
         PreHirExpr::Binary { lhs, rhs, .. } => {
-            changed |= simplify_expr(lhs, assignments, defuse, local_types);
-            changed |= simplify_expr(rhs, assignments, defuse, local_types);
+            changed |= simplify_expr(lhs, assignments, facts, local_types);
+            changed |= simplify_expr(rhs, assignments, facts, local_types);
         }
         PreHirExpr::Call { args, .. } => {
             for arg in args {
-                changed |= simplify_expr(arg, assignments, defuse, local_types);
+                changed |= simplify_expr(arg, assignments, facts, local_types);
             }
         }
         PreHirExpr::Select {
@@ -255,13 +310,13 @@ fn simplify_expr(
             else_expr,
             ..
         } => {
-            changed |= simplify_expr(cond, assignments, defuse, local_types);
-            changed |= simplify_expr(then_expr, assignments, defuse, local_types);
-            changed |= simplify_expr(else_expr, assignments, defuse, local_types);
+            changed |= simplify_expr(cond, assignments, facts, local_types);
+            changed |= simplify_expr(then_expr, assignments, facts, local_types);
+            changed |= simplify_expr(else_expr, assignments, facts, local_types);
         }
         PreHirExpr::Index { base, index, .. } => {
-            changed |= simplify_expr(base, assignments, defuse, local_types);
-            changed |= simplify_expr(index, assignments, defuse, local_types);
+            changed |= simplify_expr(base, assignments, facts, local_types);
+            changed |= simplify_expr(index, assignments, facts, local_types);
         }
         _ => {}
     }
@@ -273,9 +328,11 @@ fn simplify_expr(
     {
         if let PreHirExpr::Var(name) = inner_cast_expr.as_ref() {
             if let Some(exprs) = assignments.get(name) {
-                if exprs.len() == 1 {
+                // A temporary reached through its address can change without
+                // an assignment, so its one assignment is not its value.
+                if exprs.len() == 1 && !facts.memory_backed.contains(name) {
                     let def_expr = &exprs[0];
-                    let use_count = defuse.use_count.get(name).copied().unwrap_or(0);
+                    let use_count = facts.defuse.use_count.get(name).copied().unwrap_or(0);
                     let is_safe_to_dup =
                         matches!(def_expr, PreHirExpr::Var(_) | PreHirExpr::Const(_, _))
                             || use_count <= 1;
@@ -291,6 +348,7 @@ fn simplify_expr(
                         {
                             let inner_val_ty = get_expr_type(inner_val, local_types);
                             if &inner_val_ty == target_ty
+                                && value_is_position_independent(inner_val, facts)
                                 && matches!(
                                     (int_type_bits(inter_ty), int_type_bits(target_ty)),
                                     (Some(inter_bits), Some(target_bits)) if inter_bits >= target_bits
@@ -319,7 +377,9 @@ fn simplify_expr(
                                 if let (Some(expected_mask), PreHirExpr::Const(mask_val, _)) =
                                     (expected_mask, and_rhs.as_ref())
                                 {
-                                    if *mask_val == expected_mask {
+                                    if *mask_val == expected_mask
+                                        && value_is_position_independent(and_lhs, facts)
+                                    {
                                         *expr = PreHirExpr::Cast {
                                             ty: target_ty.clone(),
                                             expr: and_lhs.clone(),
