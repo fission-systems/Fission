@@ -1156,6 +1156,24 @@ fn try_strip_return_outer_cast(
     try_strip_outer_cast_for_target(expr, return_type, binding_types)
 }
 
+/// Strip `(cast_ty)inner` from a value stored into (or returned as)
+/// `target_ty`, where the store performs C's implicit conversion instead.
+///
+/// The two agree only when the conversion cannot depend on anything the
+/// tree does not establish:
+///
+/// - `inner` must have a known integer or boolean type. A float operand is a
+///   conversion, and an operand of unknown type (`binding_types` holds scalar
+///   bindings only, so a float, pointer or untyped binding reads as unknown)
+///   has a width and kind nothing here can vouch for.
+/// - No bit the cast extends may survive into `target_ty`. A widening cast is
+///   the only place this IR records sign- versus zero-extension (the builder
+///   lowers `INT_SEXT`/`INT_ZEXT` to a cast to the signed/unsigned wider
+///   type), and the operand's binding type is not final here: the type fixed
+///   point runs again after this pass, and C extends by that type. So the
+///   operand must already be `target_ty`'s width, which leaves the cast either
+///   a same-width reinterpretation or an extension the store truncates away.
+///   A boolean (0 or 1) extends to the same value either way.
 fn try_strip_outer_cast_for_target(
     expr: &PreHirExpr,
     target_ty: &NirType,
@@ -1168,87 +1186,23 @@ fn try_strip_outer_cast_for_target(
     else {
         return None;
     };
-    let inner_ty = resolved_expr_type(inner, binding_types);
-    if let (Some(inner_bits), Some(cast_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
-    {
-        if inner_bits > cast_bits {
-            return None;
-        }
+    if !is_scalar_non_unknown(cast_ty) || !is_scalar_non_unknown(target_ty) {
+        return None;
     }
-    if let (Some(inner_bits), Some(target_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(target_ty))
-    {
-        if inner_bits > target_bits {
-            return None;
-        }
+    let cast_bits = scalar_bit_width(cast_ty)?;
+    let target_bits = scalar_bit_width(target_ty)?;
+    if cast_bits < target_bits {
+        // `(uint)x` into a `long`: the store extends the cast's result, not `x`.
+        return None;
     }
-    if cast_ty == target_ty && is_scalar_non_unknown(cast_ty) {
-        let compatible = match (&inner_ty, target_ty) {
-            (NirType::Unknown, _) => true,
-            (a, b) if a == b => true,
-            (NirType::Bool, NirType::Int { .. }) => true,
-            (
-                NirType::Int {
-                    bits: inner_bits,
-                    signed: inner_signed,
-                },
-                NirType::Int {
-                    bits: outer_bits,
-                    signed: outer_signed,
-                },
-            ) => {
-                *inner_bits <= *outer_bits
-                    && (*inner_bits == *outer_bits || inner_signed == outer_signed)
-            }
-            _ => false,
-        };
-        if compatible {
-            return Some((**inner).clone());
+    let preserved = match resolved_expr_type(inner, binding_types) {
+        NirType::Bool => true,
+        NirType::Int { bits, .. } => bits == target_bits,
+        NirType::Unknown | NirType::Float { .. } | NirType::Ptr(_) | NirType::Aggregate { .. } => {
+            false
         }
-    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(target_ty) {
-        let (Some(cast_bits), Some(target_bits)) =
-            (scalar_bit_width(cast_ty), scalar_bit_width(target_ty))
-        else {
-            return None;
-        };
-        if cast_bits < target_bits {
-            return None;
-        }
-        // Only strip cross-type outer scalar casts when inner is also an integer/bool scalar
-        // (never strip float-to-int or unknown-type conversions), no bits are lost, and
-        // widening preserves signedness.
-        let compatible = match (&inner_ty, cast_ty, target_ty) {
-            (
-                NirType::Bool,
-                NirType::Bool | NirType::Int { .. },
-                NirType::Bool | NirType::Int { .. },
-            ) => true,
-            (
-                NirType::Int {
-                    bits: inner_bits,
-                    signed: inner_signed,
-                },
-                NirType::Int {
-                    signed: cast_signed,
-                    ..
-                },
-                NirType::Int {
-                    bits: outer_bits,
-                    signed: outer_signed,
-                },
-            ) => {
-                *inner_bits <= *outer_bits
-                    && (*inner_bits == *outer_bits
-                        || (inner_signed == cast_signed && cast_signed == outer_signed))
-            }
-            _ => false,
-        };
-        if compatible {
-            return Some((**inner).clone());
-        }
-    }
-    None
+    };
+    preserved.then(|| (**inner).clone())
 }
 
 /// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
@@ -1522,6 +1476,8 @@ mod comparison_view_tests {
             },
             expr: Box::new(PreHirExpr::Var("carrier".into())),
         };
+        // A widening cast is where the IR records zero- versus sign-extension,
+        // and `carrier`'s type may still change after cast elision: keep it.
         assert!(
             try_strip_outer_cast(
                 &widening,
@@ -1531,7 +1487,7 @@ mod comparison_view_tests {
                 },
                 &types
             )
-            .is_some()
+            .is_none()
         );
     }
 
