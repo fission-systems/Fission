@@ -499,6 +499,38 @@ class VerifyTests(unittest.TestCase):
         self.assertEqual(ledger.rejected[0][1], "arch")
 
 
+class TriageAcceptsTests(unittest.TestCase):
+    """The triage on main (sentry_triage.py) accepts what this reporter sends."""
+
+    def test_every_kind_passes_the_triage_tag_checks(self):
+        import sentry_triage
+
+        ledger = sd.Ledger()
+        for path, parse in ((DATA / "junit.xml", sd.parse_junit), (DATA / "native-diff.log", sd.parse_native_log),
+                            (DATA / "replay-witness.json", sd.parse_replay_witness)):
+            ledger.extend(parse(path, CTX, "defect-evidence-x"))
+        ledger.extend(sd.scan_fuzz_dir(DATA / FUZZ_ARTIFACT, "fuzz_coff_object", CTX))
+        ledger.extend(sd.parse_verify(DATA / "verify-batch.verify.jsonl", CTX,
+                                      "crates/fission-dir/testdata/ground_truth_fixture.elf", "x86_64"))
+        events = [sd.build_event(d, ctx) for d in ledger.defects
+                  for ctx in (CTX, ctx_for(event="schedule"))]
+        self.assertEqual({e["tags"]["kind"] for e in events}, set(sd.KINDS))
+        for event in events:
+            # Sentry stores the event's environment as a tag beside the event's own tags.
+            stored = {"groupID": "7", "tags": [{"key": "environment", "value": event["environment"]}]
+                      + [{"key": k, "value": v} for k, v in event["tags"].items()]}
+            tags = sentry_triage.validate_tags(stored, "7", "fission-systems/Fission")
+            self.assertEqual(tags["run_id"], RUN_ID)
+            run = {"repository": {"full_name": "fission-systems/Fission"}, "head_sha": SHA,
+                   "event": "schedule" if event["environment"] == "nightly" else "push"}
+            sentry_triage.check_run(run, tags, "fission-systems/Fission")
+            if tags["kind"] == "flaky_test":
+                with self.assertRaises(sentry_triage.Rejected):
+                    sentry_triage.check_eligible(tags)
+            elif tags["category"] in ("confirmed_semantic_defect", "crash"):
+                sentry_triage.check_eligible(tags)
+
+
 class CapTests(unittest.TestCase):
     def test_run_cap_and_fingerprint_dedupe(self):
         defects = [defect(kind="native_differential_mismatch", component="fission-emulator", stage="emulator",

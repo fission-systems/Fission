@@ -19,6 +19,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Sentry Crons (monitor `ci-heavy-nightly`, project `fission`): this job
+  # checks in `in_progress`, `sentry-checkin-finish` reports heavy-summary's
+  # result. Scheduled runs in this repository only, so a manual dispatch never
+  # counts as (or hides a missing) nightly. The monitor's config travels with
+  # each check-in (scripts/ci/sentry_cron_checkin.py). Without the SENTRY_DSN
+  # secret the script skips; it always exits 0, and continue-on-error keeps
+  # Sentry out of the run's result either way.
+  sentry-checkin-start:
+    name: Sentry cron check-in (start)
+    if: github.event_name == 'schedule' && github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/sentry_cron_checkin.py
+          sparse-checkout-cone-mode: false
+      - name: Check in (in_progress)
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: python3 scripts/ci/sentry_cron_checkin.py --status in_progress
+
   build-windows-heavy:
     name: Heavy Build & Test (Windows)
     uses: ./.github/workflows/reusable-build-cli.yml
@@ -239,6 +265,30 @@ jobs:
       pattern: defect-evidence-*
     secrets:
       SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+  # Needs the start job too, so the final check-in can never overtake the
+  # in_progress one. Any heavy-summary result but success (failure,
+  # cancelled) reports `error`.
+  sentry-checkin-finish:
+    name: Sentry cron check-in (finish)
+    needs: [sentry-checkin-start, heavy-summary]
+    if: always() && github.event_name == 'schedule' && github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/sentry_cron_checkin.py
+          sparse-checkout-cone-mode: false
+      - name: Check in (ok / error)
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          HEAVY_RESULT: ${{ needs.heavy-summary.result }}
+        run: python3 scripts/ci/sentry_cron_checkin.py --result "$HEAVY_RESULT"
 
   report:
     needs: heavy-summary
