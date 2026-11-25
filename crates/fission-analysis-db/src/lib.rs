@@ -1,12 +1,31 @@
 //! Typed, immutable program metadata shared by Fission analysis layers.
 //!
 //! `fission-loader` owns format parsing. This crate converts those raw facts
-//! into a deterministic snapshot with stable table IDs and explicit
+//! into a deterministic snapshot with canonical table IDs and explicit
 //! provenance. It intentionally contains no binary parser or NIR pass.
+//!
+//! # Row identity
+//!
+//! A row ID (`FunctionId`, `MemoryBlockId`, `SymbolId`, `RelocationId`) in a
+//! published [`ProgramSnapshot`] is that row's canonical table index, and it is
+//! scoped to that one snapshot: publishing a replacement renumbers rows, so an
+//! ID must not be carried from one snapshot into another. Facts that need to
+//! survive republication are keyed by the row's natural key (entry, address,
+//! name), not by its ID.
+//!
+//! Inside a [`ProgramSnapshotBuilder`] rows carry *staging* IDs. A builder
+//! never issues the same staging ID twice, not even after the row holding it
+//! is removed, so a foreign key left pointing at a removed row stays dangling
+//! and is reported at publication instead of binding to a row added later.
+//! [`ProgramSnapshotBuilder::canonicalize`] ends the staging scope: it maps
+//! every staging ID to its canonical index and turns references that name no
+//! unique staged row into dangling references.
 
 use fission_loader::{FunctionInfo, LoadedBinary, LoaderSymbolKind};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 
 mod integrity;
 pub use integrity::{
@@ -369,14 +388,14 @@ impl PartialProgramSnapshot {
     }
 
     pub fn to_builder(&self) -> ProgramSnapshotBuilder {
-        ProgramSnapshotBuilder {
-            schema: self.schema.clone(),
-            binary: self.binary.clone(),
-            memory_blocks: self.memory_blocks.clone(),
-            functions: self.functions.clone(),
-            symbols: self.symbols.clone(),
-            relocations: self.relocations.clone(),
-        }
+        ProgramSnapshotBuilder::from_raw_parts(
+            self.schema.clone(),
+            self.binary.clone(),
+            self.memory_blocks.clone(),
+            self.functions.clone(),
+            self.symbols.clone(),
+            self.relocations.clone(),
+        )
     }
 }
 
@@ -409,6 +428,11 @@ impl SnapshotPublication {
 
 /// Typed delta applied through [`ProgramSnapshotBuilder`] or
 /// [`ProgramSnapshot::apply_delta`] to construct a replacement snapshot.
+///
+/// IDs inside a delta are resolved in the scope it is applied to (a builder's
+/// staging IDs, or the IDs of the snapshot `apply_delta` is called on). The
+/// `id` field of a row passed to an `Add*` delta is ignored; the builder
+/// assigns a fresh one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProgramSnapshotDelta {
     ReplaceBinaryMetadata(BinaryMetadata),
@@ -432,8 +456,160 @@ pub enum ProgramSnapshotDelta {
     RemoveRelocation(RelocationId),
 }
 
+/// Foreign-key value that [`ProgramSnapshotBuilder::canonicalize`] writes for
+/// a reference that names no unique staged row. It is never issued as a
+/// staging ID, so it can only ever be reported as dangling.
+const UNRESOLVED_ID: u32 = u32::MAX;
+
+/// Monotonic staging-ID source for one builder table. IDs are never reused:
+/// removing a row does not move `next` back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IdAllocator {
+    next: u32,
+}
+
+impl IdAllocator {
+    /// First ID above every ID already present (exhausted when that would be
+    /// [`UNRESOLVED_ID`]).
+    fn above(ids: impl Iterator<Item = u32>) -> Self {
+        Self {
+            next: ids
+                .max()
+                .map_or(0, |max| max.saturating_add(1).min(UNRESOLVED_ID)),
+        }
+    }
+
+    fn allocate(&mut self, table: SnapshotTable) -> Result<u32, SnapshotDeltaError> {
+        if self.next == UNRESOLVED_ID {
+            return Err(SnapshotDeltaError::IdSpaceExhausted { table });
+        }
+        let id = self.next;
+        self.next += 1;
+        Ok(id)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StagingIds {
+    memory_blocks: IdAllocator,
+    functions: IdAllocator,
+    symbols: IdAllocator,
+    relocations: IdAllocator,
+}
+
+impl StagingIds {
+    fn above(
+        memory_blocks: &[MemoryBlock],
+        functions: &[FunctionRecord],
+        symbols: &[SymbolRecord],
+        relocations: &[RelocationRecord],
+    ) -> Self {
+        Self {
+            memory_blocks: IdAllocator::above(memory_blocks.iter().map(|row| row.id.0)),
+            functions: IdAllocator::above(functions.iter().map(|row| row.id.0)),
+            symbols: IdAllocator::above(symbols.iter().map(|row| row.id.0)),
+            relocations: IdAllocator::above(relocations.iter().map(|row| row.id.0)),
+        }
+    }
+}
+
+/// Why [`ProgramSnapshotBuilder::apply_delta`] refused a typed delta. A refused
+/// delta leaves the builder unchanged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SnapshotDeltaError {
+    /// The delta names an ID no staged row carries: it was removed earlier,
+    /// it was never issued, or it came from a different snapshot.
+    UnknownTarget { table: SnapshotTable, id: u32 },
+    /// Several staged rows carry the ID, so the delta cannot say which one.
+    AmbiguousTarget {
+        table: SnapshotTable,
+        id: u32,
+        rows: usize,
+    },
+    /// An added row references an ID that names no live staged row.
+    DanglingReference {
+        table: SnapshotTable,
+        field: String,
+        target_table: SnapshotTable,
+        target_id: u32,
+    },
+    /// Every staging ID for the table has been issued.
+    IdSpaceExhausted { table: SnapshotTable },
+}
+
+impl fmt::Display for SnapshotDeltaError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownTarget { table, id } => {
+                write!(
+                    f,
+                    "delta names {table:?} id {id}, which no staged row carries"
+                )
+            }
+            Self::AmbiguousTarget { table, id, rows } => {
+                write!(
+                    f,
+                    "delta names {table:?} id {id}, which {rows} staged rows carry"
+                )
+            }
+            Self::DanglingReference {
+                table,
+                field,
+                target_table,
+                target_id,
+            } => write!(
+                f,
+                "added {table:?} row references {target_table:?} id {target_id} via `{field}`, \
+                 which no live staged row carries"
+            ),
+            Self::IdSpaceExhausted { table } => {
+                write!(f, "no unissued staging id is left for {table:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SnapshotDeltaError {}
+
+/// Failure of [`ProgramSnapshot::apply_deltas`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotUpdateError {
+    /// The delta at `index` in the batch was refused; nothing was published.
+    RejectedDelta {
+        index: usize,
+        error: SnapshotDeltaError,
+    },
+    /// Every delta applied, but the resulting tables fail validation.
+    Integrity(SnapshotIntegrityReport),
+}
+
+impl SnapshotUpdateError {
+    /// The integrity report, when the batch applied but failed validation.
+    pub fn integrity_report(&self) -> Option<&SnapshotIntegrityReport> {
+        match self {
+            Self::Integrity(report) => Some(report),
+            Self::RejectedDelta { .. } => None,
+        }
+    }
+}
+
+impl fmt::Display for SnapshotUpdateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RejectedDelta { index, error } => write!(f, "delta {index} rejected: {error}"),
+            Self::Integrity(report) => report.fmt(f),
+        }
+    }
+}
+
+impl std::error::Error for SnapshotUpdateError {}
+
 /// Staged builder used to construct or derive replacement snapshots prior to
 /// validation at [`Self::publish`] / [`Self::build`].
+///
+/// Rows are changed only through typed deltas ([`Self::apply_delta`]), which
+/// resolve IDs in the builder's staging scope (see the crate docs).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProgramSnapshotBuilder {
     schema: String,
@@ -442,11 +618,61 @@ pub struct ProgramSnapshotBuilder {
     functions: Vec<FunctionRecord>,
     symbols: Vec<SymbolRecord>,
     relocations: Vec<RelocationRecord>,
+    staging_ids: StagingIds,
 }
 
-fn canonicalize_ids<T, K: Ord>(
+/// Index of the single staged row carrying `id`.
+fn unique_row<T>(
+    rows: &[T],
+    table: SnapshotTable,
+    id: u32,
+    get_id: impl Fn(&T) -> u32,
+) -> Result<usize, SnapshotDeltaError> {
+    let mut found = None;
+    let mut count = 0;
+    for (index, row) in rows.iter().enumerate() {
+        if get_id(row) == id {
+            count += 1;
+            found.get_or_insert(index);
+        }
+    }
+    match (found, count) {
+        (Some(index), 1) => Ok(index),
+        (None, _) => Err(SnapshotDeltaError::UnknownTarget { table, id }),
+        (Some(_), rows) => Err(SnapshotDeltaError::AmbiguousTarget { table, id, rows }),
+    }
+}
+
+/// Check that an added row's foreign key names exactly one live staged row.
+fn resolve_reference<T>(
+    rows: &[T],
+    table: SnapshotTable,
+    field: &str,
+    target_table: SnapshotTable,
+    target_id: u32,
+    get_id: impl Fn(&T) -> u32,
+) -> Result<(), SnapshotDeltaError> {
+    match unique_row(rows, target_table, target_id, get_id) {
+        Ok(_) => Ok(()),
+        Err(SnapshotDeltaError::UnknownTarget { .. }) => {
+            Err(SnapshotDeltaError::DanglingReference {
+                table,
+                field: field.to_string(),
+                target_table,
+                target_id,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Sort `rows` into canonical order, renumber them by position, and return
+/// the staging-ID to canonical-ID map. Staging IDs carried by more than one
+/// row are left out of the map, so references to them become dangling
+/// instead of picking one of the rows.
+fn canonicalize_ids<T>(
     rows: &mut [T],
-    key: impl Fn(&T) -> K,
+    order: impl Fn(&T, &T) -> Ordering,
     get_id: impl Fn(&T) -> u32,
     set_id: impl Fn(&mut T, u32),
 ) -> HashMap<u32, u32> {
@@ -454,12 +680,17 @@ fn canonicalize_ids<T, K: Ord>(
     for row in rows.iter() {
         *id_counts.entry(get_id(row)).or_default() += 1;
     }
-    rows.sort_by_key(key);
+    rows.sort_by(order);
     let mut old_to_new = HashMap::with_capacity(rows.len());
     for (index, row) in rows.iter_mut().enumerate() {
         let old_id = get_id(row);
-        let new_id = index as u32;
-        if id_counts.get(&old_id).copied() == Some(1) {
+        // A table too long for a `u32` index cannot be published; the
+        // out-of-range rows get an ID that validation rejects.
+        let new_id = u32::try_from(index)
+            .ok()
+            .filter(|&id| id < UNRESOLVED_ID)
+            .unwrap_or(UNRESOLVED_ID);
+        if id_counts.get(&old_id).copied() == Some(1) && new_id != UNRESOLVED_ID {
             old_to_new.insert(old_id, new_id);
         }
         set_id(row, new_id);
@@ -467,18 +698,41 @@ fn canonicalize_ids<T, K: Ord>(
     old_to_new
 }
 
+pub(crate) fn memory_block_order(left: &MemoryBlock, right: &MemoryBlock) -> Ordering {
+    (left.start, &left.name, left.file_offset).cmp(&(right.start, &right.name, right.file_offset))
+}
+
+pub(crate) fn function_order(left: &FunctionRecord, right: &FunctionRecord) -> Ordering {
+    (left.entry, &left.name, left.size).cmp(&(right.entry, &right.name, right.size))
+}
+
+pub(crate) fn symbol_order(left: &SymbolRecord, right: &SymbolRecord) -> Ordering {
+    (left.address, left.kind, &left.name).cmp(&(right.address, right.kind, &right.name))
+}
+
+pub(crate) fn relocation_order(left: &RelocationRecord, right: &RelocationRecord) -> Ordering {
+    (left.address, left.relocation_type, &left.symbol_name).cmp(&(
+        right.address,
+        right.relocation_type,
+        &right.symbol_name,
+    ))
+}
+
 impl ProgramSnapshotBuilder {
     pub fn new(binary: BinaryMetadata) -> Self {
-        Self {
-            schema: PROGRAM_SNAPSHOT_SCHEMA.to_string(),
+        Self::from_raw_parts(
+            PROGRAM_SNAPSHOT_SCHEMA.to_string(),
             binary,
-            memory_blocks: Vec::new(),
-            functions: Vec::new(),
-            symbols: Vec::new(),
-            relocations: Vec::new(),
-        }
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
+    /// Stage rows exactly as given. Their IDs become staging IDs; duplicates
+    /// are allowed here and surface as ambiguous targets or dangling
+    /// references later.
     pub fn from_raw_parts(
         schema: String,
         binary: BinaryMetadata,
@@ -487,6 +741,7 @@ impl ProgramSnapshotBuilder {
         symbols: Vec<SymbolRecord>,
         relocations: Vec<RelocationRecord>,
     ) -> Self {
+        let staging_ids = StagingIds::above(&memory_blocks, &functions, &symbols, &relocations);
         Self {
             schema,
             binary,
@@ -494,6 +749,7 @@ impl ProgramSnapshotBuilder {
             functions,
             symbols,
             relocations,
+            staging_ids,
         }
     }
 
@@ -506,9 +762,9 @@ impl ProgramSnapshotBuilder {
         let architecture = binary.architecture.as_ref();
         let load_spec = binary.load_spec.as_ref();
 
-        Self {
-            schema: PROGRAM_SNAPSHOT_SCHEMA.to_string(),
-            binary: BinaryMetadata {
+        Self::from_raw_parts(
+            PROGRAM_SNAPSHOT_SCHEMA.to_string(),
+            BinaryMetadata {
                 content_hash: binary.hash.clone(),
                 format: binary.format.clone(),
                 bitness: if binary.is_64bit { 64 } else { 32 },
@@ -525,7 +781,7 @@ impl ProgramSnapshotBuilder {
             functions,
             symbols,
             relocations,
-        }
+        )
     }
 
     pub fn with_schema(mut self, schema: impl Into<String>) -> Self {
@@ -538,128 +794,264 @@ impl ProgramSnapshotBuilder {
         self
     }
 
-    pub fn memory_blocks_mut(&mut self) -> &mut Vec<MemoryBlock> {
-        &mut self.memory_blocks
+    pub fn memory_blocks(&self) -> &[MemoryBlock] {
+        &self.memory_blocks
     }
 
-    pub fn functions_mut(&mut self) -> &mut Vec<FunctionRecord> {
-        &mut self.functions
+    pub fn functions(&self) -> &[FunctionRecord] {
+        &self.functions
     }
 
-    pub fn symbols_mut(&mut self) -> &mut Vec<SymbolRecord> {
-        &mut self.symbols
+    pub fn symbols(&self) -> &[SymbolRecord] {
+        &self.symbols
     }
 
-    pub fn relocations_mut(&mut self) -> &mut Vec<RelocationRecord> {
-        &mut self.relocations
+    pub fn relocations(&self) -> &[RelocationRecord] {
+        &self.relocations
     }
 
-    fn next_raw_id<T>(rows: &[T], get_id: impl Fn(&T) -> u32) -> u32 {
-        rows.iter()
-            .map(get_id)
-            .max()
-            .map_or(0, |id| id.saturating_add(1))
+    /// Stage a memory block under a fresh staging ID (the row's own `id` is
+    /// ignored) and return that ID.
+    pub fn add_memory_block(
+        &mut self,
+        mut block: MemoryBlock,
+    ) -> Result<MemoryBlockId, SnapshotDeltaError> {
+        let id = MemoryBlockId(
+            self.staging_ids
+                .memory_blocks
+                .allocate(SnapshotTable::MemoryBlocks)?,
+        );
+        block.id = id;
+        self.memory_blocks.push(block);
+        Ok(id)
     }
 
-    pub fn apply_delta(&mut self, delta: ProgramSnapshotDelta) -> &mut Self {
+    /// Stage a function under a fresh staging ID. Its `memory_block`, if any,
+    /// must name exactly one live staged block.
+    pub fn add_function(
+        &mut self,
+        mut function: FunctionRecord,
+    ) -> Result<FunctionId, SnapshotDeltaError> {
+        if let Some(block) = function.memory_block {
+            resolve_reference(
+                &self.memory_blocks,
+                SnapshotTable::Functions,
+                "memory_block",
+                SnapshotTable::MemoryBlocks,
+                block.0,
+                |row| row.id.0,
+            )?;
+        }
+        let id = FunctionId(
+            self.staging_ids
+                .functions
+                .allocate(SnapshotTable::Functions)?,
+        );
+        function.id = id;
+        self.functions.push(function);
+        Ok(id)
+    }
+
+    /// Stage a symbol under a fresh staging ID.
+    pub fn add_symbol(&mut self, mut symbol: SymbolRecord) -> Result<SymbolId, SnapshotDeltaError> {
+        let id = SymbolId(self.staging_ids.symbols.allocate(SnapshotTable::Symbols)?);
+        symbol.id = id;
+        self.symbols.push(symbol);
+        Ok(id)
+    }
+
+    /// Stage a relocation under a fresh staging ID. Its `symbol`, if any,
+    /// must name exactly one live staged symbol.
+    pub fn add_relocation(
+        &mut self,
+        mut relocation: RelocationRecord,
+    ) -> Result<RelocationId, SnapshotDeltaError> {
+        if let Some(symbol) = relocation.symbol {
+            resolve_reference(
+                &self.symbols,
+                SnapshotTable::Relocations,
+                "symbol",
+                SnapshotTable::Symbols,
+                symbol.0,
+                |row| row.id.0,
+            )?;
+        }
+        let id = RelocationId(
+            self.staging_ids
+                .relocations
+                .allocate(SnapshotTable::Relocations)?,
+        );
+        relocation.id = id;
+        self.relocations.push(relocation);
+        Ok(id)
+    }
+
+    /// Apply one typed delta in the builder's staging scope.
+    ///
+    /// Update and remove deltas must name exactly one staged row; a delta
+    /// naming a missing row is refused rather than treated as a no-op, since
+    /// it was derived from a state the builder does not hold. Add deltas get a
+    /// fresh staging ID that no earlier row, live or removed, has carried, and
+    /// their foreign keys must name live rows. Removing a row does not touch
+    /// rows that reference it: their references stay on the retired ID, which
+    /// is never reissued, and publication reports them as dangling. On error
+    /// the builder is unchanged.
+    pub fn apply_delta(
+        &mut self,
+        delta: ProgramSnapshotDelta,
+    ) -> Result<&mut Self, SnapshotDeltaError> {
         match delta {
             ProgramSnapshotDelta::ReplaceBinaryMetadata(binary) => {
                 self.binary = binary;
             }
             ProgramSnapshotDelta::UpdateFunctionRange { id, entry, size } => {
-                if let Some(row) = self.functions.iter_mut().find(|row| row.id == id) {
-                    row.entry = entry;
-                    row.size = size;
-                }
+                let index = unique_row(&self.functions, SnapshotTable::Functions, id.0, |row| {
+                    row.id.0
+                })?;
+                let row = &mut self.functions[index];
+                row.entry = entry;
+                row.size = size;
             }
-            ProgramSnapshotDelta::AddFunction(mut function) => {
-                function.id = FunctionId(Self::next_raw_id(&self.functions, |row| row.id.0));
-                self.functions.push(function);
+            ProgramSnapshotDelta::AddFunction(function) => {
+                self.add_function(function)?;
             }
             ProgramSnapshotDelta::RemoveFunction(id) => {
-                self.functions.retain(|row| row.id != id);
+                let index = unique_row(&self.functions, SnapshotTable::Functions, id.0, |row| {
+                    row.id.0
+                })?;
+                self.functions.remove(index);
             }
             ProgramSnapshotDelta::UpdateMemoryBlockRange { id, start, size } => {
-                if let Some(row) = self.memory_blocks.iter_mut().find(|row| row.id == id) {
-                    row.start = start;
-                    row.size = size;
-                }
+                let index = unique_row(
+                    &self.memory_blocks,
+                    SnapshotTable::MemoryBlocks,
+                    id.0,
+                    |row| row.id.0,
+                )?;
+                let row = &mut self.memory_blocks[index];
+                row.start = start;
+                row.size = size;
             }
-            ProgramSnapshotDelta::AddMemoryBlock(mut block) => {
-                block.id = MemoryBlockId(Self::next_raw_id(&self.memory_blocks, |row| row.id.0));
-                self.memory_blocks.push(block);
+            ProgramSnapshotDelta::AddMemoryBlock(block) => {
+                self.add_memory_block(block)?;
             }
             ProgramSnapshotDelta::RemoveMemoryBlock(id) => {
-                self.memory_blocks.retain(|row| row.id != id);
+                let index = unique_row(
+                    &self.memory_blocks,
+                    SnapshotTable::MemoryBlocks,
+                    id.0,
+                    |row| row.id.0,
+                )?;
+                self.memory_blocks.remove(index);
             }
-            ProgramSnapshotDelta::AddSymbol(mut symbol) => {
-                symbol.id = SymbolId(Self::next_raw_id(&self.symbols, |row| row.id.0));
-                self.symbols.push(symbol);
+            ProgramSnapshotDelta::AddSymbol(symbol) => {
+                self.add_symbol(symbol)?;
             }
             ProgramSnapshotDelta::RemoveSymbol(id) => {
-                self.symbols.retain(|row| row.id != id);
+                let index =
+                    unique_row(&self.symbols, SnapshotTable::Symbols, id.0, |row| row.id.0)?;
+                self.symbols.remove(index);
             }
-            ProgramSnapshotDelta::AddRelocation(mut relocation) => {
-                relocation.id = RelocationId(Self::next_raw_id(&self.relocations, |row| row.id.0));
-                self.relocations.push(relocation);
+            ProgramSnapshotDelta::AddRelocation(relocation) => {
+                self.add_relocation(relocation)?;
             }
             ProgramSnapshotDelta::RemoveRelocation(id) => {
-                self.relocations.retain(|row| row.id != id);
+                let index =
+                    unique_row(&self.relocations, SnapshotTable::Relocations, id.0, |row| {
+                        row.id.0
+                    })?;
+                self.relocations.remove(index);
             }
         }
-        self
+        Ok(self)
     }
 
     /// Sort all four tables into canonical order, reassign sequential row IDs,
-    /// and remap foreign keys (mapping deleted/ambiguous targets to `u32::MAX`
-    /// so validation detects dangling references instead of silently aliasing).
+    /// and remap foreign keys. A reference whose staging ID names no row, or
+    /// names several, becomes a dangling reference that validation reports;
+    /// it never binds to some other row.
+    ///
+    /// This ends the staging scope: staging IDs handed out before the call
+    /// mean nothing afterwards, and new rows are numbered after the canonical
+    /// ones.
     pub fn canonicalize(mut self) -> Self {
         let block_map = canonicalize_ids(
             &mut self.memory_blocks,
-            |row| (row.start, row.name.clone(), row.file_offset),
+            memory_block_order,
             |row| row.id.0,
             |row, id| row.id = MemoryBlockId(id),
         );
         for function in &mut self.functions {
             function.memory_block = function
                 .memory_block
-                .map(|old| MemoryBlockId(block_map.get(&old.0).copied().unwrap_or(u32::MAX)));
+                .map(|old| MemoryBlockId(block_map.get(&old.0).copied().unwrap_or(UNRESOLVED_ID)));
         }
 
         let symbol_map = canonicalize_ids(
             &mut self.symbols,
-            |row| (row.address, row.kind, row.name.clone()),
+            symbol_order,
             |row| row.id.0,
             |row, id| row.id = SymbolId(id),
         );
         for relocation in &mut self.relocations {
             relocation.symbol = relocation
                 .symbol
-                .map(|old| SymbolId(symbol_map.get(&old.0).copied().unwrap_or(u32::MAX)));
+                .map(|old| SymbolId(symbol_map.get(&old.0).copied().unwrap_or(UNRESOLVED_ID)));
         }
 
         canonicalize_ids(
             &mut self.functions,
-            |row| (row.entry, row.name.clone(), row.size),
+            function_order,
             |row| row.id.0,
             |row, id| row.id = FunctionId(id),
         );
         canonicalize_ids(
             &mut self.relocations,
-            |row| (row.address, row.relocation_type, row.symbol_name.clone()),
+            relocation_order,
             |row| row.id.0,
             |row, id| row.id = RelocationId(id),
+        );
+        self.staging_ids = StagingIds::above(
+            &self.memory_blocks,
+            &self.functions,
+            &self.symbols,
+            &self.relocations,
         );
         self
     }
 
-    /// Checked publication boundary: builds derived interval indexes from the
-    /// staged rows and validates all snapshot invariants before exposing a
-    /// [`ProgramSnapshot`].
+    /// Checked publication boundary: validates every table invariant on the
+    /// staged rows and, only when they hold, derives the interval indexes and
+    /// exposes a [`ProgramSnapshot`].
+    ///
+    /// The indexes are built once, here, from the rows just validated, and the
+    /// published snapshot cannot be mutated afterwards, so publication does
+    /// not re-derive them to compare. [`ProgramSnapshot::integrity_report`]
+    /// remains the independent audit: it re-derives both indexes from the
+    /// rows and compares them with the cached ones.
     pub fn publish(self) -> SnapshotPublication {
+        let report = integrity::validate_tables(&integrity::SnapshotTables {
+            schema: &self.schema,
+            binary: &self.binary,
+            memory_blocks: &self.memory_blocks,
+            functions: &self.functions,
+            symbols: &self.symbols,
+            relocations: &self.relocations,
+        });
+        if !report.is_valid() {
+            return SnapshotPublication::Partial(PartialProgramSnapshot {
+                schema: self.schema,
+                binary: self.binary,
+                memory_blocks: self.memory_blocks,
+                functions: self.functions,
+                symbols: self.symbols,
+                relocations: self.relocations,
+                report,
+            });
+        }
         let memory_block_intervals = build_memory_block_intervals(&self.memory_blocks);
         let function_intervals = build_function_intervals(&self.functions);
-        let candidate = ProgramSnapshot {
+        SnapshotPublication::Valid(ProgramSnapshot {
             schema: self.schema,
             binary: self.binary,
             memory_blocks: self.memory_blocks,
@@ -668,21 +1060,7 @@ impl ProgramSnapshotBuilder {
             relocations: self.relocations,
             function_intervals,
             memory_block_intervals,
-        };
-        let report = candidate.integrity_report();
-        if report.is_valid() {
-            SnapshotPublication::Valid(candidate)
-        } else {
-            SnapshotPublication::Partial(PartialProgramSnapshot {
-                schema: candidate.schema,
-                binary: candidate.binary,
-                memory_blocks: candidate.memory_blocks,
-                functions: candidate.functions,
-                symbols: candidate.symbols,
-                relocations: candidate.relocations,
-                report,
-            })
-        }
+        })
     }
 
     pub fn build(self) -> Result<ProgramSnapshot, SnapshotIntegrityReport> {
@@ -720,14 +1098,14 @@ impl ProgramSnapshot {
     }
 
     pub fn to_builder(&self) -> ProgramSnapshotBuilder {
-        ProgramSnapshotBuilder {
-            schema: self.schema.clone(),
-            binary: self.binary.clone(),
-            memory_blocks: self.memory_blocks.clone(),
-            functions: self.functions.clone(),
-            symbols: self.symbols.clone(),
-            relocations: self.relocations.clone(),
-        }
+        ProgramSnapshotBuilder::from_raw_parts(
+            self.schema.clone(),
+            self.binary.clone(),
+            self.memory_blocks.clone(),
+            self.functions.clone(),
+            self.symbols.clone(),
+            self.relocations.clone(),
+        )
     }
 
     pub fn schema(&self) -> &str {
@@ -762,22 +1140,29 @@ impl ProgramSnapshot {
         ProgramSnapshotBuilder::from_loaded_binary(binary).publish()
     }
 
-    pub fn apply_delta(
-        &self,
-        delta: ProgramSnapshotDelta,
-    ) -> Result<Self, SnapshotIntegrityReport> {
+    pub fn apply_delta(&self, delta: ProgramSnapshotDelta) -> Result<Self, SnapshotUpdateError> {
         self.apply_deltas([delta])
     }
 
+    /// Publish a replacement snapshot with `deltas` applied in order. IDs in
+    /// the deltas are this snapshot's IDs; rows added by the batch get fresh
+    /// IDs, so a delta cannot refer to a row added earlier in the same batch.
+    /// The batch is all-or-nothing: any refused delta or failed validation
+    /// publishes nothing.
     pub fn apply_deltas(
         &self,
         deltas: impl IntoIterator<Item = ProgramSnapshotDelta>,
-    ) -> Result<Self, SnapshotIntegrityReport> {
+    ) -> Result<Self, SnapshotUpdateError> {
         let mut builder = self.to_builder();
-        for delta in deltas {
-            builder.apply_delta(delta);
+        for (index, delta) in deltas.into_iter().enumerate() {
+            builder
+                .apply_delta(delta)
+                .map_err(|error| SnapshotUpdateError::RejectedDelta { index, error })?;
         }
-        builder.canonicalize().build()
+        builder
+            .canonicalize()
+            .build()
+            .map_err(SnapshotUpdateError::Integrity)
     }
 
     pub fn function_at(&self, entry: u64) -> Option<&FunctionRecord> {
@@ -1771,8 +2156,8 @@ mod tests {
             let block = &builder.memory_blocks[0];
             block.start + block.size
         };
-        builder.functions_mut()[0].entry = block_end - 10;
-        builder.functions_mut()[0].size = 50;
+        builder.functions[0].entry = block_end - 10;
+        builder.functions[0].size = 50;
 
         let Err(report) = builder.build() else {
             panic!("overflowing function must be rejected at publication");
@@ -2063,9 +2448,9 @@ mod tests {
 
         // 3. Reorder rows manually in builder, canonicalize, and publish.
         let mut reordered_builder = with_append.to_builder();
-        reordered_builder.functions_mut().reverse();
-        reordered_builder.symbols_mut().reverse();
-        reordered_builder.relocations_mut().reverse();
+        reordered_builder.functions.reverse();
+        reordered_builder.symbols.reverse();
+        reordered_builder.relocations.reverse();
         let recanonical = reordered_builder.canonicalize().build().expect("valid");
         assert_queries_match_reference_scan(&recanonical, &probes);
 
@@ -2087,7 +2472,7 @@ mod tests {
 
         // Unsorted functions without canonicalize fail publication cleanly and expose Partial.
         let mut unsorted = valid.to_builder();
-        unsorted.functions_mut().reverse();
+        unsorted.functions.reverse();
         let pub_outcome = unsorted.clone().publish();
         assert!(!pub_outcome.is_valid());
         let SnapshotPublication::Partial(partial) = pub_outcome else {
@@ -2114,28 +2499,40 @@ mod tests {
         let err = valid
             .apply_delta(ProgramSnapshotDelta::RemoveMemoryBlock(MemoryBlockId(0)))
             .expect_err("removing referenced block must fail validation");
-        assert!(err.issues.iter().any(|issue| matches!(
-            issue,
-            SnapshotIntegrityIssue::DanglingReference {
-                table: SnapshotTable::Functions,
-                target_table: SnapshotTable::MemoryBlocks,
-                ..
-            }
-        )));
+        assert!(
+            err.integrity_report()
+                .expect("validation failure")
+                .issues
+                .iter()
+                .any(|issue| matches!(
+                    issue,
+                    SnapshotIntegrityIssue::DanglingReference {
+                        table: SnapshotTable::Functions,
+                        target_table: SnapshotTable::MemoryBlocks,
+                        ..
+                    }
+                ))
+        );
 
         let err = valid
             .apply_delta(ProgramSnapshotDelta::RemoveSymbol(
                 valid.relocations()[0].symbol.expect("linked symbol"),
             ))
             .expect_err("removing referenced symbol must fail validation");
-        assert!(err.issues.iter().any(|issue| matches!(
-            issue,
-            SnapshotIntegrityIssue::DanglingReference {
-                table: SnapshotTable::Relocations,
-                target_table: SnapshotTable::Symbols,
-                ..
-            }
-        )));
+        assert!(
+            err.integrity_report()
+                .expect("validation failure")
+                .issues
+                .iter()
+                .any(|issue| matches!(
+                    issue,
+                    SnapshotIntegrityIssue::DanglingReference {
+                        table: SnapshotTable::Relocations,
+                        target_table: SnapshotTable::Symbols,
+                        ..
+                    }
+                ))
+        );
 
         // Shrinking a memory block past a function that points to it fails with FunctionOutsideMemoryBlock.
         let err = valid
@@ -2145,10 +2542,16 @@ mod tests {
                 size: 8,
             })
             .expect_err("shrinking block past functions must fail validation");
-        assert!(err.issues.iter().any(|issue| matches!(
-            issue,
-            SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
-        )));
+        assert!(
+            err.integrity_report()
+                .expect("validation failure")
+                .issues
+                .iter()
+                .any(|issue| matches!(
+                    issue,
+                    SnapshotIntegrityIssue::FunctionOutsideMemoryBlock { .. }
+                ))
+        );
 
         // Schema mismatch is also rejected.
         let err = valid
@@ -2168,24 +2571,26 @@ mod tests {
         let mut ver_builder = ProgramSnapshot::try_from_loaded_binary(&fixture(false))
             .expect("valid")
             .to_builder();
-        ver_builder.apply_delta(ProgramSnapshotDelta::AddFunction(FunctionRecord {
-            id: FunctionId(0),
-            name: "_alias".into(),
-            entry: 0x1000,
-            size: 0,
-            kind: FunctionKind::Code,
-            is_import: false,
-            is_export: false,
-            is_thunk: false,
-            thunk_target: None,
-            memory_block: Some(MemoryBlockId(0)),
-            external_library: None,
-            provenance: Provenance {
-                source: FactSource::SymbolTable,
-                confidence: FactConfidence::High,
-                detail: None,
-            },
-        }));
+        ver_builder
+            .apply_delta(ProgramSnapshotDelta::AddFunction(FunctionRecord {
+                id: FunctionId(0),
+                name: "_alias".into(),
+                entry: 0x1000,
+                size: 0,
+                kind: FunctionKind::Code,
+                is_import: false,
+                is_export: false,
+                is_thunk: false,
+                thunk_target: None,
+                memory_block: Some(MemoryBlockId(0)),
+                external_library: None,
+                provenance: Provenance {
+                    source: FactSource::SymbolTable,
+                    confidence: FactConfidence::High,
+                    detail: None,
+                },
+            }))
+            .expect("alias function is staged");
         let original = ver_builder.canonicalize().build().expect("valid");
         let mut value = serde_json::to_value(&original).expect("serialize snapshot");
         let obj = value.as_object().expect("JSON object");
