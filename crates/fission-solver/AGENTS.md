@@ -25,7 +25,7 @@ Scope: `crates/fission-solver`
 
 1. **No FFI to SMT solvers** — Do not add `z3`, `z3-sys`, `boolector`, `cvc5-sys`, or equivalent crates.
 2. **Node IDs are globally unique** — `VAR_COUNTER` is a process-global `AtomicU32`. Node IDs must never be reused across solver instances.
-3. **`SymExpr` is clone-friendly** — All AST nodes must implement `Clone`. Expressions are shared by cloning into `solver.nodes`.
+3. **`SymExpr` is clone-friendly** — All AST nodes must implement `Clone`. Expressions are shared by cloning into the solver's node table (`register_node`, `insert_node`; read with `nodes()` / `node(id)`).
 4. **`Solver::register_node` is the canonical way to store a computed expression** — Do not store nodes in ad-hoc side maps.
 5. **`Solver::register_var` is the canonical way to create a new symbolic variable** — Used by taint sources.
 6. **Assertions must be 1-bit** — `solver.assert(expr)` should only accept `SymExpr` values where `get_bit_width() == 1`.
@@ -38,6 +38,8 @@ Scope: `crates/fission-solver`
 13. **Only learned clauses are collected, and never a locked one** — `clause_meta` marks each clause; input clauses and theory lemmas are `None`. Collection used to pair learned-clause metadata with clause indices through a boundary nothing ever set, and deleted input clauses once search passed a hundred conflicts: pigeonhole problems and bit-vector problems from five bits up came back SAT. A clause that is the reason for a current assignment is kept.
 14. **Check circuits against definitions, not against Z3** — the division circuit is ported from Z3 (MIT); a test that agrees with Z3 shows the port is faithful, not that it is right. `tests/soundness_probe.rs` checks the declared QF_BV conformance matrix against SMT-LIB definitions; see `docs/architecture/SOLVER_CONFORMANCE.md`.
 15. **A search that gives up says so** — `Solver::set_conflict_budget` bounds a query in SAT conflicts (not seconds, so the answer does not depend on the machine's load); past it `check_sat` returns `Unknown` and `Solver::last_unknown()` reports `UnknownReason::ConflictBudget`. The default is no budget. `SatSolver::solve_limited` returns `None` for the same event; the `bool` entry points never give up. A derived query (`eval`, `min`, `max`, `is_true`, `is_false`) that ran out returns its "not proven" answer, and `last_unknown()` is how a caller tells that from a real one.
+16. **Assertions and backend are one state** — `Solver`'s assertion list, node table, AIG/CNF/SAT/array backend, identity table and published model are private. `assert` appends and validates and lowers only the new assertion (append-only solving stays linear); `replace_assertion`, `remove_assertion`, `truncate_assertions`, `clear_assertions` and `swap_assertions` rebuild the backend, because clauses (learned ones included) derived from a removed assertion must not answer later queries. When `assertions` was a public `Vec`, replacing `x == 0` by `x == 1` and asking under `x == 1` answered Unsat. Every edit bumps `assertion_revision()` and withdraws the model. Never re-validate the whole assertion list per query or per `assert`: that made `assert` quadratic and timed out the quotient tests in CI.
+17. **A rejected query leaves nothing behind** — query expressions are validated against the identity table with `VarSortEnv::try_bind_*`, which are atomic; only a well-formed query's variable bindings are kept (it is about to be lowered). Model reads go through `Solver::eval_in_model`, which drains what it could not lower instead of marking the whole problem unsupported.
 
 ## `SymExpr` AST Reference
 
@@ -99,7 +101,7 @@ The differential cannot see what z3 has no term for -- an ill-sorted array term,
 ## Anti-Patterns
 
 - Do not add `z3`, `z3-sys`, `boolector-sys`, `cvc5`, or any C/C++ SMT library dependency.
-- Do not store node expressions in maps outside `solver.nodes`.
+- Do not store node expressions in maps outside the solver's node table.
 - Do not reuse `SymNodeId` values.
 - Do not emit `SatResult::Sat` after implementing CDCL if the actual result is `Unsat` — correctness is required.
 - Do not treat `check_sat()` returning `Sat` as a proven result until the stub is replaced.

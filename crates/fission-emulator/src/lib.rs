@@ -46,7 +46,7 @@ mod tests {
             assert_eq!(bit_width_from_byte_size(bytes), expected_bits);
             let mut solver = Solver::new();
             let id = solver.register_var("boundary".to_string(), bit_width_from_byte_size(bytes));
-            assert_eq!(solver.nodes[&id].get_bit_width(), expected_bits);
+            assert_eq!(solver.nodes()[&id].get_bit_width(), expected_bits);
         }
     }
 }

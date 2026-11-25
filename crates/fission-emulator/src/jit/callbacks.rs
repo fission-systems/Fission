@@ -1018,10 +1018,10 @@ pub unsafe extern "C" fn jit_shadow_binop(
     let a_width_bits = crate::bit_width_from_byte_size((a_size as u32).clamp(1, 8));
     let b_width_bits = crate::bit_width_from_byte_size((b_size as u32).clamp(1, 8));
     let a_expr = a_node
-        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .and_then(|id| emu.solver.nodes().get(&id).cloned())
         .unwrap_or_else(|| SymExpr::new_const(a_val, a_width_bits));
     let b_expr = b_node
-        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .and_then(|id| emu.solver.nodes().get(&id).cloned())
         .unwrap_or_else(|| SymExpr::new_const(b_val, b_width_bits));
 
     let new_expr = match op_kind {
@@ -1109,7 +1109,7 @@ pub unsafe extern "C" fn jit_shadow_unop(
     use fission_solver::SymExpr;
     let a_width_bits = crate::bit_width_from_byte_size((a_size as u32).clamp(1, 8));
     let a_expr = a_node
-        .and_then(|id| emu.solver.nodes.get(&id).cloned())
+        .and_then(|id| emu.solver.nodes().get(&id).cloned())
         .unwrap_or_else(|| SymExpr::new_const(a_val, a_width_bits));
 
     let new_expr = match op_kind {

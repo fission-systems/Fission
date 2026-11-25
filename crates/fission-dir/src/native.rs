@@ -1316,7 +1316,9 @@ fn prove_symbolically(
         let bits = bits_for_size(input.size());
         let expression = SymExpr::new_var(&input.name, bits);
         if let SymExpr::Var { id, .. } = expression {
-            solver.nodes.insert(id, expression.clone());
+            solver
+                .insert_node(id, expression.clone())
+                .map_err(|error| error.to_string())?;
         }
         symbolic_inputs.push(expression);
     }
@@ -1333,15 +1335,16 @@ fn prove_symbolically(
         SolverVerdict::Equivalent => Ok(SymbolicOutcome::Equivalent),
         SolverVerdict::Unknown => Ok(SymbolicOutcome::Unknown),
         SolverVerdict::Counterexample => {
-            let sample = symbolic_inputs
+            // A value the model cannot give is not a counterexample.
+            let sample: Option<Vec<u64>> = symbolic_inputs
                 .iter()
                 .map(|expression| {
                     solver
-                        .bv_theory
-                        .evaluate_expr_in_model(&solver.sat, expression)
+                        .eval_in_model(expression)
+                        .map(|value| value.raw_value())
                 })
                 .collect();
-            Ok(SymbolicOutcome::Counterexample(sample))
+            Ok(sample.map_or(SymbolicOutcome::Unknown, SymbolicOutcome::Counterexample))
         }
     }
 }

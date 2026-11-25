@@ -168,7 +168,7 @@ pub fn replay(program: &Program, input: &[u8], sink: &SinkSpec, max_steps: u64) 
                     let Some(node) = run.emu.state.get_shadow_memory(ram, buf + i) else {
                         break;
                     };
-                    if let Some(SymExpr::Var { id, .. }) = run.emu.solver.nodes.get(&node)
+                    if let Some(SymExpr::Var { id, .. }) = run.emu.solver.nodes().get(&node)
                         && !vars.contains_key(id)
                     {
                         vars.insert(*id, cursor);
@@ -188,7 +188,7 @@ pub fn replay(program: &Program, input: &[u8], sink: &SinkSpec, max_steps: u64) 
                     .find(|e| e.pc == pc)
                 && let Some(cond) = event
                     .condition_node
-                    .and_then(|n| run.emu.solver.nodes.get(&n))
+                    .and_then(|n| run.emu.solver.nodes().get(&n))
             {
                 phi = Some(if *taken { cond.clone() } else { negate(cond) });
             }
@@ -246,7 +246,7 @@ pub fn replay(program: &Program, input: &[u8], sink: &SinkSpec, max_steps: u64) 
         }
         let Some(cond) = event
             .condition_node
-            .and_then(|n| run.emu.solver.nodes.get(&n))
+            .and_then(|n| run.emu.solver.nodes().get(&n))
         else {
             continue;
         };
@@ -281,7 +281,7 @@ fn call_phi(program: &Program, run: &crate::machine::Run, args: &[Option<u64>]) 
             .emu
             .state
             .get_shadow_memory(program.register_space, offset)?;
-        let expr = run.emu.solver.nodes.get(&node)?.clone();
+        let expr = run.emu.solver.nodes().get(&node)?.clone();
         let width = expr.get_bit_width();
         if width == 0 || width > size * 8 || width > 64 {
             return None;
@@ -474,7 +474,9 @@ pub fn solve(
     solver.set_conflict_budget(Some(conflicts));
     // A model reports the variables the solver knows by node.
     for o in 0..base.len() {
-        solver.nodes.insert(input_var(o), input_expr(o));
+        if let Err(err) = solver.insert_node(input_var(o), input_expr(o)) {
+            return QueryResult::Unknown(format!("invalid expression: {err}"));
+        }
     }
     let answer = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         solver.check_sat_with_oracle(Some(oracle), &all)
@@ -490,6 +492,13 @@ pub fn solve(
         }
         Ok(Ok(SatResult::Unsat)) => QueryResult::Unsat,
         Ok(Ok(SatResult::Unknown)) => QueryResult::Unknown(match solver.last_unknown() {
+            Some(UnknownReason::InvalidExpression(errs)) => format!(
+                "invalid expression: {}",
+                errs.iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
             Some(UnknownReason::ConflictBudget) => format!("conflict budget ({conflicts})"),
             Some(UnknownReason::Unsupported(what)) => format!("unsupported: {}", what.join(", ")),
             Some(UnknownReason::OracleRefinement) => "memory-oracle refinement".into(),
