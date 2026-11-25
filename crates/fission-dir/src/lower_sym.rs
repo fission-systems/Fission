@@ -28,10 +28,18 @@
 //!   (`clamp`, `max`, ...) actually use; `Switch` is deferred rather than
 //!   rushed (its fallthrough/break semantics interacting with path-
 //!   condition forking is a real design decision, not free).
-//! - **No `Div`/`Mod`/`Sar`**: `SymExpr` doesn't yet have `Sdiv`/`Urem`/
-//!   `Srem`/`Ashr` (only `Udiv`, `Shl`, `Lshr` exist). Extending
-//!   `fission-solver`'s bitvector theory to add these is a legitimate,
-//!   self-contained follow-up, not bundled into this crate.
+//! - **No `Div`/`Mod`**: the concrete tier traps on a zero divisor while the
+//!   solver's division is total, so lowering one would prove a function the
+//!   concrete tier cannot run. Refused until traps are modelled.
+//!
+//! # Semantics
+//!
+//! Every operator, conversion and condition follows the shared scalar
+//! contract in [`crate::scalar_semantics`] -- the same one [`crate::eval`]
+//! implements concretely, held to it by exhaustive and property tests. In
+//! particular shifts use the full unsigned count (no `& 63`), run at the
+//! wider of operand and result width, and saturate; and a narrowing
+//! conversion into `Bool` is refused as ambiguous.
 //!
 //! # How it works
 //!
@@ -224,6 +232,7 @@ macro_rules! define_lower_sym {
                 Leaf, LeafKind, LowerSymError, PATH_EXPLORE_BUDGET, SymEnv, and,
                 checked_scalar_type, checked_scalar_width, resize, sym_const,
             };
+            use crate::scalar_semantics::{ShiftKind, shift_sym};
             use super::super::eval::is_signed;
 
             type LowerResult<T> = std::result::Result<T, LowerSymError>;
@@ -297,12 +306,64 @@ macro_rules! define_lower_sym {
                 NirType::Int { bits, signed: false }
             }
 
-            fn align_width(expr: SymExpr, target_bits: u32, signed: bool) -> LowerResult<SymExpr> {
-                let from_bits = bit_width(&expr)?;
-                Ok(resize(expr, from_bits, target_bits, signed))
+            /// Convert a `from_ty` value to `to_ty` under the shared contract
+            /// (`crate::scalar_semantics`): truncate when narrowing, extend by
+            /// the *source* signedness when widening. A narrowing conversion
+            /// of a multi-bit value into `Bool` is refused: p-code truncates,
+            /// the C the printer writes (`(bool)x`) tests `x != 0`, and a
+            /// proof under either reading would certify the other wrongly.
+            fn convert(v: SymExpr, from_ty: &NirType, to_ty: &NirType) -> LowerResult<SymExpr> {
+                let (from_bits, from_signed) = checked_ty(from_ty)?;
+                convert_bits(v, from_bits, from_signed, to_ty)
             }
 
-            fn eval_expr(expr: &$Expr, env: &SymEnv) -> LowerResult<SymExpr> {
+            fn convert_bits(
+                v: SymExpr,
+                from_bits: u32,
+                from_signed: bool,
+                to_ty: &NirType,
+            ) -> LowerResult<SymExpr> {
+                let to_bits = checked_width(to_ty)?;
+                let actual = bit_width(&v)?;
+                if actual != from_bits {
+                    return Err(LowerSymError::UnsupportedConstruct(format!(
+                        "lower_sym: {actual}-bit value converted as a {from_bits}-bit one -- \
+                         refusing an inconsistent lowering"
+                    )));
+                }
+                if matches!(to_ty, NirType::Bool) && from_bits > 1 {
+                    return Err(LowerSymError::UnsupportedConstruct(format!(
+                        "lower_sym: narrowing conversion of a {from_bits}-bit value into Bool is \
+                         ambiguous (p-code truncation vs C `!= 0`) -- refused at the symbolic tier"
+                    )));
+                }
+                Ok(resize(v, from_bits, to_bits, from_signed))
+            }
+
+            /// `v != 0` at `v`'s own width, as one bit.
+            fn truth(v: SymExpr) -> LowerResult<SymExpr> {
+                let bits = bit_width(&v)?;
+                Ok(SymExpr::new_neq(v, SymExpr::Const { val: 0, size: bits }))
+            }
+
+            /// Lower `expr` and return it with its declared type, checking
+            /// the invariant every conversion relies on: the lowered value is
+            /// exactly as wide as the declared type says.
+            fn eval_typed(expr: &$Expr, env: &SymEnv) -> LowerResult<(SymExpr, NirType)> {
+                let ty = infer_ty(expr, env)?;
+                let bits = checked_width(&ty)?;
+                let v = eval_untyped(expr, env)?;
+                let got = bit_width(&v)?;
+                if got != bits {
+                    return Err(LowerSymError::UnsupportedConstruct(format!(
+                        "lower_sym: lowered a {got}-bit value for a {bits}-bit declared type -- \
+                         refusing an inconsistent lowering"
+                    )));
+                }
+                Ok((v, ty))
+            }
+
+            fn eval_untyped(expr: &$Expr, env: &SymEnv) -> LowerResult<SymExpr> {
                 match expr {
                     $Expr::Var(name) => {
                         if let Some(declared_ty) = env.types.get(name) {
@@ -316,49 +377,35 @@ macro_rules! define_lower_sym {
                     }
                     $Expr::Const(v, ty) => sym_const(*v, ty),
                     $Expr::Cast { ty, expr } => {
-                        let from_ty = infer_ty(expr, env)?;
-                        let (_, from_signed) = checked_ty(&from_ty)?;
-                        let to_bits = checked_width(ty)?;
-                        let inner = eval_expr(expr, env)?;
-                        let from_bits = bit_width(&inner)?;
-                        Ok(resize(inner, from_bits, to_bits, from_signed))
+                        let (inner, from_ty) = eval_typed(expr, env)?;
+                        convert(inner, &from_ty, ty)
                     }
                     $Expr::Unary { op, expr, ty } => {
-                        let expr_ty = infer_ty(expr, env)?;
-                        let (_, expr_signed) = checked_ty(&expr_ty)?;
                         let bits = checked_width(ty)?;
-                        let v = eval_expr(expr, env)?;
-                        let v_bits = bit_width(&v)?;
+                        let (v, v_ty) = eval_typed(expr, env)?;
                         Ok(match op {
-                            $UnaryOp::Neg => {
-                                let aligned = resize(v, v_bits, bits, expr_signed);
-                                SymExpr::new_sub(SymExpr::Const { val: 0, size: bits }, aligned)
-                            }
+                            $UnaryOp::Neg => SymExpr::new_sub(
+                                SymExpr::Const { val: 0, size: bits },
+                                convert(v, &v_ty, ty)?,
+                            ),
                             $UnaryOp::Not => {
-                                let is_zero = SymExpr::new_eq(v, SymExpr::Const { val: 0, size: v_bits });
+                                let is_zero = SymExpr::new_not(truth(v)?);
                                 resize(is_zero, 1, bits, false)
                             }
-                            $UnaryOp::BitNot => {
-                                let aligned = resize(v, v_bits, bits, expr_signed);
-                                SymExpr::new_not(aligned)
-                            }
+                            $UnaryOp::BitNot => SymExpr::new_not(convert(v, &v_ty, ty)?),
                         })
                     }
                     $Expr::Binary { op, lhs, rhs, ty } => eval_binary(op, lhs, rhs, ty, env),
                     $Expr::Select { cond, then_expr, else_expr, ty } => {
-                        let target_bits = checked_width(ty)?;
-                        let cond_ty = infer_ty(cond, env)?;
-                        let _ = checked_ty(&cond_ty)?;
-                        let then_ty = infer_ty(then_expr, env)?;
-                        let (_, then_signed) = checked_ty(&then_ty)?;
-                        let else_ty = infer_ty(else_expr, env)?;
-                        let (_, else_signed) = checked_ty(&else_ty)?;
-                        let c = eval_expr(cond, env)?;
-                        let zero = SymExpr::Const { val: 0, size: bit_width(&c)? };
-                        let is_true = SymExpr::new_neq(c, zero);
-                        let t = align_width(eval_expr(then_expr, env)?, target_bits, then_signed)?;
-                        let f = align_width(eval_expr(else_expr, env)?, target_bits, else_signed)?;
-                        Ok(SymExpr::Ite { cond: Box::new(is_true), t: Box::new(t), f: Box::new(f) })
+                        let _ = checked_width(ty)?;
+                        let (c, _) = eval_typed(cond, env)?;
+                        let (t, t_ty) = eval_typed(then_expr, env)?;
+                        let (f, f_ty) = eval_typed(else_expr, env)?;
+                        Ok(SymExpr::Ite {
+                            cond: Box::new(truth(c)?),
+                            t: Box::new(convert(t, &t_ty, ty)?),
+                            f: Box::new(convert(f, &f_ty, ty)?),
+                        })
                     }
                     other => Err(LowerSymError::UnsupportedConstruct(format!(
                         "lower_sym: unsupported expr {other:?} -- no memory/call/div/mod model at \
@@ -375,156 +422,104 @@ macro_rules! define_lower_sym {
                 env: &SymEnv,
             ) -> LowerResult<SymExpr> {
                 let result_bits = checked_width(ty)?;
-                let lhs_ty = infer_ty(lhs, env)?;
-                let (_, lhs_signed) = checked_ty(&lhs_ty)?;
-                let rhs_ty = infer_ty(rhs, env)?;
-                let (_, rhs_signed) = checked_ty(&rhs_ty)?;
-                let l = eval_expr(lhs, env)?;
-                let r = eval_expr(rhs, env)?;
-                let l_bits = bit_width(&l)?;
-                let r_bits = bit_width(&r)?;
+                let (l, l_ty) = eval_typed(lhs, env)?;
+                let (r, r_ty) = eval_typed(rhs, env)?;
+                let (l_bits, l_signed) = checked_ty(&l_ty)?;
+                let (r_bits, r_signed) = checked_ty(&r_ty)?;
+                // Comparisons meet at the wider operand width, each operand
+                // extended by its own signedness (never into `Bool`).
                 let cmp_bits = l_bits.max(r_bits);
+                let cmp = |v: SymExpr, signed: bool, bits: u32| {
+                    convert_bits(v, bits, signed, &NirType::Int { bits: cmp_bits, signed })
+                };
+                let flag = |b: SymExpr| resize(b, 1, result_bits, false);
 
                 Ok(match op {
-                    $BinaryOp::Add => SymExpr::new_add(
-                        resize(l, l_bits, result_bits, lhs_signed),
-                        resize(r, r_bits, result_bits, rhs_signed),
-                    ),
-                    $BinaryOp::Sub => SymExpr::new_sub(
-                        resize(l, l_bits, result_bits, lhs_signed),
-                        resize(r, r_bits, result_bits, rhs_signed),
-                    ),
+                    $BinaryOp::Add => {
+                        SymExpr::new_add(convert(l, &l_ty, ty)?, convert(r, &r_ty, ty)?)
+                    }
+                    $BinaryOp::Sub => {
+                        SymExpr::new_sub(convert(l, &l_ty, ty)?, convert(r, &r_ty, ty)?)
+                    }
                     $BinaryOp::Mul => SymExpr::Mul(
-                        Box::new(resize(l, l_bits, result_bits, lhs_signed)),
-                        Box::new(resize(r, r_bits, result_bits, rhs_signed)),
+                        Box::new(convert(l, &l_ty, ty)?),
+                        Box::new(convert(r, &r_ty, ty)?),
                     ),
-                    $BinaryOp::And => SymExpr::new_and(
-                        resize(l, l_bits, result_bits, lhs_signed),
-                        resize(r, r_bits, result_bits, rhs_signed),
-                    ),
+                    $BinaryOp::And => {
+                        SymExpr::new_and(convert(l, &l_ty, ty)?, convert(r, &r_ty, ty)?)
+                    }
                     $BinaryOp::Or => SymExpr::Or(
-                        Box::new(resize(l, l_bits, result_bits, lhs_signed)),
-                        Box::new(resize(r, r_bits, result_bits, rhs_signed)),
+                        Box::new(convert(l, &l_ty, ty)?),
+                        Box::new(convert(r, &r_ty, ty)?),
                     ),
-                    $BinaryOp::Xor => SymExpr::new_xor(
-                        resize(l, l_bits, result_bits, lhs_signed),
-                        resize(r, r_bits, result_bits, rhs_signed),
-                    ),
-                    $BinaryOp::Shl => SymExpr::Shl(
-                        Box::new(resize(l, l_bits, result_bits, lhs_signed)),
-                        Box::new(resize(r, r_bits, result_bits, false)),
-                    ),
-                    $BinaryOp::Shr => SymExpr::Lshr(
-                        Box::new(resize(l, l_bits, result_bits, false)),
-                        Box::new(resize(r, r_bits, result_bits, false)),
-                    ),
-                    $BinaryOp::LogicalAnd => {
-                        let b = and(
-                            SymExpr::new_neq(l, SymExpr::Const { val: 0, size: l_bits }),
-                            SymExpr::new_neq(r, SymExpr::Const { val: 0, size: r_bits }),
-                        );
-                        resize(b, 1, result_bits, false)
+                    $BinaryOp::Xor => {
+                        SymExpr::new_xor(convert(l, &l_ty, ty)?, convert(r, &r_ty, ty)?)
                     }
-                    $BinaryOp::LogicalOr => {
-                        let l_true = SymExpr::new_neq(l, SymExpr::Const { val: 0, size: l_bits });
-                        let r_true = SymExpr::new_neq(r, SymExpr::Const { val: 0, size: r_bits });
-                        let b = SymExpr::new_not(and(SymExpr::new_not(l_true), SymExpr::new_not(r_true)));
-                        resize(b, 1, result_bits, false)
+                    // The shift contract (`crate::scalar_semantics`): shift at
+                    // `W = max(operand, result)` with the operand brought to `W`
+                    // as the operator says, the count read unsigned at its own
+                    // width (never truncated), saturating at `W`; then narrow.
+                    $BinaryOp::Shl | $BinaryOp::Shr | $BinaryOp::Sar => {
+                        let width = l_bits.max(result_bits);
+                        let (kind, extend_signed) = match op {
+                            $BinaryOp::Shl => (ShiftKind::Left, l_signed),
+                            $BinaryOp::Shr => (ShiftKind::LogicalRight, false),
+                            _ => (ShiftKind::ArithmeticRight, true),
+                        };
+                        let operand = resize(l, l_bits, width, extend_signed);
+                        let shifted = shift_sym(kind, operand, width, r, r_bits);
+                        convert_bits(shifted, width, false, ty)?
                     }
-                    $BinaryOp::Eq => resize(
-                        SymExpr::new_eq(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Ne => resize(
-                        SymExpr::new_neq(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Lt => resize(
-                        SymExpr::new_ult(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Le => resize(
-                        SymExpr::Ule(
-                            Box::new(resize(l, l_bits, cmp_bits, lhs_signed)),
-                            Box::new(resize(r, r_bits, cmp_bits, rhs_signed)),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Gt => resize(
-                        SymExpr::new_ult(
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Ge => resize(
-                        SymExpr::Ule(
-                            Box::new(resize(r, r_bits, cmp_bits, rhs_signed)),
-                            Box::new(resize(l, l_bits, cmp_bits, lhs_signed)),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::SLt => resize(
-                        SymExpr::new_slt(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::SLe => resize(
-                        SymExpr::new_sle(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::SGt => resize(
-                        SymExpr::new_sgt(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        ),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::SGe => resize(
-                        SymExpr::new_not(SymExpr::new_slt(
-                            resize(l, l_bits, cmp_bits, lhs_signed),
-                            resize(r, r_bits, cmp_bits, rhs_signed),
-                        )),
-                        1,
-                        result_bits,
-                        false,
-                    ),
-                    $BinaryOp::Div | $BinaryOp::Mod | $BinaryOp::Sar => {
+                    $BinaryOp::LogicalAnd => flag(and(truth(l)?, truth(r)?)),
+                    $BinaryOp::LogicalOr => flag(SymExpr::new_not(and(
+                        SymExpr::new_not(truth(l)?),
+                        SymExpr::new_not(truth(r)?),
+                    ))),
+                    $BinaryOp::Eq => flag(SymExpr::new_eq(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::Ne => flag(SymExpr::new_neq(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::Lt => flag(SymExpr::new_ult(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::Le => flag(SymExpr::Ule(
+                        Box::new(cmp(l, l_signed, l_bits)?),
+                        Box::new(cmp(r, r_signed, r_bits)?),
+                    )),
+                    $BinaryOp::Gt => flag(SymExpr::new_ult(
+                        cmp(r, r_signed, r_bits)?,
+                        cmp(l, l_signed, l_bits)?,
+                    )),
+                    $BinaryOp::Ge => flag(SymExpr::Ule(
+                        Box::new(cmp(r, r_signed, r_bits)?),
+                        Box::new(cmp(l, l_signed, l_bits)?),
+                    )),
+                    $BinaryOp::SLt => flag(SymExpr::new_slt(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::SLe => flag(SymExpr::new_sle(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::SGt => flag(SymExpr::new_sgt(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    )),
+                    $BinaryOp::SGe => flag(SymExpr::new_not(SymExpr::new_slt(
+                        cmp(l, l_signed, l_bits)?,
+                        cmp(r, r_signed, r_bits)?,
+                    ))),
+                    $BinaryOp::Div | $BinaryOp::Mod => {
                         return Err(LowerSymError::UnsupportedConstruct(
-                            "lower_sym: Div/Mod/Sar not supported at the symbolic tier -- \
-                             fission_solver has no Sdiv/Urem/Srem/Ashr yet, see module docs"
+                            "lower_sym: Div/Mod not supported at the symbolic tier -- the \
+                             concrete tier traps on a zero divisor and the solver's division is \
+                             total, see crate::scalar_semantics"
                                 .to_string(),
                         ));
                     }
@@ -572,28 +567,20 @@ macro_rules! define_lower_sym {
                                     )));
                                 }
                             };
-                            let rhs_ty = infer_ty(rhs, &env)?;
-                            let (_, rhs_signed) = checked_ty(&rhs_ty)?;
-                            let v = eval_expr(rhs, &env)?;
+                            let (v, rhs_ty) = eval_typed(rhs, &env)?;
                             let target_ty = env
                                 .types
                                 .get(name)
                                 .cloned()
                                 .unwrap_or_else(|| rhs_ty.clone());
-                            let target_bits = checked_width(&target_ty)?;
-                            let from_bits = bit_width(&v)?;
-                            let resized = resize(v, from_bits, target_bits, rhs_signed);
+                            let resized = convert(v, &rhs_ty, &target_ty)?;
                             env.types.insert(name.clone(), target_ty);
                             env.values.insert(name.clone(), resized);
                             idx += 1;
                         }
                         $Stmt::Return(expr) => {
                             let v = match expr {
-                                Some(e) => {
-                                    let ret_ty = infer_ty(e, &env)?;
-                                    let _ = checked_ty(&ret_ty)?;
-                                    Some(eval_expr(e, &env)?)
-                                }
+                                Some(e) => Some(eval_typed(e, &env)?.0),
                                 None => None,
                             };
                             return Ok(vec![Leaf { path_cond, kind: LeafKind::Return(v) }]);
@@ -608,12 +595,9 @@ macro_rules! define_lower_sym {
                             });
                         }
                         $Stmt::If { cond, then_body, else_body } => {
-                            let cond_ty = infer_ty(cond, &env)?;
-                            let _ = checked_ty(&cond_ty)?;
-                            let c = eval_expr(cond, &env)?;
-                            let zero = SymExpr::Const { val: 0, size: bit_width(&c)? };
-                            let is_true = SymExpr::new_neq(c.clone(), zero.clone());
-                            let is_false = SymExpr::new_eq(c, zero);
+                            let (c, _) = eval_typed(cond, &env)?;
+                            let is_true = truth(c)?;
+                            let is_false = SymExpr::new_not(is_true.clone());
                             let then_leaves = exec_from(
                                 then_body, 0, and(path_cond.clone(), is_true), env.clone(), budget,
                             )?;
@@ -755,13 +739,9 @@ macro_rules! define_lower_sym {
                     }
                     env.types.insert(l.name.clone(), l.ty.clone());
                     if let Some(init) = &l.initializer {
-                        let target_bits = checked_width(&l.ty)?;
-                        let init_ty = infer_ty(init, &env)?;
-                        let (_, init_signed) = checked_ty(&init_ty)?;
-                        let v = eval_expr(init, &env)?;
-                        let from_bits = bit_width(&v)?;
-                        let resized = resize(v, from_bits, target_bits, init_signed);
-                        env.values.insert(l.name.clone(), resized);
+                        let (v, init_ty) = eval_typed(init, &env)?;
+                        let converted = convert(v, &init_ty, &l.ty)?;
+                        env.values.insert(l.name.clone(), converted);
                     }
                 }
 

@@ -954,7 +954,7 @@ fn signed_label(signed: bool) -> &'static str {
 
 /// Check whether `prehir` and `hir` compute the same return value for every
 /// input, for the symbolic tier's modeled subset (see [`crate::lower_sym`]'s
-/// scope notes -- acyclic, `Bool`/`Int` only, no `Div`/`Mod`/`Sar`).
+/// scope notes -- acyclic, `Bool`/`Int` only, no `Div`/`Mod`).
 pub fn check_symbolic_equivalence(prehir: &PreHirFunction, hir: &HirFunction) -> SymbolicOutcome {
     check_symbolic_equivalence_report(prehir, hir).outcome
 }
@@ -1418,7 +1418,7 @@ fn widen_bv(raw: u64, from_bits: u32, to_bits: u32, signed: bool) -> u64 {
     widened & mask_bv(to_bits)
 }
 
-fn eval_sym_bv(expr: &SymExpr, env: &HashMap<SymNodeId, u64>) -> Result<u64, String> {
+pub(crate) fn eval_sym_bv(expr: &SymExpr, env: &HashMap<SymNodeId, u64>) -> Result<u64, String> {
     let width = expr.get_bit_width();
     if !(1..=64).contains(&width) {
         return Err(format!(
