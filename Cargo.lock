@@ -916,12 +916,14 @@ dependencies = [
  "fission-signatures",
  "fission-sleigh",
  "fission-static",
+ "libc",
  "lru",
  "rayon",
  "regex",
  "serde",
  "serde_json",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
