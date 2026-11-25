@@ -17,6 +17,16 @@ on:
         required: false
         default: 60
         description: "Coverage warn threshold % for fission-pcode (warning only, not failure)"
+    outputs:
+      coverage_status:
+        description: "Explicit diagnostic status (measured_pass, measured_below_threshold, missing_evidence, malformed_evidence, checker_error)"
+        value: ${{ jobs.coverage.outputs.coverage_status }}
+      coverage_detail:
+        description: "Human-readable coverage diagnostic summary"
+        value: ${{ jobs.coverage.outputs.coverage_detail }}
+      target_pct:
+        description: "Measured line coverage percentage for fission-pcode, or empty if unavailable"
+        value: ${{ jobs.coverage.outputs.target_pct }}
 
 env:
   FISSION_IN_CRATES: ${{ inputs.crates }}
@@ -30,6 +40,10 @@ jobs:
     timeout-minutes: 60
     # Coverage is diagnostic; tool or infrastructure failures must not block L1.
     continue-on-error: true
+    outputs:
+      coverage_status: ${{ steps.summarize.outputs.coverage_status }}
+      coverage_detail: ${{ steps.summarize.outputs.coverage_detail }}
+      target_pct: ${{ steps.summarize.outputs.target_pct }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -56,16 +70,16 @@ jobs:
         with:
           tool: cargo-llvm-cov
 
-      - name: Install system dependencies (Linux)
+      - name: Install system dependencies (Linux headless)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
             libssl-dev \
-            librsvg2-dev \
-            build-essential
+            build-essential \
+            pkg-config
 
       - name: Generate coverage report (HTML + LCOV)
+        id: generate
         shell: bash
         run: |
           crates="${FISSION_IN_CRATES}"
@@ -85,101 +99,20 @@ jobs:
             "${crate_flags[@]}" \
             --locked \
             --no-report
+          mkdir -p coverage
           cargo llvm-cov report --html --output-dir coverage/html
           cargo llvm-cov report --lcov --output-path coverage/lcov.info
 
-      - name: Check coverage threshold for fission-pcode
+      - name: Summarize coverage and check advisory threshold
+        id: summarize
+        if: always()
         shell: bash
         run: |
-          python3 - <<'PY'
-          import re, sys
-          from pathlib import Path
-
-          lcov = Path("coverage/lcov.info")
-          if not lcov.exists():
-              print("WARNING: coverage/lcov.info not found, skipping threshold check")
-              sys.exit(0)
-
-          # Sum lines for fission-pcode
-          in_pcode = False
-          found_lines = 0
-          hit_lines = 0
-          for line in lcov.read_text().splitlines():
-              if line.startswith("SF:") and "fission-pcode" in line:
-                  in_pcode = True
-              if line == "end_of_record":
-                  in_pcode = False
-              if in_pcode:
-                  if line.startswith("LF:"):
-                      found_lines += int(line[3:])
-                  elif line.startswith("LH:"):
-                      hit_lines += int(line[3:])
-
-          if found_lines == 0:
-              print("WARNING: No coverage data found for fission-pcode")
-              sys.exit(0)
-
-          pct = (hit_lines / found_lines) * 100
-          threshold = ${FISSION_IN_WARN_THRESHOLD_PCT}
-          print(f"fission-pcode coverage: {pct:.1f}% ({hit_lines}/{found_lines} lines)")
-          if pct < threshold:
-              print(f"WARNING: Coverage {pct:.1f}% is below warn threshold {threshold}%")
-              print("This is a WARNING only — not blocking the build.")
-          else:
-              print(f"OK: Coverage {pct:.1f}% meets threshold {threshold}%")
-          PY
-
-      - name: Publish coverage summary
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import re, os
-          from pathlib import Path
-
-          lcov = Path("coverage/lcov.info")
-          step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "")
-          lines = ["## Code Coverage Report", ""]
-
-          if lcov.exists():
-              crate_stats = {}
-              current = None
-              lf = lh = 0
-              for line in lcov.read_text().splitlines():
-                  if line.startswith("SF:"):
-                      parts = line[3:].split("/")
-                      # Find crate name from path
-                      for i, p in enumerate(parts):
-                          if p == "crates" and i + 1 < len(parts):
-                              current = parts[i + 1]
-                              lf = lh = 0
-                              break
-                  elif line.startswith("LF:") and current:
-                      lf += int(line[3:])
-                  elif line.startswith("LH:") and current:
-                      lh += int(line[3:])
-                  elif line == "end_of_record" and current:
-                      if current not in crate_stats:
-                          crate_stats[current] = [0, 0]
-                      crate_stats[current][0] += lf
-                      crate_stats[current][1] += lh
-                      current = None
-
-              lines.append("| Crate | Lines Hit | Total Lines | Coverage % |")
-              lines.append("|---|---|---|---|")
-              for crate, (total, hit) in sorted(crate_stats.items()):
-                  if total == 0:
-                      continue
-                  pct = (hit / total) * 100
-                  lines.append(f"| `{crate}` | {hit} | {total} | {pct:.1f}% |")
-          else:
-              lines.append("WARNING: No LCOV data found.")
-
-          if step_summary:
-              with open(step_summary, "a", encoding="utf-8") as f:
-                  f.write("\n".join(lines) + "\n")
-          else:
-              print("\n".join(lines))
-          PY
+          python3 scripts/ci/coverage_summary.py \
+            --lcov coverage/lcov.info \
+            --target-crate fission-pcode \
+            --generate-outcome "${{ steps.generate.outcome }}" \
+            --json-out coverage/summary.json
 
       - name: Upload coverage artifacts
         if: always()

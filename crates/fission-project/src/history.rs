@@ -292,14 +292,16 @@ mod tests {
         let saved = project.clone();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("project.json");
-        project.write(&path).unwrap();
+        let rev0 = project.create_if_absent(&path).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.contains("\"address\": \"0x401000\""));
-        project = Project::read(&path).unwrap().unwrap();
+        let (loaded, rev1) = Project::read_with_revision(&path).unwrap();
+        assert_eq!(rev0, rev1);
+        project = loaded.unwrap();
         assert_eq!(project, saved);
         assert_eq!(project.undo().unwrap(), 1);
         assert!(project.diff(&original).unwrap().is_empty());
-        project.write(&path).unwrap();
+        project.write_if_revision(&path, &rev1).unwrap();
         project = Project::read(&path).unwrap().unwrap();
         assert_eq!(project.redo().unwrap(), 1);
         assert_eq!(project, saved);
@@ -414,7 +416,7 @@ mod tests {
             invalid.history.cursor = cursor;
             invalid.history.revisions[0].id = id;
             invalid.history.next_id = next_id;
-            assert!(invalid.write(&path).is_err());
+            assert!(invalid.write_unconditional(&path).is_err());
             assert!(!path.exists());
             std::fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
             assert!(matches!(

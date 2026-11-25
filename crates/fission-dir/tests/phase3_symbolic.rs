@@ -186,3 +186,73 @@ fn swapped_branches_are_not_proven_equivalent() {
         }
     }
 }
+
+#[test]
+fn clamp_report_records_input_correspondence_and_return_only_scope() {
+    use fission_dir::product::{
+        AssuranceBand, CallObservation, FoundationIdentity, ValidationVerdict,
+    };
+    use fission_dir::symbolic::{
+        ReturnComparisonMode, check_symbolic_equivalence_report, symbolic_ast_return_scope,
+    };
+
+    let path = fixture();
+    let binary = LoadedBinary::from_file(&path).expect("load binary");
+    let facts = FactStore::from_binary(&binary);
+    let func = FunctionInfo {
+        name: "clamp".to_string(),
+        address: entry_of(&binary, "clamp"),
+        ..Default::default()
+    };
+
+    let pair = decompile_one(&binary, &facts, &func).expect("decompile_one");
+    let report = check_symbolic_equivalence_report(&pair.prehir, &pair.hir);
+    assert_eq!(report.outcome, SymbolicOutcome::Equivalent);
+    assert_eq!(report.verdict, ValidationVerdict::Equivalent);
+    assert_eq!(report.scope, symbolic_ast_return_scope());
+    assert!(
+        report.scope.calls == CallObservation::Ignored
+            && !report.scope.traps
+            && report.scope.memory_ranges.is_empty(),
+        "symbolic scope must explicitly exclude memory/traps/calls: {:?}",
+        report.scope
+    );
+    let corr = report
+        .correspondence
+        .as_ref()
+        .expect("verified correspondence must be attached");
+    assert_eq!(corr.return_mode, ReturnComparisonMode::LanguageValue);
+    assert_eq!(corr.params.len(), pair.hir.params.len());
+    assert!(corr.params.iter().all(|p| p.width_matches));
+    assert!(matches!(
+        report.band(),
+        AssuranceBand::Proven | AssuranceBand::ConditionallyProven
+    ));
+
+    let foundation = FoundationIdentity {
+        model_version: 1,
+        function_address: func.address,
+        block_count: 1,
+        op_count: 1,
+        digest: 0xdead_beef,
+    };
+    let assurance = report
+        .to_assurance_report(foundation)
+        .expect("project symbolic report into AssuranceReport");
+    assert_eq!(assurance.verdict(), ValidationVerdict::Equivalent);
+    assert!(assurance.is_proven());
+
+    let mut corrupted_hir = pair.hir.clone();
+    let first_param = corrupted_hir.params[0].name.clone();
+    corrupted_hir.body = vec![fission_midend_core::ir::HirStmt::Return(Some(
+        fission_midend_core::ir::HirExpr::Var(first_param),
+    ))];
+    let bad_report = check_symbolic_equivalence_report(&pair.prehir, &corrupted_hir);
+    assert!(matches!(bad_report.outcome, SymbolicOutcome::Diverged(_)));
+    assert_eq!(bad_report.verdict, ValidationVerdict::Counterexample);
+    assert!(bad_report.evidence.counterexample.is_some());
+    let bad_assurance = bad_report
+        .to_assurance_report(foundation)
+        .expect("counterexample report must satisfy AssuranceReport invariants");
+    assert_eq!(bad_assurance.verdict(), ValidationVerdict::Counterexample);
+}

@@ -222,6 +222,8 @@ impl WindowsDebugger {
         self.state.attached_pid = None;
         self.state.main_thread_id = None;
         self.state.last_thread_id = None;
+        self.state.current_thread_id = None;
+        self.last_stop = None;
         self.state.status = DebugStatus::Detached;
         self.state.last_event = Some("Detached".to_string());
         self.is_wow64 = None;
@@ -251,7 +253,13 @@ impl WindowsDebugger {
         }
 
         let wide_path: Vec<u16> = OsStr::new(path).encode_wide().chain(Some(0)).collect();
-        let mut cmd_line = path.to_string();
+        // argv[0] is quoted so a path with a space stays one argument; the
+        // rest are passed as the caller wrote them.
+        let mut cmd_line = if path.contains(char::is_whitespace) {
+            format!("\"{path}\"")
+        } else {
+            path.to_string()
+        };
         for a in args {
             cmd_line.push(' ');
             cmd_line.push_str(a);

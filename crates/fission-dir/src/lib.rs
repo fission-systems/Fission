@@ -45,7 +45,11 @@ pub mod lower_sym;
 pub mod native;
 pub mod product;
 pub mod report;
+pub(crate) mod scalar_semantics;
 pub mod symbolic;
+
+#[cfg(test)]
+mod scalar_contract_tests;
 
 pub use call_sites::{MachineFlow, call_sites};
 pub use decompile::{DecompileError, PreHirHirPair, decompile_one};

@@ -13,7 +13,7 @@ Canonical policy:
 render/
 ├── mod.rs           # owner surface + type bridge from nir
 ├── layer.rs         # PrintProfile, RecoveredLineMapping (LayeredPseudocode is test-only)
-├── printer.rs       # C print (shared walk; profile sugar)
+├── printer/         # C print (shared walk; profile sugar)
 ├── presentation/    # HIR-only tree polish (apply_hir_presentation)
 │   └── mod.rs
 ├── layered.rs       # final-surface print + global/aggregate decls

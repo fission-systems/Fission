@@ -606,13 +606,32 @@ impl MachineState {
     }
 
     /// How many of the `max_len` bytes at `addr` a guest read reaches before
-    /// it would fault. All of them where faults are not enforced, or where
-    /// unmapped memory is filled on demand.
+    /// it would fault or wrap past the guest address space. All of them where
+    /// faults are not enforced, and stopping at mapped unreadable pages even
+    /// under demand paging.
     pub fn readable_len(&self, addr: u64, max_len: usize) -> usize {
-        if !self.enforce_page_faults || self.lazy_memory.is_some() {
-            return max_len;
+        self.accessible_len(addr, max_len, crate::pcode::page_map::AccessKind::Read)
+    }
+
+    /// How many of the `max_len` bytes at `addr` a guest write reaches before
+    /// it would fault or wrap past the guest address space.
+    pub fn writable_len(&self, addr: u64, max_len: usize) -> usize {
+        self.accessible_len(addr, max_len, crate::pcode::page_map::AccessKind::Write)
+    }
+
+    fn accessible_len(
+        &self,
+        addr: u64,
+        max_len: usize,
+        kind: crate::pcode::page_map::AccessKind,
+    ) -> usize {
+        let capped = crate::pcode::page_map::guest_addr_span(addr, self.page_map.is_64bit)
+            .min(max_len as u64) as usize;
+        if !self.enforce_page_faults {
+            return capped;
         }
-        self.page_map.readable_extent(addr, max_len)
+        self.page_map
+            .accessible_extent(addr, capped, kind, self.lazy_memory.is_some())
     }
 
     pub fn read_space_readonly(&self, space_id: u64, addr: u64, size: usize) -> Result<Vec<u8>> {

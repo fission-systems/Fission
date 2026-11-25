@@ -23,6 +23,7 @@ use crate::product::{
     PcodeRegionSelection, UnresolvedEffect, UnresolvedEffectKind, ValidationAssumption,
     ValidationBudget, ValidationEvidence, ValidationVerdict,
 };
+use crate::scalar_semantics::{ShiftKind, shift, shift_sym};
 use crate::symbolic::{SolverVerdict, classify_solver_result};
 
 /// Reconstructs one explicitly selected P-code region.
@@ -1704,6 +1705,9 @@ fn widen_boolean(boolean: SymExpr, bits: u32) -> SymExpr {
     }
 }
 
+/// P-code `INT_LEFT`/`INT_RIGHT` on bit-vectors: the shared shift contract
+/// in [`crate::scalar_semantics`] (full unsigned count, saturating at the
+/// value width), which the PreHIR/HIR lowering uses as well.
 fn lower_shift_symbolically(
     left: SymExpr,
     value_bits: u32,
@@ -1711,39 +1715,12 @@ fn lower_shift_symbolically(
     amount_bits: u32,
     is_left: bool,
 ) -> SymExpr {
-    let build_shift = |lhs: SymExpr, rhs: SymExpr| {
-        if is_left {
-            SymExpr::Shl(Box::new(lhs), Box::new(rhs))
-        } else {
-            SymExpr::Lshr(Box::new(lhs), Box::new(rhs))
-        }
+    let kind = if is_left {
+        ShiftKind::Left
+    } else {
+        ShiftKind::LogicalRight
     };
-    match amount_bits.cmp(&value_bits) {
-        std::cmp::Ordering::Equal => build_shift(left, right),
-        std::cmp::Ordering::Less => build_shift(
-            left,
-            SymExpr::Concat(
-                Box::new(SymExpr::new_const(0, value_bits - amount_bits)),
-                Box::new(right),
-            ),
-        ),
-        std::cmp::Ordering::Greater => {
-            let in_range = SymExpr::Ult(
-                Box::new(right.clone()),
-                Box::new(SymExpr::new_const(u64::from(value_bits), amount_bits)),
-            );
-            let narrowed = SymExpr::Extract {
-                expr: Box::new(right),
-                lsb: 0,
-                size: value_bits,
-            };
-            SymExpr::Ite {
-                cond: Box::new(in_range),
-                t: Box::new(build_shift(left, narrowed)),
-                f: Box::new(SymExpr::new_const(0, value_bits)),
-            }
-        }
-    }
+    shift_sym(kind, left, value_bits, right, amount_bits)
 }
 
 fn evaluate_expression(expression: &PcodeNativeExpr, inputs: &[u64]) -> u64 {
@@ -1784,21 +1761,14 @@ fn evaluate_expression(expression: &PcodeNativeExpr, inputs: &[u64]) -> u64 {
                 }
                 PcodeNativeBinaryOp::Multiply => left.wrapping_mul(right),
                 PcodeNativeBinaryOp::ShiftLeft => {
-                    let w = expression_bits(lhs_expr);
-                    if right >= u64::from(w) {
-                        0
-                    } else {
-                        left.wrapping_shl(right as u32)
-                    }
+                    shift(ShiftKind::Left, left, expression_bits(lhs_expr), right)
                 }
-                PcodeNativeBinaryOp::ShiftRightLogical => {
-                    let w = expression_bits(lhs_expr);
-                    if right >= u64::from(w) {
-                        0
-                    } else {
-                        left.wrapping_shr(right as u32)
-                    }
-                }
+                PcodeNativeBinaryOp::ShiftRightLogical => shift(
+                    ShiftKind::LogicalRight,
+                    left,
+                    expression_bits(lhs_expr),
+                    right,
+                ),
             };
             mask_value(value, *bits)
         }

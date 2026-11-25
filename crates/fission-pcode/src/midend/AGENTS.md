@@ -61,7 +61,7 @@ midend/
 ## Anti-Patterns
 
 - Do not add alternate telemetry payloads outside `NirBuildStats`.
-- Do not fix structuring bugs only in `printer.rs`.
+- Do not fix structuring bugs only in `render/printer/`.
 - Do not skip large-sample validation when changing rejection/acceptance logic.
 - Do not prevent regressions with downstream workarounds or sample-specific heuristics (address guards, hard-coded function names, etc.). Fix the root cause at the canonical owner (builder, normalize, or structuring) using invariant-based algorithms (CFG, dominance, def-use chains, type-system rules). A builder-level fix that stops the wrong binding from being created is better than a normalize pass that tries to clean it up later.
 - Do not implement an AI-proposed rule until it has been translated into an invariant owned by an existing builder/materialize/normalize/structuring/type-data component. Prompt output is not an owner.
