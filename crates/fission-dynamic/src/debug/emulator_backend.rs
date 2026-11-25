@@ -642,7 +642,8 @@ impl ExecutionBackend for EmulatorBackend {
             ));
         }
         if size == 0 {
-            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new()));
+            return SparseMemoryCapture::from_segments(address, 0, Vec::new())
+                .map_err(|e| fission_core::err!(debug, "{e}"));
         }
 
         let mut cursor = address;
@@ -681,6 +682,15 @@ impl ExecutionBackend for EmulatorBackend {
                         .map_err(|e| {
                             fission_core::err!(debug, "Memory read failed at 0x{cursor:x}: {e}")
                         })?;
+                    // An empty or mis-sized transfer would either stall the
+                    // cursor or attribute bytes to the wrong addresses.
+                    if bytes.len() != readable {
+                        return Err(fission_core::err!(
+                            debug,
+                            "emulator returned {} bytes for a {readable}-byte readable extent at 0x{cursor:x}",
+                            bytes.len()
+                        ));
+                    }
                     observed_total = observed_total.saturating_add(bytes.len());
                     cursor = cursor.saturating_add(bytes.len() as u64);
                     segments.push(MemorySegment::Observed(ObservedMemoryRun {
@@ -727,9 +737,10 @@ impl ExecutionBackend for EmulatorBackend {
             }
         }
 
-        Ok(SparseMemoryCapture::from_segments(
-            address, size_u64, segments,
-        ))
+        // A producer bug must surface as an error, never as a capture whose
+        // coverage metadata overstates what was observed.
+        SparseMemoryCapture::from_segments(address, size_u64, segments)
+            .map_err(|e| fission_core::err!(debug, "sparse read at 0x{address:x}: {e}"))
     }
 
     fn write_memory(&mut self, address: u64, data: &[u8]) -> FissionResult<()> {

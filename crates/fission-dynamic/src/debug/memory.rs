@@ -74,6 +74,9 @@ pub enum MemoryError {
 
     #[error("Memory read of {requested} bytes exceeds budget limit of {limit} bytes")]
     BudgetExceeded { requested: usize, limit: usize },
+
+    #[error("Invalid sparse memory capture: {0}")]
+    InvalidSparseCapture(#[from] SparseCaptureError),
 }
 
 /// Memory protection flags.
@@ -189,6 +192,8 @@ pub struct MemoryGap {
 }
 
 impl MemoryGap {
+    /// Exclusive end address. Saturates for a free-standing gap whose range
+    /// overflows; a gap held by a [`SparseMemoryCapture`] never does.
     pub fn end(&self) -> u64 {
         self.start.saturating_add(self.len)
     }
@@ -212,6 +217,8 @@ impl ObservedMemoryRun {
         self.bytes.is_empty()
     }
 
+    /// Exclusive end address. Saturates for a free-standing run whose range
+    /// overflows; a run held by a [`SparseMemoryCapture`] never does.
     pub fn end(&self) -> u64 {
         self.start.saturating_add(self.bytes.len() as u64)
     }
@@ -225,27 +232,83 @@ pub enum MemorySegment {
     Gap(MemoryGap),
 }
 
+impl MemorySegment {
+    /// First address covered by this segment.
+    pub fn start(&self) -> u64 {
+        match self {
+            Self::Observed(run) => run.start,
+            Self::Gap(gap) => gap.start,
+        }
+    }
+
+    /// Number of addresses covered by this segment.
+    pub fn len(&self) -> u64 {
+        match self {
+            Self::Observed(run) => run.bytes.len() as u64,
+            Self::Gap(gap) => gap.len,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Exclusive end address (saturating; see [`MemoryGap::end`]).
+    pub fn end(&self) -> u64 {
+        self.start().saturating_add(self.len())
+    }
+}
+
 /// Explicit partial read result containing only genuinely observed prefix bytes
 /// and an optional [`MemoryGap`] for any unread tail.
+///
+/// Built only by [`MemoryManager::read_partial`]; fields are private so the
+/// invariant `bytes.len() + trailing_gap.len == requested`, with the gap (if
+/// any) starting at `address + bytes.len()`, cannot be broken after construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PartialRead {
-    pub address: u64,
-    pub requested: usize,
-    pub bytes: Vec<u8>,
-    pub trailing_gap: Option<MemoryGap>,
+    address: u64,
+    requested: usize,
+    bytes: Vec<u8>,
+    trailing_gap: Option<MemoryGap>,
 }
 
 impl PartialRead {
+    /// Address of the first requested byte.
+    pub fn address(&self) -> u64 {
+        self.address
+    }
+
+    /// Number of bytes requested.
+    pub fn requested(&self) -> usize {
+        self.requested
+    }
+
+    /// The genuinely transferred prefix (never zero-padded).
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    /// Consume the read and return the transferred prefix.
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.bytes
+    }
+
+    /// The unread tail, if the transfer stopped early.
+    pub fn trailing_gap(&self) -> Option<&MemoryGap> {
+        self.trailing_gap.as_ref()
+    }
+
     pub fn observed_len(&self) -> usize {
         self.bytes.len()
     }
 
     pub fn missing_len(&self) -> usize {
-        self.requested.saturating_sub(self.bytes.len())
+        self.requested - self.bytes.len()
     }
 
     pub fn is_complete(&self) -> bool {
-        self.bytes.len() == self.requested && self.trailing_gap.is_none()
+        self.trailing_gap.is_none()
     }
 }
 
@@ -288,6 +351,11 @@ impl SparseReadOptions {
 }
 
 /// Accounting summary for a sparse memory acquisition.
+///
+/// Derived by [`SparseMemoryCapture::from_segments`] from a validated
+/// partition, so `observed_bytes + missing_bytes == requested_bytes` and
+/// `complete == (missing_bytes == 0)` always hold for a summary obtained from
+/// [`SparseMemoryCapture::coverage`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SparseCoverageSummary {
     pub requested_bytes: u64,
@@ -298,42 +366,180 @@ pub struct SparseCoverageSummary {
     pub complete: bool,
 }
 
+/// Why a list of [`MemorySegment`]s is not an exact partition of a
+/// [`SparseMemoryCapture`]'s requested range.
+///
+/// A capture is evidence: `complete == true` must mean every requested address
+/// was observed exactly once. The constructor therefore rejects any segment
+/// list that is not an ordered, non-overlapping, gap-free cover of
+/// `[start, start + requested_len)` instead of trusting aggregate byte counts.
+#[derive(Error, Debug, Clone, PartialEq, Eq)]
+pub enum SparseCaptureError {
+    #[error("sparse capture range overflows the address space: start {start:#x}, len {len:#x}")]
+    RangeOverflow { start: u64, len: u64 },
+
+    #[error("sparse segment {index} at {start:#x} is empty")]
+    EmptySegment { index: usize, start: u64 },
+
+    #[error("sparse segment {index} at {start:#x} (len {len:#x}) overflows the address space")]
+    SegmentOverflow { index: usize, start: u64, len: u64 },
+
+    #[error(
+        "sparse segment {index} [{start:#x}, {end:#x}) lies outside the capture [{capture_start:#x}, {capture_end:#x})"
+    )]
+    OutOfRange {
+        index: usize,
+        start: u64,
+        end: u64,
+        capture_start: u64,
+        capture_end: u64,
+    },
+
+    #[error(
+        "sparse segment {index} starts at {start:#x} but [{expected:#x}, {start:#x}) is not covered by any segment"
+    )]
+    Hole {
+        index: usize,
+        expected: u64,
+        start: u64,
+    },
+
+    #[error(
+        "sparse segment {index} starts at {start:#x}, before {expected:#x} where the previous segment ended (overlapping, duplicate or out-of-order segment)"
+    )]
+    Overlap {
+        index: usize,
+        expected: u64,
+        start: u64,
+    },
+
+    #[error(
+        "sparse segments cover [{capture_start:#x}, {covered_end:#x}) but the capture requests [{capture_start:#x}, {capture_end:#x})"
+    )]
+    IncompleteCoverage {
+        capture_start: u64,
+        covered_end: u64,
+        capture_end: u64,
+    },
+}
+
 /// Ordered sparse memory acquisition preserving observed runs and unread gaps.
+///
+/// # Invariant (checked by [`SparseMemoryCapture::from_segments`] in every build profile)
+///
+/// The segments are an exact partition of `[start, start + requested_len)`:
+/// every segment is non-empty, the first starts at `start`, each next one starts
+/// exactly where the previous one ends, the last ends at
+/// `start + requested_len`, and no endpoint overflows `u64`. Adjacent observed
+/// runs, and adjacent gaps with the same reason, are coalesced. Hence
+/// `observed_bytes + missing_bytes == requested_bytes`, and `complete` means
+/// every requested address was observed exactly once. Fields are private so the
+/// invariant cannot be broken after construction.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SparseMemoryCapture {
-    pub start: u64,
-    pub requested_len: u64,
-    pub segments: Vec<MemorySegment>,
-    pub coverage: SparseCoverageSummary,
+    start: u64,
+    requested_len: u64,
+    segments: Vec<MemorySegment>,
+    coverage: SparseCoverageSummary,
 }
 
 impl SparseMemoryCapture {
-    /// Build a canonical [`SparseMemoryCapture`], coalescing contiguous observed runs
-    /// and adjacent gaps with matching reasons.
-    pub fn from_segments(start: u64, requested_len: u64, raw_segments: Vec<MemorySegment>) -> Self {
+    /// Validate that `raw_segments` exactly partitions
+    /// `[start, start + requested_len)` and build a canonical capture,
+    /// coalescing contiguous observed runs and adjacent gaps with matching
+    /// reasons.
+    ///
+    /// Rejects (in release builds too) an overflowing capture range, empty
+    /// segments, segments whose end overflows, segments outside the range,
+    /// holes, overlaps (including duplicates and out-of-order segments) and a
+    /// cover that stops short of the requested end.
+    pub fn from_segments(
+        start: u64,
+        requested_len: u64,
+        raw_segments: Vec<MemorySegment>,
+    ) -> Result<Self, SparseCaptureError> {
+        let capture_end =
+            start
+                .checked_add(requested_len)
+                .ok_or(SparseCaptureError::RangeOverflow {
+                    start,
+                    len: requested_len,
+                })?;
+
+        let mut cursor = start;
+        for (index, segment) in raw_segments.iter().enumerate() {
+            let seg_start = segment.start();
+            let seg_len = match segment {
+                MemorySegment::Observed(run) => u64::try_from(run.bytes.len()).map_err(|_| {
+                    SparseCaptureError::SegmentOverflow {
+                        index,
+                        start: seg_start,
+                        len: u64::MAX,
+                    }
+                })?,
+                MemorySegment::Gap(gap) => gap.len,
+            };
+            if seg_len == 0 {
+                return Err(SparseCaptureError::EmptySegment {
+                    index,
+                    start: seg_start,
+                });
+            }
+            let seg_end =
+                seg_start
+                    .checked_add(seg_len)
+                    .ok_or(SparseCaptureError::SegmentOverflow {
+                        index,
+                        start: seg_start,
+                        len: seg_len,
+                    })?;
+            if seg_start < start || seg_end > capture_end {
+                return Err(SparseCaptureError::OutOfRange {
+                    index,
+                    start: seg_start,
+                    end: seg_end,
+                    capture_start: start,
+                    capture_end,
+                });
+            }
+            if seg_start < cursor {
+                return Err(SparseCaptureError::Overlap {
+                    index,
+                    expected: cursor,
+                    start: seg_start,
+                });
+            }
+            if seg_start > cursor {
+                return Err(SparseCaptureError::Hole {
+                    index,
+                    expected: cursor,
+                    start: seg_start,
+                });
+            }
+            cursor = seg_end;
+        }
+        if cursor != capture_end {
+            return Err(SparseCaptureError::IncompleteCoverage {
+                capture_start: start,
+                covered_end: cursor,
+                capture_end,
+            });
+        }
+
+        // The input is an exact partition, so every sum below is bounded by
+        // `requested_len` and coalescing only merges true neighbours.
         let mut segments: Vec<MemorySegment> = Vec::with_capacity(raw_segments.len());
         for segment in raw_segments {
-            match segment {
-                MemorySegment::Observed(run) if run.bytes.is_empty() => {}
-                MemorySegment::Gap(gap) if gap.len == 0 => {}
-                MemorySegment::Observed(run) => {
-                    if let Some(MemorySegment::Observed(prev)) = segments.last_mut() {
-                        if prev.end() == run.start {
-                            prev.bytes.extend_from_slice(&run.bytes);
-                            continue;
-                        }
-                    }
-                    segments.push(MemorySegment::Observed(run));
+            match (segments.last_mut(), segment) {
+                (Some(MemorySegment::Observed(prev)), MemorySegment::Observed(run)) => {
+                    prev.bytes.extend_from_slice(&run.bytes);
                 }
-                MemorySegment::Gap(gap) => {
-                    if let Some(MemorySegment::Gap(prev)) = segments.last_mut() {
-                        if prev.end() == gap.start && prev.reason == gap.reason {
-                            prev.len = prev.len.saturating_add(gap.len);
-                            continue;
-                        }
-                    }
-                    segments.push(MemorySegment::Gap(gap));
+                (Some(MemorySegment::Gap(prev)), MemorySegment::Gap(gap))
+                    if prev.reason == gap.reason =>
+                {
+                    prev.len += gap.len;
                 }
+                (_, segment) => segments.push(segment),
             }
         }
 
@@ -341,25 +547,18 @@ impl SparseMemoryCapture {
         let mut missing_bytes = 0u64;
         let mut observed_runs = 0usize;
         let mut gap_count = 0usize;
-
         for segment in &segments {
             match segment {
                 MemorySegment::Observed(run) => {
-                    observed_bytes = observed_bytes.saturating_add(run.len() as u64);
+                    observed_bytes += run.bytes.len() as u64;
                     observed_runs += 1;
                 }
                 MemorySegment::Gap(gap) => {
-                    missing_bytes = missing_bytes.saturating_add(gap.len);
+                    missing_bytes += gap.len;
                     gap_count += 1;
                 }
             }
         }
-
-        debug_assert_eq!(
-            observed_bytes.saturating_add(missing_bytes),
-            requested_len,
-            "sparse capture coverage mismatch: observed={observed_bytes} missing={missing_bytes} requested={requested_len}"
-        );
 
         let coverage = SparseCoverageSummary {
             requested_bytes: requested_len,
@@ -367,17 +566,43 @@ impl SparseMemoryCapture {
             missing_bytes,
             observed_runs,
             gap_count,
-            complete: missing_bytes == 0 && observed_bytes == requested_len,
+            complete: missing_bytes == 0,
         };
 
-        Self {
+        Ok(Self {
             start,
             requested_len,
             segments,
             coverage,
-        }
+        })
     }
 
+    /// First requested address.
+    pub fn start(&self) -> u64 {
+        self.start
+    }
+
+    /// Number of requested addresses.
+    pub fn requested_len(&self) -> u64 {
+        self.requested_len
+    }
+
+    /// Exclusive end of the requested range (never overflows; checked at construction).
+    pub fn end(&self) -> u64 {
+        self.start + self.requested_len
+    }
+
+    /// The canonical, ordered partition of the requested range.
+    pub fn segments(&self) -> &[MemorySegment] {
+        &self.segments
+    }
+
+    /// Coverage accounting derived from [`Self::segments`].
+    pub fn coverage(&self) -> SparseCoverageSummary {
+        self.coverage
+    }
+
+    /// `true` iff every requested address was observed.
     pub fn is_complete(&self) -> bool {
         self.coverage.complete
     }
@@ -396,83 +621,67 @@ impl SparseMemoryCapture {
         })
     }
 
+    /// Index of the segment containing `address`; `address` must lie inside
+    /// `[start, end)`. Binary search is valid because segments are ordered and
+    /// contiguous.
+    fn segment_index(&self, address: u64) -> usize {
+        self.segments.partition_point(|seg| seg.end() <= address)
+    }
+
     /// Query one byte at `address` inside this capture, distinguishing a genuinely
     /// observed `0x00` (`Some(SparseByte::Observed(0))`) from an unread gap
     /// (`Some(SparseByte::Missing(reason))`), or `None` if `address` is outside `[start, start + requested_len)`.
     pub fn byte_at(&self, address: u64) -> Option<SparseByte<'_>> {
-        let end = self.start.checked_add(self.requested_len)?;
-        if address < self.start || address >= end {
+        if address < self.start || address >= self.end() {
             return None;
         }
-        for segment in &self.segments {
-            match segment {
-                MemorySegment::Observed(run) => {
-                    if address >= run.start && address < run.end() {
-                        let offset = (address - run.start) as usize;
-                        return Some(SparseByte::Observed(run.bytes[offset]));
-                    }
-                }
-                MemorySegment::Gap(gap) => {
-                    if address >= gap.start && address < gap.end() {
-                        return Some(SparseByte::Missing(&gap.reason));
-                    }
-                }
+        match self.segments.get(self.segment_index(address))? {
+            MemorySegment::Observed(run) => {
+                let offset = usize::try_from(address - run.start).ok()?;
+                run.bytes.get(offset).copied().map(SparseByte::Observed)
             }
+            MemorySegment::Gap(gap) => Some(SparseByte::Missing(&gap.reason)),
         }
-        None
     }
 
     /// Extract an exact byte slice `[address, address + len)` only if every byte
     /// in that range was genuinely observed. Fails on any intersecting gap instead
     /// of padding zeros.
     pub fn read_exact_slice(&self, address: u64, len: usize) -> Result<Vec<u8>, MemoryError> {
-        let Some(slice_end) = address.checked_add(len as u64) else {
-            return Err(MemoryError::InvalidRegion { address, size: len });
-        };
-        let Some(cap_end) = self.start.checked_add(self.requested_len) else {
-            return Err(MemoryError::InvalidRegion { address, size: len });
-        };
-        if address < self.start || slice_end > cap_end {
+        let invalid = || MemoryError::InvalidRegion { address, size: len };
+        let len_u64 = u64::try_from(len).map_err(|_| invalid())?;
+        let slice_end = address.checked_add(len_u64).ok_or_else(invalid)?;
+        if address < self.start || slice_end > self.end() {
             return Err(MemoryError::Unmapped { address, size: len });
         }
         if len == 0 {
             return Ok(Vec::new());
         }
 
-        let mut out = Vec::with_capacity(len);
+        // A fully observed slice cannot exceed the observed byte count, so this
+        // bounds the allocation by bytes actually held, not by the (possibly
+        // huge) requested span of gap metadata.
+        let capacity = usize::try_from(self.coverage.observed_bytes)
+            .unwrap_or(usize::MAX)
+            .min(len);
+        let mut out = Vec::with_capacity(capacity);
         let mut cursor = address;
-        for segment in &self.segments {
+        for segment in &self.segments[self.segment_index(address)..] {
             if cursor >= slice_end {
                 break;
             }
             match segment {
                 MemorySegment::Observed(run) => {
-                    let seg_start = run.start;
-                    let seg_end = run.end();
-                    if seg_end <= cursor || seg_start >= slice_end {
-                        continue;
-                    }
-                    if seg_start > cursor {
-                        return Err(MemoryError::Unmapped {
-                            address: cursor,
-                            size: (seg_start - cursor) as usize,
-                        });
-                    }
-                    let take_end = seg_end.min(slice_end);
-                    let start_off = (cursor - seg_start) as usize;
-                    let end_off = (take_end - seg_start) as usize;
+                    let take_end = run.end().min(slice_end);
+                    let start_off = (cursor - run.start) as usize;
+                    let end_off = (take_end - run.start) as usize;
                     out.extend_from_slice(&run.bytes[start_off..end_off]);
                     cursor = take_end;
                 }
                 MemorySegment::Gap(gap) => {
-                    let seg_start = gap.start;
-                    let seg_end = gap.end();
-                    if seg_end <= cursor || seg_start >= slice_end {
-                        continue;
-                    }
-                    let err_addr = cursor.max(seg_start);
-                    let err_len = (slice_end.min(seg_end) - err_addr) as usize;
-                    return Err(gap.reason.into_memory_error(err_addr, err_len.max(1)));
+                    let err_len =
+                        usize::try_from(slice_end.min(gap.end()) - cursor).unwrap_or(usize::MAX);
+                    return Err(gap.reason.into_memory_error(cursor, err_len));
                 }
             }
         }
@@ -696,7 +905,7 @@ impl<M: PlatformMemory> MemoryManager<M> {
             return Err(MemoryError::NoProcess);
         }
         if size == 0 {
-            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new()));
+            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new())?);
         }
 
         let page_size_u64 = options.page_size as u64;
@@ -786,7 +995,7 @@ impl<M: PlatformMemory> MemoryManager<M> {
 
         Ok(SparseMemoryCapture::from_segments(
             address, size_u64, segments,
-        ))
+        )?)
     }
 
     /// Read memory into an existing buffer, validating address bounds, budget,
@@ -1422,6 +1631,591 @@ mod tests {
             exited.byte_at(0x4500),
             Some(SparseByte::Missing(&MemoryGapReason::ProcessExited))
         );
+    }
+
+    // ---------------------------------------------------------------------
+    // SparseMemoryCapture partition validation (#1324 review).
+    //
+    // No property-test crate is a workspace dependency, so the properties below
+    // use a hand-rolled deterministic enumerator (every composition of small
+    // lengths) plus a seeded xorshift generator for larger lengths and address
+    // extremes. Both are reproducible: a failure names the exact case.
+    // ---------------------------------------------------------------------
+
+    fn obs(start: u64, bytes: &[u8]) -> MemorySegment {
+        MemorySegment::Observed(ObservedMemoryRun {
+            start,
+            bytes: bytes.to_vec(),
+        })
+    }
+
+    fn gap(start: u64, len: u64, reason: MemoryGapReason) -> MemorySegment {
+        MemorySegment::Gap(MemoryGap { start, len, reason })
+    }
+
+    #[test]
+    fn sparse_capture_rejects_two_runs_at_the_same_address() {
+        // Review counterexample: two one-byte runs at 0x1000 sum to the requested
+        // two bytes, but 0x1001 was never observed.
+        let err = SparseMemoryCapture::from_segments(
+            0x1000,
+            2,
+            vec![obs(0x1000, &[0xaa]), obs(0x1000, &[0xbb])],
+        )
+        .expect_err("duplicate runs must not form a complete capture");
+        assert_eq!(
+            err,
+            SparseCaptureError::Overlap {
+                index: 1,
+                expected: 0x1001,
+                start: 0x1000,
+            }
+        );
+    }
+
+    #[test]
+    fn sparse_capture_rejects_every_malformed_partition_shape() {
+        use MemoryGapReason::Unmapped;
+        type Case = (&'static str, u64, u64, Vec<MemorySegment>);
+        let cases: Vec<Case> = vec![
+            (
+                "reversed order",
+                0x1000,
+                2,
+                vec![obs(0x1001, &[2]), obs(0x1000, &[1])],
+            ),
+            (
+                "hole between runs",
+                0x1000,
+                3,
+                vec![obs(0x1000, &[1]), obs(0x1002, &[3])],
+            ),
+            ("hole at the start", 0x1000, 2, vec![obs(0x1001, &[2])]),
+            (
+                "overlapping run and gap",
+                0x1000,
+                4,
+                vec![obs(0x1000, &[1, 2, 3]), gap(0x1002, 2, Unmapped)],
+            ),
+            (
+                "segment below the capture",
+                0x1000,
+                2,
+                vec![obs(0x0fff, &[0, 1, 2])],
+            ),
+            (
+                "segment past the capture end",
+                0x1000,
+                2,
+                vec![obs(0x1000, &[1]), gap(0x1001, 5, Unmapped)],
+            ),
+            (
+                "cover stops short (byte sum mismatch)",
+                0x1000,
+                4,
+                vec![obs(0x1000, &[1])],
+            ),
+            ("no segments for a non-empty request", 0x1000, 4, vec![]),
+            (
+                "empty observed run",
+                0x1000,
+                1,
+                vec![obs(0x1000, &[]), obs(0x1000, &[1])],
+            ),
+            (
+                "empty gap",
+                0x1000,
+                1,
+                vec![gap(0x1000, 0, Unmapped), obs(0x1000, &[1])],
+            ),
+            (
+                "capture range overflows u64",
+                u64::MAX - 1,
+                2,
+                vec![obs(u64::MAX - 1, &[1]), obs(u64::MAX, &[2])],
+            ),
+            (
+                "gap end overflows u64",
+                u64::MAX - 4,
+                4,
+                vec![gap(u64::MAX - 4, u64::MAX, Unmapped)],
+            ),
+            (
+                "duplicate gap covering the same bytes twice",
+                0x1000,
+                4,
+                vec![gap(0x1000, 2, Unmapped), gap(0x1000, 2, Unmapped)],
+            ),
+        ];
+        for (name, start, len, segments) in cases {
+            let result = SparseMemoryCapture::from_segments(start, len, segments);
+            assert!(result.is_err(), "{name}: accepted {result:?}");
+        }
+
+        // The last byte below u64::MAX is representable; only a range whose
+        // exclusive end would be 2^64 is rejected.
+        let edge = SparseMemoryCapture::from_segments(
+            u64::MAX - 2,
+            2,
+            vec![obs(u64::MAX - 2, &[7]), gap(u64::MAX - 1, 1, Unmapped)],
+        )
+        .expect("range ending exactly at u64::MAX is valid");
+        assert_eq!(edge.end(), u64::MAX);
+        assert_eq!(edge.byte_at(u64::MAX - 2), Some(SparseByte::Observed(7)));
+        assert_eq!(
+            edge.byte_at(u64::MAX - 1),
+            Some(SparseByte::Missing(&Unmapped))
+        );
+        assert_eq!(edge.byte_at(u64::MAX), None);
+    }
+
+    #[test]
+    fn sparse_exact_slice_over_huge_gap_fails_without_allocating_the_span() {
+        // Gaps are metadata: a capture may describe a span far larger than any
+        // allocation. Asking for an exact slice across it must report the gap,
+        // not reserve `len` bytes up front.
+        let span = 1u64 << 62;
+        let capture = SparseMemoryCapture::from_segments(
+            0x1000,
+            span,
+            vec![
+                obs(0x1000, &[0xaa; 16]),
+                gap(0x1010, span - 16, MemoryGapReason::Unmapped),
+            ],
+        )
+        .unwrap();
+        let err = capture
+            .read_exact_slice(0x1000, span as usize)
+            .expect_err("slice crosses an unmapped gap");
+        assert!(
+            matches!(
+                err,
+                MemoryError::Unmapped {
+                    address: 0x1010,
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert_eq!(capture.read_exact_slice(0x1004, 4).unwrap(), [0xaa; 4]);
+    }
+
+    /// Per-address reference model of a capture.
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    enum RefByte {
+        Observed(u8),
+        Missing(MemoryGapReason),
+    }
+
+    const REASONS: [MemoryGapReason; 3] = [
+        MemoryGapReason::Unmapped,
+        MemoryGapReason::Denied,
+        MemoryGapReason::Partial,
+    ];
+
+    /// Build segments for consecutive `parts` (lengths) with per-part `kinds`
+    /// (0 = observed, 1.. = gap reason index + 1), filling observed bytes from a
+    /// position-derived pattern that includes genuine zeros.
+    fn build_partition(
+        start: u64,
+        parts: &[u64],
+        kinds: &[usize],
+    ) -> (Vec<MemorySegment>, Vec<RefByte>) {
+        let mut segments = Vec::new();
+        let mut reference = Vec::new();
+        let mut at = start;
+        for (&len, &kind) in parts.iter().zip(kinds) {
+            if kind == 0 {
+                let bytes: Vec<u8> = (0..len)
+                    .map(|i| ((at.wrapping_add(i)).wrapping_mul(37) % 5) as u8)
+                    .collect();
+                reference.extend(bytes.iter().map(|&b| RefByte::Observed(b)));
+                segments.push(obs(at, &bytes));
+            } else {
+                let reason = REASONS[kind - 1].clone();
+                reference.extend((0..len).map(|_| RefByte::Missing(reason.clone())));
+                segments.push(gap(at, len, reason));
+            }
+            at += len;
+        }
+        (segments, reference)
+    }
+
+    /// Check every observable property of a capture against the reference model.
+    fn assert_capture_matches_reference(
+        case: &str,
+        capture: &SparseMemoryCapture,
+        start: u64,
+        reference: &[RefByte],
+    ) {
+        let len = reference.len() as u64;
+        assert_eq!(capture.start(), start, "{case}");
+        assert_eq!(capture.requested_len(), len, "{case}");
+        let observed = reference
+            .iter()
+            .filter(|b| matches!(b, RefByte::Observed(_)))
+            .count() as u64;
+        let cov = capture.coverage();
+        assert_eq!(cov.requested_bytes, len, "{case}");
+        assert_eq!(cov.observed_bytes, observed, "{case}");
+        assert_eq!(cov.missing_bytes, len - observed, "{case}");
+        assert_eq!(cov.complete, observed == len, "{case}");
+        assert_eq!(capture.is_complete(), observed == len, "{case}");
+        assert_eq!(cov.observed_runs, capture.observed_runs().count(), "{case}");
+        assert_eq!(cov.gap_count, capture.gaps().count(), "{case}");
+
+        // Canonical: contiguous, non-empty, maximally coalesced.
+        let mut at = start;
+        for pair in capture.segments().windows(2) {
+            match (&pair[0], &pair[1]) {
+                (MemorySegment::Observed(_), MemorySegment::Observed(_)) => {
+                    panic!("{case}: adjacent observed runs not coalesced")
+                }
+                (MemorySegment::Gap(a), MemorySegment::Gap(b)) if a.reason == b.reason => {
+                    panic!("{case}: adjacent equal-reason gaps not coalesced")
+                }
+                _ => {}
+            }
+        }
+        for seg in capture.segments() {
+            assert_eq!(seg.start(), at, "{case}: segment not contiguous");
+            assert!(!seg.is_empty(), "{case}: empty segment kept");
+            at = seg.end();
+        }
+        assert_eq!(at, capture.end(), "{case}");
+
+        // Per-address queries, including one address on each side.
+        if let Some(before) = start.checked_sub(1) {
+            assert_eq!(capture.byte_at(before), None, "{case}");
+        }
+        assert_eq!(capture.byte_at(capture.end()), None, "{case}");
+        for (i, expected) in reference.iter().enumerate() {
+            let got = capture.byte_at(start + i as u64);
+            match expected {
+                RefByte::Observed(b) => {
+                    assert_eq!(got, Some(SparseByte::Observed(*b)), "{case} @{i}")
+                }
+                RefByte::Missing(r) => assert_eq!(got, Some(SparseByte::Missing(r)), "{case} @{i}"),
+            }
+        }
+
+        // Every sub-slice: exact bytes iff fully observed, else a gap error.
+        for a in 0..=reference.len() {
+            for b in a..=reference.len() {
+                let got = capture.read_exact_slice(start + a as u64, b - a);
+                let window = &reference[a..b];
+                if window.iter().all(|x| matches!(x, RefByte::Observed(_))) {
+                    let want: Vec<u8> = window
+                        .iter()
+                        .map(|x| match x {
+                            RefByte::Observed(b) => *b,
+                            RefByte::Missing(_) => unreachable!(),
+                        })
+                        .collect();
+                    assert_eq!(got.as_deref(), Ok(&want[..]), "{case} slice {a}..{b}");
+                } else {
+                    assert!(got.is_err(), "{case} slice {a}..{b} returned {got:?}");
+                }
+            }
+        }
+
+        // Rebuilding from the canonical segments is the identity.
+        let rebuilt =
+            SparseMemoryCapture::from_segments(start, len, capture.segments().to_vec()).unwrap();
+        assert_eq!(&rebuilt, capture, "{case}: not idempotent");
+    }
+
+    /// Every single-step corruption of a valid, non-empty partition. Each one is
+    /// guaranteed to break the exact-partition invariant.
+    fn mutations(segments: &[MemorySegment]) -> Vec<(String, Vec<MemorySegment>)> {
+        let mut out = Vec::new();
+        for i in 0..segments.len() {
+            let mut dup = segments.to_vec();
+            dup.insert(i + 1, segments[i].clone());
+            out.push((format!("duplicate {i}"), dup));
+
+            let mut drop = segments.to_vec();
+            drop.remove(i);
+            out.push((format!("drop {i}"), drop));
+
+            let mut grow = segments.to_vec();
+            match &mut grow[i] {
+                MemorySegment::Observed(run) => run.bytes.push(0),
+                MemorySegment::Gap(g) => g.len += 1,
+            }
+            out.push((format!("grow {i}"), grow));
+
+            for delta in [-1i64, 1] {
+                let mut shift = segments.to_vec();
+                match &mut shift[i] {
+                    MemorySegment::Observed(run) => {
+                        run.start = run.start.wrapping_add_signed(delta)
+                    }
+                    MemorySegment::Gap(g) => g.start = g.start.wrapping_add_signed(delta),
+                }
+                out.push((format!("shift {i} by {delta}"), shift));
+            }
+
+            let mut empty = segments.to_vec();
+            empty.insert(i, obs(segments[i].start(), &[]));
+            out.push((format!("empty before {i}"), empty));
+
+            if i + 1 < segments.len() {
+                let mut swap = segments.to_vec();
+                swap.swap(i, i + 1);
+                out.push((format!("swap {i},{}", i + 1), swap));
+            }
+        }
+        // Shrinking the last segment leaves the requested end uncovered.
+        let last = segments.len() - 1;
+        let mut shrink = segments.to_vec();
+        let shrinks = match &mut shrink[last] {
+            MemorySegment::Observed(run) if run.bytes.len() > 1 => {
+                run.bytes.pop();
+                true
+            }
+            MemorySegment::Gap(g) if g.len > 1 => {
+                g.len -= 1;
+                true
+            }
+            _ => false,
+        };
+        if shrinks {
+            out.push(("shrink last".to_string(), shrink));
+        }
+        out
+    }
+
+    /// All compositions of `n` into positive parts, in a fixed order.
+    fn compositions(n: u64) -> Vec<Vec<u64>> {
+        if n == 0 {
+            return vec![Vec::new()];
+        }
+        let mut out = Vec::new();
+        for first in 1..=n {
+            for mut rest in compositions(n - first) {
+                rest.insert(0, first);
+                out.push(rest);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn sparse_capture_exhaustive_small_partitions_match_reference_and_reject_mutations() {
+        let starts = [0u64, 0x1000, 0x1fff, u64::MAX - 6];
+        let mut accepted = 0usize;
+        let mut rejected = 0usize;
+        for &start in &starts {
+            for n in 0..=6u64 {
+                for parts in compositions(n) {
+                    // Every assignment of {observed, 3 gap reasons} to the parts.
+                    let k = parts.len() as u32;
+                    for code in 0..4usize.pow(k) {
+                        let kinds: Vec<usize> =
+                            (0..k).map(|j| (code / 4usize.pow(j)) % 4).collect();
+                        let (segments, reference) = build_partition(start, &parts, &kinds);
+                        let case = format!("start={start:#x} parts={parts:?} kinds={kinds:?}");
+                        let capture =
+                            SparseMemoryCapture::from_segments(start, n, segments.clone())
+                                .unwrap_or_else(|e| {
+                                    panic!("{case}: valid partition rejected: {e}")
+                                });
+                        assert_capture_matches_reference(&case, &capture, start, &reference);
+                        accepted += 1;
+
+                        if segments.is_empty() {
+                            continue;
+                        }
+                        for (what, bad) in mutations(&segments) {
+                            let result = SparseMemoryCapture::from_segments(start, n, bad.clone());
+                            assert!(
+                                result.is_err(),
+                                "{case}: mutation `{what}` accepted: {bad:?} -> {result:?}"
+                            );
+                            rejected += 1;
+                        }
+                    }
+                }
+            }
+        }
+        // Guard against the enumerator silently shrinking to nothing.
+        assert!(accepted > 4 * 10_000, "accepted only {accepted}");
+        assert!(rejected > 4 * 100_000, "rejected only {rejected}");
+    }
+
+    /// Deterministic xorshift64* so randomized cases are reproducible.
+    struct XorShift(u64);
+    impl XorShift {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x >> 12;
+            x ^= x << 25;
+            x ^= x >> 27;
+            self.0 = x;
+            x.wrapping_mul(0x2545_f491_4f6c_dd1d)
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+    }
+
+    #[test]
+    fn sparse_capture_randomized_large_partitions_match_reference_and_reject_mutations() {
+        let mut rng = XorShift(0x1324_5eed_cafe_f00d);
+        for iter in 0..400 {
+            let n = 1 + rng.below(2048);
+            let start = match iter % 4 {
+                0 => rng.below(1 << 48),
+                1 => u64::MAX - n - rng.below(4),
+                2 => 0,
+                _ => (rng.below(1 << 36)) << 12,
+            };
+            let mut parts = Vec::new();
+            let mut left = n;
+            while left > 0 {
+                let p = 1 + rng.below(left.min(300));
+                parts.push(p);
+                left -= p;
+            }
+            let kinds: Vec<usize> = parts.iter().map(|_| rng.below(4) as usize).collect();
+            let (segments, reference) = build_partition(start, &parts, &kinds);
+            let case = format!("iter={iter} start={start:#x} n={n} parts={}", parts.len());
+            let capture = SparseMemoryCapture::from_segments(start, n, segments.clone())
+                .unwrap_or_else(|e| panic!("{case}: valid partition rejected: {e}"));
+
+            // Full sub-slice enumeration is quadratic; sample it instead.
+            assert_eq!(
+                capture.coverage().observed_bytes + capture.coverage().missing_bytes,
+                n
+            );
+            for _ in 0..64 {
+                let i = rng.below(n) as usize;
+                let got = capture.byte_at(start + i as u64);
+                match &reference[i] {
+                    RefByte::Observed(b) => {
+                        assert_eq!(got, Some(SparseByte::Observed(*b)), "{case} @{i}")
+                    }
+                    RefByte::Missing(r) => {
+                        assert_eq!(got, Some(SparseByte::Missing(r)), "{case} @{i}")
+                    }
+                }
+                let j = i + rng.below((n as usize - i) as u64 + 1) as usize;
+                let window = &reference[i..j];
+                let got = capture.read_exact_slice(start + i as u64, j - i);
+                assert_eq!(
+                    got.is_ok(),
+                    window.iter().all(|x| matches!(x, RefByte::Observed(_))),
+                    "{case} slice {i}..{j}"
+                );
+            }
+            for (what, bad) in mutations(&segments) {
+                assert!(
+                    SparseMemoryCapture::from_segments(start, n, bad).is_err(),
+                    "{case}: mutation `{what}` accepted"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn read_sparse_over_randomized_backend_failures_yields_exact_partitions() {
+        // Property over the producer, not just the constructor: whatever mix of
+        // full pages, short transfers, zero transfers, unmapped/denied pages and
+        // process exit the backend reports, every observed byte equals target
+        // memory, every unobservable byte is a gap, and coverage adds up.
+        let mut rng = XorShift(0x0bad_5eed_1324_0001);
+        for iter in 0..200 {
+            let mut mock = MockPlatformMemory::new();
+            let pages = 6u64;
+            let base = 0x10_000u64;
+            // expected[addr - base] = Some(byte) if a correct backend can observe it.
+            let mut expected: Vec<Option<u8>> = Vec::new();
+            let mut exited_at: Option<u64> = None;
+            for p in 0..pages {
+                let page_addr = base + p * 4096;
+                match rng.below(6) {
+                    0 | 1 => {
+                        let page: Vec<u8> = (0..4096)
+                            .map(|i| if i % 3 == 0 { 0 } else { (i % 251) as u8 })
+                            .collect();
+                        expected.extend(page.iter().map(|&b| Some(b)));
+                        mock.page_map.insert(page_addr, Ok(page));
+                    }
+                    2 => {
+                        let short = rng.below(4096) as usize;
+                        let page = vec![0u8; short];
+                        expected.extend((0..4096).map(|i| (i < short).then_some(0u8)));
+                        mock.page_map.insert(page_addr, Ok(page));
+                    }
+                    3 => {
+                        expected.extend(std::iter::repeat_n(None, 4096));
+                        mock.page_map.insert(
+                            page_addr,
+                            Err(MemoryError::Unmapped {
+                                address: page_addr,
+                                size: 4096,
+                            }),
+                        );
+                    }
+                    4 => {
+                        expected.extend(std::iter::repeat_n(None, 4096));
+                        mock.page_map.insert(
+                            page_addr,
+                            Err(MemoryError::AccessDenied { address: page_addr }),
+                        );
+                    }
+                    _ => {
+                        expected.extend(std::iter::repeat_n(None, 4096));
+                        mock.page_map.insert(
+                            page_addr,
+                            Err(MemoryError::ProcessExited { address: page_addr }),
+                        );
+                    }
+                }
+            }
+            let total = (pages * 4096) as usize;
+            let start_off = rng.below(4096) as usize;
+            let len = rng.below((total - start_off) as u64) as usize + 1;
+            let start = base + start_off as u64;
+            // Once the process exits, nothing after it is observable.
+            for (i, slot) in expected.iter_mut().enumerate().skip(start_off) {
+                if exited_at.is_some() {
+                    *slot = None;
+                    continue;
+                }
+                let addr = base + i as u64;
+                if let Some(Err(MemoryError::ProcessExited { .. })) =
+                    mock.page_map.get(&(addr & !0xfff))
+                {
+                    exited_at = Some(addr);
+                    *slot = None;
+                }
+            }
+
+            let mem = MemoryManager::with_backend(mock);
+            let capture = mem
+                .read_sparse(start, len, SparseReadOptions::default())
+                .unwrap_or_else(|e| panic!("iter {iter}: read_sparse failed: {e}"));
+            let case = format!("iter={iter} start={start:#x} len={len}");
+            assert_eq!(capture.requested_len(), len as u64, "{case}");
+            let cov = capture.coverage();
+            assert_eq!(cov.observed_bytes + cov.missing_bytes, len as u64, "{case}");
+            let mut observed = 0u64;
+            for i in 0..len {
+                let addr = start + i as u64;
+                match (capture.byte_at(addr), expected[start_off + i]) {
+                    (Some(SparseByte::Observed(b)), Some(want)) => {
+                        assert_eq!(b, want, "{case} @{addr:#x}");
+                        observed += 1;
+                    }
+                    (Some(SparseByte::Missing(_)), None) => {}
+                    (got, want) => panic!("{case} @{addr:#x}: got {got:?}, want {want:?}"),
+                }
+            }
+            assert_eq!(cov.observed_bytes, observed, "{case}");
+            assert_eq!(capture.is_complete(), observed == len as u64, "{case}");
+        }
     }
 
     #[cfg(target_os = "macos")]

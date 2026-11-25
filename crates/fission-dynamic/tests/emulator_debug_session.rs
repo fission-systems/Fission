@@ -408,9 +408,9 @@ fn sparse_emulator_read_preserves_observed_bytes_and_tags_unmapped_and_budget_ga
         .read_memory_sparse(start, 2 * 4096, SparseReadOptions::default())
         .expect("sparse read");
 
-    assert_eq!(capture.coverage.requested_bytes, 2 * 4096);
-    assert_eq!(capture.coverage.observed_bytes, 4096);
-    assert_eq!(capture.coverage.missing_bytes, 4096);
+    assert_eq!(capture.coverage().requested_bytes, 2 * 4096);
+    assert_eq!(capture.coverage().observed_bytes, 4096);
+    assert_eq!(capture.coverage().missing_bytes, 4096);
     assert!(!capture.is_complete());
     assert_eq!(
         capture.byte_at(probe_page),
@@ -425,8 +425,8 @@ fn sparse_emulator_read_preserves_observed_bytes_and_tags_unmapped_and_budget_ga
     let budgeted = backend
         .read_memory_sparse(start, 4096, SparseReadOptions::with_max_bytes(64))
         .expect("budgeted sparse read");
-    assert_eq!(budgeted.coverage.observed_bytes, 64);
-    assert_eq!(budgeted.coverage.missing_bytes, 4096 - 64);
+    assert_eq!(budgeted.coverage().observed_bytes, 64);
+    assert_eq!(budgeted.coverage().missing_bytes, 4096 - 64);
     assert_eq!(
         budgeted.byte_at(start + 64),
         Some(SparseByte::Missing(&MemoryGapReason::Budget))

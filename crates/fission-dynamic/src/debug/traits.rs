@@ -197,7 +197,8 @@ pub trait ExecutionBackend: Send {
             ));
         }
         if size == 0 {
-            return Ok(SparseMemoryCapture::from_segments(address, 0, Vec::new()));
+            return SparseMemoryCapture::from_segments(address, 0, Vec::new())
+                .map_err(|e| fission_core::err!(debug, "{e}"));
         }
 
         let page_size_u64 = options.page_size as u64;
@@ -311,9 +312,10 @@ pub trait ExecutionBackend: Send {
             probed_span = probed_span.saturating_add(chunk_len);
         }
 
-        Ok(SparseMemoryCapture::from_segments(
-            address, size_u64, segments,
-        ))
+        // A producer bug must surface as an error, never as a capture whose
+        // coverage metadata overstates what was observed.
+        SparseMemoryCapture::from_segments(address, size_u64, segments)
+            .map_err(|e| fission_core::err!(debug, "sparse read at 0x{address:x}: {e}"))
     }
 
     /// Write memory to the target process
