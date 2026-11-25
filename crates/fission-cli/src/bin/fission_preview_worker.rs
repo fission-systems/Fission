@@ -16,6 +16,8 @@ static GLOBAL_ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 static GLOBAL_ALLOCATOR: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 fn main() -> io::Result<()> {
+    // The supervisor runs us in our own process group; exit if it dies.
+    fission_decompiler::worker::exit_when_supervisor_dies();
     fission_core::logging::try_init_tracing("warn");
 
     let mut input = Vec::new();

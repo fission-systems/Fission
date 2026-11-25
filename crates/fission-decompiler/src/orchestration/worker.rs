@@ -603,6 +603,12 @@ mod supervise {
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
+                // Lets the worker detect a supervisor that died before the
+                // worker armed its watchdog (`exit_when_supervisor_dies`).
+                .env(
+                    super::super::WORKER_PARENT_PID_ENV,
+                    std::process::id().to_string(),
+                )
                 // New process group led by the worker: every descendant that
                 // does not explicitly leave it dies with one killpg.
                 .process_group(0)
@@ -1889,6 +1895,91 @@ mod tests {
         assert!(err.message.contains("request"), "{}", err.message);
     }
 
+    #[cfg(unix)]
+    const SPIN_PIDFILE_ENV: &str = "FISSION_WORKER_TEST_SPIN_PIDFILE";
+    #[cfg(unix)]
+    const SUPERVISOR_SCRIPT_ENV: &str = "FISSION_WORKER_TEST_SUPERVISOR_SCRIPT";
+
+    /// The worker leads its own process group, so terminal Ctrl-C and host
+    /// death do not signal it. A CPU-bound worker that never touches its
+    /// pipes must still notice that its supervisor is gone and exit.
+    ///
+    /// Three roles of this one test, chosen by environment:
+    /// - outer: spawns a supervisor process, SIGKILLs it, watches the worker;
+    /// - supervisor: runs the real supervisor against a spinning worker;
+    /// - worker: calls the worker binaries' startup hook, then spins.
+    #[cfg(unix)]
+    #[test]
+    fn cpu_bound_worker_exits_when_its_supervisor_is_killed() {
+        const NAME: &str = "cpu_bound_worker_exits_when_its_supervisor_is_killed";
+        if let Some(pidfile) = std::env::var_os(SPIN_PIDFILE_ENV) {
+            super::exit_when_supervisor_dies();
+            std::fs::write(&pidfile, std::process::id().to_string()).expect("write pidfile");
+            let mut x = 0u64;
+            loop {
+                x = std::hint::black_box(x.wrapping_add(1));
+            }
+        }
+        if let Some(script) = std::env::var_os(SUPERVISOR_SCRIPT_ENV) {
+            let _ = execute_nir_worker_request_with_config(
+                &sample_request(16),
+                &WorkerRunConfig::with_path(PathBuf::from(script), 120_000),
+            );
+            panic!("supervisor returned before it was killed");
+        }
+
+        let tmp = TempScriptDir::new("orphan");
+        let pidfile = tmp.dir.join("worker.pid");
+        let exe = std::env::current_exe().expect("test binary");
+        let test_name = format!(
+            "{}::{NAME}",
+            module_path!()
+                .split_once("::")
+                .map_or(module_path!(), |(_, rest)| rest)
+        );
+        let script = tmp.write_executable(
+            "spin_worker.sh",
+            &format!(
+                "{SPIN_PIDFILE_ENV}='{}' exec '{}' '{test_name}' --exact --nocapture --test-threads=1",
+                pidfile.display(),
+                exe.display()
+            ),
+        );
+        let mut supervisor = Command::new(&exe)
+            .args([&test_name, "--exact", "--nocapture", "--test-threads=1"])
+            .env(SUPERVISOR_SCRIPT_ENV, &script)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn supervisor");
+        let started = wait_until(Duration::from_secs(20), || read_pid(&pidfile).is_some());
+        let worker = read_pid(&pidfile);
+        if !started || worker.is_none() {
+            let _ = supervisor.kill();
+            let _ = supervisor.wait();
+            panic!("spinning worker never started");
+        }
+        let worker = worker.unwrap_or_default();
+        assert!(
+            resources::process_alive(worker),
+            "worker alive before the kill"
+        );
+
+        supervisor.kill().expect("SIGKILL supervisor");
+        supervisor.wait().expect("reap supervisor");
+        let killed_at = Instant::now();
+        let gone = wait_until(Duration::from_secs(3), || !resources::process_alive(worker));
+        let elapsed = killed_at.elapsed();
+        println!("orphan probe: worker {worker} gone={gone} after {elapsed:?}");
+        if !gone {
+            resources::kill(worker);
+        }
+        assert!(
+            gone,
+            "CPU-bound worker outlived its SIGKILLed supervisor by > 3 s"
+        );
+    }
+
     #[test]
     fn execute_nir_worker_echoes_request_identity_and_taxonomy_recognizes_new_failures() {
         let mut req = sample_request(16);
@@ -1909,6 +2000,67 @@ mod tests {
             ),
             "nir_worker_failure"
         );
+    }
+}
+
+/// Environment variable through which the supervisor tells a worker its pid,
+/// so the worker can detect a supervisor that died before the worker started.
+pub const WORKER_PARENT_PID_ENV: &str = "FISSION_WORKER_PARENT_PID";
+
+/// Exit code of a worker that found its supervisor gone (nobody reads it).
+#[cfg(unix)]
+const ORPHANED_WORKER_EXIT_CODE: libc::c_int = 75;
+
+/// Called first thing by the worker binaries: exit as soon as the supervising
+/// process is gone.
+///
+/// The supervisor puts each worker in its own process group (see
+/// `supervise`), so terminal Ctrl-C and host death no longer reach it as a
+/// signal; a CPU-bound worker that never touches its pipes would otherwise
+/// keep running as an orphan. Unix: a watchdog thread polls `getppid()` every
+/// 100 ms and `_exit`s once the parent changes (re-parenting to init or a
+/// subreaper is the only way it changes); Linux additionally asks the kernel
+/// for SIGKILL on parent death (`PR_SET_PDEATHSIG`; the spawning supervisor
+/// thread blocks until the worker is reaped, so thread-exit semantics do not
+/// fire early). Windows needs nothing here: the worker is in a
+/// kill-on-close Job Object whose only handle the supervisor holds, so the
+/// supervisor's death closes it and the job kills the worker.
+pub fn exit_when_supervisor_dies() {
+    #[cfg(unix)]
+    {
+        // SAFETY: getppid has no preconditions and cannot fail.
+        let current = unsafe { libc::getppid() };
+        let expected = std::env::var(WORKER_PARENT_PID_ENV)
+            .ok()
+            .and_then(|pid| pid.parse::<libc::pid_t>().ok())
+            .unwrap_or(current);
+        #[cfg(target_os = "linux")]
+        // SAFETY: PR_SET_PDEATHSIG takes a signal number; no pointers involved.
+        unsafe {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+        }
+        let orphaned = move || {
+            // SAFETY: as above.
+            unsafe { libc::getppid() != expected }
+        };
+        // Covers a supervisor that died before this point (including before
+        // PR_SET_PDEATHSIG was armed).
+        if orphaned() {
+            // SAFETY: immediate process exit; nothing to unwind or flush.
+            unsafe { libc::_exit(ORPHANED_WORKER_EXIT_CODE) };
+        }
+        let _ = std::thread::Builder::new()
+            .name("supervisor-watchdog".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(Duration::from_millis(100));
+                    if orphaned() {
+                        // SAFETY: as above. `_exit`, not `exit`: another thread
+                        // may hold the stdout lock or be mid-allocation.
+                        unsafe { libc::_exit(ORPHANED_WORKER_EXIT_CODE) };
+                    }
+                }
+            });
     }
 }
 
