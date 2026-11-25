@@ -140,7 +140,14 @@ jobs:
           prefix="$(mktemp -d)/prefix"
           (cd "$(mktemp -d)" && FISSION_PREFIX="${prefix}" \
             FISSION_ARCHIVE="${GITHUB_WORKSPACE}/dist/fission-${{ matrix.target }}.tar.gz" \
-            sh "${GITHUB_WORKSPACE}/install.sh")
+            sh "${GITHUB_WORKSPACE}/install.sh" --require-checksum)
+          (cd "$(mktemp -d)" && env -u FISSION_ROOT -u FISSION_RESOURCE_ROOT "${prefix}/bin/fission_cli" \
+            resources status --json | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data["resource_manifest"]["state"] == "match", data
+          assert data["resources"]["signatures_base"], data
+          ')
           (cd "$(mktemp -d)" && env -u FISSION_ROOT "${prefix}/bin/fission_cli" \
             decomp "${GITHUB_WORKSPACE}/crates/fission-sleigh/testdata/a64_csel_select.so" --all \
             | grep -q "Function:")

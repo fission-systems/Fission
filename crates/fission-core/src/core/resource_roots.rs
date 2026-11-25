@@ -390,44 +390,75 @@ fn path_display(p: impl AsRef<Path>) -> String {
     p.as_ref().display().to_string()
 }
 
+fn push_exe_adjacent_roots_for_path(
+    out: &mut Vec<(&'static str, PathBuf)>,
+    seen: &mut std::collections::HashSet<PathBuf>,
+    exe: &Path,
+) {
+    let Some(parent) = exe.parent() else {
+        return;
+    };
+    let mut push = |label: &'static str, path: PathBuf| {
+        if seen.insert(path.clone()) {
+            out.push((label, path));
+        }
+    };
+
+    push("exe_dir/fission-data", parent.join("fission-data"));
+    push(
+        "exe_dir/share/fission",
+        parent.join("share").join("fission"),
+    );
+    #[cfg(unix)]
+    if let Some(gp) = parent.parent() {
+        push(
+            "exe_parent/../share/fission",
+            gp.join("share").join("fission"),
+        );
+    }
+    #[cfg(windows)]
+    if let Some(gp) = parent.parent() {
+        push("exe_parent/share/fission", gp.join("share").join("fission"));
+    }
+}
+
+fn exe_adjacent_bundle_roots_for_exe(exe: &Path) -> Vec<(&'static str, PathBuf)> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    // Resolve the canonical executable target first so a binary invoked through a
+    // transactional `current` symlink (or running alongside a newer upgrade) binds
+    // to its own immutable generation's sibling `../share/fission` directory.
+    if let Ok(canonical) = std::fs::canonicalize(exe)
+        && canonical != exe
+    {
+        push_exe_adjacent_roots_for_path(&mut out, &mut seen, &canonical);
+    }
+    push_exe_adjacent_roots_for_path(&mut out, &mut seen, exe);
+
+    #[cfg(unix)]
+    {
+        for (label, sys_path) in [
+            ("system_/usr/share/fission", "/usr/share/fission"),
+            (
+                "system_/usr/local/share/fission",
+                "/usr/local/share/fission",
+            ),
+        ] {
+            let path = PathBuf::from(sys_path);
+            if seen.insert(path.clone()) {
+                out.push((label, path));
+            }
+        }
+    }
+    out
+}
+
 fn exe_adjacent_bundle_roots_labeled() -> Vec<(&'static str, PathBuf)> {
     let Ok(exe) = std::env::current_exe() else {
         return Vec::new();
     };
-    let Some(parent) = exe.parent() else {
-        return Vec::new();
-    };
-
-    let mut v = Vec::new();
-    v.push(("exe_dir/fission-data", parent.join("fission-data")));
-    v.push((
-        "exe_dir/share/fission",
-        parent.join("share").join("fission"),
-    ));
-    #[cfg(unix)]
-    {
-        if let Some(gp) = parent.parent() {
-            v.push((
-                "exe_parent/../share/fission",
-                gp.join("share").join("fission"),
-            ));
-        }
-        v.push((
-            "system_/usr/share/fission",
-            PathBuf::from("/usr/share/fission"),
-        ));
-        v.push((
-            "system_/usr/local/share/fission",
-            PathBuf::from("/usr/local/share/fission"),
-        ));
-    }
-    #[cfg(windows)]
-    {
-        if let Some(gp) = parent.parent() {
-            v.push(("exe_parent/share/fission", gp.join("share").join("fission")));
-        }
-    }
-    v
+    exe_adjacent_bundle_roots_for_exe(&exe)
 }
 
 fn exe_adjacent_bundle_roots() -> Vec<PathBuf> {
@@ -619,5 +650,86 @@ mod resource_bundle_tests {
         assert_eq!(find_sleigh_specs_root(), specs_dir);
 
         set_cli_resource_bundle_root(None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn canonical_exe_resolves_pinned_generation_across_atomic_current_flip() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let prefix = fs::canonicalize(dir.path()).unwrap();
+        let bin_dir = prefix.join("bin");
+        let store = prefix.join("lib").join("fission");
+        let v1_root = store.join("releases").join("v0.3.0");
+        let v2_root = store.join("releases").join("v0.4.0");
+        fs::create_dir_all(&bin_dir).unwrap();
+        for gen_root in [&v1_root, &v2_root] {
+            fs::create_dir_all(gen_root.join("bin")).unwrap();
+            fs::create_dir_all(gen_root.join("share/fission/sleigh-specs")).unwrap();
+            fs::write(gen_root.join("bin/fission_cli"), b"#!/bin/sh\n").unwrap();
+        }
+
+        let current_link = store.join("current");
+        symlink("releases/v0.3.0", &current_link).unwrap();
+        let launcher = bin_dir.join("fission_cli");
+        symlink("../lib/fission/current/bin/fission_cli", &launcher).unwrap();
+
+        let v1_share = v1_root.join("share/fission");
+        let v2_share = v2_root.join("share/fission");
+        let prefix_share = prefix.join("share/fission");
+
+        let roots_before: Vec<PathBuf> = exe_adjacent_bundle_roots_for_exe(&launcher)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        let idx_v1 = roots_before
+            .iter()
+            .position(|p| p == &v1_share)
+            .expect("v1 share root");
+        let idx_prefix = roots_before
+            .iter()
+            .position(|p| p == &prefix_share)
+            .expect("prefix share fallback");
+        assert!(
+            idx_v1 < idx_prefix,
+            "canonical generation share must resolve before prefix fallback: {roots_before:?}"
+        );
+
+        // Simulate atomic upgrade of `current` while a v0.3.0 process is still running.
+        let current_tmp = store.join(".current.tmp");
+        symlink("releases/v0.4.0", &current_tmp).unwrap();
+        fs::rename(&current_tmp, &current_link).unwrap();
+
+        let roots_after: Vec<PathBuf> = exe_adjacent_bundle_roots_for_exe(&launcher)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        let idx_v2 = roots_after
+            .iter()
+            .position(|p| p == &v2_share)
+            .expect("v2 share root");
+        let idx_prefix_after = roots_after
+            .iter()
+            .position(|p| p == &prefix_share)
+            .expect("prefix share fallback");
+        assert!(idx_v2 < idx_prefix_after, "{roots_after:?}");
+        assert!(
+            !roots_after.contains(&v1_share),
+            "new launcher invocations must not resolve v1 after flip: {roots_after:?}"
+        );
+
+        // An already-running process from v0.3.0 holds its canonical executable path
+        // and continues resolving v0.3.0 resources exclusively over v0.4.0.
+        let pinned_v1_exe = v1_root.join("bin/fission_cli");
+        let pinned_roots: Vec<PathBuf> = exe_adjacent_bundle_roots_for_exe(&pinned_v1_exe)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
+        assert!(pinned_roots.contains(&v1_share), "{pinned_roots:?}");
+        assert!(
+            !pinned_roots.contains(&v2_share) && !pinned_roots.contains(&prefix_share),
+            "pinned generation must remain isolated from v2 and prefix symlink: {pinned_roots:?}"
+        );
     }
 }
