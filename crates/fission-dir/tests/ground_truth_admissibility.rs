@@ -1618,3 +1618,59 @@ fn undefined_read_divergence_is_counted_as_diverged() {
     assert_eq!(report.denominators.diverged_runs, 1);
     assert_denominators_consistent(&report);
 }
+
+/// The decompiler infers a 64-byte local where the machine's buffer is 128
+/// bytes; the buffer escapes to a callee and the machine then stores at
+/// `buf + 64`, one byte past the inferred extent, which the tree drops. An
+/// extent only the decompiler vouches for cannot justify agreement.
+#[test]
+fn inferred_extent_too_small_with_callee_escape_is_never_equivalent() {
+    // Same machine code as `frame_object_passed_to_callee_is_compared_in_full`.
+    let code = [
+        0x48, 0x81, 0xec, 0x88, 0x00, 0x00, 0x00, // sub rsp, 0x88
+        0x48, 0x8d, 0x7c, 0x24, 0x08, // lea rdi, [rsp+8]
+        0xe8, 0x12, 0x00, 0x00, 0x00, // call +0x12 -> 0x23
+        0xc7, 0x44, 0x24, 0x48, 0x2a, 0x00, 0x00, 0x00, // mov dword [rsp+0x48], 42
+        0x31, 0xc0, // xor eax, eax
+        0x48, 0x81, 0xc4, 0x88, 0x00, 0x00, 0x00, // add rsp, 0x88
+        0xc3, // ret
+        0xc3, // callee: ret
+    ];
+    let elf = build_x86_64_elf("inferred_too_small", &code);
+    let call_site = TEST_CODE_VADDR + 0x0c;
+    let mut harness = EmulatorHarness::build(&elf.path, Some(50_000)).expect("harness");
+    let frame_offsets: BTreeMap<String, i64> = [("buf".to_string(), -0x88)].into_iter().collect();
+    let grounding = leaf_grounding(&elf.path, TEST_CODE_VADDR, frame_offsets);
+    let hir = make_hir(
+        "inferred_too_small",
+        Vec::new(),
+        vec![binding("buf", aggregate_ty(64))],
+        int_ty(32, true),
+        vec![
+            call_stmt(call_site, vec![local("buf")]),
+            HirStmt::Return(Some(HirExpr::Const(0, int_ty(32, true)))),
+        ],
+    );
+    let report = check_ground_truth_report(
+        &mut harness,
+        TEST_CODE_VADDR,
+        &to_prehir(&hir),
+        &hir,
+        &RunPlan {
+            runs: 4,
+            ..RunPlan::default()
+        },
+        &grounding,
+    );
+    match &report.outcome {
+        VerifyOutcome::Inconclusive { reason } => assert!(
+            reason.contains("inferred extent"),
+            "the reason must name the unjustified inferred extent: {reason}"
+        ),
+        other => panic!(
+            "a callee escape bounded only by a too-small inferred extent must not pass: {other:?}"
+        ),
+    }
+    assert_eq!(report.denominators.agreed_runs, 0);
+    assert_denominators_consistent(&report);
+}

@@ -183,7 +183,8 @@ impl ConcreteObservationScope {
                 "intermediate store ordering inside identically-ending non-overlapping writes"
                     .to_string(),
                 "memory a stubbed callee reads through its pointer arguments at the time of \
-                 the call (escaped frame objects are compared by their final contents)"
+                 the call (escaped frame objects are compared by their final contents; one \
+                 bounded only by an inferred extent needs the whole private frame to agree)"
                     .to_string(),
             ],
         }
@@ -1816,6 +1817,30 @@ fn run_ground_truth_suite(
             _ => Vec::new(),
         };
         frame_reasons.extend(frame_obs.unbounded.iter().cloned());
+        // A callee escape bounded only by an extent the decompiler inferred:
+        // the extent may be too small, and the callee reaches whatever the
+        // object really is. Justify agreement by the frame range instead --
+        // every byte of the private frame must agree -- or do not agree.
+        if frame_reasons.is_empty() && !frame_obs.inferred_only.is_empty() {
+            let sides =
+                std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
+            for (side, run) in sides {
+                if let Some(diff) = frame_wide_difference(
+                    side,
+                    &machine.frame_audit.spec,
+                    &run.writes,
+                    &machine.all_writes,
+                    baseline,
+                ) {
+                    frame_reasons.push(format!(
+                        "{} bounded only by the decompiler's inferred extent, and the private \
+                         frame beyond what was compared differs: {diff}",
+                        frame_obs.inferred_only.join(", ")
+                    ));
+                    break;
+                }
+            }
+        }
         if !frame_reasons.is_empty() {
             let reasons = &frame_reasons;
             denominators.unknown_runs += 1;
@@ -2112,6 +2137,11 @@ struct EscapedFrameObservation {
     /// Escaped frame addresses no known object bounds. Their reach into the
     /// frame cannot be derived, so a run with any is not agreement.
     unbounded: Vec<String>,
+    /// Escapes to a callee (or arriving as an input) bounded only by extents
+    /// the decompiler inferred. The extent may be too small, so agreement
+    /// needs the whole private frame to agree; see
+    /// [`frame_wide_difference`].
+    inferred_only: Vec<String>,
 }
 
 /// Bound every frame address in `audit`'s escapes by the objects in
@@ -2158,6 +2188,11 @@ fn bound_escaped_frame_objects(
             ));
             continue;
         }
+        // Returned and stored escapes never count as agreement anyway.
+        if how != "returned" && how != "stored" && !containing.iter().any(|o| o.declared) {
+            out.inferred_only
+                .push(format!("{how} frame address {ptr:#x}"));
+        }
         for object in containing {
             let extent = &object.extent;
             if !seen_objects.insert((extent.start, extent.end)) {
@@ -2185,6 +2220,45 @@ fn bound_escaped_frame_objects(
         }
     }
     out
+}
+
+/// The first private-frame byte whose final value differs between the tree
+/// and the machine, either side's untouched bytes read from `baseline`.
+fn frame_wide_difference(
+    side: &str,
+    spec: &FrameExclusionSpec,
+    tree_writes: &BTreeMap<u64, u8>,
+    machine_all_writes: &BTreeMap<u64, u8>,
+    baseline: impl Fn(u64) -> Option<u8>,
+) -> Option<String> {
+    for region in [spec.private_below.clone(), spec.abi_home_space.clone()] {
+        for (&addr, &value) in machine_all_writes.range(region.clone()) {
+            if !spec.in_private_frame(addr) {
+                continue;
+            }
+            let tree_value = tree_writes.get(&addr).copied().or_else(|| baseline(addr));
+            if tree_value != Some(value) {
+                return Some(format!(
+                    "{side}: frame byte at {addr:#x} is {} in the tree, machine stored \
+                     {value:#04x}",
+                    tree_value.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
+        }
+        for (&addr, &value) in tree_writes.range(region) {
+            if !spec.in_private_frame(addr) || machine_all_writes.contains_key(&addr) {
+                continue;
+            }
+            let machine_value = baseline(addr);
+            if machine_value != Some(value) {
+                return Some(format!(
+                    "{side}: tree stored {value:#04x} at frame byte {addr:#x}, machine left {}",
+                    machine_value.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
+        }
+    }
+    None
 }
 
 /// Contiguous runs of caller memory an explicit case declares: each is an
@@ -2706,6 +2780,45 @@ mod tests {
             None
         );
         assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn frame_wide_difference_sees_bytes_past_an_inferred_extent() {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[]);
+        let zero = |_: u64| Some(0u8);
+        let past = spec.entry_sp - 0x40;
+        let machine: BTreeMap<u64, u8> = [(past, 0x2a)].into_iter().collect();
+        assert!(frame_wide_difference("hir", &spec, &BTreeMap::new(), &machine, zero).is_some());
+        assert_eq!(
+            frame_wide_difference("hir", &spec, &machine, &machine, zero),
+            None
+        );
+        // Bytes above the private frame are not part of this check.
+        let caller: BTreeMap<u64, u8> = [(spec.entry_sp + 0x10, 1)].into_iter().collect();
+        assert_eq!(
+            frame_wide_difference("hir", &spec, &BTreeMap::new(), &caller, zero),
+            None
+        );
+    }
+
+    #[test]
+    fn callee_escape_bounded_only_by_inferred_extent_is_flagged() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x40..entry - 0x20);
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: object.extent.start,
+        }]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.inferred_only.len(), 1);
+        let declared = KnownObject {
+            extent: object.extent.clone(),
+            declared: true,
+        };
+        let obs = bound_escaped_frame_objects(&audit, &[declared], &BTreeMap::new());
+        assert!(obs.inferred_only.is_empty());
     }
 
     #[test]
