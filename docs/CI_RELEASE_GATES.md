@@ -121,6 +121,28 @@ and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
 on its schedule or by manual dispatch, restores its corpus from earlier runs,
 and attaches crash inputs to the run for 30 days.
 
+### Sentry monitors
+
+Sentry (org `fission-systems`) watches two things from outside the run. The
+plan has one cron and one uptime monitor seat, and both are in use.
+
+- **Cron `ci-heavy-nightly`** (project `fission`). Scheduled Heavy runs in this
+  repository check in `in_progress` when they start and `ok` or `error` from
+  `heavy-summary`'s result (anything but success, cancelled included, is
+  `error`). Manual dispatches never check in. Each check-in carries the
+  monitor config, so Sentry creates and updates the monitor from
+  `scripts/ci/sentry_cron_checkin.py`: crontab `30 2 * * *` UTC, max runtime
+  180 minutes, one failure opens an issue and one success resolves it. The
+  check-in margin is 900 minutes because GitHub starts this schedule 5 to 10
+  hours late (43 to 717 minutes over 100 nights); a night with no run alerts
+  at 17:30 UTC. Change the cron in the workflow and the script together (a
+  unit test compares them). The jobs need the `SENTRY_DSN` repository secret
+  (the `fission` project's DSN). Without it they skip, and a Sentry failure
+  never changes the run's result.
+- **Uptime "FreshBench results page"** (project `freshbench`) requests
+  `https://fission-systems.github.io/freshbench/` every 5 minutes with a
+  10-second timeout. It was created once through the API and needs no secret.
+
 ## Native differential (SLEIGH lift against the CPU)
 
 Fission lifts from Ghidra's SLEIGH specs, and its emulator and decompiler share
