@@ -473,6 +473,14 @@ fn render_mlil_preview_with_binary_and_context_output(
     let mut body = body;
     fission_midend_normalize::fold_branch_decided_selects(&mut body);
     hir.body = body;
+    // Normalize states each widening cast's extension, and each unsigned
+    // compare's bit-pattern view, against the binding types it ends with. The
+    // copy propagation and call-site typing above run after that and can put
+    // an operand of the other signedness under such a cast (`return
+    // (ulong)local_18` with `local_18: int` sign-extends a value `INT_ZEXT`
+    // zero-extended). Restate both at the last point binding types change.
+    let _ = fission_midend_normalize::canonicalize_unsigned_compare_binding_casts(&mut hir);
+    let _ = fission_midend_normalize::canonicalize_extension_binding_casts(&mut hir);
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
     // the genuinely separate `HirStmt` grammar and `hir` is rebound to a

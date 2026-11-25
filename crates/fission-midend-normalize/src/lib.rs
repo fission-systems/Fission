@@ -78,6 +78,9 @@ pub use analysis::defuse::constant_folding_pass;
 pub use cleanup::eliminate_redundant_var_assigns;
 pub use cleanup::propagate_copies_in_runs;
 pub use cleanup::prune_unobservable_scratch;
+pub use cleanup::{
+    canonicalize_extension_binding_casts, canonicalize_unsigned_compare_binding_casts,
+};
 /// `c ? a : b` inside an arm that already decided `c` (see the pass docs).
 pub use global_opt::fold_branch_decided_selects;
 

@@ -421,3 +421,29 @@ fn cast_elision_still_strips_casts_that_cannot_extend() {
     assert!(cast_elision_pass(&mut round_trip));
     assert_eq!(assigned_rhs(&round_trip), &var("x"));
 }
+
+/// The orchestrator re-runs the extension canonicalization after the
+/// post-normalize copy propagation and call-site typing, which can retype an
+/// operand under a cast that normalize already canonicalized. The re-run must
+/// restore the extension the IR means and be a no-op when nothing changed.
+#[test]
+fn rerunning_the_extension_canonicalization_after_a_late_retype_restores_the_view() {
+    let mut func = assign_wide(
+        vec![binding("x", ty(32, false))],
+        cast(ty(64, false), var("x")),
+    );
+    assert!(!canonicalize_extension_binding_casts(&mut func));
+
+    // A late pass settles `x` as `int`: C would now sign-extend `(ulong)x`.
+    func.params[0].ty = ty(32, true);
+    assert!(canonicalize_extension_binding_casts(&mut func));
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(64, false), cast(ty(32, false), var("x"))),
+        "the zero extension must print as (unsigned long long)(uint)x"
+    );
+    assert!(
+        !canonicalize_extension_binding_casts(&mut func),
+        "a second run over a canonical tree changes nothing"
+    );
+}
