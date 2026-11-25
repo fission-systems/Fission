@@ -19,8 +19,9 @@ pub mod utils;
 // Re-export all public passes from submodules so the cleanup module's
 // public API surface remains unchanged.
 pub use casts::{
-    canonicalize_extension_binding_casts, canonicalize_unsigned_compare_binding_casts,
-    cast_elision_pass, collapse_trivial_pointer_alias_bindings, normalize_pointer_and_struct_casts,
+    canonicalize_extension_binding_casts, canonicalize_extension_binding_casts_over_variables,
+    canonicalize_unsigned_compare_binding_casts, cast_elision_pass,
+    collapse_trivial_pointer_alias_bindings, normalize_pointer_and_struct_casts,
     strip_redundant_assign_casts,
 };
 pub use control_flow::{

@@ -1920,7 +1920,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("apply_condexe_folding_pass");
         }
-        if apply_iblock_phi_elimination(stmts) {
+        // Recurses into nested lists itself and only drops a diamond whose
+        // value dies inside a nested list (overwrite / return); called on a
+        // nested list it would take the list's end for the function's end.
+        if depth == 0 && apply_iblock_phi_elimination(stmts) {
             changed = true;
             last_changed_pass = Some("apply_iblock_phi_elimination");
         }
