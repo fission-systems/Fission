@@ -62,6 +62,7 @@ impl InstNextShared {
 /// where possible (`Operand` needs none at all) and any unavoidable
 /// formatting is deferred to `Display`, which only ever runs once a decode
 /// has already failed.
+#[derive(Clone)]
 enum WalkFrame {
     Constructor(std::sync::Arc<CompiledExecutableConstructor>),
     Operand(usize),
@@ -81,6 +82,32 @@ impl std::fmt::Display for WalkFrame {
             WalkFrame::Operand(index) => write!(f, "operand({index})"),
             WalkFrame::Subtable(name) => write!(f, "subtable({name})"),
         }
+    }
+}
+
+/// The parser path attached to a failed bind, as `sleigh parser path: a -> b`.
+///
+/// Most failed binds are a rejected candidate whose error is dropped unread,
+/// so the frames are formatted only when the error is displayed. The type also
+/// marks an error that already carries a path: an enclosing bind leaves it.
+struct SleighParserPath(Vec<WalkFrame>);
+
+impl std::fmt::Display for SleighParserPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("sleigh parser path: ")?;
+        for (index, frame) in self.0.iter().enumerate() {
+            if index > 0 {
+                f.write_str(" -> ")?;
+            }
+            write!(f, "{frame}")?;
+        }
+        Ok(())
+    }
+}
+
+impl std::fmt::Debug for SleighParserPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(self, f)
     }
 }
 
@@ -184,23 +211,16 @@ fn bind_instruction_with_inst_next<'a>(
     match result {
         Ok(state) => Ok(state),
         Err(err) => {
-            let err_str = format!("{err:?}");
-            if err_str.contains("sleigh parser path:") {
+            // A nested bind already attached the path (errors propagate
+            // through binds by `?` and `context`, so the marker survives).
+            if err.downcast_ref::<SleighParserPath>().is_some() {
+                return Err(err);
+            }
+            let frames = WALK_STACK.with(|stack| stack.borrow().clone());
+            if frames.is_empty() {
                 Err(err)
             } else {
-                let backtrace = WALK_STACK.with(|stack| {
-                    stack
-                        .borrow()
-                        .iter()
-                        .map(|frame| frame.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" -> ")
-                });
-                if backtrace.is_empty() {
-                    Err(err)
-                } else {
-                    Err(err.context(format!("sleigh parser path: {backtrace}")))
-                }
+                Err(err.context(SleighParserPath(frames)))
             }
         }
     }
@@ -2691,5 +2711,34 @@ mod operand_expression_borrow_tests {
         ] {
             compare_with_owned_reference(&thumb, bytes);
         }
+    }
+}
+
+#[cfg(test)]
+mod parser_path_tests {
+    use super::*;
+
+    #[test]
+    fn the_parser_path_reads_as_before_and_is_found_under_later_context() {
+        let path = SleighParserPath(vec![
+            WalkFrame::Subtable("instruction".into()),
+            WalkFrame::Operand(1),
+            WalkFrame::Subtable("rm32".into()),
+        ]);
+        let err = anyhow::anyhow!("DecodeNoMatch in subtable rm32 at 0x1000")
+            .context(path)
+            .context("lifting 0x1000");
+        assert!(
+            err.downcast_ref::<SleighParserPath>().is_some(),
+            "an enclosing bind must see the path a nested bind attached"
+        );
+        let debug = format!("{err:?}");
+        assert!(
+            debug.contains(
+                "sleigh parser path: subtable(instruction) -> operand(1) -> subtable(rm32)"
+            ),
+            "{debug}"
+        );
+        assert_eq!(debug.matches("sleigh parser path:").count(), 1);
     }
 }
