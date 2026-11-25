@@ -1402,14 +1402,39 @@ fn rewrite_i32_compatible_constants_in_expr(expr: &mut PreHirExpr, narrowed_ty: 
         // The operands of `/ % >> < ==` carry the operation's numeric domain:
         // turning `(ulong)x / (ulong)y` into `(int)x / (int)y` makes an
         // unsigned divide signed. Only modular operators may be narrowed
-        // through.
-        PreHirExpr::Binary { op, .. } if op.reads_operand_domain() => false,
+        // through; here only a direct constant whose value both types read
+        // the same is retyped, which changes neither the value nor the text.
+        PreHirExpr::Binary { op, lhs, rhs, .. } if op.reads_operand_domain() => {
+            retype_domain_neutral_constant(lhs, narrowed_ty)
+                | retype_domain_neutral_constant(rhs, narrowed_ty)
+        }
         PreHirExpr::Binary { lhs, rhs, .. } => {
             rewrite_i32_compatible_constants_in_expr(lhs, narrowed_ty)
                 | rewrite_i32_compatible_constants_in_expr(rhs, narrowed_ty)
         }
         _ => false,
     }
+}
+
+/// Retype an unsigned constant operand to `narrowed_ty` only when it is in
+/// `0..=i32::MAX`, where a signed and an unsigned reading agree.
+fn retype_domain_neutral_constant(expr: &mut PreHirExpr, narrowed_ty: &NirType) -> bool {
+    let PreHirExpr::Const(value, ty) = expr else {
+        return false;
+    };
+    let unsigned_source = matches!(
+        ty,
+        NirType::Int {
+            bits: 64 | 32,
+            signed: false
+        }
+    );
+    let narrow_int = matches!(narrowed_ty, NirType::Int { bits: 32, .. });
+    if !unsigned_source || !narrow_int || !(0..=i64::from(i32::MAX)).contains(value) {
+        return false;
+    }
+    *ty = narrowed_ty.clone();
+    true
 }
 
 pub(super) fn strip_zero_extended_casts_to_declared_return_width(

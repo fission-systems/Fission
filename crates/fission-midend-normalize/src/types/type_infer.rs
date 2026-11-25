@@ -1907,6 +1907,68 @@ mod tests {
         }
     }
 
+    /// A small unsigned constant operand of a comparison reads the same as
+    /// `int`, so the narrowing still retypes it (the flag-condition fold
+    /// relies on that); a constant outside `0..=i32::MAX` keeps its type.
+    #[test]
+    fn signed_return_narrowing_retypes_only_value_neutral_compare_constants() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i32_ty = NirType::Int {
+            bits: 32,
+            signed: true,
+        };
+        let compare = |value| PreHirExpr::Binary {
+            op: PreHirBinaryOp::SLe,
+            lhs: Box::new(PreHirExpr::Const(value, u64_ty.clone())),
+            rhs: Box::new(PreHirExpr::Var("param_1".into())),
+            ty: NirType::Bool,
+        };
+        let mut func = PreHirFunction {
+            name: "compare_constants".to_owned(),
+            int_param_offsets: Vec::new(),
+            params: vec![make_param("param_1", i32_ty.clone())],
+            locals: vec![
+                make_binding("xVar8"),
+                make_binding("xVar9"),
+                make_binding("xVar10"),
+            ],
+            return_type: u64_ty.clone(),
+            surface_return_type_name: None,
+            body: vec![
+                make_assign("xVar9", compare(0)),
+                make_assign("xVar10", compare(0x8000_0000)),
+                make_assign(
+                    "xVar8",
+                    PreHirExpr::Select {
+                        cond: Box::new(PreHirExpr::Var("c1".into())),
+                        then_expr: Box::new(PreHirExpr::Const(1, u64_ty.clone())),
+                        else_expr: Box::new(PreHirExpr::Const(4294967295, u64_ty.clone())),
+                        ty: u64_ty.clone(),
+                    },
+                ),
+                PreHirStmt::Return(Some(PreHirExpr::Var("xVar8".into()))),
+            ],
+            ..Default::default()
+        };
+        assert!(super::apply_type_inference_pass(&mut func));
+        assert_eq!(func.return_type, i32_ty);
+        let lhs_const = |stmt: &PreHirStmt| match stmt {
+            PreHirStmt::Assign {
+                rhs: PreHirExpr::Binary { lhs, .. },
+                ..
+            } => match lhs.as_ref() {
+                PreHirExpr::Const(value, ty) => (*value, ty.clone()),
+                other => panic!("expected const, got {other:?}"),
+            },
+            other => panic!("expected compare assign, got {other:?}"),
+        };
+        assert_eq!(lhs_const(&func.body[0]), (0, i32_ty));
+        assert_eq!(lhs_const(&func.body[1]), (0x8000_0000, u64_ty));
+    }
+
     #[test]
     fn modular_operators_alone_are_domain_neutral() {
         use PreHirBinaryOp::*;
