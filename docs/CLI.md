@@ -317,7 +317,11 @@ fission_cli api memcpy --32 --json
 ```
 
 `whatis` answers from the typed program-metadata snapshot (`fission-analysis-db`)
-plus the DWARF line table. `types` lists what the loader recovered from the
+plus the DWARF line table. A malformed loader row (a section or symbol whose
+range runs past the end of the address space, say) is left out of that snapshot
+together with the rows that reference it; `whatis --json` and `inventory
+program-metadata` then list each such row under `rejected_rows` with its
+reasons, and the rest of the program is answered as usual. `types` lists what the loader recovered from the
 binary's own metadata; each type names the analysis that produced it
 (`source`: `cpp_rtti`, `dwarf`, `pdb`, `go`, `rust_vtable`, `objc`, `swift`,
 `pe_header`, `elf_header`, `te_header`). Objective-C, Swift and Rust-vtable

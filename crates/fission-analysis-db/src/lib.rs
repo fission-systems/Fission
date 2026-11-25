@@ -28,9 +28,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 mod integrity;
+mod quarantine;
 pub use integrity::{
     FactInventory, SnapshotIntegrityIssue, SnapshotIntegrityReport, SnapshotTable,
 };
+pub use quarantine::{QuarantinedPublication, RejectedRow, RowRejection};
 
 pub const PROGRAM_SNAPSHOT_SCHEMA: &str = "fission-program-snapshot-v1";
 
@@ -1030,28 +1032,47 @@ impl ProgramSnapshotBuilder {
     /// remains the independent audit: it re-derives both indexes from the
     /// rows and compares them with the cached ones.
     pub fn publish(self) -> SnapshotPublication {
-        let report = integrity::validate_tables(&integrity::SnapshotTables {
+        let report = self.validate_tables();
+        if report.is_valid() {
+            SnapshotPublication::Valid(self.seal())
+        } else {
+            SnapshotPublication::Partial(self.into_partial(report))
+        }
+    }
+
+    /// Publication that rejects individual rows instead of the whole snapshot.
+    ///
+    /// When the only violations are confined to rows (a range that overflows
+    /// the address space, a foreign key naming no row, a function outside the
+    /// block it names), those rows are left out, as is every row whose foreign
+    /// key names a left-out row, and the remaining rows are published. No row
+    /// is altered to make it valid: a row is either published exactly as
+    /// staged or listed in [`QuarantinedPublication::rejected_rows`] with its
+    /// reasons. Violations that belong to the snapshot as a whole (schema,
+    /// binary identity, row IDs, canonical order) are not attributable to a
+    /// row, so they still yield [`SnapshotPublication::Partial`] with nothing
+    /// quarantined.
+    pub fn publish_quarantining_rows(self) -> QuarantinedPublication {
+        quarantine::publish_quarantining_rows(self)
+    }
+
+    fn validate_tables(&self) -> SnapshotIntegrityReport {
+        integrity::validate_tables(&integrity::SnapshotTables {
             schema: &self.schema,
             binary: &self.binary,
             memory_blocks: &self.memory_blocks,
             functions: &self.functions,
             symbols: &self.symbols,
             relocations: &self.relocations,
-        });
-        if !report.is_valid() {
-            return SnapshotPublication::Partial(PartialProgramSnapshot {
-                schema: self.schema,
-                binary: self.binary,
-                memory_blocks: self.memory_blocks,
-                functions: self.functions,
-                symbols: self.symbols,
-                relocations: self.relocations,
-                report,
-            });
-        }
+        })
+    }
+
+    /// Derive the interval indexes from rows that have just passed
+    /// [`Self::validate_tables`] and expose them as a published snapshot.
+    fn seal(self) -> ProgramSnapshot {
         let memory_block_intervals = build_memory_block_intervals(&self.memory_blocks);
         let function_intervals = build_function_intervals(&self.functions);
-        SnapshotPublication::Valid(ProgramSnapshot {
+        ProgramSnapshot {
             schema: self.schema,
             binary: self.binary,
             memory_blocks: self.memory_blocks,
@@ -1060,7 +1081,19 @@ impl ProgramSnapshotBuilder {
             relocations: self.relocations,
             function_intervals,
             memory_block_intervals,
-        })
+        }
+    }
+
+    fn into_partial(self, report: SnapshotIntegrityReport) -> PartialProgramSnapshot {
+        PartialProgramSnapshot {
+            schema: self.schema,
+            binary: self.binary,
+            memory_blocks: self.memory_blocks,
+            functions: self.functions,
+            symbols: self.symbols,
+            relocations: self.relocations,
+            report,
+        }
     }
 
     pub fn build(self) -> Result<ProgramSnapshot, SnapshotIntegrityReport> {
@@ -1138,6 +1171,15 @@ impl ProgramSnapshot {
 
     pub fn publish_loaded_binary(binary: &LoadedBinary) -> SnapshotPublication {
         ProgramSnapshotBuilder::from_loaded_binary(binary).publish()
+    }
+
+    /// [`ProgramSnapshotBuilder::publish_quarantining_rows`] over the loader's
+    /// facts: one malformed loader row costs that row (and the rows that
+    /// reference it), not the whole program.
+    pub fn publish_loaded_binary_quarantining_rows(
+        binary: &LoadedBinary,
+    ) -> QuarantinedPublication {
+        ProgramSnapshotBuilder::from_loaded_binary(binary).publish_quarantining_rows()
     }
 
     pub fn apply_delta(&self, delta: ProgramSnapshotDelta) -> Result<Self, SnapshotUpdateError> {
