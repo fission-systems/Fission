@@ -1,4 +1,4 @@
-use super::record::{CliRustDecompileRecord, CliRustOutcome};
+use super::record::{AbortedRenderKind, CliRustDecompileRecord, CliRustOutcome};
 
 pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) -> serde_json::Value {
     let addr_str = format!("0x{:x}", entry.func.address);
@@ -111,10 +111,22 @@ pub(crate) fn record_to_json(entry: &CliRustDecompileRecord, benchmark: bool) ->
                 "engine_used": "rust_sleigh",
                 "fell_back": true,
                 "fallback_reason": kind.fallback_reason(),
-                "failure_domain": "job_infrastructure",
-                "job_status": kind.job_status(),
                 "error": message,
             });
+            match kind {
+                AbortedRenderKind::AnalysisPanicked => {
+                    obj["failure_domain"] = serde_json::json!("analysis");
+                    obj["analysis_status"] = serde_json::json!("panicked");
+                }
+                AbortedRenderKind::AnalysisTimedOut => {
+                    obj["failure_domain"] = serde_json::json!("analysis");
+                    obj["analysis_status"] = serde_json::json!("timed_out");
+                }
+                AbortedRenderKind::Infrastructure(kind) => {
+                    obj["failure_domain"] = serde_json::json!("job_infrastructure");
+                    obj["job_status"] = serde_json::json!(kind.job_status());
+                }
+            }
             if let Some(code) = assembly_fallback_code {
                 obj["code"] = serde_json::json!(code);
                 obj["fallback"] = serde_json::json!("assembly");

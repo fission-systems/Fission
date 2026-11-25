@@ -1,12 +1,14 @@
-use crate::cli::oneshot::rust_decomp::record::{InfrastructureFailureKind, RenderConfig};
+use crate::cli::oneshot::rust_decomp::record::{
+    AbortedRenderKind, InfrastructureFailureKind, RenderConfig,
+};
 use crate::cli::oneshot::rust_decomp::{
-    FunctionRenderResult, RenderOutcomeKind, make_infrastructure_error_result,
-    make_internal_error_result, render_one_function_inner,
+    FunctionRenderResult, RenderOutcomeKind, make_aborted_render_result,
+    make_infrastructure_error_result, make_internal_error_result, render_one_function_inner,
 };
 use fission_loader::loader::{FunctionInfo, LoadedBinary};
 use fission_static::analysis::decomp::facts::FactStore;
 use std::cmp::min;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -78,31 +80,41 @@ pub(crate) fn render_one_function_on_large_stack(
     stack_size_bytes: usize,
 ) -> FunctionRenderResult {
     let func_owned = func.clone();
-    let func_for_error = func.clone();
+    let binary_for_render = Arc::clone(&binary);
+    render_on_large_stack_with(binary, func, config, stack_size_bytes, move || {
+        render_one_function_inner(
+            binary_for_render.as_ref(),
+            facts.as_ref(),
+            &func_owned,
+            config,
+        )
+    })
+}
+
+/// Run `render` for `func` on a dedicated large-stack thread, bounded by the
+/// configured render timeout. A panic inside `render`, or `render` running
+/// past the timeout, is an *analysis* outcome for this function; failing to
+/// spawn or lose the thread is an infrastructure one.
+fn render_on_large_stack_with<R>(
+    binary: Arc<fission_loader::loader::LoadedBinary>,
+    func: &FunctionInfo,
+    config: RenderConfig,
+    stack_size_bytes: usize,
+    render: R,
+) -> FunctionRenderResult
+where
+    R: FnOnce() -> FunctionRenderResult + Send + 'static,
+{
+    let func_for_thread = func.clone();
     let binary_for_thread = Arc::clone(&binary);
-    let facts_for_thread = Arc::clone(&facts);
     let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
 
     let spawn = thread::Builder::new()
         .name(format!("fission-rust-decomp-0x{:x}", func.address))
         .stack_size(stack_size_bytes)
         .spawn(move || {
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                render_one_function_inner(
-                    binary_for_thread.as_ref(),
-                    facts_for_thread.as_ref(),
-                    &func_owned,
-                    config,
-                )
-            }))
-            .unwrap_or_else(|_| {
-                make_internal_error_result(
-                    binary_for_thread.as_ref(),
-                    &func_owned,
-                    "worker thread panicked while rendering function".to_string(),
-                    config,
-                )
-            });
+            let result =
+                render_catching_panic(binary_for_thread.as_ref(), &func_for_thread, config, render);
             let _ = result_tx.send(result);
         });
 
@@ -114,9 +126,10 @@ pub(crate) fn render_one_function_on_large_stack(
                         let _ = handle.join();
                         result
                     }
-                    Err(mpsc::RecvTimeoutError::Timeout) => make_internal_error_result(
+                    Err(mpsc::RecvTimeoutError::Timeout) => make_aborted_render_result(
                         binary.as_ref(),
-                        &func_for_error,
+                        func,
+                        AbortedRenderKind::AnalysisTimedOut,
                         render_timeout_message(timeout_ms),
                         config,
                     ),
@@ -124,7 +137,7 @@ pub(crate) fn render_one_function_on_large_stack(
                         let _ = handle.join();
                         make_internal_error_result(
                             binary.as_ref(),
-                            &func_for_error,
+                            func,
                             "worker thread exited before returning a render result".to_string(),
                             config,
                         )
@@ -135,15 +148,17 @@ pub(crate) fn render_one_function_on_large_stack(
                     Ok(()) => result_rx.recv().unwrap_or_else(|_| {
                         make_internal_error_result(
                             binary.as_ref(),
-                            &func_for_error,
+                            func,
                             "worker thread exited before returning a render result".to_string(),
                             config,
                         )
                     }),
+                    // `render` itself runs under `catch_unwind`; a join error
+                    // is a panic in the thread's own plumbing.
                     Err(_) => make_internal_error_result(
                         binary.as_ref(),
-                        &func_for_error,
-                        "worker thread panicked while rendering function".to_string(),
+                        func,
+                        "render worker thread panicked outside the render".to_string(),
                         config,
                     ),
                 }
@@ -151,7 +166,7 @@ pub(crate) fn render_one_function_on_large_stack(
         }
         Err(err) => make_internal_error_result(
             binary.as_ref(),
-            &func_for_error,
+            func,
             format!("failed to spawn render worker: {err}"),
             config,
         ),
@@ -164,21 +179,45 @@ fn render_one_function_catching_panic(
     func: &FunctionInfo,
     config: RenderConfig,
 ) -> FunctionRenderResult {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+    render_catching_panic(binary, func, config, || {
         render_one_function_inner(binary, facts, func, config)
-    }))
-    .unwrap_or_else(|_| {
-        make_internal_error_result(
+    })
+}
+
+/// Run one function's render, turning a panic inside it into that
+/// function's analysis failure (the decompiler crashed on this input; the
+/// batch runner did not fail).
+fn render_catching_panic(
+    binary: &fission_loader::loader::LoadedBinary,
+    func: &FunctionInfo,
+    config: RenderConfig,
+    render: impl FnOnce() -> FunctionRenderResult,
+) -> FunctionRenderResult {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(render)).unwrap_or_else(|_| {
+        make_aborted_render_result(
             binary,
             func,
-            "worker thread panicked while rendering function".to_string(),
+            AbortedRenderKind::AnalysisPanicked,
+            "decompiler panicked while rendering function".to_string(),
             config,
         )
     })
 }
 
+/// Batch-local identity of one accepted task: its index in the accepted
+/// function list. Unique within a batch even when several functions share
+/// an entry address.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct BatchTaskId(pub(crate) usize);
+
+/// The thread that claimed a task: a supervisor index, or the coordinator
+/// itself in the sequential paths.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct WorkerId(u32);
+
+impl WorkerId {
+    const COORDINATOR: WorkerId = WorkerId(u32::MAX);
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TaskTerminalKind {
@@ -188,24 +227,29 @@ pub(crate) enum TaskTerminalKind {
     Cancelled,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum TaskLifecycleState {
-    Accepted,
-    Queued,
-    Running,
-    Terminal(TaskTerminalKind),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize)]
 pub(crate) struct BatchLedgerSummary {
     pub accepted: usize,
+    /// Tasks whose render ran to an analysis outcome, including analysis
+    /// failures (reported errors, panics, timeouts).
     pub analysis_completed: usize,
+    /// Of `analysis_completed`: renders that panicked or timed out.
+    pub analysis_aborted: usize,
     pub infrastructure_failed: usize,
     pub not_started: usize,
     pub cancelled: usize,
     pub synthesized_rows: usize,
+    /// A second completion for a task that already has its terminal row.
     pub duplicate_completions: usize,
+    /// A completion naming a task id outside this batch.
     pub stale_completions: usize,
+    /// A completion for a task the sender had not claimed (not running, or
+    /// running on another worker).
+    pub unexpected_completions: usize,
+    /// A completion whose payload was not rendered for the task it names.
+    pub identity_mismatches: usize,
+    /// Lifecycle transitions refused by the progress tracker.
+    pub rejected_transitions: usize,
     pub spawn_errors: usize,
     pub send_errors: usize,
     pub join_errors: usize,
@@ -219,7 +263,7 @@ impl BatchLedgerSummary {
     }
 
     pub(crate) fn reconciles(&self) -> bool {
-        self.accepted == self.terminal_total()
+        self.accepted == self.terminal_total() && self.analysis_aborted <= self.analysis_completed
     }
 
     pub(crate) fn has_infrastructure_anomalies(&self) -> bool {
@@ -229,6 +273,9 @@ impl BatchLedgerSummary {
             || self.synthesized_rows > 0
             || self.duplicate_completions > 0
             || self.stale_completions > 0
+            || self.unexpected_completions > 0
+            || self.identity_mismatches > 0
+            || self.rejected_transitions > 0
             || self.spawn_errors > 0
             || self.send_errors > 0
             || self.join_errors > 0
@@ -241,71 +288,171 @@ pub(crate) struct BatchFanoutReport {
     pub accounting: BatchLedgerSummary,
 }
 
+/// Which batch task a result was rendered for. `func` is the ledger's own
+/// canonical entry for that task, shared (not copied), so the ledger checks
+/// a result against its task by pointer identity: two aliases at one
+/// address, or two byte-identical entries, are still different tasks.
+#[derive(Clone)]
+pub(crate) struct TaskProvenance {
+    task_id: BatchTaskId,
+    func: Arc<FunctionInfo>,
+}
+
+impl TaskProvenance {
+    pub(crate) fn task_id(&self) -> BatchTaskId {
+        self.task_id
+    }
+}
+
+impl FunctionRenderResult {
+    pub(crate) fn task_id(&self) -> Option<BatchTaskId> {
+        self.provenance.as_ref().map(TaskProvenance::task_id)
+    }
+}
+
+/// One accepted task as handed to a worker: its id and the ledger's
+/// canonical function entry.
 #[derive(Clone)]
 struct ScheduledTask {
     task_id: BatchTaskId,
-    func: FunctionInfo,
+    func: Arc<FunctionInfo>,
+}
+
+impl ScheduledTask {
+    /// Mark `result` as rendered for this task.
+    fn stamp(&self, mut result: FunctionRenderResult) -> FunctionRenderResult {
+        result.provenance = Some(TaskProvenance {
+            task_id: self.task_id,
+            func: Arc::clone(&self.func),
+        });
+        result
+    }
+
+    /// Render this task's function and stamp the result with this task, so
+    /// the stamp is bound to the function that was actually rendered.
+    fn render(
+        &self,
+        render: impl FnOnce(&FunctionInfo) -> FunctionRenderResult,
+    ) -> FunctionRenderResult {
+        self.stamp(render(&self.func))
+    }
+
+    /// Whether `result` carries this task's stamp and describes its function.
+    fn owns(&self, result: &FunctionRenderResult) -> bool {
+        result.provenance.as_ref().is_some_and(|provenance| {
+            provenance.task_id == self.task_id && Arc::ptr_eq(&provenance.func, &self.func)
+        }) && result.address == self.func.address
+    }
 }
 
 struct WorkerCompletion {
+    /// The worker that claims to have run the task.
+    worker: WorkerId,
     task_id: BatchTaskId,
     result: FunctionRenderResult,
 }
 
-const PROGRESS_ACCEPTED: u8 = 0;
-const PROGRESS_QUEUED: u8 = 1;
-const PROGRESS_RUNNING: u8 = 2;
-const PROGRESS_CANCELLED_BY_WORKER: u8 = 3;
-const PROGRESS_SEND_FAILED: u8 = 4;
+/// Non-terminal lifecycle states, shared between the coordinator and the
+/// workers. The only legal transitions are
+/// `ACCEPTED -> QUEUED -> RUNNING(worker)`, `QUEUED -> CANCELLED(worker)`
+/// and `QUEUED -> SEND_FAILED`; terminal states live in the ledger, which
+/// only the coordinator touches.
+const STATE_ACCEPTED: u8 = 0;
+const STATE_QUEUED: u8 = 1;
+const STATE_RUNNING: u8 = 2;
+const STATE_CANCELLED: u8 = 3;
+const STATE_SEND_FAILED: u8 = 4;
 
 struct BatchProgressTracker {
-    states: Vec<AtomicU8>,
+    /// Per task: state in the low 8 bits, claiming worker + 1 above them
+    /// (0 = no claimant), so a claim is one compare-and-swap.
+    slots: Vec<AtomicU64>,
+    rejected_transitions: AtomicUsize,
 }
 
 impl BatchProgressTracker {
     fn new(len: usize) -> Self {
         Self {
-            states: (0..len).map(|_| AtomicU8::new(PROGRESS_ACCEPTED)).collect(),
+            slots: (0..len)
+                .map(|_| AtomicU64::new(Self::pack(STATE_ACCEPTED, None)))
+                .collect(),
+            rejected_transitions: AtomicUsize::new(0),
         }
     }
 
-    fn mark_queued(&self, task_id: BatchTaskId) {
-        if let Some(slot) = self.states.get(task_id.0) {
-            slot.store(PROGRESS_QUEUED, Ordering::Release);
-        }
+    fn pack(state: u8, claimant: Option<WorkerId>) -> u64 {
+        let claimant = claimant.map_or(0, |worker| u64::from(worker.0) + 1);
+        (claimant << 8) | u64::from(state)
     }
 
-    fn mark_send_failed(&self, task_id: BatchTaskId) {
-        if let Some(slot) = self.states.get(task_id.0) {
-            slot.store(PROGRESS_SEND_FAILED, Ordering::Release);
-        }
+    fn unpack(word: u64) -> (u8, Option<WorkerId>) {
+        let state = (word & 0xff) as u8;
+        let claimant = (word >> 8)
+            .checked_sub(1)
+            .and_then(|w| u32::try_from(w).ok())
+            .map(WorkerId);
+        (state, claimant)
     }
 
-    fn mark_running(&self, task_id: BatchTaskId) {
-        if let Some(slot) = self.states.get(task_id.0) {
-            slot.store(PROGRESS_RUNNING, Ordering::Release);
+    fn transition(
+        &self,
+        task_id: BatchTaskId,
+        from: u8,
+        to: u8,
+        claimant: Option<WorkerId>,
+    ) -> bool {
+        let accepted = self.slots.get(task_id.0).is_some_and(|slot| {
+            slot.compare_exchange(
+                Self::pack(from, None),
+                Self::pack(to, claimant),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+        });
+        if !accepted {
+            self.rejected_transitions.fetch_add(1, Ordering::Relaxed);
         }
+        accepted
     }
 
-    fn mark_cancelled_by_worker(&self, task_id: BatchTaskId) {
-        if let Some(slot) = self.states.get(task_id.0) {
-            slot.store(PROGRESS_CANCELLED_BY_WORKER, Ordering::Release);
-        }
+    fn mark_queued(&self, task_id: BatchTaskId) -> bool {
+        self.transition(task_id, STATE_ACCEPTED, STATE_QUEUED, None)
     }
 
-    fn get(&self, task_id: BatchTaskId) -> u8 {
-        self.states
+    fn mark_send_failed(&self, task_id: BatchTaskId) -> bool {
+        self.transition(task_id, STATE_QUEUED, STATE_SEND_FAILED, None)
+    }
+
+    /// Claim a queued task for `worker`. Fails (and is counted) unless the
+    /// task is queued and unclaimed; a worker must not render a task it
+    /// failed to claim.
+    fn try_claim(&self, task_id: BatchTaskId, worker: WorkerId) -> bool {
+        self.transition(task_id, STATE_QUEUED, STATE_RUNNING, Some(worker))
+    }
+
+    fn mark_cancelled(&self, task_id: BatchTaskId, worker: WorkerId) -> bool {
+        self.transition(task_id, STATE_QUEUED, STATE_CANCELLED, Some(worker))
+    }
+
+    fn snapshot(&self, task_id: BatchTaskId) -> (u8, Option<WorkerId>) {
+        self.slots
             .get(task_id.0)
-            .map(|slot| slot.load(Ordering::Acquire))
-            .unwrap_or(PROGRESS_ACCEPTED)
+            .map(|slot| Self::unpack(slot.load(Ordering::Acquire)))
+            .unwrap_or((STATE_ACCEPTED, None))
+    }
+
+    fn rejected_transitions(&self) -> usize {
+        self.rejected_transitions.load(Ordering::Relaxed)
     }
 }
 
 struct TaskLedgerEntry {
-    task_id: BatchTaskId,
-    func: FunctionInfo,
-    state: TaskLifecycleState,
-    result: Option<FunctionRenderResult>,
+    func: Arc<FunctionInfo>,
+    /// The task's one terminal state and row; set exactly once.
+    terminal: Option<(TaskTerminalKind, FunctionRenderResult)>,
+    /// Completions rejected because their payload belonged to another task.
+    identity_mismatches: usize,
 }
 
 struct BatchTaskLedger {
@@ -313,6 +460,8 @@ struct BatchTaskLedger {
     synthesized_rows: usize,
     duplicate_completions: usize,
     stale_completions: usize,
+    unexpected_completions: usize,
+    identity_mismatches: usize,
     spawn_errors: usize,
     send_errors: usize,
     join_errors: usize,
@@ -324,12 +473,10 @@ impl BatchTaskLedger {
     fn new(functions: &[FunctionInfo]) -> Self {
         let entries = functions
             .iter()
-            .enumerate()
-            .map(|(idx, func)| TaskLedgerEntry {
-                task_id: BatchTaskId(idx),
-                func: func.clone(),
-                state: TaskLifecycleState::Accepted,
-                result: None,
+            .map(|func| TaskLedgerEntry {
+                func: Arc::new(func.clone()),
+                terminal: None,
+                identity_mismatches: 0,
             })
             .collect();
         Self {
@@ -337,6 +484,8 @@ impl BatchTaskLedger {
             synthesized_rows: 0,
             duplicate_completions: 0,
             stale_completions: 0,
+            unexpected_completions: 0,
+            identity_mismatches: 0,
             spawn_errors: 0,
             send_errors: 0,
             join_errors: 0,
@@ -345,25 +494,36 @@ impl BatchTaskLedger {
         }
     }
 
-    fn mark_queued(&mut self, task_id: BatchTaskId) {
-        if let Some(entry) = self.entries.get_mut(task_id.0) {
-            if matches!(entry.state, TaskLifecycleState::Accepted) {
-                entry.state = TaskLifecycleState::Queued;
-            }
+    fn task(&self, task_id: BatchTaskId) -> ScheduledTask {
+        ScheduledTask {
+            task_id,
+            func: Arc::clone(&self.entries[task_id.0].func),
         }
     }
 
-    fn mark_running(&mut self, task_id: BatchTaskId) {
-        if let Some(entry) = self.entries.get_mut(task_id.0) {
-            if !matches!(entry.state, TaskLifecycleState::Terminal(_)) {
-                entry.state = TaskLifecycleState::Running;
-            }
-        }
+    /// Tasks in dispatch order: largest first (LPT) to avoid long-tail
+    /// stragglers, ties by address then task id. Presentation order is
+    /// decided separately in [`BatchTaskLedger::into_report`].
+    fn lpt_schedule(&self) -> Vec<ScheduledTask> {
+        let mut indices: Vec<usize> = (0..self.entries.len()).collect();
+        indices.sort_by(|&a, &b| {
+            let (fa, fb) = (&self.entries[a].func, &self.entries[b].func);
+            fb.size
+                .cmp(&fa.size)
+                .then_with(|| fa.address.cmp(&fb.address))
+                .then_with(|| a.cmp(&b))
+        });
+        indices
+            .into_iter()
+            .map(|idx| self.task(BatchTaskId(idx)))
+            .collect()
     }
 
     fn terminal_kind_for_outcome(outcome_kind: RenderOutcomeKind) -> TaskTerminalKind {
         match outcome_kind {
-            RenderOutcomeKind::Analysis => TaskTerminalKind::AnalysisCompleted,
+            RenderOutcomeKind::Analysis | RenderOutcomeKind::AnalysisAborted => {
+                TaskTerminalKind::AnalysisCompleted
+            }
             RenderOutcomeKind::Infrastructure(InfrastructureFailureKind::WorkerInternalError) => {
                 TaskTerminalKind::InfrastructureFailed
             }
@@ -376,52 +536,65 @@ impl BatchTaskLedger {
         }
     }
 
+    /// Accept `completion` as its task's terminal row only if it is a legal
+    /// lifecycle step (the task is running, claimed by the sender, and not
+    /// yet terminal) and its payload was rendered for that very task.
+    /// Anything else is counted and dropped; the task keeps waiting for a
+    /// valid completion and is reconciled if none arrives.
     fn record_completion(
         &mut self,
-        mut completion: WorkerCompletion,
+        completion: WorkerCompletion,
+        progress: &BatchProgressTracker,
         on_result: &mut impl FnMut(BatchTaskId, &FunctionRenderResult) -> Result<(), String>,
         binary: &LoadedBinary,
         config: RenderConfig,
     ) -> Result<(), ()> {
-        let Some(entry) = self.entries.get_mut(completion.task_id.0) else {
+        let task_id = completion.task_id;
+        if task_id.0 >= self.entries.len() {
             self.stale_completions += 1;
             return Ok(());
-        };
-        if matches!(entry.state, TaskLifecycleState::Terminal(_)) {
+        }
+        if self.entries[task_id.0].terminal.is_some() {
             self.duplicate_completions += 1;
             return Ok(());
         }
-        if completion.result.address != entry.func.address {
-            self.stale_completions += 1;
+        if progress.snapshot(task_id) != (STATE_RUNNING, Some(completion.worker)) {
+            self.unexpected_completions += 1;
+            return Ok(());
+        }
+        let task = self.task(task_id);
+        if !task.owns(&completion.result) {
+            self.identity_mismatches += 1;
+            self.entries[task_id.0].identity_mismatches += 1;
             return Ok(());
         }
 
-        completion.result.task_id = Some(completion.task_id);
-        match on_result(completion.task_id, &completion.result) {
+        let result = completion.result;
+        let entry = &mut self.entries[task_id.0];
+        match on_result(task_id, &result) {
             Ok(()) => {
-                let kind = Self::terminal_kind_for_outcome(completion.result.outcome_kind);
-                entry.result = Some(completion.result);
-                entry.state = TaskLifecycleState::Terminal(kind);
+                let kind = Self::terminal_kind_for_outcome(result.outcome_kind);
+                entry.terminal = Some((kind, result));
                 Ok(())
             }
             Err(consumer_err) => {
                 self.consumer_errors += 1;
                 self.synthesized_rows += 1;
-                let mut synthesized = make_infrastructure_error_result(
+                let synthesized = task.stamp(make_infrastructure_error_result(
                     binary,
-                    &entry.func,
+                    &task.func,
                     InfrastructureFailureKind::WorkerInternalError,
                     format!("result consumer failed: {consumer_err}"),
                     config,
-                );
-                synthesized.task_id = Some(entry.task_id);
-                entry.result = Some(synthesized);
-                entry.state = TaskLifecycleState::Terminal(TaskTerminalKind::InfrastructureFailed);
+                ));
+                entry.terminal = Some((TaskTerminalKind::InfrastructureFailed, synthesized));
                 Err(())
             }
         }
     }
 
+    /// Give every task still without a terminal row exactly one, derived
+    /// from how far it got.
     fn reconcile_missing(
         &mut self,
         progress: &BatchProgressTracker,
@@ -431,18 +604,21 @@ impl BatchTaskLedger {
     ) {
         let join_errors = self.join_errors;
         let consumer_errors = self.consumer_errors;
-        for entry in &mut self.entries {
-            if matches!(entry.state, TaskLifecycleState::Terminal(_)) {
+        for idx in 0..self.entries.len() {
+            if self.entries[idx].terminal.is_some() {
                 continue;
             }
-            let raw_progress = progress.get(entry.task_id);
-            if raw_progress == PROGRESS_RUNNING {
-                entry.state = TaskLifecycleState::Running;
-            }
-            let (kind, message) = match raw_progress {
-                PROGRESS_RUNNING => (
+            let task = self.task(BatchTaskId(idx));
+            let mismatches = self.entries[idx].identity_mismatches;
+            let (state, _) = progress.snapshot(task.task_id);
+            let (kind, message) = match state {
+                STATE_RUNNING => (
                     InfrastructureFailureKind::WorkerInternalError,
-                    if join_errors > 0 {
+                    if mismatches > 0 {
+                        format!(
+                            "worker returned {mismatches} completion(s) rendered for a different task and no valid completion for this one"
+                        )
+                    } else if join_errors > 0 {
                         format!(
                             "worker supervisor panicked or exited abnormally while rendering task (join_errors={join_errors})"
                         )
@@ -454,127 +630,101 @@ impl BatchTaskLedger {
                             .to_string()
                     },
                 ),
-                PROGRESS_CANCELLED_BY_WORKER => (
+                STATE_CANCELLED => (
                     InfrastructureFailureKind::Cancelled,
                     "batch task cancelled before execution".to_string(),
                 ),
-                PROGRESS_SEND_FAILED => {
-                    if cancelled {
-                        (
-                            InfrastructureFailureKind::Cancelled,
-                            "batch task cancelled before worker dispatch".to_string(),
-                        )
-                    } else {
-                        (
-                            InfrastructureFailureKind::NotStarted,
-                            "worker task queue closed before task could be dispatched".to_string(),
-                        )
-                    }
-                }
-                PROGRESS_QUEUED | PROGRESS_ACCEPTED | _ => {
-                    if cancelled {
-                        (
-                            InfrastructureFailureKind::Cancelled,
-                            "batch task cancelled before execution".to_string(),
-                        )
-                    } else if consumer_errors > 0 {
-                        (
-                            InfrastructureFailureKind::NotStarted,
-                            "result consumer aborted batch before worker started task".to_string(),
-                        )
-                    } else if join_errors > 0 {
-                        (
-                            InfrastructureFailureKind::NotStarted,
-                            format!(
-                                "worker pool stopped after supervisor failure before starting task (join_errors={join_errors})"
-                            ),
-                        )
-                    } else {
-                        (
-                            InfrastructureFailureKind::NotStarted,
-                            "worker pool exited before starting accepted task".to_string(),
-                        )
-                    }
-                }
+                STATE_SEND_FAILED if cancelled => (
+                    InfrastructureFailureKind::Cancelled,
+                    "batch task cancelled before worker dispatch".to_string(),
+                ),
+                STATE_SEND_FAILED => (
+                    InfrastructureFailureKind::NotStarted,
+                    "worker task queue closed before task could be dispatched".to_string(),
+                ),
+                _ if cancelled => (
+                    InfrastructureFailureKind::Cancelled,
+                    "batch task cancelled before execution".to_string(),
+                ),
+                _ if consumer_errors > 0 => (
+                    InfrastructureFailureKind::NotStarted,
+                    "result consumer aborted batch before worker started task".to_string(),
+                ),
+                _ if join_errors > 0 => (
+                    InfrastructureFailureKind::NotStarted,
+                    format!(
+                        "worker pool stopped after supervisor failure before starting task (join_errors={join_errors})"
+                    ),
+                ),
+                _ => (
+                    InfrastructureFailureKind::NotStarted,
+                    "worker pool exited before starting accepted task".to_string(),
+                ),
             };
 
-            let mut synthesized =
-                make_infrastructure_error_result(binary, &entry.func, kind, message, config);
-            synthesized.task_id = Some(entry.task_id);
+            let synthesized = task.stamp(make_infrastructure_error_result(
+                binary, &task.func, kind, message, config,
+            ));
             let terminal = Self::terminal_kind_for_outcome(synthesized.outcome_kind);
-            entry.result = Some(synthesized);
-            entry.state = TaskLifecycleState::Terminal(terminal);
+            self.entries[idx].terminal = Some((terminal, synthesized));
             self.synthesized_rows += 1;
         }
     }
 
-    fn into_report(mut self) -> BatchFanoutReport {
-        let mut analysis_completed = 0usize;
-        let mut infrastructure_failed = 0usize;
-        let mut not_started = 0usize;
-        let mut cancelled = 0usize;
-
-        for entry in &self.entries {
-            match entry.state {
-                TaskLifecycleState::Terminal(TaskTerminalKind::AnalysisCompleted) => {
-                    analysis_completed += 1;
-                }
-                TaskLifecycleState::Terminal(TaskTerminalKind::InfrastructureFailed) => {
-                    infrastructure_failed += 1;
-                }
-                TaskLifecycleState::Terminal(TaskTerminalKind::NotStarted) => {
-                    not_started += 1;
-                }
-                TaskLifecycleState::Terminal(TaskTerminalKind::Cancelled) => {
-                    cancelled += 1;
-                }
-                other => {
-                    panic!(
-                        "batch task ledger entry {:?} still non-terminal during report assembly: {:?}",
-                        entry.task_id, other
-                    );
-                }
-            }
-        }
-
-        let accounting = BatchLedgerSummary {
+    fn into_report(self, progress: &BatchProgressTracker) -> BatchFanoutReport {
+        let mut accounting = BatchLedgerSummary {
             accepted: self.entries.len(),
-            analysis_completed,
-            infrastructure_failed,
-            not_started,
-            cancelled,
             synthesized_rows: self.synthesized_rows,
             duplicate_completions: self.duplicate_completions,
             stale_completions: self.stale_completions,
+            unexpected_completions: self.unexpected_completions,
+            identity_mismatches: self.identity_mismatches,
+            rejected_transitions: progress.rejected_transitions(),
             spawn_errors: self.spawn_errors,
             send_errors: self.send_errors,
             join_errors: self.join_errors,
             consumer_errors: self.consumer_errors,
             sequential_fallback: self.sequential_fallback,
+            ..BatchLedgerSummary::default()
         };
+
+        // Presentation order depends only on canonical task metadata
+        // (`(address, task_id)`), never on worker arrival or LPT order,
+        // including when aliases share an address.
+        let mut order: Vec<usize> = (0..self.entries.len()).collect();
+        order.sort_by_key(|&idx| (self.entries[idx].func.address, idx));
+
+        let mut rows: Vec<Option<FunctionRenderResult>> = Vec::with_capacity(self.entries.len());
+        for (idx, entry) in self.entries.into_iter().enumerate() {
+            let Some((kind, result)) = entry.terminal else {
+                panic!("batch task {idx} has no terminal state during report assembly");
+            };
+            assert_eq!(
+                result.task_id(),
+                Some(BatchTaskId(idx)),
+                "terminal row for batch task {idx} is stamped for another task"
+            );
+            match kind {
+                TaskTerminalKind::AnalysisCompleted => {
+                    accounting.analysis_completed += 1;
+                    if result.outcome_kind == RenderOutcomeKind::AnalysisAborted {
+                        accounting.analysis_aborted += 1;
+                    }
+                }
+                TaskTerminalKind::InfrastructureFailed => accounting.infrastructure_failed += 1,
+                TaskTerminalKind::NotStarted => accounting.not_started += 1,
+                TaskTerminalKind::Cancelled => accounting.cancelled += 1,
+            }
+            rows.push(Some(result));
+        }
         assert!(
             accounting.reconciles(),
             "batch ledger accounting failed to reconcile: {accounting:?}"
         );
 
-        // Presentation order must depend solely on canonical task metadata
-        // (`(address, original_task_id)`), never worker arrival order or LPT
-        // execution order, including when aliases share an address.
-        self.entries.sort_by(|a, b| {
-            a.func
-                .address
-                .cmp(&b.func.address)
-                .then_with(|| a.task_id.cmp(&b.task_id))
-        });
-
-        let results: Vec<FunctionRenderResult> = self
-            .entries
+        let results: Vec<FunctionRenderResult> = order
             .into_iter()
-            .map(|entry| {
-                entry
-                    .result
-                    .expect("terminal ledger entry must hold a result")
-            })
+            .map(|idx| rows[idx].take().expect("each task row is emitted once"))
             .collect();
         assert_eq!(results.len(), accounting.accepted);
 
@@ -586,8 +736,8 @@ impl BatchTaskLedger {
 }
 
 struct PersistentDecompWorker {
-    request_tx: mpsc::SyncSender<(BatchTaskId, FunctionInfo)>,
-    result_rx: mpsc::Receiver<(BatchTaskId, FunctionRenderResult)>,
+    request_tx: mpsc::SyncSender<ScheduledTask>,
+    result_rx: mpsc::Receiver<FunctionRenderResult>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -599,21 +749,22 @@ impl PersistentDecompWorker {
         config: RenderConfig,
         stack_size_bytes: usize,
     ) -> Result<Self, std::io::Error> {
-        let (request_tx, request_rx) = mpsc::sync_channel::<(BatchTaskId, FunctionInfo)>(0);
-        let (result_tx, result_rx) = mpsc::sync_channel::<(BatchTaskId, FunctionRenderResult)>(1);
+        let (request_tx, request_rx) = mpsc::sync_channel::<ScheduledTask>(0);
+        let (result_tx, result_rx) = mpsc::sync_channel::<FunctionRenderResult>(1);
         let handle = thread::Builder::new()
             .name(format!("fission-rust-decomp-worker-{worker_idx}"))
             .stack_size(stack_size_bytes)
             .spawn(move || {
-                while let Ok((task_id, func)) = request_rx.recv() {
-                    let mut result = render_one_function_catching_panic(
-                        binary.as_ref(),
-                        facts.as_ref(),
-                        &func,
-                        config,
-                    );
-                    result.task_id = Some(task_id);
-                    if result_tx.send((task_id, result)).is_err() {
+                while let Ok(task) = request_rx.recv() {
+                    let result = task.render(|func| {
+                        render_one_function_catching_panic(
+                            binary.as_ref(),
+                            facts.as_ref(),
+                            func,
+                            config,
+                        )
+                    });
+                    if result_tx.send(result).is_err() {
                         break;
                     }
                 }
@@ -631,10 +782,17 @@ impl PersistentDecompWorker {
             let _ = handle.join();
         }
     }
+
+    /// Abandon a child that may still be running; it exits on its own once
+    /// its next send finds the result channel closed.
+    fn detach(mut self) {
+        self.handle.take();
+    }
 }
 
 struct WorkerSupervisorContext {
     worker_idx: usize,
+    worker: WorkerId,
     binary: Arc<LoadedBinary>,
     facts: Arc<FactStore>,
     config: RenderConfig,
@@ -645,6 +803,79 @@ struct WorkerSupervisorContext {
     progress: Arc<BatchProgressTracker>,
     cancel: Arc<AtomicBool>,
     stop_dispatch: Arc<AtomicBool>,
+}
+
+/// Render `task` on the supervisor's persistent large-stack child, bounded
+/// by `timeout_ms`; the child is replaced after a timeout or a failure.
+fn render_on_persistent_child(
+    ctx: &WorkerSupervisorContext,
+    persistent_child: &mut Option<PersistentDecompWorker>,
+    task: &ScheduledTask,
+    timeout_ms: u64,
+) -> FunctionRenderResult {
+    let infrastructure = |message: String| {
+        task.render(|func| make_internal_error_result(&ctx.binary, func, message, ctx.config))
+    };
+    if persistent_child.is_none() {
+        // Reuse one `stack_size_bytes` thread across tasks so thread-local
+        // SLEIGH/type caches stay warm and we avoid per-function 32 MiB
+        // thread creation, while still replacing a wedged child.
+        match PersistentDecompWorker::spawn(
+            ctx.worker_idx,
+            Arc::clone(&ctx.binary),
+            Arc::clone(&ctx.facts),
+            ctx.config,
+            ctx.stack_size_bytes,
+        ) {
+            Ok(worker) => *persistent_child = Some(worker),
+            Err(err) => return infrastructure(format!("failed to spawn render worker: {err}")),
+        }
+    }
+    let worker = persistent_child
+        .as_mut()
+        .expect("persistent worker initialized");
+    if worker.request_tx.send(task.clone()).is_err() {
+        if let Some(dead) = persistent_child.take() {
+            dead.shutdown();
+        }
+        return infrastructure("worker thread exited before receiving a render task".to_string());
+    }
+    match worker
+        .result_rx
+        .recv_timeout(Duration::from_millis(timeout_ms))
+    {
+        Ok(result) if task.owns(&result) => result,
+        Ok(_) => {
+            if let Some(child) = persistent_child.take() {
+                child.detach();
+            }
+            infrastructure(format!(
+                "worker child returned a result not rendered for {:?}",
+                task.task_id
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            // Detach without joining; the next task spawns a fresh child.
+            if let Some(child) = persistent_child.take() {
+                child.detach();
+            }
+            task.render(|func| {
+                make_aborted_render_result(
+                    &ctx.binary,
+                    func,
+                    AbortedRenderKind::AnalysisTimedOut,
+                    render_timeout_message(timeout_ms),
+                    ctx.config,
+                )
+            })
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            if let Some(dead) = persistent_child.take() {
+                dead.shutdown();
+            }
+            infrastructure("worker thread exited before returning a render result".to_string())
+        }
+    }
 }
 
 fn spawn_production_supervisor(
@@ -665,132 +896,37 @@ fn spawn_production_supervisor(
                 Ok(locked) => locked.recv(),
                 Err(_) => break,
             };
-            let task = match task {
-                Ok(task) => task,
-                Err(_) => break,
-            };
+            let Ok(task) = task else { break };
             if ctx.cancel.load(Ordering::Acquire) {
-                ctx.progress.mark_cancelled_by_worker(task.task_id);
+                ctx.progress.mark_cancelled(task.task_id, ctx.worker);
                 break;
             }
             if ctx.stop_dispatch.load(Ordering::Acquire) {
                 break;
             }
-            ctx.progress.mark_running(task.task_id);
+            if !ctx.progress.try_claim(task.task_id, ctx.worker) {
+                // Not queued, or already claimed: rendering it would give the
+                // task a second owner. The refusal is counted.
+                continue;
+            }
 
-            let task_id = task.task_id;
-            let func = task.func;
-            let mut rendered = if let Some(timeout_ms) = ctx.timeout_ms {
-                // Reuse one `stack_size_bytes` worker thread across tasks
-                // so we keep thread-local SLEIGH/type caches warm and
-                // avoid per-function 32 MiB OS thread creation/teardown,
-                // while still detaching and replacing a wedged worker on
-                // hard timeout or unexpected disconnect.
-                if persistent_child.is_none() {
-                    match PersistentDecompWorker::spawn(
-                        ctx.worker_idx,
-                        Arc::clone(&ctx.binary),
-                        Arc::clone(&ctx.facts),
-                        ctx.config,
-                        ctx.stack_size_bytes,
-                    ) {
-                        Ok(worker) => persistent_child = Some(worker),
-                        Err(err) => {
-                            let mut err_res = make_internal_error_result(
-                                ctx.binary.as_ref(),
-                                &func,
-                                format!("failed to spawn render worker: {err}"),
-                                ctx.config,
-                            );
-                            err_res.task_id = Some(task_id);
-                            if ctx
-                                .result_tx
-                                .send(WorkerCompletion {
-                                    task_id,
-                                    result: err_res,
-                                })
-                                .is_err()
-                            {
-                                break;
-                            }
-                            continue;
-                        }
-                    }
-                }
-                let worker = persistent_child
-                    .as_mut()
-                    .expect("persistent worker initialized");
-                if worker.request_tx.send((task_id, func.clone())).is_err() {
-                    if let Some(dead) = persistent_child.take() {
-                        dead.shutdown();
-                    }
-                    make_internal_error_result(
+            let rendered = if let Some(timeout_ms) = ctx.timeout_ms {
+                render_on_persistent_child(&ctx, &mut persistent_child, &task, timeout_ms)
+            } else {
+                task.render(|func| {
+                    render_one_function_catching_panic(
                         ctx.binary.as_ref(),
-                        &func,
-                        "worker thread exited before receiving a render task".to_string(),
+                        ctx.facts.as_ref(),
+                        func,
                         ctx.config,
                     )
-                } else {
-                    match worker
-                        .result_rx
-                        .recv_timeout(Duration::from_millis(timeout_ms))
-                    {
-                        Ok((returned_id, result)) => {
-                            if returned_id != task_id || result.address != func.address {
-                                if let Some(mut wedged) = persistent_child.take() {
-                                    wedged.handle.take();
-                                }
-                                make_internal_error_result(
-                                    ctx.binary.as_ref(),
-                                    &func,
-                                    format!(
-                                        "worker child returned mismatched task correlation ({returned_id:?} vs expected {task_id:?})"
-                                    ),
-                                    ctx.config,
-                                )
-                            } else {
-                                result
-                            }
-                        }
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            // Detach without joining; the next task spawns a
-                            // fresh large-stack child thread.
-                            if let Some(mut wedged) = persistent_child.take() {
-                                wedged.handle.take();
-                            }
-                            make_internal_error_result(
-                                ctx.binary.as_ref(),
-                                &func,
-                                render_timeout_message(timeout_ms),
-                                ctx.config,
-                            )
-                        }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            if let Some(dead) = persistent_child.take() {
-                                dead.shutdown();
-                            }
-                            make_internal_error_result(
-                                ctx.binary.as_ref(),
-                                &func,
-                                "worker thread exited before returning a render result".to_string(),
-                                ctx.config,
-                            )
-                        }
-                    }
-                }
-            } else {
-                render_one_function_catching_panic(
-                    ctx.binary.as_ref(),
-                    ctx.facts.as_ref(),
-                    &func,
-                    ctx.config,
-                )
+                })
             };
-            rendered.task_id = Some(task_id);
             if ctx
                 .result_tx
                 .send(WorkerCompletion {
-                    task_id,
+                    worker: ctx.worker,
+                    task_id: task.task_id,
                     result: rendered,
                 })
                 .is_err()
@@ -804,6 +940,36 @@ fn spawn_production_supervisor(
     })
 }
 
+/// Render `task` on the coordinator thread and record it, through the same
+/// lifecycle (`QUEUED -> RUNNING -> terminal`) the worker pool uses.
+fn run_task_on_coordinator(
+    ledger: &mut BatchTaskLedger,
+    progress: &BatchProgressTracker,
+    task: &ScheduledTask,
+    render: impl FnOnce(&FunctionInfo) -> FunctionRenderResult,
+    on_result: &mut impl FnMut(BatchTaskId, &FunctionRenderResult) -> Result<(), String>,
+    binary: &LoadedBinary,
+    config: RenderConfig,
+) -> Result<(), ()> {
+    if !progress.mark_queued(task.task_id)
+        || !progress.try_claim(task.task_id, WorkerId::COORDINATOR)
+    {
+        return Ok(());
+    }
+    let result = task.render(render);
+    ledger.record_completion(
+        WorkerCompletion {
+            worker: WorkerId::COORDINATOR,
+            task_id: task.task_id,
+            result,
+        },
+        progress,
+        on_result,
+        binary,
+        config,
+    )
+}
+
 pub(crate) fn run_sequential_batch(
     binary: Arc<LoadedBinary>,
     facts: Arc<FactStore>,
@@ -814,22 +980,20 @@ pub(crate) fn run_sequential_batch(
     let mut ledger = BatchTaskLedger::new(functions);
     let progress = BatchProgressTracker::new(functions.len());
 
-    for (idx, func) in functions.iter().enumerate() {
-        let task_id = BatchTaskId(idx);
-        progress.mark_running(task_id);
-        ledger.mark_running(task_id);
-        let mut rendered = render_one_function_on_large_stack(
-            Arc::clone(&binary),
-            Arc::clone(&facts),
-            func,
-            config,
-            stack_size_bytes,
-        );
-        rendered.task_id = Some(task_id);
-        let _ = ledger.record_completion(
-            WorkerCompletion {
-                task_id,
-                result: rendered,
+    for idx in 0..functions.len() {
+        let task = ledger.task(BatchTaskId(idx));
+        let _ = run_task_on_coordinator(
+            &mut ledger,
+            &progress,
+            &task,
+            |func| {
+                render_one_function_on_large_stack(
+                    Arc::clone(&binary),
+                    Arc::clone(&facts),
+                    func,
+                    config,
+                    stack_size_bytes,
+                )
             },
             &mut |_, _| Ok(()),
             binary.as_ref(),
@@ -838,7 +1002,7 @@ pub(crate) fn run_sequential_batch(
     }
 
     ledger.reconcile_missing(&progress, false, binary.as_ref(), config);
-    ledger.into_report()
+    ledger.into_report(&progress)
 }
 
 pub(crate) fn run_worker_fanout_fanin(
@@ -860,26 +1024,6 @@ pub(crate) fn run_worker_fanout_fanin(
         Arc::new(AtomicBool::new(false)),
         |_, _| Ok(()),
     )
-}
-
-fn lpt_schedule(functions: &[FunctionInfo]) -> Vec<ScheduledTask> {
-    let mut indices: Vec<usize> = (0..functions.len()).collect();
-    // Schedule largest functions first (LPT) to avoid long-tail stragglers;
-    // `BatchTaskLedger::into_report` sorts results by `(address, task_id)`.
-    indices.sort_by(|&a, &b| {
-        functions[b]
-            .size
-            .cmp(&functions[a].size)
-            .then_with(|| functions[a].address.cmp(&functions[b].address))
-            .then_with(|| a.cmp(&b))
-    });
-    indices
-        .into_iter()
-        .map(|idx| ScheduledTask {
-            task_id: BatchTaskId(idx),
-            func: functions[idx].clone(),
-        })
-        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -915,6 +1059,7 @@ where
     for worker_idx in 0..worker_count {
         let ctx = WorkerSupervisorContext {
             worker_idx,
+            worker: WorkerId(u32::try_from(worker_idx).expect("worker index fits in u32")),
             binary: Arc::clone(&binary),
             facts: Arc::clone(&facts),
             config,
@@ -946,30 +1091,27 @@ where
                 "failed to spawn decompilation worker threads ({err}); falling back to sequential rendering"
             );
         }
-        for task in lpt_schedule(functions) {
+        for task in ledger.lpt_schedule() {
             if cancel.load(Ordering::Acquire) || stop_dispatch.load(Ordering::Acquire) {
                 break;
             }
-            progress.mark_running(task.task_id);
-            ledger.mark_running(task.task_id);
-            let mut rendered = render_one_function_catching_panic(
+            if run_task_on_coordinator(
+                &mut ledger,
+                &progress,
+                &task,
+                |func| {
+                    render_one_function_catching_panic(
+                        binary.as_ref(),
+                        facts.as_ref(),
+                        func,
+                        config,
+                    )
+                },
+                &mut on_result,
                 binary.as_ref(),
-                facts.as_ref(),
-                &task.func,
                 config,
-            );
-            rendered.task_id = Some(task.task_id);
-            if ledger
-                .record_completion(
-                    WorkerCompletion {
-                        task_id: task.task_id,
-                        result: rendered,
-                    },
-                    &mut on_result,
-                    binary.as_ref(),
-                    config,
-                )
-                .is_err()
+            )
+            .is_err()
             {
                 stop_dispatch.store(true, Ordering::Release);
                 break;
@@ -981,10 +1123,10 @@ where
             binary.as_ref(),
             config,
         );
-        return ledger.into_report();
+        return ledger.into_report(&progress);
     }
 
-    for task in lpt_schedule(functions) {
+    for task in ledger.lpt_schedule() {
         if cancel.load(Ordering::Acquire) {
             break;
         }
@@ -995,16 +1137,21 @@ where
             ledger.send_errors += 1;
             break;
         }
-        ledger.mark_queued(task_id);
     }
     drop(task_tx);
 
-    // Drain until all worker `Sender`s close rather than looping `0..functions.len()`:
-    // counting raw messages would let duplicate or stale completions finish the
-    // loop early and drop legitimate late task results.
+    // Drain until all worker `Sender`s close rather than counting messages:
+    // counting would let duplicate or stale completions end the loop early
+    // and drop legitimate late task results.
     while let Ok(completion) = result_rx.recv() {
         if ledger
-            .record_completion(completion, &mut on_result, binary.as_ref(), config)
+            .record_completion(
+                completion,
+                progress.as_ref(),
+                &mut on_result,
+                binary.as_ref(),
+                config,
+            )
             .is_err()
         {
             stop_dispatch.store(true, Ordering::Release);
@@ -1025,7 +1172,7 @@ where
         binary.as_ref(),
         config,
     );
-    ledger.into_report()
+    ledger.into_report(&progress)
 }
 
 #[cfg(test)]
@@ -1156,7 +1303,7 @@ mod tests {
             CliRustDecompileRecord, CliRustOutcome, RenderConfig,
         };
         use crate::cli::oneshot::rust_decomp::{
-            FunctionRenderResult, record_into_function_render_result,
+            FunctionRenderResult, RenderOutcomeKind, record_into_function_render_result,
         };
         use fission_loader::loader::{
             BinaryLoadSpec, DataBuffer, FunctionInfo, LoadedBinary, LoadedBinaryBuilder,
@@ -1210,6 +1357,17 @@ mod tests {
             let binary = Arc::new(builder.build().expect("build test binary"));
             let facts = Arc::new(FactStore::from_binary_without_signature_matches(&binary));
             (binary, facts)
+        }
+
+        /// Every accepted task has exactly one row, stamped for that task.
+        fn assert_one_row_per_task(report: &super::super::BatchFanoutReport, accepted: usize) {
+            let mut ids: Vec<usize> = report
+                .results
+                .iter()
+                .map(|row| row.task_id().expect("batch rows are stamped").0)
+                .collect();
+            ids.sort_unstable();
+            assert_eq!(ids, (0..accepted).collect::<Vec<_>>());
         }
 
         fn make_func(name: &str, address: u64, size: u64) -> FunctionInfo {
@@ -1293,11 +1451,12 @@ mod tests {
                                 .lock()
                                 .unwrap()
                                 .push((task.task_id.0, task.func.address));
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             let mut rendered =
                                 fake_success(&task.func, &format!("// {}", task.func.name));
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             buffered.push(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: rendered,
                             });
@@ -1319,16 +1478,338 @@ mod tests {
             );
             // Presentation order: (address ASC, original task_id ASC) -> alias_first (1) before alias_second (2), then fn_other (0).
             assert_eq!(report.results.len(), 3);
-            assert_eq!(report.results[0].task_id, Some(BatchTaskId(1)));
+            assert_eq!(report.results[0].task_id(), Some(BatchTaskId(1)));
             assert_eq!(report.results[0].plain_output, "// alias_first");
-            assert_eq!(report.results[1].task_id, Some(BatchTaskId(2)));
+            assert_eq!(report.results[1].task_id(), Some(BatchTaskId(2)));
             assert_eq!(report.results[1].plain_output, "// alias_second");
-            assert_eq!(report.results[2].task_id, Some(BatchTaskId(0)));
+            assert_eq!(report.results[2].task_id(), Some(BatchTaskId(0)));
             assert_eq!(report.results[2].plain_output, "// fn_other");
             assert!(report.accounting.reconciles());
             assert_eq!(report.accounting.accepted, 3);
             assert_eq!(report.accounting.analysis_completed, 3);
             assert!(!report.accounting.has_infrastructure_anomalies());
+        }
+
+        /// Two accepted tasks share one entry address (aliases). A worker
+        /// that routes each result under the other alias's task id must not
+        /// get either result accepted: the address alone cannot tell the
+        /// aliases apart.
+        #[test]
+        fn swapped_task_ids_with_identical_addresses_are_rejected() {
+            let functions = vec![
+                make_func("alias_first", 0x1000, 8),
+                make_func("alias_second", 0x1000, 8),
+            ];
+            let (binary, facts) = make_test_binary(functions.clone());
+
+            let report = run_worker_fanout_fanin_with_hooks(
+                binary,
+                facts,
+                &functions,
+                test_config(),
+                1,
+                8 * 1024 * 1024,
+                |ctx: WorkerSupervisorContext| {
+                    thread::Builder::new().spawn(move || {
+                        let mut rendered = Vec::new();
+                        while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
+                            let mut result =
+                                fake_success(&task.func, &format!("// {}", task.func.name));
+                            result = task.stamp(result);
+                            rendered.push((task.task_id, result));
+                        }
+                        // Route each payload under the *other* alias's id.
+                        let ids: Vec<BatchTaskId> = rendered.iter().map(|(id, _)| *id).collect();
+                        for (idx, (_, result)) in rendered.into_iter().enumerate() {
+                            let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
+                                task_id: ids[1 - idx],
+                                result,
+                            });
+                        }
+                    })
+                },
+                Arc::new(AtomicBool::new(false)),
+                |_, _| Ok(()),
+            );
+
+            assert_eq!(report.results.len(), 2);
+            for (row, own) in report.results.iter().zip(["alias_first", "alias_second"]) {
+                let other = if own == "alias_first" {
+                    "alias_second"
+                } else {
+                    "alias_first"
+                };
+                assert_ne!(
+                    row.plain_output,
+                    format!("// {other}"),
+                    "row for {own} carries the other alias's result"
+                );
+            }
+            assert_eq!(report.accounting.analysis_completed, 0);
+            assert_eq!(report.accounting.infrastructure_failed, 2);
+            assert_eq!(report.accounting.identity_mismatches, 2);
+            assert!(report.accounting.reconciles());
+            assert_one_row_per_task(&report, 2);
+            for row in &report.results {
+                assert_eq!(row.json_entry["job_status"], "infrastructure_failed");
+                assert!(
+                    row.json_entry["error"]
+                        .as_str()
+                        .is_some_and(|e| e.contains("rendered for a different task")),
+                    "{}",
+                    row.json_entry["error"]
+                );
+            }
+        }
+
+        /// `--addresses-file` listing one address twice yields two accepted
+        /// tasks with byte-identical metadata. They are still two tasks: a
+        /// swapped routing is caught by task identity, not by comparing
+        /// names or addresses, and correct routing keeps both rows.
+        #[test]
+        fn byte_identical_duplicate_tasks_keep_distinct_identity() {
+            let functions = vec![make_func("dup", 0x1000, 8), make_func("dup", 0x1000, 8)];
+            let (binary, facts) = make_test_binary(functions.clone());
+
+            for swap in [true, false] {
+                let report = run_worker_fanout_fanin_with_hooks(
+                    Arc::clone(&binary),
+                    Arc::clone(&facts),
+                    &functions,
+                    test_config(),
+                    1,
+                    8 * 1024 * 1024,
+                    move |ctx: WorkerSupervisorContext| {
+                        thread::Builder::new().spawn(move || {
+                            let mut rendered = Vec::new();
+                            while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
+                                assert!(ctx.progress.try_claim(task.task_id, ctx.worker));
+                                let result = task.stamp(fake_success(
+                                    &task.func,
+                                    &format!("// task {}", task.task_id.0),
+                                ));
+                                rendered.push((task.task_id, result));
+                            }
+                            let ids: Vec<BatchTaskId> =
+                                rendered.iter().map(|(id, _)| *id).collect();
+                            for (idx, (own, result)) in rendered.into_iter().enumerate() {
+                                let _ = ctx.result_tx.send(WorkerCompletion {
+                                    worker: ctx.worker,
+                                    task_id: if swap { ids[1 - idx] } else { own },
+                                    result,
+                                });
+                            }
+                        })
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                    |_, _| Ok(()),
+                );
+
+                assert_one_row_per_task(&report, 2);
+                assert!(report.accounting.reconciles());
+                if swap {
+                    assert_eq!(report.accounting.identity_mismatches, 2);
+                    assert_eq!(report.accounting.infrastructure_failed, 2);
+                } else {
+                    assert_eq!(report.accounting.identity_mismatches, 0);
+                    assert_eq!(report.results[0].plain_output, "// task 0");
+                    assert_eq!(report.results[1].plain_output, "// task 1");
+                }
+            }
+        }
+
+        /// A completion for a task no worker has claimed (still queued) is
+        /// not a legal lifecycle transition; accepting it let a forged row
+        /// stand in for a function that never ran.
+        #[test]
+        fn completion_for_unclaimed_task_is_rejected() {
+            let functions = vec![make_func("fn_0", 0x1000, 16), make_func("fn_1", 0x1020, 8)];
+            let (binary, facts) = make_test_binary(functions.clone());
+            let forged_target = functions[1].clone();
+
+            let report = run_worker_fanout_fanin_with_hooks(
+                binary,
+                facts,
+                &functions,
+                test_config(),
+                1,
+                8 * 1024 * 1024,
+                move |ctx: WorkerSupervisorContext| {
+                    let forged_target = forged_target.clone();
+                    thread::Builder::new().spawn(move || {
+                        // Runs only the first (largest) task, fn_0.
+                        let Ok(task) = ctx.task_rx.lock().unwrap().recv() else {
+                            return;
+                        };
+                        assert!(ctx.progress.try_claim(task.task_id, ctx.worker));
+                        // fn_1 (task 1) stays queued: nobody ever runs it.
+                        let fake = fake_success(&forged_target, "forged");
+                        let _ = ctx.result_tx.send(WorkerCompletion {
+                            worker: ctx.worker,
+                            task_id: BatchTaskId(1),
+                            result: fake,
+                        });
+                        let real = task.stamp(fake_success(&task.func, "real:fn_0"));
+                        let _ = ctx.result_tx.send(WorkerCompletion {
+                            worker: ctx.worker,
+                            task_id: task.task_id,
+                            result: real,
+                        });
+                    })
+                },
+                Arc::new(AtomicBool::new(false)),
+                |_, _| Ok(()),
+            );
+
+            assert_eq!(report.results[0].plain_output, "real:fn_0");
+            assert_ne!(report.results[1].plain_output, "forged");
+            assert_eq!(report.results[1].json_entry["job_status"], "not_started");
+            assert_eq!(report.accounting.analysis_completed, 1);
+            assert_eq!(report.accounting.not_started, 1);
+            assert_eq!(report.accounting.unexpected_completions, 1);
+            assert!(report.accounting.reconciles());
+            assert_one_row_per_task(&report, 2);
+        }
+
+        /// A completion for a running task sent by a worker that did not
+        /// claim it is rejected even when its payload is correctly stamped;
+        /// the claimant's own completion is the one that counts.
+        #[test]
+        fn completion_from_non_claimant_worker_is_rejected() {
+            let functions = vec![make_func("fn_0", 0x1000, 16)];
+            let (binary, facts) = make_test_binary(functions.clone());
+            let handoff = Arc::new(Mutex::new(None::<super::super::ScheduledTask>));
+            let forged_sent = Arc::new(AtomicBool::new(false));
+
+            let report = run_worker_fanout_fanin_with_hooks(
+                binary,
+                facts,
+                &functions,
+                test_config(),
+                2,
+                8 * 1024 * 1024,
+                move |ctx: WorkerSupervisorContext| {
+                    let handoff = Arc::clone(&handoff);
+                    let forged_sent = Arc::clone(&forged_sent);
+                    thread::Builder::new().spawn(move || {
+                        if ctx.worker_idx == 1 {
+                            // Never claims anything; forges worker 0's task.
+                            let task = loop {
+                                if let Some(task) = handoff.lock().unwrap().clone() {
+                                    break task;
+                                }
+                                thread::yield_now();
+                            };
+                            let forged = task.stamp(fake_success(&task.func, "forged"));
+                            let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
+                                task_id: task.task_id,
+                                result: forged,
+                            });
+                            forged_sent.store(true, Ordering::Release);
+                            return;
+                        }
+                        let Ok(task) = ctx.task_rx.lock().unwrap().recv() else {
+                            return;
+                        };
+                        assert!(ctx.progress.try_claim(task.task_id, ctx.worker));
+                        *handoff.lock().unwrap() = Some(task.clone());
+                        while !forged_sent.load(Ordering::Acquire) {
+                            thread::yield_now();
+                        }
+                        let real = task.stamp(fake_success(&task.func, "real"));
+                        let _ = ctx.result_tx.send(WorkerCompletion {
+                            worker: ctx.worker,
+                            task_id: task.task_id,
+                            result: real,
+                        });
+                    })
+                },
+                Arc::new(AtomicBool::new(false)),
+                |_, _| Ok(()),
+            );
+
+            assert_eq!(report.results[0].plain_output, "real");
+            assert_eq!(report.accounting.unexpected_completions, 1);
+            assert_eq!(report.accounting.duplicate_completions, 0);
+            assert_eq!(report.accounting.analysis_completed, 1);
+            assert!(report.accounting.reconciles());
+            assert_one_row_per_task(&report, 1);
+        }
+
+        /// The tracker admits only `ACCEPTED -> QUEUED -> RUNNING | CANCELLED
+        /// | SEND_FAILED`; a second claim, a claim of an unqueued task, or a
+        /// cancel after a claim is refused and counted.
+        #[test]
+        fn progress_tracker_refuses_illegal_transitions() {
+            let tracker = super::super::BatchProgressTracker::new(2);
+            let (t0, t1) = (BatchTaskId(0), BatchTaskId(1));
+            let (w0, w1) = (super::super::WorkerId(0), super::super::WorkerId(1));
+            assert!(!tracker.try_claim(t0, w0), "claim before queueing");
+            assert!(tracker.mark_queued(t0));
+            assert!(!tracker.mark_queued(t0), "queued twice");
+            assert!(tracker.try_claim(t0, w0));
+            assert!(!tracker.try_claim(t0, w1), "second claimant");
+            assert!(!tracker.mark_cancelled(t0, w0), "cancel after claim");
+            assert!(!tracker.mark_send_failed(t0), "send failure after claim");
+            assert_eq!(
+                tracker.snapshot(t0),
+                (super::super::STATE_RUNNING, Some(w0))
+            );
+            assert!(!tracker.try_claim(BatchTaskId(7), w0), "out of range");
+            assert!(tracker.mark_queued(t1));
+            assert!(tracker.mark_cancelled(t1, w1));
+            assert!(!tracker.try_claim(t1, w1), "claim after cancel");
+            assert_eq!(tracker.rejected_transitions(), 7);
+        }
+
+        /// A panic inside the render is the function's analysis failure, not
+        /// a job-infrastructure failure: the attempt ran.
+        #[test]
+        fn render_panic_is_an_analysis_failure() {
+            let func = make_func("fn_panics", 0x1000, 8);
+            let (binary, _facts) = make_test_binary(vec![func.clone()]);
+            let result = super::super::render_catching_panic(&binary, &func, test_config(), || {
+                panic!("simulated decompiler defect")
+            });
+            assert_eq!(result.outcome_kind, RenderOutcomeKind::AnalysisAborted);
+            assert_eq!(result.json_entry["failure_domain"], "analysis");
+            assert_eq!(result.json_entry["analysis_status"], "panicked");
+            assert!(result.json_entry.get("job_status").is_none());
+            // The pre-split value is kept for existing consumers.
+            assert_eq!(
+                result.json_entry["fallback_reason"],
+                "rust_sleigh:worker_internal_error"
+            );
+        }
+
+        /// A render that outlives its time budget is the function's analysis
+        /// outcome as well.
+        #[test]
+        fn render_timeout_is_an_analysis_failure() {
+            let func = make_func("fn_slow", 0x1000, 8);
+            let (binary, _facts) = make_test_binary(vec![func.clone()]);
+            let slow_func = func.clone();
+            let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+            let mut config = test_config();
+            config.timeout_ms = Some(20);
+            let result = super::super::render_on_large_stack_with(
+                binary,
+                &func,
+                config,
+                8 * 1024 * 1024,
+                move || {
+                    // Outlives the budget until the test releases it.
+                    let _ = release_rx.recv();
+                    fake_success(&slow_func, "too late")
+                },
+            );
+            drop(release_tx);
+            assert_eq!(result.outcome_kind, RenderOutcomeKind::AnalysisAborted);
+            assert_eq!(result.json_entry["failure_domain"], "analysis");
+            assert_eq!(result.json_entry["analysis_status"], "timed_out");
         }
 
         #[test]
@@ -1365,7 +1846,7 @@ mod tests {
                                 Err(_) => break,
                             };
                             let Ok(task) = task else { break };
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             rendered_counts.lock().unwrap()[task.task_id.0] += 1;
                             if ctx.worker_idx == 0 {
                                 gate.store(true, Ordering::Release);
@@ -1373,8 +1854,9 @@ mod tests {
                             }
                             let mut rendered =
                                 fake_success(&task.func, &format!("// {}", task.func.name));
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: rendered,
                             });
@@ -1396,7 +1878,7 @@ mod tests {
             assert_eq!(*rendered_counts.lock().unwrap(), [1, 1, 1]);
 
             let panicked_row = &report.results[0];
-            assert_eq!(panicked_row.task_id, Some(BatchTaskId(0)));
+            assert_eq!(panicked_row.task_id(), Some(BatchTaskId(0)));
             assert_eq!(
                 panicked_row.json_entry["failure_domain"],
                 "job_infrastructure"
@@ -1432,10 +1914,11 @@ mod tests {
                     }
                     thread::Builder::new().spawn(move || {
                         while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             let mut rendered = fake_success(&task.func, "ok");
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: rendered,
                             });
@@ -1506,10 +1989,11 @@ mod tests {
                 |ctx: WorkerSupervisorContext| {
                     thread::Builder::new().spawn(move || {
                         if let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             let mut rendered = fake_success(&task.func, "first");
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: rendered,
                             });
@@ -1548,31 +2032,41 @@ mod tests {
                     thread::Builder::new().spawn(move || {
                         let mut injected = false;
                         while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             if !injected {
                                 injected = true;
                                 // Stale completion #1: out-of-range TaskId.
                                 let _ = ctx.result_tx.send(WorkerCompletion {
+                                    worker: ctx.worker,
                                     task_id: BatchTaskId(99),
                                     result: fake_success(&task.func, "stale_id"),
                                 });
-                                // Stale completion #2: wrong address for target TaskId.
+                                // Mismatch: payload rendered for another function.
                                 let wrong_addr_func = make_func("wrong", 0x9999, 4);
                                 let _ = ctx.result_tx.send(WorkerCompletion {
+                                    worker: ctx.worker,
                                     task_id: task.task_id,
-                                    result: fake_success(&wrong_addr_func, "stale_addr"),
+                                    result: task
+                                        .stamp(fake_success(&wrong_addr_func, "stale_addr")),
                                 });
                             }
 
-                            let valid =
-                                fake_success(&task.func, &format!("first:{}", task.func.name));
+                            let valid = task.stamp(fake_success(
+                                &task.func,
+                                &format!("first:{}", task.func.name),
+                            ));
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: valid,
                             });
                             // Duplicate completion with mutated payload must be ignored.
-                            let dup = fake_success(&task.func, &format!("dup:{}", task.func.name));
+                            let dup = task.stamp(fake_success(
+                                &task.func,
+                                &format!("dup:{}", task.func.name),
+                            ));
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: dup,
                             });
@@ -1586,7 +2080,8 @@ mod tests {
             assert_eq!(report.results.len(), 2);
             assert_eq!(report.results[0].plain_output, "first:fn_first");
             assert_eq!(report.results[1].plain_output, "first:fn_second");
-            assert_eq!(report.accounting.stale_completions, 2);
+            assert_eq!(report.accounting.stale_completions, 1);
+            assert_eq!(report.accounting.identity_mismatches, 1);
             assert_eq!(report.accounting.duplicate_completions, 2);
             assert_eq!(report.accounting.analysis_completed, 2);
             assert!(report.accounting.reconciles());
@@ -1614,10 +2109,11 @@ mod tests {
                     let cancel_ref = Arc::clone(&cancel_for_worker);
                     thread::Builder::new().spawn(move || {
                         if let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             let mut rendered = fake_success(&task.func, "done");
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             let _ = ctx.result_tx.send(WorkerCompletion {
+                                worker: ctx.worker,
                                 task_id: task.task_id,
                                 result: rendered,
                             });
@@ -1625,7 +2121,7 @@ mod tests {
                         }
                         while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
                             if ctx.cancel.load(Ordering::Acquire) {
-                                ctx.progress.mark_cancelled_by_worker(task.task_id);
+                                ctx.progress.mark_cancelled(task.task_id, ctx.worker);
                                 break;
                             }
                         }
@@ -1687,12 +2183,13 @@ mod tests {
                             if ctx.stop_dispatch.load(Ordering::Acquire) {
                                 break;
                             }
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             let mut rendered = fake_success(&task.func, "rendered");
-                            rendered.task_id = Some(task.task_id);
+                            rendered = task.stamp(rendered);
                             if ctx
                                 .result_tx
                                 .send(WorkerCompletion {
+                                    worker: ctx.worker,
                                     task_id: task.task_id,
                                     result: rendered,
                                 })
@@ -1745,11 +2242,12 @@ mod tests {
                 |ctx: WorkerSupervisorContext| {
                     thread::Builder::new().spawn(move || {
                         while let Ok(task) = ctx.task_rx.lock().unwrap().recv() {
-                            ctx.progress.mark_running(task.task_id);
+                            ctx.progress.try_claim(task.task_id, ctx.worker);
                             if task.task_id == BatchTaskId(0) {
                                 let mut rendered = fake_hard_error(&task.func, "bad pcode");
-                                rendered.task_id = Some(task.task_id);
+                                rendered = task.stamp(rendered);
                                 let _ = ctx.result_tx.send(WorkerCompletion {
+                                    worker: ctx.worker,
                                     task_id: task.task_id,
                                     result: rendered,
                                 });

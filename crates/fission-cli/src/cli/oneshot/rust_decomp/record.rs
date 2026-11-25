@@ -21,7 +21,11 @@ pub(crate) struct CliRustDecompileRecord {
     pub outcome: CliRustOutcome,
 }
 
-/// Distinguishes batch job/infrastructure failures from function-level analysis errors.
+/// A batch job/infrastructure failure: the batch runner did not give the
+/// function a complete render attempt (or could not deliver its result).
+/// Contrast [`AbortedRenderKind::AnalysisPanicked`] and
+/// [`AbortedRenderKind::AnalysisTimedOut`], where the attempt ran and the
+/// analysis itself failed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InfrastructureFailureKind {
     WorkerInternalError,
@@ -43,6 +47,29 @@ impl InfrastructureFailureKind {
             Self::WorkerInternalError => "infrastructure_failed",
             Self::NotStarted => "not_started",
             Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// Why a render produced no analysis output of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AbortedRenderKind {
+    /// The render ran on this function and panicked: a decompiler defect on
+    /// this input, not a fault of the batch runner.
+    AnalysisPanicked,
+    /// The render ran on this function past its wall-clock budget.
+    AnalysisTimedOut,
+    /// The batch runner failed; the function's analysis is not to blame.
+    Infrastructure(InfrastructureFailureKind),
+}
+
+impl AbortedRenderKind {
+    pub(crate) fn fallback_reason(self) -> &'static str {
+        match self {
+            // The value every aborted render carried before the analysis /
+            // infrastructure split; `failure_domain` now tells them apart.
+            Self::AnalysisPanicked | Self::AnalysisTimedOut => "rust_sleigh:worker_internal_error",
+            Self::Infrastructure(kind) => kind.fallback_reason(),
         }
     }
 }
@@ -78,8 +105,10 @@ pub(crate) enum CliRustOutcome {
         error_text: String,
         decomp_sec: f64,
     },
+    /// The render did not produce an analysis result: it panicked, timed
+    /// out, or the batch runner failed around it (see `kind`).
     WorkerInternalError {
-        kind: InfrastructureFailureKind,
+        kind: AbortedRenderKind,
         message: String,
         assembly_fallback_code: Option<String>,
     },

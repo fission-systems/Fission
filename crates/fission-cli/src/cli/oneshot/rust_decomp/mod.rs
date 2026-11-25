@@ -26,12 +26,19 @@ use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RenderOutcomeKind {
+    /// The render ran to an analysis outcome (success, assembly fallback or
+    /// a reported analysis error).
     Analysis,
+    /// The render ran and the analysis panicked or exceeded its time budget.
+    AnalysisAborted,
+    /// The batch runner failed around the render.
     Infrastructure(record::InfrastructureFailureKind),
 }
 
 pub(crate) struct FunctionRenderResult {
-    pub task_id: Option<workers::BatchTaskId>,
+    /// Which batch task this result was rendered for, stamped where the
+    /// task's function was handed to the renderer. `None` outside a batch.
+    pub provenance: Option<workers::TaskProvenance>,
     pub outcome_kind: RenderOutcomeKind,
     pub address: u64,
     pub decomp_sec: f64,
@@ -273,9 +280,13 @@ fn record_into_function_render_result(
         CliRustOutcome::Success { .. }
         | CliRustOutcome::AssemblyFallback { .. }
         | CliRustOutcome::HardError { .. } => RenderOutcomeKind::Analysis,
-        CliRustOutcome::WorkerInternalError { kind, .. } => {
-            RenderOutcomeKind::Infrastructure(*kind)
-        }
+        CliRustOutcome::WorkerInternalError { kind, .. } => match kind {
+            record::AbortedRenderKind::AnalysisPanicked
+            | record::AbortedRenderKind::AnalysisTimedOut => RenderOutcomeKind::AnalysisAborted,
+            record::AbortedRenderKind::Infrastructure(kind) => {
+                RenderOutcomeKind::Infrastructure(*kind)
+            }
+        },
     };
     let decomp_sec = match &record.outcome {
         CliRustOutcome::Success { decomp_sec, .. } => *decomp_sec,
@@ -286,7 +297,7 @@ fn record_into_function_render_result(
     let json_entry = record_to_json(&record, benchmark);
     let plain_output = record_plain_output(&record);
     FunctionRenderResult {
-        task_id: None,
+        provenance: None,
         outcome_kind,
         address,
         decomp_sec,
@@ -297,19 +308,26 @@ fn record_into_function_render_result(
     }
 }
 
-pub(crate) fn make_infrastructure_error_result(
+/// A result for a render that produced no analysis output of its own.
+pub(crate) fn make_aborted_render_result(
     binary: &LoadedBinary,
     func: &FunctionInfo,
-    kind: record::InfrastructureFailureKind,
+    kind: record::AbortedRenderKind,
     message: String,
     config: RenderConfig,
 ) -> FunctionRenderResult {
     let fallback = match kind {
-        record::InfrastructureFailureKind::WorkerInternalError => {
+        record::AbortedRenderKind::AnalysisPanicked
+        | record::AbortedRenderKind::AnalysisTimedOut
+        | record::AbortedRenderKind::Infrastructure(
+            record::InfrastructureFailureKind::WorkerInternalError,
+        ) => {
             fallback::make_assembly_fallback(binary, binary.inner().data.as_slice(), func, &message)
         }
-        record::InfrastructureFailureKind::NotStarted
-        | record::InfrastructureFailureKind::Cancelled => None,
+        record::AbortedRenderKind::Infrastructure(
+            record::InfrastructureFailureKind::NotStarted
+            | record::InfrastructureFailureKind::Cancelled,
+        ) => None,
     };
     let asm_fallback = fallback.is_some();
     let record = CliRustDecompileRecord {
@@ -331,6 +349,22 @@ pub(crate) fn make_infrastructure_error_result(
         asm_fallback,
     );
     record_into_function_render_result(record, debug_bundle, config.benchmark)
+}
+
+pub(crate) fn make_infrastructure_error_result(
+    binary: &LoadedBinary,
+    func: &FunctionInfo,
+    kind: record::InfrastructureFailureKind,
+    message: String,
+    config: RenderConfig,
+) -> FunctionRenderResult {
+    make_aborted_render_result(
+        binary,
+        func,
+        record::AbortedRenderKind::Infrastructure(kind),
+        message,
+        config,
+    )
 }
 
 pub(crate) fn make_internal_error_result(
@@ -592,6 +626,9 @@ fn run_with_functions(
             send_errors = acct.send_errors,
             duplicate_completions = acct.duplicate_completions,
             stale_completions = acct.stale_completions,
+            unexpected_completions = acct.unexpected_completions,
+            identity_mismatches = acct.identity_mismatches,
+            rejected_transitions = acct.rejected_transitions,
             consumer_errors = acct.consumer_errors,
             "batch worker ledger reconciled infrastructure anomalies"
         );
@@ -607,9 +644,12 @@ fn run_with_functions(
 
     let mut project_renders: Vec<String> = Vec::new();
     let mut project_diagnostics = Vec::new();
-    for entry in &results {
+    let result_count = results.len();
+    // Consume the rows: each is moved into the output it belongs to rather
+    // than cloned, so a whole-binary run does not hold every row twice.
+    for entry in results {
         if effective_json {
-            let mut je = entry.json_entry.clone();
+            let mut je = entry.json_entry;
             if cli.debug_decomp {
                 if let Some(ref b) = entry.debug_bundle {
                     je["debug_decomp"] = b.clone();
@@ -628,15 +668,15 @@ fn run_with_functions(
                 all_output.push_str("// ============================================\n\n");
             }
             if cli.project {
-                project_renders.push(entry.plain_output.clone());
+                project_renders.push(entry.plain_output);
             } else {
                 all_output.push_str(&entry.plain_output);
                 all_output.push_str("\n\n");
             }
         }
         if let Some(rows) = debug_bundle_rows.as_mut() {
-            if let Some(ref b) = entry.debug_bundle {
-                rows.push(b.clone());
+            if let Some(b) = entry.debug_bundle {
+                rows.push(b);
             }
         }
     }
@@ -653,7 +693,7 @@ fn run_with_functions(
         let envelope = benchmark_envelope_json(
             cli,
             json_results,
-            results.len(),
+            result_count,
             worker_count,
             use_worker_fanout,
             available_parallelism,
