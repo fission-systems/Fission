@@ -120,8 +120,22 @@ jobs:
           tool: nextest
       - name: Build
         run: cargo nextest run --locked --no-run -p fission-emulator --test native_differential
+      # The log is the defect reporter's input (reusable-sentry-defects.yml);
+      # pipefail keeps the test's own exit status.
       - name: Compare against the CPU
-        run: cargo nextest run --locked --no-tests=fail -p fission-emulator --test native_differential --no-capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo nextest run --locked --no-tests=fail -p fission-emulator --test native_differential --no-capture 2>&1 \
+            | tee native-diff.log
+      - name: Keep the log for the defect reporter
+        if: ${{ failure() && github.event_name != 'pull_request' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: defect-evidence-native-diff-${{ matrix.os }}
+          path: native-diff.log
+          if-no-files-found: ignore
+          retention-days: 14
 
   fixtures:
     if: inputs.suite == 'loader' || inputs.suite == 'decompiler'

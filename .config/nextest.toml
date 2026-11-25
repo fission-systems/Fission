@@ -10,3 +10,14 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 [[profile.default.overrides]]
 filter = "binary(native_differential)"
 slow-timeout = { period = "120s", terminate-after = 5 }
+
+# CI runs select this profile (NEXTEST_PROFILE=ci in reusable-run-tests.yml):
+# the default profile plus a JUnit report at target/nextest/ci/junit.xml.
+# The report records a test that failed and then passed on a retry as a
+# <flakyFailure>, which scripts/ci/sentry_defects.py reports as a flaky test.
+[profile.ci]
+
+[profile.ci.junit]
+path = "junit.xml"
+store-success-output = false
+store-failure-output = true

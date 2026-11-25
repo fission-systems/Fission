@@ -143,12 +143,14 @@ jobs:
           set -euo pipefail
           cargo build --locked -p fission-dir --example concrete_replay
           python3 scripts/test/replay_fixture.py --runner target/debug/examples/concrete_replay
+      # The defect-evidence- prefix is what the Sentry defect reporter downloads.
       - name: Preserve a replayable mismatch
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fixture-replay-witness
+          name: defect-evidence-replay-witness
           path: replay-witness.json
+          if-no-files-found: ignore
 
   # Step 1: Security & Lint
   security-check:
@@ -283,6 +285,7 @@ jobs:
       run_cli_alt_feature_checks: ${{ needs.changes.outputs.run_cli_alt_feature_checks == 'true' }}
       # Doctests and optional-feature suites run beside nextest, not after it.
       parallel_lanes: true
+      evidence_name: linux
 
   # Native debugger tests are feature-gated and exercise OS process control.
   # Keep them out of unrelated Rust changes, but always run them when the
@@ -297,6 +300,7 @@ jobs:
       crates: "fission-dynamic,fission-cli"
       features: "fission-dynamic/interactive_runtime,fission-cli/debugger"
       profile: debug
+      evidence_name: linux-debugger
 
   # Smoke builds its own CLI and PE fixture; no artifacts from test-linux.
   # Keep both lanes required in CI Summary, but do not serialize them.
@@ -320,6 +324,7 @@ jobs:
       os: macos-latest
       crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
+      evidence_name: macos
 
   platform-debugger:
     needs: [changes]
@@ -466,6 +471,22 @@ jobs:
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
       output_diff: ${{ needs.changes.outputs.run_decomp_corpus == 'true' }}
+
+  # Report-only, not part of CI Summary: flaky tests (failed, then passed on
+  # nextest's retry), aborted tests, native differential divergences and
+  # replay mismatches of main pushes and merge candidates, as Sentry events.
+  # Never runs for pull requests; see reusable-sentry-defects.yml.
+  sentry-defects:
+    needs: [replay-checks, test-linux, test-linux-debugger, test-macos, native-diff]
+    if: >-
+      always()
+      && github.repository == 'fission-systems/Fission'
+      && contains(fromJSON('["push","merge_group","workflow_dispatch"]'), github.event_name)
+    uses: ./.github/workflows/reusable-sentry-defects.yml
+    with:
+      pattern: defect-evidence-*
+    secrets:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
   # Final summary — lane-aware required jobs
   ci-summary:
