@@ -72,10 +72,6 @@ pub enum StubbedEnd {
     Other(CallOutcome),
 }
 
-/// How far an aliased input pointer pointing into the stack frame is
-/// conservatively treated as observable caller/out-param storage (in bytes).
-pub const ALIAS_OBSERVATION_WINDOW: u64 = 256;
-
 /// How far above `entry_sp` is inspected when auditing writes into caller
 /// stack space outside ABI home/shadow slots.
 const CALLER_STACK_AUDIT_WINDOW: u64 = 4096;
@@ -103,9 +99,11 @@ pub struct FrameExclusionSpec {
     /// Outgoing caller-prepared stack argument slots above `abi_home_space`.
     /// Never excluded.
     pub caller_stack_args: std::ops::Range<u64>,
-    /// Subranges inside the frame that an incoming parameter pointer can alias;
-    /// writes there are observable rather than private.
-    pub aliased_input_ranges: Vec<std::ops::Range<u64>>,
+    /// Incoming argument values (by slot) that point into the private frame.
+    /// No fixed window after such a pointer is assumed observable: the
+    /// object it designates is bounded later, by the ground-truth check, from
+    /// objects whose extent is known, or the comparison is not justified.
+    pub aliased_inputs: Vec<(usize, u64)>,
 }
 
 impl FrameExclusionSpec {
@@ -147,12 +145,11 @@ impl FrameExclusionSpec {
             return_addr_slot,
             abi_home_space,
             caller_stack_args,
-            aliased_input_ranges: Vec::new(),
+            aliased_inputs: Vec::new(),
         };
-        for &arg in args {
+        for (slot, &arg) in args.iter().enumerate() {
             if spec.in_private_frame(arg) {
-                spec.aliased_input_ranges
-                    .push(arg..arg.saturating_add(ALIAS_OBSERVATION_WINDOW));
+                spec.aliased_inputs.push((slot, arg));
             }
         }
         spec
@@ -173,14 +170,13 @@ impl FrameExclusionSpec {
         in_candidate && !in_ret && !in_caller_args
     }
 
-    /// True if a write at `addr` may be excluded from external-memory diffing.
+    /// True if a write at `addr` is excluded from the default external-memory
+    /// diff. Frame objects whose address escapes are put back by the
+    /// ground-truth check over their full known extent; see
+    /// [`FrameExclusionJustification::RequiresObjectBounds`].
     #[must_use]
     pub fn is_excluded(&self, addr: u64) -> bool {
         self.in_private_frame(addr)
-            && !self
-                .aliased_input_ranges
-                .iter()
-                .any(|range| range.contains(&addr))
     }
 
     /// True if `addr` lies in caller-owned stack space above/at `entry_sp`
@@ -216,6 +212,24 @@ pub enum EscapedFramePointer {
         site: u64,
         ptr: u64,
     },
+    /// An incoming argument already pointed into the private frame.
+    AliasedInput {
+        slot: usize,
+        ptr: u64,
+    },
+}
+
+impl EscapedFramePointer {
+    /// The frame address that escaped.
+    #[must_use]
+    pub fn pointer(&self) -> u64 {
+        match self {
+            Self::Returned(ptr)
+            | Self::StoredExternally { target: ptr, .. }
+            | Self::PassedToCall { ptr, .. }
+            | Self::AliasedInput { ptr, .. } => *ptr,
+        }
+    }
 }
 
 /// Whether excluding private frame writes in this run is justified.
@@ -223,9 +237,12 @@ pub enum EscapedFramePointer {
 pub enum FrameExclusionJustification {
     /// No private-frame pointer escaped, SP balanced, no overlapping accesses.
     JustifiedPrivateFrame,
-    /// One or more private-frame pointers were passed directly to stubbed callees
-    /// (modeled separately by argument comparison and callee-write stubs).
-    EscapedToCallee { count: usize },
+    /// Private-frame pointers were passed to callees or arrived as input
+    /// arguments while the function ran. The frame bytes behind them are
+    /// observable, so excluding the frame is justified only once every such
+    /// pointer is bounded by an object of known extent, which is then
+    /// compared in full; an unbounded one leaves the run inconclusive.
+    RequiresObjectBounds { count: usize },
     /// Frame exclusion could not be fully justified as unobservable private
     /// storage (e.g. frame pointer returned/stored externally, SP mismatch, or
     /// write straddling the frame boundary).
@@ -236,6 +253,9 @@ pub enum FrameExclusionJustification {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FrameExclusionAudit {
     pub spec: FrameExclusionSpec,
+    /// Byte order of pointers stored in memory, to follow pointers held in
+    /// escaped frame objects.
+    pub endian: Endianness,
     pub excluded_write_bytes: usize,
     pub caller_stack_write_addrs: Vec<u64>,
     pub aliased_input_addrs: Vec<u64>,
@@ -524,49 +544,139 @@ fn collect_memory_access_audit(
     }
 }
 
-fn scan_stored_frame_pointers(
+/// Every way a private-frame address left the function in this run.
+///
+/// Complete by construction: escapes decide whether excluding the frame is
+/// justified, so they are never truncated to a sample size. The list is
+/// bounded by the run itself (at most [`MAX_STUBBED_CALLS`] calls times the
+/// argument registers, plus one entry per pointer-sized observable store).
+fn collect_escaped_frame_pointers(
+    returned: Option<u64>,
+    calls: &[ObservedCall],
     observable_writes: &BTreeMap<u64, u8>,
     spec: &FrameExclusionSpec,
     ptr_size: u8,
     endian: Endianness,
-    escaped: &mut Vec<EscapedFramePointer>,
-) {
+) -> Vec<EscapedFramePointer> {
+    let mut escaped: Vec<EscapedFramePointer> = spec
+        .aliased_inputs
+        .iter()
+        .map(|&(slot, ptr)| EscapedFramePointer::AliasedInput { slot, ptr })
+        .collect();
+    if let Some(ret) = returned
+        && spec.in_private_frame(ret)
+    {
+        escaped.push(EscapedFramePointer::Returned(ret));
+    }
+    for (call_index, call) in calls.iter().enumerate() {
+        for &arg in &call.args {
+            if spec.in_private_frame(arg) {
+                escaped.push(EscapedFramePointer::PassedToCall {
+                    call_index,
+                    site: call.site,
+                    ptr: arg,
+                });
+            }
+        }
+    }
+    for (at, target) in stored_frame_pointers(observable_writes, spec, ptr_size, endian) {
+        escaped.push(EscapedFramePointer::StoredExternally { at, target });
+    }
+    escaped
+}
+
+/// Whether excluding the private frame is justified given `escaped`, the
+/// stack-pointer delta across the return, and stores straddling the frame
+/// edge.
+fn justify_frame_exclusion(
+    escaped: &[EscapedFramePointer],
+    sp_delta: Option<i64>,
+    boundary_overlaps: &[(u64, u32)],
+) -> FrameExclusionJustification {
+    let mut unjustified_reasons = Vec::new();
+    let mut needs_bounds = 0usize;
+    for esc in escaped {
+        match esc {
+            EscapedFramePointer::Returned(ptr) => unjustified_reasons.push(format!(
+                "function returned pointer {ptr:#x} inside its private frame"
+            )),
+            EscapedFramePointer::StoredExternally { at, target } => {
+                unjustified_reasons.push(format!(
+                    "function stored frame pointer {target:#x} to external address {at:#x}"
+                ));
+            }
+            EscapedFramePointer::PassedToCall { .. } | EscapedFramePointer::AliasedInput { .. } => {
+                needs_bounds += 1;
+            }
+        }
+    }
+    if let Some(delta) = sp_delta
+        && delta != 0
+    {
+        unjustified_reasons.push(format!(
+            "stack pointer shifted by {delta} bytes across return"
+        ));
+    }
+    if let Some(&(at, size)) = boundary_overlaps.first() {
+        unjustified_reasons.push(format!(
+            "write at {at:#x} ({size} bytes) straddles the excluded frame boundary"
+        ));
+    }
+    if !unjustified_reasons.is_empty() {
+        FrameExclusionJustification::Unjustified {
+            reasons: unjustified_reasons,
+        }
+    } else if needs_bounds > 0 {
+        FrameExclusionJustification::RequiresObjectBounds {
+            count: needs_bounds,
+        }
+    } else {
+        FrameExclusionJustification::JustifiedPrivateFrame
+    }
+}
+
+/// Decode a `ptr_size`-byte pointer at `addr` from `bytes`, when every byte of
+/// it is present.
+pub(crate) fn read_pointer(
+    bytes: &BTreeMap<u64, u8>,
+    addr: u64,
+    ptr_size: u8,
+    endian: Endianness,
+) -> Option<u64> {
     let size = usize::from(ptr_size);
     if size != 4 && size != 8 {
-        return;
+        return None;
     }
-    for &addr in observable_writes.keys() {
-        if escaped.len() >= MAX_AUDIT_SAMPLES {
-            break;
-        }
-        let Some(bytes) = (0..size as u64)
-            .map(|off| observable_writes.get(&addr.wrapping_add(off)).copied())
-            .collect::<Option<Vec<u8>>>()
-        else {
-            continue;
-        };
-        let target = match (size, endian) {
-            (8, Endianness::Little) => u64::from_le_bytes(bytes.try_into().expect("8 bytes")),
-            (8, Endianness::Big) => u64::from_be_bytes(bytes.try_into().expect("8 bytes")),
-            (4, Endianness::Little) => {
-                u64::from(u32::from_le_bytes(bytes.try_into().expect("4 bytes")))
-            }
-            (4, Endianness::Big) => {
-                u64::from(u32::from_be_bytes(bytes.try_into().expect("4 bytes")))
-            }
-            _ => continue,
-        };
-        if spec.in_private_frame(target)
-            && !escaped.iter().any(|existing| {
-                matches!(
-                    existing,
-                    EscapedFramePointer::StoredExternally { at, .. } if *at == addr
-                )
-            })
-        {
-            escaped.push(EscapedFramePointer::StoredExternally { at: addr, target });
-        }
+    let mut raw = [0u8; 8];
+    for (off, slot) in raw.iter_mut().take(size).enumerate() {
+        *slot = *bytes.get(&addr.wrapping_add(off as u64))?;
     }
+    Some(match (size, endian) {
+        (8, Endianness::Little) => u64::from_le_bytes(raw),
+        (8, Endianness::Big) => u64::from_be_bytes(raw),
+        (4, Endianness::Little) => {
+            u64::from(u32::from_le_bytes(raw[..4].try_into().expect("4 bytes")))
+        }
+        (_, _) => u64::from(u32::from_be_bytes(raw[..4].try_into().expect("4 bytes"))),
+    })
+}
+
+/// Every `(at, target)` where `writes` holds a whole pointer at `at` whose
+/// value lies in the private frame. Unaligned positions are scanned too: a
+/// packed store still hands the address out.
+fn stored_frame_pointers(
+    writes: &BTreeMap<u64, u8>,
+    spec: &FrameExclusionSpec,
+    ptr_size: u8,
+    endian: Endianness,
+) -> Vec<(u64, u64)> {
+    writes
+        .keys()
+        .filter_map(|&at| {
+            let target = read_pointer(writes, at, ptr_size, endian)?;
+            spec.in_private_frame(target).then_some((at, target))
+        })
+        .collect()
 }
 
 /// Stack pointer at the callee's entry for a call with `stack_args` stack
@@ -1239,80 +1349,29 @@ impl EmulatorHarness {
             .expect("frame state")
             .first_undefined_read;
 
-        let mut escaped_frame_pointers = Vec::new();
-        if let StubbedEnd::Returned(ret) = end
-            && frame_spec.in_private_frame(ret)
-        {
-            escaped_frame_pointers.push(EscapedFramePointer::Returned(ret));
-        }
-        for (call_index, call) in calls.iter().enumerate() {
-            for &arg in &call.args {
-                if frame_spec.in_private_frame(arg)
-                    && escaped_frame_pointers.len() < MAX_AUDIT_SAMPLES
-                {
-                    escaped_frame_pointers.push(EscapedFramePointer::PassedToCall {
-                        call_index,
-                        site: call.site,
-                        ptr: arg,
-                    });
-                }
-            }
-        }
-        scan_stored_frame_pointers(
+        let returned = match end {
+            StubbedEnd::Returned(ret) => Some(ret),
+            _ => None,
+        };
+        let escaped_frame_pointers = collect_escaped_frame_pointers(
+            returned,
+            &calls,
             &writes,
             &frame_spec,
             ptr_size_u8,
             endian,
-            &mut escaped_frame_pointers,
         );
-
-        let mut unjustified_reasons = Vec::new();
-        let mut passed_to_callee_count = 0usize;
-        for esc in &escaped_frame_pointers {
-            match esc {
-                EscapedFramePointer::Returned(ptr) => unjustified_reasons.push(format!(
-                    "function returned pointer {ptr:#x} inside its private frame"
-                )),
-                EscapedFramePointer::StoredExternally { at, target } => {
-                    unjustified_reasons.push(format!(
-                        "function stored frame pointer {target:#x} to external address {at:#x}"
-                    ));
-                }
-                EscapedFramePointer::PassedToCall { .. } => passed_to_callee_count += 1,
-            }
-        }
-        if let Some(delta) = sp_delta
-            && delta != 0
-        {
-            unjustified_reasons.push(format!(
-                "stack pointer shifted by {delta} bytes across return"
-            ));
-        }
-        if !boundary_overlaps.is_empty() {
-            let (at, size) = boundary_overlaps[0];
-            unjustified_reasons.push(format!(
-                "write at {at:#x} ({size} bytes) straddles the excluded frame boundary"
-            ));
-        }
-        let justification = if !unjustified_reasons.is_empty() {
-            FrameExclusionJustification::Unjustified {
-                reasons: unjustified_reasons,
-            }
-        } else if passed_to_callee_count > 0 {
-            FrameExclusionJustification::EscapedToCallee {
-                count: passed_to_callee_count,
-            }
-        } else {
-            FrameExclusionJustification::JustifiedPrivateFrame
-        };
+        let justification =
+            justify_frame_exclusion(&escaped_frame_pointers, sp_delta, &boundary_overlaps);
 
         let aliased_input_addrs: Vec<u64> = frame_spec
-            .aliased_input_ranges
+            .aliased_inputs
             .iter()
-            .map(|r| r.start)
+            .map(|&(_, ptr)| ptr)
             .collect();
         let frame_audit = FrameExclusionAudit {
             spec: frame_spec,
+            endian,
             excluded_write_bytes: excluded_addrs.len(),
             caller_stack_write_addrs: caller_stack_addrs.into_iter().collect(),
             aliased_input_addrs,
@@ -1454,9 +1513,12 @@ impl EmulatorHarness {
 #[cfg(test)]
 mod tests {
     use super::{
-        EmulatorHarness, FrameExclusionSpec, call_frame_sp, encode_word, link_reg_call_frame_sp,
+        EmulatorHarness, EscapedFramePointer, FrameExclusionJustification, FrameExclusionSpec,
+        MAX_AUDIT_SAMPLES, ObservedCall, call_frame_sp, collect_escaped_frame_pointers,
+        encode_word, justify_frame_exclusion, link_reg_call_frame_sp, read_pointer,
     };
     use fission_emulator::arch::Endianness;
+    use std::collections::BTreeMap;
 
     /// Where the callee finds stack argument `n`, as `call` writes it:
     /// `new_sp + stack_arg_offset(n)` with `stack_arg_offset(n) = ptr + shadow
@@ -1580,12 +1642,99 @@ mod tests {
         assert!(!win64.is_caller_stack(entry_sp + 8));
         assert!(win64.is_caller_stack(entry_sp + 0x28));
 
-        // Out-param pointer aliasing into private frame disables exclusion around alias.
+        // An input pointer into the private frame is recorded, not given a
+        // guessed observable window: the ground-truth check bounds it by a
+        // known object or reports it unbounded.
         let alias_ptr = entry_sp - 0x200;
-        let aliased = FrameExclusionSpec::from_abi(entry_sp, 8, false, 8, 6, &[alias_ptr]);
+        let aliased = FrameExclusionSpec::from_abi(entry_sp, 8, false, 8, 6, &[7, alias_ptr]);
         assert!(aliased.in_private_frame(alias_ptr));
-        assert!(!aliased.is_excluded(alias_ptr));
-        assert!(!aliased.is_excluded(alias_ptr + 8));
+        assert_eq!(aliased.aliased_inputs, vec![(1, alias_ptr)]);
+        assert!(aliased.is_excluded(alias_ptr + 0x100));
         assert!(aliased.is_excluded(entry_sp - 4));
+    }
+
+    fn sysv_spec() -> FrameExclusionSpec {
+        FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[])
+    }
+
+    #[test]
+    fn escape_collection_is_not_truncated_by_the_audit_sample_cap() {
+        let spec = sysv_spec();
+        let frame_ptr = spec.entry_sp - 0x80;
+        let calls: Vec<ObservedCall> = (0..(MAX_AUDIT_SAMPLES as u64 + 4))
+            .map(|n| ObservedCall {
+                site: 0x1000 + n,
+                args: vec![frame_ptr],
+            })
+            .collect();
+        let global = 0x60_0000_u64;
+        let writes: BTreeMap<u64, u8> = frame_ptr
+            .to_le_bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (global + i as u64, *b))
+            .collect();
+        let escaped =
+            collect_escaped_frame_pointers(None, &calls, &writes, &spec, 8, Endianness::Little);
+        assert_eq!(
+            escaped
+                .iter()
+                .filter(|e| matches!(e, EscapedFramePointer::PassedToCall { .. }))
+                .count(),
+            calls.len()
+        );
+        assert!(escaped.contains(&EscapedFramePointer::StoredExternally {
+            at: global,
+            target: frame_ptr
+        }));
+        assert!(matches!(
+            justify_frame_exclusion(&escaped, Some(0), &[]),
+            FrameExclusionJustification::Unjustified { .. }
+        ));
+    }
+
+    #[test]
+    fn callee_and_input_escapes_require_object_bounds() {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[0x7fff_0000 - 0x40]);
+        let calls = vec![ObservedCall {
+            site: 0x1000,
+            args: vec![0x7fff_0000 - 0x80],
+        }];
+        let escaped = collect_escaped_frame_pointers(
+            Some(1),
+            &calls,
+            &BTreeMap::new(),
+            &spec,
+            8,
+            Endianness::Little,
+        );
+        assert_eq!(escaped.len(), 2);
+        assert_eq!(
+            justify_frame_exclusion(&escaped, Some(0), &[]),
+            FrameExclusionJustification::RequiresObjectBounds { count: 2 }
+        );
+        assert_eq!(
+            justify_frame_exclusion(&[], Some(0), &[]),
+            FrameExclusionJustification::JustifiedPrivateFrame
+        );
+        assert!(matches!(
+            justify_frame_exclusion(&[], Some(8), &[]),
+            FrameExclusionJustification::Unjustified { .. }
+        ));
+    }
+
+    #[test]
+    fn read_pointer_needs_every_byte_and_respects_width() {
+        let bytes: BTreeMap<u64, u8> = (0..8u64).map(|i| (0x100 + i, i as u8 + 1)).collect();
+        assert_eq!(
+            read_pointer(&bytes, 0x100, 8, Endianness::Little),
+            Some(0x0807_0605_0403_0201)
+        );
+        assert_eq!(
+            read_pointer(&bytes, 0x100, 4, Endianness::Big),
+            Some(0x0102_0304)
+        );
+        assert_eq!(read_pointer(&bytes, 0x101, 8, Endianness::Little), None);
+        assert_eq!(read_pointer(&bytes, 0x100, 2, Endianness::Little), None);
     }
 }

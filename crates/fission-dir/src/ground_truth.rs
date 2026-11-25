@@ -22,6 +22,7 @@ use crate::call_sites::MachineFlow;
 use crate::emu_driver::{
     CallOutcome, CallStub, EmulatorHarness, EscapedFramePointer, FrameExclusionAudit,
     FrameExclusionJustification, FrameExclusionSpec, MemoryAccessAudit, ObservedCall, StubbedEnd,
+    read_pointer,
 };
 use crate::eval::{
     CallEvent, Run as InterpRun, UndefinedRead, World, hir_addressed_locals, hir_free_names,
@@ -46,10 +47,6 @@ const MAX_SAMPLE_WITNESSES: usize = 8;
 
 /// Maximum synthetic unmapped addresses sampled per interpreter run.
 const MAX_INTERP_SYNTHETIC_SAMPLES: usize = 16;
-
-/// Size of the byte window checked around an escaped frame pointer returned or
-/// stored externally by a function whose frame exclusion was unjustified.
-const ESCAPED_FRAME_CHECK_WINDOW: u64 = 64;
 
 /// What the comparison needs from outside the two trees and the emulator.
 #[derive(Debug, Clone, Default)]
@@ -139,7 +136,12 @@ impl Grounding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryComparisonKind {
     /// Final written byte states agree across all addresses outside the audited
-    /// private stack frame exclusion (does not enforce intermediate write order).
+    /// private stack frame exclusion, plus the full extent of every frame
+    /// object whose address escaped (returned, stored, passed to a callee, or
+    /// received as an input) and whose bounds are known. A frame address with
+    /// no known bounding object makes the run inconclusive instead of being
+    /// compared over a guessed window. Intermediate write order is not
+    /// enforced.
     FinalStateOutsideExcludedFrame,
 }
 
@@ -179,6 +181,9 @@ impl ConcreteObservationScope {
                 "floating-point and vector registers outside modeled integer ABI slots".to_string(),
                 "host syscalls, I/O, randomness, clocks, and concurrency/interleaving".to_string(),
                 "intermediate store ordering inside identically-ending non-overlapping writes"
+                    .to_string(),
+                "memory a stubbed callee reads through its pointer arguments at the time of \
+                 the call (escaped frame objects are compared by their final contents)"
                     .to_string(),
             ],
         }
@@ -276,7 +281,56 @@ pub struct GroundTruthDenominators {
     pub skipped_emulator_errors: usize,
     pub asymmetric_fault_runs: usize,
     pub unjustified_frame_runs: usize,
+    /// Runs left unknown because the machine broke the ABI contract the tree
+    /// implies (a callee-saved register changed across the return).
+    pub abi_violation_runs: usize,
     pub prehir_skipped_runs: usize,
+}
+
+impl GroundTruthDenominators {
+    /// Why these counts do not add up, or `None` when every attempted run
+    /// sits in exactly one terminal bucket and every checked run in exactly
+    /// one verdict bucket.
+    #[must_use]
+    pub fn consistency_error(&self) -> Option<String> {
+        let terminal = self.checked_runs
+            + self.unknown_runs
+            + self.skipped_interpreter_errors
+            + self.skipped_emulator_errors;
+        if self.attempted_runs != terminal {
+            return Some(format!(
+                "attempted {} != checked + unknown + skipped ({terminal})",
+                self.attempted_runs
+            ));
+        }
+        let verdicts =
+            self.agreed_runs + self.diverged_runs + self.suspect_runs + self.asymmetric_fault_runs;
+        if self.checked_runs != verdicts {
+            return Some(format!(
+                "checked {} != agreed + diverged + suspect + asymmetric ({verdicts})",
+                self.checked_runs
+            ));
+        }
+        if self.agreed_runs != self.native_admissible_runs + self.synthetic_model_runs {
+            return Some(format!(
+                "agreed {} != native {} + synthetic {}",
+                self.agreed_runs, self.native_admissible_runs, self.synthetic_model_runs
+            ));
+        }
+        if self.unjustified_frame_runs + self.abi_violation_runs > self.unknown_runs {
+            return Some(format!(
+                "unjustified-frame {} + abi-violation {} exceed unknown {}",
+                self.unjustified_frame_runs, self.abi_violation_runs, self.unknown_runs
+            ));
+        }
+        if self.attempted_runs > self.planned_runs {
+            return Some(format!(
+                "attempted {} > planned {}",
+                self.attempted_runs, self.planned_runs
+            ));
+        }
+        None
+    }
 }
 
 /// Explicit, non-overstated input case for native-admissible verification.
@@ -576,11 +630,21 @@ fn push_witness_bounded(
 }
 
 fn is_interp_runtime_trap(msg: &str) -> bool {
-    msg.contains("division by zero")
-        || msg.contains("modulo by zero")
-        || msg.contains("did not finish within")
-        || msg.contains("more than ")
-        || msg.contains("load from unmapped address")
+    is_interp_arithmetic_trap(msg) || msg.contains("load from unmapped address")
+}
+
+/// An integer division or remainder by zero in the tree. Natively the
+/// machine's divide instruction traps too (x86 `#DE`), but the emulator's
+/// p-code division does not raise it, so the machine side of such a run is
+/// not evidence either way.
+fn is_interp_arithmetic_trap(msg: &str) -> bool {
+    msg.contains("division by zero") || msg.contains("modulo by zero")
+}
+
+/// The interpreter's own step or call budget ran out: a resource limit, not a
+/// termination behaviour of the tree.
+fn is_interp_budget(msg: &str) -> bool {
+    msg.contains("did not finish within") || msg.contains("more than ")
 }
 
 fn classify_interp_err(err: &anyhow::Error) -> TerminationKind {
@@ -588,7 +652,9 @@ fn classify_interp_err(err: &anyhow::Error) -> TerminationKind {
         return TerminationKind::UndefinedRead(undef.to_string());
     }
     let msg = err.to_string();
-    if is_interp_runtime_trap(&msg) {
+    if is_interp_budget(&msg) {
+        TerminationKind::HitBudget
+    } else if is_interp_runtime_trap(&msg) {
         TerminationKind::Trap(msg)
     } else {
         TerminationKind::Unsupported(msg)
@@ -604,14 +670,52 @@ fn classify_machine_err(err: &anyhow::Error, strict_native: bool) -> (Terminatio
         return (TerminationKind::Fault(fault.to_string()), strict_native);
     }
     let msg = err.to_string();
-    let is_arith_or_fault = msg.contains("divide")
-        || msg.contains("division")
-        || msg.contains("fault")
-        || msg.contains("p-code budget");
+    if msg.contains("p-code budget") {
+        // A step budget is a resource limit, not a fault of the code.
+        return (TerminationKind::HitBudget, true);
+    }
+    let is_arith_or_fault =
+        msg.contains("divide") || msg.contains("division") || msg.contains("fault");
     (
         TerminationKind::Fault(msg),
         strict_native || is_arith_or_fault,
     )
+}
+
+/// Why a run whose two sides ended as `machine` and `hir` is neither agreement
+/// nor a counterexample, or `None` when the endings can be compared.
+///
+/// A step budget on either side is a resource limit, not a termination
+/// behaviour. An integer division by zero traps natively on the machine as
+/// well, but the emulator's p-code division does not raise it, so a tree trap
+/// there has no machine counterpart to compare against.
+fn unknown_termination_reason(machine: &TerminationKind, hir: &TerminationKind) -> Option<String> {
+    if machine.is_trap_or_fault() && hir.is_trap_or_fault() {
+        return Some(format!(
+            "both sides trapped/terminated abnormally: machine={machine:?}, hir={hir:?}"
+        ));
+    }
+    if *machine == TerminationKind::HitBudget {
+        return Some(format!(
+            "the machine did not finish within the emulator budget (hir={hir:?}); a budget \
+             is not a termination difference"
+        ));
+    }
+    if *hir == TerminationKind::HitBudget {
+        return Some(format!(
+            "the tree did not finish within the interpreter budget (machine={machine:?}); a \
+             budget is not a termination difference"
+        ));
+    }
+    if let TerminationKind::Trap(msg) = hir
+        && is_interp_arithmetic_trap(msg)
+    {
+        return Some(format!(
+            "hir trapped ({msg}); the emulator does not raise the machine's divide trap, so \
+             machine={machine:?} is not comparable"
+        ));
+    }
+    None
 }
 
 fn build_report_assumptions(
@@ -931,6 +1035,29 @@ fn run_ground_truth_suite(
                 Some((*addr, type_bytes(grounding.global_types.get(name)?)?))
             }))
             .collect();
+        // Objects of known extent a frame address can designate: the tree's
+        // addressed locals where the decompiler placed them, and the caller
+        // memory an explicit case declares. Every byte of one whose address
+        // escapes is observable; nothing else in the frame is assumed to be.
+        let mut known_objects: Vec<KnownObject> = hir_locals
+            .iter()
+            .filter_map(|(name, addr)| {
+                let ty = &hir.locals.iter().find(|l| &l.name == name)?.ty;
+                let size = type_bytes(ty).filter(|size| *size > 0)?;
+                Some(KnownObject {
+                    extent: *addr..addr.saturating_add(size),
+                    declared: false,
+                })
+            })
+            .collect();
+        known_objects.extend(
+            declared_objects(image_slice)
+                .into_iter()
+                .map(|extent| KnownObject {
+                    extent,
+                    declared: true,
+                }),
+        );
 
         let interp_synthetic_reads = RefCell::new(Vec::<u64>::new());
         let initial_mem_map: HashMap<u64, u8> = image_slice.iter().copied().collect();
@@ -1097,11 +1224,8 @@ fn run_ground_truth_suite(
             Err(err) => {
                 let (m_term, treat_as_fault) = classify_machine_err(&err, strict_native);
                 if treat_as_fault {
-                    if hir_term.is_trap_or_fault() {
+                    if let Some(msg) = unknown_termination_reason(&m_term, &hir_term) {
                         denominators.unknown_runs += 1;
-                        let msg = format!(
-                            "both sides faulted/trapped: hir={hir_term:?}, machine={m_term:?}"
-                        );
                         first_unknown.get_or_insert_with(|| msg.clone());
                         push_witness_bounded(
                             &mut witnesses,
@@ -1313,44 +1437,45 @@ fn run_ground_truth_suite(
             continue;
         }
 
-        // Handle non-normal machine termination (`HitBudget`, `ProcessExited`, `Fault`).
-        if machine_term.is_trap_or_fault() {
-            if hir_term.is_trap_or_fault() {
-                denominators.unknown_runs += 1;
-                let msg = format!(
-                    "both sides trapped/terminated abnormally: machine={machine_term:?}, hir={hir_term:?}"
-                );
-                first_unknown.get_or_insert_with(|| msg.clone());
-                push_witness_bounded(
-                    &mut witnesses,
-                    &mut non_error_samples,
-                    ConcreteWitness {
-                        kind: WitnessKind::Unknown,
-                        initial_state: InitialStateIdentity {
-                            seed: seed_opt,
-                            run: run_opt,
-                            pointer_bits: slot_bits,
-                            raw_slots,
-                            admissibility: StateAdmissibility::Unknown,
-                            admissibility_reasons: vec![msg.clone()],
-                        },
-                        args,
-                        stub_summary,
-                        frame_audit: Some(machine.frame_audit),
-                        memory_audit: Some(machine.memory_audit),
-                        machine_termination: machine_term,
-                        hir_termination: hir_term,
-                        prehir_termination: prehir_term,
-                        machine_return: None,
-                        hir_return: None,
-                        prehir_return: None,
-                        detail: Some(msg),
+        // Terminations that say nothing about the tree: both sides stopped
+        // abnormally, a budget ran out, or the tree traps where the emulator
+        // does not model the machine's trap.
+        if let Some(msg) = unknown_termination_reason(&machine_term, &hir_term) {
+            denominators.unknown_runs += 1;
+            first_unknown.get_or_insert_with(|| msg.clone());
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Unknown,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
                     },
-                );
-                continue;
-            }
-            // Machine trapped/hit-budget/exited while HIR finished normally (or read undefined):
-            // explicit asymmetric termination divergence!
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: machine_ret.map(|raw| norm(raw as i64)),
+                    hir_return: hir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        // Handle non-normal machine termination (`ProcessExited`, `Fault`).
+        if machine_term.is_trap_or_fault() {
+            // Machine faulted/exited while HIR finished normally (or read
+            // undefined): explicit asymmetric termination divergence.
             denominators.checked_runs += 1;
             denominators.asymmetric_fault_runs += 1;
             let hir_ret = hir_r.as_ref().ok().and_then(|r| r.ret).map(norm);
@@ -1489,6 +1614,7 @@ fn run_ground_truth_suite(
             }
             (Some(read), None) => {
                 denominators.checked_runs += 1;
+                denominators.diverged_runs += 1;
                 let emulator_val = machine_ret.map(|raw| norm(raw as i64));
                 let detail = format!("hir: {read}; the machine read only what the run defined");
                 divergences.push(Divergence {
@@ -1542,16 +1668,21 @@ fn run_ground_truth_suite(
 
         let mut detail = None;
         let mut suspect: Option<String> = None;
-        let escaped_ranges = escaped_pointer_ranges(&machine.frame_audit.escaped_frame_pointers);
+        let mut frame_obs =
+            bound_escaped_frame_objects(&machine.frame_audit, &known_objects, &machine.all_writes);
+        let baseline = |a: u64| {
+            harness
+                .baseline_byte(a)
+                .or_else(|| initial_mem_map.get(&a).copied())
+                .or_else(|| state_opt.map(|s| s.memory_byte(a)))
+        };
 
         let sides = std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
         for (side, run) in sides {
             if detail.is_some() {
                 break;
             }
-            let obs_tree = observable_tree_writes(&machine.frame_audit.spec, run, &escaped_ranges);
-            let obs_machine =
-                observable_machine_writes(&machine.writes, &machine.all_writes, &escaped_ranges);
+            let obs_tree = observable_tree_writes(&machine.frame_audit.spec, run);
             detail = compare_calls(
                 side,
                 &run.calls,
@@ -1572,13 +1703,16 @@ fn run_ground_truth_suite(
                     }
                 })
             })
+            .or_else(|| compare_writes(side, &obs_tree, &machine.writes, &no_placed, baseline))
             .or_else(|| {
-                compare_writes(side, &obs_tree, &obs_machine, &no_placed, |a| {
-                    harness
-                        .baseline_byte(a)
-                        .or_else(|| initial_mem_map.get(&a).copied())
-                        .or_else(|| state_opt.map(|s| s.memory_byte(a)))
-                })
+                compare_escaped_objects(
+                    side,
+                    &run.writes,
+                    &machine.all_writes,
+                    &frame_obs.observable,
+                    baseline,
+                    &mut frame_obs.unbounded,
+                )
             });
         }
 
@@ -1673,10 +1807,17 @@ fn run_ground_truth_suite(
             continue;
         }
 
-        // Frame exclusion must be justified before counting a positive pass as agreed!
-        if let FrameExclusionJustification::Unjustified { reasons } =
-            &machine.frame_audit.justification
-        {
+        // Frame exclusion must be justified before counting a positive pass as
+        // agreed: an escape it cannot account for, or a frame address no
+        // object of known extent bounds, leaves the frame observable beyond
+        // what was compared.
+        let mut frame_reasons = match &machine.frame_audit.justification {
+            FrameExclusionJustification::Unjustified { reasons } => reasons.clone(),
+            _ => Vec::new(),
+        };
+        frame_reasons.extend(frame_obs.unbounded.iter().cloned());
+        if !frame_reasons.is_empty() {
+            let reasons = &frame_reasons;
             denominators.unknown_runs += 1;
             denominators.unjustified_frame_runs += 1;
             let msg = format!("unjustified frame exclusion: {}", reasons.join("; "));
@@ -1693,6 +1834,48 @@ fn run_ground_truth_suite(
                         raw_slots,
                         admissibility: StateAdmissibility::Unknown,
                         admissibility_reasons: reasons.clone(),
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: emulator_val,
+                    hir_return: hir_val,
+                    prehir_return: prehir_val,
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        // The tree is a C function: it cannot leave a callee-saved register
+        // changed. A machine run that does broke the ABI the comparison
+        // assumes, so it is not agreement (and, with the callee-saved set
+        // taken from the calling-convention table rather than the binary,
+        // not a proven counterexample either).
+        if !machine.frame_audit.clobbered_callee_saved.is_empty() {
+            denominators.unknown_runs += 1;
+            denominators.abi_violation_runs += 1;
+            let msg = format!(
+                "ABI violation: callee-saved register(s) changed across the return: {}",
+                machine.frame_audit.clobbered_callee_saved.join(", ")
+            );
+            first_unknown.get_or_insert_with(|| msg.clone());
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Unknown,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
                     },
                     args,
                     stub_summary,
@@ -1794,11 +1977,27 @@ fn run_ground_truth_suite(
         unresolved_effects.push(UnresolvedEffect {
             kind: UnresolvedEffectKind::MemoryAlias,
             description: format!(
-                "{} run(s) had unjustified private-frame exclusion (escape, SP delta, or boundary overlap)",
-                denominators.unjustified_frame_runs
+                "{} of {} planned run(s) had unjustified private-frame exclusion (returned/stored \
+                 frame pointer, frame address with no known bounding object, SP delta, or \
+                 boundary overlap)",
+                denominators.unjustified_frame_runs, denominators.planned_runs
             ),
         });
     }
+    if denominators.abi_violation_runs > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::Environment,
+            description: format!(
+                "{} of {} planned run(s) changed a callee-saved register across the return",
+                denominators.abi_violation_runs, denominators.planned_runs
+            ),
+        });
+    }
+    debug_assert_eq!(
+        denominators.consistency_error(),
+        None,
+        "ground-truth denominators must partition the attempted runs"
+    );
 
     let outcome = if !divergences.is_empty() {
         VerifyOutcome::Diverged(divergences)
@@ -1864,10 +2063,11 @@ fn classify_run_admissibility(
             calls.len()
         ));
     }
-    if !frame_audit.clobbered_callee_saved.is_empty() {
+    if !frame_audit.aliased_input_addrs.is_empty() {
         synthetic_reasons.push(format!(
-            "callee-saved registers modified across call: {}",
-            frame_audit.clobbered_callee_saved.join(", ")
+            "input pointer(s) {:#x?} designate storage below the entry stack pointer, where no \
+             live caller object can be natively",
+            frame_audit.aliased_input_addrs
         ));
     }
     if machine_undefined_read {
@@ -1884,54 +2084,203 @@ fn classify_run_admissibility(
         "run accessed mapped image/stack only with no stubbed calls or lazy unmapped pages"
             .to_string()
     }];
-    if let FrameExclusionJustification::EscapedToCallee { count } = frame_audit.justification {
-        notes.push(format!("{count} private-frame pointer(s) passed to callee"));
+    if let FrameExclusionJustification::RequiresObjectBounds { count } = frame_audit.justification {
+        notes.push(format!(
+            "{count} private-frame pointer escape(s), each compared over its bounding object"
+        ));
     }
     (StateAdmissibility::NativeAdmissible, notes)
 }
 
-fn escaped_pointer_ranges(escaped: &[EscapedFramePointer]) -> Vec<std::ops::Range<u64>> {
-    escaped
-        .iter()
-        .filter_map(|esc| match esc {
-            EscapedFramePointer::Returned(ptr)
-            | EscapedFramePointer::StoredExternally { target: ptr, .. } => {
-                Some(*ptr..ptr.saturating_add(ESCAPED_FRAME_CHECK_WINDOW))
-            }
-            EscapedFramePointer::PassedToCall { .. } => None,
-        })
-        .collect()
+/// An object whose extent is known: declared by an explicit case's caller
+/// memory, or inferred by the decompiler (an addressed local where it placed
+/// it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KnownObject {
+    extent: std::ops::Range<u64>,
+    declared: bool,
 }
 
-fn observable_tree_writes(
-    spec: &FrameExclusionSpec,
-    run: &InterpRun,
-    escaped_ranges: &[std::ops::Range<u64>],
-) -> BTreeMap<u64, u8> {
+/// Frame storage an escaped frame address can reach, bounded by objects of
+/// known extent.
+#[derive(Debug, Default)]
+struct EscapedFrameObservation {
+    /// The full extent of every frame object an escaped address designates,
+    /// directly or through pointers stored inside such an object. Both sides'
+    /// final bytes there are compared.
+    observable: Vec<KnownObject>,
+    /// Escaped frame addresses no known object bounds. Their reach into the
+    /// frame cannot be derived, so a run with any is not agreement.
+    unbounded: Vec<String>,
+}
+
+/// Bound every frame address in `audit`'s escapes by the objects in
+/// `known_objects` that contain it (an interior pointer reaches the whole
+/// object, negative offsets included; a one-past-the-end pointer reaches the
+/// object it ends). Pointers the machine left inside a bounded object are
+/// followed too: whoever receives the object receives them.
+///
+/// No fixed window is assumed after an address: without a known object the
+/// address is reported unbounded instead.
+fn bound_escaped_frame_objects(
+    audit: &FrameExclusionAudit,
+    known_objects: &[KnownObject],
+    machine_all_writes: &BTreeMap<u64, u8>,
+) -> EscapedFrameObservation {
+    let spec = &audit.spec;
+    let mut out = EscapedFrameObservation::default();
+    let mut pending: Vec<(String, u64)> = audit
+        .escaped_frame_pointers
+        .iter()
+        .map(|esc| {
+            let how = match esc {
+                EscapedFramePointer::Returned(_) => "returned",
+                EscapedFramePointer::StoredExternally { .. } => "stored",
+                EscapedFramePointer::PassedToCall { .. } => "callee-argument",
+                EscapedFramePointer::AliasedInput { .. } => "input-argument",
+            };
+            (how.to_string(), esc.pointer())
+        })
+        .collect();
+    let mut seen_pointers = BTreeSet::new();
+    let mut seen_objects = BTreeSet::new();
+    while let Some((how, ptr)) = pending.pop() {
+        if !seen_pointers.insert(ptr) {
+            continue;
+        }
+        let containing: Vec<&KnownObject> = known_objects
+            .iter()
+            .filter(|object| object.extent.contains(&ptr) || object.extent.end == ptr)
+            .collect();
+        if containing.is_empty() {
+            out.unbounded.push(format!(
+                "{how} frame address {ptr:#x} lies in no frame object of known extent"
+            ));
+            continue;
+        }
+        for object in containing {
+            let extent = &object.extent;
+            if !seen_objects.insert((extent.start, extent.end)) {
+                continue;
+            }
+            out.observable.push(object.clone());
+            // Only pointers wholly inside the object: bytes past its end
+            // belong to something else and only make up a spurious value.
+            if extent.end - extent.start < spec.pointer_size {
+                continue;
+            }
+            let last_start = extent.end - spec.pointer_size;
+            for (&at, _) in machine_all_writes.range(extent.start..=last_start) {
+                if let Some(target) = read_pointer(
+                    machine_all_writes,
+                    at,
+                    spec.pointer_size as u8,
+                    audit.endian,
+                ) && spec.in_private_frame(target)
+                    && !extent.contains(&target)
+                {
+                    pending.push((format!("held-in-object@{at:#x}"), target));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Contiguous runs of caller memory an explicit case declares: each is an
+/// object whose extent the case states.
+fn declared_objects(initial_memory: &[(u64, u8)]) -> Vec<std::ops::Range<u64>> {
+    let addrs: BTreeSet<u64> = initial_memory.iter().map(|(addr, _)| *addr).collect();
+    let mut out: Vec<std::ops::Range<u64>> = Vec::new();
+    for addr in addrs {
+        match out.last_mut() {
+            Some(run) if run.end == addr => run.end = addr.saturating_add(1),
+            _ => out.push(addr..addr.saturating_add(1)),
+        }
+    }
+    out
+}
+
+fn observable_tree_writes(spec: &FrameExclusionSpec, run: &InterpRun) -> BTreeMap<u64, u8> {
     run.writes
         .iter()
-        .filter(|(addr, _)| {
-            !spec.is_excluded(**addr) || escaped_ranges.iter().any(|r| r.contains(addr))
-        })
+        .filter(|(addr, _)| !spec.is_excluded(**addr))
         .map(|(addr, val)| (*addr, *val))
         .collect()
 }
 
-fn observable_machine_writes(
-    machine_writes: &BTreeMap<u64, u8>,
+/// Compare both sides' final bytes over every escaped frame object.
+///
+/// A byte the tree stored that differs from the machine's is a divergence:
+/// the decompiled program writes its own object, whose address escaped,
+/// differently. A byte only the machine stored is a divergence when the
+/// object's extent was declared by the caller; inside an extent the
+/// decompiler inferred it may equally be machine-private state (a saved
+/// register, a spill) the inferred extent over-covers, so it is recorded in
+/// `unknown` and the run cannot count as agreement.
+fn compare_escaped_objects(
+    side: &str,
+    tree_writes: &BTreeMap<u64, u8>,
     machine_all_writes: &BTreeMap<u64, u8>,
-    escaped_ranges: &[std::ops::Range<u64>],
-) -> BTreeMap<u64, u8> {
-    if escaped_ranges.is_empty() {
-        return machine_writes.clone();
-    }
-    let mut out = machine_writes.clone();
-    for (&addr, &val) in machine_all_writes {
-        if escaped_ranges.iter().any(|r| r.contains(&addr)) {
-            out.insert(addr, val);
+    objects: &[KnownObject],
+    baseline: impl Fn(u64) -> Option<u8>,
+    unknown: &mut Vec<String>,
+) -> Option<String> {
+    let declared = |addr: u64| {
+        objects
+            .iter()
+            .any(|object| object.declared && object.extent.contains(&addr))
+    };
+    let mut reported_machine_only = false;
+    for object in objects {
+        let range = object.extent.clone();
+        for (&addr, &value) in machine_all_writes.range(range.clone()) {
+            match tree_writes.get(&addr) {
+                Some(&tree_value) if tree_value != value => {
+                    return Some(format!(
+                        "{side}: escaped frame object byte at {addr:#x} is {tree_value:#04x} in \
+                         the tree, machine stored {value:#04x}"
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    let untouched = baseline(addr);
+                    if untouched == Some(value) {
+                        continue;
+                    }
+                    let msg = format!(
+                        "{side}: escaped frame object byte at {addr:#x}: machine stored \
+                         {value:#04x}, the tree left it {}",
+                        untouched.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                    );
+                    if declared(addr) {
+                        return Some(msg);
+                    }
+                    if !reported_machine_only {
+                        reported_machine_only = true;
+                        unknown.push(format!(
+                            "{msg} (a dropped store, or machine-private state inside the \
+                             object's inferred extent)"
+                        ));
+                    }
+                }
+            }
+        }
+        for (&addr, &value) in tree_writes.range(range) {
+            if machine_all_writes.contains_key(&addr) {
+                continue;
+            }
+            let untouched = baseline(addr);
+            if untouched != Some(value) {
+                return Some(format!(
+                    "{side}: tree stored {value:#04x} in escaped frame object at {addr:#x}, \
+                     machine left {}",
+                    untouched.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
         }
     }
-    out
+    None
 }
 
 /// The first way `calls` (what one tree did) differs from `machine`'s, or
@@ -2193,6 +2542,216 @@ fn mask_to_width(raw: u64, bits: u32) -> i64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audit_with(escaped: Vec<EscapedFramePointer>) -> FrameExclusionAudit {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[]);
+        FrameExclusionAudit {
+            spec,
+            endian: fission_emulator::arch::Endianness::Little,
+            excluded_write_bytes: 0,
+            caller_stack_write_addrs: Vec::new(),
+            aliased_input_addrs: Vec::new(),
+            escaped_frame_pointers: escaped,
+            boundary_overlaps: Vec::new(),
+            sp_delta: Some(0),
+            clobbered_callee_saved: Vec::new(),
+            justification: FrameExclusionJustification::JustifiedPrivateFrame,
+        }
+    }
+
+    fn inferred(extent: std::ops::Range<u64>) -> KnownObject {
+        KnownObject {
+            extent,
+            declared: false,
+        }
+    }
+
+    #[test]
+    fn escaped_interior_pointer_reaches_the_whole_object_both_directions() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x200..entry - 0x100);
+        let audit = audit_with(vec![EscapedFramePointer::Returned(entry - 0x180)]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.observable, vec![object]);
+        assert!(obs.unbounded.is_empty());
+    }
+
+    #[test]
+    fn one_past_the_end_pointer_reaches_the_object_it_ends() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x40..entry - 0x20);
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: object.extent.end,
+        }]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.observable, vec![object]);
+    }
+
+    #[test]
+    fn overlapping_objects_are_all_observable() {
+        let entry = 0x7fff_0000u64;
+        let wide = inferred(entry - 0x100..entry - 0x80);
+        let narrow = inferred(entry - 0xc0..entry - 0xb8);
+        let audit = audit_with(vec![EscapedFramePointer::Returned(entry - 0xbc)]);
+        let obs =
+            bound_escaped_frame_objects(&audit, &[wide.clone(), narrow.clone()], &BTreeMap::new());
+        assert_eq!(obs.observable.len(), 2);
+        assert!(obs.observable.contains(&wide) && obs.observable.contains(&narrow));
+    }
+
+    #[test]
+    fn escaped_address_outside_known_objects_is_unbounded_not_windowed() {
+        let entry = 0x7fff_0000u64;
+        let audit = audit_with(vec![EscapedFramePointer::StoredExternally {
+            at: 0x60_0000,
+            target: entry - 0x300,
+        }]);
+        let obs = bound_escaped_frame_objects(
+            &audit,
+            &[inferred(entry - 0x40..entry - 0x20)],
+            &BTreeMap::new(),
+        );
+        assert!(obs.observable.is_empty());
+        assert_eq!(obs.unbounded.len(), 1);
+    }
+
+    #[test]
+    fn frame_pointer_held_in_an_escaped_object_is_followed() {
+        let entry = 0x7fff_0000u64;
+        let outer = inferred(entry - 0x40..entry - 0x20);
+        let inner = inferred(entry - 0x100..entry - 0xc0);
+        let held = entry - 0xf0;
+        let writes: BTreeMap<u64, u8> = held
+            .to_le_bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (outer.extent.start + i as u64, *b))
+            .collect();
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: outer.extent.start,
+        }]);
+        let obs = bound_escaped_frame_objects(&audit, &[outer.clone(), inner.clone()], &writes);
+        assert!(obs.observable.contains(&outer) && obs.observable.contains(&inner));
+        // An unbounded pointer held inside the object is reported, not ignored.
+        let obs = bound_escaped_frame_objects(&audit, std::slice::from_ref(&outer), &writes);
+        assert_eq!(obs.unbounded.len(), 1, "{obs:?}");
+    }
+
+    #[test]
+    fn escaped_object_differences_by_provenance() {
+        let base = 0x7fff_0000u64 - 0x40;
+        let machine: BTreeMap<u64, u8> = [(base, 0x2a)].into_iter().collect();
+        let zero = |_: u64| Some(0u8);
+        // Machine-only store in an inferred extent: unknown, not a divergence.
+        let mut unknown = Vec::new();
+        let objects = [inferred(base..base + 8)];
+        assert_eq!(
+            compare_escaped_objects(
+                "hir",
+                &BTreeMap::new(),
+                &machine,
+                &objects,
+                zero,
+                &mut unknown
+            ),
+            None
+        );
+        assert_eq!(unknown.len(), 1);
+        // Machine-only store in a declared caller object: divergence.
+        let mut unknown = Vec::new();
+        let declared = [KnownObject {
+            extent: base..base + 8,
+            declared: true,
+        }];
+        assert!(
+            compare_escaped_objects(
+                "hir",
+                &BTreeMap::new(),
+                &machine,
+                &declared,
+                zero,
+                &mut unknown
+            )
+            .is_some()
+        );
+        // Tree stored a different value: divergence even in an inferred extent.
+        let tree: BTreeMap<u64, u8> = [(base, 0x2b)].into_iter().collect();
+        assert!(
+            compare_escaped_objects("hir", &tree, &machine, &objects, zero, &mut Vec::new())
+                .is_some()
+        );
+        // Tree stored where the machine left the byte: divergence.
+        let tree: BTreeMap<u64, u8> = [(base + 4, 0x01)].into_iter().collect();
+        assert!(
+            compare_escaped_objects(
+                "hir",
+                &tree,
+                &BTreeMap::new(),
+                &objects,
+                zero,
+                &mut Vec::new()
+            )
+            .is_some()
+        );
+        // Agreement.
+        let mut unknown = Vec::new();
+        assert_eq!(
+            compare_escaped_objects("hir", &machine, &machine, &objects, zero, &mut unknown),
+            None
+        );
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn declared_case_memory_forms_contiguous_objects() {
+        let mem = [(0x10, 0u8), (0x11, 0), (0x13, 0), (0x12, 0), (0x20, 0)];
+        assert_eq!(declared_objects(&mem), vec![0x10..0x14, 0x20..0x21]);
+    }
+
+    #[test]
+    fn denominator_consistency_flags_an_uncounted_divergence() {
+        let ok = GroundTruthDenominators {
+            planned_runs: 2,
+            attempted_runs: 2,
+            checked_runs: 1,
+            diverged_runs: 1,
+            unknown_runs: 1,
+            abi_violation_runs: 1,
+            ..GroundTruthDenominators::default()
+        };
+        assert_eq!(ok.consistency_error(), None);
+        let missing = GroundTruthDenominators {
+            diverged_runs: 0,
+            ..ok
+        };
+        assert!(missing.consistency_error().is_some());
+    }
+
+    #[test]
+    fn budgets_and_unmodeled_divide_traps_are_not_comparable() {
+        use TerminationKind as T;
+        assert!(unknown_termination_reason(&T::HitBudget, &T::Returned).is_some());
+        assert!(unknown_termination_reason(&T::Returned, &T::HitBudget).is_some());
+        assert!(
+            unknown_termination_reason(&T::Returned, &T::Trap("interp: division by zero".into()))
+                .is_some()
+        );
+        assert!(
+            unknown_termination_reason(
+                &T::Returned,
+                &T::Trap("interp: load from unmapped address 0x0".into())
+            )
+            .is_none()
+        );
+        assert!(unknown_termination_reason(&T::ProcessExited, &T::Returned).is_none());
+        assert!(unknown_termination_reason(&T::Fault("x".into()), &T::Trap("y".into())).is_some());
+    }
 
     fn slots_of(params: &[(&str, Option<NirBindingOrigin>)]) -> Vec<usize> {
         param_slots(params.iter().copied())
