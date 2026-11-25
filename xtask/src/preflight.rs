@@ -1330,7 +1330,7 @@ mod tests {
         let fake = dir.join("cargo");
         std::fs::write(
             &fake,
-            format!("#!/bin/sh\necho \"$*\" > '{}'\n", log.display()),
+            format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display()),
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1357,13 +1357,19 @@ mod tests {
                 .trim()
                 .to_string()
         };
+        // Linting fission-cli also lints its opt-in `sentry` feature.
+        let sentry = format!("clippy -p fission-cli --features sentry {lints}");
         assert_eq!(
             run("fission-pcode, fission-signatures,fission-cli"),
-            format!("clippy -p fission-pcode -p fission-cli {lints}")
+            format!("clippy -p fission-pcode -p fission-cli {lints}\n{sentry}")
         );
         assert_eq!(
             run(""),
-            format!("clippy --workspace --exclude fission-signatures {lints}")
+            format!("clippy --workspace --exclude fission-signatures {lints}\n{sentry}")
+        );
+        assert_eq!(
+            run("fission-pcode"),
+            format!("clippy -p fission-pcode {lints}")
         );
         // Only excluded packages selected: nothing to lint, cargo never runs.
         assert_eq!(run("fission-signatures"), "");
