@@ -40,13 +40,16 @@
 //!
 //! The same all-or-nothing contract as the other drivers: either the graph
 //! folds to one node that owns every reachable block, or the driver returns
-//! `None` and the caller keeps its existing path. Whether the result is
+//! `None` and the caller keeps its existing path. Besides the per-round caps
+//! (rounds, concessions, return copies), an aggregate work meter
+//! (`MAX_WORK_UNITS`, nodes plus edges visited) bounds the whole attempt; a
+//! function that spends it is declined the same way, deterministically. Whether the result is
 //! *better* is not this driver's call -- the caller's quality comparison
 //! admits it only when it strictly improves on the current best, so a
 //! function this driver structures worse is simply not changed.
 
 use crate::HashMap;
-use crate::cfg_analysis::{DomTree, ImmPostDomTree};
+use crate::cfg_analysis::{ImmDomTree, ImmPostDomTree};
 use crate::collapse_driver::{
     blocks_reachable_from_entry, covers_every_reachable_block,
     fold_accounts_for_every_internal_edge, lower_shape, node_statements,
@@ -55,7 +58,7 @@ use crate::collapse_graph::{CollapseGraph, NodeId};
 use crate::collapse_shapes::{Shape, find_shape};
 use crate::host::StructuringHost;
 use crate::reaching_driver::{
-    governing_block_after, live_node_owning_entry, materialize_concession, survives_without,
+    governing_block_after, live_node_owning_entry, materialize_concession,
 };
 use fission_midend_core::ir::MlilPreviewError;
 use fission_midend_prehir::util::expr_has_side_effecting_call;
@@ -84,6 +87,10 @@ const MAX_RETURN_PREDS: usize = 8;
 /// H2 is quadratic in graph size; apply it only to small choices.
 const H2_MAX_EDGES: usize = 10;
 const H2_MAX_NODES: usize = 50;
+
+/// Aggregate graph work, in nodes plus edges visited, before the driver
+/// declines the function. See [`WorkMeter`].
+const MAX_WORK_UNITS: u64 = 2_000_000;
 
 /// Whether the SAILR driver is offered. **Off unless `FISSION_SAILR=1`.**
 ///
@@ -121,10 +128,12 @@ pub fn preview_sailr(
 fn fold_sailr(
     host: &mut impl StructuringHost,
 ) -> Result<Option<Vec<PreHirStmt>>, MlilPreviewError> {
-    let out = fold_sailr_inner(host)?;
-    if let Err(reason) = &out {
-        if crate::linear_types::structuring_diag_enabled() {
-            eprintln!("[DIAG] SAILR declined: {reason}");
+    let mut work = WorkMeter::new(MAX_WORK_UNITS);
+    let out = fold_sailr_inner(host, &mut work)?;
+    if crate::linear_types::structuring_diag_enabled() {
+        match &out {
+            Ok(_) => eprintln!("[DIAG] SAILR folded: work {}", work.used),
+            Err(reason) => eprintln!("[DIAG] SAILR declined: {reason}; work {}", work.used),
         }
     }
     Ok(out.ok())
@@ -132,6 +141,7 @@ fn fold_sailr(
 
 fn fold_sailr_inner(
     host: &mut impl StructuringHost,
+    work: &mut WorkMeter,
 ) -> Result<Result<Vec<PreHirStmt>, String>, MlilPreviewError> {
     let successors: Vec<Vec<usize>> = host.successors().to_vec();
     if successors.is_empty() {
@@ -144,6 +154,16 @@ fn fold_sailr_inner(
     let mut copies = 0usize;
 
     for _ in 0..budget {
+        // Finding a shape and looking for a return to split each scan the
+        // live nodes.
+        work.charge(graph.live_count());
+        if work.exhausted() {
+            return Ok(Err(format!(
+                "work budget {} spent, live {}",
+                work.limit,
+                graph.live_count()
+            )));
+        }
         if let Some(sole) = graph.sole_live_node() {
             let Some(node) = graph.node(sole) else {
                 return Ok(Err("sole node missing".into()));
@@ -195,7 +215,7 @@ fn fold_sailr_inner(
                 graph.live_count()
             )));
         }
-        let Some((from, to)) = pick_edge(&graph, failed.as_ref(), |n| {
+        let Some((from, to)) = pick_edge(&graph, failed.as_ref(), work, |n| {
             plain_return_node(host, &graph, n)
         }) else {
             return Ok(Err(format!(
@@ -273,6 +293,18 @@ fn explain_unlowerable(
 /// [`MAX_RETURN_STMTS`] statements, ending in `return`, with no call that
 /// could have an effect and no control flow. Copying such a node changes
 /// nothing a path does -- each path still runs exactly those statements once.
+///
+/// Why that holds, including for values that differ per predecessor: a
+/// node's statements are a function of the node alone (a block is lowered
+/// once and cached by block index), and they are what every path through it
+/// already ran. A value that depends on the incoming edge reaches the block
+/// through copies placed at the end of each predecessor, or through a merge
+/// binding the block itself evaluates; a copy keeps both, in the same order
+/// relative to every load and store. A node with no successors has nothing
+/// after it to reach twice. The size and effect bounds are a code-growth
+/// policy, not what makes the copy sound. A `goto` target is never copied:
+/// its body carries the label, and only variable assignments and the
+/// `return` are admitted, so no label is ever defined twice.
 fn plain_return_body(
     host: &mut impl StructuringHost,
     graph: &CollapseGraph,
@@ -325,19 +357,18 @@ fn split_merged_return(
     allowance: usize,
 ) -> Result<usize, MlilPreviewError> {
     let mut candidates: Vec<NodeId> = Vec::new();
+    let mut listed = vec![false; graph.node_capacity()];
     if let Some(shape) = failed {
         for &m in &shape.members {
             for &s in graph.successors(m) {
-                if !candidates.contains(&s) {
+                if !listed[s] {
+                    listed[s] = true;
                     candidates.push(s);
                 }
             }
         }
     }
-    let mut rest: Vec<NodeId> = graph
-        .live_nodes()
-        .filter(|n| !candidates.contains(n))
-        .collect();
+    let mut rest: Vec<NodeId> = graph.live_nodes().filter(|&n| !listed[n]).collect();
     rest.sort_by_key(|&n| graph.node(n).map_or(usize::MAX, |x| x.entry_block));
     candidates.extend(rest);
 
@@ -366,15 +397,30 @@ fn split_merged_return(
 }
 
 /// The edge to concede, by Phoenix's candidate classes and SAILR's H1-H3.
+///
+/// Dominance is answered from one immediate-dominator tree (Cooper) with
+/// pre/post-order intervals, and "removing this edge strands no node" is
+/// answered from the same tree in O(in-degree) per candidate instead of a
+/// graph walk per candidate; see [`Dominance::survives_without`] for why the
+/// two questions are the same. The choice is identical to the walk-based one
+/// (`differential_tests::pick_edge_matches_the_reference_implementation`).
 fn pick_edge(
     graph: &CollapseGraph,
     failed: Option<&Shape>,
+    work: &mut WorkMeter,
     mut is_plain_return: impl FnMut(NodeId) -> bool,
 ) -> Option<(NodeId, NodeId)> {
     let head = live_node_owning_entry(graph)?;
     let live: Vec<NodeId> = graph.live_nodes().collect();
     let dense = Dense::new(graph, head, &live);
-    let dom = DomTree::analyze(&dense.succ, &dense.pred);
+    work.charge(dense.size());
+    // Removing an edge only ever loses reachability: when some live node is
+    // already cut off from the head, no removal leaves every node reachable,
+    // so no edge can be conceded.
+    if !dense.all_reachable() {
+        return None;
+    }
+    let dom = Dominance::new(&dense);
 
     // Phoenix's three classes; within each, SAILR's order.
     let mut unrelated = Vec::new();
@@ -412,8 +458,10 @@ fn pick_edge(
         // concession lets it fold next round.
         let focused: Vec<_> = class.iter().copied().filter(near_failure).collect();
         let edges = if focused.is_empty() { class } else { focused };
-        for edge in order_edges(graph, &dense, edges, &mut is_plain_return) {
-            if survives_without(graph, head, &live, edge.0, edge.1) {
+        for edge in order_edges(graph, &dense, edges, work, &mut is_plain_return) {
+            let (du, dv) = (dense.index[&edge.0], dense.index[&edge.1]);
+            work.charge(dense.pred[dv].len());
+            if dom.survives_without(&dense, du, dv) {
                 return Some(edge);
             }
         }
@@ -428,6 +476,7 @@ fn order_edges(
     graph: &CollapseGraph,
     dense: &Dense,
     mut edges: Vec<(NodeId, NodeId)>,
+    work: &mut WorkMeter,
     is_plain_return: &mut impl FnMut(NodeId) -> bool,
 ) -> Vec<(NodeId, NodeId)> {
     let block = |n: NodeId| graph.node(n).map_or(usize::MAX, |x| x.entry_block);
@@ -457,12 +506,16 @@ fn order_edges(
 
     // H2: removal that leaves the most real immediate postdominators.
     if best.len() > 1 && edges.len() <= H2_MAX_EDGES && dense.succ.len() <= H2_MAX_NODES {
+        // One scratch copy of the adjacency for every candidate, each edge
+        // taken out and put back in place, rather than a copy per candidate.
+        let mut scratch = (dense.succ.clone(), dense.pred.clone());
         let scored: Vec<((NodeId, NodeId), usize)> = best
             .iter()
             .map(|&(u, v)| {
+                work.charge(dense.size());
                 (
                     (u, v),
-                    dense.postdominated_without(dense.index[&u], dense.index[&v]),
+                    postdominated_without(&mut scratch, dense.index[&u], dense.index[&v]),
                 )
             })
             .collect();
@@ -487,8 +540,9 @@ fn order_edges(
     }
 
     // Best first, then the rest in default order as fallbacks.
-    let mut out = best.clone();
-    out.extend(edges.into_iter().filter(|e| !best.contains(e)));
+    let chosen: crate::HashSet<(NodeId, NodeId)> = best.iter().copied().collect();
+    let mut out = best;
+    out.extend(edges.into_iter().filter(|e| !chosen.contains(e)));
     out
 }
 
@@ -499,6 +553,8 @@ struct Dense {
     succ: Vec<Vec<usize>>,
     pred: Vec<Vec<usize>>,
     rpo: HashMap<NodeId, usize>,
+    /// How many nodes the walk from the head reached.
+    reached: usize,
 }
 
 impl Dense {
@@ -538,6 +594,7 @@ impl Dense {
         for (rank, &n) in post.iter().rev().enumerate() {
             rpo.insert(order[n], rank);
         }
+        let reached = post.len();
         let mut next = post.len();
         for &n in &order {
             if !rpo.contains_key(&n) {
@@ -550,19 +607,140 @@ impl Dense {
             succ,
             pred,
             rpo,
+            reached,
         }
     }
 
-    /// How many nodes keep a real immediate postdominator once `u -> v` is gone.
-    fn postdominated_without(&self, u: usize, v: usize) -> usize {
-        let mut succ = self.succ.clone();
-        let mut pred = self.pred.clone();
-        succ[u].retain(|&x| x != v);
-        pred[v].retain(|&x| x != u);
-        let ipdom = ImmPostDomTree::compute(&succ, &pred);
-        (0..succ.len())
-            .filter(|&n| ipdom.immediate_postdominator(n).is_some())
-            .count()
+    /// Nodes plus edges: the unit every pass over this graph is charged in.
+    fn size(&self) -> usize {
+        self.succ.len() + self.succ.iter().map(Vec::len).sum::<usize>()
+    }
+
+    /// Whether every node is reachable from the head. Unreachable nodes are
+    /// exactly the ones ranked after the reverse postorder walk.
+    fn all_reachable(&self) -> bool {
+        self.reached == self.succ.len()
+    }
+}
+
+/// How many nodes keep a real immediate postdominator once `u -> v` is gone.
+///
+/// `scratch` holds a copy of the dense adjacency; the edge is removed for the
+/// computation and restored at its original positions afterwards, so the
+/// copy can serve every candidate.
+fn postdominated_without(
+    scratch: &mut (Vec<Vec<usize>>, Vec<Vec<usize>>),
+    u: usize,
+    v: usize,
+) -> usize {
+    let (succ, pred) = scratch;
+    let succ_at: Vec<usize> = positions(&succ[u], v);
+    let pred_at: Vec<usize> = positions(&pred[v], u);
+    succ[u].retain(|&x| x != v);
+    pred[v].retain(|&x| x != u);
+    let ipdom = ImmPostDomTree::compute(succ, pred);
+    let count = (0..succ.len())
+        .filter(|&n| ipdom.immediate_postdominator(n).is_some())
+        .count();
+    for at in succ_at {
+        succ[u].insert(at, v);
+    }
+    for at in pred_at {
+        pred[v].insert(at, u);
+    }
+    count
+}
+
+fn positions(list: &[usize], value: usize) -> Vec<usize> {
+    list.iter()
+        .enumerate()
+        .filter_map(|(i, &x)| (x == value).then_some(i))
+        .collect()
+}
+
+/// Dominance on a [`Dense`] graph every node of which is reachable from the
+/// head: the immediate-dominator tree, numbered by one depth-first walk so
+/// that "`a` dominates `b`" is an interval test.
+struct Dominance {
+    pre: Vec<usize>,
+    post: Vec<usize>,
+}
+
+impl Dominance {
+    fn new(dense: &Dense) -> Self {
+        let n = dense.succ.len();
+        let idom = ImmDomTree::compute(&dense.succ, &dense.pred);
+        let mut children = vec![Vec::new(); n];
+        for v in 1..n {
+            if let Some(p) = idom.immediate_dominator(v) {
+                children[p].push(v);
+            }
+        }
+        let mut pre = vec![usize::MAX; n];
+        let mut post = vec![usize::MAX; n];
+        let (mut pre_clock, mut post_clock) = (0usize, 0usize);
+        let mut stack: Vec<(usize, usize)> = vec![(0, 0)];
+        pre[0] = pre_clock;
+        pre_clock += 1;
+        while let Some((node, next)) = stack.pop() {
+            if let Some(&child) = children[node].get(next) {
+                stack.push((node, next + 1));
+                pre[child] = pre_clock;
+                pre_clock += 1;
+                stack.push((child, 0));
+            } else {
+                post[node] = post_clock;
+                post_clock += 1;
+            }
+        }
+        Self { pre, post }
+    }
+
+    /// Reflexive: every node dominates itself.
+    fn dominates(&self, a: usize, b: usize) -> bool {
+        self.pre[a] <= self.pre[b] && self.post[b] <= self.post[a]
+    }
+
+    /// Whether every node stays reachable from the head once `u -> v` is
+    /// removed, given that every node is reachable now.
+    ///
+    /// Removing an edge strands something only if it strands `v`: any path
+    /// that used the edge can be re-routed through whatever still reaches `v`.
+    /// `v` stays reachable iff it is the head, or another predecessor `p`
+    /// reaches it without passing through `v` first -- that is, `v` does not
+    /// dominate `p`. If `v` dominates every other predecessor, each of them is
+    /// reached only through `v`, so nothing but `u -> v` can bring control to
+    /// `v`.
+    fn survives_without(&self, dense: &Dense, u: usize, v: usize) -> bool {
+        v == 0
+            || dense.pred[v]
+                .iter()
+                .any(|&p| p != u && !self.dominates(v, p))
+    }
+}
+
+/// An aggregate bound on the driver's graph work, in nodes-plus-edges
+/// visited. Per-round caps bound each step; this bounds their sum, so a
+/// function that keeps the driver busy is declined -- deterministically,
+/// since the count does not depend on time -- and the caller keeps its
+/// existing structuring.
+#[derive(Debug, Clone, Copy)]
+struct WorkMeter {
+    used: u64,
+    limit: u64,
+}
+
+impl WorkMeter {
+    fn new(limit: u64) -> Self {
+        Self { used: 0, limit }
+    }
+
+    fn charge(&mut self, units: usize) {
+        self.used = self.used.saturating_add(units as u64);
+    }
+
+    fn exhausted(&self) -> bool {
+        self.used > self.limit
     }
 }
 
@@ -638,8 +816,8 @@ mod tests {
     #[test]
     fn edge_order_is_deterministic() {
         let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![3, 4], vec![4], vec![4], vec![]]);
-        let a = pick_edge(&g, None, |_| false);
-        let b = pick_edge(&g, None, |_| false);
+        let a = pick_edge(&g, None, &mut WorkMeter::new(u64::MAX), |_| false);
+        let b = pick_edge(&g, None, &mut WorkMeter::new(u64::MAX), |_| false);
         assert!(a.is_some());
         assert_eq!(a, b);
         let (_, to) = a.unwrap();
@@ -652,9 +830,13 @@ mod tests {
     #[test]
     fn h3_prefers_an_edge_into_a_plain_return() {
         let g = CollapseGraph::from_cfg(&[vec![1, 2], vec![3, 4], vec![3, 4], vec![], vec![]]);
-        let picked = pick_edge(&g, None, |n| n == 4);
+        let picked = pick_edge(&g, None, &mut WorkMeter::new(u64::MAX), |n| n == 4);
         assert_eq!(picked.map(|(_, v)| v), Some(4));
-        let picked = pick_edge(&g, None, |n| n == 3);
+        let picked = pick_edge(&g, None, &mut WorkMeter::new(u64::MAX), |n| n == 3);
         assert_eq!(picked.map(|(_, v)| v), Some(3));
     }
 }
+
+#[cfg(test)]
+#[path = "sailr_driver_differential_tests.rs"]
+mod differential_tests;

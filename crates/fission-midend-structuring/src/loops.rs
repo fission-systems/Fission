@@ -2433,7 +2433,7 @@ fn stmts_contain_break(stmts: &[PreHirStmt]) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use fission_midend_core::ir::NirType;
     use fission_midend_prehir::{PreHirBinaryOp, PreHirExpr, PreHirLValue, PreHirStmt};
@@ -2752,7 +2752,9 @@ mod tests {
         assert!(terminal_do_while_condition(&partial).is_none());
     }
 
-    struct MockRotatedLoopHost {
+    /// A [`StructuringHost`] over fixed per-block statements and terminators.
+    /// Shared with other drivers' tests (`sailr_driver`).
+    pub(crate) struct MockRotatedLoopHost {
         options: fission_midend_core::ir::MlilPreviewOptions,
         work_counter: std::rc::Rc<std::cell::Cell<u64>>,
         resource_usage: std::rc::Rc<fission_midend_core::ir::ResourceUsage>,
@@ -2774,7 +2776,7 @@ mod tests {
     }
 
     impl MockRotatedLoopHost {
-        fn new(
+        pub(crate) fn new(
             successors: Vec<Vec<usize>>,
             block_addrs: Vec<u64>,
             stmts: Vec<Vec<PreHirStmt>>,
