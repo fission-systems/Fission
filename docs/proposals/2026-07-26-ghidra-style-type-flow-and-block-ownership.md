@@ -6,7 +6,7 @@ Date: 2026-07-26
 
 Primary row:
 
-- External corpus: `/Users/sjkim1127/fission-benchmark`, dev
+- External corpus: `~/fission-benchmark`, dev
 - Function: `matrix_multiply`
 - Binary/address: `memory_layouts_gcc_O0.exe`, `0x1400015b8`
 - Initial Fission result: `compile_error`, 0/5 semantic cases
@@ -156,8 +156,8 @@ parallel program-metadata map is added.
   single-definition bindings, matching Ghidra's per-varnode boundary. A focused
   regression test and the external O1/O2 rerun both verify the correction.
 - Final candidate artifacts:
-  - `/Users/sjkim1127/fission-benchmark/results/local_b8442d08_typeflow_ownership_fixed_matrix_multiply_fission.json`
-  - `/Users/sjkim1127/fission-benchmark/results/local_b8442d08_typeflow_ownership_fixed_matrix_multiply_ghidra.json`
+  - `~/fission-benchmark/results/local_b8442d08_typeflow_ownership_fixed_matrix_multiply_fission.json`
+  - `~/fission-benchmark/results/local_b8442d08_typeflow_ownership_fixed_matrix_multiply_ghidra.json`
 - Ghidra's GCC O0 comparison row reproducibly reports `runtime_error` in the
   current external harness; the same final Fission row is 5/5. The other Ghidra
   variants in this focused run are 5/5.
