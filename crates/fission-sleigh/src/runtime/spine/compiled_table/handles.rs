@@ -103,6 +103,27 @@ pub(super) fn handle_selector_index(
     nonnegative_handle_index(*handle_index)
 }
 
+/// The handle an offset ConstTpl reads, when it reads the handle's offset:
+/// `[handle:offset]` gives `(index, None)`, `[handle:offset+plus]` (a bit range
+/// of the operand, `m128[0,64]`) gives `(index, Some(plus))`. Ghidra
+/// `VarnodeTpl.isDynamic` keys on the offset being a handle of either kind.
+pub(super) fn offset_handle_selector(const_tpl: &CompiledConstTpl) -> Option<(usize, Option<u64>)> {
+    let CompiledConstTpl::Handle {
+        handle_index,
+        selector,
+        plus,
+    } = const_tpl
+    else {
+        return None;
+    };
+    let plus = match (selector, plus) {
+        (CompiledHandleSelector::Offset, None) => None,
+        (CompiledHandleSelector::OffsetPlus, Some(plus)) => Some(*plus),
+        _ => return None,
+    };
+    Some((nonnegative_handle_index(*handle_index)?, plus))
+}
+
 fn nonnegative_handle_index(handle_index: i64) -> Option<usize> {
     if handle_index < 0 {
         return None;

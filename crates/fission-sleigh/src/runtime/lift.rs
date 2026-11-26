@@ -2807,4 +2807,71 @@ mod raw_seed_lift_tests {
             .unwrap_err();
         assert_eq!(format!("{a:#}"), format!("{b:#}"));
     }
+
+    /// Bit ranges of a memory operand (`m128[64,64]`, the `[handle:offset+plus]`
+    /// selector) are loaded like the whole operand: Ghidra `PcodeEmit.dump`
+    /// treats any offset handle of a dynamic operand as dynamic, and
+    /// `generatePointerAdd` adds the byte offset to the pointer first.
+    /// Fission handled only `[handle:offset]`, so these lifts read a unique
+    /// varnode no op had written (fission-systems/Fission#1062).
+    #[test]
+    fn x86_bit_range_of_a_memory_operand_is_loaded() {
+        let frontend = RuntimeSleighFrontend::new_for_language("x86-64").expect("x86-64 frontend");
+        let lift = |bytes: &[u8]| {
+            let (ops, len) = frontend
+                .decode_and_lift_with_len(bytes, 0x100000)
+                .unwrap_or_else(|error| panic!("lift {bytes:02x?}: {error:#}"));
+            assert_eq!(len as usize, bytes.len());
+            ops
+        };
+        let rsi = |vn: &Varnode| {
+            fission_pcode_ir::space::is_register_space_id(vn.space_id) && vn.offset == 0x30
+        };
+        for bytes in [
+            &[0x66, 0x0f, 0x6c, 0x06][..], // punpcklqdq xmm0, xmmword ptr [rsi]
+            &[0x66, 0x0f, 0x3a, 0x20, 0x06, 0x05][..], // pinsrb xmm0, byte ptr [rsi], 5
+            &[0x66, 0x0f, 0x58, 0x06][..], // addpd xmm0, xmmword ptr [rsi]
+        ] {
+            let ops = lift(bytes);
+            let mut written = std::collections::HashSet::new();
+            for op in &ops {
+                for vn in &op.inputs {
+                    if fission_pcode_ir::space::is_unique_space_id(vn.space_id) {
+                        assert!(
+                            written.contains(&(vn.offset, vn.size)),
+                            "{bytes:02x?} reads unique {:#x}:{} before any op writes it: {ops:#?}",
+                            vn.offset,
+                            vn.size
+                        );
+                    }
+                }
+                if let Some(out) = &op.output {
+                    written.insert((out.offset, out.size));
+                }
+            }
+            assert!(
+                ops.iter()
+                    .any(|op| op.opcode == PcodeOpcode::Load && rsi(&op.inputs[1])),
+                "{bytes:02x?} never loads [rsi]: {ops:#?}"
+            );
+        }
+        // addpd's high lane, `m128[64,64]`, loads 8 bytes from rsi + 8.
+        let ops = lift(&[0x66, 0x0f, 0x58, 0x06]);
+        let add = ops
+            .iter()
+            .position(|op| {
+                op.opcode == PcodeOpcode::IntAdd
+                    && rsi(&op.inputs[0])
+                    && op.inputs[1].is_constant
+                    && op.inputs[1].offset == 8
+            })
+            .unwrap_or_else(|| panic!("no rsi + 8 for the high lane: {ops:#?}"));
+        let ea = ops[add].output.clone().expect("INT_ADD output");
+        assert!(ops[add + 1..].iter().any(|op| {
+            op.opcode == PcodeOpcode::Load
+                && op.inputs[1].offset == ea.offset
+                && op.inputs[1].space_id == ea.space_id
+                && op.output.as_ref().is_some_and(|out| out.size == 8)
+        }));
+    }
 }

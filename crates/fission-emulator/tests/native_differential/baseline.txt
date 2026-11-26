@@ -50,9 +50,6 @@ x86_64 XCHG * #1059 42 90 clears RAX[63:32]; also #1060 (xchg m32, r32 no zero-e
 x86_64 XCHG.XACQUIRE * #1060 xchg m32, r32 no zero-extension
 # Decode: 66 66 cancels the operand-size override.
 x86_64 ADD CF,PF,ZF,SF,OF,RBP #1061 66 66 03 e8 decoded as add ebp, eax (drop with #1061)
-# Lift: no LOAD for a bit range of a dynamic memory operand.
-x86_64 PUNPCKLQDQ * #1062 memory operand never loaded
-x86_64 PINSRB * #1062 memory operand never loaded
 
 # ── AArch64 ─────────────────────────────────────────────────────────────────
 # Spec: no FPToFixed saturation for NaN/out-of-range; unsigned forms convert as signed.
