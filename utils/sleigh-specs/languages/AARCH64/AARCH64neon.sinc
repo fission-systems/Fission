@@ -4325,18 +4325,18 @@ is b_3131=0 & q=1 & u=1 & b_2428=0xe & advSIMD3.size=0 & b_21=1 & Rm_VPR128.4S &
 is b_31=0 & b_30=0 & b_2129=0b101110010 & b_1015=0b000101 & Rd_VPR64.4H & Rn_VPR64.4H & Rm_VPR64.4H & Zd
 {
 	TMPD1 = 0;
-	# sipd infix TMPD1 = f+(Rm_VPR64.4H,Rn_VPR64.4H) on pairs lane size (2 to 2)
-	local tmp2 = Rm_VPR64.4H[0,16];
-	local tmp3 = Rm_VPR64.4H[16,16];
+	# sipd infix TMPD1 = f+(Rn_VPR64.4H,Rm_VPR64.4H) on pairs lane size (2 to 2)
+	local tmp2 = Rn_VPR64.4H[0,16];
+	local tmp3 = Rn_VPR64.4H[16,16];
 	TMPD1[0,16] = tmp2 f+ tmp3;
-	tmp2 = Rm_VPR64.4H[32,16];
-	tmp3 = Rm_VPR64.4H[48,16];
-	TMPD1[16,16] = tmp2 f+ tmp3;
-	tmp2 = Rn_VPR64.4H[0,16];
-	tmp3 = Rn_VPR64.4H[16,16];
-	TMPD1[32,16] = tmp2 f+ tmp3;
 	tmp2 = Rn_VPR64.4H[32,16];
 	tmp3 = Rn_VPR64.4H[48,16];
+	TMPD1[16,16] = tmp2 f+ tmp3;
+	tmp2 = Rm_VPR64.4H[0,16];
+	tmp3 = Rm_VPR64.4H[16,16];
+	TMPD1[32,16] = tmp2 f+ tmp3;
+	tmp2 = Rm_VPR64.4H[32,16];
+	tmp3 = Rm_VPR64.4H[48,16];
 	TMPD1[48,16] = tmp2 f+ tmp3;
 	Rd_VPR64.4H = TMPD1;
 	zext_zd(Zd); # zero upper 24 bytes of Zd
@@ -10953,7 +10953,8 @@ is b_1031=0b0001111001111110000000 & Rd_GPR32 & Rn_FPR64 & Rd_GPR64
 :fmadd Rd_FPR64, Rn_FPR64, Rm_FPR64, Ra_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=0 & Rm_FPR64 & b_15=0 & Ra_FPR64 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = Ra_FPR64 f+ (Rm_FPR64 f* Rn_FPR64); #NEON_fmadd(Rn_FPR64, Rm_FPR64, Ra_FPR64);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR64 = Ra_FPR64 f+ (Rn_FPR64 f* Rm_FPR64);
 	zext_zd(Zd); # zero upper bytes of Zd
 }
 
@@ -10965,7 +10966,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=0 & Rm_FPR64 & b_15=0 & R
 :fmadd Rd_FPR32, Rn_FPR32, Rm_FPR32, Ra_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=0 & Rm_FPR32 & b_15=0 & Ra_FPR32 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = Ra_FPR32 f+ (Rm_FPR32 f* Rn_FPR32); #NEON_fmadd(Rn_FPR32, Rm_FPR32, Ra_FPR32);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR32 = Ra_FPR32 f+ (Rn_FPR32 f* Rm_FPR32);
 	zext_zs(Zd); # zero upper bytes of Zd
 }
 
@@ -10977,7 +10979,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=0 & Rm_FPR32 & b_15=0 & R
 :fmadd Rd_FPR16, Rn_FPR16, Rm_FPR16, Ra_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=3 & b_21=0 & Rm_FPR16 & b_15=0 & Ra_FPR16 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = Ra_FPR16 f+ (Rm_FPR16 f* Rn_FPR16); #NEON_fmadd(Rn_FPR16, Rm_FPR16, Ra_FPR16);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR16 = Ra_FPR16 f+ (Rn_FPR16 f* Rm_FPR16);
 	zext_zh(Zd); # zero upper bytes of Zd
 }
 
@@ -12679,15 +12682,15 @@ is b_31=0 & b_30=0 & b_2329=0b1011100 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_V
 # SIMD 4S when Q = 1
 
 :fmlal2 Rd_VPR128.4S, vRn_VPR128^".4H", Rm_VPR64.4H
-is b_31=0 & b_30=1 & b_2329=0b1011100 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_VPR128.4S & vRn_VPR128 & Rn_VPR128 & Rm_VPR64.4H & Zd
+is b_31=0 & b_30=1 & b_2329=0b1011100 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_VPR128.4S & vRn_VPR128 & Rn_VPR128 & Rm_VPR64.4H & Rm_VPR128 & Zd
 {
 	# Fission: FPMulAdd on single-precision operands
 	TMPD1 = Rn_VPR128[64,64];
 	# simd resize TMPQ3 = float2float(TMPD2) (lane size 2 to 4)
-	TMPQ3[0,32] = float2float(TMPD1[0,16]) f* float2float(Rm_VPR64.4H[0,16]);
-	TMPQ3[32,32] = float2float(TMPD1[16,16]) f* float2float(Rm_VPR64.4H[16,16]);
-	TMPQ3[64,32] = float2float(TMPD1[32,16]) f* float2float(Rm_VPR64.4H[32,16]);
-	TMPQ3[96,32] = float2float(TMPD1[48,16]) f* float2float(Rm_VPR64.4H[48,16]);
+	TMPQ3[0,32] = float2float(TMPD1[0,16]) f* float2float(Rm_VPR128[64,16]);
+	TMPQ3[32,32] = float2float(TMPD1[16,16]) f* float2float(Rm_VPR128[80,16]);
+	TMPQ3[64,32] = float2float(TMPD1[32,16]) f* float2float(Rm_VPR128[96,16]);
+	TMPQ3[96,32] = float2float(TMPD1[48,16]) f* float2float(Rm_VPR128[112,16]);
 	# simd infix Rd_VPR128.4S = Rd_VPR128.4S + TMPQ3 on lane size 4
 	Rd_VPR128.4S[0,32] = Rd_VPR128.4S[0,32] f+ TMPQ3[0,32];
 	Rd_VPR128.4S[32,32] = Rd_VPR128.4S[32,32] f+ TMPQ3[32,32];
@@ -13145,15 +13148,15 @@ is b_31=0 & b_30=0 & b_2329=0b1011101 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_V
 # SIMD 4S when Q = 1
 
 :fmlsl2 Rd_VPR128.4S, vRn_VPR128^".4H", Rm_VPR64.4H
-is b_31=0 & b_30=1 & b_2329=0b1011101 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_VPR128.4S & vRn_VPR128 & Rn_VPR128 & Rm_VPR64.4H & Zd
+is b_31=0 & b_30=1 & b_2329=0b1011101 & b_22=0 & b_21=1 & b_1015=0b110011 & Rd_VPR128.4S & vRn_VPR128 & Rn_VPR128 & Rm_VPR64.4H & Rm_VPR128 & Zd
 {
 	# Fission: FPMulAdd on single-precision operands
 	TMPD1 = Rn_VPR128[64,64];
 	# simd resize TMPQ3 = float2float(TMPD2) (lane size 2 to 4)
-	TMPQ3[0,32] = (f- float2float(TMPD1[0,16])) f* float2float(Rm_VPR64.4H[0,16]);
-	TMPQ3[32,32] = (f- float2float(TMPD1[16,16])) f* float2float(Rm_VPR64.4H[16,16]);
-	TMPQ3[64,32] = (f- float2float(TMPD1[32,16])) f* float2float(Rm_VPR64.4H[32,16]);
-	TMPQ3[96,32] = (f- float2float(TMPD1[48,16])) f* float2float(Rm_VPR64.4H[48,16]);
+	TMPQ3[0,32] = (f- float2float(TMPD1[0,16])) f* float2float(Rm_VPR128[64,16]);
+	TMPQ3[32,32] = (f- float2float(TMPD1[16,16])) f* float2float(Rm_VPR128[80,16]);
+	TMPQ3[64,32] = (f- float2float(TMPD1[32,16])) f* float2float(Rm_VPR128[96,16]);
+	TMPQ3[96,32] = (f- float2float(TMPD1[48,16])) f* float2float(Rm_VPR128[112,16]);
 	# simd infix Rd_VPR128.4S = Rd_VPR128.4S - TMPQ3 on lane size 4
 	Rd_VPR128.4S[0,32] = Rd_VPR128.4S[0,32] f+ TMPQ3[0,32];
 	Rd_VPR128.4S[32,32] = Rd_VPR128.4S[32,32] f+ TMPQ3[32,32];
@@ -13528,7 +13531,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & Imm8_fmov16_operand
 :fmsub Rd_FPR64, Rn_FPR64, Rm_FPR64, Ra_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=0 & Rm_FPR64 & b_15=1 & Ra_FPR64 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = Ra_FPR64 f- (Rm_FPR64 f* Rn_FPR64);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR64 = Ra_FPR64 f+ ((f- Rn_FPR64) f* Rm_FPR64);
 	zext_zd(Zd); # zero upper bytes of Zd
 
 }
@@ -13541,7 +13545,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=0 & Rm_FPR64 & b_15=1 & R
 :fmsub Rd_FPR32, Rn_FPR32, Rm_FPR32, Ra_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=0 & Rm_FPR32 & b_15=1 & Ra_FPR32 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = Ra_FPR32 f- (Rm_FPR32 f* Rn_FPR32);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR32 = Ra_FPR32 f+ ((f- Rn_FPR32) f* Rm_FPR32);
 	zext_zs(Zd); # zero upper bytes of Zd
 }
 
@@ -13553,7 +13558,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=0 & Rm_FPR32 & b_15=1 & R
 :fmsub Rd_FPR16, Rn_FPR16, Rm_FPR16, Ra_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=3 & b_21=0 & Rm_FPR16 & b_15=1 & Ra_FPR16 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = Ra_FPR16 f- (Rm_FPR16 f* Rn_FPR16);
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR16 = Ra_FPR16 f+ ((f- Rn_FPR16) f* Rm_FPR16);
 	zext_zh(Zd); # zero upper bytes of Zd
 }
 
@@ -14216,7 +14222,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1e & ftype=3 & b_2121=1 & fpDpOpcode=0x2 & b_
 :fnmadd Rd_FPR64, Rn_FPR64, Rm_FPR64, Ra_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=1 & Rm_FPR64 & b_15=0 & Ra_FPR64 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = (f-(Rn_FPR64 f* Rm_FPR64)) f- Ra_FPR64;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR64 = (f- Ra_FPR64) f+ ((f- Rn_FPR64) f* Rm_FPR64);
 	zext_zd(Zd);
 }
 
@@ -14228,7 +14235,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=1 & Rm_FPR64 & b_15=0 & R
 :fnmadd Rd_FPR32, Rn_FPR32, Rm_FPR32, Ra_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=1 & Rm_FPR32 & b_15=0 & Ra_FPR32 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = (f-(Rn_FPR32 f* Rm_FPR32)) f- Ra_FPR32;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR32 = (f- Ra_FPR32) f+ ((f- Rn_FPR32) f* Rm_FPR32);
 	zext_zs(Zd);
 }
 
@@ -14240,7 +14248,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=1 & Rm_FPR32 & b_15=0 & R
 :fnmadd Rd_FPR16, Rn_FPR16, Rm_FPR16, Ra_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=3 & b_21=1 & Rm_FPR16 & b_15=0 & Ra_FPR16 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = (f-(Rn_FPR16 f* Rm_FPR16)) f- Ra_FPR16;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR16 = (f- Ra_FPR16) f+ ((f- Rn_FPR16) f* Rm_FPR16);
 	zext_zh(Zd);
 }
 
@@ -14252,7 +14261,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=3 & b_21=1 & Rm_FPR16 & b_15=0 & R
 :fnmsub Rd_FPR64, Rn_FPR64, Rm_FPR64, Ra_FPR64
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=1 & Rm_FPR64 & b_15=1 & Ra_FPR64 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	Rd_FPR64 = (Rn_FPR64 f* Rm_FPR64) f- Ra_FPR64;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR64 = (f- Ra_FPR64) f+ (Rn_FPR64 f* Rm_FPR64);
 	zext_zd(Zd);
 }
 
@@ -14264,7 +14274,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=1 & b_21=1 & Rm_FPR64 & b_15=1 & R
 :fnmsub Rd_FPR32, Rn_FPR32, Rm_FPR32, Ra_FPR32
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=1 & Rm_FPR32 & b_15=1 & Ra_FPR32 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = (Rn_FPR32 f* Rm_FPR32) f- Ra_FPR32;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR32 = (f- Ra_FPR32) f+ (Rn_FPR32 f* Rm_FPR32);
 	zext_zs(Zd);
 }
 
@@ -14276,7 +14287,8 @@ is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=0 & b_21=1 & Rm_FPR32 & b_15=1 & R
 :fnmsub Rd_FPR16, Rn_FPR16, Rm_FPR16, Ra_FPR16
 is m=0 & b_3030=0 & s=0 & b_2428=0x1f & ftype=3 & b_21=1 & Rm_FPR16 & b_15=1 & Ra_FPR16 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = (Rn_FPR16 f* Rm_FPR16) f- Ra_FPR16;
+	# Fission: FPMulAdd operand order and FPNeg
+	Rd_FPR16 = (f- Ra_FPR16) f+ (Rn_FPR16 f* Rm_FPR16);
 	zext_zh(Zd);
 }
 

@@ -195,6 +195,9 @@ const CURATED: &[(&str, &[u8])] = &[
     // Widening half-precision multiply-adds and half-precision fixed-point converts.
     ("fmlal2 v0.2s, v1.2h, v2.2h", &[0x20, 0xcc, 0x22, 0x2e]),
     ("fmlsl2 v0.2s, v1.2h, v2.2h", &[0x20, 0xcc, 0xa2, 0x2e]),
+    ("fmlal2 v0.4s, v1.4h, v2.4h", &[0x20, 0xcc, 0x22, 0x6e]),
+    ("fmlsl2 v0.4s, v1.4h, v2.4h", &[0x20, 0xcc, 0xa2, 0x6e]),
+    ("faddp v0.4h, v1.4h, v2.4h", &[0x20, 0x14, 0x42, 0x2e]),
     ("fmlal v0.4s, v1.4h, v2.h[3]", &[0x20, 0x00, 0xb2, 0x4f]),
     ("fmlsl v0.4s, v1.4h, v2.h[3]", &[0x20, 0x40, 0xb2, 0x4f]),
     ("scvtf h0, x1, #53", &[0x20, 0x2c, 0xc2, 0x9e]),

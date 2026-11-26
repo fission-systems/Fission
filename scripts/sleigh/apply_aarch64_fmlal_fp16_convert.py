@@ -28,6 +28,10 @@ Found by the native differential (an Apple M4 host), behind its `~fp16` entry.
    disassembled as `v2.H[0x1]` and read element 1. Those rules now use H:L:M like the
    others (both endiannesses).
 
+4. FMLAL2/FMLSL2 `.4S` (vector) read the second source from Vm<63:0>. The "2" forms take
+   the upper half of both sources (`operand2 = Vpart[m, 1, datasize DIV 2]`), so they now
+   read Vm<127:64>, as the Q=0 forms already did.
+
 Usage: apply_aarch64_fmlal_fp16_convert.py NEON.sinc INSTRUCTIONS.sinc
 (AARCH64neon.sinc and AARCH64instructions.sinc, rewritten in place). It is idempotent.
 """
@@ -97,6 +101,22 @@ def fix_convert(m):
     return m.group("head") + pat + "\n" + body + "\n"
 
 
+# fmlal2/fmlsl2 Vd.4S, Vn.4H, Vm.4H: the second source is Vm<127:64>
+UPPER = re.compile(r"^(?P<head>:fml[as]l2 Rd_VPR128\.4S, [^\n]*, Rm_VPR64\.4H\n)(?P<pat>is [^\n]*)\n\{\n(?P<body>.*?)\n\}\n", re.M | re.S)
+LOW_LANE = re.compile(r"Rm_VPR64\.4H\[(\d+),16\]")
+
+
+def fix_upper(m):
+    head, pat, body = m.group("head", "pat", "body")
+    if "Rm_VPR128[" in body:
+        return m.group(0)
+    body, n = LOW_LANE.subn(lambda s: f"Rm_VPR128[{64 + int(s.group(1))},16]", body)
+    assert n == 4, (head, n)
+    pat = pat.replace("& Rm_VPR64.4H", "& Rm_VPR64.4H & Rm_VPR128", 1)
+    assert "Rm_VPR128 " in pat, pat
+    return head + pat + "\n{\n" + body + "\n}\n"
+
+
 INDEX_EDITS = [
     (
         "vIndexHLM: val is b_2223=2 & b_2121 & b_1111 [ val = b_1111 << 1 | b_2121; ] { export *[const]:8 val; }",
@@ -118,7 +138,8 @@ def main():
     text = open(neon).read()
     text, n1 = CTOR.subn(fix_fmlal, text)
     text, n2 = CONVERT.subn(fix_convert, text)
-    assert (n1, n2) == (16, 4), (n1, n2)
+    text, n3 = UPPER.subn(fix_upper, text)
+    assert (n1, n2, n3) == (16, 4, 2), (n1, n2, n3)
     open(neon, "w").write(text)
     text = open(instructions).read()
     for old, new in INDEX_EDITS:

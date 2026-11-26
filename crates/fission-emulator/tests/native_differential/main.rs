@@ -293,8 +293,9 @@ impl<'a> Harness<'a> {
                     stats.random_mnemonics.insert(mn.clone());
                 }
                 let mask = (self.target.mask)(bytes, &lifted, input);
-                let mut diffs = model::compare(self.target.isa, mask, input, &n, &f);
-                if half_precision(&lifted.ops) {
+                let half = half_precision(&lifted.ops);
+                let mut diffs = model::compare(self.target.isa, mask, half, input, &n, &f);
+                if half {
                     for d in &mut diffs {
                         d.field.push_str("~fp16");
                     }

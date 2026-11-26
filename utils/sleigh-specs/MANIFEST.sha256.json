@@ -93,20 +93,20 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64.sla",
-      "sha256": "15ac201cd2b9f4da6555cc689faf5a948a679665157a4083c8ca320234a74888",
-      "size": 613755,
+      "sha256": "0b4bfae09b22f61d14301aef9b3ecfcb0e52e57fbe610591f3658537a16e3e97",
+      "size": 613810,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64BE.sla",
-      "sha256": "430776091814e0ea1ace0d91f527aa6d0a0473f1302a7d58842385c75de32f42",
-      "size": 620613,
+      "sha256": "764395c604a81a71eab0c66b7047e1a7c33f6a34697351c0b89d0c62a320569e",
+      "size": 620639,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64_AppleSilicon.sla",
-      "sha256": "d50135ba4fe9b9b2b89062b9a8187a8db39f7531dffdf9deac693a946c8b113e",
-      "size": 615834,
+      "sha256": "50a23b30ab6a3c58703a224de435becc3d510c510ff5bde03cc3d0d8da688e34",
+      "size": 615861,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
@@ -1227,8 +1227,8 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64neon.sinc",
-      "sha256": "bdf10590fc393694de8af9be2f48e630cdf9c463e8410a0eb69ebe0faa7f2c9b",
-      "size": 1682836,
+      "sha256": "97177feeb78a84cfe716167c1240d398c4c41e21969e4fe5625877d977619b06",
+      "size": 1683307,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64neon.sinc"
     },
     {

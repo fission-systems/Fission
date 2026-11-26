@@ -113,7 +113,16 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   half-precision constant (infinity for fbits >= 16), giving NaN; they now convert through
   double and round once (a 64-bit source with more than 53 significant bits rounds twice).
   Evidence: an Apple M4 run natively; the native differential's `~fp16` entry hid these.
+  The vector `FMLAL2`/`FMLSL2 .4S` forms also read the second source from Vm<63:0> instead of
+  Vm<127:64> (upstream); the same script fixes that.
   Re-apply with `scripts/sleigh/apply_aarch64_fmlal_fp16_convert.py`.
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
+  `FMSUB`/`FNMADD`/`FNMSUB` subtracted where FPMulAdd negates an operand (FPNeg), so a
+  propagated NaN had the wrong sign; they and `FMADD` are now `addend f+ (element1 f*
+  element2)` with the operand negated first. `FADDP .4H` put Vm's pairwise sums in the low
+  lanes; Vn's come first. Evidence: an Apple M4 run natively (nightly size). Not modelled:
+  the single rounding (#1072) and the signalling-NaN priority of FPProcessNaNs3 (#1397).
+  Re-apply with `scripts/sleigh/apply_aarch64_fpneg_faddp.py`.
 - `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
   `FMAX`/`FMIN`/`FMAXNM`/`FMINNM` (H, S, D) follow FPMax/FPMin/FPMaxNum/FPMinNum. Upstream
   copied Rn into Rd before comparing, so with Rd = Rm (`fmax d0, d1, d0`) the result was

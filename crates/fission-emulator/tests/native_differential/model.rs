@@ -79,10 +79,13 @@ fn hex16(v: &[u8; 16]) -> String {
     format!("{:032x}", u128::from_le_bytes(*v))
 }
 
-/// Every unmasked difference between the two final states.
+/// Every unmasked difference between the two final states. `half` says the
+/// instruction computes on half-precision floats, so vector lanes may also be
+/// compared as f16 NaNs.
 pub fn compare(
     isa: &Isa,
     mask: Mask,
+    half: bool,
     input: &CpuState,
     native: &CpuState,
     fission: &CpuState,
@@ -119,7 +122,7 @@ pub fn compare(
             // Both sides produced a NaN and only the payload differs: kept
             // apart, because which NaN propagates is one evaluator question
             // (#1055), not a defect of each instruction.
-            let suffix = if nan_payload_only(&native.vec[i], &fission.vec[i]) {
+            let suffix = if nan_payload_only(&native.vec[i], &fission.vec[i], half) {
                 "~nan"
             } else {
                 ""
@@ -157,9 +160,9 @@ pub fn compare(
     out
 }
 
-/// Whether every differing lane, read as f32 lanes or as f64 lanes, holds a
-/// NaN on both sides.
-fn nan_payload_only(a: &[u8; 16], b: &[u8; 16]) -> bool {
+/// Whether every differing lane, read as f32 lanes or as f64 lanes (or as f16
+/// lanes, for a half-precision instruction), holds a NaN on both sides.
+fn nan_payload_only(a: &[u8; 16], b: &[u8; 16], half: bool) -> bool {
     let f32_lanes = (0..4).all(|l| {
         let x = u32::from_le_bytes(a[4 * l..4 * l + 4].try_into().unwrap());
         let y = u32::from_le_bytes(b[4 * l..4 * l + 4].try_into().unwrap());
@@ -170,7 +173,14 @@ fn nan_payload_only(a: &[u8; 16], b: &[u8; 16]) -> bool {
         let y = u64::from_le_bytes(b[8 * l..8 * l + 8].try_into().unwrap());
         x == y || (f64::from_bits(x).is_nan() && f64::from_bits(y).is_nan())
     });
-    f32_lanes || f64_lanes
+    let f16_lanes = half
+        && (0..8).all(|l| {
+            let x = u16::from_le_bytes(a[2 * l..2 * l + 2].try_into().unwrap());
+            let y = u16::from_le_bytes(b[2 * l..2 * l + 2].try_into().unwrap());
+            let nan = |v: u16| v & 0x7FFF > 0x7C00;
+            x == y || (nan(x) && nan(y))
+        });
+    f32_lanes || f64_lanes || f16_lanes
 }
 
 // ── Value generation ────────────────────────────────────────────────────────
