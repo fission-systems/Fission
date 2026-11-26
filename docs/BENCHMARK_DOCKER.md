@@ -12,7 +12,7 @@
 
 **Policy (2026-07-10):** Decompiler quality work that claims row-level or corpus
 improvement **must** run the external multi-decompiler benchmark via
-`/Users/sjkim1127/fission-benchmark/docker-compose.yml` (with the **local**
+`~/fission-benchmark/docker-compose.yml` (with the **local**
 overlay for in-tree Fission builds). Do not promote “fixed” from unit tests or
 one-off `fission_cli decomp` alone.
 
@@ -23,11 +23,11 @@ use the **local** profile and must **never** be published as official latest.
 
 | Item | Path |
 |------|------|
-| Benchmark repo | `/Users/sjkim1127/fission-benchmark` |
-| Compose (base) | `/Users/sjkim1127/fission-benchmark/docker-compose.yml` |
-| Compose (local Fission) | `/Users/sjkim1127/fission-benchmark/docker-compose.local.yml` |
+| Benchmark repo | `~/fission-benchmark` |
+| Compose (base) | `~/fission-benchmark/docker-compose.yml` |
+| Compose (local Fission) | `~/fission-benchmark/docker-compose.local.yml` |
 | Prepare local CLI bundle | `scripts/prepare_local_fission.sh` in the benchmark repo |
-| Fission monorepo | `/Users/sjkim1127/Fission` (override with `FISSION_ROOT`) |
+| Fission monorepo | your Fission checkout (override with `FISSION_ROOT`) |
 
 ## Local CLI observe (before / after text — not the oracle)
 
@@ -53,8 +53,8 @@ semantic oracle / ranking below.
 
 ```bash
 # 1) From fission-benchmark: bake current Fission tree into a Linux CLI bundle
-cd /Users/sjkim1127/fission-benchmark
-export FISSION_ROOT=/Users/sjkim1127/Fission
+cd ~/fission-benchmark
+export FISSION_ROOT=/path/to/Fission   # your Fission checkout
 ./scripts/prepare_local_fission.sh
 
 # 2) Start local Fission service (profile local + both compose files)
@@ -101,7 +101,7 @@ Standing rule for AI-assisted and human quality cycles:
 
 1. Implement invariant at the owner (see ADR 0006 / 0009).
 2. Unit / crate tests.
-3. **Always** exercise `/Users/sjkim1127/fission-benchmark/docker-compose.yml`
+3. **Always** exercise `~/fission-benchmark/docker-compose.yml`
    local loop above before claiming row improvement.
 4. Report both CLI one-shot and runner/oracle movement.
 
