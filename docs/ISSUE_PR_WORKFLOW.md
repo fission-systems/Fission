@@ -132,8 +132,20 @@ next, up to four.
 - The model sees only the public checkout and the issue text. It can read
   and edit files, nothing else.
 - Its edits are kept only under `docs/`, in Markdown and in Rust under
-  `crates/`, small and text-only.
-- `scripts/ci/free_model_draft.py` holds the rules and their tests.
+  `crates/`, small and text-only. Nothing in a proc-macro crate is kept,
+  because `cargo check` would run it.
+- Build-error repair loop: when the edits touch Rust under `crates/`, the
+  workflow (the model has no shell) runs `cargo fmt` and
+  `cargo check --locked -p <package> --all-targets` on each touched package.
+  On a compiler error the model gets the diagnostics (the first ~6,000
+  characters) in a new run and fixes only those, at most 2 rounds per model,
+  with the edit check and cargo run again after each. A model that still
+  fails hands over to the next. The Rust toolchain is installed only when a
+  draft touches Rust, so a docs-only draft stays fast. The PR body says
+  whether `cargo check` passed and after how many repair rounds. That is a
+  compile check only: no test ran.
+- `scripts/ci/free_model_draft.py` holds the rules and their tests;
+  `scripts/ci/free_model_draft_loop.sh` is the model loop.
 
 The draft gets no CI and cannot merge. An Opus review of the diff comes first.
 Marking it ready then starts CI, and the usual lifecycle above applies. If the

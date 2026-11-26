@@ -13,8 +13,20 @@ name: Free-model draft
 #   checkout. It cannot run commands or reach the network, and in a
 #   non-interactive run a permission request is rejected.
 # - Edits: kept only under docs/, in Markdown and in Rust under crates/;
-#   small; text-only; no workflow, script or build file. The check runs
-#   again in the job that opens the PR.
+#   small; text-only; no workflow, script or build file; nothing in a
+#   proc-macro crate (cargo check would run it). The check runs again in the
+#   job that opens the PR.
+# - Build-error repair loop (scripts/ci/free_model_draft_loop.sh): when the
+#   edits touch Rust under crates/, the workflow, not the model, runs
+#   `cargo fmt` and `cargo check --locked -p <pkg> --all-targets` on the
+#   touched packages. On a compiler error the model gets the diagnostics
+#   (first ~6,000 characters) in a new run and may fix them, at most 2 rounds
+#   per model, each followed by the edit check and cargo again. If it still
+#   fails, the next model takes over. The model still has no shell. The Rust
+#   toolchain and cache are set up only when a draft touches Rust, so a
+#   docs-only draft stays fast. The cache is restored, never saved: a
+#   model's build output must not enter a cache other runs read. The PR body
+#   says whether cargo check passed and after how many repair rounds.
 # - No API key: free models need none. No secret reaches the model's job.
 # - Models: free ones have usage limits, so the run number picks which goes
 #   first and a failing or rate-limited one hands over to the next (up to
@@ -55,13 +67,16 @@ jobs:
       github.repository == 'fission-systems/Fission'
       && (github.event_name == 'workflow_dispatch' || github.event.label.name == 'agent:free')
     runs-on: ubuntu-24.04
-    # Up to four models at 12 minutes each.
-    timeout-minutes: 60
+    # Up to four models at 12 minutes each, plus cargo and repair rounds; the
+    # loop stops starting new work after 110 minutes (BUDGET_SECS).
+    timeout-minutes: 130
     permissions:
       contents: read
       issues: read
     outputs:
-      model: ${{ steps.model.outputs.model }}
+      model: ${{ steps.resume.outputs.model || steps.model.outputs.model }}
+      cargo: ${{ steps.resume.outputs.cargo || steps.model.outputs.cargo }}
+      repairs: ${{ steps.resume.outputs.repairs || steps.model.outputs.repairs }}
     env:
       ISSUE: ${{ github.event.issue.number || inputs.issue }}
     steps:
@@ -82,40 +97,33 @@ jobs:
         run: npm install --global --no-fund --no-audit "opencode-ai@$OPENCODE_VERSION"
       - name: Draft with free models in turn
         id: model
-        run: |
-          set -euo pipefail
-          opencode models opencode > "$RUNNER_TEMP/models.txt"
-          echo "Free models listed:"; cat "$RUNNER_TEMP/models.txt"
-          # Free models have usage limits: the run number picks which one goes
-          # first, and a model that fails, is rate-limited or leaves no
-          # acceptable edits hands over to the next.
-          models=()
-          while IFS= read -r model; do models+=("$model"); done < <(python3 scripts/ci/free_model_draft.py \
-            order-models --models-file "$RUNNER_TEMP/models.txt" --seed "$GITHUB_RUN_NUMBER")
-          OPENCODE_CONFIG_CONTENT="$(cat "$RUNNER_TEMP/draft/permissions.json")"
-          export OPENCODE_CONFIG_CONTENT
-          used=""
-          for model in "${models[@]}"; do
-            echo "::group::$model"
-            git reset -q --hard HEAD
-            git clean -fdq
-            timeout 12m opencode run --model "$model" "$(cat "$RUNNER_TEMP/draft/prompt.txt")" \
-              || echo "$model exited with status $?"
-            if python3 scripts/ci/free_model_draft.py check; then
-              used="$model"
-              echo "::endgroup::"
-              break
-            fi
-            echo "::endgroup::"
-          done
-          if [ -z "$used" ]; then
-            echo "::error::no free model left an acceptable draft (tried: ${models[*]})"
-            exit 1
-          fi
-          echo "model=$used" >> "$GITHUB_OUTPUT"
-          git diff --cached > "$RUNNER_TEMP/draft/edits.patch"
-          { echo "### Free-model draft by \`$used\`"; echo; echo '```diff'; cat "$RUNNER_TEMP/draft/edits.patch"; echo '```'; } \
-            >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DRAFT: ${{ runner.temp }}/draft
+          ISSUE_JSON: ${{ runner.temp }}/issue.json
+          SEED: ${{ github.run_number }}
+          RUST_READY: "0"
+        run: bash scripts/ci/free_model_draft_loop.sh
+      # Only when the accepted edits touch Rust: the loop stopped to ask for
+      # the toolchain, and the next step resumes it at the same model.
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        if: steps.model.outputs.need_rust == 'true'
+        with:
+          toolchain: stable
+          components: rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: steps.model.outputs.need_rust == 'true'
+        with:
+          shared-key: fission-output-diff-${{ runner.os }}
+          save-if: "false"
+      - name: Check the Rust, repair build errors, and finish the draft
+        id: resume
+        if: steps.model.outputs.need_rust == 'true'
+        env:
+          DRAFT: ${{ runner.temp }}/draft
+          ISSUE_JSON: ${{ runner.temp }}/issue.json
+          SEED: ${{ github.run_number }}
+          RUST_READY: "1"
+        run: bash scripts/ci/free_model_draft_loop.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: free-model-draft
@@ -136,6 +144,8 @@ jobs:
     env:
       ISSUE: ${{ github.event.issue.number || inputs.issue }}
       MODEL: ${{ needs.draft.outputs.model }}
+      CARGO: ${{ needs.draft.outputs.cargo }}
+      REPAIRS: ${{ needs.draft.outputs.repairs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -164,7 +174,12 @@ jobs:
             echo "Fixes #$ISSUE"
             echo
             echo "Drafted by \`$MODEL\`, an OpenCode Zen free model ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID))."
-            echo "It could only read and edit files; nothing was built or tested."
+            echo "The model could only read and edit files. It ran nothing and tested nothing."
+            if [ "$CARGO" = passed ]; then
+              echo "The workflow ran \`cargo fmt\` and \`cargo check --locked --all-targets\` on the touched packages: **passed**, after $REPAIRS repair round(s) (at most 2). That is a compile check only; no test ran."
+            else
+              echo "The workflow did not run \`cargo check\`: the draft changes no Rust under \`crates/\`. Nothing was built or tested."
+            fi
             echo
             echo "**Before this leaves draft:** an Opus review of the diff. Marking it ready starts CI."
           } > "$RUNNER_TEMP/body.md"
