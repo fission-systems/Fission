@@ -61,7 +61,7 @@ first within a rank.
    STM32 boards. 512-byte blocks with a target address each: the same sparse
    image as HEX, so it reuses item 1's mapping and language path. The family
    ID names the chip, not the instruction set variant, so it is reported, not
-   used to pick a language. **Done** (second PR).
+   used to pick a language. **Done** (#1405).
 3. **Unix `ar` archives (`.a`, MSVC `.lib`).** Static libraries are the most
    common input Fission refuses outright. Enumerate members (GNU and BSD long
    names, the MSVC/GNU symbol-index members) and load a chosen member through
