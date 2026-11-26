@@ -57,13 +57,13 @@ Read the nearest child file before editing those areas.
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
-| Checked-in utility resources | `/Users/sjkim1127/Fission/utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
+| Checked-in utility resources | `utils` | Prefer existing resource/path config and utility loaders over hardcoded paths; use this tree when reusable signatures, type info, benchmark support data, or other checked-in resources already cover the need |
 | Loader identity / binary provenance hints | `crates/fission-loader/src/loader/identity/` | Evidence-backed `BinaryIdentityReport` on `LoadedBinary`; not an IR/decompiler repair layer |
 | Canonical program metadata view | `crates/fission-analysis-db/` | Deterministic IDs and provenance for memory blocks, functions, symbols, and relocations; read-only downstream contract |
 | Binary loaders (PE, ELF, Mach-O, TE, COFF, etc.) | `crates/fission-loader/src/loader/` | Format-specific byte parsing, section mapping, relocation, and symbol resolution |
 | Static facts and binary-derived analysis services | `crates/fission-static/src/analysis/` | Xrefs, discovery, patches, strings; fact extraction — not decompiler orchestration |
 | Decomp-facing facts / native prep surface | `crates/fission-static/src/analysis/decomp/` | `FactStore` and related helpers consumed by `fission-decompiler` |
-| Reference algorithms | `/Users/sjkim1127/Fission/vendor`, especially `/Users/sjkim1127/Fission/vendor/ghidra/` and `/Users/sjkim1127/Fission/vendor/retdec-5.0/` | Reference these often for invariants and behavior, but do not add runtime/build dependencies, bindings, or copied implementation shortcuts |
+| Reference algorithms | `vendor`, especially `vendor/ghidra/` and `vendor/retdec-5.0/` | Reference these often for invariants and behavior, but do not add runtime/build dependencies, bindings, or copied implementation shortcuts |
 
 ## Core Rules
 
@@ -72,8 +72,8 @@ Read the nearest child file before editing those areas.
 3. Use typed contracts; do not invent parallel telemetry payloads outside `NirBuildStats`.
 4. Keep behavior deterministic when outputs feed snapshots, metrics, or benchmark comparisons.
 5. Large refactors are acceptable when they reduce long-term complexity and tighten ownership.
-6. Do not hardcode repository-local resource paths in code; when `/Users/sjkim1127/Fission/utils` has reusable signatures, type info, benchmark support data, or other checked-in resources, route access through existing `PathConfig`, `PATHS`, `resource_roots`, or utility loaders instead of embedding absolute paths.
-7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
+6. Do not hardcode repository-local resource paths in code; when `utils` has reusable signatures, type info, benchmark support data, or other checked-in resources, route access through existing `PathConfig`, `PATHS`, `resource_roots`, or utility loaders instead of embedding absolute paths.
+7. Treat `vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
 10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is FreshBench ([`docs/BENCHMARK_FRESHBENCH.md`](docs/BENCHMARK_FRESHBENCH.md), [ADR 0019](docs/adr/0019-freshbench-is-the-benchmark.md)), measured on the **whole M1 corpus** (`freshbench sweep run`); a `--builds`/`--only` slice is only the quick pre-check. Estimates, assumed patterns, and nextest-only green are not quality evidence. **A benchmark measures similarity to the source, not correctness** (ADR 0019, carrying over ADR 0018). It is reported for every output-changing PR, but a claim that output became *correct* needs correctness evidence: native replay, `fission_cli verify --tier ground-truth`, manuals, DWARF/PDB, call sites counted by instruction address, or the raw diff. A fix that makes wrong output right may land with a worse score when the PR shows that evidence and explains the regression.
@@ -154,8 +154,8 @@ not LOC, commit count, feature count, issue count, or benchmark rank alone.
 - Do not duplicate the same metric definition across pcode and benchmark scripts.
 - Do not treat `fission-cli` as a semantic repair layer.
 - Do not treat benchmark/reporting scripts as semantic repair layers.
-- Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `/Users/sjkim1127/Fission/utils` directly in implementation logic.
-- Do not link against, shell out to, bind to, or otherwise depend on `/Users/sjkim1127/Fission/vendor` code in production paths.
+- Do not bypass `PathConfig`, `PATHS`, `resource_roots`, or related helpers by embedding `utils` directly in implementation logic.
+- Do not link against, shell out to, bind to, or otherwise depend on `vendor` code in production paths.
 - Do not claim success from one targeted test if crate-level regression remains.
 - Do not grow parallel x86-32 / x64 / ARM copies of the same materialize, loop-carried, join, or short-circuit rule; restate once as a common invariant and supply ISA data only through models (cspec/CC/SLEIGH).
 - **Do not invent presentation/structuring “quality” passes from synthetic shapes alone** (e.g. hand-built `while`→`for` IR) and call the work a decompiler improvement. Without a measured motivating row (or multi-row sample) and a remeasured after, report only “mechanical change / test coverage.”
@@ -419,10 +419,10 @@ Required principles:
 
 Resource rules:
 
-- `/Users/sjkim1127/Fission/utils` contains reusable Fission resources, type information, signatures, and benchmark support data.
+- `utils` contains reusable Fission resources, type information, signatures, and benchmark support data.
 - Prefer existing resource loaders, `PathConfig`, `PATHS`, and resource-root mechanisms over hardcoded paths or duplicate implementations.
 - Use `utils` only when it supports a maintainable semantic-layer design, not as a workaround.
-- `/Users/sjkim1127/Fission/vendor` and especially `/Users/sjkim1127/Fission/vendor/ghidra/ghidra-Ghidra_12.0.4_build` are reference-only sources.
+- `vendor` and especially `vendor/ghidra/ghidra-Ghidra_12.0.4_build` are reference-only sources.
 - Do not add runtime/build dependencies on vendor code, do not copy implementations, and do not add C++ bindings.
 
 Regression-prevention workflow:
