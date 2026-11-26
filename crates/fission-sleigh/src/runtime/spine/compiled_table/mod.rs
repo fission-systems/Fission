@@ -480,6 +480,14 @@ fn typed_template_resolution_error(
     compiled: &CompiledFrontend,
     err: anyhow::Error,
 ) -> anyhow::Error {
+    // An invalid instruction found while binding operands (a `_` hole in an
+    // attach table) is not a gap in the template support.
+    if matches!(
+        err.downcast_ref::<RuntimeSleighError>(),
+        Some(RuntimeSleighError::DecodeNoMatch { .. })
+    ) {
+        return err;
+    }
     let rendered = err.to_string();
     let lower = rendered.to_ascii_lowercase();
     if lower.contains("tokenfield")

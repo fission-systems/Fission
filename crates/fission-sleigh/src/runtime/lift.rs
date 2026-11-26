@@ -2859,4 +2859,35 @@ mod raw_seed_lift_tests {
             assert_eq!(registers, [2, 3, 4, 5], "{name}: {ops:#?}");
         }
     }
+
+    /// x86-32 `mov r32, crN` attaches `[ CR0 _ CR2 CR3 CR4 _ _ _ ]`: CR2 is
+    /// selector 2 and CR1 is no register, so that encoding is invalid (#1391).
+    #[test]
+    fn x86_32_control_register_holes_keep_positions_and_reject_cr1() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86:LE:32:default").expect("x86-32 frontend");
+        let decode = |bytes: &[u8]| {
+            frontend.decode_instruction_and_lift_with_context_override(bytes, 0x100000, None)
+        };
+        for (bytes, text) in [
+            ([0x0f, 0x20, 0xd0], "mov EAX, CR2"),
+            ([0x0f, 0x22, 0xd8], "mov CR3, EAX"),
+        ] {
+            let (decoded, _, len, _) =
+                decode(&bytes).unwrap_or_else(|error| panic!("lift {bytes:02x?}: {error:#}"));
+            assert_eq!(len, 3);
+            assert_eq!(
+                format!("{} {}", decoded.mnemonic, decoded.operands_text),
+                text
+            );
+        }
+        let error = decode(&[0x0f, 0x20, 0xc8]).expect_err("mov eax, cr1 is invalid");
+        assert!(
+            matches!(
+                error.downcast_ref::<crate::runtime::RuntimeSleighError>(),
+                Some(crate::runtime::RuntimeSleighError::DecodeNoMatch { .. })
+            ),
+            "{error:#}"
+        );
+    }
 }
