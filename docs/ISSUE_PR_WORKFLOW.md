@@ -119,6 +119,24 @@ along the way go in their own PRs, or in an issue with a probe.
 Use small coherent PRs; don't mix unrelated fixes. Research remains isolated
 until qualification. No automatic merge or issue closing based on labels.
 
+### Free-model drafts (`agent:free`)
+
+Label a simple issue `agent:free`: a typo, a docs fix, or a small
+single-purpose code change. Do not use it on an issue whose body carries a log
+or decompiled output. `free-model-draft.yml` then asks an OpenCode Zen free
+model for a fix and opens it as a draft PR labelled `agent:free-draft`.
+
+- The model sees only the public checkout and the issue text. It can read
+  and edit files, nothing else.
+- Its edits are kept only under `docs/`, in Markdown and in Rust under
+  `crates/`, small and text-only.
+- `scripts/ci/free_model_draft.py` holds the rules and their tests.
+
+The draft gets no CI and cannot merge. An Opus review of the diff comes first.
+Marking it ready then starts CI, and the usual lifecycle above applies. If the
+model produced nothing acceptable, the workflow says so on the issue. Hand the
+issue to a stronger model.
+
 ## Bootstrap and migration
 
 Maintainer with GitHub CLI access:
