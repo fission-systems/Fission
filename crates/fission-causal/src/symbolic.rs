@@ -502,6 +502,19 @@ pub fn solve(
             Some(UnknownReason::ConflictBudget) => format!("conflict budget ({conflicts})"),
             Some(UnknownReason::Unsupported(what)) => format!("unsupported: {}", what.join(", ")),
             Some(UnknownReason::OracleRefinement) => "memory-oracle refinement".into(),
+            Some(UnknownReason::OracleIdentityMismatch(msg)) => {
+                format!("oracle identity mismatch: {msg}")
+            }
+            Some(UnknownReason::OracleMissingByte { space_id, address }) => {
+                format!("oracle missing byte at space_{space_id}[0x{address:x}]")
+            }
+            Some(UnknownReason::OracleBoundaryOverflow {
+                space_id,
+                address,
+                bit_width,
+            }) => format!(
+                "oracle boundary overflow at space_{space_id}[0x{address:x}] ({bit_width} bits)"
+            ),
             None => "unknown".into(),
         }),
         Ok(Err(e)) => QueryResult::Unknown(format!("solver error: {e}")),

@@ -1,5 +1,6 @@
 use crate::ast::{Sort, SymExpr, SymNodeId};
 use crate::cnf::Lit;
+pub use crate::oracle::*;
 use crate::theory::bitvector::LoweredAssumption;
 use crate::validate::{validate_query_with_nodes, ValidatedQuery, ValidationError, VarSortEnv};
 use anyhow::Result;
@@ -28,6 +29,16 @@ pub enum UnknownReason {
     /// The memory oracle kept contradicting the model after the bounded
     /// number of refinement rounds.
     OracleRefinement,
+    /// Supplied memory bindings disagree with the active oracle identity or array sort.
+    OracleIdentityMismatch(String),
+    /// A queried concrete address lacked oracle backing under [`MissingBytePolicy::RejectUnknown`].
+    OracleMissingByte { space_id: u64, address: u64 },
+    /// A multibyte oracle read crossed the declared address-space boundary under [`AddressWrapPolicy::RejectOverflow`].
+    OracleBoundaryOverflow {
+        space_id: u64,
+        address: u64,
+        bit_width: u32,
+    },
 }
 
 /// Value state for one symbol in a published `Sat` model.
@@ -82,6 +93,7 @@ pub enum ModelLookup {
 pub struct PublishedModel {
     pub query_epoch: u64,
     pub oracle_epoch: Option<u64>,
+    pub oracle_scope: OracleModelScope,
     pub assumptions: Vec<SymExpr>,
     /// [`Solver::assertion_revision`] at publication; a model answers only
     /// for the assertion set it was found under.
@@ -137,10 +149,6 @@ pub struct EvalReport {
     pub base_satisfiable: bool,
 }
 
-pub trait MemoryOracle {
-    fn read_concrete(&self, space_id: u64, addr: u64) -> Option<u8>;
-}
-
 /// A basic interface for an SMT Solver (CDCL/Bitvector skeleton).
 ///
 /// # One source of truth
@@ -159,10 +167,6 @@ pub trait MemoryOracle {
 ///   derived from an assertion that is gone can never answer a later query.
 /// - Every change bumps [`Solver::assertion_revision`] and withdraws the
 ///   published model.
-///
-/// The fields used to be public, and a caller who edited `assertions` in
-/// place left the clauses of the old assertion in the SAT core: replacing
-/// `x == 0` by `x == 1` and asking under `x == 1` answered `Unsat`.
 pub struct Solver {
     /// The list of assertions (Path Conditions) that must be satisfied.
     assertions: Vec<SymExpr>,
@@ -196,6 +200,7 @@ pub struct Solver {
     last_unknown: Option<UnknownReason>,
     query_epoch: u64,
     oracle_epoch: u64,
+    last_oracle_scope: Option<OracleModelScope>,
     published_model: Option<PublishedModel>,
 }
 
@@ -203,6 +208,18 @@ impl Default for Solver {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[derive(Debug, Clone)]
+enum ResolvedMemoryConfig {
+    LegacyPrefix {
+        snapshot_id: Option<MemorySnapshotId>,
+    },
+    Explicit {
+        snapshot_id: Option<MemorySnapshotId>,
+        by_name: HashMap<String, MemoryBinding>,
+        list: Vec<MemoryBinding>,
+    },
 }
 
 fn collect_array_selects(expr: &SymExpr, seen: &mut HashSet<SymExpr>, out: &mut Vec<SymExpr>) {
@@ -213,28 +230,21 @@ fn collect_array_selects(expr: &SymExpr, seen: &mut HashSet<SymExpr>, out: &mut 
     });
 }
 
-fn read_oracle_value(
-    oracle: &dyn MemoryOracle,
-    space_id: u64,
-    addr: u64,
-    bit_width: u32,
-) -> Option<u64> {
-    if bit_width == 0 || bit_width > 64 {
-        return None;
+fn array_sort_widths(sort: &Sort) -> Option<(u32, u32)> {
+    match sort {
+        Sort::Array { domain, range } => {
+            let idx = match domain.as_ref() {
+                Sort::BitVector(bits) | Sort::Float(bits) => *bits,
+                _ => return None,
+            };
+            let val = match range.as_ref() {
+                Sort::BitVector(bits) | Sort::Float(bits) => *bits,
+                _ => return None,
+            };
+            Some((idx, val))
+        }
+        _ => None,
     }
-    let byte_count = u64::from(bit_width.div_ceil(8));
-    let mut val = 0u64;
-    for byte_idx in 0..byte_count {
-        let byte_addr = addr.checked_add(byte_idx)?;
-        let byte = oracle.read_concrete(space_id, byte_addr)?;
-        val |= u64::from(byte) << (byte_idx * 8);
-    }
-    let mask = if bit_width >= 64 {
-        u64::MAX
-    } else {
-        (1u64 << bit_width) - 1
-    };
-    Some(val & mask)
 }
 
 /// A constant's value: its low `size` bits, which is all lowering reads.
@@ -267,6 +277,7 @@ impl Solver {
             last_unknown: None,
             query_epoch: 0,
             oracle_epoch: 0,
+            last_oracle_scope: None,
             published_model: None,
         }
     }
@@ -663,9 +674,168 @@ impl Solver {
         self.last_unknown.as_ref()
     }
 
+    /// Declared memory-oracle identity and observed concrete addresses from the
+    /// most recent `check_sat_with_*` query.
+    #[must_use]
+    pub fn last_oracle_scope(&self) -> Option<&OracleModelScope> {
+        self.last_oracle_scope.as_ref()
+    }
+
+    fn lower_temporary_expressions(
+        &mut self,
+        expressions: &[SymExpr],
+    ) -> std::result::Result<Vec<Lit>, SatResult> {
+        if !self.bv_theory.unsupported().is_empty() {
+            return Err(SatResult::Unknown);
+        }
+        let mut literals = Vec::new();
+        for expression in expressions {
+            let lowered = self.bv_theory.lower_to_literal(expression, &mut self.sat);
+            let unsupported = self.bv_theory.aig.take_unsupported();
+            if !unsupported.is_empty() {
+                tracing::debug!(?unsupported, "cannot lower query constraint");
+                self.last_unknown = Some(UnknownReason::Unsupported(unsupported));
+                return Err(SatResult::Unknown);
+            }
+            match lowered {
+                LoweredAssumption::Literal(lit) => literals.push(lit),
+                LoweredAssumption::TriviallyTrue => {}
+                LoweredAssumption::Refuted | LoweredAssumption::TriviallyFalse => {
+                    return Err(SatResult::Unsat);
+                }
+            }
+        }
+        Ok(literals)
+    }
+
+    fn resolve_memory_config(
+        &self,
+        oracle: Option<&dyn MemoryOracle>,
+        explicit_bindings: &[MemoryBinding],
+        extra: &[SymExpr],
+    ) -> std::result::Result<ResolvedMemoryConfig, UnknownReason> {
+        let effective: Vec<MemoryBinding> = if !explicit_bindings.is_empty() {
+            explicit_bindings.to_vec()
+        } else if let Some(o) = oracle {
+            o.memory_bindings()
+        } else {
+            Vec::new()
+        };
+
+        if oracle.is_none() && !effective.is_empty() {
+            return Err(UnknownReason::OracleIdentityMismatch(
+                "memory bindings provided without an active MemoryOracle".to_string(),
+            ));
+        }
+
+        let oracle_snap = oracle.and_then(|o| o.snapshot_id());
+        if effective.is_empty() {
+            return Ok(ResolvedMemoryConfig::LegacyPrefix {
+                snapshot_id: oracle_snap,
+            });
+        }
+
+        let mut by_name: HashMap<String, MemoryBinding> = HashMap::new();
+        let mut unique_bindings = Vec::new();
+        let mut first_snap: Option<MemorySnapshotId> = None;
+        let mut all_same_snap = true;
+
+        for binding in &effective {
+            binding
+                .validate()
+                .map_err(UnknownReason::OracleIdentityMismatch)?;
+            if let Some(expected_snap) = oracle_snap {
+                if expected_snap != binding.snapshot_id {
+                    return Err(UnknownReason::OracleIdentityMismatch(format!(
+                        "binding '{}' snapshot {:?} differs from oracle snapshot {:?}",
+                        binding.array_name, binding.snapshot_id, expected_snap
+                    )));
+                }
+            }
+            match first_snap {
+                None => first_snap = Some(binding.snapshot_id),
+                Some(s) if s != binding.snapshot_id => all_same_snap = false,
+                _ => {}
+            }
+            if let Some(prev) = by_name.get(&binding.array_name) {
+                if prev != binding {
+                    return Err(UnknownReason::OracleIdentityMismatch(format!(
+                        "conflicting memory bindings for array '{}'",
+                        binding.array_name
+                    )));
+                }
+            } else {
+                by_name.insert(binding.array_name.clone(), binding.clone());
+                unique_bindings.push(binding.clone());
+            }
+        }
+
+        // Check declared array variable sorts against every explicit binding.
+        let mut sort_error: Option<String> = None;
+        let mut check_expr_sorts = |expr: &SymExpr| {
+            expr.visit_preorder(&mut |node| {
+                if sort_error.is_some() {
+                    return;
+                }
+                if let SymExpr::Var { name, sort, .. } = node {
+                    if let Some(binding) = by_name.get(name) {
+                        match array_sort_widths(sort) {
+                            Some((idx_w, val_w))
+                                if idx_w == binding.index_bits && val_w == binding.value_bits => {}
+                            Some((idx_w, val_w)) => {
+                                sort_error = Some(format!(
+                                    "array '{name}' sort ({idx_w}->{val_w}) does not match binding ({}->{})",
+                                    binding.index_bits, binding.value_bits
+                                ));
+                            }
+                            None => {
+                                sort_error = Some(format!(
+                                    "variable '{name}' is bound as memory but has non-array sort {sort:?}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            });
+        };
+        for expr in self.nodes.values() {
+            check_expr_sorts(expr);
+        }
+        for expr in &self.assertions {
+            check_expr_sorts(expr);
+        }
+        for expr in extra {
+            check_expr_sorts(expr);
+        }
+        if let Some(err) = sort_error {
+            return Err(UnknownReason::OracleIdentityMismatch(err));
+        }
+
+        let scope_snapshot = oracle_snap.or(if all_same_snap { first_snap } else { None });
+        Ok(ResolvedMemoryConfig::Explicit {
+            snapshot_id: scope_snapshot,
+            by_name,
+            list: unique_bindings,
+        })
+    }
+
     pub fn check_sat_with_oracle(
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
+        extra: &[SymExpr],
+    ) -> Result<SatResult> {
+        self.check_sat_with_memory_bindings(oracle, &[], extra)
+    }
+
+    /// Solve under an optional [`MemoryOracle`] and explicit immutable [`MemoryBinding`]s.
+    ///
+    /// Oracle refinement lemmas stay strictly scoped to this query via SAT
+    /// assumptions and never mutate persistent [`Self::assertions`] or permanent
+    /// solver clauses across subsequent queries.
+    pub fn check_sat_with_memory_bindings(
+        &mut self,
+        oracle: Option<&dyn MemoryOracle>,
+        bindings: &[MemoryBinding],
         extra: &[SymExpr],
     ) -> Result<SatResult> {
         self.query_epoch = self.query_epoch.saturating_add(1);
@@ -674,7 +844,8 @@ impl Solver {
             self.oracle_epoch
         });
         self.invalidate_model();
-        let result = self.check_sat_inner(oracle, extra, oracle_epoch)?;
+        self.last_oracle_scope = None;
+        let result = self.check_sat_inner(oracle, bindings, extra, oracle_epoch)?;
         if result != SatResult::Sat {
             self.invalidate_model();
         }
@@ -690,12 +861,21 @@ impl Solver {
     fn check_sat_inner(
         &mut self,
         oracle: Option<&dyn MemoryOracle>,
+        explicit_bindings: &[MemoryBinding],
         extra: &[SymExpr],
         oracle_epoch: Option<u64>,
     ) -> Result<SatResult> {
         self.last_unknown = None;
         let mut loop_count = 0;
         let mut remaining_conflicts = self.sat.conflict_budget();
+
+        let mem_config = match self.resolve_memory_config(oracle, explicit_bindings, extra) {
+            Ok(cfg) => cfg,
+            Err(reason) => {
+                self.last_unknown = Some(reason);
+                return Ok(SatResult::Unknown);
+            }
+        };
 
         // Elaborate and validate every variable sort, identity, and operator
         // well-formedness rule before short-circuiting or lowering. Pending
@@ -714,6 +894,20 @@ impl Solver {
             return Ok(SatResult::Unknown);
         }
 
+        let (initial_snapshot, initial_bindings) = match &mem_config {
+            ResolvedMemoryConfig::LegacyPrefix { snapshot_id } => (*snapshot_id, Vec::new()),
+            ResolvedMemoryConfig::Explicit {
+                snapshot_id, list, ..
+            } => (*snapshot_id, list.clone()),
+        };
+        self.last_oracle_scope = Some(OracleModelScope {
+            oracle_present: oracle.is_some(),
+            snapshot_id: initial_snapshot,
+            bindings: initial_bindings.clone(),
+            observed_reads: Vec::new(),
+            missing_reads: Vec::new(),
+        });
+
         // Concrete-boolean short-circuit (avoids incomplete AIG/CNF for Const 0/1).
         let is_false = |e: &SymExpr| matches!(e, SymExpr::Const { val: 0, size: 1 });
         if self.has_false_assertion || extra.iter().any(is_false) {
@@ -724,10 +918,13 @@ impl Solver {
             return Ok(self.refuted());
         }
 
-        let assumptions = match self.lower_query_assumptions(extra) {
+        let mut query_assumptions = match self.lower_query_assumptions(extra) {
             Ok(assumptions) => assumptions,
             Err(result) => return Ok(result),
         };
+
+        let mut observed_reads: Vec<OracleReadRecord> = Vec::new();
+        let mut missing_reads: Vec<OracleReadRecord> = Vec::new();
 
         loop {
             loop_count += 1;
@@ -737,10 +934,10 @@ impl Solver {
                 return Ok(SatResult::Unknown);
             }
 
-            // 3. Solve pure boolean SAT problem with assumptions
+            // 3. Solve pure boolean SAT problem under query-scoped assumptions only.
             match self.sat.solve_with_remaining_budget(
                 Some(&mut self.array_theory),
-                &assumptions,
+                &query_assumptions,
                 &mut remaining_conflicts,
             ) {
                 Some(true) => {}
@@ -750,6 +947,9 @@ impl Solver {
                     return Ok(SatResult::Unknown);
                 }
             }
+
+            observed_reads.clear();
+            missing_reads.clear();
 
             // 4. Memory CEGAR (before publishing any candidate model)
             if let Some(oracle) = oracle {
@@ -777,13 +977,7 @@ impl Solver {
                     let SymExpr::ArraySelect { array, index } = &expr else {
                         continue;
                     };
-                    let SymExpr::Var { name, .. } = array.as_ref() else {
-                        continue;
-                    };
-                    let Some(suffix) = name.strip_prefix("space_") else {
-                        continue;
-                    };
-                    let Ok(space_id) = suffix.parse::<u64>() else {
+                    let SymExpr::Var { name, sort, .. } = array.as_ref() else {
                         continue;
                     };
                     let bit_width = match expr.get_sort() {
@@ -792,32 +986,127 @@ impl Solver {
                         }
                         _ => continue,
                     };
+
+                    let (
+                        space_id,
+                        snap_id,
+                        index_bits,
+                        byte_order,
+                        wrap_policy,
+                        missing_byte_policy,
+                    ) = match &mem_config {
+                        ResolvedMemoryConfig::Explicit { by_name, .. } => {
+                            let Some(binding) = by_name.get(name) else {
+                                // Ordinary or unbound arrays retain standard uninterpreted semantics.
+                                continue;
+                            };
+                            (
+                                binding.space_id,
+                                Some(binding.snapshot_id),
+                                binding.index_bits,
+                                binding.byte_order,
+                                binding.wrap_policy,
+                                binding.missing_byte_policy,
+                            )
+                        }
+                        ResolvedMemoryConfig::LegacyPrefix { snapshot_id } => {
+                            let Some(suffix) = name.strip_prefix("space_") else {
+                                continue;
+                            };
+                            let Ok(space_id) = suffix.parse::<u64>() else {
+                                continue;
+                            };
+                            let index_bits = array_sort_widths(sort)
+                                .map(|(idx_w, _)| idx_w)
+                                .unwrap_or_else(|| index.get_bit_width());
+                            (
+                                space_id,
+                                *snapshot_id,
+                                index_bits,
+                                oracle.byte_order(space_id),
+                                oracle.wrap_policy(space_id),
+                                oracle.missing_byte_policy(space_id),
+                            )
+                        }
+                    };
+
                     let c_idx = self.bv_theory.evaluate_expr_in_model(&self.sat, index);
                     let c_val = self.bv_theory.evaluate_expr_in_model(&self.sat, &expr);
 
-                    if let Some(oracle_val) = read_oracle_value(oracle, space_id, c_idx, bit_width)
-                    {
-                        if c_val != oracle_val {
-                            // Lemma: index == c_idx => ArraySelect == oracle_val
-                            let eq_idx = SymExpr::Eq(
-                                index.clone(),
-                                Box::new(SymExpr::new_const(c_idx, index.get_bit_width())),
-                            );
-                            let eq_val = SymExpr::Eq(
-                                Box::new(expr.clone()),
-                                Box::new(SymExpr::new_const(oracle_val, bit_width)),
-                            );
-                            let implies =
-                                SymExpr::Or(Box::new(SymExpr::new_not(eq_idx)), Box::new(eq_val));
-                            new_lemmas.push(implies);
+                    match read_oracle_with_policy(
+                        oracle,
+                        space_id,
+                        c_idx,
+                        index_bits,
+                        bit_width,
+                        byte_order,
+                        wrap_policy,
+                    ) {
+                        OracleReadOutcome::Value(oracle_val) => {
+                            if c_val != oracle_val {
+                                // Scoped implication assumption: index == c_idx => ArraySelect == oracle_val
+                                let eq_idx = SymExpr::Eq(
+                                    index.clone(),
+                                    Box::new(SymExpr::new_const(c_idx, index.get_bit_width())),
+                                );
+                                let eq_val = SymExpr::Eq(
+                                    Box::new(expr.clone()),
+                                    Box::new(SymExpr::new_const(oracle_val, bit_width)),
+                                );
+                                let implies = SymExpr::Or(
+                                    Box::new(SymExpr::new_not(eq_idx)),
+                                    Box::new(eq_val),
+                                );
+                                new_lemmas.push(implies);
+                            } else {
+                                observed_reads.push(OracleReadRecord {
+                                    array_name: name.clone(),
+                                    space_id,
+                                    snapshot_id: snap_id,
+                                    address: c_idx,
+                                    bit_width,
+                                    byte_order,
+                                    value: Some(oracle_val),
+                                });
+                            }
+                        }
+                        OracleReadOutcome::MissingByte(missing_addr) => match missing_byte_policy {
+                            MissingBytePolicy::RejectUnknown => {
+                                self.last_unknown = Some(UnknownReason::OracleMissingByte {
+                                    space_id,
+                                    address: missing_addr,
+                                });
+                                return Ok(SatResult::Unknown);
+                            }
+                            MissingBytePolicy::UnconstrainedFree => {
+                                missing_reads.push(OracleReadRecord {
+                                    array_name: name.clone(),
+                                    space_id,
+                                    snapshot_id: snap_id,
+                                    address: c_idx,
+                                    bit_width,
+                                    byte_order,
+                                    value: None,
+                                });
+                            }
+                        },
+                        OracleReadOutcome::BoundaryOverflow => {
+                            self.last_unknown = Some(UnknownReason::OracleBoundaryOverflow {
+                                space_id,
+                                address: c_idx,
+                                bit_width,
+                            });
+                            return Ok(SatResult::Unknown);
                         }
                     }
                 }
                 if !new_lemmas.is_empty() {
-                    for lemma in new_lemmas {
-                        self.assert(lemma);
+                    match self.lower_temporary_expressions(&new_lemmas) {
+                        Ok(lits) => query_assumptions.extend(lits),
+                        Err(SatResult::Unsat) => return Ok(self.refuted()),
+                        Err(other) => return Ok(other),
                     }
-                    continue; // Restart CEGAR loop
+                    continue; // Restart CEGAR loop under extended query-only assumptions
                 }
             }
 
@@ -831,6 +1120,15 @@ impl Solver {
                 return Ok(SatResult::Unknown);
             }
 
+            let scope = OracleModelScope {
+                oracle_present: oracle.is_some(),
+                snapshot_id: initial_snapshot,
+                bindings: initial_bindings,
+                observed_reads,
+                missing_reads,
+            };
+            self.last_oracle_scope = Some(scope.clone());
+
             let raw_model: HashMap<SymNodeId, u64> = candidate_entries
                 .iter()
                 .map(|(&id, entry)| (id, entry.raw_value()))
@@ -842,6 +1140,7 @@ impl Solver {
             self.published_model = Some(PublishedModel {
                 query_epoch: self.query_epoch,
                 oracle_epoch,
+                oracle_scope: scope,
                 assumptions: extra.to_vec(),
                 assertion_revision: self.assertion_revision,
                 entries: candidate_entries,
