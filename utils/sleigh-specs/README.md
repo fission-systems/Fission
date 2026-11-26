@@ -81,6 +81,49 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   the most negative N-bit integer for a NaN, an infinity or an out-of-range result), with
   the rest of the register zeroed; upstream lifted them as `trunc`, integer bits (#1070).
   Evidence: an Apple M4 run natively (the native differential).
+  Then `scripts/sleigh/apply_aarch64_fcvt_saturate.py` gives every FCVT{A,M,N,P,Z}{S,U} the
+  Arm ARM FPToFixed semantics (#1056): each mode table is split into one table per mnemonic
+  (`fcvt_vmnemonic_ms`, `..._mu`, ...) so S and U get their own constructors; the operand is
+  rounded exactly (M `floor`, P `ceil`, Z by `trunc` itself, N ties to even and A ties away
+  built from `floor` and the exact fraction), then saturated to the N-bit signed or unsigned
+  range, with 0 for a NaN; the unsigned forms convert values at or above 2^(N-1) as
+  `trunc(r - 2^(N-1)) ^ 2^(N-1)`. Half precision is widened to single first. The same script
+  rewrites the fixed-point `fcvtz{s,u} Wd/Xd, Hn/Sn/Dn, #fbits` (scaled by 2^fbits as two
+  exact power-of-two multiplications; upstream's half-precision FCVTZU multiplied by the
+  integer fbits) and the scalar SIMD `fcvtz{s,u} Hd/Sd/Dd, #fbits` (upstream lifted `fcvtzs`
+  as the user op `NEON_fcvtzs`, and the H and D forms of `fcvtzu` read the immediate through
+  `Imm_shr_imm32`: wrong fbits and disassembly). The vector fixed-point forms, still the user
+  ops `NEON_fcvtzs`/`NEON_fcvtzu`, are unchanged. Evidence: an Apple M4 run natively.
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the saturating and
+  rounding NEON forms upstream lifts as plain p-code wrap and truncate. `SUQADD`, `SQNEG`,
+  `SQDMULL`/`SQDMULL2`, `SQDMLAL`/`SQDMLAL2`, `SQDMLSL`/`SQDMLSL2` and the by-element
+  `SQDMULH`/`SQRDMULH` now saturate as SatQ does (one saturation for the doubled product and
+  one for the accumulation), `SQRDMULH` adds the rounding constant, and `SRSRA`/`URSRA` add
+  bit `shift-1` of the operand (the rounding constant, without widening, so a shift of the
+  full element width is right too). All sources are read before Vd is written (#1068, native
+  evidence). Forms upstream lifts as `NEON_*` user ops are unchanged. Re-apply with
+  `scripts/sleigh/apply_aarch64_neon_saturate.py`.
+- `AARCH64/AARCH64neon.sinc` and `AARCH64/AARCH64instructions.sinc` (and the three compiled
+  `AARCH64*.sla`): `FMLAL`/`FMLAL2`/`FMLSL`/`FMLSL2` accumulated with the integer `+`/`-`
+  (adding float bit patterns) after a half-precision multiply; each lane is now
+  `acc f+ (float2float(a) f* float2float(b))`, exact because a half-precision product fits in
+  single precision, so it rounds once as FPMulAdd does (FMLSL negates the first element). Their
+  by-element forms decoded the index as H:L instead of H:L:M (the `b_2223=2` rules of
+  `vIndexHLM` and `Re_VPR128Lo.H.sel`, used by no other instruction). `SCVTF`/`UCVTF Hd, Rn,
+  #fbits` converted to half precision (infinity above 65504) and divided by 2^fbits as a
+  half-precision constant (infinity for fbits >= 16), giving NaN; they now convert through
+  double and round once (a 64-bit source with more than 53 significant bits rounds twice).
+  Evidence: an Apple M4 run natively; the native differential's `~fp16` entry hid these.
+  The vector `FMLAL2`/`FMLSL2 .4S` forms also read the second source from Vm<63:0> instead of
+  Vm<127:64> (upstream); the same script fixes that.
+  Re-apply with `scripts/sleigh/apply_aarch64_fmlal_fp16_convert.py`.
+- `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
+  `FMSUB`/`FNMADD`/`FNMSUB` subtracted where FPMulAdd negates an operand (FPNeg), so a
+  propagated NaN had the wrong sign; they and `FMADD` are now `addend f+ (element1 f*
+  element2)` with the operand negated first. `FADDP .4H` put Vm's pairwise sums in the low
+  lanes; Vn's come first. Evidence: an Apple M4 run natively (nightly size). Not modelled:
+  the single rounding (#1072) and the signalling-NaN priority of FPProcessNaNs3 (#1397).
+  Re-apply with `scripts/sleigh/apply_aarch64_fpneg_faddp.py`.
 - `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the scalar
   `FMAX`/`FMIN`/`FMAXNM`/`FMINNM` (H, S, D) follow FPMax/FPMin/FPMaxNum/FPMinNum. Upstream
   copied Rn into Rd before comparing, so with Rd = Rm (`fmax d0, d1, d0`) the result was
@@ -122,6 +165,42 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `# neglected zexts`. The 41 constructors now call `zext_zd`, as the spec's other 64-bit
   SIMD results do (#1067, native evidence). Re-apply with
   `scripts/sleigh/apply_aarch64_ld_vpr64_zero_upper.py`.
+- `x86/lockable.sinc` (and the compiled `x86.sla`, `x86-64.sla`): `XADD m, r` stores the
+  sum before it writes the register, and reads the memory operand once (SDM: `TEMP := SRC +
+  DEST; SRC := DEST; DEST := TEMP` with the address formed before execution). Upstream wrote
+  the register first, so `xadd byte ptr [rbx], bh` stored through the updated RBX (#1053).
+  `XCHG m32, r32` zero-extends the register into 64 bits (`check_Reg32_dest`), as every
+  32-bit register write does in 64-bit mode (#1060). Re-apply with
+  `scripts/sleigh/apply_x86_xadd_xchg_memory_forms.py`.
+- `x86/ia.sinc` (and the compiled `x86.sla`, `x86-64.sla`): `0x90` is a NOP, and `F3 90`
+  PAUSE, only when REX.B is 0; with REX.B it is `xchg r8d, eax` (`90+rd`), and REX.W/R/X
+  alone no longer turn it into a 32-bit `xchg eax, eax` that clears RAX[63:32] (#1059). A
+  repeated `0x66` prefix keeps the operand-size override instead of toggling it back
+  (`66 66 03 e8` is `add bp, ax`, #1061): the first one sets `prefix_66` and later ones
+  match a constructor that changes nothing. `SHR` and `SHRD` leave OF alone when the masked
+  count is 0 and set it per the SDM for a count of 1 (#1051); upstream's `shrflags`/
+  `shrdflags` had the two cases swapped. `PUSHF`/`PUSHFD`/`PUSHFQ` store reserved bit 1 as 1
+  (#1052). Evidence: an x86-64 host run natively (the native differential) and the SDM
+  sections cited in the script, except for `F3 90` with REX.B, where host CPUs disagree:
+  an Intel Xeon 6975P-C CI runner executes `f3 41 90` as PAUSE (RAX and R8 unchanged), while
+  an AMD EPYC 7763 runner executes it as `xchg r8d, eax`. The spec follows the `90+rd`
+  encoding (the AMD behaviour); the baseline marks that divergence `@host` (#1059).
+  Re-apply with `scripts/sleigh/apply_x86_prefix_and_flag_fixes.py`.
+- `x86/ia.sinc`, `x86/lockable.sinc` (and the compiled `x86.sla`, `x86-64.sla`): AF is set
+  by every add/subtract form, as the carry or borrow out of bit 3 (SDM Vol. 1, 3.4.3.1);
+  upstream never wrote it (#1048). `addflags`, `subflags`, `addCarryFlags`,
+  `subCarryFlags` and `negflags` compute `AF = ((a ^ b ^ result) & 0x10) != 0` from their
+  operands, and INC/DEC set it from the low nibble, so ADD, ADC, SUB, SBB, CMP, CMPS,
+  SCAS, NEG, INC, DEC, XADD, CMPXCHG and CMPccXADD all write it. The SSE
+  float-to-integer conversions `CVTSD2SI`/`CVTSS2SI`/`CVTPD2DQ`/`CVTPS2DQ` round to
+  nearest with ties to even (MXCSR.RC = 00, the default; other modes are not modelled)
+  instead of upstream's ties-away `round` or, for the packed forms, no rounding (#1049),
+  and they and `CVTTSD2SI`/`CVTTSS2SI`/`CVTTPD2DQ`/`CVTTPS2DQ` return the integer
+  indefinite (`0x80000000`, `0x8000000000000000`) for a NaN, an infinity or an
+  out-of-range result (#1050). The rounding is built exactly from `floor`, as
+  `apply_aarch64_frint_exact.py` does. The VEX/EVEX `VCVT*` and MMX `CVT*PI` forms are
+  unchanged. Evidence: an x86-64 host run natively (the native differential) and the SDM
+  sections cited in the script. Re-apply with `scripts/sleigh/apply_x86_af_and_cvt.py`.
 - `Toy/` is from the Ghidra source tree (it has no `data/languages` in the release) and
   has no compiled `.sla`.
 

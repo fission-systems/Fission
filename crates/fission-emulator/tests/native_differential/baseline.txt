@@ -7,8 +7,9 @@
 #             trailing `*` a family (`LDADD*`: LDADDB, LDADDAH, ...)
 #   fields    the comma-separated fields allowed to differ (register names,
 #             flags, `mem`, `fault`, `panic`, `decode`), `*`, or a tag:
-#             `~nan` (both sides NaN, payloads differ), `~fp16` (the
-#             instruction does half-precision float arithmetic)
+#             `~nan` (every differing element, at the instruction's float width,
+#             is NaN on both sides: payloads differ), `~fp16` (the instruction
+#             does half-precision float arithmetic)
 #   issue     the GitHub issue tracking the fix
 #
 # The gate fails on a divergence not covered here and on an entry that no
@@ -21,58 +22,26 @@
 # does not, on the same tree), the reason says `@host`: no run calls it stale.
 
 # ── x86-64 ──────────────────────────────────────────────────────────────────
-# Spec: arithmetic never writes AF (SDM 2, ADD..CMPS "Flags Affected").
-x86_64 * AF #1048 arithmetic instructions leave AF unchanged
-# Spec: ties round away from zero, not by MXCSR.RC (#1049); NaN and
-# out-of-range inputs do not give the integer indefinite (#1050).
-x86_64 CVTSD2SI * #1049 rounding; also #1050
-x86_64 CVTSS2SI * #1049 rounding; also #1050
-x86_64 CVTPD2DQ * #1049 rounding; also #1050
-x86_64 CVTPS2DQ * #1049 rounding; also #1050
-x86_64 CVTTSD2SI * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTSS2SI * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTPD2DQ * #1050 NaN/out-of-range is not the integer indefinite
-x86_64 CVTTPS2DQ * #1050 NaN/out-of-range is not the integer indefinite
-# Spec: a masked count of 0 must leave the flags alone (SDM 2, SHR / SHRD).
-x86_64 SHR OF #1051 count 0 changes OF
-x86_64 SHRD OF #1051 count 0 changes OF
-# Spec: reserved RFLAGS bit 1 is stored as 0.
-x86_64 PUSHFQ mem #1052 stored RFLAGS bit 1 is 0
-x86_64 PUSHF mem #1052 stored FLAGS bit 1 is 0
-# Spec: the store re-reads an address register the instruction just wrote.
-x86_64 XADD mem,fault #1053 store address formed after the source register is written
 # Evaluator: which NaN propagates is left to the host's float ops; x86
 # propagates the first source (`~nan`: both sides NaN, payloads differ).
-x86_64 * ~nan #1055 NaN payload / operand order
-# Decode: 0x90 ignores REX.B (f3 41 90 is xchg r8d, eax); 90 with REX is a NOP.
-x86_64 PAUSE * #1059 f3 41 90 decoded as PAUSE; runners disagree on it @host
-x86_64 XCHG * #1059 42 90 clears RAX[63:32]; also #1060 (xchg m32, r32 no zero-extension)
-x86_64 XCHG.XACQUIRE * #1060 xchg m32, r32 no zero-extension
-# Decode: 66 66 cancels the operand-size override.
-x86_64 ADD CF,PF,ZF,SF,OF,RBP #1061 66 66 03 e8 decoded as add ebp, eax (drop with #1061)
+# Since #1049/#1050 the PR-size run hits it only in DPPS on Intel hosts; an
+# AMD EPYC host agrees with Fission there, so it is `@host`.
+x86_64 * ~nan #1055 NaN payload / operand order @host
+# Host: f3 41 90 is xchg r8d, eax (90+rd with REX.B, SDM) and Fission decodes it so;
+# a host CPU that runs it as PAUSE leaves RAX and R8 alone.
+x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
 
 # ── AArch64 ─────────────────────────────────────────────────────────────────
-# Spec: no FPToFixed saturation for NaN/out-of-range; unsigned forms convert as signed.
-aarch64 FCVTZS * #1056 no saturation
-aarch64 FCVTZU * #1056 no saturation; converts as signed
-aarch64 FCVTAS * #1056 no saturation
-aarch64 FCVTAU * #1056 no saturation; converts as signed
-aarch64 FCVTMS * #1056 no saturation
-aarch64 FCVTMU * #1056 no saturation; converts as signed
-aarch64 FCVTNS * #1056 no saturation
-aarch64 FCVTNU * #1056 no saturation; converts as signed
-aarch64 FCVTPS * #1056 no saturation
-aarch64 FCVTPU * #1056 no saturation; converts as signed
-# Evaluator: NaN propagation (operand order, sNaN priority and quieting).
-aarch64 * ~nan #1055 NaN payload / operand order
-# Evaluator: half-precision float varnodes read as 0.0 and are not written.
-aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
-# Spec: fused multiply-adds round twice.
+# Spec: fused multiply-adds round twice (p-code has no fused operation, so the
+# lift is a product and a sum; FPNeg is applied to the operands).
 aarch64 FMSUB * #1072 not fused @nightly
+aarch64 FNMSUB q0 #1072 not fused: the product overflows where the CPU adds -inf @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
-# Spec: saturating NEON ops wrap, rounding ones truncate.
-aarch64 SUQADD * #1068 no saturation
-aarch64 SQDMLAL * #1068 no saturation
-aarch64 SQRDMULH * #1068 no rounding constant
-aarch64 SRSRA * #1068 no rounding constant
+# Spec: FPProcessNaNs3 gives a signalling NaN in any operand priority; the
+# product-then-sum lift can propagate another one.
+aarch64 FMADD ~nan #1397 signalling NaN priority not modelled
+aarch64 FNMADD ~nan #1397 signalling NaN priority not modelled
+aarch64 FNMSUB ~nan #1397 signalling NaN priority not modelled
+aarch64 FMLAL* ~nan #1397 signalling NaN priority not modelled
+aarch64 FMLSL* ~nan #1397 signalling NaN priority not modelled
