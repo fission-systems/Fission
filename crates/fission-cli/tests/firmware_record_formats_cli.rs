@@ -257,3 +257,57 @@ fn uf2_without_a_language_names_its_family() {
     assert!(stderr.contains("RP2040"), "{stderr}");
     assert!(stderr.contains("--language"), "{stderr}");
 }
+
+#[test]
+fn info_reports_no_entry_when_the_file_states_none() {
+    let file = write_fixture(
+        "info_reports_no_entry_when_the_file_states_none",
+        "noentry.hex",
+        &[ihex(0x1000, 0x00, &X86_DOUBLE), ihex(0, 0x01, &[])],
+    );
+    let path = file.to_str().unwrap();
+    let args = ["--language", "x86:LE:32:default", "info", path, "--no-db"];
+    let json = run(&[&args[..], &["--json"]].concat());
+    assert!(json.status.success(), "{json:?}");
+    let info: Value = serde_json::from_slice(&json.stdout).expect("json");
+    assert_eq!(info["entry"], "0x0");
+    assert_eq!(info["entry_declared"], false);
+    assert_eq!(info["image_base"], "0x1000");
+    assert_eq!(info["functions"], 0);
+    let text = run(&args);
+    let text = String::from_utf8_lossy(&text.stdout);
+    let entry = text
+        .lines()
+        .find(|line| line.contains("Entry:"))
+        .expect("entry row");
+    assert!(entry.contains("none"), "{entry}");
+
+    let declared = x86_hex("info_reports_no_entry_when_the_file_states_none_declared");
+    let json = run(&[
+        "--language",
+        "x86:LE:32:default",
+        "info",
+        declared.to_str().unwrap(),
+        "--json",
+        "--no-db",
+    ]);
+    let info: Value = serde_json::from_slice(&json.stdout).expect("json");
+    assert_eq!(info["entry"], "0x1000");
+    assert!(info.get("entry_declared").is_none(), "{info}");
+}
+
+#[test]
+fn a_multibyte_srecord_line_is_an_error_not_a_crash() {
+    let file = write_fixture(
+        "a_multibyte_srecord_line_is_an_error_not_a_crash",
+        "bad.srec",
+        &["S0030000FC".to_string(), "S\u{20ac}0000".to_string()],
+    );
+    let out = run(&["info", file.to_str().unwrap(), "--no-db"]);
+    assert!(!out.status.success());
+    assert_ne!(out.status.code(), Some(101), "{out:?}");
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("MalformedHeader"),
+        "{out:?}"
+    );
+}

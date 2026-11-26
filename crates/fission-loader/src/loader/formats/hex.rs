@@ -34,6 +34,13 @@ impl IntelHexLoader {
         let mut entry = None;
 
         for (line_no, raw_line) in reader.ascii_lines().enumerate() {
+            let Some(raw_line) = raw_line else {
+                return Err(err!(
+                    loader,
+                    "MalformedHeader: Intel HEX line {} is not ASCII",
+                    line_no + 1
+                ));
+            };
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
@@ -98,6 +105,13 @@ impl IntelHexLoader {
                                 as u64,
                         );
                 }
+                0x02..=0x05 => {
+                    return Err(err!(
+                        loader,
+                        "MalformedHeader: Intel HEX line {}: record type 0x{record_type:02x} cannot carry {count} bytes",
+                        line_no + 1
+                    ));
+                }
                 _ => {
                     return Err(err!(
                         loader,
@@ -137,12 +151,19 @@ impl MotorolaHexLoader {
         let mut entry = None;
 
         for (line_no, raw_line) in reader.ascii_lines().enumerate() {
+            let Some(raw_line) = raw_line else {
+                return Err(err!(
+                    loader,
+                    "MalformedHeader: Motorola S-record line {} is not ASCII",
+                    line_no + 1
+                ));
+            };
             let line = raw_line.trim();
             if line.is_empty() {
                 continue;
             }
             let bytes = line.as_bytes();
-            if bytes.len() < 4 || !matches!(bytes[0], b'S' | b's') {
+            if bytes.len() < 4 || !matches!(bytes[0], b'S' | b's') || !bytes[1].is_ascii_digit() {
                 return Err(err!(
                     loader,
                     "MalformedHeader: Motorola S-record line missing S-type"
@@ -418,7 +439,8 @@ mod tests {
             binary.functions.is_empty(),
             "no code is known to start anywhere"
         );
-        assert_eq!(binary.entry_point, 0x1000);
+        assert_eq!(binary.entry_point, 0);
+        assert_eq!(binary.declared_entry_point(), None);
     }
 
     #[test]
@@ -534,6 +556,131 @@ mod tests {
         assert_eq!(binary.entry_point, 0x0800_0001);
         assert_eq!(binary.data.as_slice(), &thumb);
         assert!(binary.functions.iter().any(|f| f.address == 0x0800_0001));
+    }
+
+    /// `S` followed by a multi-byte character: slicing the line at byte 2
+    /// panicked, with or without a language.
+    #[test]
+    fn motorola_srecord_multibyte_record_type_is_malformed_not_a_panic() {
+        let text = "S0030000FC\nS\u{20ac}0000\n".as_bytes().to_vec();
+        for language in [None, Some(x86())] {
+            let err = MotorolaHexLoader::parse_with_language(
+                DataBuffer::Heap(text.clone()),
+                "bad.srec".to_string(),
+                language.as_ref(),
+            )
+            .expect_err("not a record");
+            assert!(format!("{err}").contains("MalformedHeader"), "{err}");
+        }
+    }
+
+    /// A line that is not text must fail the load: dropping it would load the
+    /// image with that record's bytes missing.
+    #[test]
+    fn a_line_that_is_not_ascii_is_malformed_not_skipped() {
+        let good = ihex(0x1000, 0x00, &X86_DOUBLE);
+        let eof = ihex(0, 0x01, &[]);
+        for bad in [&[b':', 0xff, 0xfe][..], "S\u{e9}".as_bytes()] {
+            let mut text = good.clone().into_bytes();
+            text.push(b'\n');
+            text.extend_from_slice(bad);
+            text.push(b'\n');
+            text.extend_from_slice(eof.as_bytes());
+            let err = IntelHexLoader::parse_with_language(
+                DataBuffer::Heap(text),
+                "bad.hex".to_string(),
+                Some(&x86()),
+            )
+            .expect_err("unreadable line");
+            assert!(format!("{err}").contains("line 2 is not ASCII"), "{err}");
+        }
+        let mut text = srec(3, 0x1000, 4, &[1]).into_bytes();
+        text.extend_from_slice(&[b'\n', b'S', 0xff, b'\n']);
+        let err = MotorolaHexLoader::parse_with_language(
+            DataBuffer::Heap(text),
+            "bad.srec".to_string(),
+            Some(&x86()),
+        )
+        .expect_err("unreadable line");
+        assert!(format!("{err}").contains("line 2 is not ASCII"), "{err}");
+    }
+
+    fn load_at(address: u32, language: &ExplicitLanguage) -> Result<LoadedBinary> {
+        MotorolaHexLoader::parse_with_language(
+            DataBuffer::Heap(lines(&[srec(3, address, 4, &[1, 2, 3, 4])])),
+            "fw.srec".to_string(),
+            Some(language),
+        )
+    }
+
+    #[test]
+    fn data_past_the_language_address_space_is_refused() {
+        let err = load_at(0xffff_ffff, &x86()).expect_err("crosses 4 GiB");
+        assert!(format!("{err}").contains("SectionOutOfBounds"), "{err}");
+        load_at(0xffff_fffc, &x86()).expect("ends exactly at 4 GiB");
+
+        let z80 = language("z80:LE:16:default", "z80", 16);
+        load_at(0xfffc, &z80).expect("ends at 64 KiB");
+        load_at(0xfffd, &z80).expect_err("past 64 KiB");
+
+        // Word-addressed flash and segmented x86 reach past their ID's size.
+        let avr = language("avr8:LE:16:default", "avr8", 16);
+        load_at(0x1_fffc, &avr).expect("avr8:16 holds 128 KiB");
+        load_at(0x1_fffd, &avr).expect_err("past 128 KiB");
+        let real_mode = language("x86:LE:16:Real Mode", "x86", 16);
+        load_at(0xf_fff0, &real_mode).expect("the 8086 reset vector");
+    }
+
+    #[test]
+    fn the_low_bit_is_ignored_only_where_it_is_a_mode_bit() {
+        // One byte past the data on x86; the Thumb form of the last
+        // instruction on ARM.
+        let text = lines(&[
+            srec(3, 0x1000, 4, &[1, 2, 3, 4, 5]),
+            srec(7, 0x1005, 4, &[]),
+        ]);
+        let load = |language: &ExplicitLanguage| {
+            MotorolaHexLoader::parse_with_language(
+                DataBuffer::Heap(text.clone()),
+                "fw.srec".to_string(),
+                Some(language),
+            )
+            .expect("loads")
+        };
+        let x86_image = load(&x86());
+        assert!(x86_image.functions.is_empty());
+        assert_eq!(x86_image.declared_entry_point(), None);
+        let arm = load(&language("ARM:LE:32:Cortex", "ARM", 32));
+        assert_eq!(arm.declared_entry_point(), Some(0x1005));
+    }
+
+    #[test]
+    fn a_start_record_naming_address_zero_is_an_entry() {
+        let text = lines(&[
+            ihex(0, 0x00, &X86_DOUBLE),
+            ihex(0, 0x05, &0u32.to_be_bytes()),
+            ihex(0, 0x01, &[]),
+        ]);
+        let binary = IntelHexLoader::parse_with_language(
+            DataBuffer::Heap(text),
+            "fw.hex".to_string(),
+            Some(&x86()),
+        )
+        .expect("loads");
+        assert_eq!(binary.declared_entry_point(), Some(0));
+    }
+
+    #[test]
+    fn a_known_record_type_with_the_wrong_length_says_so() {
+        let err = IntelHexLoader::parse_with_language(
+            DataBuffer::Heap(lines(&[ihex(0, 0x04, &[0x00])])),
+            "bad.hex".to_string(),
+            Some(&x86()),
+        )
+        .expect_err("type 04 needs two bytes");
+        let message = format!("{err}");
+        assert!(message.contains("MalformedHeader"), "{message}");
+        assert!(message.contains("0x04 cannot carry 1 bytes"), "{message}");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use super::{FunctionInfo, LoadedBinary, SectionInfo};
+use super::{FunctionInfo, LoadedBinary, START_ADDRESS_RECORD_ORIGIN, SectionInfo};
 use crate::loader::reader::Endian;
 use crate::prelude::*;
 
@@ -300,6 +300,20 @@ impl LoadedBinary {
             .iter()
             .filter(|f| f.address > address)
             .min_by_key(|f| f.address)
+    }
+
+    /// The entry point the file (or the caller, for a raw image) states, or
+    /// `None` when there is none. `entry_point` is 0 for such a binary, and 0
+    /// is also a real address in images based there, which a start-address
+    /// record can name.
+    pub fn declared_entry_point(&self) -> Option<u64> {
+        let named_zero = || {
+            self.functions.iter().any(|function| {
+                function.address == 0
+                    && function.origin.as_deref() == Some(START_ADDRESS_RECORD_ORIGIN)
+            })
+        };
+        (self.entry_point != 0 || named_zero()).then_some(self.entry_point)
     }
 
     /// Get summary string

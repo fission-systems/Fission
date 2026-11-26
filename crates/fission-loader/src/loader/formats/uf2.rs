@@ -13,6 +13,7 @@ use crate::loader::pipeline::ExplicitLanguage;
 use crate::loader::reader::SparseImage;
 use crate::loader::types::{DataBuffer, LoadedBinary};
 use crate::prelude::*;
+use std::collections::BTreeSet;
 
 pub const UF2_BLOCK_SIZE: usize = 512;
 const UF2_MAGIC_START0: u32 = 0x0A32_4655; // "UF2\n"
@@ -21,6 +22,9 @@ const UF2_MAGIC_END: u32 = 0x0AB1_6F30;
 /// Bytes 32..508 of a block; `payloadSize` may not exceed it.
 const UF2_MAX_PAYLOAD: usize = 476;
 const UF2_DATA_OFFSET: usize = 32;
+/// Most family IDs an error message names; a hostile file can carry one per
+/// block.
+const UF2_MAX_NAMED_FAMILIES: usize = 8;
 
 /// The block is not for the main flash (a comment, a bootloader hint); the
 /// specification says to skip it when writing the device, so it is no part
@@ -103,7 +107,7 @@ impl Uf2Loader {
         }
 
         let mut image = SparseImage::new();
-        let mut families: Vec<u32> = Vec::new();
+        let mut families = BTreeSet::new();
         for (index, block) in bytes.chunks_exact(UF2_BLOCK_SIZE).enumerate() {
             let header = parse_block(block)
                 .map_err(|reason| err!(loader, "MalformedHeader: UF2 block {index}: {reason}"))?;
@@ -117,15 +121,10 @@ impl Uf2Loader {
             if header.flags & UF2_FLAG_NOT_MAIN_FLASH != 0 {
                 continue;
             }
-            if let Some(family) = header.family_id
-                && !families.contains(&family)
-            {
-                families.push(family);
-            }
+            families.extend(header.family_id);
             let payload = &block[UF2_DATA_OFFSET..UF2_DATA_OFFSET + header.payload_size];
             image.write(u64::from(header.target_address), payload)?;
         }
-        families.sort_unstable();
 
         if image.is_empty() {
             return Err(err!(
@@ -192,12 +191,13 @@ fn parse_block(block: &[u8]) -> std::result::Result<Uf2Block, String> {
     })
 }
 
-fn describe_families(families: &[u32]) -> String {
+fn describe_families(families: &BTreeSet<u32>) -> String {
     if families.is_empty() {
         return "no family ID".to_string();
     }
-    let names: Vec<String> = families
+    let mut names: Vec<String> = families
         .iter()
+        .take(UF2_MAX_NAMED_FAMILIES)
         .map(
             |&id| match KNOWN_FAMILIES.iter().find(|(known, _)| *known == id) {
                 Some((_, name)) => format!("family 0x{id:08x} {name}"),
@@ -205,6 +205,12 @@ fn describe_families(families: &[u32]) -> String {
             },
         )
         .collect();
+    if families.len() > UF2_MAX_NAMED_FAMILIES {
+        names.push(format!(
+            "and {} more",
+            families.len() - UF2_MAX_NAMED_FAMILIES
+        ));
+    }
     names.join(", ")
 }
 
@@ -321,6 +327,7 @@ mod tests {
         // UF2 has no entry point and the first bytes of a Cortex-M image are
         // its vector table, so nothing is seeded.
         assert!(binary.functions.is_empty());
+        assert_eq!(binary.declared_entry_point(), None);
     }
 
     #[test]
@@ -373,6 +380,26 @@ mod tests {
         let message = format!("{err}");
         assert!(message.contains("MalformedHeader"), "{message}");
         assert!(message.contains("RP2350_RISCV"), "{message}");
+    }
+
+    #[test]
+    fn a_file_with_many_families_names_only_a_few() {
+        let mut file = Vec::new();
+        for index in 0..20_000u32 {
+            file.extend(block(
+                UF2_FLAG_FAMILY_ID_PRESENT,
+                index * 4,
+                &THUMB_ADD,
+                0,
+                1,
+                index,
+            ));
+        }
+        let err = Uf2Loader::parse(DataBuffer::Heap(file), "many.uf2".to_string())
+            .expect_err("no language");
+        let message = format!("{err}");
+        assert!(message.contains("and 19992 more"), "{message}");
+        assert!(message.len() < 500, "{} bytes", message.len());
     }
 
     #[test]
