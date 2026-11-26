@@ -1410,7 +1410,7 @@ fission_cli inventory function-facts app.exe \
 
 ### Benchmark-adjacent decomp workflow
 
-For quality measurement, use DecBench; see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
+For quality measurement, use FreshBench; see [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md).
 
 `fission_cli --benchmark` is a decomp-output timing flag. It is not the benchmark suite driver.
 

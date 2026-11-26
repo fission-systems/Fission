@@ -26,7 +26,7 @@ use fission_midend_core::ir::{SsaUseSite, SsaValueDefinition};
 /// `lhblFlashWaitComplete` (4 source CFG nodes; every other decompiler scores
 /// it perfectly) and a 201,839-character line for `coreutils/sort`'s `merge`.
 /// Those two shapes are about a third of Fission's excess structure distance
-/// on the full DecBench sweep.
+/// on the full benchmark sweep.
 ///
 /// So bound the output too, and fall back to the same named binding the work
 /// budget already falls back to -- a variable reference is what the source had

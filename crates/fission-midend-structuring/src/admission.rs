@@ -31,7 +31,7 @@ pub fn decide_structuring_admission(
         return StructuringAdmissionReason::ExplicitForceLinear;
     }
 
-    // Raised from 192/3_000 (measured on the DecBench sample-set corpus: 4
+    // Raised from 192/3_000 (measured on the benchmark sample-set corpus: 4
     // functions with 122-207 *reducible* blocks -- scc_irreducible_count==0,
     // so the ReplacementPlanExplosion risk documented for IrreducibleBudget
     // broadening does not apply here -- were being force-linearized purely

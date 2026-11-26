@@ -6,7 +6,7 @@
 //!
 //! The two spellings compile identically -- one conversion happens either
 //! way, on whichever arm the condition selects -- and the hoisted form is
-//! the one a person writes. It is also, on the DecBench structure metric,
+//! the one a person writes. It is also, on the benchmark's structure metric,
 //! materially cheaper: pyjoern gives a conditional whose arms carry casts
 //! its own branch in the CFG (four nodes) and a conditional over plain
 //! operands a single node, so a function emitting a cast in both arms of

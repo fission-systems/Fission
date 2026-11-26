@@ -11,7 +11,7 @@ does not erase an unsupported operation observed earlier.
 
 `crates/fission-emulator/tests/corpus_dev_sweep.rs` is the full measurement
 lane. It only executes Fission's source-built dev binaries. Do not point it at
-DecBench, evalkit, malware, or another corpus that is intended for static
+FreshBench, evalkit, malware, or another corpus that is intended for static
 analysis only.
 
 ```sh

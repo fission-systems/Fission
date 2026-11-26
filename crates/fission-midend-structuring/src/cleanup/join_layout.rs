@@ -20,7 +20,7 @@
 //! turns that predecessor's jump into a fall-through and retires it. The
 //! others keep jumping to the label, which stays put with the block.
 //!
-//! Measured on the DecBench sample set, 416 of 1,781 remaining gotos (23.4%)
+//! Measured on the benchmark sample set, 416 of 1,781 remaining gotos (23.4%)
 //! target a label with no adjacent predecessor, so this is purely a layout
 //! loss rather than anything inherent to the control flow.
 //!

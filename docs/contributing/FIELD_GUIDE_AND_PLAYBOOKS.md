@@ -6,7 +6,8 @@ the long-form contributor material — field guide, per-area playbooks, the
 review question bank, and the maintainer handoff template.
 
 Start with [`AGENTS.md`](https://github.com/fission-systems/Fission/blob/main/AGENTS.md) for the working rules and the
-decompiler quality loop. This document is the depth behind them.
+decompiler quality loop, and [`BENCHMARK_FRESHBENCH.md`](../BENCHMARK_FRESHBENCH.md) for the
+benchmark commands. This document is the depth behind them.
 
 ## Field Guide: Practical Rules by Area
 
@@ -164,7 +165,7 @@ Route through resource roots and path config.
 
 Project canonical metrics and keep outputs deterministic.
 
-- Owner check: identify the script that owns the report (`scripts/quality/decbench_*`) before editing.
+- Owner check: identify what owns the report (FreshBench's `sweep report` for scores, `NirBuildStats` for decompiler counters) before editing.
 - Evidence check: record the concrete function, row, sample, test, or artifact that motivated the change.
 - Coverage check: add focused coverage for the invariant rather than only inspecting output manually.
 - Regression check: run the smallest useful test first and then the relevant crate check.
@@ -222,7 +223,7 @@ Start in `fission-sleigh`; compare emitted p-code before touching NIR or HIR.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 02. Fixing an NIR materialization bug
@@ -233,7 +234,7 @@ Start in `fission-pcode/src/nir`; preserve exact source behavior before readabil
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 03. Improving HIR readability
@@ -244,7 +245,7 @@ Start from correct NIR; prefer cleanup passes over printer substitutions.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 04. Changing structuring logic
@@ -255,7 +256,7 @@ Start in `crates/fission-pcode/src/midend/structuring`; require CFG evidence and
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 05. Adding a new NIR pass
@@ -266,7 +267,7 @@ Implement a pass with declared analysis dependencies and accurate changed status
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 06. Debugging an if-else recovery failure
@@ -277,7 +278,7 @@ Inspect dominance, post-dominance, and region exits before modifying emitted syn
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 07. Debugging a loop recovery failure
@@ -288,7 +289,7 @@ Inspect SCCs, loop headers, latches, exits, and break or continue candidates.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 08. Debugging a switch recovery failure
@@ -299,7 +300,7 @@ Inspect jump table evidence, bounds, case targets, and default target handling.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 09. Cleaning unnecessary temporaries
@@ -310,7 +311,7 @@ Confirm the temporary has no semantic or ordering role before removing it.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 10. Recovering function parameters
@@ -321,7 +322,7 @@ Use ABI facts, call uses, stack/register evidence, and type context together.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 11. Recovering local variables
@@ -332,7 +333,7 @@ Tie stack slots, stores, loads, and lifetimes to stable local names.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 12. Recovering return values
@@ -343,7 +344,7 @@ Check accumulator registers, call sites, and observed return uses.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 13. Recovering pointer arithmetic
@@ -354,7 +355,7 @@ Prefer base plus offset or indexed forms only when data-flow evidence supports t
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 14. Recovering arrays
@@ -365,7 +366,7 @@ Require stable stride, base object, and index expression evidence.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 15. Recovering struct fields
@@ -376,7 +377,7 @@ Require layout evidence before rendering field access.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 16. Changing loader format detection
@@ -387,7 +388,7 @@ Fail closed for unknown or unsupported families; never hide uncertainty as raw b
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 17. Adding loader provenance
@@ -398,7 +399,7 @@ Attach evidence without changing parsing semantics or decompiler behavior.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 18. Changing import handling
@@ -409,7 +410,7 @@ Keep true imports, import thunks, undefined externals, and debug-only symbols di
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 19. Changing export handling
@@ -420,7 +421,7 @@ Preserve symbol provenance and loader-owned function views.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 20. Changing resource lookup
@@ -431,7 +432,7 @@ Route through path config and resource roots; do not embed local absolute paths.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 21. Changing utility manifests
@@ -442,7 +443,7 @@ Keep manifests deterministic and explain what data is required at runtime.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 22. Changing signature lookup
@@ -453,7 +454,7 @@ Keep signature hits evidence-backed and separate from semantic repair.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 23. Changing benchmark reports
@@ -464,7 +465,7 @@ Project `NirBuildStats` and other canonical counters; do not redefine metrics.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 24. Changing JSON report contracts
@@ -475,7 +476,7 @@ Version or document the contract and keep output deterministic.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 25. Changing CLI output
@@ -486,7 +487,7 @@ Keep CLI as a surface; do not fix semantics in formatting code.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 26. Changing CLI command parsing
@@ -497,7 +498,7 @@ Separate compatibility shims from command ownership and behavior.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 27. Changing CLI behavior
@@ -508,7 +509,7 @@ Keep the CLI a product surface: no semantic rules in command code (see `crates/f
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 28. Changing agent-facing output
@@ -519,7 +520,7 @@ Consume shared function views and keep the JSON contract stable (`fission_cli sc
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 29. Changing AI integration surfaces
@@ -530,7 +531,7 @@ Keep AI assistance advisory and preserve deterministic core behavior.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 30. Changing plugin contracts
@@ -541,7 +542,7 @@ Keep contracts explicit, stable, and separated from core crate internals.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 31. Changing dynamic-analysis support
@@ -552,7 +553,7 @@ Keep dynamic evidence labeled and do not blur it with static facts.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 32. Changing time-travel support
@@ -563,7 +564,7 @@ Keep trace-derived facts explicit and reproducible.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 33. Adding a new test fixture
@@ -574,7 +575,7 @@ Document provenance, architecture, compiler, and why the fixture is useful.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 34. Adding a regression test
@@ -585,7 +586,7 @@ Name the invariant, not just the failing sample.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 35. Updating snapshots
@@ -596,7 +597,7 @@ Inspect semantic meaning before accepting changed text.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 36. Investigating benchmark movement
@@ -607,7 +608,7 @@ Compare exact rows, artifacts, scores, stdout, stderr, and feature gaps.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 37. Investigating a pass-count change
@@ -618,7 +619,7 @@ Trace whether the change is semantic, presentational, telemetry-only, or noise.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 38. Investigating a size change
@@ -629,7 +630,7 @@ Inspect line count and byte count together with readability and semantics.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 39. Investigating a CI-only failure
@@ -640,7 +641,7 @@ Check OS, LFS resources, workflow inputs, feature flags, and rust version.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 40. Investigating a resource-missing failure
@@ -651,7 +652,7 @@ Check LFS pull scope, resource roots, and CLI resource status.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 41. Investigating a panic
@@ -662,7 +663,7 @@ Capture command, input, backtrace, crate owner, and minimal reproducer.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 42. Investigating non-determinism
@@ -673,7 +674,7 @@ Check map iteration, filesystem order, random seeds, timestamps, and local paths
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 43. Changing dependencies
@@ -684,7 +685,7 @@ Justify long-term maintenance value and avoid dependency shortcuts for core sema
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 44. Consulting Ghidra
@@ -695,7 +696,7 @@ Use it for invariants and expected behavior, not copied implementation.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 45. Consulting RetDec
@@ -706,7 +707,7 @@ Use it as reference material without creating runtime dependency.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 46. Touching vendor trees
@@ -717,7 +718,7 @@ Do not add production links, shell-outs, bindings, or copied shortcuts.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 47. Touching `utils/`
@@ -728,7 +729,7 @@ Use existing loaders and manifests instead of bypassing resource configuration.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 48. Writing architecture docs
@@ -739,7 +740,7 @@ State owner boundaries and avoid implying surface layers own semantics.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 49. Writing user docs
@@ -750,7 +751,7 @@ Prefer commands and observed behavior over aspiration.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 50. Writing troubleshooting docs
@@ -761,7 +762,7 @@ Map symptom to first owner and first command.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 51. Writing release notes
@@ -772,7 +773,7 @@ Separate features, fixes, quality movement, and known limitations.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 52. Preparing a commit
@@ -783,7 +784,7 @@ Stage intended hunks only and keep unrelated dirty work untouched.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 53. Preparing a PR
@@ -794,7 +795,7 @@ Lead with behavior change, validation, and residual risk.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 54. Reviewing a PR
@@ -805,7 +806,7 @@ Prioritize bugs, regressions, missing tests, and ownership drift.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 55. Refactoring shared code
@@ -816,7 +817,7 @@ Keep behavior stable unless the refactor explicitly includes a measured semantic
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 56. Adding an abstraction
@@ -827,7 +828,7 @@ Add it only when it removes real duplication or encodes a real invariant.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 57. Deleting legacy code
@@ -838,7 +839,7 @@ Prove the active path no longer depends on it and keep compatibility expectation
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 58. Changing telemetry names
@@ -849,7 +850,7 @@ Check every consumer and avoid parallel meanings.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 59. Changing public structs
@@ -860,7 +861,7 @@ Consider the CLI JSON contract, scripts, and downstream compatibility.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 60. Changing error types
@@ -871,7 +872,7 @@ Keep errors typed enough for users and agents to act on.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 61. Changing logging
@@ -882,7 +883,7 @@ Keep logs useful for debugging without making tests flaky.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 62. Changing performance-sensitive paths
@@ -893,7 +894,7 @@ Measure before and after when the change affects common loops.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 63. Changing memory-heavy paths
@@ -904,7 +905,7 @@ Check large binaries and avoid unbounded accumulation.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 64. Changing parser code
@@ -915,7 +916,7 @@ Use structured readers and bounds checks rather than ad hoc slicing.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 65. Changing graph algorithms
@@ -926,7 +927,7 @@ Prefer explicit graph facts over lexical ordering or sample-specific assumptions
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 66. Changing dataflow analysis
@@ -937,7 +938,7 @@ Document convergence, lattice meaning, and budget behavior.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 67. Changing fixed-point loops
@@ -948,7 +949,7 @@ Make termination, changed status, and budget behavior inspectable.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 68. Changing type inference
@@ -959,7 +960,7 @@ Keep confidence and provenance visible; avoid overconfident names.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 69. Changing ABI handling
@@ -970,7 +971,7 @@ Keep architecture and calling convention boundaries explicit.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 70. Changing x86 behavior
@@ -981,7 +982,7 @@ Validate exact sample first, then the broader x86/x86-64 family.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 71. Changing non-x86 behavior
@@ -992,7 +993,7 @@ Do not regress x86/x86-64 priority while expanding breadth.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 72. Changing docs only
@@ -1003,7 +1004,7 @@ Do not claim semantic improvement from documentation changes.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ### 73. Changing logo or README assets
@@ -1014,7 +1015,7 @@ Keep icon and README logo responsibilities separate.
 - Evidence: preserve the command, binary, address, row, fixture, or artifact that motivated the change.
 - Coverage: add or update the smallest test that captures the invariant.
 - Validation: run the targeted check first, then the relevant crate-level check.
-- Regression: compare existing tests and, when decompiler output can change, the DecBench measurement.
+- Regression: compare existing tests and, when decompiler output can change, a FreshBench run (a slice first, then the full M1 run).
 - Report: separate mechanical change from quality improvement.
 
 ## Review Question Bank

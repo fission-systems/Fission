@@ -214,8 +214,9 @@ CI/dashboard boundary. A benchmark row, AI review prompt, Ghidra comparison, or
 validation-pool result may motivate a change, but none of those surfaces own the
 semantic decision, and none of them is a correctness oracle: Ghidra shares
 Fission's Sleigh input ([ADR 0017](../adr/0017-ghidra-is-not-an-oracle.md)) and
-DecBench measures similarity to the source
-([ADR 0018](../adr/0018-decbench-is-not-a-correctness-oracle.md)).
+a benchmark such as FreshBench measures similarity to the source, not
+correctness (ADR 0018, carried over by
+[ADR 0019](../adr/0019-freshbench-is-the-benchmark.md)).
 
 The architectural admission path is:
 
