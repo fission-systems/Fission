@@ -19,6 +19,16 @@ on:
         required: false
         type: string
         default: ""
+    outputs:
+      lost:
+        description: "Rows that had output on the last passing main sweep and lost it"
+        value: ${{ jobs.report.outputs.lost }}
+      lost_build:
+        description: "The first build with such rows"
+        value: ${{ jobs.report.outputs.lost_build }}
+      baseline_commit:
+        description: "The commit that baseline sweep measured"
+        value: ${{ jobs.report.outputs.baseline_commit }}
 
 permissions:
   contents: read
@@ -135,6 +145,10 @@ jobs:
     if: ${{ always() && !inputs.build && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      lost: ${{ steps.report.outputs.lost }}
+      lost_build: ${{ steps.report.outputs.lost_build }}
+      baseline_commit: ${{ steps.report.outputs.baseline_commit }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -165,6 +179,7 @@ jobs:
             fi
           done
       - name: Report every shard and compare with the baseline
+        id: report
         run: |
           chmod +x toolchain/freshbench
           python3 scripts/ci/freshbench_sweep.py --data "$RUNNER_TEMP/freshbench" report \

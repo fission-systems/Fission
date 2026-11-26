@@ -114,6 +114,24 @@ still serves later steps; it runs when the setup or `ci.yml` changes.
 - The PR fixture lane builds the release CLI with overflow checks and debug
   assertions on.
 
+## Parallel bisect
+
+`parallel-bisect.yml` names the first main commit between a good and a bad
+one that regressed. Every first-parent commit in the range, up to 48 and sampled
+evenly beyond that, is built and measured at once, so one round answers what a
+sequential bisect needs log2(N) rounds for. When the range was sampled, the
+verdict says so and gives the narrower range to run again.
+
+- **output probe:** a FreshBench sweep of one build or slice. A commit is bad when
+  fewer rows have output than on the good commit, or more tool calls fail.
+- **speed probe:** the cachegrind sample. Each probe also measures the good
+  commit's CLI on its own runner, so the 3% threshold compares like with like.
+
+The nightly FreshBench sweep runs it when rows lose their output, on the first
+such build, from the baseline sweep's commit. The nightly speed check runs it
+on a 3% rise, from the last good night's commit. Both comment the verdict on
+the run's `ci-red` issue. It can also be dispatched by hand.
+
 ## Scheduled runs report into issues
 
 Heavy, fuzz, determinism, the native differential and the FreshBench sweep end with `reusable-report-red.yml`. While a
