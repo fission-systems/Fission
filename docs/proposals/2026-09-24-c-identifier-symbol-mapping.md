@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
 - Function: `__mingwthr_run_key_dtors.part.0`
 - Address: `0x1400021a0`
 - Corpus row or benchmark command: real-binary project render via `fission_cli decomp <binary> --project --no-header --no-warnings --no-db`
