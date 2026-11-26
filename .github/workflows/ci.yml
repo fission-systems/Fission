@@ -469,6 +469,9 @@ jobs:
       && (needs.changes.outputs.run_decomp_corpus == 'true'
           || contains(github.event.pull_request.labels.*.name, 'type:performance'))
     uses: ./.github/workflows/reusable-base-head.yml
+    permissions:
+      contents: read
+      actions: read
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
       output_diff: ${{ needs.changes.outputs.run_decomp_corpus == 'true' }}

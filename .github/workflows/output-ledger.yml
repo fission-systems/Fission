@@ -1,0 +1,101 @@
+name: Output ledger
+
+# One entry per main push that can change the decompiler
+# (scripts/ci/output_ledger.py):
+# - each function's output hash on the fixed FreshBench sample of
+#   output_diff.py, and the sample's totals;
+# - instructions executed on the speed sample, by this commit's CLI alone.
+#
+# Artifacts:
+# - `output-ledger-<commit>` (90 days) is the entry.
+#   `output_ledger.py history KEY` reads these to name the commits that
+#   changed one function's output, without building anything.
+# - `output-ledger-run-<commit>` (30 days) is the sweep run. The PR
+#   base-vs-head check uses it as its base side instead of decompiling the
+#   base again.
+#
+# Report-only. It runs one at a time: a push made while one is running waits,
+# and a newer push replaces the waiting one, so commits can be skipped. A
+# skipped commit has no entry, and base-vs-head then decompiles that base
+# itself.
+
+on:
+  push:
+    branches: [main]
+    # Must match DECOMPILER_INPUTS in scripts/ci/output_diff.py, plus what
+    # defines the measurement itself.
+    paths:
+      - "crates/**"
+      - "utils/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "fission.toml"
+      - "scripts/ci/output_ledger.py"
+      - "scripts/ci/output_diff.py"
+      - "scripts/ci/speed_compare.py"
+      - "scripts/ci/freshbench_corpus.py"
+      - ".github/workflows/output-ledger.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: output-ledger
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  FISSION_BENCHMARK_NO_CACHE: "1"
+
+jobs:
+  record:
+    name: Record this commit's output and cost
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          # base-vs-head's key: PR builds restore main's cache from here.
+          shared-key: fission-output-diff-${{ runner.os }}
+      - name: Build the CLI
+        run: cargo build --locked --release -p fission-cli
+      - name: Build the pinned scorer
+        run: |
+          set -euo pipefail
+          commit="$(python3 -c 'import sys; sys.path.insert(0, "scripts/ci"); import freshbench_corpus as c; print(c.FRESHBENCH_COMMIT)')"
+          cargo install --locked --git https://github.com/fission-systems/freshbench --rev "$commit" \
+            --root "$RUNNER_TEMP/freshbench-tool" freshbench
+      - name: Install valgrind
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends valgrind
+      - name: Record the entry
+        run: |
+          # Measurements run with error reporting off; `sweep run` refuses otherwise.
+          env -u SENTRY_DSN -u FISSION_SENTRY -u FRESHBENCH_SENTRY \
+            python3 scripts/ci/output_ledger.py record --data "$RUNNER_TEMP/freshbench" \
+              --freshbench "$RUNNER_TEMP/freshbench-tool/bin/freshbench" \
+              --cli target/release/fission_cli --out ledger
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: output-ledger-${{ github.sha }}
+          path: ledger/entry.json
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: output-ledger-run-${{ github.sha }}
+          path: ledger/run
+          if-no-files-found: error
+          retention-days: 30

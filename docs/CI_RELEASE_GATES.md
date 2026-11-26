@@ -265,6 +265,31 @@ records the scorer id and refuses to compare runs scored differently. Move
 A complete passing run with a new scorer or corpus establishes the next
 baseline. See [the benchmark guide](BENCHMARK_FRESHBENCH.md).
 
+## Output ledger
+
+`output-ledger.yml` records one entry per main push that changes a
+decompiler input (`DECOMPILER_INPUTS` in `scripts/ci/output_diff.py`, the
+same list as the workflow's `paths`). It is report-only and runs one at a
+time; a newer push replaces a waiting one, so commits can be skipped.
+
+An entry (`scripts/ci/output_ledger.py record`) holds:
+- each function's output hash on output_diff.py's fixed FreshBench sample, and
+  that sample's totals;
+- instructions executed on speed_compare.py's sample by that commit's CLI
+  alone, with the runner's CPU model. Counts are comparable only on the same
+  CPU model.
+
+| artifact | kept | used by |
+|---|---|---|
+| `output-ledger-<commit>` (the entry) | 90 days | `output_ledger.py history KEY`: the main commits that changed one function's output, read from entries alone; `compare OLD NEW` for two entries |
+| `output-ledger-run-<commit>` (the sweep run) | 30 days | the PR base-vs-head check's base side |
+
+Base-vs-head takes the run of the newest first-parent commit at or before
+the PR base that changed a decompiler input, because the base decompiles
+exactly as that commit does. It uses the run only when it is clean and has
+the head run's scorer, corpus and function count. Otherwise it decompiles
+the base itself.
+
 ## Release process
 
 The maintainer reviews and merges one Release PR; the workflows do the rest.

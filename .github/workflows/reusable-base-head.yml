@@ -7,7 +7,9 @@ name: Reusable base-vs-head decompiler comparison
 #   flagged at +3%;
 # - output (decompiler changes only): `freshbench sweep diff` of the two,
 #   functions whose text changed first, then score deltas on those
-#   (scripts/ci/output_diff.py).
+#   (scripts/ci/output_diff.py). The base side comes from main's output
+#   ledger (output-ledger.yml) when it has a matching run; otherwise the
+#   base is decompiled here.
 # Report-only: neither gates the merge yet.
 
 on:
@@ -25,6 +27,8 @@ on:
 
 permissions:
   contents: read
+  # Download main's output-ledger artifact.
+  actions: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -77,13 +81,16 @@ jobs:
             --base-resources "$RUNNER_TEMP/base/utils" --out output-diff
       - name: Decompile the sample with both and compare output
         if: inputs.output_diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           # Measurements run with error reporting off; `sweep run` refuses otherwise.
           env -u SENTRY_DSN -u FISSION_SENTRY -u FRESHBENCH_SENTRY \
             python3 scripts/ci/output_diff.py --data "$RUNNER_TEMP/freshbench" \
               --freshbench "$RUNNER_TEMP/freshbench-tool/bin/freshbench" \
               --base-cli "$RUNNER_TEMP/base_cli" --head-cli "$RUNNER_TEMP/head_cli" \
-              --base-repo "$RUNNER_TEMP/base" --out output-diff
+              --base-repo "$RUNNER_TEMP/base" --fetch-base-run --out output-diff
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
