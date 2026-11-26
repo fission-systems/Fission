@@ -93,7 +93,7 @@ verify() {
     fi
     echo "Rust touched in: ${PKGS[*]} (repair round $round of $MAX_REPAIRS)"
     if cargo_check; then
-      helper check || return 1
+      helper check --issue-json "$ISSUE_JSON" || return 1
       CARGO="passed"; REPAIRS="$round"
       return 0
     fi
@@ -120,7 +120,7 @@ verify() {
     echo "repair round $round with $model"
     timeout "$REPAIR_TIMEOUT" opencode run --model "$model" "$(cat "$DRAFT/repair.txt")" \
       || echo "$model exited with status $? in repair round $round"
-    helper check || return 1
+    helper check --issue-json "$ISSUE_JSON" || return 1
   done
 }
 
@@ -186,7 +186,7 @@ for model in "${MODELS[@]}"; do
     git clean -fdq
     timeout "$MODEL_TIMEOUT" opencode run --model "$model" "$(cat "$DRAFT/prompt.txt")" \
       || echo "$model exited with status $?"
-    if ! helper check; then
+    if ! helper check --issue-json "$ISSUE_JSON"; then
       echo "::endgroup::"
       continue
     fi

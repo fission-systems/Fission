@@ -144,8 +144,47 @@ next, up to four.
   draft touches Rust, so a docs-only draft stays fast. The PR body says
   whether `cargo check` passed and after how many repair rounds. That is a
   compile check only: no test ran.
+- Comment-only issues: an issue whose body carries the hidden marker
+  `<!-- free-task-kind:comment-only -->` is behaviour-neutral by design, so
+  the edit check also requires every added or removed line in a `*.rs` file to
+  be a comment (`//`, `///`, `//!`, or inside `/* */`) or blank. It judges the
+  lines of the staged zero-context diff: a line that has code before a `//`,
+  or sits inside a string, counts as code, and so does any deleted code line.
+  An added comment line that opens a code fence (three or more backticks or
+  tildes) or an indented code block is refused too, because rustdoc would run
+  it as a doctest. `#[doc = ...]` is code, so it is refused.
+  Markdown is not restricted further. The check runs in the model loop and
+  again in the job that opens the PR.
 - `scripts/ci/free_model_draft.py` holds the rules and their tests;
   `scripts/ci/free_model_draft_loop.sh` is the model loop.
+
+#### Mined issues (`free-task-miner.yml`)
+
+A daily workflow (`scripts/ci/free_task_miner.py`) files `agent:free` +
+`area:docs` issues for documentation work with a clear target, with no model
+involved in finding it, at most 3 per run in total (kinds take turns). It then
+starts the draft workflow for each, because issues created with `GITHUB_TOKEN`
+trigger nothing. Detectors:
+
+- `home-path`: an absolute home path in maintained Markdown, with the portable
+  replacement.
+- `broken-link`: a relative Markdown link whose target exists exactly once
+  elsewhere under the same name.
+- `missing-docs`: public items without a doc comment, from `missing_docs`
+  warnings of one crate (`cargo rustc -p <crate> --lib -- -W missing_docs`, so
+  only that crate is compiled with the lint). The issue asks for `///`
+  comments that describe only what the code visibly does.
+- `rustdoc`: rustdoc lint warnings of that crate (`cargo doc --no-deps`:
+  broken intra-doc links, invalid HTML tags, bare URLs, ...).
+
+The two Rust detectors run on one crate per run, picked by day of year from
+`DOC_CRATES` in the script, so a run stays bounded. Their issues carry the
+comment-only marker above, so a model cannot change logic. Groups are at most
+8 files and 15 items (Markdown kinds: 12 files and 40 replacements). Every
+finding has a hidden `free-task-item` key without a line number; a finding that
+any `agent:free` issue (open or closed) already carries is not filed again.
+Dry run locally: `python3 scripts/ci/free_task_miner.py --dry-run --doc-crate
+<crate>` (`--no-rust-docs` skips the cargo detectors).
 
 The draft gets no CI and cannot merge. An Opus review of the diff comes first.
 Marking it ready then starts CI, and the usual lifecycle above applies. If the

@@ -237,5 +237,136 @@ class RepairPromptTests(unittest.TestCase):
             self.assertIn("+let x;", run.stdout)
 
 
+def rs_diff(path, *hunks):
+    """A `git diff -U0` of one file; each hunk is (old_start, new_start, [lines with +/- prefix])."""
+    out = [f"diff --git a/{path} b/{path}", "index 1..2 100644", f"--- a/{path}", f"+++ b/{path}"]
+    for old, new, lines in hunks:
+        out.append(f"@@ -{old},0 +{new},{len(lines)} @@")
+        out += lines
+    return "\n".join(out) + "\n"
+
+
+class CommentOnlyTests(unittest.TestCase):
+    def problems(self, *lines, path="crates/c/src/lib.rs"):
+        return fmd.comment_only_problems(rs_diff(path, (10, 10, list(lines))))
+
+    def test_doc_comment_additions_pass(self):
+        self.assertEqual(self.problems("+/// Adds one.", "+    /// Indented.", "+//! Module doc.", "+// note", "+"), [])
+
+    def test_a_code_line_inside_a_doc_comment_hunk_is_refused(self):
+        found = self.problems("+/// Adds one.", "+pub fn f() { g(); }", "+/// More.")
+        self.assertEqual(len(found), 1)
+        self.assertIn("crates/c/src/lib.rs:11: added line is code", found[0])
+
+    def test_a_string_literal_with_slashes_is_code_not_a_comment(self):
+        self.assertTrue(self.problems('+let u = "http://example.com";'))
+        self.assertTrue(self.problems('+    let s = "// not a comment";'))
+
+    def test_a_trailing_comment_does_not_hide_code(self):
+        self.assertTrue(self.problems("+let x = 1; // note"))
+        self.assertTrue(self.problems("+/* c */ let x = 1;"))
+
+    def test_a_deleted_code_line_is_refused(self):
+        found = self.problems("-    let x = 1;")
+        self.assertEqual(len(found), 1)
+        self.assertIn("removed line is code", found[0])
+
+    def test_deleting_or_rewriting_a_comment_is_fine_but_uncommenting_code_is_not(self):
+        self.assertEqual(self.problems("-/// Old.", "+/// New."), [])
+        self.assertTrue(self.problems("-// let x = 1;", "+let x = 1;"))
+
+    def test_block_comments_are_followed_within_the_hunk(self):
+        self.assertEqual(self.problems("+/*", "+ * text", "+ */", "+/* one */"), [])
+        self.assertEqual(self.problems("+/* nested /* inner */ still */"), [])
+        self.assertTrue(self.problems("+/*", "+ text", "+ */", "+let x = 1;"))
+        self.assertTrue(self.problems("+/* a */ b(); /* c */"))
+
+    def test_a_code_fence_in_an_added_doc_comment_is_refused(self):
+        for line in ("+/// ```rust", "+//! ~~~", "+    /// ```", "+/// ````text", "+//! ~~~~"):
+            found = self.problems(line)
+            self.assertEqual(len(found), 1, line)
+            self.assertIn("code fence", found[0])
+
+    def test_a_code_fence_inside_a_block_comment_is_refused(self):
+        self.assertTrue(self.problems("+/*", "+ * ```", "+ */"))
+        self.assertTrue(self.problems("+/** ```rust"))
+        self.assertTrue(self.problems("+/*", "+```", "+*/"))
+
+    def test_an_indented_code_block_in_a_doc_comment_is_refused(self):
+        self.assertTrue(self.problems("+///     let x = 1;"))
+        self.assertEqual(self.problems("+///   - nested list item"), [])
+
+    def test_inline_backticks_still_pass(self):
+        self.assertEqual(self.problems("+/// returns `None` when empty", "+/// see ``a`b`` and ```x``` inline",
+                                       "+//! The `foo` module."), [])
+
+    def test_removing_a_fence_is_not_refused(self):
+        self.assertEqual(self.problems("-/// ```", "-/// ```"), [])
+
+    def test_an_added_doc_attribute_is_code(self):
+        self.assertTrue(self.problems('+#[doc = "```\nlet x = 1;\n```"]'))
+        self.assertTrue(self.problems('+    #![doc = "x"]'))
+
+    def test_a_continuation_whose_opener_is_not_in_the_diff_is_refused(self):
+        self.assertTrue(self.problems("+ * dangling"))
+
+    def test_code_that_looks_like_a_diff_header_is_still_checked(self):
+        self.assertTrue(self.problems("+++x;"))
+        self.assertTrue(self.problems("--x;"))
+
+    def test_non_rust_files_are_not_restricted(self):
+        diff = rs_diff("docs/a.md", (1, 1, ["+Some prose.", "-Old prose."]))
+        self.assertEqual(fmd.comment_only_problems(diff), [])
+
+    def test_each_file_is_judged_alone(self):
+        diff = (rs_diff("docs/a.md", (1, 1, ["+Prose."]))
+                + rs_diff("crates/c/src/a.rs", (3, 3, ["+/// ok"]))
+                + rs_diff("crates/c/src/b.rs", (4, 4, ["+let y = 2;"])))
+        found = fmd.comment_only_problems(diff)
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("crates/c/src/b.rs:4:"))
+
+    def test_the_no_newline_marker_is_ignored(self):
+        self.assertEqual(self.problems("+/// doc", "\\ No newline at end of file"), [])
+
+    def test_the_marker_in_the_issue_body_turns_the_rule_on_and_into_the_prompt(self):
+        plain, marked = issue(), issue(body="Add docs.\n" + fmd.COMMENT_ONLY_MARKER + "\n")
+        self.assertFalse(fmd.is_comment_only(plain))
+        self.assertTrue(fmd.is_comment_only(marked))
+        self.assertNotIn("comment-only", fmd.prompt(plain))
+        self.assertIn("comment-only", fmd.prompt(marked))
+
+
+class CommentOnlyCheckCommandTests(unittest.TestCase):
+    def run_check(self, body, new_text):
+        repo = Path(tempfile.mkdtemp())
+        src = repo / "crates" / "c" / "src"
+        src.mkdir(parents=True)
+        for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", str(repo), *cmd], check=True)
+        (src / "lib.rs").write_text("pub fn f() -> u32 {\n    1\n}\n")
+        subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", "x"], check=True)
+        (src / "lib.rs").write_text(new_text)
+        issue_file = Path(tempfile.mkdtemp()) / "issue.json"
+        issue_file.write_text(json.dumps({"body": body}))
+        script = Path(fmd.__file__)
+        return subprocess.run([sys.executable, str(script), "check", "--repo", str(repo),
+                               "--issue-json", str(issue_file)], capture_output=True, text=True)
+
+    DOC = "/// Returns one.\npub fn f() -> u32 {\n    1\n}\n"
+    LOGIC = "/// Returns one.\npub fn f() -> u32 {\n    2\n}\n"
+
+    def test_comment_only_issue_accepts_a_doc_edit_and_refuses_a_logic_edit(self):
+        marked = "Add docs.\n" + fmd.COMMENT_ONLY_MARKER
+        self.assertEqual(self.run_check(marked, self.DOC).returncode, 0)
+        refused = self.run_check(marked, self.LOGIC)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("is code, not a comment", refused.stderr)
+
+    def test_an_ordinary_issue_still_accepts_the_logic_edit(self):
+        self.assertEqual(self.run_check("Fix it.", self.LOGIC).returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
