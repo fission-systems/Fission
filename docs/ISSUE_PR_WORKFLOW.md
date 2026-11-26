@@ -126,8 +126,8 @@ single-purpose code change. Do not use it on an issue whose body carries a log
 or decompiled output. `free-model-draft.yml` then asks OpenCode Zen free models
 for a fix and opens it as a draft PR labelled `agent:free-draft`. Free models
 have usage limits, so the run number picks which one goes first. A model
-that fails, is rate-limited or leaves no acceptable edits hands over to the
-next, up to four.
+that fails or leaves no acceptable edits hands over to the next, up to four,
+within the budgets and failure classes below.
 
 - The model sees only the public checkout and the issue text. It can read
   and edit files, nothing else.
@@ -155,16 +155,88 @@ next, up to four.
   it as a doctest. `#[doc = ...]` is code, so it is refused.
   Markdown is not restricted further. The check runs in the model loop and
   again in the job that opens the PR.
+- Budgets, shared by model switches and repairs: at most 5 `opencode run`
+  calls per task (`MAX_INVOCATIONS_PER_TASK`, counted in the loop's state dir;
+  it fails with `BUDGET_EXHAUSTED` when spent, instead of the old worst case of
+  4 models x 3 calls). No opencode or cargo call starts if its timeout would
+  cross `BUDGET_SECS`: the timeout is shortened to the time left, or the call
+  is skipped (under 120 s for opencode, 300 s for cargo).
+- Failure classes (`free_model_draft.py classify`, from the opencode exit
+  status, its `--format json` error events and text, and the cargo log). Each
+  attempt gets a row in the step summary.
+
+  | Class | Action |
+  |---|---|
+  | `RATE_LIMITED` (429, "rate limit", "quota", "too many requests") | stop the whole task, exit 75, Retry-After reported when seen |
+  | `PROVIDER_UNAVAILABLE` (connection refused, DNS, 5xx) | stop the task, exit 76 |
+  | `INFRA_FAILURE` (cargo cannot download or reach the registry) | never sent to the model; cargo retried once, then stop, exit 77 |
+  | `BUDGET_EXHAUSTED` | stop, exit 78 |
+  | `MODEL_UNAVAILABLE`, `NO_CHANGES`, `POLICY_VIOLATION` | next model |
+  | `COMPILATION_ERROR` | repair loop; `cargo fmt` failures count (a rustfmt failure is almost always a syntax error and its message goes to the model) |
+
+  After `RATE_LIMITED` or `PROVIDER_UNAVAILABLE` the issue gets `agent:deferred`
+  with a comment (reason and time); the scheduler removes it after 6 hours. Any
+  other failed draft gets `agent:blocked`, so it is not retried until a human
+  removes the label. Run `python3 scripts/check/sync_github_labels.py --apply`
+  once so the labels exist.
+- Duplicate guard: before drafting, and again before opening the PR, the
+  workflow does nothing if an open PR labelled `agent:free-draft` says
+  `Fixes #<issue>` or an open PR comes from a branch `agent-free/issue-<issue>-*`.
+  The issue gets one comment saying so (checked first, so never repeated).
 - `scripts/ci/free_model_draft.py` holds the rules and their tests;
-  `scripts/ci/free_model_draft_loop.sh` is the model loop.
+  `scripts/ci/free_model_draft_loop.sh` is the model loop;
+  `scripts/ci/test_free_model_draft_loop.py` simulates it with a fake `opencode`.
+
+#### Scheduler (`free-agent-scheduler.yml`)
+
+State lives in GitHub (issues, labels, runs, PRs, artifacts): no database, no
+state branch. A workflow `concurrency:` group keeps one pending run and cancels
+the rest, so it cannot queue tasks. Instead a cron (every 30 minutes,
+`scripts/ci/free_agent_scheduler.py tick`) starts one `free-model-draft.yml`
+run per tick, within `.github/free-agent-policy.json`:
+
+- `max_concurrent` (1): draft runs queued or in progress;
+- `max_daily_tasks` (10): draft runs started today (UTC), the only hard cap on usage;
+- `max_pending_draft_prs` (10): open `agent:free-draft` PRs, because review is
+  the bottleneck.
+
+It picks the oldest open `agent:free` issue with no open draft PR and no
+`agent:blocked` or `agent:deferred` label. At the start of each tick it removes
+`agent:deferred` from issues that have had it for 6 hours (the `labeled` event
+time in the issue timeline). Labelling an issue `agent:free` by hand still
+starts a run at once. Try it without side effects: run the workflow with
+`dry_run` (the default), or
+`python3 scripts/ci/free_agent_scheduler.py tick --dry-run`.
+
+#### Usage measurement (`free-agent-report.yml`)
+
+The quota is measured from normal runs, never probed. `opencode run` uses
+`--format json`; each invocation's events go to `metrics/<n>.jsonl`, and every
+draft run uploads `free-agent-metrics-<run_id>` (90 days) with `metrics.json`:
+per invocation the model, kind (draft or repair), seconds, LLM requests (the
+`step_finish` count), tokens (in, out, reasoning, cache read), status codes,
+Retry-After and class. It holds numbers, model ids, class names and status codes
+only. A field the events lack is unknown (`?`), never 0, and opencode's internal
+retries are not events, so a rate-limited model may show only as slow
+invocations. `scripts/ci/free_agent_report.py` (daily, or on dispatch) writes
+per day and model: runs, invocations, requests, tokens, 429s, rate-limited runs,
+accepted drafts and mean seconds per invocation to the job summary. The
+scheduler prints today's totals on every tick.
 
 #### Mined issues (`free-task-miner.yml`)
 
-A daily workflow (`scripts/ci/free_task_miner.py`) files `agent:free` +
-`area:docs` issues for documentation work with a clear target, with no model
-involved in finding it, at most 3 per run in total (kinds take turns). It then
-starts the draft workflow for each, because issues created with `GITHUB_TOKEN`
-trigger nothing. Detectors:
+A daily workflow (`scripts/ci/free_task_miner.py`) finds documentation work with
+a clear target, with no model involved in finding it. Findings that need writing
+(`missing-docs`, `rustdoc`) become `agent:free` + `area:docs` issues, at most 3
+per run in total (kinds take turns); the scheduler above starts their drafts
+(issues created with `GITHUB_TOKEN` trigger nothing, and the miner starts no
+draft itself). Findings with an exact before and after (`home-path`,
+`broken-link`) need no model: `--fix` applies one group of them, each
+replacement only if `before` occurs exactly once on the recorded file:line (a
+mismatch is skipped and reported), and the workflow runs
+`free_model_draft.py check` on the result and opens a draft PR labelled
+`agent:deterministic` on a branch `agent-fix/<fingerprint>`. No such PR is opened
+while 3 are open. Detectors:
 
 - `home-path`: an absolute home path in maintained Markdown, with the portable
   replacement.
@@ -182,7 +254,8 @@ The two Rust detectors run on one crate per run, picked by day of year from
 comment-only marker above, so a model cannot change logic. Groups are at most
 8 files and 15 items (Markdown kinds: 12 files and 40 replacements). Every
 finding has a hidden `free-task-item` key without a line number; a finding that
-any `agent:free` issue (open or closed) already carries is not filed again.
+any `agent:free` issue (open or closed) or any open `agent:deterministic` PR
+already carries is not filed or fixed again.
 Dry run locally: `python3 scripts/ci/free_task_miner.py --dry-run --doc-crate
 <crate>` (`--no-rust-docs` skips the cargo detectors).
 

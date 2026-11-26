@@ -8,6 +8,10 @@ for a simple issue, and a draft PR carries it to review.
     free_model_draft.py rust-packages [--repo DIR]            packages whose Rust the edits touch
     free_model_draft.py errors [--file F] [--max-chars N]     compiler diagnostics, truncated
     free_model_draft.py repair-prompt --issue-json F --diff-file F --errors-file F   follow-up prompt
+    free_model_draft.py classify --kind opencode|cargo|check --file F ...   failure class of one attempt
+    free_model_draft.py retry-after --file F ...              a Retry-After value seen in opencode output
+    free_model_draft.py begin-call --state DIR --kind opencode|cargo ...    time and invocation budget gate
+    free_model_draft.py stop-code CLASS                       exit status of a task-stopping class
 
 What reaches the model is the public repository and the issue's title and
 body, nothing else. The model runs with every tool denied except reading and
@@ -42,6 +46,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 import tomllib
 from pathlib import Path
 
@@ -373,6 +378,216 @@ Compiler errors (first errors kept):
 """
 
 
+# ---------------------------------------------------------------------------
+# Budgets. One task (one issue) may spend at most MAX_INVOCATIONS_PER_TASK
+# `opencode run` calls in all: drafts, repairs and model switches share it.
+# No call starts if its timeout would cross BUDGET_SECS.
+
+MAX_INVOCATIONS_PER_TASK = 5
+MIN_OPENCODE_SECS = 120
+MIN_CARGO_SECS = 300
+
+
+def remaining_secs(start: int, now: int, budget: int) -> int:
+    return budget - (now - start)
+
+
+def call_timeout(requested: int, remaining: int, minimum: int) -> int | None:
+    """The timeout for the next call: `requested`, shortened to what is left of the budget,
+    or None (skip the call) when less than `minimum` seconds are left."""
+    if remaining < minimum:
+        return None
+    return min(requested, remaining)
+
+
+def spend_invocation(state: Path, limit: int = MAX_INVOCATIONS_PER_TASK) -> int | None:
+    """Count one opencode invocation in the state dir. Returns the number spent so far,
+    or None when `limit` invocations were already spent (nothing is counted then)."""
+    counter = state / "invocations"
+    try:
+        spent = int(counter.read_text().strip() or 0)
+    except (OSError, ValueError):
+        spent = 0
+    if spent >= limit:
+        return None
+    state.mkdir(parents=True, exist_ok=True)
+    counter.write_text(f"{spent + 1}\n")
+    return spent + 1
+
+
+# ---------------------------------------------------------------------------
+# Failure classification of one attempt.
+
+RATE_LIMITED = "RATE_LIMITED"
+MODEL_UNAVAILABLE = "MODEL_UNAVAILABLE"
+PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+INFRA_FAILURE = "INFRA_FAILURE"
+COMPILATION_ERROR = "COMPILATION_ERROR"
+NO_CHANGES = "NO_CHANGES"
+POLICY_VIOLATION = "POLICY_VIOLATION"
+BUDGET_EXHAUSTED = "BUDGET_EXHAUSTED"
+
+STOP, NEXT_MODEL, REPAIR = "stop the task", "next model", "repair loop"
+ACTIONS = {RATE_LIMITED: STOP, MODEL_UNAVAILABLE: NEXT_MODEL, PROVIDER_UNAVAILABLE: STOP,
+           INFRA_FAILURE: STOP, COMPILATION_ERROR: REPAIR, NO_CHANGES: NEXT_MODEL,
+           POLICY_VIOLATION: NEXT_MODEL, BUDGET_EXHAUSTED: STOP}
+# Distinct non-zero exit statuses of the loop when it stops the whole task.
+STOP_CODES = {RATE_LIMITED: 75, PROVIDER_UNAVAILABLE: 76, INFRA_FAILURE: 77, BUDGET_EXHAUSTED: 78}
+
+_I = re.IGNORECASE
+_HTTP = r"(?:\bhttp\b|status(?:[ _]?code)?|error|code)\W{0,6}"
+RATE_RX = re.compile(r"rate[ _-]?limit|too many requests|\bquota\b|" + _HTTP + r"429\b|\b429\s+too\b", _I)
+MODEL_RX = re.compile(r"model[ _]not[ _]found|unknown model|no such model|ProviderModelNotFound|"
+                      r"model\b[^\n]{0,60}\b(?:is )?(?:not (?:found|available|supported)|unavailable|"
+                      r"deprecated|removed|discontinued)", _I)
+PROVIDER_RX = re.compile(r"connection refused|econn(?:refused|reset)|enotfound|getaddrinfo|"
+                         r"name resolution|could not resolve host|\bdns\b|etimedout|socket hang up|"
+                         r"network is unreachable|service unavailable|bad gateway|gateway timeout|overloaded|"
+                         + _HTTP + r"5\d\d\b|\b5\d\d\s+(?:internal server error|bad gateway|service unavailable|"
+                         r"gateway timeout)", _I)
+INFRA_RX = re.compile(r"failed to download|spurious network error|unable to update registry|"
+                      r"failed to get [`'\"]?[^\n]*as a dependency|failed to fetch|could not resolve host|"
+                      r"couldn't resolve host|network failure seems to be happening|"
+                      r"failed to query replaced source registry|failed to load source for dependency", _I)
+RETRY_RX = (re.compile(r"retry[-_ ]after\W{0,4}(\d{1,6})\s*(ms|s|sec|secs|seconds|m|min|minutes)?\b", _I),
+            re.compile(r"(?:try again|retry) in (\d{1,6})\s*(ms|s|sec|secs|seconds|m|min|minutes)\b", _I))
+
+
+def parse_events(text: str) -> list[dict]:
+    """The JSON events (`opencode run --format json`, one object per line, with a `type`) in `text`."""
+    events = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and isinstance(event.get("type"), str):
+            events.append(event)
+    return events
+
+
+def _int(value) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def event_error(event: dict) -> dict:
+    """What an `error` (or `retry`) event says, defensively: {"status": int|None, "retry_after": int|None}.
+    The v1 schema is `error.name`, `error.data.{message,statusCode,isRetryable,responseHeaders}`;
+    a status or headers placed directly on `error` are read too. Missing fields are None, not 0."""
+    err = event.get("error")
+    err = err if isinstance(err, dict) else {}
+    data = err.get("data") if isinstance(err.get("data"), dict) else {}
+    status = None
+    for source in (data, err):
+        for key in ("statusCode", "status_code", "status"):
+            code = _int(source.get(key))
+            if code is not None and 100 <= code <= 599:
+                status = code
+                break
+        if status is not None:
+            break
+    retry = None
+    for source in (data, err):
+        headers = source.get("responseHeaders") or source.get("headers")
+        if isinstance(headers, dict):
+            for key, value in headers.items():
+                if str(key).lower() == "retry-after":
+                    try:
+                        retry = int(str(value).strip())
+                    except ValueError:
+                        retry = None  # an HTTP date: not a number of seconds
+    return {"status": status, "retry_after": retry}
+
+
+def event_usage(event: dict) -> dict:
+    """Token counts of one `step_finish` event; any field the event lacks is None (unknown)."""
+    part = event.get("part")
+    tokens = part.get("tokens") if isinstance(part, dict) else None
+    tokens = tokens if isinstance(tokens, dict) else {}
+    cache = tokens.get("cache") if isinstance(tokens.get("cache"), dict) else {}
+    return {"input": _int(tokens.get("input")), "output": _int(tokens.get("output")),
+            "reasoning": _int(tokens.get("reasoning")), "cache_read": _int(cache.get("read"))}
+
+
+def scannable_text(*outputs: str) -> str:
+    """The part of opencode's output a text pattern may match: lines that are not JSON, and the
+    `error` events. The model's own `text` and `tool_use` events are left out, so a model that
+    writes about "rate limits" in a doc cannot stop the task."""
+    kept = []
+    for output in outputs:
+        for line in output.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("{"):
+                try:
+                    event = json.loads(stripped)
+                except ValueError:
+                    kept.append(line)
+                    continue
+                if isinstance(event, dict) and event.get("type") in ("error", "retry"):
+                    kept.append(json.dumps(event.get("error", event)))
+            else:
+                kept.append(line)
+    return "\n".join(kept)
+
+
+def retry_after(*outputs: str) -> str | None:
+    """A Retry-After value seen in opencode's output (error events or text), as "N seconds"."""
+    for output in outputs:
+        for event in parse_events(output):
+            if event["type"] in ("error", "retry"):
+                seconds = event_error(event)["retry_after"]
+                if seconds is not None:
+                    return f"{seconds} seconds"
+    text = scannable_text(*outputs)
+    for rx in RETRY_RX:
+        match = rx.search(text)
+        if match:
+            amount, unit = int(match.group(1)), (match.group(2) or "s").lower()
+            if unit == "ms":
+                return f"{max(amount // 1000, 1)} seconds"
+            return f"{amount * 60} seconds" if unit.startswith("m") else f"{amount} seconds"
+    return None
+
+
+def classify_opencode(status: int, outputs: list[str], made_edits: bool = False) -> str | None:
+    """The provider-side class of one `opencode run`, or None when nothing is wrong with the
+    provider (then the edit check decides: NO_CHANGES or POLICY_VIOLATION). A clean exit that
+    left edits is never a failure. A clean exit without edits is not classified from text (a model
+    may merely mention a quota), only from an `error` event. Event status codes win over text."""
+    if status == 0 and made_edits:
+        return None
+    for output in outputs:
+        for event in parse_events(output):
+            if event["type"] in ("error", "retry"):
+                code = event_error(event)["status"]
+                if code == 429:
+                    return RATE_LIMITED
+                if code is not None and code >= 500 and event["type"] == "error":
+                    return PROVIDER_UNAVAILABLE
+    if status == 0:
+        return None
+    text = scannable_text(*outputs)
+    for cls, rx in ((RATE_LIMITED, RATE_RX), (MODEL_UNAVAILABLE, MODEL_RX), (PROVIDER_UNAVAILABLE, PROVIDER_RX)):
+        if rx.search(text):
+            return cls
+    return None
+
+
+def classify_cargo(log: str) -> str:
+    """The class of a FAILED fmt/check log: INFRA_FAILURE when cargo could not reach the registry
+    (never shown to the model), else COMPILATION_ERROR (a rustfmt failure is a syntax error)."""
+    return INFRA_FAILURE if INFRA_RX.search(log) else COMPILATION_ERROR
+
+
+def classify_check(message: str) -> str:
+    """The class of a refused `check`: nothing changed, or the edits broke a rule."""
+    problems = message.strip().removeprefix("edits refused:").strip()
+    return NO_CHANGES if problems == "no change" else POLICY_VIOLATION
+
+
 def git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout
 
@@ -399,7 +614,61 @@ def main() -> int:
     rp.add_argument("--issue-json", type=Path, required=True)
     rp.add_argument("--diff-file", type=Path, required=True)
     rp.add_argument("--errors-file", type=Path, required=True)
+    cl = sub.add_parser("classify")
+    cl.add_argument("--kind", choices=["opencode", "cargo", "check"], required=True)
+    cl.add_argument("--file", type=Path, action="append", required=True)
+    cl.add_argument("--status", type=int, default=1)
+    cl.add_argument("--edits", type=int, default=0)
+    ra = sub.add_parser("retry-after")
+    ra.add_argument("--file", type=Path, action="append", required=True)
+    bc = sub.add_parser("begin-call")
+    bc.add_argument("--state", type=Path, required=True)
+    bc.add_argument("--kind", choices=["opencode", "cargo"], required=True)
+    bc.add_argument("--requested", type=int, required=True)
+    bc.add_argument("--budget", type=int, required=True)
+    bc.add_argument("--min", type=int)
+    bc.add_argument("--max-invocations", type=int, default=MAX_INVOCATIONS_PER_TASK)
+    bc.add_argument("--now", type=int, help="epoch seconds (tests)")
+    sc = sub.add_parser("stop-code")
+    sc.add_argument("name")
     args = parser.parse_args()
+
+    if args.command == "stop-code":
+        print(STOP_CODES.get(args.name, 1))
+        return 0
+    if args.command in ("classify", "retry-after"):
+        texts = [f.read_text(errors="replace") if f.exists() else "" for f in args.file]
+        if args.command == "retry-after":
+            print(retry_after(*texts) or "")
+        elif args.kind == "opencode":
+            print(classify_opencode(args.status, texts, bool(args.edits)) or "NONE")
+        elif args.kind == "cargo":
+            print(classify_cargo("\n".join(texts)))
+        else:
+            print(classify_check("\n".join(texts)))
+        return 0
+    if args.command == "begin-call":
+        # exit 0: go ahead, the timeout in seconds is printed; 2: out of time; 3: invocations spent.
+        try:
+            start = int((args.state / "start").read_text().strip())
+        except (OSError, ValueError):
+            start = int(time.time())
+        now = args.now if args.now is not None else int(time.time())
+        minimum = args.min if args.min is not None else (MIN_OPENCODE_SECS if args.kind == "opencode"
+                                                         else MIN_CARGO_SECS)
+        secs = call_timeout(args.requested, remaining_secs(start, now, args.budget), minimum)
+        if secs is None:
+            print(f"out of time: fewer than {minimum}s of the {args.budget}s budget left", file=sys.stderr)
+            return 2
+        if args.kind == "opencode":
+            spent = spend_invocation(args.state, args.max_invocations)
+            if spent is None:
+                print(f"invocation budget spent: {args.max_invocations} opencode runs for this task",
+                      file=sys.stderr)
+                return 3
+            print(f"opencode invocation {spent} of {args.max_invocations}, timeout {secs}s", file=sys.stderr)
+        print(secs)
+        return 0
 
     if args.command == "prepare":
         issue = json.loads(args.issue_json.read_text())
