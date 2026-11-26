@@ -268,7 +268,7 @@ fn another_decode_spec_or_context_is_another_location() {
         at("spec", 0, 0x40_0000),
         image.at(0, 4),
         DecodeContext {
-            context_register: Some(1),
+            context_override: Some("thumb".into()),
         },
         &maps,
         &image,

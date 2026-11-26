@@ -5,14 +5,13 @@ use crate::identity::ImageIdentity;
 use serde::{Deserialize, Serialize};
 
 /// Decoder state that changes what the bytes at an address mean.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
-)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct DecodeContext {
-    /// SLEIGH context register override, for example ARM's Thumb mode. `None`
-    /// is the language's default context.
+    /// SLEIGH context register override, for example ARM's Thumb mode, as its
+    /// producer writes it canonically. Compared for equality only. `None` is
+    /// the language's default context.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_register: Option<u32>,
+    pub context_override: Option<String>,
 }
 
 /// The version of a stretch of code: its length and the digest of its bytes.

@@ -72,7 +72,7 @@ Candidates for the shared contracts:
 | Contract | Fields | Rule |
 |---|---|---|
 | `ImageIdentity` | file content digest (BLAKE3), address space, `SpecContext { language_id, compiler_spec_id }` | path and load address are not identity. The language id carries the architecture |
-| `DecodeContext` | SLEIGH context register override | the same bytes in another mode are other code |
+| `DecodeContext` | SLEIGH context register override, in a canonical text form | the same bytes in another mode are other code |
 | `CodeVersion` | length, digest of the bytes | part of every code location |
 | `CodeLocation` | image, image-relative offset, version, decode context | survives relocation and snapshot rebuilds; stops applying when bytes or context change |
 | `FunctionKey` | image, entry offset, decode context | natural identity. `FunctionId` and other snapshot row ids never leave their snapshot |
