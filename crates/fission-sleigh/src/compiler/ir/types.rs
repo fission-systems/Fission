@@ -649,7 +649,9 @@ pub enum CompiledOperandSpec {
         byte_start: u32,
         byte_end: u32,
         shift: i32,
-        entries: Vec<CompiledResolvedVarnode>,
+        /// Indexed by the attach table's selector. `None` is a `_` hole, which
+        /// has no register: selecting it makes the instruction invalid.
+        entries: Vec<Option<CompiledResolvedVarnode>>,
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,
@@ -659,7 +661,8 @@ pub enum CompiledOperandSpec {
     },
     SlaVarnodeListExpression {
         expr: CompiledPatternExpression,
-        entries: Vec<CompiledResolvedVarnode>,
+        /// See `SlaVarnodeList::entries`.
+        entries: Vec<Option<CompiledResolvedVarnode>>,
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,
