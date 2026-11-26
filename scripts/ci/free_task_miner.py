@@ -15,9 +15,9 @@ Detectors (each yields a finding only when the fix is determinable):
                targets are skipped.
 
 Findings are grouped per kind into issues of at most 12 files and 40 replacements.
-Each body carries a hidden `<!-- free-task:<16 hex> -->` fingerprint of its sorted
-findings; a group whose marker already appears in any issue labelled agent:free
-(open or closed) is skipped.
+Each body carries one hidden `<!-- free-task-item:<16 hex> -->` key per finding (a hash
+of kind, file, before, after; no line number). Findings whose key already appears in any
+issue labelled agent:free (open or closed) are dropped before grouping.
 
 Default mode is a dry run. `--create` files the issues with `gh` (labels agent:free
 and area:docs) and starts `free-model-draft.yml` for each, because issues created
@@ -136,6 +136,19 @@ def detect_home_paths(root, files):
     return findings
 
 
+def _scope_dir(path):
+    """`crates/<name>/` for crate sources, else the top-level directory ("" at the root)."""
+    parts = path.split("/")
+    if parts[0] == "crates" and len(parts) > 2:
+        return "crates/" + parts[1]
+    return parts[0] if len(parts) > 1 else ""
+
+
+def plausible_target(source, candidate):
+    """A same-named file is trusted only if it is Markdown or lives next to the source."""
+    return candidate.endswith(".md") or _scope_dir(source) == _scope_dir(candidate)
+
+
 def link_fix(raw, path, existing, by_name):
     """The corrected link target, or None when it is fine or not determinable."""
     if raw.startswith(("#", "<", "/")) or SCHEME_RE.match(raw):
@@ -148,7 +161,7 @@ def link_fix(raw, path, existing, by_name):
     if resolved in existing or any(p.startswith(resolved + "/") for p in existing):
         return None
     candidates = by_name.get(posixpath.basename(target), [])
-    if len(candidates) != 1:
+    if len(candidates) != 1 or not plausible_target(path, candidates[0]):
         return None
     return rel_link(path, candidates[0]) + (sep + frag if sep else "")
 
@@ -197,12 +210,19 @@ def group_findings(findings):
     return groups
 
 
+def item_key(finding):
+    """Identity of one defect: independent of its line number and of grouping."""
+    payload = json.dumps([finding.kind, finding.file, finding.before, finding.after],
+                         ensure_ascii=True)
+    return hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def fingerprint(group):
     payload = json.dumps(sorted(list(f) for f in group), ensure_ascii=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]
 
 
-MARKER_RE = re.compile(r"<!-- free-task:([0-9a-f]{16}) -->")
+ITEM_MARKER_RE = re.compile(r"<!-- free-task-item:([0-9a-f]{16}) -->")
 
 TITLES = {"home-path": "docs: replace absolute home paths with portable paths",
           "broken-link": "docs: fix broken relative Markdown links"}
@@ -221,27 +241,23 @@ def render_body(group):
              "Edit only the listed lines in these Markdown files; change nothing else.", ""]
     for f in sorted(group):
         lines.append(f"- `{f.file}:{f.line}`: `{f.before}` → `{f.after}`")
-    lines += ["", "Found by `scripts/ci/free_task_miner.py`.", "",
-              f"<!-- free-task:{fingerprint(group)} -->"]
+    lines += ["", "Found by `scripts/ci/free_task_miner.py`.", ""]
+    lines += [f"<!-- free-task-item:{item_key(f)} -->" for f in sorted(group)]
+    lines.append(f"<!-- free-task:{fingerprint(group)} -->")
     return "\n".join(lines) + "\n"
 
 
 def known_markers(issues):
     found = set()
     for item in issues:
-        found.update(MARKER_RE.findall(item.get("body") or ""))
+        found.update(ITEM_MARKER_RE.findall(item.get("body") or ""))
     return found
 
 
-def select_groups(groups, markers, max_issues):
-    chosen = []
-    for group in groups:
-        if fingerprint(group) in markers:
-            continue
-        chosen.append(group)
-        if len(chosen) >= max_issues:
-            break
-    return chosen
+def plan(findings, markers, max_issues):
+    """Drop already-filed findings, then group the rest and cap the issue count."""
+    fresh = [f for f in findings if item_key(f) not in markers]
+    return group_findings(fresh)[:max_issues]
 
 
 def gh_existing_issues():
@@ -285,8 +301,9 @@ def main(argv=None):
             raise
         markers = set()
         print("note: gh unavailable; not checking for existing issues", file=sys.stderr)
-    chosen = select_groups(groups, markers, args.max_issues)
-    print(f"{len(chosen)} to file, {len(groups) - len(chosen)} skipped (already filed or over --max-issues)")
+    chosen = plan(findings, markers, args.max_issues)
+    filed = sum(1 for f in findings if item_key(f) in markers)
+    print(f"{filed} findings already filed; {len(chosen)} issues to file (max {args.max_issues})")
     for group in chosen:
         title, body = render_title(group), render_body(group)
         if args.create:

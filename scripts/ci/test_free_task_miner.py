@@ -89,6 +89,23 @@ class LinkTests(unittest.TestCase):
                  "docs/deep/b.md": "", "vendor/v.md": ""}
         self.assertEqual(mine(files), [])
 
+    def test_cross_crate_non_markdown_match_is_refused(self):
+        files = {"crates/fission-decompiler/src/README.md": "[p](./pcode.rs)\n",
+                 "crates/fission-static/src/analysis/pcode.rs": ""}
+        self.assertEqual(mine(files), [])
+
+    def test_same_crate_non_markdown_match_is_accepted(self):
+        files = {"crates/c/src/README.md": "[p](./pcode.rs)\n", "crates/c/src/x/pcode.rs": ""}
+        self.assertEqual(mine(files)[0].after, "x/pcode.rs")
+
+    def test_markdown_match_in_another_crate_is_accepted(self):
+        files = {"crates/c/README.md": "[g](GUIDE.md)\n", "crates/d/GUIDE.md": ""}
+        self.assertEqual(mine(files)[0].after, "../d/GUIDE.md")
+
+    def test_non_crate_source_needs_same_top_level_dir_for_non_markdown(self):
+        files = {"docs/a.md": "[s](x.py) [t](y.py)\n", "docs/q/x.py": "", "scripts/y.py": ""}
+        self.assertEqual([x.after for x in mine(files)], ["q/x.py"])
+
     def test_root_file_links_into_docs(self):
         found = mine({"README.md": "[g](guide.md)\n", "docs/guide.md": ""})
         self.assertEqual(found[0].after, "docs/guide.md")
@@ -121,6 +138,8 @@ class FingerprintAndBodyTests(unittest.TestCase):
         self.assertEqual(body.count("- `docs/a.md:"), 40)
         self.assertIn("- `docs/a.md:3`: `/Users/x/fission-benchmark/3` → `~/fission-benchmark/3`", body)
         self.assertIn(f"<!-- free-task:{ftm.fingerprint(group)} -->", body)
+        for x in group:
+            self.assertIn(f"<!-- free-task-item:{ftm.item_key(x)} -->", body)
         self.assertNotIn("```", body)
 
     def test_title_counts(self):
@@ -128,12 +147,28 @@ class FingerprintAndBodyTests(unittest.TestCase):
 
 
 class DedupTests(unittest.TestCase):
-    def test_groups_with_a_known_marker_are_skipped_and_cap_applies(self):
-        groups = [[f(n)] for n in range(5)]
-        issues = [{"number": 1, "body": f"x\n<!-- free-task:{ftm.fingerprint(groups[0])} -->"},
-                  {"number": 2, "body": None}]
-        markers = ftm.known_markers(issues)
-        self.assertEqual(ftm.select_groups(groups, markers, 3), groups[1:4])
+    def issues_for(self, findings):
+        return [{"number": 1, "body": ftm.render_body(findings)}, {"number": 2, "body": None}]
+
+    def test_item_key_ignores_the_line_number(self):
+        a = ftm.Finding("home-path", "docs/a.md", 3, "b", "c")
+        self.assertEqual(ftm.item_key(a), ftm.item_key(a._replace(line=99)))
+        self.assertNotEqual(ftm.item_key(a), ftm.item_key(a._replace(file="docs/z.md")))
+
+    def test_shifted_line_numbers_do_not_refile(self):
+        old = [f(n) for n in range(3)]
+        shifted = [x._replace(line=x.line + 10) for x in old]
+        markers = ftm.known_markers(self.issues_for(old))
+        self.assertEqual(ftm.plan(shifted, markers, 3), [])
+
+    def test_partly_filed_group_files_only_the_new_findings(self):
+        markers = ftm.known_markers(self.issues_for([f(0), f(1)]))
+        groups = ftm.plan([f(n) for n in range(4)], markers, 3)
+        self.assertEqual(groups, [[f(2), f(3)]])
+
+    def test_cap_applies_after_dedup(self):
+        findings = [f(n, file=f"docs/f{n}.md") for n in range(500)]
+        self.assertEqual(len(ftm.plan(findings, set(), 3)), 3)
 
     def test_create_files_labels_and_starts_the_draft_once_per_issue(self):
         root = make_repo({"docs/a.md": "/Users/b/fission-benchmark/x\n"})
