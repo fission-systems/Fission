@@ -5,7 +5,7 @@
 - `libc_types_gcc_O2.exe:count_spaces@0x1400014f0`
 - `crypto_gcc_O2.exe:rc4_init@0x140001530`
 - `semantic_stress_clang_O2.exe:overlap_move@0x140001800`
-- Corpus: external `/Users/sjkim1127/fission-benchmark`, `dev` profile, local
+- Corpus: external `~/fission-benchmark`, `dev` profile, local
   Fission endpoint, caches disabled with `--no-resume`.
 
 The focused baseline was recorded in:

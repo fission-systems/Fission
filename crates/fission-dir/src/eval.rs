@@ -73,7 +73,9 @@ pub fn normalize(raw: i64, ty: &NirType) -> i64 {
     if bits >= 64 {
         return raw;
     }
-    let mask = (1i64 << bits) - 1;
+    // The mask is built unsigned: `(1i64 << 63) - 1` overflows, so every
+    // 63-bit type panicked here in a debug build.
+    let mask = crate::scalar_semantics::mask(bits) as i64;
     let v = raw & mask;
     if is_signed(ty) && (v & (1i64 << (bits - 1))) != 0 {
         v | !mask
@@ -430,6 +432,7 @@ macro_rules! define_interp {
             }
 
             use super::{is_signed, normalize, width_of};
+            use crate::scalar_semantics::{ShiftKind, shift, sign_extend};
 
             /// `raw`'s low `bits` bits, as an unsigned value -- used for
             /// unsigned comparisons/shifts/division, where a signed `i64`
@@ -802,16 +805,33 @@ macro_rules! define_interp {
                     $BinaryOp::And => l & r,
                     $BinaryOp::Or => l | r,
                     $BinaryOp::Xor => l ^ r,
-                    $BinaryOp::Shl => l.wrapping_shl((r as u32) & 63),
-                    $BinaryOp::Shr => {
-                        (unsigned_masked(l, operand_bits) >> ((r as u32) & 63)) as i64
-                    }
-                    // The sign of an operand is bit `operand_bits - 1`, not bit
-                    // 63 of the stored `i64`: an unsigned-typed 32-bit value is
-                    // held zero-extended, so `0x8000_0000` is +2^31 there and
-                    // only negative once read at its own width.
-                    $BinaryOp::Sar => {
-                        (sign_extend_i128(l, operand_bits) >> ((r as u32) & 63)) as i64
+                    // The shift contract (`crate::scalar_semantics`): the count
+                    // is the right operand's full unsigned value at its own
+                    // width, the shift runs at the wider of operand and result
+                    // and saturates at or past it. `count & 63` made 64-bit
+                    // `1 << 64` equal 1 while the symbolic tier said 0.
+                    $BinaryOp::Shl | $BinaryOp::Shr | $BinaryOp::Sar => {
+                        let count_bits = width_of(infer_ty(rhs, env)?).clamp(1, 64);
+                        let count = unsigned_masked(r, count_bits);
+                        let width = operand_bits.max(width_of(ty).clamp(1, 64));
+                        let (kind, operand) = match op {
+                            // Held extended by the operand's own signedness,
+                            // as every other arithmetic operand.
+                            $BinaryOp::Shl => (ShiftKind::Left, l as u64),
+                            $BinaryOp::Shr => {
+                                (ShiftKind::LogicalRight, unsigned_masked(l, operand_bits))
+                            }
+                            // The sign of an operand is bit `operand_bits - 1`,
+                            // not bit 63 of the stored `i64`: an unsigned-typed
+                            // 32-bit value is held zero-extended, so
+                            // `0x8000_0000` is +2^31 there and only negative
+                            // once read at its own width.
+                            _ => (
+                                ShiftKind::ArithmeticRight,
+                                sign_extend(l as u64, operand_bits),
+                            ),
+                        };
+                        shift(kind, operand, width, count) as i64
                     }
                     $BinaryOp::Eq => bool_to_raw(
                         unsigned_masked(l, common_bits) == unsigned_masked(r, common_bits),
@@ -1527,6 +1547,84 @@ mod tests {
         )
         .expect("interpret");
         assert_eq!(value, Some(0xF800_0000));
+    }
+
+    /// The shift contract (`crate::scalar_semantics`): the count is the
+    /// right operand's full unsigned value at its own width, and a count at
+    /// or past the shifted width saturates (zero, or the sign for `Sar`).
+    /// `& 63` made 64-bit `1 << 64` equal 1 and `1 << 65` equal 2, the
+    /// symbolic tier's bit-vector shift says 0 for both, and an UNSAT proof
+    /// then certified one semantics while this tier ran another.
+    #[test]
+    fn shift_counts_at_or_past_the_operand_width_saturate_instead_of_wrapping() {
+        let u64_ty = NirType::Int {
+            bits: 64,
+            signed: false,
+        };
+        let i64_ty = NirType::Int {
+            bits: 64,
+            signed: true,
+        };
+        let i8_ty = NirType::Int {
+            bits: 8,
+            signed: true,
+        };
+        let eval = |op, value: HirExpr, count: HirExpr, ty: &NirType| {
+            interpret_hir(
+                &[HirStmt::Return(Some(binary(op, value, count, ty.clone())))],
+                &[],
+                &[],
+                &[],
+            )
+            .expect("interpret")
+            .expect("value")
+        };
+        let c64 = |v: i64| HirExpr::Const(v, u64_ty.clone());
+        assert_eq!(eval(HirBinaryOp::Shl, c64(1), c64(64), &u64_ty), 0);
+        assert_eq!(eval(HirBinaryOp::Shl, c64(1), c64(65), &u64_ty), 0);
+        assert_eq!(eval(HirBinaryOp::Shr, c64(-1), c64(64), &u64_ty), 0);
+        assert_eq!(eval(HirBinaryOp::Shr, c64(-1), c64(65), &u64_ty), 0);
+        // Arithmetic right shift past the width fills with the sign.
+        let neg = HirExpr::Const(-8, i64_ty.clone());
+        assert_eq!(eval(HirBinaryOp::Sar, neg.clone(), c64(64), &i64_ty), -1);
+        assert_eq!(eval(HirBinaryOp::Sar, c64(8), c64(64), &u64_ty), 0);
+        // A negative signed count is a huge unsigned count, not `count & 63`.
+        let minus_one_i8 = HirExpr::Const(-1, i8_ty.clone());
+        assert_eq!(
+            eval(HirBinaryOp::Shl, c64(1), minus_one_i8.clone(), &u64_ty),
+            0
+        );
+        // In-range counts are unchanged.
+        assert_eq!(eval(HirBinaryOp::Shl, c64(1), c64(63), &u64_ty), i64::MIN);
+        assert_eq!(eval(HirBinaryOp::Sar, neg, c64(1), &i64_ty), -4);
+    }
+
+    /// A right shift whose result type is narrower than its operand shifts
+    /// at the operand width first: 16-bit `0x0100 >> 1` truncated to 8 bits
+    /// is `0x80`.
+    #[test]
+    fn a_narrowing_right_shift_shifts_at_the_operand_width() {
+        let u16_ty = NirType::Int {
+            bits: 16,
+            signed: false,
+        };
+        let u8_ty = NirType::Int {
+            bits: 8,
+            signed: false,
+        };
+        let value = interpret_hir(
+            &[HirStmt::Return(Some(binary(
+                HirBinaryOp::Shr,
+                HirExpr::Const(0x0100, u16_ty.clone()),
+                HirExpr::Const(1, u16_ty),
+                u8_ty,
+            )))],
+            &[],
+            &[],
+            &[],
+        )
+        .expect("interpret");
+        assert_eq!(value, Some(0x80));
     }
 
     #[test]

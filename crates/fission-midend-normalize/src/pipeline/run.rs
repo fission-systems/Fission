@@ -89,7 +89,7 @@ pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, p
 
         // The four passes can undo one another inside a round -- one widens a
         // binding, a later one narrows it back -- and then each reports a
-        // change although the round ends where it began. On the full DecBench
+        // change although the round ends where it began. On the full benchmark
         // dataset 90% of rounds did, so almost every fixed point ran to its
         // cap. The passes read nothing but `func`, so a round that returns to
         // its starting state would repeat itself identically: stop there.
@@ -1920,7 +1920,10 @@ fn cleanup_stmt_list_with_options_and_preserved(
             changed = true;
             last_changed_pass = Some("apply_condexe_folding_pass");
         }
-        if apply_iblock_phi_elimination(stmts) {
+        // Recurses into nested lists itself and only drops a diamond whose
+        // value dies inside a nested list (overwrite / return); called on a
+        // nested list it would take the list's end for the function's end.
+        if depth == 0 && apply_iblock_phi_elimination(stmts) {
             changed = true;
             last_changed_pass = Some("apply_iblock_phi_elimination");
         }

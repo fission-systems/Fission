@@ -10,7 +10,7 @@ Two different “print expression” surfaces exist after midend extraction:
 1. **`fission_midend_core::format_expr_key`** (`util/print.rs`, formerly
    `print_expr`) — deterministic, dependency-light stringization of `HirExpr`
    for **keys, ordering, and diagnostics** inside normalize/structuring.
-2. **`fission_pcode::render::print_expr`** (`render/printer.rs`) — dual-layer
+2. **`fission_pcode::render::print_expr`** (`render/printer/`) — dual-layer
    **C presentation** (NIR/HIR profiles) governed by
    [ADR 0011](0011-hir-presentation-contract.md).
 

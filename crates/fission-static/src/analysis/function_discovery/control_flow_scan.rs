@@ -1,7 +1,7 @@
 use fission_loader::LoadedBinary;
 use fission_sleigh::runtime::{PackedContextOverride, RuntimeSleighFrontend};
 
-use super::coverage_decode::{COVERAGE_WINDOW_BYTES, CoverageDecodes, CoverageInstruction};
+use super::coverage_decode::{COVERAGE_WINDOW_BYTES, CoverageDecodes, SweptInstruction};
 use super::discovery_diag_enabled;
 use super::targets::collect_instruction_targets;
 use super::thumb::image_decode_context;
@@ -155,7 +155,7 @@ pub(super) fn scan_executable_sections(
             },
         );
 
-    let coverage_decodes: CoverageDecodes = coverage_rows.into_iter().collect();
+    let coverage_decodes = CoverageDecodes::new(sweep_context, coverage_rows);
     if discovery_diag_enabled() {
         eprintln!(
             "DISCOVERY_DIAG: scan_stage={:?} decoded={} calls={} jumps={}",
@@ -189,7 +189,7 @@ fn scan_section_references(
     call_targets: &mut Vec<u64>,
     jump_targets: &mut Vec<u64>,
     jump_edges: &mut Vec<(u64, u64)>,
-    coverage_rows: &mut Vec<((u64, usize), (usize, CoverageInstruction))>,
+    coverage_rows: &mut Vec<((u64, usize), (u8, SweptInstruction))>,
     coverage_budget: usize,
 ) -> usize {
     let mut decoded_count = 0usize;
@@ -198,7 +198,7 @@ fn scan_section_references(
 
     while offset < bytes.len() {
         let remaining = &bytes[offset..];
-        let collect_coverage = sweep_context.is_none() && coverage_rows.len() < coverage_budget;
+        let collect_coverage = coverage_rows.len() < coverage_budget;
         if let Ok(instructions) = frontend.decode_window_no_pcode_with_read_prefixes(
             remaining,
             current,
@@ -212,10 +212,11 @@ fn scan_section_references(
                     if let Some(prefix) = *prefix
                         && prefix <= COVERAGE_WINDOW_BYTES
                         && coverage_rows.len() < coverage_budget
-                        && let Some(coverage) = CoverageInstruction::from_decoded(instruction)
+                        && let Ok(prefix) = u8::try_from(prefix)
+                        && let Some(swept) = SweptInstruction::from_decoded(instruction)
                     {
                         let input = remaining.as_ptr() as usize + batch_bytes;
-                        coverage_rows.push(((instruction.address, input), (prefix, coverage)));
+                        coverage_rows.push(((instruction.address, input), (prefix, swept)));
                     }
                     batch_bytes += instruction.length;
                     collect_instruction_targets(

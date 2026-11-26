@@ -5,16 +5,16 @@
 - Binaries/functions: `crypto_gcc_O2.exe:rc4_init@0x140001530`,
   `libc_types_gcc_O2.exe:count_spaces@0x1400014f0`, and
   `semantic_stress_clang_O2.exe:bounded_tlv_sum@0x140001590`.
-- Corpus: external `/Users/sjkim1127/fission-benchmark`, `dev`, local Fission
+- Corpus: external `~/fission-benchmark`, `dev`, local Fission
   endpoint built from `5ec221602`, fingerprint
   `7a3104eddbb3b0bb674e021fa0218f23dc9a28cc9fe2a38db2f533434000280a`; all
   rows were run with `--no-resume`.
 - Baseline artifacts:
 
   ```text
-  /Users/sjkim1127/fission-benchmark/results/issue60_before_rc4_init.json
-  /Users/sjkim1127/fission-benchmark/results/issue60_before_count_spaces.json
-  /Users/sjkim1127/fission-benchmark/results/issue60_before_bounded_tlv_sum.json
+  ~/fission-benchmark/results/issue60_before_rc4_init.json
+  ~/fission-benchmark/results/issue60_before_count_spaces.json
+  ~/fission-benchmark/results/issue60_before_bounded_tlv_sum.json
   ```
 
 - `rc4_init` has 9 compiler rows (24.44% mean semantic pass rate); GCC O2 is
@@ -114,9 +114,9 @@ types, idempotence, and rejection of unrelated identifiers.
   - After artifacts:
 
     ```text
-    /Users/sjkim1127/fission-benchmark/results/issue60_after_rc4_init.json
-    /Users/sjkim1127/fission-benchmark/results/issue60_after_count_spaces.json
-    /Users/sjkim1127/fission-benchmark/results/issue60_after_bounded_tlv_sum.json
+    ~/fission-benchmark/results/issue60_after_rc4_init.json
+    ~/fission-benchmark/results/issue60_after_count_spaces.json
+    ~/fission-benchmark/results/issue60_after_bounded_tlv_sum.json
     ```
 
   - Bundle: local Fission build from `5ec221602` plus this working change,

@@ -1113,6 +1113,52 @@ mod tests {
     }
 
     #[test]
+    fn sccp_kills_a_local_whose_address_was_stored_to_memory_before_a_call() {
+        // `*slot = &buf; f(); x = buf;` -- the address escapes through a
+        // store, not a call argument, and `f` can write through `*slot`.
+        let mut func = PreHirFunction {
+            name: "test_sccp_store_escape".to_string(),
+            int_param_offsets: Vec::new(),
+            return_type: int(32),
+            body: vec![
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("buf".to_string()),
+                    rhs: PreHirExpr::Const(0, int(64)),
+                },
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Deref {
+                        ptr: Box::new(var("slot")),
+                        ty: int(64),
+                    },
+                    rhs: PreHirExpr::AddressOfLocal("buf".to_string()),
+                },
+                PreHirStmt::Expr(PreHirExpr::Call {
+                    origin: None,
+                    target: "write_through_global".to_string(),
+                    args: vec![],
+                    ty: int(64),
+                }),
+                PreHirStmt::Assign {
+                    lhs: PreHirLValue::Var("x".to_string()),
+                    rhs: var("buf"),
+                },
+            ],
+            ..Default::default()
+        };
+
+        apply_sccp_pass(&mut func);
+
+        let PreHirStmt::Assign { rhs, .. } = &func.body[3] else {
+            panic!("expected the trailing read to remain an assignment");
+        };
+        assert_eq!(
+            rhs,
+            &var("buf"),
+            "an address stored to memory escapes: a later call may write it"
+        );
+    }
+
+    #[test]
     fn sccp_kills_a_local_when_its_address_reaches_a_call_through_a_pointer_alias() {
         // The p-code materializer commonly separates the address computation
         // from the call argument (`p = &buf; call(p)`).  Treating only a

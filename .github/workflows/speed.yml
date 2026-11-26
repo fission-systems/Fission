@@ -33,6 +33,9 @@ jobs:
     name: Instructions executed vs the last good night
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    outputs:
+      base_commit: ${{ steps.baseline.outputs.commit }}
+      regressed: ${{ steps.verdict.outputs.regressed }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -79,15 +82,35 @@ jobs:
         env:
           BASE_COMMIT: ${{ steps.baseline.outputs.commit }}
         run: |
-          python3 scripts/ci/speed_compare.py --data "$RUNNER_TEMP/decbench" \
+          python3 scripts/ci/speed_compare.py --data "$RUNNER_TEMP/freshbench" \
             --base-cli baseline/fission_cli --head-cli speed-cli/fission_cli \
             --title "Decompile cost, ${BASE_COMMIT:0:9} -> $(git rev-parse --short HEAD)" \
             --out speed-report --fail-on-regression
+      - name: Record whether the instructions rose
+        id: verdict
+        if: always() && steps.baseline.outputs.found == 'true'
+        run: |
+          python3 -c 'import json; print("regressed=" + ("true" if json.load(open("speed-report/speed.json"))["regressed"] else "false"))' \
+            >> "$GITHUB_OUTPUT" || echo "regressed=false" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: speed-cli
           path: speed-cli
           retention-days: 30
+
+  # The instructions rose 3% or more since the last good night: find the commit.
+  bisect:
+    needs: speed
+    if: ${{ always() && needs.speed.outputs.regressed == 'true' && needs.speed.outputs.base_commit != '' }}
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/parallel-bisect.yml
+    with:
+      good: ${{ needs.speed.outputs.base_commit }}
+      bad: ${{ github.sha }}
+      probe: speed
+      issue_title: "CI red: ${{ github.workflow }}"
 
   report:
     needs: speed

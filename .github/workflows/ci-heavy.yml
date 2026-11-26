@@ -19,6 +19,32 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Sentry Crons (monitor `ci-heavy-nightly`, project `fission`): this job
+  # checks in `in_progress`, `sentry-checkin-finish` reports heavy-summary's
+  # result. Scheduled runs in this repository only, so a manual dispatch never
+  # counts as (or hides a missing) nightly. The monitor's config travels with
+  # each check-in (scripts/ci/sentry_cron_checkin.py). Without the SENTRY_DSN
+  # secret the script skips; it always exits 0, and continue-on-error keeps
+  # Sentry out of the run's result either way.
+  sentry-checkin-start:
+    name: Sentry cron check-in (start)
+    if: github.event_name == 'schedule' && github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/sentry_cron_checkin.py
+          sparse-checkout-cone-mode: false
+      - name: Check in (in_progress)
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: python3 scripts/ci/sentry_cron_checkin.py --status in_progress
+
   build-windows-heavy:
     name: Heavy Build & Test (Windows)
     uses: ./.github/workflows/reusable-build-cli.yml
@@ -36,6 +62,7 @@ jobs:
       crates: "fission-midend-structuring,fission-pcode-ir,fission-cspec,fission-pcode,fission-decompiler"
       profile: release
       timeout_minutes: 120
+      evidence_name: windows
 
   test-windows-native-debugger:
     name: Native Win32 Debugger (Windows)
@@ -65,7 +92,9 @@ jobs:
           cargo check --locked -p fission-dynamic --features windows_native_debugger
           cargo check --locked -p fission-cli --features windows_native_debugger
       - name: Run native debugger tests
-        run: cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
+        run: |
+          cargo nextest run --locked -p fission-dynamic --features windows_native_debugger
+          cargo nextest run --locked --no-tests=fail -p fission-cli --features windows_native_debugger --test debug_session_cli -E 'test(windows_native_)'
 
   build-macos-heavy:
     name: Heavy Build (macOS)
@@ -93,6 +122,7 @@ jobs:
       exclude_crates: "fission-static"
       run_interactive_runtime_tests: true
       run_script_emulator_tests: true
+      evidence_name: linux-full
 
   compile-surface:
     name: Compile Surface (Linux · all features)
@@ -161,6 +191,12 @@ jobs:
     if: always()
     steps:
       - name: Check Status
+        env:
+          # Through env, not `${{ }}` in the script: the detail can quote LCOV
+          # content, and template text is spliced in before bash parses it.
+          COVERAGE_RESULT: ${{ needs.coverage.result }}
+          COVERAGE_STATUS: ${{ needs.coverage.outputs.coverage_status }}
+          COVERAGE_DETAIL: ${{ needs.coverage.outputs.coverage_detail }}
         run: |
           set -euo pipefail
           FAILED=0
@@ -184,13 +220,34 @@ jobs:
           require_success "MSRV" "${{ needs.msrv-check.result }}"
           require_success "Security advisories" "${{ needs.advisories.result }}"
 
-          # Coverage is warn-only even when run
-          if [ "${{ needs.coverage.result }}" = "failure" ]; then
-            echo "WARNING: Coverage job encountered an error (non-blocking)"
-          elif [ "${{ needs.coverage.result }}" = "skipped" ]; then
-            echo "INFO: Coverage skipped"
-          else
-            echo "INFO: Coverage finished (${{ needs.coverage.result }})"
+          # Coverage is diagnostic/advisory only, but distinguish valid measurement from
+          # missing/malformed evidence, a failed measurement and checker failures.
+          # Status values: scripts/ci/coverage_summary.py (EvidenceStatus).
+          case "$COVERAGE_STATUS" in
+            measured_pass)
+              echo "OK: Coverage measured and meets advisory threshold (${COVERAGE_DETAIL})"
+              ;;
+            measured_below_threshold)
+              echo "WARNING: Coverage below advisory threshold (${COVERAGE_DETAIL})"
+              ;;
+            missing_evidence|malformed_evidence|measurement_failed|checker_error)
+              echo "WARNING: Coverage diagnostic failed [${COVERAGE_STATUS}] (${COVERAGE_DETAIL})"
+              ;;
+            "")
+              if [ "$COVERAGE_RESULT" = "skipped" ]; then
+                echo "INFO: Coverage skipped"
+              else
+                # The checker publishes a status on every path it reaches, so an
+                # empty one means it never ran; that is not a measurement.
+                echo "WARNING: Coverage published no diagnostic status (job result=${COVERAGE_RESULT}; non-blocking)"
+              fi
+              ;;
+            *)
+              echo "WARNING: Coverage published an unknown status '${COVERAGE_STATUS}' (job result=${COVERAGE_RESULT}; non-blocking)"
+              ;;
+          esac
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            echo "- Coverage diagnostic: \`${COVERAGE_STATUS:-$COVERAGE_RESULT}\`${COVERAGE_DETAIL:+ — ${COVERAGE_DETAIL}}" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if [ "$FAILED" -eq 1 ]; then
@@ -198,6 +255,40 @@ jobs:
           fi
           echo "OK: Heavy validation checks passed for this event!"
           echo "INFO: Heavy runs nightly or on demand; dispatch it for a release candidate SHA before tagging."
+
+  # Report-only: flaky and aborted tests as Sentry events (reusable-sentry-defects.yml).
+  sentry-defects:
+    needs: [test-windows-heavy, test-linux-full]
+    if: always() && github.repository == 'fission-systems/Fission'
+    uses: ./.github/workflows/reusable-sentry-defects.yml
+    with:
+      pattern: defect-evidence-*
+    secrets:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
+  # Needs the start job too, so the final check-in can never overtake the
+  # in_progress one. Any heavy-summary result but success (failure,
+  # cancelled) reports `error`.
+  sentry-checkin-finish:
+    name: Sentry cron check-in (finish)
+    needs: [sentry-checkin-start, heavy-summary]
+    if: always() && github.event_name == 'schedule' && github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/sentry_cron_checkin.py
+          sparse-checkout-cone-mode: false
+      - name: Check in (ok / error)
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          HEAVY_RESULT: ${{ needs.heavy-summary.result }}
+        run: python3 scripts/ci/sentry_cron_checkin.py --result "$HEAVY_RESULT"
 
   report:
     needs: heavy-summary

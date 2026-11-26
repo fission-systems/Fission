@@ -1,0 +1,31 @@
+[package]
+name = "fission-analysis-kernel"
+version = "0.4.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Thin orchestration over Fission engines: runtime evidence capture, import and evidence-aware views"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+
+# Only surfaces depend on this crate; engines never do (ADR 0020).
+[features]
+default = []
+## Record runtime traces from the emulator.
+emulator = ["dep:fission-emulator"]
+
+[dependencies]
+fission-analysis-db = { path = "../fission-analysis-db" }
+fission-analysis-protocol = { path = "../fission-analysis-protocol" }
+fission-decompiler = { path = "../fission-decompiler" }
+fission-emulator = { path = "../fission-emulator", optional = true }
+fission-evidence = { path = "../fission-evidence" }
+fission-loader = { path = "../fission-loader" }
+fission-sleigh = { path = "../fission-sleigh" }
+thiserror = "2.0"
+
+[dev-dependencies]
+# The tests capture real runs, so they always build the emulator backend.
+fission-analysis-kernel = { path = ".", features = ["emulator"] }
+fission-emulator = { path = "../fission-emulator" }
+tempfile = "3"

@@ -13,6 +13,8 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 | [`crates/fission-analysis-protocol`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-protocol) | Result shapes `fission_cli` prints as JSON (`list`, `callgraph`, `disasm`) |
 | [`crates/fission-analysis-db`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-db) | Immutable typed program metadata snapshots |
 | [`crates/fission-project`](https://github.com/fission-systems/Fission/tree/main/crates/fission-project) | Persistent analyst decisions, binary identity binding, and edit history for `db` |
+| [`crates/fission-evidence`](../crates/fission-evidence) | Image identity, code location, runtime mapping and evidence contracts (leaf; ADR 0020) |
+| [`crates/fission-analysis-kernel`](../crates/fission-analysis-kernel) | Thin orchestration over engine facades: runtime trace capture, evidence import and evidence-aware views (ADR 0020); only surfaces depend on it |
 | [`crates/fission-pcode-ir`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode-ir) | p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies) |
 | [`crates/fission-cspec`](https://github.com/fission-systems/Fission/tree/main/crates/fission-cspec) | cspec / ldefs / pspec parsing, register model (`RegisterNamer`), entry parameter-arity inference (ADR 0012 amendment) |
 | [`crates/fission-pcode`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode) | NIR/HIR, structuring, CFG analysis, printer; re-exports `fission-pcode-ir` under the historical paths |
@@ -39,7 +41,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 
 | Path | Purpose |
 |------|---------|
-| [`benchmark/`](https://github.com/fission-systems/Fission/tree/main/benchmark) | Corpus configs and patch-validation pool (see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)) |
+| [`benchmark/`](https://github.com/fission-systems/Fission/tree/main/benchmark) | Corpus configs and patch-validation pool (benchmark: see [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md)) |
 | [`docs/`](index.md) | Versioned guides: architecture, CLI, evaluation, changelog, onboarding (this tree) |
 | [`scripts/`](https://github.com/fission-systems/Fission/tree/main/scripts) | Benchmark/test helpers (`scripts/quality`, `scripts/ci`, `scripts/release`, `scripts/test`) |
 | [`utils/`](https://github.com/fission-systems/Fission/tree/main/utils) | Checked-in specs/data (see [`utils/MANIFEST.md`](https://github.com/fission-systems/Fission/blob/main/utils/MANIFEST.md)) |

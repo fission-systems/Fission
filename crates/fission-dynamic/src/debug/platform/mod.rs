@@ -50,17 +50,19 @@ pub use macos::{MacOSDebugger as PlatformDebugger, MacOSMemory, enumerate_proces
 
 /// Platform-agnostic trait for process memory operations
 ///
-/// This trait defines the interface that all platform-specific memory
-/// implementations must provide. It enables writing platform-independent
-/// code that works with process memory.
+/// This trait defines the low-level byte-transfer primitive that all platform-specific
+/// memory backends must provide. Callers use [`crate::debug::memory::MemoryManager`] to
+/// enforce exact reads ([`read`](crate::debug::memory::MemoryManager::read)), explicit
+/// partial prefix reads ([`read_partial`](crate::debug::memory::MemoryManager::read_partial)),
+/// or gap-aware sparse acquisitions ([`read_sparse`](crate::debug::memory::MemoryManager::read_sparse)).
 ///
 /// # Example
 ///
 /// ```ignore
-/// use crate::debug::platform::PlatformMemory;
+/// use crate::debug::memory::MemoryManager;
 ///
-/// fn dump_memory<M: PlatformMemory>(mem: &M, address: u64) {
-///     if let Ok(data) = mem.read(address, 16) {
+/// fn dump_memory(mem: &MemoryManager, address: u64) {
+///     if let Ok(data) = mem.read_exact(address, 16) {
 ///         println!("{:?}", data);
 ///     }
 /// }
@@ -82,7 +84,9 @@ pub trait PlatformMemory: Send {
     /// * `buffer` - The buffer to read into
     ///
     /// # Returns
-    /// The number of bytes successfully read
+    /// The number of contiguous leading bytes transferred into `buffer[..count]`.
+    /// Implementations MUST return a count `<= buffer.len()` and MUST NOT expect
+    /// callers to treat unread tail bytes in `buffer[count..]` as observed data.
     fn read_into(&self, address: u64, buffer: &mut [u8]) -> Result<usize, MemoryError>;
 
     /// Write memory to the target process

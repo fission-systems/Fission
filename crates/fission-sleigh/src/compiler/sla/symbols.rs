@@ -116,7 +116,7 @@ pub(super) struct DecodedOperandSymbol {
     pub(super) token_field: Option<DecodedTokenField>,
     pub(super) pattern_expression: Option<CompiledPatternExpression>,
     pub(super) selector_expression: Option<CompiledPatternExpression>,
-    pub(super) varnode_list: Option<Vec<CompiledResolvedVarnode>>,
+    pub(super) varnode_list: Option<Vec<Option<CompiledResolvedVarnode>>>,
     pub(super) value_map: Option<Vec<i64>>,
     pub(super) fixed_varnode: Option<CompiledResolvedVarnode>,
 }
@@ -377,7 +377,7 @@ type DecodedOperandDisplayBinding = (
     Option<DecodedTokenField>,
     Option<CompiledPatternExpression>,
     Option<CompiledPatternExpression>,
-    Option<Vec<CompiledResolvedVarnode>>,
+    Option<Vec<Option<CompiledResolvedVarnode>>>,
     Option<Vec<i64>>,
     Option<CompiledResolvedVarnode>,
 );

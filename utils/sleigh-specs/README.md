@@ -103,16 +103,19 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   in the forms upstream wrote as a bare `W` assignment, which kept the old upper half: the
   LSE atomics `LD{ADD,CLR,EOR,SET,SMAX,SMIN,UMAX,UMIN}` and `SWP` (byte, halfword and word,
   every ordering), `LDLARB`/`LDLARH`/`LDLAR`, `LDAPRB`/`LDAPRH`/`LDAPR` and `CAS`/`CASP`
-  with `W` registers. Each now assigns `zext(...)` to the `X` register. `CASP`'s pair
-  registers are still mis-indexed by Fission's runtime (a dropped `attach variables` hole,
-  fission-systems/Fission#1391), so the differential cannot confirm its `W` form yet.
-  Evidence: an Apple M4 run natively (the native differential, fission-systems/Fission#1067
-  and #1057).
+  with `W` registers. Each now assigns `zext(...)` to the `X` register. Evidence: an Apple
+  M4 run natively (the native differential, fission-systems/Fission#1067 and #1057).
   Re-apply with `scripts/sleigh/apply_aarch64_w_dest_zero_extend.py`.
   The same file compares the byte and halfword `LDSMAX`/`LDSMIN`/`LDUMAX`/`LDUMIN` at the
   element width (`Max(SInt(data), SInt(value))` over 8 or 16 bits); upstream compared the
   loaded element with the whole 32-bit `Ws`, so the stored maximum could be the register's
   low byte (#1069). Re-apply with `scripts/sleigh/apply_aarch64_lse_minmax_width.py`.
+- `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): 64-bit `CASP`
+  compares and stores the pair in register order (Rs/Rt at the lower address, Rs+1/Rt+1
+  above it, in both byte orders, per the Arm ARM `CASP` pseudocode); upstream swapped them
+  for little-endian, so a matching compare failed and no store happened (found by an Apple
+  M4 run once Fission's attach-table holes were fixed, fission-systems/Fission#1391).
+  Re-apply with `scripts/sleigh/apply_aarch64_casp_pair_order.py`.
 - `AARCH64/AARCH64ldst.sinc` (and the three compiled `AARCH64*.sla`): `LD1`..`LD4` and
   `LD1R`..`LD4R` with a 64-bit arrangement (`.8B/.4H/.2S/.1D`) zero bits 127:64 (and the SVE
   upper bits) of every destination, as `V[t, 64] = rval` does; upstream left them, marked

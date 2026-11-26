@@ -47,6 +47,10 @@ pub(super) fn print_binary_info(
             "imports": counts.imports,
             "exports": counts.exports,
         });
+        // `entry` stays a string under contract v1; this says it is not one.
+        if binary.declared_entry_point().is_none() {
+            payload["entry_declared"] = serde_json::json!(false);
+        }
         if include_detections {
             let dr = detector::detect(binary);
             let detections: Vec<Value> = dr
@@ -167,7 +171,9 @@ pub(super) fn print_binary_info(
         writeln!(
             stdout,
             "║ Entry:      {:<46} ║",
-            format!("0x{:x}", binary.entry_point)
+            binary
+                .declared_entry_point()
+                .map_or_else(|| "none".to_string(), |entry| format!("0x{entry:x}"))
         )?;
         writeln!(
             stdout,

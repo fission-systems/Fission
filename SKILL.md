@@ -78,10 +78,11 @@ python3 scripts/audit/ai_prompt_leak_scan.py --root .
 python3 scripts/audit/nir_boundary_scan.py --root .
 ```
 
-Rerun the motivating row and compare cache-disabled full-dataset DecBench
-sweeps before making a quality claim. Check per-row output hashes before score
-deltas. Report status and failure changes, GED perfect count with total
-distance, and type results. Follow the [DecBench guide](docs/BENCHMARK_DECBENCH.md).
+Rerun the motivating row and compare full FreshBench M1 runs (`freshbench sweep
+run`, then `sweep diff`) before making a quality claim; a `--builds` / `--only`
+slice is only a pre-check. Check per-row output hashes before score deltas.
+Report status and failure changes, GED perfect count with distance, and type
+results. Follow the [FreshBench guide](docs/BENCHMARK_FRESHBENCH.md).
 
 ## Review Rejection Rules
 

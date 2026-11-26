@@ -9,6 +9,10 @@ pub use fission_core::architecture::{
 };
 pub use fission_core::common::types::{FunctionInfo, SectionInfo};
 
+/// `FunctionInfo::origin` of the function a record file's start-address record
+/// names.
+pub(crate) const START_ADDRESS_RECORD_ORIGIN: &str = "start-address-record";
+
 #[path = "types/builder.rs"]
 mod builder_methods;
 #[path = "types/discovery.rs"]

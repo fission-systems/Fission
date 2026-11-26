@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/crypto_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/crypto_gcc_O2.exe`
 - Function: `crc32`
 - Address: `0x1400016e0`
 - Corpus row or benchmark command: external DecBench local evaluation, `dev`

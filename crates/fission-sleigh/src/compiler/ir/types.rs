@@ -3,6 +3,43 @@ use std::collections::{BTreeMap, BTreeSet};
 use rkyv::{Archive, Deserialize as RkyvDeserialize, Serialize as RkyvSerialize};
 use serde::{Deserialize, Serialize};
 
+/// A fact derived from the immutable compiled data around it, computed on
+/// first use and kept. It is not part of that data: serde and rkyv skip it,
+/// and equality ignores it, so a value that has computed it and one that has
+/// not compare equal.
+#[derive(Default)]
+pub struct DerivedOnce<T>(std::sync::OnceLock<T>);
+
+impl<T: Copy> DerivedOnce<T> {
+    pub fn get(&self) -> Option<T> {
+        self.0.get().copied()
+    }
+
+    pub fn set(&self, value: T) {
+        let _ = self.0.set(value);
+    }
+}
+
+impl<T: Clone> Clone for DerivedOnce<T> {
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<T> PartialEq for DerivedOnce<T> {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl<T> Eq for DerivedOnce<T> {}
+
+impl<T> std::fmt::Debug for DerivedOnce<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("DerivedOnce")
+    }
+}
+
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Archive, RkyvSerialize, RkyvDeserialize,
 )]
@@ -15,6 +52,11 @@ pub struct CompiledSubtableDefinition {
     /// Immutable executable metadata shared by selected runtime states.
     pub constructors: Vec<std::sync::Arc<CompiledExecutableConstructor>>,
     pub decision_tree: CompiledDecisionTree,
+    /// Whether decoding this subtable consumes sequential instruction bytes
+    /// (`token::subtable_consumes_sequential_bytes` from depth 0).
+    #[serde(skip)]
+    #[rkyv(with = rkyv::with::Skip)]
+    pub consumes_sequential_bytes: DerivedOnce<bool>,
 }
 
 #[derive(
@@ -316,6 +358,11 @@ pub struct CompiledExecutableConstructor {
     pub named_templates: Vec<Option<CompiledConstructTpl>>,
     pub runtime_ready: bool,
     pub unsupported_template_kind: Option<String>,
+    /// Whether this constructor's operands consume sequential instruction
+    /// bytes (`token::constructor_consumes_sequential_operand_bytes`).
+    #[serde(skip)]
+    #[rkyv(with = rkyv::with::Skip)]
+    pub consumes_sequential_operand_bytes: DerivedOnce<bool>,
 }
 
 #[derive(
@@ -602,7 +649,9 @@ pub enum CompiledOperandSpec {
         byte_start: u32,
         byte_end: u32,
         shift: i32,
-        entries: Vec<CompiledResolvedVarnode>,
+        /// Indexed by the attach table's selector. `None` is a `_` hole, which
+        /// has no register: selecting it makes the instruction invalid.
+        entries: Vec<Option<CompiledResolvedVarnode>>,
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,
@@ -612,7 +661,8 @@ pub enum CompiledOperandSpec {
     },
     SlaVarnodeListExpression {
         expr: CompiledPatternExpression,
-        entries: Vec<CompiledResolvedVarnode>,
+        /// See `SlaVarnodeList::entries`.
+        entries: Vec<Option<CompiledResolvedVarnode>>,
         /// See `SlaTokenField::reloffset`.
         #[serde(default)]
         reloffset: i32,

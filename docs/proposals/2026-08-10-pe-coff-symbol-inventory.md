@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O0.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O0.exe`
 - Surface: external metadata-parity `/metadata` comparison
 - Current behavior: function-entry recall is 85/85 and relocation-address recall is 45/48, but symbol-address recall is low because Fission exposes 194 symbol rows (158 unique addresses) while Ghidra exposes 1,054 rows.
 - Comparable loader surface: Ghidra has 569 unique `source=imported` symbol addresses. Fission currently matches 155. The PE COFF symbol table itself accounts for 568 of those addresses.

@@ -59,6 +59,8 @@ pub struct AigManager {
     strash: HashMap<(AigLit, AigLit), u32>,
     /// Maps AST Node ID to its vector of AIG literals (one per bit)
     var_map: HashMap<u32, Vec<AigLit>>,
+    /// Sort recorded for each AST variable ID to catch conflicting ID/sort aliasing.
+    var_sorts: HashMap<u32, crate::ast::Sort>,
     /// Maps ArraySelect nodes to their vector of AIG literals
     array_select_map: HashMap<SymExpr, Vec<AigLit>>,
     pub last_cnf_node: usize,
@@ -83,6 +85,7 @@ impl AigManager {
             nodes: vec![], // Index 0 is reserved (constant 0)
             strash: HashMap::new(),
             var_map: HashMap::new(),
+            var_sorts: HashMap::new(),
             array_select_map: HashMap::new(),
             last_cnf_node: 0,
             array_axioms_enabled: false,
@@ -589,14 +592,31 @@ impl AigManager {
                 bits
             }
             SymExpr::Var { id, sort, .. } => {
+                if let Some(existing) = self.var_sorts.get(id) {
+                    if existing != sort {
+                        let existing = existing.clone();
+                        self.note_unsupported(format!(
+                            "variable id {id} aliases conflicting sorts: {existing:?} vs {sort:?}"
+                        ));
+                        let safe_w = width.unwrap_or(1).clamp(1, 64) as usize;
+                        return self.fresh_bits(safe_w);
+                    }
+                }
                 if let Some(bits) = self.var_map.get(id) {
                     bits.clone()
                 } else {
-                    // Float-sorted vars use the same bit-width unit as bitvectors.
                     let bits = match sort {
-                        crate::ast::Sort::Float(sz) => (*sz).max(1),
-                        _ => sort.expect_bv().max(1),
+                        crate::ast::Sort::BitVector(sz) | crate::ast::Sort::Float(sz) => {
+                            (*sz).max(1)
+                        }
+                        crate::ast::Sort::Array { .. } => {
+                            self.note_unsupported(format!(
+                                "array variable id {id} lowered without scalar projection"
+                            ));
+                            return self.fresh_bits(1);
+                        }
                     };
+                    self.var_sorts.insert(*id, sort.clone());
                     self.add_var(*id, bits)
                 }
             }
@@ -604,6 +624,32 @@ impl AigManager {
                 // Ensure index subexpressions are lowered so any unsupported ops inside
                 // the index are recorded consistently.
                 let _ = self.lower_expr(index);
+                match (array.checked_sort(), index.checked_sort()) {
+                    (Err(err), _) | (_, Err(err)) => {
+                        self.note_unsupported(err.to_string());
+                        return self.fresh_bits(1);
+                    }
+                    (Ok(crate::ast::Sort::Array { domain, range }), Ok(idx_sort)) => {
+                        if idx_sort != *domain {
+                            self.note_unsupported(format!(
+                                "ArraySelect index sort mismatch: expected {domain:?}, got {idx_sort:?}"
+                            ));
+                            let w = match range.as_ref() {
+                                crate::ast::Sort::BitVector(b) | crate::ast::Sort::Float(b) => {
+                                    (*b).clamp(1, 64)
+                                }
+                                crate::ast::Sort::Array { .. } => 1,
+                            };
+                            return self.fresh_bits(w as usize);
+                        }
+                    }
+                    (Ok(other), Ok(_)) => {
+                        self.note_unsupported(format!(
+                            "ArraySelect target is not an array: {other:?}"
+                        ));
+                        return self.fresh_bits(1);
+                    }
+                }
                 // A read gets fresh bits. Either oracle CEGAR (`space_<id>`) or
                 // `ArrayTheory` (when attached to `Solver`) supplies read-over-write
                 // and functional-consistency axioms.
@@ -624,7 +670,7 @@ impl AigManager {
                 if let Some(bits) = self.array_select_map.get(expr) {
                     bits.clone()
                 } else {
-                    let size = expr.get_bit_width();
+                    let size = expr.get_bit_width().clamp(1, 64);
                     let mut bits = Vec::with_capacity(size as usize);
                     for _ in 0..size {
                         let idx = self.nodes.len() as u32 + 1;

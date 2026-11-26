@@ -10,6 +10,7 @@ keywords = ["fission", "reverse-engineering", "project"]
 categories = ["development-tools"]
 
 [dependencies]
+blake3 = "1.5"
 fission-loader = { path = "../fission-loader" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

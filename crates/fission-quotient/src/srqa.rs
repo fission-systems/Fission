@@ -545,7 +545,9 @@ pub fn minimal_input(
     let mut solver = Solver::new();
     solver.set_conflict_budget(budget.conflict_budget);
     for input in inputs {
-        solver.nodes.insert(var_id(input), input.clone());
+        solver
+            .insert_node(var_id(input), input.clone())
+            .map_err(|_| ())?;
     }
     solver.assert(constraint.clone());
     match solver.check_sat().unwrap_or(SatResult::Unknown) {

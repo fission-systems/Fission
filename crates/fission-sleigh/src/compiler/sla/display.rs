@@ -36,7 +36,7 @@ pub(super) enum DecodedDisplaySymbol {
         selector_expr: Option<CompiledPatternExpression>,
     },
     VarnodeList {
-        entries: Vec<CompiledResolvedVarnode>,
+        entries: Vec<Option<CompiledResolvedVarnode>>,
         token_field: Option<DecodedTokenField>,
         selector_expr: Option<CompiledPatternExpression>,
     },
@@ -168,16 +168,23 @@ pub(super) fn decode_display_symbols(
             .transpose()?
             .flatten();
         let selector_expr = first_decoded_pattern_expression(symbol.children.iter())?;
+        // One child per selector value: `<var>`, or `<null>` for a `_` hole
+        // (Ghidra `VarnodeListSymbol`). Dropping the holes would move every
+        // later register down by one (fission-systems/Fission#1391).
         let entries = symbol
             .children
             .iter()
-            .filter(|child| child.id == sla_format::ELEM_VAR)
+            .filter(|child| child.id == sla_format::ELEM_VAR || child.id == sla_format::ELEM_NULL)
             .map(|child| {
+                if child.id == sla_format::ELEM_NULL {
+                    return Ok(None);
+                }
                 let var_id = required_unsigned_u32(child, sla_format::ATTR_ID, "var id")
                     .map_err(|err| anyhow!("varlist_sym {id} has malformed var id: {err}"))?;
                 fixed_varnodes
                     .get(&var_id)
                     .cloned()
+                    .map(Some)
                     .ok_or_else(|| anyhow!("varlist_sym {id} references unknown varnode {var_id}"))
             })
             .collect::<Result<Vec<_>>>()?;
@@ -205,7 +212,15 @@ pub(super) fn decoded_display_kind(symbol: &DecodedDisplaySymbol) -> CompiledDis
         }
         DecodedDisplaySymbol::VarnodeList { entries, .. } => {
             CompiledDisplayOperandKind::VarnodeList(
-                entries.iter().map(|entry| entry.name.to_string()).collect(),
+                entries
+                    .iter()
+                    // A hole keeps its position as the spec's own `_`; decoding a
+                    // selector that names it fails, so it is never printed.
+                    .map(|entry| match entry {
+                        Some(entry) => entry.name.to_string(),
+                        None => "_".to_string(),
+                    })
+                    .collect(),
             )
         }
         DecodedDisplaySymbol::FixedVarnode(_) => CompiledDisplayOperandKind::Generic,

@@ -76,10 +76,12 @@ fn aig_constant_assumptions_do_not_allocate_cnf_variables() {
     let mut solver = Solver::new();
 
     assert_eq!(
-        solver.check_sat_with_oracle(None, &[tautology]).unwrap(),
+        solver
+            .check_sat_with_oracle(None, std::slice::from_ref(&tautology))
+            .unwrap(),
         SatResult::Sat
     );
-    assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+    assert_eq!(solver.bv_theory().cnf.get_cnf_var_for_aig(0), 0);
 
     assert_eq!(
         solver
@@ -87,21 +89,22 @@ fn aig_constant_assumptions_do_not_allocate_cnf_variables() {
             .unwrap(),
         SatResult::Unsat
     );
-    assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+    assert_eq!(solver.bv_theory().cnf.get_cnf_var_for_aig(0), 0);
 
     // Constant model evaluation must keep using the AIG literal itself rather
-    // than an unrelated SAT assignment for the reserved constant node.
+    // than an unrelated SAT assignment for the reserved constant node. Model
+    // evaluation needs a current model, so publish one first.
     assert_eq!(
-        solver
-            .bv_theory
-            .evaluate_expr_in_model(&solver.sat, &SymExpr::new_const(0, 4)),
-        0
+        solver.check_sat_with_oracle(None, &[tautology]).unwrap(),
+        SatResult::Sat
     );
     assert_eq!(
-        solver
-            .bv_theory
-            .evaluate_expr_in_model(&solver.sat, &SymExpr::new_const(0xf, 4)),
-        0xf
+        solver.eval_in_model(&SymExpr::new_const(0, 4)),
+        Some(fission_solver::ModelValue::Assigned(0))
+    );
+    assert_eq!(
+        solver.eval_in_model(&SymExpr::new_const(0xf, 4)),
+        Some(fission_solver::ModelValue::Assigned(0xf))
     );
 }
 
@@ -118,14 +121,14 @@ fn maximum_includes_the_unsigned_domain_endpoint() {
     for width in [1, 2, 4, 8, 16, 32, 64] {
         let mut solver = Solver::new();
         let id = solver.register_var(format!("endpoint_{width}"), width);
-        let value = solver.nodes[&id].clone();
+        let value = solver.nodes()[&id].clone();
         let expected = if width == 64 {
             u64::MAX
         } else {
             (1u64 << width) - 1
         };
         assert_eq!(solver.max(&value), Some(expected), "width {width}");
-        assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+        assert_eq!(solver.bv_theory().cnf.get_cnf_var_for_aig(0), 0);
     }
 }
 
@@ -137,7 +140,7 @@ fn extrema_match_every_small_unsigned_interval() {
             for upper in lower..=domain_max {
                 let mut solver = Solver::new();
                 let id = solver.register_var("interval".to_string(), width);
-                let value = solver.nodes[&id].clone();
+                let value = solver.nodes()[&id].clone();
                 solver.assert(SymExpr::Ule(
                     Box::new(SymExpr::new_const(lower, width)),
                     Box::new(value.clone()),
@@ -161,7 +164,7 @@ fn extrema_match_every_small_unsigned_interval() {
                     Some(lower),
                     "query isolation {width} bits [{lower}, {upper}]"
                 );
-                assert_eq!(solver.bv_theory.cnf.get_cnf_var_for_aig(0), 0);
+                assert_eq!(solver.bv_theory().cnf.get_cnf_var_for_aig(0), 0);
             }
         }
     }
@@ -171,7 +174,7 @@ fn extrema_match_every_small_unsigned_interval() {
 fn extrema_keep_unsat_and_unknown_distinct_from_values() {
     let mut solver = Solver::new();
     let id = solver.register_var("empty".to_string(), 8);
-    let value = solver.nodes[&id].clone();
+    let value = solver.nodes()[&id].clone();
     solver.assert(SymExpr::new_const(0, 1));
     assert_eq!(solver.max(&value), None);
     assert_eq!(solver.min(&value), None);
@@ -191,7 +194,7 @@ fn sat_then_unsat_and_budget_unknown_invalidate_prior_model() {
 
     let mut solver = Solver::new();
     let id = solver.register_var("x".to_string(), 8);
-    let x = solver.nodes[&id].clone();
+    let x = solver.nodes()[&id].clone();
     solver.assert(SymExpr::Eq(
         Box::new(x.clone()),
         Box::new(SymExpr::new_const(5, 8)),
@@ -228,7 +231,7 @@ fn sat_then_unsat_and_budget_unknown_invalidate_prior_model() {
         solver.get_model_value(id),
         ModelLookup::Absent(AbsentModelReason::NoPublishedModel)
     );
-    assert!(solver.model.is_empty());
+    assert!(solver.model().is_empty());
     assert!(solver.published_model().is_none());
     // Immutable snapshot previously retained by caller remains intact.
     assert_eq!(snapshot.get_value(id), Some(5));
@@ -238,7 +241,7 @@ fn sat_then_unsat_and_budget_unknown_invalidate_prior_model() {
     let mut b_solver = Solver::new();
     let bid = b_solver.register_var("k".to_string(), 6);
     let m = SymExpr::new_var("m", 6);
-    let k = b_solver.nodes[&bid].clone();
+    let k = b_solver.nodes()[&bid].clone();
     assert_eq!(b_solver.check_sat().unwrap(), SatResult::Sat);
     assert_eq!(b_solver.get_value(bid), Some(0));
 
@@ -254,7 +257,7 @@ fn sat_then_unsat_and_budget_unknown_invalidate_prior_model() {
         Some(&UnknownReason::ConflictBudget)
     );
     assert_eq!(b_solver.get_value(bid), None);
-    assert!(b_solver.model.is_empty());
+    assert!(b_solver.model().is_empty());
     assert!(b_solver.published_model().is_none());
 }
 
@@ -272,7 +275,7 @@ fn oracle_refinement_exhaustion_publishes_no_candidate_model() {
 
     let mut solver = Solver::new();
     let idx_id = solver.register_var("idx".to_string(), 16);
-    let idx = solver.nodes[&idx_id].clone();
+    let idx = solver.nodes()[&idx_id].clone();
     let mem = SymExpr::new_array_var("space_1", 16, 8);
     let sel = SymExpr::ArraySelect {
         array: Box::new(mem),
@@ -294,7 +297,7 @@ fn oracle_refinement_exhaustion_publishes_no_candidate_model() {
         Some(&UnknownReason::OracleRefinement)
     );
     assert_eq!(solver.get_value(idx_id), None);
-    assert!(solver.model.is_empty());
+    assert!(solver.model().is_empty());
     assert!(solver.published_model().is_none());
 }
 
@@ -317,7 +320,7 @@ fn assertion_mutations_and_assigned_vs_default_completion_are_explicit() {
     }
     let n_id = solver.register_node(nested);
 
-    let c = solver.nodes[&c_id].clone();
+    let c = solver.nodes()[&c_id].clone();
     solver.assert(SymExpr::Eq(
         Box::new(c.clone()),
         Box::new(SymExpr::new_const(9, 8)),
@@ -344,8 +347,8 @@ fn assertion_mutations_and_assigned_vs_default_completion_are_explicit() {
         ModelLookup::Absent(AbsentModelReason::UnregisteredNode)
     );
 
-    // Direct mutation on public `solver.assertions` invalidates stale readers.
-    solver.assertions.push(SymExpr::Eq(
+    // Any change to the assertion list invalidates stale readers.
+    solver.assert(SymExpr::Eq(
         Box::new(c.clone()),
         Box::new(SymExpr::new_const(1, 8)),
     ));
@@ -358,12 +361,12 @@ fn assertion_mutations_and_assigned_vs_default_completion_are_explicit() {
 
     // Solving now refutes the contradiction cleanly.
     assert_eq!(solver.check_sat().unwrap(), SatResult::Unsat);
-    assert!(solver.model.is_empty());
+    assert!(solver.model().is_empty());
 
     // Calling `assert` directly also clears any active model immediately.
     let mut solver2 = Solver::new();
     let v_id = solver2.register_var("v".to_string(), 8);
-    let v = solver2.nodes[&v_id].clone();
+    let v = solver2.nodes()[&v_id].clone();
     solver2.assert(SymExpr::Eq(
         Box::new(v.clone()),
         Box::new(SymExpr::new_const(3, 8)),
@@ -372,7 +375,7 @@ fn assertion_mutations_and_assigned_vs_default_completion_are_explicit() {
     assert_eq!(solver2.get_value(v_id), Some(3));
     solver2.assert(SymExpr::Eq(Box::new(v), Box::new(SymExpr::new_const(4, 8))));
     assert_eq!(solver2.get_value(v_id), None);
-    assert!(solver2.model.is_empty());
+    assert!(solver2.model().is_empty());
 }
 
 #[test]
@@ -381,7 +384,7 @@ fn temporary_unsupported_eval_does_not_poison_subsequent_supported_queries() {
 
     let mut solver = Solver::new();
     let x_id = solver.register_var("x".to_string(), 8);
-    let x = solver.nodes[&x_id].clone();
+    let x = solver.nodes()[&x_id].clone();
     solver.assert(SymExpr::Eq(
         Box::new(x.clone()),
         Box::new(SymExpr::new_const(42, 8)),
@@ -396,14 +399,14 @@ fn temporary_unsupported_eval_does_not_poison_subsequent_supported_queries() {
     assert!(report_fp.values.is_empty());
     assert!(!report_fp.base_satisfiable);
     assert!(matches!(report_fp.termination, EvalTermination::Unknown(_)));
-    assert!(solver.bv_theory.unsupported().is_empty());
+    assert!(solver.bv_theory().unsupported().is_empty());
 
     // 2. Temporary unsupported wide (>64-bit) variable in `eval` and `min`/`max`.
     let temp_wide = SymExpr::new_var("temp_wide", 128);
     assert!(solver.eval(&temp_wide, 1).is_empty());
     assert_eq!(solver.min(&temp_wide), None);
     assert_eq!(solver.max(&temp_wide), None);
-    assert!(solver.bv_theory.unsupported().is_empty());
+    assert!(solver.bv_theory().unsupported().is_empty());
 
     // 3. Subsequent supported queries remain completely unaffected.
     assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
@@ -415,7 +418,7 @@ fn temporary_unsupported_eval_does_not_poison_subsequent_supported_queries() {
 
     // 4. Persistent unsupported assertion STILL taints all subsequent queries.
     solver.assert(SymExpr::Eq(Box::new(temp_fp.clone()), Box::new(temp_fp)));
-    assert!(!solver.bv_theory.unsupported().is_empty());
+    assert!(!solver.bv_theory().unsupported().is_empty());
     assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
     assert!(solver.eval(&x, 1).is_empty());
 }
@@ -426,7 +429,7 @@ fn eval_detailed_distinguishes_zero_limit_exhausted_and_budget_unknown() {
 
     let mut solver = Solver::new();
     let x_id = solver.register_var("x".to_string(), 2);
-    let x = solver.nodes[&x_id].clone();
+    let x = solver.nodes()[&x_id].clone();
 
     let zero = solver.eval_detailed(&x, 0);
     assert!(zero.values.is_empty());
@@ -455,12 +458,12 @@ fn eval_detailed_distinguishes_zero_limit_exhausted_and_budget_unknown() {
     // Enumeration ended via refuted exclusion (`Unsat`), so no stale probe
     // model may remain published afterward.
     assert_eq!(solver.get_value(x_id), None);
-    assert!(solver.model.is_empty());
+    assert!(solver.model().is_empty());
 
     // When `y` is constrained before enumeration, iteration 0 itself is exact.
     let mut c_solver = Solver::new();
     let y_id = c_solver.register_var("y".to_string(), 4);
-    let y = c_solver.nodes[&y_id].clone();
+    let y = c_solver.nodes()[&y_id].clone();
     c_solver.assert(SymExpr::Eq(
         Box::new(y.clone()),
         Box::new(SymExpr::new_const(3, 4)),
@@ -502,7 +505,7 @@ fn partially_unsupported_sat_does_not_publish_candidate_model() {
 
     let mut solver = Solver::new();
     let x_id = solver.register_var("x".to_string(), 8);
-    let x = solver.nodes[&x_id].clone();
+    let x = solver.nodes()[&x_id].clone();
     solver.assert(SymExpr::Eq(Box::new(x), Box::new(SymExpr::new_const(5, 8))));
 
     // Combining a satisfiable constraint with an unsupported float operation
@@ -519,6 +522,6 @@ fn partially_unsupported_sat_does_not_publish_candidate_model() {
         Some(UnknownReason::Unsupported(_))
     ));
     assert_eq!(solver.get_value(x_id), None);
-    assert!(solver.model.is_empty());
+    assert!(solver.model().is_empty());
     assert!(solver.published_model().is_none());
 }

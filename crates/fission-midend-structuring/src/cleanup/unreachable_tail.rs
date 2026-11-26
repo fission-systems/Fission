@@ -14,7 +14,7 @@
 //!
 //! It is also the single largest source of structural distance from source
 //! measured so far. In a CFG that statement is a node with no predecessor, and
-//! DecBench's graph edit distance charges `1 + in-degree + out-degree` to
+//! the benchmark's graph edit distance charges `1 + in-degree + out-degree` to
 //! delete a node -- so an isolated one costs exactly 1. Measured over 40
 //! functions of `base-passwd/update-passwd` scored against their published
 //! source CFGs: 12 matched source exactly, and **9 more were wrong by this and

@@ -299,6 +299,8 @@ pub(crate) fn classify_nir_surface(code: &str) -> NirSurfaceKind {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NirWorkerRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<u64>,
     pub pcode_json: String,
     pub address: u64,
     pub name: String,
@@ -308,6 +310,10 @@ pub struct NirWorkerRequest {
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NirWorkerResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<u64>,
     pub success: bool,
     pub code: Option<String>,
     pub build_stats: Option<NirBuildStats>,

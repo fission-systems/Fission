@@ -16,7 +16,7 @@
   semantic case.
 - Failure category: `no_wrapper` / real-output correctness defect.
 - Relevant benchmark/static/readability observations: the baseline artifact is
-  `/Users/sjkim1127/fission-benchmark/results/issue106_before_b3c923bf0.json`.
+  `~/fission-benchmark/results/issue106_before_b3c923bf0.json`.
   The O2 output contains `WaitForSingleObject()` with zero arguments and tests
   the constant `1` against `258`.
 

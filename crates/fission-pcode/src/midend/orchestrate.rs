@@ -473,6 +473,13 @@ fn render_mlil_preview_with_binary_and_context_output(
     let mut body = body;
     fission_midend_normalize::fold_branch_decided_selects(&mut body);
     hir.body = body;
+    // Normalize states each widening cast's extension against the binding
+    // types it ends with. The copy propagation and call-site typing above run
+    // after that and can leave a variable of the other signedness under such
+    // a cast (`return (ulong)local_18` with `local_18: int` sign-extends a
+    // value `INT_ZEXT` zero-extended). Restate it for variable operands at the
+    // last point binding types change.
+    let _ = fission_midend_normalize::canonicalize_extension_binding_casts_over_variables(&mut hir);
     // The real PreHirFunction -> HirFunction boundary: structuring's CFG-to-AST
     // rewrite is done, so `hir.body` (still `Vec<PreHirStmt>`) is converted to
     // the genuinely separate `HirStmt` grammar and `hir` is rebound to a
@@ -489,7 +496,7 @@ fn render_mlil_preview_with_binary_and_context_output(
     // `params`/`locals` an interpreter needs) as of the point a real caller
     // would consider structuring's semantic output done -- any remaining
     // steps below this point are printer-facing, not semantic (see
-    // `midend/AGENTS.md`: "Do not fix structuring bugs only in printer.rs").
+    // `midend/AGENTS.md`: "Do not fix structuring bugs only in `render/printer/`").
     let hir_function = hir.clone();
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::Normalize);
     record_ghidra_action_stage(&mut build_stats, GhidraActionConcept::PrototypeTypes);

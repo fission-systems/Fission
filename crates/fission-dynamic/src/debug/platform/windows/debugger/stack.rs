@@ -20,9 +20,7 @@ impl WindowsDebugger {
     pub(super) fn stack_peek(&self, offset: isize) -> FissionResult<u64> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for stack peek"))?;
         let regs = self.fetch_registers(tid)?;
         let sp = stack_pointer(&regs);
@@ -44,9 +42,7 @@ impl WindowsDebugger {
     pub(super) fn stack_pop(&mut self) -> FissionResult<u64> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for stack pop"))?;
         let mut regs = self.fetch_registers(tid)?;
         let ptr = stack_pointer(&regs);
@@ -67,9 +63,7 @@ impl WindowsDebugger {
     pub(super) fn stack_push(&mut self, value: u64) -> FissionResult<()> {
         let tid = self
             .state
-            .current_thread_id
-            .or(self.state.last_thread_id)
-            .or(self.state.main_thread_id)
+            .selected_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id for stack push"))?;
         let mut regs = self.fetch_registers(tid)?;
         let sp = stack_pointer(&regs);

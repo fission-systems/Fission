@@ -10,22 +10,24 @@ fn eager_assertions_advance_the_lowering_cursor() {
             Box::new(x.clone()),
             Box::new(SymExpr::new_const(bound, 8)),
         ));
-        assert_eq!(solver.lowered_assertions, solver.assertions.len());
+        assert_eq!(solver.lowered_assertion_count(), solver.assertions().len());
         assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
-        assert_eq!(solver.lowered_assertions, solver.assertions.len());
+        assert_eq!(solver.lowered_assertion_count(), solver.assertions().len());
     }
 }
 
 #[test]
-fn eager_lowering_does_not_skip_publicly_appended_assertions() {
+fn eager_lowering_lowers_every_appended_assertion() {
+    // The assertion list is no longer public, so nothing can be appended
+    // behind the lowering cursor; both assertions go through `assert`.
     let mut solver = Solver::new();
     let x = SymExpr::new_var("x", 8);
-    solver.assertions.push(SymExpr::Eq(
+    solver.assert(SymExpr::Eq(
         Box::new(x.clone()),
         Box::new(SymExpr::new_const(1, 8)),
     ));
     solver.assert(SymExpr::Eq(Box::new(x), Box::new(SymExpr::new_const(2, 8))));
-    assert_eq!(solver.lowered_assertions, 2);
+    assert_eq!(solver.lowered_assertion_count(), 2);
     assert_eq!(solver.check_sat().unwrap(), SatResult::Unsat);
 }
 
@@ -105,9 +107,9 @@ fn invalid_extracts_and_wide_variables_are_unknown_without_panics() {
     for width in [65, 80, 128, 256, u32::MAX] {
         let mut solver = Solver::new();
         let id = solver.register_var("wide".into(), width);
-        let value = solver.nodes[&id].clone();
+        let value = solver.nodes()[&id].clone();
         assert!(solver.eval(&value, 1).is_empty());
-        assert!(!solver.model.contains_key(&id));
+        assert!(!solver.model().contains_key(&id));
         assert_eq!(solver.check_sat().unwrap(), SatResult::Unknown);
     }
 }
@@ -207,7 +209,7 @@ fn registered_nested_arrays_are_not_extracted_as_u64_scalars() {
     let mut solver = Solver::new();
     let id = solver.register_node(array);
     assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
-    assert!(!solver.model.contains_key(&id));
+    assert!(!solver.model().contains_key(&id));
 }
 
 fn array_select(array: SymExpr, index: SymExpr) -> SymExpr {

@@ -74,6 +74,8 @@ pub enum ParsedInvocation {
     Api(ApiArgs),
     /// The minimal observable state machine of a step function (experimental)
     Quotient(QuotientArgs),
+    /// Import runtime traces and explain what they say about a function
+    Evidence(EvidenceArgs),
 }
 
 /// `fission_cli call`: run one function of the binary in the emulator, from
@@ -111,6 +113,48 @@ pub struct CallArgs {
     /// Output in JSON format
     #[arg(short, long)]
     pub json: bool,
+}
+
+/// `fission_cli evidence`: runtime observations kept apart from static
+/// analysis, and read only when asked for.
+#[derive(Args, Debug, Clone, PartialEq, Eq)]
+#[command(
+    long_about = "Import runtime traces into an evidence file and explain what it says about a function.\n\nA trace comes from `sandbox --indirect-trace-out`. Importing attributes every address to the binary only when the observed bytes are the binary's; a trace of another image is refused. The evidence file only grows: importing the same trace again changes nothing.\n\n`explain` lists a function's indirect calls and jumps, the targets the static lift connected and the targets runs observed, each with its provenance. Observed targets are not all possible targets, so every target set is reported as open. Nothing here changes what `decomp` prints.",
+    after_help = "Examples:\n  fission_cli sandbox app.elf --indirect-trace-out run1.json -- first\n  fission_cli evidence import app.elf run1.json --store app.evidence.json\n  fission_cli evidence explain app.elf --addr 0x401130 --store app.evidence.json --json"
+)]
+pub struct EvidenceArgs {
+    #[command(subcommand)]
+    pub command: EvidenceCommand,
+
+    /// Output in JSON format
+    #[arg(short, long, global = true)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug, Clone, PartialEq, Eq)]
+pub enum EvidenceCommand {
+    /// Add the observations of one or more runtime traces to an evidence file
+    Import {
+        /// Binary the traces were recorded from
+        binary: PathBuf,
+        /// Trace files written by `sandbox --indirect-trace-out`
+        #[arg(required = true)]
+        traces: Vec<PathBuf>,
+        /// Evidence file to add to; created if it does not exist
+        #[arg(long, value_name = "FILE")]
+        store: PathBuf,
+    },
+    /// Show a function's indirect targets and where each is known from
+    Explain {
+        /// Binary to analyse
+        binary: PathBuf,
+        /// An address in the function
+        #[arg(long, value_parser = parse_hex_address)]
+        addr: u64,
+        /// Evidence file to read
+        #[arg(long, value_name = "FILE")]
+        store: PathBuf,
+    },
 }
 
 /// `fission_cli quotient`: the minimal observable state machine of one step
@@ -509,6 +553,8 @@ Exit codes under `--contract v1`: 0 ok, 1 failed, 2 usage, 3 input, 4 partial (o
     Call(CallArgs),
     /// Minimal observable state machine of a step function (experimental)
     Quotient(QuotientArgs),
+    /// Import runtime traces and explain indirect targets with their provenance
+    Evidence(EvidenceArgs),
     /// Print the agent usage guide (SKILL.md) built into this binary
     #[command(
         long_about = "Print the usage guide an AI agent should read before driving this CLI: the --contract v1 envelope, exit codes, the command sequence, and the traps measured on this build.\n\nThe text is compiled into the binary, so it always matches the version you are running."
@@ -824,6 +870,15 @@ pub struct SandboxArgs {
     /// and HLE calls, with arguments -- is always on and costs nothing extra.
     #[arg(long)]
     pub coverage: bool,
+
+    /// Record every indirect call and jump with its target to this file
+    ///
+    /// The runtime trace for `evidence import`. Costs one callback per
+    /// indirect transfer, and nothing when not given. Not available with
+    /// symbolic exploration, which forces paths, or a restored snapshot,
+    /// whose inputs are unknown.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["sym_explore", "restore_snapshot"])]
+    pub indirect_trace_out: Option<PathBuf>,
 
     /// Print sandbox metrics report as JSON on stdout
     #[arg(long)]
@@ -1483,6 +1538,7 @@ pub(crate) const CANONICAL_SUBCOMMANDS: &[&str] = &[
     "languages",
     "call",
     "quotient",
+    "evidence",
     "types",
     "whatis",
     "api",
@@ -1636,6 +1692,7 @@ fn ignored_option_warnings(
         | ParsedInvocation::Verify(_)
         | ParsedInvocation::Call(_)
         | ParsedInvocation::Quotient(_)
+        | ParsedInvocation::Evidence(_)
         | ParsedInvocation::Db(_) => {
             let command = match invocation {
                 ParsedInvocation::Script(_) => "script",
@@ -1643,6 +1700,7 @@ fn ignored_option_warnings(
                 ParsedInvocation::Verify(_) => "verify",
                 ParsedInvocation::Call(_) => "call",
                 ParsedInvocation::Quotient(_) => "quotient",
+                ParsedInvocation::Evidence(_) => "evidence",
                 _ => "db",
             };
             if language.is_some() {
@@ -1683,6 +1741,7 @@ fn raw_load_warnings(
         ParsedInvocation::Languages(_) => "languages",
         ParsedInvocation::Call(_) => "call",
         ParsedInvocation::Quotient(_) => "quotient",
+        ParsedInvocation::Evidence(_) => "evidence",
         ParsedInvocation::Api(_) => "api",
     };
     [
@@ -1991,6 +2050,7 @@ fn normalize_canonical(cli: CliArgs) -> ParsedInvocation {
                 }
                 CliCommand::Call(call) => return ParsedInvocation::Call(call),
                 CliCommand::Quotient(quotient) => return ParsedInvocation::Quotient(quotient),
+                CliCommand::Evidence(evidence) => return ParsedInvocation::Evidence(evidence),
                 CliCommand::Script(_) => unreachable!("script branch handled above"),
                 CliCommand::Resources(_) => unreachable!("resources branch handled above"),
                 CliCommand::Db(_) => unreachable!("db branch handled above"),
@@ -2037,6 +2097,7 @@ mod tests {
             ParsedInvocation::Call(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Api(_) => panic!("expected one-shot canonical parse"),
             ParsedInvocation::Quotient(_) => panic!("expected one-shot canonical parse"),
+            ParsedInvocation::Evidence(_) => panic!("expected one-shot canonical parse"),
         }
     }
 
@@ -2057,6 +2118,7 @@ mod tests {
             ParsedInvocation::Call(_) => panic!("legacy parser cannot emit call"),
             ParsedInvocation::Api(_) => panic!("legacy parser cannot emit api"),
             ParsedInvocation::Quotient(_) => panic!("legacy parser cannot emit quotient"),
+            ParsedInvocation::Evidence(_) => panic!("legacy parser cannot emit evidence"),
         }
     }
 

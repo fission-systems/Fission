@@ -40,6 +40,8 @@ pub struct ObserveMask {
     pub insn: bool,
     /// Called on each RAM read and write.
     pub mem: bool,
+    /// Called on each indirect call and indirect jump, with its target.
+    pub indirect: bool,
 }
 
 impl ObserveMask {
@@ -47,6 +49,7 @@ impl ObserveMask {
         block: false,
         insn: false,
         mem: false,
+        indirect: false,
     };
 
     pub fn block() -> Self {
@@ -56,8 +59,15 @@ impl ObserveMask {
         }
     }
 
+    pub fn indirect() -> Self {
+        Self {
+            indirect: true,
+            ..Self::NONE
+        }
+    }
+
     pub fn any(&self) -> bool {
-        self.block || self.insn || self.mem
+        self.block || self.insn || self.mem || self.indirect
     }
 
     pub fn union(self, other: Self) -> Self {
@@ -65,6 +75,7 @@ impl ObserveMask {
             block: self.block || other.block,
             insn: self.insn || other.insn,
             mem: self.mem || other.mem,
+            indirect: self.indirect || other.indirect,
         }
     }
 }
@@ -95,6 +106,39 @@ impl ShadowMode {
     }
 }
 
+/// Most bytes read at an indirect transfer's target.
+pub const INDIRECT_TARGET_WINDOW: usize = 16;
+
+/// How an indirect transfer left its instruction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IndirectKind {
+    /// p-code `CALLIND`.
+    Call,
+    /// p-code `BRANCHIND`. A `RETURN` is not reported.
+    Jump,
+}
+
+/// One indirect call or jump, as it happened.
+///
+/// The bytes are read when the transfer runs, because the guest may rewrite
+/// either end afterwards.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndirectTransfer {
+    pub kind: IndirectKind,
+    pub thread: u64,
+    /// Address of the transferring instruction.
+    pub site: u64,
+    /// That instruction's bytes; empty if they could not be read.
+    pub site_bytes: Vec<u8>,
+    /// Where control went.
+    pub target: u64,
+    /// Up to [`INDIRECT_TARGET_WINDOW`] readable bytes at `target`; empty when
+    /// nothing is readable there, as for a host-emulated import.
+    pub target_bytes: Vec<u8>,
+    /// The decoder's context override when the site was decoded.
+    pub decode_context: Option<fission_sleigh::runtime::PackedContextOverride>,
+}
+
 /// One watcher of a run.
 ///
 /// Every method has a default, so an observer implements only the events it
@@ -118,6 +162,8 @@ pub trait Observer: Send {
     fn on_insn(&mut self, _pc: u64) {}
 
     fn on_mem(&mut self, _addr: u64, _size: u32, _write: bool, _value: u64) {}
+
+    fn on_indirect_transfer(&mut self, _transfer: &IndirectTransfer) {}
 
     /// A guest syscall, with the ABI's argument registers already read.
     ///

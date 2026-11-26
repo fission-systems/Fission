@@ -9,7 +9,7 @@
 //!
 //! # Nothing here executes a corpus binary, and nothing here may
 //!
-//! The DecBench corpus contains malware compiled from source. The rule for it
+//! The benchmark corpus contains malware compiled from source. The rule for it
 //! is static analysis only: never run, never `chmod +x`, never load into an
 //! emulator "just to see". This benchmark obeys that by construction -- it
 //! reads bytes, decodes them, lifts them to p-code and hands the p-code to the
@@ -73,8 +73,9 @@ fn corpus_root() -> Option<PathBuf> {
         let path = PathBuf::from(root);
         return path.is_dir().then_some(path);
     }
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../fission-benchmark/decbench-data/binaries");
+    // FreshBench M1's decompiler inputs, fetched as docs/BENCHMARK_FRESHBENCH.md shows.
+    let home = std::env::var_os("HOME")?;
+    let path = PathBuf::from(home).join("freshbench-data/m1/stripped");
     path.is_dir().then_some(path)
 }
 
@@ -393,7 +394,7 @@ fn language_of(path: &Path) -> String {
 #[ignore = "a measurement over the whole benchmark corpus, not an assertion"]
 fn how_much_of_the_benchmark_corpus_translates() {
     // Opt-in: asked for by name, so an absent corpus is a failure.
-    let root = corpus_root().expect("DecBench corpus not present (set TRANSLATE_ROOT)");
+    let root = corpus_root().expect("benchmark corpus not present (set TRANSLATE_ROOT)");
 
     let mut files: Vec<PathBuf> = Vec::new();
     let mut stack = vec![root.clone()];

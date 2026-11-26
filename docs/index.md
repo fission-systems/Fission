@@ -9,7 +9,7 @@ backends, and solver-assisted verification.
 - [CLI reference](CLI.md) for commands, resources, and the machine contract.
 - [Project map](PROJECT_MAP.md) and [architecture](architecture/ARCHITECTURE.md)
   for contributors.
-- [DecBench](BENCHMARK_DECBENCH.md) and [CI and release gates](CI_RELEASE_GATES.md)
+- [FreshBench](BENCHMARK_FRESHBENCH.md) and [CI and release gates](CI_RELEASE_GATES.md)
   for benchmark and release evidence.
 - [GitHub releases](https://github.com/fission-systems/Fission/releases/latest)
   for binaries and resource packages.

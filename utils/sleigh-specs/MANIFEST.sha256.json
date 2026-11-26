@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "utils/sleigh-specs/README.md",
-      "sha256": "633f32543074f5778906c96765ba4d3912aa30f2a4cabd04fd8278c7ce868814",
-      "size": 10646,
+      "sha256": "6042b55d011ba84fa4613765ffd20d2a7b9027f3f8aea71387059f5fe2a5c3d3",
+      "size": 10960,
       "source_path": "local migration note"
     },
     {
@@ -93,20 +93,20 @@
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64.sla",
-      "sha256": "058ac347ac9da7919b38cac4efef79b8632c1f7c9e4c92b1986be5a36d8b2aca",
-      "size": 528331,
+      "sha256": "f01cd22e47d3778d9ce82a0d13a1f9fd7208e8390544f367f4c0357e8c8af644",
+      "size": 528312,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64BE.sla",
-      "sha256": "8b17cc802d04f8801894ff47f47bfd89cff131789af29a45666d2ba3ead24937",
-      "size": 534380,
+      "sha256": "55a3bc84e7421c3e56c7423282b4e05490cc8892afb5865f49ba91a3c174a0d8",
+      "size": 534373,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
       "path": "utils/sleigh-specs/compiled/AARCH64/AARCH64_AppleSilicon.sla",
-      "sha256": "ba972a61edb1110dbe8d70b7992e44c8816a18d949b5808b00a1d4b05b801d88",
-      "size": 530439,
+      "sha256": "7160c9a1fa0c54e7423c1561b30278dd66d9a80e5964f1ec53c80d0606f6d265",
+      "size": 530421,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors (Ghidra 12.2 compiled .sla snapshot)"
     },
     {
@@ -1209,8 +1209,8 @@
     },
     {
       "path": "utils/sleigh-specs/languages/AARCH64/AARCH64base.sinc",
-      "sha256": "a676c7ae4814a880bb16c6112184634134a776742638e69df13c2a493af7ac36",
-      "size": 368772,
+      "sha256": "9f9e312aa6a506e5de53429d7c0bbc042d9f19ed1cc65a7d65c147d017351e65",
+      "size": 368623,
       "source_path": "vendor/ghidra/ghidra_12.2_PUBLIC/Ghidra/Processors/AARCH64/data/languages/AARCH64base.sinc"
     },
     {

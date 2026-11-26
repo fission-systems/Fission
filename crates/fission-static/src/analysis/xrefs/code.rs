@@ -2,8 +2,8 @@
 
 use fission_loader::loader::LoadedBinary;
 use fission_sleigh::runtime::{
-    DecodedFlowKind, DecodedInstruction, DecodedReferenceKind, PackedContextOverride,
-    RuntimeSleighFrontend,
+    DecodedFlowKind, DecodedInstruction, DecodedReferenceKind, InstructionReuse,
+    PackedContextOverride, RuntimeSleighFrontend,
 };
 
 use super::{OPERAND_INDEX_MNEMONIC, Xref, XrefType};
@@ -13,9 +13,20 @@ use crate::analysis::xref_coverage::XrefOmissionReason;
 pub(in crate::analysis) fn visit_code_flow_xrefs(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
+    visit: impl FnMut(Xref),
+) {
+    visit_code_flow_xrefs_reusing(binary, frontend, None, visit);
+}
+
+/// [`visit_code_flow_xrefs`], taking already-lifted instructions from `reuse`
+/// where it holds them. The xrefs are the same.
+pub(in crate::analysis) fn visit_code_flow_xrefs_reusing(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    reuse: Option<&InstructionReuse>,
     mut visit: impl FnMut(Xref),
 ) {
-    scan_executable_code(binary, frontend, |instruction| {
+    scan_executable_code_reusing(binary, frontend, reuse, |instruction| {
         visit_instruction_xrefs(&instruction, None, &mut visit);
     });
 }
@@ -23,6 +34,15 @@ pub(in crate::analysis) fn visit_code_flow_xrefs(
 pub(super) fn scan_executable_code(
     binary: &LoadedBinary,
     frontend: &RuntimeSleighFrontend,
+    visit: impl FnMut(DecodedInstruction),
+) -> (usize, Vec<XrefOmissionReason>) {
+    scan_executable_code_reusing(binary, frontend, None, visit)
+}
+
+fn scan_executable_code_reusing(
+    binary: &LoadedBinary,
+    frontend: &RuntimeSleighFrontend,
+    reuse: Option<&InstructionReuse>,
     mut visit: impl FnMut(DecodedInstruction),
 ) -> (usize, Vec<XrefOmissionReason>) {
     let mut completed = 0;
@@ -52,7 +72,14 @@ pub(super) fn scan_executable_code(
             section.virtual_address,
             address_state.context_override,
         );
-        if let Some(reason) = decode_code(frontend, code, base_addr, context_override, &mut visit) {
+        if let Some(reason) = decode_code(
+            frontend,
+            code,
+            base_addr,
+            context_override,
+            reuse,
+            &mut visit,
+        ) {
             omitted.push(reason);
         } else {
             completed += 1;
@@ -66,12 +93,13 @@ fn decode_code(
     code: &[u8],
     base_addr: u64,
     context_override: Option<PackedContextOverride>,
+    reuse: Option<&InstructionReuse>,
     visit: &mut impl FnMut(DecodedInstruction),
 ) -> Option<XrefOmissionReason> {
     let decode_result = if context_override.is_some() {
-        frontend.decode_window_with_context_override(code, base_addr, usize::MAX, context_override)
+        frontend.decode_window_reusing(code, base_addr, usize::MAX, context_override, reuse)
     } else {
-        frontend.decode_window_parallel(code, base_addr)
+        frontend.decode_window_parallel_reusing(code, base_addr, reuse)
     };
     let Ok(instructions) = decode_result else {
         return Some(XrefOmissionReason::InstructionDecodeFailed);

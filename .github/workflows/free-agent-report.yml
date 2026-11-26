@@ -1,0 +1,45 @@
+name: Free-agent usage report
+
+# Daily summary of the free-model usage measured in normal runs
+# (scripts/ci/free_agent_report.py): it downloads the `free-agent-metrics-<run_id>`
+# artifacts of the last N days of free-model-draft.yml runs and writes, per UTC day
+# and model, runs, invocations, LLM requests, tokens (in, out, reasoning, cache
+# read), 429 count, rate-limited runs, accepted drafts and the mean seconds per
+# invocation to the job summary. It only reads artifacts: it sends no request to any
+# model and probes no limit. A token total of `?` means no event carried the field.
+
+on:
+  schedule:
+    - cron: "43 6 * * *"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many UTC days to report"
+        required: false
+        type: string
+        default: "7"
+
+permissions: {}
+
+jobs:
+  report:
+    name: Summarise free-model usage
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    env:
+      DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.days || '7' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Report
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$DAYS" =~ ^[0-9]{1,2}$ ]] || { echo "::error::days must be a number"; exit 1; }
+          python3 scripts/ci/free_agent_report.py --days "$DAYS"

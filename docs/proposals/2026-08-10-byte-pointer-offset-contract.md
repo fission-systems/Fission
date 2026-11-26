@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/.cache/decbench-local-eval/x86_O2/math.elf`
+- Binary: `~/fission-benchmark/.cache/decbench-local-eval/x86_O2/math.elf`
 - Function: `bubble_sort`
 - Address: `0x4007f0`
 - Corpus row or benchmark command: external DecBench local evaluation, x86 O2 `math.c`, with `DECBENCH_NO_CACHE=1`; focused decompilation via `target/release/fission_cli decomp ... --addr 0x4007f0 --layer both --json --debug-decomp --no-warnings`.

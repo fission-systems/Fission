@@ -46,4 +46,25 @@ else
   cmd=(cargo clippy --workspace "${exclude_flags[@]+"${exclude_flags[@]}"}" --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity)
 fi
 echo "+ ${cmd[*]}" >&2
-exec "${cmd[@]}"
+"${cmd[@]}"
+
+# Optional features no default build compiles. Each runs when its package is
+# linted at all (workspace mode, or selected and not excluded).
+lints_package() {
+  local pkg="$1" flag
+  if [ "${#package_flags[@]}" -eq 0 ]; then
+    for flag in "${exclude_flags[@]+"${exclude_flags[@]}"}"; do
+      [ "$flag" = "$pkg" ] && return 1
+    done
+    return 0
+  fi
+  for flag in "${package_flags[@]}"; do
+    [ "$flag" = "$pkg" ] && return 0
+  done
+  return 1
+}
+if lints_package fission-cli; then
+  cmd=(cargo clippy -p fission-cli --features sentry --all-targets --locked -- -D warnings -A clippy::style -A clippy::complexity)
+  echo "+ ${cmd[*]}" >&2
+  "${cmd[@]}"
+fi

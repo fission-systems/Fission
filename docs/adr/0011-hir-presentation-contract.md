@@ -164,6 +164,6 @@ dead `x`).
 - [ADR 0008](0008-nir-substrate-and-owner-boundaries.md) — substrate vs owners
 - Repo policy: root `Agents.md` § NIR vs HIR
 - Implementation: `crates/fission-pcode/src/render/`
-  (`presentation/`, `printer.rs`, `pipeline.rs`, `layer.rs`)
+  (`presentation/`, `printer/`, `pipeline.rs`, `layer.rs`)
 - Module boundary: presentation is crate-root `render`, not nested under `nir/`
 - Boundary scan: `scripts/check/owner_boundaries.sh`

@@ -13,7 +13,7 @@
 
 use anyhow::{Context, Result, bail};
 use fission_emulator::arch::Endianness;
-use fission_emulator::pcode::page_map::prot;
+use fission_emulator::pcode::page_map::{AccessKind, PageFault, prot};
 use fission_emulator::{
     ArchInfo, Emulator, LinuxEnv, MachineState, OsEnvironment, RunOutcome, WindowsEnv,
 };
@@ -72,17 +72,237 @@ pub enum StubbedEnd {
     Other(CallOutcome),
 }
 
+/// How far above `entry_sp` is inspected when auditing writes into caller
+/// stack space outside ABI home/shadow slots.
+const CALLER_STACK_AUDIT_WINDOW: u64 = 4096;
+
+/// Maximum representative addresses retained in per-run audit summaries.
+const MAX_AUDIT_SAMPLES: usize = 16;
+
+/// Exact ABI-derived specification of which addresses belong to a called
+/// function's private stack frame versus observable caller-owned / aliased
+/// storage.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrameExclusionSpec {
+    pub entry_sp: u64,
+    pub cfa: u64,
+    pub pointer_size: u64,
+    /// `[entry_sp - FRAME_BELOW .. entry_sp)`: function's private stack locals.
+    pub private_below: std::ops::Range<u64>,
+    /// Return-address push slot `[entry_sp .. entry_sp + pointer_size)` for
+    /// stack-return ABIs (`None` for link-register ABIs). Never excluded.
+    pub return_addr_slot: Option<std::ops::Range<u64>>,
+    /// Mandatory callee-owned spill/home region above `cfa` (32B on Win64;
+    /// empty on SysV64/x86-32). For link-register ABIs this covers
+    /// `[entry_sp .. entry_sp + base_offset)`.
+    pub abi_home_space: std::ops::Range<u64>,
+    /// Outgoing caller-prepared stack argument slots above `abi_home_space`.
+    /// Never excluded.
+    pub caller_stack_args: std::ops::Range<u64>,
+    /// Incoming argument values (by slot) that point into the private frame.
+    /// No fixed window after such a pointer is assumed observable: the
+    /// object it designates is bounded later, by the ground-truth check, from
+    /// objects whose extent is known, or the comparison is not justified.
+    pub aliased_inputs: Vec<(usize, u64)>,
+}
+
+impl FrameExclusionSpec {
+    /// Construct an ABI-justified exclusion specification for a call entered at
+    /// `entry_sp` with `args`.
+    #[must_use]
+    pub fn from_abi(
+        entry_sp: u64,
+        pointer_size: u64,
+        has_link_reg: bool,
+        stack_arg_offset_0: u64,
+        reg_arg_count: usize,
+        args: &[u64],
+    ) -> Self {
+        let ptr_size = pointer_size.max(1);
+        let (cfa, return_addr_slot, abi_home_space) = if has_link_reg {
+            (
+                entry_sp,
+                None,
+                entry_sp..entry_sp.saturating_add(stack_arg_offset_0),
+            )
+        } else {
+            let cfa = entry_sp.wrapping_add(ptr_size);
+            let ret_slot = entry_sp..cfa;
+            let home_end = entry_sp.saturating_add(stack_arg_offset_0.max(ptr_size));
+            (cfa, Some(ret_slot), cfa..home_end)
+        };
+        let stack_arg_count = args.len().saturating_sub(reg_arg_count) as u64;
+        let args_start = entry_sp.saturating_add(stack_arg_offset_0);
+        let args_end = args_start.saturating_add(stack_arg_count.saturating_mul(ptr_size));
+        let caller_stack_args = args_start..args_end;
+        let private_below = entry_sp.saturating_sub(FRAME_BELOW)..entry_sp;
+
+        let mut spec = Self {
+            entry_sp,
+            cfa,
+            pointer_size: ptr_size,
+            private_below,
+            return_addr_slot,
+            abi_home_space,
+            caller_stack_args,
+            aliased_inputs: Vec::new(),
+        };
+        for (slot, &arg) in args.iter().enumerate() {
+            if spec.in_private_frame(arg) {
+                spec.aliased_inputs.push((slot, arg));
+            }
+        }
+        spec
+    }
+
+    /// True if `addr` lies in the function's private stack area (`private_below`
+    /// or `abi_home_space`) and is NOT the return address slot or caller stack
+    /// arguments.
+    #[must_use]
+    pub fn in_private_frame(&self, addr: u64) -> bool {
+        let in_candidate =
+            self.private_below.contains(&addr) || self.abi_home_space.contains(&addr);
+        let in_ret = self
+            .return_addr_slot
+            .as_ref()
+            .is_some_and(|r| r.contains(&addr));
+        let in_caller_args = self.caller_stack_args.contains(&addr);
+        in_candidate && !in_ret && !in_caller_args
+    }
+
+    /// True if a write at `addr` is excluded from the default external-memory
+    /// diff. Frame objects whose address escapes are put back by the
+    /// ground-truth check over their full known extent; see
+    /// [`FrameExclusionJustification::RequiresObjectBounds`].
+    #[must_use]
+    pub fn is_excluded(&self, addr: u64) -> bool {
+        self.in_private_frame(addr)
+    }
+
+    /// True if `addr` lies in caller-owned stack space above/at `entry_sp`
+    /// outside ABI callee home slots.
+    #[must_use]
+    pub fn is_caller_stack(&self, addr: u64) -> bool {
+        let above_entry =
+            addr >= self.entry_sp && addr < self.entry_sp.saturating_add(CALLER_STACK_AUDIT_WINDOW);
+        above_entry && !self.abi_home_space.contains(&addr)
+    }
+
+    /// Retain only writes outside the audited private frame exclusion.
+    #[must_use]
+    pub fn filter_observable(&self, writes: &BTreeMap<u64, u8>) -> BTreeMap<u64, u8> {
+        writes
+            .iter()
+            .filter(|(addr, _)| !self.is_excluded(**addr))
+            .map(|(addr, value)| (*addr, *value))
+            .collect()
+    }
+}
+
+/// How an address within the private frame escaped the function.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EscapedFramePointer {
+    Returned(u64),
+    StoredExternally {
+        at: u64,
+        target: u64,
+    },
+    PassedToCall {
+        call_index: usize,
+        site: u64,
+        ptr: u64,
+    },
+    /// An incoming argument already pointed into the private frame.
+    AliasedInput {
+        slot: usize,
+        ptr: u64,
+    },
+}
+
+impl EscapedFramePointer {
+    /// The frame address that escaped.
+    #[must_use]
+    pub fn pointer(&self) -> u64 {
+        match self {
+            Self::Returned(ptr)
+            | Self::StoredExternally { target: ptr, .. }
+            | Self::PassedToCall { ptr, .. }
+            | Self::AliasedInput { ptr, .. } => *ptr,
+        }
+    }
+}
+
+/// Whether excluding private frame writes in this run is justified.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrameExclusionJustification {
+    /// No private-frame pointer escaped, SP balanced, no overlapping accesses.
+    JustifiedPrivateFrame,
+    /// Private-frame pointers were passed to callees or arrived as input
+    /// arguments while the function ran. The frame bytes behind them are
+    /// observable, so excluding the frame is justified only once every such
+    /// pointer is bounded by an object of known extent, which is then
+    /// compared in full; an unbounded one leaves the run inconclusive.
+    RequiresObjectBounds { count: usize },
+    /// Frame exclusion could not be fully justified as unobservable private
+    /// storage (e.g. frame pointer returned/stored externally, SP mismatch, or
+    /// write straddling the frame boundary).
+    Unjustified { reasons: Vec<String> },
+}
+
+/// Full frame-exclusion and ABI-preservation audit for one emulated run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrameExclusionAudit {
+    pub spec: FrameExclusionSpec,
+    /// Byte order of pointers stored in memory, to follow pointers held in
+    /// escaped frame objects.
+    pub endian: Endianness,
+    pub excluded_write_bytes: usize,
+    pub caller_stack_write_addrs: Vec<u64>,
+    pub aliased_input_addrs: Vec<u64>,
+    pub escaped_frame_pointers: Vec<EscapedFramePointer>,
+    pub boundary_overlaps: Vec<(u64, u32)>,
+    pub sp_delta: Option<i64>,
+    pub clobbered_callee_saved: Vec<String>,
+    pub justification: FrameExclusionJustification,
+}
+
+/// Audit of memory mapping/permission compliance versus `lazy_memory` fallback.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct MemoryAccessAudit {
+    pub lazy_memory_active: bool,
+    pub synthetic_unmapped_reads: Vec<u64>,
+    pub synthetic_unmapped_writes: Vec<u64>,
+    pub permission_violations: Vec<u64>,
+    pub total_synthetic_pages: usize,
+}
+
+impl MemoryAccessAudit {
+    #[must_use]
+    pub fn used_synthetic_memory(&self) -> bool {
+        !self.synthetic_unmapped_reads.is_empty()
+            || !self.synthetic_unmapped_writes.is_empty()
+            || !self.permission_violations.is_empty()
+    }
+}
+
 /// A call into one function with every call it makes stubbed out.
 #[derive(Debug)]
 pub struct StubbedRun {
     pub end: StubbedEnd,
     pub calls: Vec<ObservedCall>,
-    /// Every byte the function stored outside its own stack frame, with the
-    /// value it held when the run ended.
+    /// Every byte the function stored outside its audited private frame, with
+    /// the value it held when the run ended.
     pub writes: BTreeMap<u64, u8>,
+    /// All bytes written by the function before frame exclusion, used to audit
+    /// escaped frame storage.
+    pub all_writes: BTreeMap<u64, u8>,
     /// The first byte of the function's own frame, below its entry stack
     /// pointer, that it read before anything in this run wrote it.
     pub undefined_frame_read: Option<u64>,
+    pub exit_code: Option<u32>,
+    pub exit_signal: Option<i32>,
+    pub frame_audit: FrameExclusionAudit,
+    pub memory_audit: MemoryAccessAudit,
 }
 
 /// Which bytes of the frame below the entry stack pointer this run has
@@ -141,6 +361,42 @@ impl fission_emulator::observe::Observer for WriteLog {
     fn on_mem(&mut self, addr: u64, size: u32, write: bool, _value: u64) {
         if write {
             self.0.lock().expect("write log").push((addr, size));
+        }
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Records the first byte read per 4 KiB page (`page_base -> first_addr`)
+/// so post-run auditing can check mapped permissions without storing a per-access
+/// trace.
+struct ReadPageLog(Arc<Mutex<BTreeMap<u64, u64>>>);
+
+impl fission_emulator::observe::Observer for ReadPageLog {
+    fn interest(&self) -> fission_emulator::observe::ObserveMask {
+        fission_emulator::observe::ObserveMask {
+            mem: true,
+            ..fission_emulator::observe::ObserveMask::NONE
+        }
+    }
+
+    fn on_mem(&mut self, addr: u64, size: u32, write: bool, _value: u64) {
+        if write || size == 0 {
+            return;
+        }
+        let first_page = addr & !0xfff;
+        let last_page = addr.saturating_add(u64::from(size) - 1) & !0xfff;
+        let mut map = self.0.lock().expect("read page log");
+        let mut page = first_page;
+        loop {
+            let sample = if page == first_page { addr } else { page };
+            map.entry(page).or_insert(sample);
+            if page >= last_page {
+                break;
+            }
+            page = page.saturating_add(4096);
         }
     }
 
@@ -214,10 +470,6 @@ fn no_writes(_: usize, _: &[u64]) -> Vec<(u64, u8)> {
 /// Writes there are its locals, which the decompiled body keeps in variables.
 const FRAME_BELOW: u64 = 1 << 20;
 
-/// How far above the entry stack pointer still belongs to the call: the
-/// return address and the Win64 home slots a prologue spills arguments to.
-const FRAME_ABOVE: u64 = 64;
-
 /// A real emulator with a real, loaded process image, reusable across many
 /// concrete calls into the same binary. Restores to the post-image-setup
 /// baseline before every call (see [`Self::call`]) so one call's global/heap
@@ -228,6 +480,203 @@ pub struct EmulatorHarness {
     baseline_pc: u64,
     /// Address and byte length of the scratch buffer, once installed.
     scratch: Option<(u64, usize)>,
+    lazy_memory_active: bool,
+    last_call_args: Vec<u64>,
+}
+
+fn collect_memory_access_audit(
+    lazy_memory_active: bool,
+    baseline_state: &MachineState,
+    read_pages: &BTreeMap<u64, u64>,
+    write_pages: &BTreeMap<u64, u64>,
+) -> MemoryAccessAudit {
+    let mut synthetic_unmapped_reads = Vec::new();
+    let mut synthetic_unmapped_writes = Vec::new();
+    let mut permission_violations = Vec::new();
+    let mut synthetic_pages = BTreeSet::new();
+
+    if baseline_state.enforce_page_faults {
+        for (&page, &addr) in read_pages {
+            match baseline_state.page_map.check_access(addr, AccessKind::Read) {
+                Ok(()) => {}
+                Err(PageFault::NotMapped { .. }) => {
+                    synthetic_pages.insert(page);
+                    if synthetic_unmapped_reads.len() < MAX_AUDIT_SAMPLES {
+                        synthetic_unmapped_reads.push(addr);
+                    }
+                }
+                Err(PageFault::Prot { .. }) => {
+                    synthetic_pages.insert(page);
+                    if permission_violations.len() < MAX_AUDIT_SAMPLES {
+                        permission_violations.push(addr);
+                    }
+                }
+            }
+        }
+        for (&page, &addr) in write_pages {
+            match baseline_state
+                .page_map
+                .check_access(addr, AccessKind::Write)
+            {
+                Ok(()) => {}
+                Err(PageFault::NotMapped { .. }) => {
+                    synthetic_pages.insert(page);
+                    if synthetic_unmapped_writes.len() < MAX_AUDIT_SAMPLES {
+                        synthetic_unmapped_writes.push(addr);
+                    }
+                }
+                Err(PageFault::Prot { .. }) => {
+                    synthetic_pages.insert(page);
+                    if permission_violations.len() < MAX_AUDIT_SAMPLES {
+                        permission_violations.push(addr);
+                    }
+                }
+            }
+        }
+    }
+
+    MemoryAccessAudit {
+        lazy_memory_active,
+        synthetic_unmapped_reads,
+        synthetic_unmapped_writes,
+        permission_violations,
+        total_synthetic_pages: synthetic_pages.len(),
+    }
+}
+
+/// Every way a private-frame address left the function in this run.
+///
+/// Complete by construction: escapes decide whether excluding the frame is
+/// justified, so they are never truncated to a sample size. The list is
+/// bounded by the run itself (at most [`MAX_STUBBED_CALLS`] calls times the
+/// argument registers, plus one entry per pointer-sized observable store).
+fn collect_escaped_frame_pointers(
+    returned: Option<u64>,
+    calls: &[ObservedCall],
+    observable_writes: &BTreeMap<u64, u8>,
+    spec: &FrameExclusionSpec,
+    ptr_size: u8,
+    endian: Endianness,
+) -> Vec<EscapedFramePointer> {
+    let mut escaped: Vec<EscapedFramePointer> = spec
+        .aliased_inputs
+        .iter()
+        .map(|&(slot, ptr)| EscapedFramePointer::AliasedInput { slot, ptr })
+        .collect();
+    if let Some(ret) = returned
+        && spec.in_private_frame(ret)
+    {
+        escaped.push(EscapedFramePointer::Returned(ret));
+    }
+    for (call_index, call) in calls.iter().enumerate() {
+        for &arg in &call.args {
+            if spec.in_private_frame(arg) {
+                escaped.push(EscapedFramePointer::PassedToCall {
+                    call_index,
+                    site: call.site,
+                    ptr: arg,
+                });
+            }
+        }
+    }
+    for (at, target) in stored_frame_pointers(observable_writes, spec, ptr_size, endian) {
+        escaped.push(EscapedFramePointer::StoredExternally { at, target });
+    }
+    escaped
+}
+
+/// Whether excluding the private frame is justified given `escaped`, the
+/// stack-pointer delta across the return, and stores straddling the frame
+/// edge.
+fn justify_frame_exclusion(
+    escaped: &[EscapedFramePointer],
+    sp_delta: Option<i64>,
+    boundary_overlaps: &[(u64, u32)],
+) -> FrameExclusionJustification {
+    let mut unjustified_reasons = Vec::new();
+    let mut needs_bounds = 0usize;
+    for esc in escaped {
+        match esc {
+            EscapedFramePointer::Returned(ptr) => unjustified_reasons.push(format!(
+                "function returned pointer {ptr:#x} inside its private frame"
+            )),
+            EscapedFramePointer::StoredExternally { at, target } => {
+                unjustified_reasons.push(format!(
+                    "function stored frame pointer {target:#x} to external address {at:#x}"
+                ));
+            }
+            EscapedFramePointer::PassedToCall { .. } | EscapedFramePointer::AliasedInput { .. } => {
+                needs_bounds += 1;
+            }
+        }
+    }
+    if let Some(delta) = sp_delta
+        && delta != 0
+    {
+        unjustified_reasons.push(format!(
+            "stack pointer shifted by {delta} bytes across return"
+        ));
+    }
+    if let Some(&(at, size)) = boundary_overlaps.first() {
+        unjustified_reasons.push(format!(
+            "write at {at:#x} ({size} bytes) straddles the excluded frame boundary"
+        ));
+    }
+    if !unjustified_reasons.is_empty() {
+        FrameExclusionJustification::Unjustified {
+            reasons: unjustified_reasons,
+        }
+    } else if needs_bounds > 0 {
+        FrameExclusionJustification::RequiresObjectBounds {
+            count: needs_bounds,
+        }
+    } else {
+        FrameExclusionJustification::JustifiedPrivateFrame
+    }
+}
+
+/// Decode a `ptr_size`-byte pointer at `addr` from `bytes`, when every byte of
+/// it is present.
+pub(crate) fn read_pointer(
+    bytes: &BTreeMap<u64, u8>,
+    addr: u64,
+    ptr_size: u8,
+    endian: Endianness,
+) -> Option<u64> {
+    let size = usize::from(ptr_size);
+    if size != 4 && size != 8 {
+        return None;
+    }
+    let mut raw = [0u8; 8];
+    for (off, slot) in raw.iter_mut().take(size).enumerate() {
+        *slot = *bytes.get(&addr.wrapping_add(off as u64))?;
+    }
+    Some(match (size, endian) {
+        (8, Endianness::Little) => u64::from_le_bytes(raw),
+        (8, Endianness::Big) => u64::from_be_bytes(raw),
+        (4, Endianness::Little) => {
+            u64::from(u32::from_le_bytes(raw[..4].try_into().expect("4 bytes")))
+        }
+        (_, _) => u64::from(u32::from_be_bytes(raw[..4].try_into().expect("4 bytes"))),
+    })
+}
+
+/// Every `(at, target)` where `writes` holds a whole pointer at `at` whose
+/// value lies in the private frame. Unaligned positions are scanned too: a
+/// packed store still hands the address out.
+fn stored_frame_pointers(
+    writes: &BTreeMap<u64, u8>,
+    spec: &FrameExclusionSpec,
+    ptr_size: u8,
+    endian: Endianness,
+) -> Vec<(u64, u64)> {
+    writes
+        .keys()
+        .filter_map(|&at| {
+            let target = read_pointer(writes, at, ptr_size, endian)?;
+            spec.in_private_frame(target).then_some((at, target))
+        })
+        .collect()
 }
 
 /// Stack pointer at the callee's entry for a call with `stack_args` stack
@@ -329,6 +778,8 @@ impl EmulatorHarness {
             baseline_state,
             baseline_pc,
             scratch: None,
+            lazy_memory_active: false,
+            last_call_args: Vec::new(),
         })
     }
 
@@ -566,6 +1017,7 @@ impl EmulatorHarness {
         self.restore_baseline();
         let lazy = *state;
         self.emu.state.lazy_memory = Some(Arc::new(move |addr| lazy.memory_byte(addr)));
+        self.lazy_memory_active = true;
         let sp = self.emu.arch.sp_reg;
         let pc = self.emu.arch.pc_reg;
         let link = self.emu.arch.cc.return_addr_reg();
@@ -580,6 +1032,17 @@ impl EmulatorHarness {
                     .write_register_u64(name, state.register_word(index as u64))?;
             }
         }
+        self.setup_call(address, args)
+    }
+
+    /// Set up a strict native-admissible run of `address` with `args`: NO
+    /// `lazy_memory`, strict `PageMap` page-fault enforcement, and baseline
+    /// registers unmodified outside the ABI argument slots.
+    pub fn begin_native_run(&mut self, address: u64, args: &[u64]) -> Result<()> {
+        self.restore_baseline();
+        self.emu.state.lazy_memory = None;
+        self.emu.state.enforce_page_faults = true;
+        self.lazy_memory_active = false;
         self.setup_call(address, args)
     }
 
@@ -609,12 +1072,28 @@ impl EmulatorHarness {
         Ok(entry_sp.saturating_sub(FRAME_BELOW)..entry_sp)
     }
 
-    /// The addresses the function's own frame covers in the run
-    /// [`Self::begin_run`] set up. Stores there are the function's own
-    /// business; only stores outside it are compared.
+    /// ABI-derived private frame range for [`Self::begin_run`]. Covers locals
+    /// below `entry_sp` and mandatory ABI home/shadow slots above `cfa` (e.g.
+    /// 32B Win64 shadow space), excluding caller stack arguments. See
+    /// [`Self::frame_exclusion_spec`] for full return-slot/alias exclusions.
     pub fn frame_range(&mut self) -> Result<std::ops::Range<u64>> {
         let entry_sp = self.emu.read_register_u64(self.emu.arch.sp_reg)?;
-        Ok(entry_sp.saturating_sub(FRAME_BELOW)..entry_sp.saturating_add(FRAME_ABOVE))
+        let above = self.emu.arch.cc.stack_arg_offset(0);
+        Ok(entry_sp.saturating_sub(FRAME_BELOW)..entry_sp.saturating_add(above))
+    }
+
+    /// Audited ABI exclusion specification for the call currently prepared on
+    /// this harness.
+    pub fn frame_exclusion_spec(&mut self) -> Result<FrameExclusionSpec> {
+        let entry_sp = self.emu.read_register_u64(self.emu.arch.sp_reg)?;
+        Ok(FrameExclusionSpec::from_abi(
+            entry_sp,
+            u64::from(self.emu.arch.pointer_size),
+            self.emu.arch.cc.return_addr_reg().is_some(),
+            self.emu.arch.cc.stack_arg_offset(0),
+            self.emu.arch.cc.arg_regs().len(),
+            &self.last_call_args,
+        ))
     }
 
     /// Registers as they stand now -- after [`Self::begin_run`], what the
@@ -647,10 +1126,51 @@ impl EmulatorHarness {
         stub: &CallStub<'_>,
     ) -> Result<StubbedRun> {
         let sp_reg = self.emu.arch.sp_reg;
+        let pc_reg = self.emu.arch.pc_reg;
+        let return_reg = self.emu.arch.cc.return_reg();
+        let link_reg = self.emu.arch.cc.return_addr_reg();
+        let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
+        let killed: Vec<&'static str> = self.emu.arch.cc.killed_by_call().to_vec();
+
         let entry_sp = self.emu.read_register_u64(sp_reg)?;
+        let ptr_size_u8 = self.emu.arch.pointer_size;
+        let endian = self.emu.arch.endian;
+        let frame_spec = FrameExclusionSpec::from_abi(
+            entry_sp,
+            u64::from(ptr_size_u8),
+            link_reg.is_some(),
+            self.emu.arch.cc.stack_arg_offset(0),
+            arg_regs.len(),
+            &self.last_call_args,
+        );
+
+        let callee_saved_names: Vec<&'static str> = self
+            .emu
+            .arch
+            .gp_regs
+            .iter()
+            .copied()
+            .filter(|name| {
+                let is_special = [Some(sp_reg), Some(pc_reg), Some(return_reg), link_reg]
+                    .into_iter()
+                    .flatten()
+                    .any(|r| r.eq_ignore_ascii_case(name));
+                let is_arg = arg_regs.iter().any(|r| r.eq_ignore_ascii_case(name));
+                let is_killed = killed.iter().any(|r| r.eq_ignore_ascii_case(name));
+                !is_special && !is_arg && !is_killed
+            })
+            .collect();
+        let entry_callee_saved: Vec<(&'static str, u64)> = callee_saved_names
+            .iter()
+            .filter_map(|&name| self.emu.read_register_u64(name).ok().map(|val| (name, val)))
+            .collect();
+
         let log = Arc::new(Mutex::new(Vec::new()));
         self.emu.add_observer(Box::new(WriteLog(Arc::clone(&log))));
-        let below_entry = entry_sp.saturating_sub(FRAME_BELOW)..entry_sp;
+        let read_pages = Arc::new(Mutex::new(BTreeMap::new()));
+        self.emu
+            .add_observer(Box::new(ReadPageLog(Arc::clone(&read_pages))));
+        let below_entry = frame_spec.private_below.clone();
         let frame_state = Arc::new(Mutex::new(FrameState::default()));
         self.emu.add_observer(Box::new(FrameReads {
             region: below_entry.clone(),
@@ -664,9 +1184,6 @@ impl EmulatorHarness {
         for site in flow.calls.keys().chain(&flow.tail_jumps) {
             self.emu.set_breakpoint(*site);
         }
-        let arg_regs: Vec<&'static str> = self.emu.arch.cc.arg_regs().to_vec();
-        let return_reg = self.emu.arch.cc.return_reg();
-        let killed: Vec<&'static str> = self.emu.arch.cc.killed_by_call().to_vec();
         let mut calls = Vec::new();
         let end = loop {
             // The emulator does not stop at a breakpoint on the PC it starts
@@ -739,32 +1256,150 @@ impl EmulatorHarness {
             }
         };
         self.release_run();
+
+        let (sp_delta, clobbered_callee_saved) = if matches!(end, StubbedEnd::Returned(_)) {
+            let expected_sp = frame_spec.cfa;
+            let delta = self
+                .emu
+                .read_register_u64(sp_reg)
+                .ok()
+                .map(|exit_sp| exit_sp.wrapping_sub(expected_sp) as i64);
+            let mut clobbered = Vec::new();
+            for (name, before) in &entry_callee_saved {
+                if let Ok(after) = self.emu.read_register_u64(name)
+                    && after != *before
+                {
+                    clobbered.push((*name).to_string());
+                }
+            }
+            (delta, clobbered)
+        } else {
+            (None, Vec::new())
+        };
+
         let ram = self.emu.state.ram_space();
-        let frame = entry_sp.saturating_sub(FRAME_BELOW)..entry_sp.saturating_add(FRAME_ABOVE);
+        let write_log_entries = log.lock().expect("write log").clone();
+        let mut all_written_addrs = BTreeSet::new();
         let mut written = BTreeSet::new();
-        for (addr, size) in log.lock().expect("write log").iter() {
-            for i in 0..u64::from(*size) {
+        let mut boundary_overlaps = Vec::new();
+        let mut caller_stack_addrs = BTreeSet::new();
+        let mut excluded_addrs = BTreeSet::new();
+        let mut write_pages: BTreeMap<u64, u64> = BTreeMap::new();
+
+        for &(addr, size) in &write_log_entries {
+            if size == 0 {
+                continue;
+            }
+            let first_page = addr & !0xfff;
+            let last_page = addr.saturating_add(u64::from(size) - 1) & !0xfff;
+            let mut page = first_page;
+            loop {
+                let sample = if page == first_page { addr } else { page };
+                write_pages.entry(page).or_insert(sample);
+                if page >= last_page {
+                    break;
+                }
+                page = page.saturating_add(4096);
+            }
+
+            let mut any_excluded = false;
+            let mut any_observable = false;
+            for i in 0..u64::from(size) {
                 let at = addr.wrapping_add(i);
-                if !frame.contains(&at) {
+                all_written_addrs.insert(at);
+                if frame_spec.is_excluded(at) {
+                    any_excluded = true;
+                } else {
+                    any_observable = true;
+                }
+            }
+            let overlaps = any_excluded && any_observable;
+            if overlaps && boundary_overlaps.len() < MAX_AUDIT_SAMPLES {
+                boundary_overlaps.push((addr, size));
+            }
+            for i in 0..u64::from(size) {
+                let at = addr.wrapping_add(i);
+                if !overlaps && frame_spec.is_excluded(at) {
+                    excluded_addrs.insert(at);
+                } else {
                     written.insert(at);
+                    if frame_spec.is_caller_stack(at)
+                        && caller_stack_addrs.len() < MAX_AUDIT_SAMPLES
+                    {
+                        caller_stack_addrs.insert(at);
+                    }
                 }
             }
         }
+
+        let mut all_writes = BTreeMap::new();
         let mut writes = BTreeMap::new();
-        for at in written {
+        for at in all_written_addrs {
             if let Ok(bytes) = self.emu.state.read_space(ram, at, 1) {
-                writes.insert(at, bytes[0]);
+                let b = bytes[0];
+                all_writes.insert(at, b);
+                if written.contains(&at) {
+                    writes.insert(at, b);
+                }
             }
         }
+
         let undefined_frame_read = frame_state
             .lock()
             .expect("frame state")
             .first_undefined_read;
+
+        let returned = match end {
+            StubbedEnd::Returned(ret) => Some(ret),
+            _ => None,
+        };
+        let escaped_frame_pointers = collect_escaped_frame_pointers(
+            returned,
+            &calls,
+            &writes,
+            &frame_spec,
+            ptr_size_u8,
+            endian,
+        );
+        let justification =
+            justify_frame_exclusion(&escaped_frame_pointers, sp_delta, &boundary_overlaps);
+
+        let aliased_input_addrs: Vec<u64> = frame_spec
+            .aliased_inputs
+            .iter()
+            .map(|&(_, ptr)| ptr)
+            .collect();
+        let frame_audit = FrameExclusionAudit {
+            spec: frame_spec,
+            endian,
+            excluded_write_bytes: excluded_addrs.len(),
+            caller_stack_write_addrs: caller_stack_addrs.into_iter().collect(),
+            aliased_input_addrs,
+            escaped_frame_pointers,
+            boundary_overlaps,
+            sp_delta,
+            clobbered_callee_saved,
+            justification,
+        };
+
+        let read_pages_guard = read_pages.lock().expect("read page log");
+        let memory_audit = collect_memory_access_audit(
+            self.lazy_memory_active,
+            &self.baseline_state,
+            &read_pages_guard,
+            &write_pages,
+        );
+
         Ok(StubbedRun {
             end,
             calls,
             writes,
+            all_writes,
             undefined_frame_read,
+            exit_code: self.emu.exit_code,
+            exit_signal: self.emu.exit_signal,
+            frame_audit,
+            memory_audit,
         })
     }
 
@@ -801,11 +1436,17 @@ impl EmulatorHarness {
         // emulator, not in the restored state, so without this every call
         // spent what the earlier ones left and a batch ran out partway.
         self.emu.inst_count = 0;
+        self.emu.exit_code = None;
+        self.emu.exit_signal = None;
+        self.emu.halt_requested = false;
+        self.lazy_memory_active = false;
+        self.last_call_args.clear();
     }
 
     /// Set up a call of `address` with `args` on the current state, stopped
     /// at its first instruction.
     fn setup_call(&mut self, address: u64, args: &[u64]) -> Result<()> {
+        self.last_call_args = args.to_vec();
         // Set up the call like a real `call`/`bl`: write the sentinel
         // return address to the link register (ARM/MIPS/PPC) or push it on
         // the stack (x86) -- exactly what `simulate_return()` already
@@ -871,8 +1512,13 @@ impl EmulatorHarness {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmulatorHarness, call_frame_sp, encode_word, link_reg_call_frame_sp};
+    use super::{
+        EmulatorHarness, EscapedFramePointer, FrameExclusionJustification, FrameExclusionSpec,
+        MAX_AUDIT_SAMPLES, ObservedCall, call_frame_sp, collect_escaped_frame_pointers,
+        encode_word, justify_frame_exclusion, link_reg_call_frame_sp, read_pointer,
+    };
     use fission_emulator::arch::Endianness;
+    use std::collections::BTreeMap;
 
     /// Where the callee finds stack argument `n`, as `call` writes it:
     /// `new_sp + stack_arg_offset(n)` with `stack_arg_offset(n) = ptr + shadow
@@ -969,5 +1615,126 @@ mod tests {
         let large = vec![0x55u8; 512];
         let addr_large = harness.install_scratch(&large).expect("install 512B");
         assert_eq!(harness.baseline_byte(addr_large + 511), Some(0x55));
+    }
+
+    #[test]
+    fn frame_exclusion_spec_respects_abi_boundaries_and_aliases() {
+        let entry_sp = 0x7fff_0000_u64;
+        // SysV64: 8B return address at [entry_sp..entry_sp+8), 0 shadow space,
+        // arg6 at [entry_sp+8..entry_sp+16).
+        let sysv = FrameExclusionSpec::from_abi(entry_sp, 8, false, 8, 6, &[1, 2, 3, 4, 5, 6, 7]);
+        assert!(sysv.is_excluded(entry_sp - 4));
+        assert!(!sysv.is_excluded(entry_sp));
+        assert!(!sysv.is_excluded(entry_sp + 4));
+        assert!(!sysv.is_excluded(entry_sp + 8));
+        assert!(!sysv.is_excluded(entry_sp + 16));
+        assert!(sysv.is_caller_stack(entry_sp + 16));
+        assert!(sysv.is_caller_stack(entry_sp));
+
+        // Win64: 8B return address at [entry_sp..entry_sp+8), 32B shadow space at
+        // [entry_sp+8..entry_sp+0x28), stack arg at [entry_sp+0x28..entry_sp+0x30).
+        let win64 = FrameExclusionSpec::from_abi(entry_sp, 8, false, 0x28, 4, &[1, 2, 3, 4, 5]);
+        assert!(win64.is_excluded(entry_sp - 16));
+        assert!(!win64.is_excluded(entry_sp));
+        assert!(win64.is_excluded(entry_sp + 8));
+        assert!(win64.is_excluded(entry_sp + 0x20));
+        assert!(!win64.is_excluded(entry_sp + 0x28));
+        assert!(!win64.is_caller_stack(entry_sp + 8));
+        assert!(win64.is_caller_stack(entry_sp + 0x28));
+
+        // An input pointer into the private frame is recorded, not given a
+        // guessed observable window: the ground-truth check bounds it by a
+        // known object or reports it unbounded.
+        let alias_ptr = entry_sp - 0x200;
+        let aliased = FrameExclusionSpec::from_abi(entry_sp, 8, false, 8, 6, &[7, alias_ptr]);
+        assert!(aliased.in_private_frame(alias_ptr));
+        assert_eq!(aliased.aliased_inputs, vec![(1, alias_ptr)]);
+        assert!(aliased.is_excluded(alias_ptr + 0x100));
+        assert!(aliased.is_excluded(entry_sp - 4));
+    }
+
+    fn sysv_spec() -> FrameExclusionSpec {
+        FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[])
+    }
+
+    #[test]
+    fn escape_collection_is_not_truncated_by_the_audit_sample_cap() {
+        let spec = sysv_spec();
+        let frame_ptr = spec.entry_sp - 0x80;
+        let calls: Vec<ObservedCall> = (0..(MAX_AUDIT_SAMPLES as u64 + 4))
+            .map(|n| ObservedCall {
+                site: 0x1000 + n,
+                args: vec![frame_ptr],
+            })
+            .collect();
+        let global = 0x60_0000_u64;
+        let writes: BTreeMap<u64, u8> = frame_ptr
+            .to_le_bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (global + i as u64, *b))
+            .collect();
+        let escaped =
+            collect_escaped_frame_pointers(None, &calls, &writes, &spec, 8, Endianness::Little);
+        assert_eq!(
+            escaped
+                .iter()
+                .filter(|e| matches!(e, EscapedFramePointer::PassedToCall { .. }))
+                .count(),
+            calls.len()
+        );
+        assert!(escaped.contains(&EscapedFramePointer::StoredExternally {
+            at: global,
+            target: frame_ptr
+        }));
+        assert!(matches!(
+            justify_frame_exclusion(&escaped, Some(0), &[]),
+            FrameExclusionJustification::Unjustified { .. }
+        ));
+    }
+
+    #[test]
+    fn callee_and_input_escapes_require_object_bounds() {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[0x7fff_0000 - 0x40]);
+        let calls = vec![ObservedCall {
+            site: 0x1000,
+            args: vec![0x7fff_0000 - 0x80],
+        }];
+        let escaped = collect_escaped_frame_pointers(
+            Some(1),
+            &calls,
+            &BTreeMap::new(),
+            &spec,
+            8,
+            Endianness::Little,
+        );
+        assert_eq!(escaped.len(), 2);
+        assert_eq!(
+            justify_frame_exclusion(&escaped, Some(0), &[]),
+            FrameExclusionJustification::RequiresObjectBounds { count: 2 }
+        );
+        assert_eq!(
+            justify_frame_exclusion(&[], Some(0), &[]),
+            FrameExclusionJustification::JustifiedPrivateFrame
+        );
+        assert!(matches!(
+            justify_frame_exclusion(&[], Some(8), &[]),
+            FrameExclusionJustification::Unjustified { .. }
+        ));
+    }
+
+    #[test]
+    fn read_pointer_needs_every_byte_and_respects_width() {
+        let bytes: BTreeMap<u64, u8> = (0..8u64).map(|i| (0x100 + i, i as u8 + 1)).collect();
+        assert_eq!(
+            read_pointer(&bytes, 0x100, 8, Endianness::Little),
+            Some(0x0807_0605_0403_0201)
+        );
+        assert_eq!(
+            read_pointer(&bytes, 0x100, 4, Endianness::Big),
+            Some(0x0102_0304)
+        );
+        assert_eq!(read_pointer(&bytes, 0x101, 8, Endianness::Little), None);
+        assert_eq!(read_pointer(&bytes, 0x100, 2, Endianness::Little), None);
     }
 }

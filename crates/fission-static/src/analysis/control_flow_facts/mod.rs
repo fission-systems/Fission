@@ -14,13 +14,13 @@ use fission_core::core::ghidra_no_return::{
     binary_format_to_ghidra_format, ghidra_no_return_index,
 };
 use fission_loader::loader::{LoadedBinary, RelocationEntry};
-use fission_sleigh::runtime::{DecodeMemoryContext, RuntimeSleighFrontend};
+use fission_sleigh::runtime::{DecodeMemoryContext, InstructionReuse, RuntimeSleighFrontend};
 use lru::LruCache;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::noreturn::{DecodeSeeds, no_return_functions_with_seeds};
-use crate::analysis::xrefs::{XrefType, visit_code_flow_xrefs};
+use crate::analysis::xrefs::{XrefType, visit_code_flow_xrefs_reusing};
 
 pub use decode_context::{decode_memory_context_for, function_max_bytes};
 
@@ -61,6 +61,28 @@ static FACTS_CACHE: OnceLock<
 /// Cache key: the file's hash plus a digest of the function list the facts are
 /// built from.
 fn facts_cache_key(binary: &LoadedBinary) -> String {
+    format!("{}:{:016x}", binary.hash, functions_digest(binary))
+}
+
+/// Digest of `binary.functions` (count, then each address and size).
+///
+/// Every `function_max_bytes` / `decode_memory_context_for` call asks for the
+/// facts, so hashing the whole list each time made a pass over n functions
+/// cost n². The list lives in the loader's copy-on-write storage, and any
+/// mutation of it detaches the storage token, so a digest remembered for the
+/// token still in place is the digest of the list as it is.
+fn functions_digest(binary: &LoadedBinary) -> u64 {
+    const REMEMBERED: usize = 8;
+    static DIGESTS: OnceLock<
+        Mutex<std::collections::VecDeque<(fission_loader::loader::LoadedBinaryStorageToken, u64)>>,
+    > = OnceLock::new();
+    let digests = DIGESTS.get_or_init(Default::default);
+    if let Ok(digests) = digests.lock()
+        && let Some((_, digest)) = digests.iter().find(|(token, _)| token.matches(binary))
+    {
+        return *digest;
+    }
+
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     binary.functions.len().hash(&mut hasher);
@@ -68,7 +90,15 @@ fn facts_cache_key(binary: &LoadedBinary) -> String {
         function.address.hash(&mut hasher);
         function.size.hash(&mut hasher);
     }
-    format!("{}:{:016x}", binary.hash, hasher.finish())
+    let digest = hasher.finish();
+
+    if let Ok(mut digests) = digests.lock() {
+        if digests.len() == REMEMBERED {
+            digests.pop_front();
+        }
+        digests.push_back((binary.storage_token(), digest));
+    }
+    digest
 }
 
 fn facts_cache()
@@ -179,34 +209,41 @@ impl ControlFlowFacts {
             let no_return_idx = ghidra_no_return_index();
             // Local wrappers come from the structural fixed point. Name lookup
             // also handles indirect import slots that have no function entry.
-            let computed_no_return = no_return_functions_with_seeds(binary, seeds);
+            // The sweep below decodes every executable byte, most of it code
+            // the no-return pass has just lifted function by function. It
+            // takes those instructions where the bytes and context agree.
+            let mut reuse = InstructionReuse::new(frontend);
+            let computed_no_return =
+                no_return_functions_with_seeds(binary, seeds, Some(&mut reuse));
             let mut no_return_by_target = FxHashMap::default();
-            visit_code_flow_xrefs(binary, frontend, |xref| match xref.xref_type {
-                XrefType::Jump => {
-                    flow_edges.push((xref.from_addr, xref.to_addr));
-                }
-                XrefType::Call => {
-                    let target = xref.to_addr;
-                    let no_return = no_return_by_target.entry(target).or_insert_with(|| {
-                        computed_no_return.contains(&target)
-                            || ghidra_format.is_some_and(|format| {
-                                resolve_call_target_name(binary, target).is_some_and(
-                                    |(symbol, library)| {
-                                        no_return_idx.is_no_return(
-                                            format,
-                                            compiler_key,
-                                            library,
-                                            &symbol,
-                                        )
-                                    },
-                                )
-                            })
-                    });
-                    if *no_return {
-                        noreturn_callsites.insert(xref.from_addr);
+            visit_code_flow_xrefs_reusing(binary, frontend, Some(&reuse), |xref| {
+                match xref.xref_type {
+                    XrefType::Jump => {
+                        flow_edges.push((xref.from_addr, xref.to_addr));
                     }
+                    XrefType::Call => {
+                        let target = xref.to_addr;
+                        let no_return = no_return_by_target.entry(target).or_insert_with(|| {
+                            computed_no_return.contains(&target)
+                                || ghidra_format.is_some_and(|format| {
+                                    resolve_call_target_name(binary, target).is_some_and(
+                                        |(symbol, library)| {
+                                            no_return_idx.is_no_return(
+                                                format,
+                                                compiler_key,
+                                                library,
+                                                &symbol,
+                                            )
+                                        },
+                                    )
+                                })
+                        });
+                        if *no_return {
+                            noreturn_callsites.insert(xref.from_addr);
+                        }
+                    }
+                    XrefType::Data | XrefType::DataRead | XrefType::DataWrite => {}
                 }
-                XrefType::Data | XrefType::DataRead | XrefType::DataWrite => {}
             });
         }
 
@@ -785,6 +822,43 @@ pub(crate) fn resolve_call_target_name_direct(
 mod tests {
     use super::*;
     use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder};
+
+    /// The function-list digest is remembered per storage, and any change to
+    /// the list moves the storage, so the key always describes the list as it
+    /// is.
+    #[test]
+    fn facts_key_follows_every_change_to_the_function_list() {
+        let fresh_digest = |binary: &LoadedBinary| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            binary.functions.len().hash(&mut hasher);
+            for function in &binary.functions {
+                function.address.hash(&mut hasher);
+                function.size.hash(&mut hasher);
+            }
+            format!("{}:{:016x}", binary.hash, hasher.finish())
+        };
+        let mut binary = seed_fixture("digest-memo");
+        let first = facts_cache_key(&binary);
+        assert_eq!(first, fresh_digest(&binary));
+        assert_eq!(facts_cache_key(&binary), first, "remembered");
+
+        binary.functions.push(FunctionInfo {
+            name: "later".into(),
+            address: 0x401010,
+            size: 4,
+            ..Default::default()
+        });
+        let after_push = facts_cache_key(&binary);
+        assert_ne!(after_push, first);
+        assert_eq!(after_push, fresh_digest(&binary));
+
+        // Same length, one size edited in place.
+        binary.functions[0].size += 1;
+        let after_edit = facts_cache_key(&binary);
+        assert_ne!(after_edit, after_push);
+        assert_eq!(after_edit, fresh_digest(&binary));
+    }
 
     fn seed_fixture(hash: &str) -> LoadedBinary {
         let mut binary =

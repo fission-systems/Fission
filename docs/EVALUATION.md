@@ -201,7 +201,7 @@ Run it only after:
 - `info`, `list`, and `decomp` work on at least one sample binary
 - you have inspected one or two live outputs manually
 
-Quality is measured with DecBench: a local sample-set gate for quick signal and a full-dataset sweep for quality comparisons and release claims. Commands, environment variables and rules are in [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
+Quality is measured with FreshBench: a `--builds` / `--only` slice of the M1 corpus for quick signal and a full M1 run for quality comparisons and release claims. Commands and rules are in [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md).
 
 ## Text Output vs JSON Output
 

@@ -25,7 +25,7 @@
 //! x = b;`), which is deliberate: proving it needs both arms to be total,
 //! and the straight-line case is where the volume is.
 //!
-//! Measured on gzip's `get_method` (DecBench `unoptimized`, the single
+//! Measured on gzip's `get_method` (benchmark config `unoptimized`, the single
 //! largest GED contributor in that config at the 0.2.1 scoring): 50 of 452
 //! assignments in the emitted body are this shape, against 122 excess CFG
 //! nodes over the source.

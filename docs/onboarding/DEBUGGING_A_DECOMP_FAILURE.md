@@ -39,10 +39,10 @@ Symptoms: duplicated labels, collapsed loops, odd regions.
 
 Symptoms: types look fine internally but pseudocode unreadable.
 
-- Only after NIR/HIR matches intent should you tune [`printer.rs`](https://github.com/fission-systems/Fission/blob/main/crates/fission-pcode/src/render/printer.rs) paths.
+- Only after NIR/HIR matches intent should you tune [`printer/`](https://github.com/fission-systems/Fission/blob/main/crates/fission-pcode/src/render/printer/mod.rs) paths.
 
 ## 7. Regression scale-up
 
 Run the relevant crate suite with `cargo nextest run -p <crate>`. For a quality
-claim, attach cache-disabled before/after evidence following the
-[DecBench guide](../BENCHMARK_DECBENCH.md).
+claim, attach before/after FreshBench runs (`freshbench sweep diff`, then
+`sweep report`) following the [FreshBench guide](../BENCHMARK_FRESHBENCH.md).

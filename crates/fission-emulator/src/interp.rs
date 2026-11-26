@@ -243,6 +243,20 @@ impl Emulator {
                     idx = target;
                 }
                 StepResult::Branch(addr) => {
+                    let indirect = match op.opcode {
+                        PcodeOpcode::CallInd => Some(crate::observe::IndirectKind::Call),
+                        PcodeOpcode::BranchInd => Some(crate::observe::IndirectKind::Jump),
+                        _ => None,
+                    };
+                    if self.observe.indirect
+                        && let Some(kind) = indirect
+                    {
+                        let site = self.pc;
+                        let site_len = instruction_fallthroughs
+                            .get(&site)
+                            .map_or(0, |next| next.wrapping_sub(site) as u32);
+                        self.notify_indirect(site, site_len, addr, kind);
+                    }
                     if self.halt_requested {
                         return Ok(InterpExit::Halt);
                     }
@@ -346,13 +360,17 @@ impl Emulator {
                         idx += 1;
                         continue;
                     }
-                    let _control = crate::jit::callbacks::jit_call_other(
-                        self as *mut _,
-                        userop_id,
-                        input_vals.as_ptr(),
-                        input_vals.len() as u64,
-                        u64::from(output_size),
-                    );
+                    // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                    // the call; argument buffers are live locals sized by their length.
+                    let _control = unsafe {
+                        crate::jit::callbacks::jit_call_other(
+                            self as *mut _,
+                            userop_id,
+                            input_vals.as_ptr(),
+                            input_vals.len() as u64,
+                            u64::from(output_size),
+                        )
+                    };
                     if let Some(out) = flat[idx].output.clone() {
                         // `jit_call_other` returns the control result (halt,
                         // jump, or continue), not the userop's data result.
@@ -363,7 +381,10 @@ impl Emulator {
                         // ExclusiveMonitorPass returns Continue while its
                         // data result is one, so this changed the predicate
                         // that controls the exclusive-store path.
-                        let result = crate::jit::callbacks::jit_callother_result(self as *mut _);
+                        // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                        // the call; argument buffers are live locals sized by their length.
+                        let result =
+                            unsafe { crate::jit::callbacks::jit_callother_result(self as *mut _) };
                         let mut evaluator = Evaluator::concrete(&mut self.state, &mut self.solver);
                         evaluator.write_varnode_u64(&out, result)?;
                     }
@@ -458,14 +479,18 @@ impl Emulator {
                 if let Some(out) = &op.output {
                     if !out.is_constant && !op.inputs.is_empty() {
                         let in0 = &op.inputs[0];
-                        jit_shadow_copy(
-                            emu_ptr,
-                            out.space_id,
-                            out.offset,
-                            out.size as u64,
-                            if in0.is_constant { 0 } else { in0.space_id },
-                            if in0.is_constant { 0 } else { in0.offset },
-                        );
+                        // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                        // the call; argument buffers are live locals sized by their length.
+                        unsafe {
+                            jit_shadow_copy(
+                                emu_ptr,
+                                out.space_id,
+                                out.offset,
+                                out.size as u64,
+                                if in0.is_constant { 0 } else { in0.space_id },
+                                if in0.is_constant { 0 } else { in0.offset },
+                            )
+                        };
                     }
                 }
             }
@@ -475,17 +500,21 @@ impl Emulator {
                         let space_id = op.inputs[0].constant_val as u64;
                         let in1 = &op.inputs[1];
                         let addr = value(1);
-                        jit_shadow_load(
-                            emu_ptr,
-                            out.space_id,
-                            out.offset,
-                            out.size as u64,
-                            space_id,
-                            addr,
-                            if in1.is_constant { 0 } else { in1.space_id },
-                            if in1.is_constant { 0 } else { in1.offset },
-                            in1.size as u64,
-                        );
+                        // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                        // the call; argument buffers are live locals sized by their length.
+                        unsafe {
+                            jit_shadow_load(
+                                emu_ptr,
+                                out.space_id,
+                                out.offset,
+                                out.size as u64,
+                                space_id,
+                                addr,
+                                if in1.is_constant { 0 } else { in1.space_id },
+                                if in1.is_constant { 0 } else { in1.offset },
+                                in1.size as u64,
+                            )
+                        };
                     }
                 }
             }
@@ -497,17 +526,21 @@ impl Emulator {
                     let addr = value(1);
                     // The callback's order (the JIT's): space, address,
                     // size, then the value's varnode, then the pointer's.
-                    jit_shadow_store(
-                        emu_ptr,
-                        space_id,
-                        addr,
-                        in2.size as u64,
-                        if in2.is_constant { 0 } else { in2.space_id },
-                        if in2.is_constant { 0 } else { in2.offset },
-                        if in1.is_constant { 0 } else { in1.space_id },
-                        if in1.is_constant { 0 } else { in1.offset },
-                        in1.size as u64,
-                    );
+                    // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                    // the call; argument buffers are live locals sized by their length.
+                    unsafe {
+                        jit_shadow_store(
+                            emu_ptr,
+                            space_id,
+                            addr,
+                            in2.size as u64,
+                            if in2.is_constant { 0 } else { in2.space_id },
+                            if in2.is_constant { 0 } else { in2.offset },
+                            if in1.is_constant { 0 } else { in1.space_id },
+                            if in1.is_constant { 0 } else { in1.offset },
+                            in1.size as u64,
+                        )
+                    };
                 }
             }
             PcodeOpcode::IntAdd
@@ -559,21 +592,25 @@ impl Emulator {
                             PcodeOpcode::FloatLessEqual => SymBinOpKind::FloatLe as u32,
                             _ => unreachable!(),
                         };
-                        jit_shadow_binop(
-                            emu_ptr,
-                            out.space_id,
-                            out.offset,
-                            out.size as u64,
-                            if in0.is_constant { 0 } else { in0.space_id },
-                            if in0.is_constant { 0 } else { in0.offset },
-                            a_val,
-                            if in0.is_constant { 8 } else { in0.size as u64 },
-                            if in1.is_constant { 0 } else { in1.space_id },
-                            if in1.is_constant { 0 } else { in1.offset },
-                            b_val,
-                            if in1.is_constant { 8 } else { in1.size as u64 },
-                            kind,
-                        );
+                        // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                        // the call; argument buffers are live locals sized by their length.
+                        unsafe {
+                            jit_shadow_binop(
+                                emu_ptr,
+                                out.space_id,
+                                out.offset,
+                                out.size as u64,
+                                if in0.is_constant { 0 } else { in0.space_id },
+                                if in0.is_constant { 0 } else { in0.offset },
+                                a_val,
+                                if in0.is_constant { 8 } else { in0.size as u64 },
+                                if in1.is_constant { 0 } else { in1.space_id },
+                                if in1.is_constant { 0 } else { in1.offset },
+                                b_val,
+                                if in1.is_constant { 8 } else { in1.size as u64 },
+                                kind,
+                            )
+                        };
                     }
                 }
             }
@@ -596,17 +633,21 @@ impl Emulator {
                             PcodeOpcode::FloatSqrt => SymUnOpKind::FloatSqrt as u32,
                             _ => unreachable!(),
                         };
-                        jit_shadow_unop(
-                            emu_ptr,
-                            out.space_id,
-                            out.offset,
-                            out.size as u64,
-                            if in0.is_constant { 0 } else { in0.space_id },
-                            if in0.is_constant { 0 } else { in0.offset },
-                            a_val,
-                            if in0.is_constant { 8 } else { in0.size as u64 },
-                            kind,
-                        );
+                        // SAFETY: `self` is a live `Emulator`, not otherwise borrowed across
+                        // the call; argument buffers are live locals sized by their length.
+                        unsafe {
+                            jit_shadow_unop(
+                                emu_ptr,
+                                out.space_id,
+                                out.offset,
+                                out.size as u64,
+                                if in0.is_constant { 0 } else { in0.space_id },
+                                if in0.is_constant { 0 } else { in0.offset },
+                                a_val,
+                                if in0.is_constant { 8 } else { in0.size as u64 },
+                                kind,
+                            )
+                        };
                     }
                 }
             }
@@ -745,7 +786,7 @@ mod tests {
     fn interpreter_hle_jump_to_exits_translation_block() {
         let mut emu = test_emulator();
         let userop_id = 0xD00E;
-        emu.os = Box::new(JumpToEnv);
+        emu.os = std::sync::Arc::new(JumpToEnv);
         emu.userop_map.insert(userop_id, "jump_to_test".to_string());
 
         let insns = [GuestInsn {

@@ -52,6 +52,31 @@ case "${1:-}" in
       "${profile_flags[@]+"${profile_flags[@]}"}")
     ;;
   doc)
+    # Doctests exist only in library targets: `cargo test --doc -p X` errors
+    # ("no library targets found") for a binary-only package such as xtask.
+    # Keep only the requested packages that have a lib or proc-macro target.
+    if [ "${#package_flags[@]}" -gt 0 ]; then
+      lib_crates="$(cargo metadata --no-deps --format-version 1 --locked |
+        python3 -c 'import json, sys
+for p in json.load(sys.stdin)["packages"]:
+    if any(k in ("lib", "rlib", "dylib", "proc-macro") for t in p["targets"] for k in t["kind"]):
+        print(p["name"])')"
+      doc_flags=()
+      for crate in "${CRATE_ARRAY[@]+"${CRATE_ARRAY[@]}"}"; do
+        crate="$(echo "$crate" | tr -d '[:space:]')"
+        [ -z "$crate" ] && continue
+        if printf '%s\n' "$lib_crates" | grep -qxF "$crate"; then
+          doc_flags+=(-p "$crate")
+        else
+          echo "Skipping doctests for $crate: no library target" >&2
+        fi
+      done
+      if [ "${#doc_flags[@]}" -eq 0 ]; then
+        echo "No library targets among the selected packages; no doctests to run."
+        exit 0
+      fi
+      package_flags=("${doc_flags[@]}")
+    fi
     # A doctest that fails must fail the job; `|| true` here meant no
     # doctest could ever fail CI.
     cmd=(cargo test --doc "${package_flags[@]+"${package_flags[@]}"}" \

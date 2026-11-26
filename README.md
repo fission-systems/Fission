@@ -180,9 +180,10 @@ schema matching, and DREAM reaching conditions. The crate-by-crate map is in
 
 ## Evaluation
 
-Quality is measured on [DecBench](https://decbench.com), which scores control-flow
-structure against the source (graph edit distance), recovered types against DWARF,
-and whether the output recompiles. A score that looks only at CFG shape and types
+Quality is measured on [FreshBench](https://github.com/fission-systems/freshbench),
+which scores control-flow structure against the source (graph edit distance),
+recovered types against DWARF, recompilation and call sites
+([`docs/BENCHMARK_FRESHBENCH.md`](docs/BENCHMARK_FRESHBENCH.md)). A score that looks only at CFG shape and types
 cannot tell whether the emitted C does what the binary does, so semantic defects
 are hunted separately with execution: `verify`, and differential runs against the
 emulator. Numbers for each release and how they were reached are in
@@ -197,7 +198,7 @@ emulator. Numbers for each release and how they were reached are in
 | [`docs/architecture/`](docs/architecture/) | Pipeline, dynamic analysis, Ghidra parity audit |
 | [`docs/adr/`](docs/adr/) | Architecture decision records |
 | [`docs/changelog/`](docs/changelog/) | Release notes |
-| [DecBench](docs/BENCHMARK_DECBENCH.md) | Quality measurements and corpus sweeps |
+| [FreshBench](docs/BENCHMARK_FRESHBENCH.md) | Quality measurements and corpus sweeps |
 | [CI and release gates](docs/CI_RELEASE_GATES.md) | PR, nightly and release validation |
 | [`docs/roadmap/1.0-criteria.md`](docs/roadmap/1.0-criteria.md) | What 1.0 will promise, and what is still open |
 | [`AGENTS.md`](AGENTS.md) | Working rules for changing the decompiler; read before contributing |

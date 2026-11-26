@@ -53,13 +53,11 @@ NATIVE_DIFF = (
     "crates/fission-emulator/tests/native_differential/",
     ".github/workflows/native-differential.yml",
 )
-# The nightly full-dataset sweep cannot run on a PR; one binary through the same
-# script proves the download, strip, decompile and scoring path still works.
+# The nightly full-corpus sweep cannot run on a PR; one binary through the same
+# jobs proves the download, decompile and scoring path still works.
 SWEEP = (
-    ".github/workflows/decbench-sweep.yml", ".github/workflows/reusable-decbench-sweep.yml",
-    "scripts/quality/decbench_full_sweep.py",
-    "scripts/quality/decbench_scoring.py", "scripts/quality/decbench_sample_set_gate.py",
-    "scripts/quality/decbench-ci-requirements.txt",
+    ".github/workflows/freshbench-sweep.yml", ".github/workflows/reusable-freshbench-sweep.yml",
+    "scripts/ci/freshbench_sweep.py", "scripts/ci/freshbench_corpus.py",
 )
 
 # The sccache fallback self-test: an unreachable cache service must leave the
