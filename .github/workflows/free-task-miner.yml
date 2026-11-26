@@ -1,0 +1,59 @@
+name: Free-task miner
+
+# Finds mechanical documentation defects with no model involved
+# (scripts/ci/free_task_miner.py) and files each batch as an issue with a
+# concrete before -> after list, labelled `agent:free` and `area:docs`.
+# free-model-draft.yml then drafts the fix.
+#
+# Detectors: absolute home-directory paths in maintained Markdown, and broken
+# relative Markdown links whose target basename exists exactly once elsewhere
+# in the repo. Each issue body holds a hidden `free-task:<fingerprint>` marker;
+# a batch that any agent:free issue (open or closed) already carries is
+# skipped, and at most 3 issues are filed per run.
+#
+# Events created with GITHUB_TOKEN start no workflows, so the label on a mined
+# issue does not trigger free-model-draft.yml. The miner starts it with
+# `gh workflow run` (workflow_dispatch is allowed from GITHUB_TOKEN), hence
+# `actions: write`.
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print what would be filed"
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: free-task-miner
+  cancel-in-progress: false
+
+jobs:
+  mine:
+    name: Mine and file issues
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Mine
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mode="--create"
+          if [ "$DRY_RUN" = "true" ]; then mode="--dry-run"; fi
+          python3 scripts/ci/free_task_miner.py "$mode" --max-issues 3
