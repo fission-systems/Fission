@@ -147,6 +147,44 @@ impl SparseImage {
         Some((start, end))
     }
 
+    /// The written bytes as maximal contiguous runs, sorted by address.
+    ///
+    /// Unlike [`Self::materialize`] this never fills the gaps between
+    /// records, so its output is bounded by the bytes written: a file with
+    /// one record at 0 and one at 0xffff_fff0 yields two short runs, not a
+    /// 4 GiB buffer. Records that overlap must agree on the bytes they share;
+    /// two records writing different bytes to one address are a malformed
+    /// image, and which one wins would be a guess.
+    pub fn coalesced_runs(&self) -> Result<Vec<(u64, Vec<u8>)>> {
+        let mut order: Vec<usize> = (0..self.ranges.len()).collect();
+        // Index breaks address ties so the result never depends on sort
+        // stability.
+        order.sort_by_key(|&index| (self.ranges[index].0, index));
+        let mut runs: Vec<(u64, Vec<u8>)> = Vec::new();
+        for index in order {
+            let (address, bytes) = &self.ranges[index];
+            if let Some((start, run)) = runs.last_mut() {
+                // `write` rejected any range whose end overflows, and a run
+                // ends at the end of one of its ranges.
+                let end = *start + run.len() as u64;
+                if *address <= end {
+                    let shared_from = (*address - *start) as usize;
+                    let shared_len = ((end - *address) as usize).min(bytes.len());
+                    if run[shared_from..shared_from + shared_len] != bytes[..shared_len] {
+                        return Err(err!(
+                            loader,
+                            "MalformedHeader: overlapping records write different bytes at 0x{address:x}"
+                        ));
+                    }
+                    run.extend_from_slice(&bytes[shared_len..]);
+                    continue;
+                }
+            }
+            runs.push((*address, bytes.clone()));
+        }
+        Ok(runs)
+    }
+
     pub fn materialize(&self, fill: u8) -> Result<(u64, Vec<u8>)> {
         let (start, end) = self
             .bounds()

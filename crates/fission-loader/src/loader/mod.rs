@@ -46,6 +46,16 @@ impl LoadedBinary {
         Self::auto_detect_and_parse(DataBuffer::Heap(data), path)
     }
 
+    /// Parse binary from bytes, with a language for formats whose bytes name
+    /// no processor (Intel HEX, Motorola S-record). Other formats ignore it.
+    pub fn from_bytes_with_language(
+        data: Vec<u8>,
+        path: String,
+        language: &pipeline::ExplicitLanguage,
+    ) -> Result<Self> {
+        Self::auto_detect_and_parse_inner(DataBuffer::Heap(data), path, true, Some(language))
+    }
+
     /// Parse binary from bytes (alias for compatibility)
     pub fn from_bytes_dynamic(data: Vec<u8>, path: String) -> Result<Self> {
         Self::auto_detect_and_parse(DataBuffer::Heap(data), path)
@@ -53,7 +63,7 @@ impl LoadedBinary {
 
     /// Auto-detect binary format and parse
     fn auto_detect_and_parse(data: DataBuffer, path: String) -> Result<Self> {
-        Self::auto_detect_and_parse_inner(data, path, true)
+        Self::auto_detect_and_parse_inner(data, path, true, None)
     }
 
     /// `resolve_external_debug: false` skips `.gnu_debuglink`/
@@ -70,8 +80,9 @@ impl LoadedBinary {
         data: DataBuffer,
         path: String,
         resolve_external_debug: bool,
+        language: Option<&pipeline::ExplicitLanguage>,
     ) -> Result<Self> {
-        let mut binary = pipeline::LoaderPipeline::load(data, path)?;
+        let mut binary = pipeline::LoaderPipeline::load_with_language(data, path, language)?;
         binary.identity_report = Some(identity::analyze(
             &binary,
             identity::IdentityScanLimits::default(),
