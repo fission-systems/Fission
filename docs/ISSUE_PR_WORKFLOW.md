@@ -150,6 +150,9 @@ next, up to four.
   be a comment (`//`, `///`, `//!`, or inside `/* */`) or blank. It judges the
   lines of the staged zero-context diff: a line that has code before a `//`,
   or sits inside a string, counts as code, and so does any deleted code line.
+  An added comment line that opens a code fence (three or more backticks or
+  tildes) or an indented code block is refused too, because rustdoc would run
+  it as a doctest. `#[doc = ...]` is code, so it is refused.
   Markdown is not restricted further. The check runs in the model loop and
   again in the job that opens the PR.
 - `scripts/ci/free_model_draft.py` holds the rules and their tests;

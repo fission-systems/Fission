@@ -23,7 +23,9 @@ Its edits are kept only if they stay in ALLOWED paths, small and text-only:
 - an issue whose body carries the hidden marker `<!-- free-task-kind:comment-only -->`
   (the task miner's documentation tasks) is behaviour-neutral by design: every
   added or removed line in a `*.rs` file must then be a comment or blank
-  (`comment_only_problems`). Markdown is not restricted further.
+  (`comment_only_problems`). An added comment line that opens a code fence or an
+  indented code block is refused as well (rustdoc would run it as a doctest).
+  Markdown is not restricted further.
 The same check runs again in the job that opens the PR.
 
 Rust edits are then built by the workflow, never by the model: `cargo fmt` and
@@ -226,6 +228,26 @@ def _scan_comment(text: str, depth: int) -> tuple[bool, int]:
     return True, depth
 
 
+_COMMENT_PREFIX = re.compile(r"^[\s/!*]*")
+_FENCE = re.compile(r"^(`{3,}|~{3,})")
+
+
+def _doctest_risk(text: str) -> bool:
+    """Whether an added comment line opens a Markdown code fence, or is an indented
+    code block (4+ spaces after the comment marker and its one conventional space).
+    rustdoc compiles and runs both as doctests (`cargo test --doc`), so a "comment"
+    could carry executable code."""
+    body = _COMMENT_PREFIX.sub("", text)
+    if _FENCE.match(body):
+        return True
+    stripped = text.lstrip()
+    for marker in ("///", "//!"):
+        if stripped.startswith(marker):
+            rest = stripped[len(marker):]
+            return rest.startswith(("     ", "\t"))
+    return False
+
+
 _HUNK = re.compile(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
@@ -258,6 +280,9 @@ def comment_only_problems(diff: str) -> list[str]:
             sign, text = line[0], line[1:]
             ok, depth[sign] = _scan_comment(text, depth[sign])
             number = new_no if sign == "+" else old_no
+            if ok and sign == "+" and _doctest_risk(text):
+                problems.append(f"{path}:{number}: added comment opens a code fence or code block "
+                                f"(it would run as a doctest): {text.strip()[:80]}")
             if not ok:
                 problems.append(f"{path}:{number}: {'added' if sign == '+' else 'removed'} line is code, "
                                 f"not a comment: {text.strip()[:80]}")

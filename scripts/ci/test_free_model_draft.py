@@ -281,6 +281,32 @@ class CommentOnlyTests(unittest.TestCase):
         self.assertTrue(self.problems("+/*", "+ text", "+ */", "+let x = 1;"))
         self.assertTrue(self.problems("+/* a */ b(); /* c */"))
 
+    def test_a_code_fence_in_an_added_doc_comment_is_refused(self):
+        for line in ("+/// ```rust", "+//! ~~~", "+    /// ```", "+/// ````text", "+//! ~~~~"):
+            found = self.problems(line)
+            self.assertEqual(len(found), 1, line)
+            self.assertIn("code fence", found[0])
+
+    def test_a_code_fence_inside_a_block_comment_is_refused(self):
+        self.assertTrue(self.problems("+/*", "+ * ```", "+ */"))
+        self.assertTrue(self.problems("+/** ```rust"))
+        self.assertTrue(self.problems("+/*", "+```", "+*/"))
+
+    def test_an_indented_code_block_in_a_doc_comment_is_refused(self):
+        self.assertTrue(self.problems("+///     let x = 1;"))
+        self.assertEqual(self.problems("+///   - nested list item"), [])
+
+    def test_inline_backticks_still_pass(self):
+        self.assertEqual(self.problems("+/// returns `None` when empty", "+/// see ``a`b`` and ```x``` inline",
+                                       "+//! The `foo` module."), [])
+
+    def test_removing_a_fence_is_not_refused(self):
+        self.assertEqual(self.problems("-/// ```", "-/// ```"), [])
+
+    def test_an_added_doc_attribute_is_code(self):
+        self.assertTrue(self.problems('+#[doc = "```\nlet x = 1;\n```"]'))
+        self.assertTrue(self.problems('+    #![doc = "x"]'))
+
     def test_a_continuation_whose_opener_is_not_in_the_diff_is_refused(self):
         self.assertTrue(self.problems("+ * dangling"))
 
