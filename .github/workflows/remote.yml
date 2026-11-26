@@ -1,0 +1,102 @@
+name: Remote run
+
+# `cargo xtask remote` runs one cargo command for a developer or an agent on a
+# hosted runner instead of their machine: it pushes the working tree as a
+# temporary `remote/<sha>` branch, dispatches this workflow on it, waits, and
+# prints the log. Pushes to `remote/*` trigger no other workflow.
+#
+# The command is split on whitespace and passed to `cargo` as separate
+# arguments; it never goes through a shell. Only users who can dispatch
+# workflows (repository writers) can run it, and the job holds no secrets
+# and a read-only token.
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: "Arguments to cargo, e.g. `nextest run -p fission-pcode`"
+        required: true
+        type: string
+      os:
+        description: "Runner image"
+        required: false
+        type: choice
+        default: ubuntu-24.04
+        options:
+          - ubuntu-24.04
+          - macos-15
+          - windows-2025
+      artifacts:
+        description: "Paths to return besides the log (space separated, relative to the checkout)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: remote-${{ github.ref }}-${{ inputs.os }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+
+jobs:
+  run:
+    name: cargo ${{ inputs.command }} (${{ inputs.os }})
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-remote-${{ inputs.os }}
+      - uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
+      - name: Run the command
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.command }}
+        run: |
+          set -uo pipefail
+          read -ra arguments <<< "$COMMAND"
+          mkdir -p remote-output
+          echo "+ cargo ${arguments[*]}" | tee remote-output/remote.log
+          cargo "${arguments[@]}" 2>&1 | tee -a remote-output/remote.log
+          status=${PIPESTATUS[0]}
+          echo "$status" > remote-output/status
+          exit "$status"
+      - name: Collect requested paths
+        if: always() && inputs.artifacts != ''
+        shell: bash
+        env:
+          ARTIFACTS: ${{ inputs.artifacts }}
+        run: |
+          set -uo pipefail
+          read -ra paths <<< "$ARTIFACTS"
+          for path in "${paths[@]}"; do
+            case "$path" in
+              /*|*..*) echo "skipping $path: not a path inside the checkout"; continue ;;
+            esac
+            if [[ -e "$path" ]]; then
+              mkdir -p "remote-output/files/$(dirname "$path")"
+              cp -R "$path" "remote-output/files/$path"
+            else
+              echo "missing: $path"
+            fi
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: remote-output
+          path: remote-output
+          if-no-files-found: error
+          retention-days: 3

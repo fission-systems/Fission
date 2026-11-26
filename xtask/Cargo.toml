@@ -2,7 +2,7 @@
 name = "xtask"
 version = "0.0.0"
 edition = "2024"
-description = "Developer tasks for the Fission workspace (`cargo xtask preflight`, `cargo xtask cleanup`)"
+description = "Developer tasks for the Fission workspace (`cargo xtask preflight`, `cleanup`, `remote`)"
 license = "Apache-2.0"
 publish = false
 
