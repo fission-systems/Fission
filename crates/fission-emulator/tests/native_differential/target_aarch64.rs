@@ -321,6 +321,7 @@ const CURATED: &[(&str, &[u8])] = &[
     ("fmadd d0, d1, d2, d3", &[0x20, 0x0c, 0x42, 0x1f]),
     ("fmsub s0, s1, s2, s3", &[0x20, 0x8c, 0x02, 0x1f]),
     ("fnmadd d0, d1, d2, d3", &[0x20, 0x0c, 0x62, 0x1f]),
+    ("fnmsub s0, s1, s2, s3", &[0x20, 0x8c, 0x22, 0x1f]),
     ("fnmul s0, s1, s2", &[0x20, 0x88, 0x22, 0x1e]),
     ("fabd d0, d1, d2", &[0x20, 0xd4, 0xe2, 0x7e]),
     ("fcmp d0, d1", &[0x00, 0x20, 0x61, 0x1e]),
@@ -471,6 +472,15 @@ fn state(rng: &mut Rng, curated: Option<&str>) -> CpuState {
                 s.gpr[3] = second;
             }
         }
+        // FPProcessNaNs3 takes a signalling NaN in a source before a quiet NaN
+        // addend, which random lanes almost never line up: do it now and then.
+        if ["fmadd", "fmsub", "fnmadd", "fnmsub", "fmlal", "fmlsl"]
+            .iter()
+            .any(|m| name.starts_with(m))
+            && rng.chance(25)
+        {
+            signalling_nan_after_quiet_addend(&mut s, name);
+        }
         // Rounding instructions get a halfway input half the time: ties are
         // where the rounding modes differ, and a random float is almost never one.
         // Saturating multiplies overflow only for INT_MIN * INT_MIN, and SQNEG
@@ -494,6 +504,30 @@ fn state(rng: &mut Rng, curated: Option<&str>) -> CpuState {
         }
     }
     s
+}
+
+/// A quiet NaN addend and a signalling NaN second source in every lane of a
+/// curated multiply-add: scalar `d0, d1, d2, d3` forms add v3 to v1 * v2,
+/// the widening `fmlal`/`fmlsl` forms add v0 to v1 * v2 (half-precision sources).
+fn signalling_nan_after_quiet_addend(s: &mut CpuState, name: &str) {
+    let widening = name.starts_with("fmlal") || name.starts_with("fmlsl");
+    let (addend, quiet, signalling): (usize, &[u8], &[u8]) = if widening {
+        (0, &[0x01, 0x00, 0xc0, 0x7f], &[0x01, 0x7d])
+    } else if name.contains(" d0") {
+        (
+            3,
+            &[1, 0, 0, 0, 0, 0, 0xf8, 0x7f],
+            &[2, 0, 0, 0, 0, 0, 0xf4, 0x7f],
+        )
+    } else {
+        (3, &[0x01, 0x00, 0xc0, 0x7f], &[0x02, 0x00, 0xa0, 0x7f])
+    };
+    for lane in s.vec[addend].chunks_mut(quiet.len()) {
+        lane.copy_from_slice(quiet);
+    }
+    for lane in s.vec[2].chunks_mut(signalling.len()) {
+        lane.copy_from_slice(signalling);
+    }
 }
 
 fn random_insn(rng: &mut Rng) -> Vec<u8> {

@@ -7,8 +7,9 @@
 #             trailing `*` a family (`LDADD*`: LDADDB, LDADDAH, ...)
 #   fields    the comma-separated fields allowed to differ (register names,
 #             flags, `mem`, `fault`, `panic`, `decode`), `*`, or a tag:
-#             `~nan` (both sides NaN, payloads differ), `~fp16` (the
-#             instruction does half-precision float arithmetic)
+#             `~nan` (every differing element, at the instruction's float width,
+#             is NaN on both sides: payloads differ), `~fp16` (the instruction
+#             does half-precision float arithmetic)
 #   issue     the GitHub issue tracking the fix
 #
 # The gate fails on a divergence not covered here and on an entry that no
@@ -34,6 +35,7 @@ x86_64 XCHG RAX,R8 #1059 f3 41 90 executed as PAUSE on some hosts @host
 # Spec: fused multiply-adds round twice (p-code has no fused operation, so the
 # lift is a product and a sum; FPNeg is applied to the operands).
 aarch64 FMSUB * #1072 not fused @nightly
+aarch64 FNMSUB q0 #1072 not fused: the product overflows where the CPU adds -inf @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
 # Runtime: attach-variables tables drop their `_` holes, so CASP's pair
@@ -41,4 +43,8 @@ aarch64 FMLS * #1072 not fused @nightly
 aarch64 CASP* * #1391 pair registers mis-indexed by a dropped varlist hole
 # Spec: FPProcessNaNs3 gives a signalling NaN in any operand priority; the
 # product-then-sum lift can propagate another one.
-aarch64 FMLAL* ~nan #1397 signalling NaN priority not modelled @nightly
+aarch64 FMADD ~nan #1397 signalling NaN priority not modelled
+aarch64 FNMADD ~nan #1397 signalling NaN priority not modelled
+aarch64 FNMSUB ~nan #1397 signalling NaN priority not modelled
+aarch64 FMLAL* ~nan #1397 signalling NaN priority not modelled
+aarch64 FMLSL* ~nan #1397 signalling NaN priority not modelled
