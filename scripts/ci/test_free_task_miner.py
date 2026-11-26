@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -172,30 +173,126 @@ class DedupTests(unittest.TestCase):
         findings = [f(n, file=f"docs/f{n}.md") for n in range(500)]
         self.assertEqual(len(ftm.plan(findings, set(), 3)), 3)
 
-    def test_create_files_labels_and_starts_the_draft_once_per_issue(self):
-        root = make_repo({"docs/a.md": "/Users/b/fission-benchmark/x\n"})
-        with mock.patch.object(ftm, "gh_existing_issues", return_value=[]), \
-                mock.patch.object(ftm, "gh_create", return_value="9") as create, \
-                mock.patch.object(ftm, "gh_start_draft") as start:
-            ftm.main(["--root", root, "--create", "--no-rust-docs"])
+    RUST = [ftm.Finding("missing-docs", "crates/c/src/lib.rs", n, f"pub fn f{n}()", "") for n in range(3)]
+
+    def run_main(self, argv, issues=(), det_prs=(), findings=None, files=None):
+        root = make_repo(files or {"docs/a.md": "/Users/b/fission-benchmark/x\n"})
+        mined = mock.patch.object(ftm, "mine", return_value=self.RUST if findings is None else findings)
+        with mined, mock.patch.object(ftm, "gh_existing_issues", return_value=list(issues)), \
+                mock.patch.object(ftm, "gh_open_deterministic_prs", return_value=list(det_prs)), \
+                mock.patch.object(ftm, "gh_create", return_value="9") as create:
+            ftm.main(["--root", root, *argv])
+        return create
+
+    def test_create_files_only_the_model_kinds_and_starts_no_draft(self):
+        self.assertFalse(hasattr(ftm, "gh_start_draft"))
+        mixed = self.RUST + [f(1)]
+        create = self.run_main(["--create", "--no-rust-docs"], findings=mixed)
         self.assertEqual(create.call_count, 1)
-        start.assert_called_once_with("9")
+        self.assertNotIn("home-path", create.call_args[0][0] + create.call_args[0][1])
 
     def test_existing_marker_means_nothing_is_created(self):
-        root = make_repo({"docs/a.md": "/Users/b/fission-benchmark/x\n"})
-        group = ftm.group_findings(ftm.mine(root))[0]
-        issues = [{"number": 3, "body": ftm.render_body(group)}]
-        with mock.patch.object(ftm, "gh_existing_issues", return_value=issues), \
-                mock.patch.object(ftm, "gh_create") as create:
-            ftm.main(["--root", root, "--create", "--no-rust-docs"])
-        create.assert_not_called()
+        issues = [{"number": 3, "body": ftm.render_body(self.RUST)}]
+        self.assertEqual(self.run_main(["--create", "--no-rust-docs"], issues=issues).call_count, 0)
+
+    def test_an_open_deterministic_pr_marker_also_dedups(self):
+        prs = [{"number": 4, "body": ftm.render_fix_body(self.RUST, [])}]
+        self.assertEqual(self.run_main(["--create", "--no-rust-docs"], det_prs=prs).call_count, 0)
 
     def test_dry_run_creates_nothing(self):
-        root = make_repo({"docs/a.md": "/Users/b/fission-benchmark/x\n"})
-        with mock.patch.object(ftm, "gh_existing_issues", return_value=[]), \
-                mock.patch.object(ftm, "gh_create") as create:
-            ftm.main(["--root", root, "--no-rust-docs"])
-        create.assert_not_called()
+        self.assertEqual(self.run_main(["--no-rust-docs"]).call_count, 0)
+
+
+class FixTests(unittest.TestCase):
+    def finding(self, line, before, after, path="docs/a.md", kind="home-path"):
+        return ftm.Finding(kind, path, line, before, after)
+
+    def test_a_replacement_is_applied_only_where_before_occurs_exactly_once(self):
+        root = make_repo({"docs/a.md": "keep\nsee /Users/b/fission-benchmark/x now\r\n"})
+        want = self.finding(2, "/Users/b/fission-benchmark/x", "~/fission-benchmark/x")
+        applied, skipped = ftm.apply_fixes(root, [want])
+        self.assertEqual((applied, skipped), ([want], []))
+        with open(os.path.join(root, "docs/a.md"), newline="") as fh:
+            self.assertEqual(fh.read(), "keep\nsee ~/fission-benchmark/x now\r\n")
+
+    def test_a_mismatch_is_skipped_and_reported_and_the_file_is_untouched(self):
+        text = "a\nB B\nplain\n"
+        root = make_repo({"docs/a.md": text})
+        moved = self.finding(1, "B", "C")           # the text is on line 2, not 1
+        twice = self.finding(2, "B", "C")           # twice on the line: ambiguous
+        past = self.finding(9, "B", "C")
+        applied, skipped = ftm.apply_fixes(root, [moved, twice, past])
+        self.assertEqual(applied, [])
+        reasons = {f.line: why for f, why in skipped}
+        self.assertIn("not found", reasons[1])
+        self.assertIn("2 times", reasons[2])
+        self.assertIn("past the end", reasons[9])
+        with open(os.path.join(root, "docs/a.md")) as fh:
+            self.assertEqual(fh.read(), text)
+
+    def test_two_findings_on_one_line_are_applied_in_turn(self):
+        root = make_repo({"docs/a.md": "[x](old/a.md) [y](old/b.md)\n"})
+        one = self.finding(1, "old/a.md", "new/a.md", kind="broken-link")
+        two = self.finding(1, "old/b.md", "new/b.md", kind="broken-link")
+        applied, _ = ftm.apply_fixes(root, [one, two])
+        self.assertEqual(len(applied), 2)
+        with open(os.path.join(root, "docs/a.md")) as fh:
+            self.assertEqual(fh.read(), "[x](new/a.md) [y](new/b.md)\n")
+
+    def run_fix(self, root, issues=(), det_prs=(), extra=()):
+        out = os.path.join(tempfile.mkdtemp(), "out")
+        with mock.patch.object(ftm, "gh_existing_issues", return_value=list(issues)), \
+                mock.patch.object(ftm, "gh_open_deterministic_prs", return_value=list(det_prs)):
+            ftm.main(["--root", root, "--fix", "--out", out, *extra])
+        return out
+
+    FILES = {"docs/a.md": "see /Users/b/fission-benchmark/x\n[t](old/b.md)\n", "docs/deep/b.md": ""}
+
+    def test_fix_edits_the_tree_and_writes_the_pr_text_with_item_keys(self):
+        root = make_repo(self.FILES)
+        out = self.run_fix(root)
+        with open(os.path.join(root, "docs/a.md")) as fh:
+            self.assertIn("(deep/b.md)", fh.read())  # one group (one kind) per PR
+        body = open(os.path.join(out, "body.md")).read()
+        self.assertIn("No model took part", body)
+        self.assertEqual(len(ftm.ITEM_MARKER_RE.findall(body)), 1)  # one kind per PR
+        self.assertTrue(open(os.path.join(out, "title.txt")).read().startswith("docs:"))
+
+    def test_the_branch_is_the_fingerprint_of_what_was_applied(self):
+        root = make_repo(self.FILES)
+        env_out = os.path.join(root, "gh_out")
+        with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": env_out}):
+            self.run_fix(root)
+        text = open(env_out).read()
+        self.assertIn("applied=1", text)
+        self.assertRegex(text, r"branch=agent-fix/[0-9a-f]{16}")
+
+    def test_a_finding_filed_as_an_issue_or_an_open_pr_is_not_fixed(self):
+        root = make_repo({"docs/a.md": "see /Users/b/fission-benchmark/x\n"})
+        found = ftm.detect_home_paths(root, ftm.list_files(root))
+        out = self.run_fix(root, issues=[{"number": 1, "body": ftm.render_body(found)}])
+        self.assertFalse(os.path.exists(os.path.join(out, "body.md")))
+        with open(os.path.join(root, "docs/a.md")) as fh:
+            self.assertIn("/Users/b", fh.read())
+
+    def test_nothing_is_fixed_while_too_many_deterministic_prs_are_open(self):
+        root = make_repo(self.FILES)
+        prs = [{"number": n, "body": ""} for n in range(ftm.MAX_OPEN_DETERMINISTIC)]
+        env_out = os.path.join(root, "gh_out")
+        with mock.patch.dict(os.environ, {"GITHUB_OUTPUT": env_out}):
+            out = self.run_fix(root, det_prs=prs)
+        self.assertFalse(os.path.exists(os.path.join(out, "body.md")))
+        self.assertEqual(open(env_out).read().strip(), "applied=0")  # the workflow reads this
+
+    def test_the_result_passes_the_draft_check(self):
+        import subprocess as sp
+        root = make_repo(self.FILES)
+        for cmd in (["init", "-q"], ["config", "user.email", "t@t"], ["config", "user.name", "t"],
+                    ["add", "-A"], ["commit", "-qm", "x"]):
+            sp.run(["git", "-C", root, *cmd], check=True)
+        self.run_fix(root)
+        run = sp.run([sys.executable, fmd.__file__, "check", "--repo", root], capture_output=True, text=True)
+        self.assertEqual(run.returncode, 0, run.stderr)
 
 
 def cargo_msg(code, text, file="crates/c/src/lib.rs", line=7, src=None, message="missing documentation",

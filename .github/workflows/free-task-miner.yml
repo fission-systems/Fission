@@ -1,29 +1,32 @@
 name: Free-task miner
 
 # Finds documentation tasks with no model involved
-# (scripts/ci/free_task_miner.py) and files each batch as an issue with a
-# concrete list, labelled `agent:free` and `area:docs`.
-# free-model-draft.yml then drafts the fix.
+# (scripts/ci/free_task_miner.py).
 #
-# Detectors: absolute home-directory paths in maintained Markdown; broken
-# relative Markdown links whose target basename exists exactly once elsewhere
-# in the repo; and, for ONE crate per run (rotating by day of year through
-# DOC_CRATES in the script), public Rust items without a doc comment
-# (`missing_docs`, via `cargo rustc -p <crate> --lib -- -W missing_docs`, which
-# applies the lint to that crate only) and rustdoc lint warnings (`cargo doc
-# --no-deps -p <crate>`). The Rust kinds carry the hidden marker
-# `free-task-kind:comment-only`, so free-model-draft.yml refuses any draft that
-# changes a Rust line that is not a comment. That is why the Rust toolchain is
-# installed here.
+# - `fix` job: findings with an exact before -> after (absolute home-directory
+#   paths in maintained Markdown; broken relative Markdown links whose target
+#   basename exists exactly once elsewhere in the repo) need no model. `--fix`
+#   applies one group of them, each replacement only if `before` occurs exactly
+#   once on the recorded file:line (a mismatch is skipped and reported). The
+#   workflow, not a model, then runs `free_model_draft.py check` on the result
+#   and opens a draft PR labelled `agent:deterministic` on a branch
+#   `agent-fix/<fingerprint>`. No PR while 3 such PRs wait for review.
+# - `mine` job: findings that need writing become `agent:free` + `area:docs`
+#   issues for a model, for ONE crate per run (rotating by day of year through
+#   DOC_CRATES in the script): public Rust items without a doc comment
+#   (`missing_docs`, via `cargo rustc -p <crate> --lib -- -W missing_docs`, which
+#   applies the lint to that crate only) and rustdoc lint warnings (`cargo doc
+#   --no-deps -p <crate>`). Those issues carry the hidden marker
+#   `free-task-kind:comment-only`, so free-model-draft.yml refuses any draft that
+#   changes a Rust line that is not a comment. That is why the Rust toolchain is
+#   installed in this job only.
 #
 # Each finding has a hidden `free-task-item` key (no line number); a finding
-# that any agent:free issue (open or closed) already carries is skipped, and at
-# most 3 issues are filed per run in total, kinds taking turns.
+# that any agent:free issue (open or closed) or any open agent:deterministic PR
+# already carries is skipped, and at most 3 issues are filed per run in total.
 #
-# Events created with GITHUB_TOKEN start no workflows, so the label on a mined
-# issue does not trigger free-model-draft.yml. The miner starts it with
-# `gh workflow run` (workflow_dispatch is allowed from GITHUB_TOKEN), hence
-# `actions: write`.
+# The miner no longer starts drafts: free-agent-scheduler.yml picks the filed
+# issues up, one task per tick, within .github/free-agent-policy.json.
 
 on:
   schedule:
@@ -31,7 +34,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: "Only print what would be filed"
+        description: "Only print what would be filed or fixed (no issue, branch or PR)"
         required: false
         type: boolean
         default: true
@@ -51,7 +54,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      actions: write
+      pull-requests: read
     env:
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
     steps:
@@ -72,3 +75,48 @@ jobs:
           mode="--create"
           if [ "$DRY_RUN" = "true" ]; then mode="--dry-run"; fi
           python3 scripts/ci/free_task_miner.py "$mode" --max-issues 3
+
+  fix:
+    name: Fix exact replacements without a model
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Apply the exact replacements
+        id: fix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/free_task_miner.py --fix --out "$RUNNER_TEMP/fix"
+      - name: Show the change
+        if: steps.fix.outputs.applied != '0'
+        run: git diff --stat
+      - name: Check the edits, push a branch and open a draft PR
+        if: steps.fix.outputs.applied != '0' && env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.fix.outputs.branch }}
+        run: |
+          set -euo pipefail
+          [[ "$BRANCH" =~ ^agent-fix/[0-9a-f]{16}$ ]] || { echo "::error::bad branch name"; exit 1; }
+          python3 scripts/ci/free_model_draft.py check
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null; then
+            echo "branch $BRANCH already exists: nothing to do"
+            exit 0
+          fi
+          git switch -c "$BRANCH"
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "$(cat "$RUNNER_TEMP/fix/title.txt")"
+          gh auth setup-git
+          git push -q origin "$BRANCH"
+          gh pr create --draft --base main --head "$BRANCH" --label agent:deterministic \
+            --title "$(cat "$RUNNER_TEMP/fix/title.txt")" --body-file "$RUNNER_TEMP/fix/body.md"

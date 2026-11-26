@@ -30,9 +30,18 @@ after; no line number). Findings whose key already appears in any issue labelled
 agent:free (open or closed) are dropped before grouping. `--max-issues` caps the total
 across kinds; kinds take turns, so one cannot starve another.
 
-Default mode is a dry run. `--create` files the issues with `gh` (labels agent:free
-and area:docs) and starts `free-model-draft.yml` for each, because issues created
-with GITHUB_TOKEN do not trigger workflows.
+Findings with an exact before -> after (`home-path`, `broken-link`) need no model: `--fix`
+applies one group of them to the working tree, each replacement only if `before` occurs
+exactly once on the recorded file:line, and writes the PR title and body to `--out`. The
+workflow (free-task-miner.yml), not a model, checks the result with
+`free_model_draft.py check` and opens a draft PR labelled `agent:deterministic` on a branch
+`agent-fix/<fingerprint>`. Findings that need writing (`missing-docs`, `rustdoc`) become
+issues for the model. A finding already carried by any agent:free issue (open or closed) or
+by an open agent:deterministic PR is not filed or fixed again.
+
+Default mode is a dry run. `--create` files the model-kind issues with `gh` (labels
+agent:free and area:docs). It does not start a draft: free-agent-scheduler.yml picks the
+issues up, one task per tick.
 """
 
 import argparse
@@ -54,6 +63,9 @@ MAX_REPLACEMENTS = 40
 # Rust item's text, so these groups are smaller.
 MAX_GROUP = {"missing-docs": (8, 15), "rustdoc": (8, 15)}
 COMMENT_ONLY_MARKER = "<!-- free-task-kind:comment-only -->"
+DETERMINISTIC_LABEL = "agent:deterministic"
+# `--fix` opens nothing while this many deterministic PRs wait for review.
+MAX_OPEN_DETERMINISTIC = 3
 
 # Crates (directory names under crates/; the package name is the same) whose Rust
 # docs are mined, one per run: DOC_CRATES[day of year % len]. Small, with few
@@ -448,6 +460,14 @@ def gh_existing_issues():
     return json.loads(out)
 
 
+def gh_open_deterministic_prs():
+    """Open `agent:deterministic` PRs: their findings are as good as filed."""
+    out = subprocess.run(["gh", "pr", "list", "--label", DETERMINISTIC_LABEL, "--state", "open",
+                          "--limit", "200", "--json", "number,body"],
+                         check=True, capture_output=True, text=True).stdout
+    return json.loads(out)
+
+
 def gh_create(title, body):
     out = subprocess.run(["gh", "issue", "create", "--title", title, "--body-file", "-",
                           "--label", "agent:free", "--label", "area:docs"],
@@ -458,9 +478,95 @@ def gh_create(title, body):
     return number
 
 
-def gh_start_draft(number):
-    subprocess.run(["gh", "workflow", "run", "free-model-draft.yml", "-f", f"issue={number}"],
-                   check=True)
+def apply_fixes(root, findings):
+    """Apply deterministic replacements. One is applied only if `before` occurs exactly once
+    in the line at the recorded file:line (the current text, after earlier replacements);
+    anything else is skipped with a reason. Returns (applied, skipped) where skipped holds
+    (finding, reason). Line endings are kept."""
+    applied, skipped = [], []
+    by_file = {}
+    for f in findings:
+        by_file.setdefault(f.file, []).append(f)
+    for path in sorted(by_file):
+        full = os.path.join(root, path)
+        try:
+            with open(full, encoding="utf-8", newline="") as fh:
+                lines = fh.read().splitlines(keepends=True)
+        except (OSError, UnicodeDecodeError) as err:
+            skipped.extend((f, f"cannot read the file ({type(err).__name__})") for f in by_file[path])
+            continue
+        changed = False
+        for f in sorted(by_file[path]):
+            if not 1 <= f.line <= len(lines):
+                skipped.append((f, f"line {f.line} is past the end of the file"))
+                continue
+            text = lines[f.line - 1]
+            count = text.count(f.before)
+            if count != 1:
+                skipped.append((f, "`before` not found on that line" if count == 0
+                                else f"`before` occurs {count} times on that line"))
+                continue
+            lines[f.line - 1] = text.replace(f.before, f.after, 1)
+            applied.append(f)
+            changed = True
+        if changed:
+            with open(full, "w", encoding="utf-8", newline="") as fh:
+                fh.write("".join(lines))
+    return applied, skipped
+
+
+def render_fix_body(applied, skipped):
+    """The body of an `agent:deterministic` PR: what was replaced, with the per-finding dedup keys."""
+    lines = ["Exact replacements found and applied by `scripts/ci/free_task_miner.py --fix`. "
+             "**No model took part.** Each one was applied only where the text before it was found "
+             "exactly once on the recorded line.", ""]
+    lines += [render_item(f) for f in sorted(applied)]
+    if skipped:
+        lines += ["", "Skipped (the line no longer matches):"]
+        lines += [f"- `{f.file}:{f.line}`: {why}" for f, why in skipped]
+    lines += [""] + [f"<!-- free-task-item:{item_key(f)} -->" for f in sorted(applied)]
+    lines.append(f"<!-- free-task:{fingerprint(applied)} -->")
+    return "\n".join(lines) + "\n"
+
+
+def write_fix_output(applied, fp):
+    """The step outputs the workflow reads: `applied` always, `branch` when something changed."""
+    out = os.environ.get("GITHUB_OUTPUT")
+    if out:
+        with open(out, "a", encoding="utf-8") as fh:
+            fh.write(f"applied={applied}\n")
+            if fp:
+                fh.write(f"branch=agent-fix/{fp}\n")
+
+
+def run_fix(args, markers, open_prs):
+    """`--fix`: apply one group of deterministic findings to the working tree."""
+    if open_prs >= MAX_OPEN_DETERMINISTIC:
+        print(f"{open_prs} open {DETERMINISTIC_LABEL} PRs (max {MAX_OPEN_DETERMINISTIC}): nothing to fix now")
+        write_fix_output(0, None)
+        return 0
+    files = list_files(args.root)
+    found = detect_home_paths(args.root, files) + detect_broken_links(args.root, files)
+    chosen = plan(sorted(set(found)), markers, 1)
+    print(f"{len(found)} deterministic findings; {sum(1 for f in found if item_key(f) in markers)} already filed")
+    applied, skipped = ([], [])
+    if chosen:
+        applied, skipped = apply_fixes(args.root, chosen[0])
+    for f in applied:
+        print(f"fixed {f.file}:{f.line}: {f.before} -> {f.after}")
+    for f, why in skipped:
+        print(f"skipped {f.file}:{f.line}: {why}")
+    if args.out:
+        os.makedirs(args.out, exist_ok=True)
+        if applied:
+            title = render_title(applied)
+            with open(os.path.join(args.out, "title.txt"), "w", encoding="utf-8") as fh:
+                fh.write(title + "\n")
+            with open(os.path.join(args.out, "body.md"), "w", encoding="utf-8") as fh:
+                fh.write(render_fix_body(applied, skipped))
+    write_fix_output(len(applied), fingerprint(applied) if applied else None)
+    print(f"{len(applied)} replacements applied, {len(skipped)} skipped")
+    return 0
 
 
 def main(argv=None):
@@ -469,38 +575,51 @@ def main(argv=None):
     ap.add_argument("--max-issues", type=int, default=3, help="total across all kinds")
     ap.add_argument("--doc-crate", help="crate to mine for Rust docs (default: by day of year)")
     ap.add_argument("--no-rust-docs", action="store_true", help="skip the cargo-based detectors")
+    ap.add_argument("--out", help="with --fix: directory for title.txt and body.md of the PR")
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="print what would be filed (default)")
-    mode.add_argument("--create", action="store_true", help="file the issues with gh")
+    mode.add_argument("--create", action="store_true", help="file the issues (model kinds) with gh")
+    mode.add_argument("--fix", action="store_true",
+                      help="apply the exact home-path / broken-link replacements in the working tree")
     args = ap.parse_args(argv)
+
+    if args.fix:
+        det_prs = gh_open_deterministic_prs()
+        markers = known_markers(gh_existing_issues()) | known_markers(det_prs)
+        open_prs = len(det_prs)
+        return run_fix(args, markers, open_prs)
 
     doc_crate = None
     if not args.no_rust_docs:
         doc_crate = args.doc_crate or pick_doc_crate(datetime.date.today().timetuple().tm_yday)
         print(f"Rust docs crate: {doc_crate}")
     findings = mine(args.root, doc_crate)
-    groups = group_findings(findings)
-    print(f"{len(findings)} findings in {len(groups)} groups: "
+    print(f"{len(findings)} findings: "
           + ", ".join(f"{k} {sum(1 for f in findings if f.kind == k)}"
                       for k in sorted({f.kind for f in findings})))
     try:
-        markers = known_markers(gh_existing_issues())
+        markers = known_markers(gh_existing_issues()) | known_markers(gh_open_deterministic_prs())
     except (OSError, subprocess.CalledProcessError):
         if args.create:
             raise
         markers = set()
         print("note: gh unavailable; not checking for existing issues", file=sys.stderr)
-    chosen = plan(findings, markers, args.max_issues)
-    filed = sum(1 for f in findings if item_key(f) in markers)
+    # Findings with an exact before -> after are fixed by `--fix` (a PR, no model); only the
+    # kinds that need writing become issues for a model.
+    model_findings = [f for f in findings if f.kind in MAX_GROUP]
+    chosen = plan(model_findings, markers, args.max_issues)
+    filed = sum(1 for f in model_findings if item_key(f) in markers)
     print(f"{filed} findings already filed; {len(chosen)} issues to file (max {args.max_issues})")
     for group in chosen:
         title, body = render_title(group), render_body(group)
         if args.create:
             number = gh_create(title, body)
             print(f"created #{number}: {title}")
-            gh_start_draft(number)
         else:
             print(f"--- would file: {title}\n{body}")
+    if not args.create:
+        fixable = [f for f in findings if f.kind not in MAX_GROUP and item_key(f) not in markers]
+        print(f"{len(fixable)} deterministic findings the `--fix` mode would fix")
     return 0
 
 

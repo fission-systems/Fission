@@ -213,5 +213,20 @@
     "name": "agent:free-draft",
     "color": "c5def5",
     "description": "Draft PR from a free model; needs an Opus review before it leaves draft"
+  },
+  {
+    "name": "agent:deferred",
+    "color": "fef2c0",
+    "description": "Free-model draft paused (rate limit or provider down); the scheduler lifts it after 6 hours"
+  },
+  {
+    "name": "agent:blocked",
+    "color": "d93f0b",
+    "description": "Free-model draft failed; not retried by the scheduler until the label is removed"
+  },
+  {
+    "name": "agent:deterministic",
+    "color": "c5def5",
+    "description": "Draft PR from exact replacements (free_task_miner.py --fix); no model took part"
   }
 ]

@@ -368,5 +368,150 @@ class CommentOnlyCheckCommandTests(unittest.TestCase):
         self.assertEqual(self.run_check("Fix it.", self.LOGIC).returncode, 0)
 
 
+def err_event(code=None, headers=None, kind="error", name="APIError"):
+    data = {"message": "x"}
+    if code is not None:
+        data["statusCode"] = code
+    if headers is not None:
+        data["responseHeaders"] = headers
+    return json.dumps({"type": kind, "timestamp": 1, "sessionID": "s", "error": {"name": name, "data": data}})
+
+
+class OpencodeClassifierTests(unittest.TestCase):
+    def classify(self, status, text, edits=False):
+        return fmd.classify_opencode(status, [text], edits)
+
+    def test_rate_limit_words_and_429_in_text(self):
+        for text in ("Error: 429 Too Many Requests", "rate limit exceeded", "Rate_Limit reached",
+                     "monthly quota used up", "status code: 429", "HTTP 429"):
+            self.assertEqual(self.classify(1, text), fmd.RATE_LIMITED, text)
+
+    def test_an_error_event_with_status_429_is_a_rate_limit_whatever_the_text(self):
+        self.assertEqual(self.classify(1, err_event(429)), fmd.RATE_LIMITED)
+        self.assertEqual(self.classify(0, err_event(429)), fmd.RATE_LIMITED)  # clean exit, no edits
+
+    def test_provider_failures(self):
+        for text in ("connect ECONNREFUSED 127.0.0.1:443", "getaddrinfo ENOTFOUND api.example",
+                     "connection refused", "status 503 Service Unavailable", "HTTP 502", "Bad Gateway"):
+            self.assertEqual(self.classify(1, text), fmd.PROVIDER_UNAVAILABLE, text)
+        self.assertEqual(self.classify(1, err_event(503)), fmd.PROVIDER_UNAVAILABLE)
+
+    def test_model_unavailable(self):
+        for text in ("Model not found: opencode/x", "ProviderModelNotFoundError", "model x is unavailable",
+                     "unknown model"):
+            self.assertEqual(self.classify(1, text), fmd.MODEL_UNAVAILABLE, text)
+
+    def test_a_clean_exit_with_edits_is_never_a_failure(self):
+        self.assertIsNone(self.classify(0, "rate limit quota 429", edits=True))
+
+    def test_a_clean_exit_without_edits_is_not_classified_from_text(self):
+        self.assertIsNone(self.classify(0, "I could not find a rate limit setting"))
+
+    def test_the_models_own_text_events_do_not_count(self):
+        text = json.dumps({"type": "text", "part": {"text": "document the quota and the 429 rate limit"}})
+        self.assertIsNone(self.classify(1, text))
+        self.assertEqual(self.classify(1, text + "\nError: rate limit"), fmd.RATE_LIMITED)
+
+    def test_unrelated_failures_and_plain_numbers_are_not_classified(self):
+        self.assertIsNone(self.classify(124, ""))
+        self.assertIsNone(self.classify(1, "error at line 5290 of the file, 429 bytes"))
+
+    def test_rate_limit_wins_over_provider_text(self):
+        self.assertEqual(self.classify(1, "503 Service Unavailable: rate limit"), fmd.RATE_LIMITED)
+
+    def test_retry_after_from_headers_and_text(self):
+        self.assertEqual(fmd.retry_after(err_event(429, {"Retry-After": "30"})), "30 seconds")
+        self.assertEqual(fmd.retry_after(err_event(429, {"retry-after": "Wed, 21 Oct 2015 07:28:00 GMT"})), None)
+        self.assertEqual(fmd.retry_after("Too many requests. Try again in 2 minutes"), "120 seconds")
+        self.assertEqual(fmd.retry_after("Retry-After: 15"), "15 seconds")
+        self.assertIsNone(fmd.retry_after("nothing here"))
+
+    def test_events_are_read_defensively(self):
+        self.assertEqual(fmd.event_error({"type": "error"}), {"status": None, "retry_after": None})
+        self.assertEqual(fmd.event_error({"type": "error", "error": {"statusCode": 429}})["status"], 429)
+        self.assertEqual(fmd.event_error({"type": "error", "error": {"data": {"statusCode": "429"}}})["status"], None)
+        self.assertEqual(fmd.event_usage({"type": "step_finish"}),
+                         {"input": None, "output": None, "reasoning": None, "cache_read": None})
+        usage = fmd.event_usage({"type": "step_finish", "part": {"tokens": {"input": 3, "output": 0,
+                                                                            "cache": {"read": 2}}}})
+        self.assertEqual(usage, {"input": 3, "output": 0, "reasoning": None, "cache_read": 2})
+        self.assertEqual(fmd.parse_events("not json\n{broken\n[1]\n" + err_event(1)), [json.loads(err_event(1))])
+
+
+class CargoAndCheckClassifierTests(unittest.TestCase):
+    def test_registry_failures_are_infrastructure(self):
+        for log in ("error: failed to download from `https://index.crates.io/x`",
+                    "warning: spurious network error (3 tries remaining): timed out",
+                    "error: Unable to update registry `crates-io`",
+                    "error: failed to get `serde` as a dependency of package `a v0.1.0`",
+                    "error: failed to fetch into: /home/x/.cargo/registry"):
+            self.assertEqual(fmd.classify_cargo(log), fmd.INFRA_FAILURE, log)
+
+    def test_compiler_and_rustfmt_errors_are_compilation_errors(self):
+        for log in ("error[E0308]: mismatched types", "error: expected one of `;` or `}`, found `x`\n"
+                    "Error writing files: failed to resolve mod `m`"):
+            self.assertEqual(fmd.classify_cargo(log), fmd.COMPILATION_ERROR)
+
+    def test_a_refused_check_is_no_changes_or_a_policy_violation(self):
+        self.assertEqual(fmd.classify_check("edits refused: no change"), fmd.NO_CHANGES)
+        self.assertEqual(fmd.classify_check("edits refused: a.rs: binary"), fmd.POLICY_VIOLATION)
+        self.assertEqual(fmd.classify_check("edits refused: no change; x: outside the allowed paths"),
+                         fmd.POLICY_VIOLATION)
+
+    def test_each_class_has_an_action_and_only_the_stops_have_exit_codes(self):
+        self.assertEqual(fmd.ACTIONS[fmd.RATE_LIMITED], fmd.STOP)
+        self.assertEqual(fmd.ACTIONS[fmd.PROVIDER_UNAVAILABLE], fmd.STOP)
+        self.assertEqual(fmd.ACTIONS[fmd.INFRA_FAILURE], fmd.STOP)
+        self.assertEqual(fmd.ACTIONS[fmd.MODEL_UNAVAILABLE], fmd.NEXT_MODEL)
+        self.assertEqual(fmd.ACTIONS[fmd.NO_CHANGES], fmd.NEXT_MODEL)
+        self.assertEqual(fmd.ACTIONS[fmd.POLICY_VIOLATION], fmd.NEXT_MODEL)
+        self.assertEqual(fmd.ACTIONS[fmd.COMPILATION_ERROR], fmd.REPAIR)
+        stops = {c for c, a in fmd.ACTIONS.items() if a == fmd.STOP}
+        self.assertEqual(set(fmd.STOP_CODES), stops)
+        self.assertEqual(len(set(fmd.STOP_CODES.values())), len(stops))
+        self.assertNotIn(0, fmd.STOP_CODES.values())
+
+
+class BudgetTests(unittest.TestCase):
+    def test_a_call_never_crosses_the_budget(self):
+        self.assertEqual(fmd.call_timeout(720, 6600, 120), 720)
+        self.assertEqual(fmd.call_timeout(720, 300, 120), 300)   # shortened
+        self.assertIsNone(fmd.call_timeout(720, 119, 120))       # skipped
+        self.assertIsNone(fmd.call_timeout(720, -5, 120))
+        self.assertEqual(fmd.remaining_secs(1000, 1100, 600), 500)
+
+    def test_five_invocations_are_spent_and_then_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            self.assertEqual([fmd.spend_invocation(state) for _ in range(6)], [1, 2, 3, 4, 5, None])
+            self.assertEqual((state / "invocations").read_text().strip(), "5")
+        self.assertEqual(fmd.MAX_INVOCATIONS_PER_TASK, 5)
+
+    def test_begin_call_reports_time_and_budget_through_its_exit_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp)
+            (state / "start").write_text("1000\n")
+
+            def run(*extra, now=1100):
+                return subprocess.run([sys.executable, fmd.__file__, "begin-call", "--state", tmp, "--kind", "opencode",
+                                       "--requested", "720", "--budget", "600", "--now", str(now), *extra],
+                                      capture_output=True, text=True)
+            first = run()
+            self.assertEqual((first.returncode, first.stdout.strip()), (0, "500"))
+            self.assertEqual(run(now=1490).returncode, 2)      # 110s left: under the 120s minimum
+            self.assertEqual((state / "invocations").read_text().strip(), "1")  # the skipped call cost nothing
+            for _ in range(4):
+                self.assertEqual(run().returncode, 0)
+            self.assertEqual(run().returncode, 3)
+            cargo = subprocess.run([sys.executable, fmd.__file__, "begin-call", "--state", tmp, "--kind", "cargo",
+                                    "--requested", "1500", "--budget", "6000", "--now", "1100"],
+                                   capture_output=True, text=True)
+            self.assertEqual((cargo.returncode, cargo.stdout.strip()), (0, "1500"))  # cargo is never counted
+
+    def test_stop_code_command(self):
+        run = subprocess.run([sys.executable, fmd.__file__, "stop-code", fmd.RATE_LIMITED], capture_output=True, text=True)
+        self.assertEqual(run.stdout.strip(), "75")
+
+
 if __name__ == "__main__":
     unittest.main()
