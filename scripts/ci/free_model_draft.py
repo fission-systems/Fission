@@ -3,7 +3,7 @@
 for a simple issue, and a draft PR carries it to review.
 
     free_model_draft.py prepare --issue-json FILE --out DIR   check the issue, write the prompt
-    free_model_draft.py pick-model --models-file FILE         choose a free model from `opencode models opencode`
+    free_model_draft.py order-models --models-file FILE --seed N   free models to try, in order
     free_model_draft.py check [--repo DIR]                    check the model's edits in the working tree
 
 What reaches the model is the public repository and the issue's title and
@@ -38,6 +38,10 @@ MAX_LINES = 400
 # Zero-retention providers first (OpenCode Zen docs, 2026-11); any other free
 # model after them. The free list rotates, so this is a preference, not a pin.
 PREFERRED = ("deepseek-v4.1-flash-free", "hy4-flash-free", "beam-free")
+# Free models have usage limits. Each run starts at a different model (the
+# run number picks it) so the load spreads, and falls back to the next one
+# when a model fails, is rate-limited, or leaves no acceptable edits.
+MAX_ATTEMPTS = 4
 
 # OpenCode v1 permission config: the last matching rule wins and key order is
 # kept, so deny everything first and allow file reads and edits after.
@@ -94,16 +98,23 @@ Issue body:
 """
 
 
-def pick_model(listing: str) -> str:
-    models = [line.strip().removeprefix("opencode/") for line in listing.splitlines()
-              if line.strip().startswith("opencode/")]
-    for preferred in PREFERRED:
-        if preferred in models:
-            return f"opencode/{preferred}"
-    free = sorted(m for m in models if m.endswith("-free") or m == "big-pickle")
-    if not free:
+def order_models(listing: str, seed: int, limit: int = MAX_ATTEMPTS) -> list[str]:
+    """The free models to try, in order: the listed preferred ones, then the
+    other free ones, each group rotated by `seed`, at most `limit`."""
+    models = {line.strip().removeprefix("opencode/") for line in listing.splitlines()
+              if line.strip().startswith("opencode/")}
+    preferred = [m for m in PREFERRED if m in models]
+    others = sorted(m for m in models - set(preferred) if m.endswith("-free") or m == "big-pickle")
+    if not preferred and not others:
         raise SystemExit("no free OpenCode Zen model is listed")
-    return f"opencode/{free[0]}"
+
+    def rotate(group: list[str]) -> list[str]:
+        if not group:
+            return group
+        start = seed % len(group)
+        return group[start:] + group[:start]
+
+    return [f"opencode/{m}" for m in (rotate(preferred) + rotate(others))[:limit]]
 
 
 def path_allowed(path: str) -> bool:
@@ -148,8 +159,9 @@ def main() -> int:
     p = sub.add_parser("prepare")
     p.add_argument("--issue-json", type=Path, required=True)
     p.add_argument("--out", type=Path, required=True)
-    m = sub.add_parser("pick-model")
+    m = sub.add_parser("order-models")
     m.add_argument("--models-file", type=Path, required=True)
+    m.add_argument("--seed", type=int, default=0, help="the run number: which model goes first")
     c = sub.add_parser("check")
     c.add_argument("--repo", type=Path, default=Path("."))
     args = parser.parse_args()
@@ -163,8 +175,8 @@ def main() -> int:
         (args.out / "prompt.txt").write_text(prompt(issue))
         (args.out / "permissions.json").write_text(json.dumps({"permission": PERMISSIONS}))
         return 0
-    if args.command == "pick-model":
-        print(pick_model(args.models_file.read_text()))
+    if args.command == "order-models":
+        print("\n".join(order_models(args.models_file.read_text(), args.seed)))
         return 0
     git(args.repo, "add", "-A")
     problems = edit_problems(git(args.repo, "diff", "--cached", "--numstat"),

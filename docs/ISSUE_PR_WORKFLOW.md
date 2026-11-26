@@ -123,8 +123,11 @@ until qualification. No automatic merge or issue closing based on labels.
 
 Label a simple issue `agent:free`: a typo, a docs fix, or a small
 single-purpose code change. Do not use it on an issue whose body carries a log
-or decompiled output. `free-model-draft.yml` then asks an OpenCode Zen free
-model for a fix and opens it as a draft PR labelled `agent:free-draft`.
+or decompiled output. `free-model-draft.yml` then asks OpenCode Zen free models
+for a fix and opens it as a draft PR labelled `agent:free-draft`. Free models
+have usage limits, so the run number picks which one goes first. A model
+that fails, is rate-limited or leaves no acceptable edits hands over to the
+next, up to four.
 
 - The model sees only the public checkout and the issue text. It can read
   and edit files, nothing else.
