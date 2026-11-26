@@ -17,6 +17,21 @@ jobs:
   sweep:
     uses: ./.github/workflows/reusable-freshbench-sweep.yml
 
+  # Rows lost their output since the last passing sweep: find the commit.
+  bisect:
+    needs: sweep
+    if: ${{ always() && needs.sweep.outputs.lost != '' && needs.sweep.outputs.lost != '0' && needs.sweep.outputs.baseline_commit != '' }}
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/parallel-bisect.yml
+    with:
+      good: ${{ needs.sweep.outputs.baseline_commit }}
+      bad: ${{ github.sha }}
+      probe: output
+      build: ${{ needs.sweep.outputs.lost_build }}
+      issue_title: "CI red: ${{ github.workflow }}"
+
   notify:
     needs: sweep
     if: always()

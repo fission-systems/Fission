@@ -122,6 +122,18 @@ def report(args) -> int:
     else:
         text += "\nNo baseline sweep to compare with.\n"
     lost_total = sum(d.get("lost_output", 0) for d in diffs.values() if "error" not in d)
+    lost_builds = sorted(n for n, d in diffs.items() if "error" not in d and d.get("lost_output"))
+    baseline_commit = ""
+    for name in lost_builds:
+        meta = args.baseline / name / "meta.json"
+        if meta.exists():
+            baseline_commit = json.loads(meta.read_text()).get("git", {}).get("commit", "")
+            break
+    if os.environ.get("GITHUB_OUTPUT"):
+        # For the nightly's bisect: which build lost rows, and since when.
+        with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+            out.write(f"lost={lost_total}\nlost_build={lost_builds[0] if lost_builds else ''}\n"
+                      f"baseline_commit={baseline_commit}\n")
     (args.out / "summary.json").write_text(json.dumps({"reports": reports, "diffs": diffs, "missing": missing,
                                                        "lost_output": lost_total}, indent=2) + "\n")
     (args.out / "summary.md").write_text(text)
