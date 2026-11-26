@@ -39,3 +39,6 @@ aarch64 * ~fp16 #1065 FP16 arithmetic not evaluated
 aarch64 FMSUB * #1072 not fused @nightly
 aarch64 FMLA * #1072 not fused @nightly
 aarch64 FMLS * #1072 not fused @nightly
+# Runtime: attach-variables tables drop their `_` holes, so CASP's pair
+# registers are mis-indexed (`casp w2, w3, ...` reads w5 and w4, w9).
+aarch64 CASP* * #1391 pair registers mis-indexed by a dropped varlist hole
