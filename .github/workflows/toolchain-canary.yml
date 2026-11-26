@@ -1,0 +1,256 @@
+name: Toolchain canary
+
+# CI floats on `stable`, so a new rustc or LLVM lands on main the day it ships:
+# a build break, a compiler crash (ICE) or different codegen. This runs the
+# next release (`beta`) once a week, about six weeks before it becomes stable,
+# so the break is found while there is time to adapt the code or report the
+# bug upstream. `nightly` can be dispatched by hand.
+#
+# Fails on: a build error, an ICE, a test failure, or a release CLI that
+# decompiles in-repo fixtures differently from the stable-built one. Clippy
+# is report-only (a new toolchain brings new lints). Policy and the response
+# to a red run: docs/CI_RELEASE_GATES.md, "Toolchain canary".
+
+on:
+  schedule:
+    # Saturday 07:20 UTC. Every other cron here is daily between 00:17 and
+    # 05:17 UTC (determinism 02:45, ci-heavy 02:30, memory-ceiling 02:55,
+    # speed 03:05, native-differential 03:10, freshbench 01:25, miner 05:17),
+    # Sunday 03:15 (mutants) or Monday 09:00 (ci-cd-monitor). This slot sits
+    # after the nightly runs finish and on the weekend, so it competes with
+    # none of them for runners.
+    - cron: "20 7 * * 6"
+  workflow_dispatch:
+    inputs:
+      toolchain:
+        description: "Toolchain to try"
+        required: false
+        type: choice
+        options:
+          - beta
+          - nightly
+        default: beta
+
+permissions:
+  contents: read
+
+concurrency:
+  group: toolchain-canary-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CANARY_TOOLCHAIN: ${{ inputs.toolchain || 'beta' }}
+
+jobs:
+  # Build, test and lint the whole workspace with the canary toolchain.
+  workspace:
+    name: Workspace on the canary toolchain
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    outputs:
+      rustc: ${{ steps.version.outputs.rustc }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: ${{ env.CANARY_TOOLCHAIN }}
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          # Never shared with a stable cache.
+          shared-key: fission-canary-workspace-${{ env.CANARY_TOOLCHAIN }}
+          cache-on-failure: true
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@11535f61e49cc8fdbdbb5aacee608b494b699f42 # nextest
+        with:
+          tool: nextest
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libssl-dev build-essential file pkg-config
+      - name: Record the toolchain
+        id: version
+        run: |
+          set -euo pipefail
+          {
+            echo "## Toolchain canary: ${CANARY_TOOLCHAIN}"
+            echo
+            echo '```'
+            rustc -Vv
+            cargo -V
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "rustc=$(rustc -V)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the workspace
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo build --locked --workspace --all-targets 2>&1 | tee build.log
+      - name: Test the workspace
+        id: test
+        continue-on-error: true
+        env:
+          NEXTEST_PROFILE: ci
+        run: |
+          set -o pipefail
+          cargo nextest run --locked --workspace --exclude fission-static \
+            --no-tests=fail --no-fail-fast --retries 1 2>&1 | tee test.log
+      # Report-only: a new toolchain brings new lints.
+      - name: Clippy (report-only)
+        id: clippy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --locked --keep-going -- -D warnings -A clippy::style -A clippy::complexity 2>&1 | tee clippy.log
+      - name: Look for compiler crashes and count lints
+        id: ice
+        if: always()
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_canary.py clippy-count clippy.log | tee -a "$GITHUB_STEP_SUMMARY" || true
+          # Exit 1 on an ICE; the verdict below fails the job on it.
+          python3 scripts/ci/toolchain_canary.py ice build.log test.log clippy.log | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Verdict
+        if: always()
+        env:
+          BUILD: ${{ steps.build.outcome }}
+          TEST: ${{ steps.test.outcome }}
+          CLIPPY: ${{ steps.clippy.outcome }}
+          ICE: ${{ steps.ice.outcome }}
+        run: |
+          set -euo pipefail
+          failed=0
+          if [[ "$ICE" == "failure" ]]; then
+            echo "::error::The compiler crashed (ICE). Report it to rust-lang/rust."
+            echo "- ICE: **the compiler crashed**" >> "$GITHUB_STEP_SUMMARY"
+            failed=1
+          fi
+          if [[ "$BUILD" != "success" ]]; then
+            echo "::error::cargo build failed on ${CANARY_TOOLCHAIN}."
+            echo "- Build: **${BUILD}**" >> "$GITHUB_STEP_SUMMARY"
+            failed=1
+          fi
+          if [[ "$TEST" != "success" ]]; then
+            echo "::error::cargo nextest failed on ${CANARY_TOOLCHAIN}."
+            echo "- Tests: **${TEST}**" >> "$GITHUB_STEP_SUMMARY"
+            failed=1
+          fi
+          echo "- Clippy: ${CLIPPY} (report-only, does not fail the canary)" >> "$GITHUB_STEP_SUMMARY"
+          exit "$failed"
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: canary-logs
+          path: |
+            build.log
+            test.log
+            clippy.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # The release CLI, built once with stable and once with the canary, decompiles
+  # the same in-repo fixtures. Hashes only travel between jobs, not binaries.
+  cli:
+    name: Release CLI (${{ matrix.side }})
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - side: stable
+            toolchain: stable
+          - side: canary
+            toolchain: ${{ inputs.toolchain || 'beta' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: fission-canary-cli-${{ matrix.side }}-${{ matrix.toolchain }}
+          cache-on-failure: true
+      - name: Build the release CLI
+        env:
+          SIDE: ${{ matrix.side }}
+        run: |
+          set -euo pipefail
+          {
+            echo "### Release CLI, ${SIDE}"
+            echo '```'
+            rustc -Vv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          set -o pipefail
+          cargo build --locked --release -p fission-cli 2>&1 | tee cli-build.log
+      - name: Look for compiler crashes
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_canary.py ice cli-build.log | tee -a "$GITHUB_STEP_SUMMARY"
+      # In-repo fixtures only, small, and never executed. Each is decompiled
+      # twice so a function that is unstable on one side is skipped, not blamed
+      # on the compiler.
+      - name: Decompile the fixtures
+        env:
+          SIDE: ${{ matrix.side }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_canary.py hash target/release/fission_cli "hashes-${SIDE}.json" \
+            crates/fission-sleigh/testdata/x64_stale_arg_register.elf \
+            crates/fission-sleigh/testdata/x64_pie_relative_switch.elf \
+            crates/fission-sleigh/testdata/x64_static_switch_no_reloc.elf \
+            crates/fission-sleigh/testdata/x64_dense_switch_300.so \
+            crates/fission-sleigh/testdata/a64_csel_select.so \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: canary-hashes-${{ matrix.side }}
+          path: hashes-${{ matrix.side }}.json
+          retention-days: 14
+          if-no-files-found: error
+
+  codegen:
+    name: Same output on stable and canary
+    needs: cli
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: canary-hashes-*
+          merge-multiple: true
+      - name: Compare
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/toolchain_canary.py compare hashes-stable.json hashes-canary.json | tee -a "$GITHUB_STEP_SUMMARY"
+
+  report:
+    needs: [workspace, cli, codegen]
+    if: always() && github.repository == 'fission-systems/Fission'
+    permissions:
+      issues: write
+    uses: ./.github/workflows/reusable-report-red.yml
+    with:
+      result: ${{ contains(needs.*.result, 'failure') && 'failure' || (contains(needs.*.result, 'cancelled') && 'cancelled' || 'success') }}
+      detail: "${{ needs.workspace.outputs.rustc }}; the run's job summary says whether the build, an ICE, a test or the decompiled output failed"

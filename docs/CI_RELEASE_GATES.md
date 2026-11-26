@@ -134,7 +134,7 @@ the run's `ci-red` issue. It can also be dispatched by hand.
 
 ## Scheduled runs report into issues
 
-Heavy, fuzz, determinism, the native differential and the FreshBench sweep end with `reusable-report-red.yml`. While a
+Heavy, fuzz, determinism, the native differential, the toolchain canary and the FreshBench sweep end with `reusable-report-red.yml`. While a
 workflow is red on main there is one open issue titled `CI red: <workflow>`
 with the `ci-red` label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
@@ -257,6 +257,43 @@ register, flag, vector register and a 16 KiB scratch buffer.
 The PR and nightly runs share the seed, so every PR case is also a nightly case.
 A divergence only the nightly finds gets a curated case before it is added to
 the baseline, so the PR run reproduces every entry.
+
+## Toolchain canary
+
+CI floats on `stable`, so a new rustc or LLVM reaches main the day it ships.
+[`toolchain-canary.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/toolchain-canary.yml)
+runs the next release (`beta`) every Saturday at 07:20 UTC, about six weeks
+before it becomes stable. Dispatch it with `toolchain: nightly` to look further
+ahead. It does not pin the main toolchain.
+
+It runs, on ubuntu-24.04 and with `--locked`:
+
+- `cargo build --workspace --all-targets` and the workspace `cargo nextest run`
+  (same exclusions and retry as the Linux test lane);
+- `cargo clippy` with the CI lint set, report-only: the warning count goes in
+  the summary and never fails the run, since a new toolchain brings new lints;
+- a release `fission_cli` built with stable and with the canary toolchain, each
+  decompiling five small in-repo fixtures from `crates/fission-sleigh/testdata`
+  (nothing is executed). The output text of every function is hashed and
+  compared. Each side runs twice and a function that differs between its own
+  two runs is skipped, so only a difference the compiler caused is reported.
+
+It fails on a build error, a compiler crash (an ICE: "the compiler unexpectedly
+panicked", "internal compiler error", LLVM errors, a rustc signal), a test
+failure, or a function whose decompiled text differs between the two CLIs. A red
+run follows the usual scheduled-run rule: one `CI red: Toolchain canary` issue
+whose comments name the rustc version. The job summary says which of the four
+failed and lists the differing functions.
+
+When it is red:
+
+- an ICE, or a decompiled-output difference with no change in our code, is a
+  rustc or LLVM bug: reduce it and file it at `rust-lang/rust`, and link the
+  issue here;
+- a build error, test failure or output difference caused by a stricter check
+  or a behavior change is ours: adapt the code on main before beta ships.
+  Output that changed because the compiler exposed undefined or ordering-
+  dependent behavior is a decompiler bug, not a compiler one.
 
 ## Nightly FreshBench
 
