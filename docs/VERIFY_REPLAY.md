@@ -39,3 +39,7 @@ casts, basic arithmetic and bitwise expressions, and constant left shifts. It ma
 values to their recovered widths and preserves the recovered signedness.
 `replay_fixture.py` compares the resulting 32 bits with the fixture ABI.
 Unsupported HIR forms produce an error.
+
+For the oracle dependency matrix, common-mode blind spots, and offline fault-injection
+calibration suite (`python3 scripts/test/replay_fixture.py --calibrate`), see
+[VERIFY_ORACLE_CALIBRATION.md](VERIFY_ORACLE_CALIBRATION.md).
