@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/math_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/math_gcc_O2.exe`
 - Function: `bubble_sort`
 - Address: `0x1400015d0`
 - Corpus row or benchmark command:
