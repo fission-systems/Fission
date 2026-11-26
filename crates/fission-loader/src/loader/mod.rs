@@ -47,7 +47,7 @@ impl LoadedBinary {
     }
 
     /// Parse binary from bytes, with a language for formats whose bytes name
-    /// no processor (Intel HEX, Motorola S-record). Other formats ignore it.
+    /// no processor (Intel HEX, Motorola S-record, UF2). Other formats ignore it.
     pub fn from_bytes_with_language(
         data: Vec<u8>,
         path: String,

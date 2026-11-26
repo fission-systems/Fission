@@ -1,9 +1,9 @@
 //! Every loader path from raw bytes: format detection, then whichever parser
 //! claims the input (ELF, PE, Mach-O, COFF, TE, a.out, Intel HEX, S-record,
-//! MZ/NE, raw), with its symbol, debug-info and identity analysis. No magic
+//! UF2, MZ/NE, raw), with its symbol, debug-info and identity analysis. No magic
 //! gate, so the detector itself is fuzzed too.
 //!
-//! Formats that name no processor (Intel HEX, S-record) stop at
+//! Formats that name no processor (Intel HEX, S-record, UF2) stop at
 //! `LoadSpecNotFound` without a language, before their image is mapped, so
 //! such an input is loaded a second time under a fixed one to reach the
 //! mapping as well.

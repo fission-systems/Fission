@@ -301,9 +301,9 @@ fission_cli --language x86:LE:64:default --base 0x400000 disasm shellcode.bin --
 fission_cli --language ARM:LE:32:v8 --base 0x8000000 --entry 0x8000101 decomp firmware.bin --addr 0x8000100
 ```
 
-Intel HEX and Motorola S-record files describe where their bytes go but not
-what processor runs them, so they load only with `--language` (no `--base`: the
-records give the addresses). Each contiguous run of records becomes one
+Intel HEX, Motorola S-record and UF2 files describe where their bytes go but
+not what processor runs them, so they load only with `--language` (no `--base`:
+the records give the addresses). Each contiguous run of records becomes one
 section; a run ending past the language's address space, or a line that is not a
 record, fails the load. A start-address record (Intel HEX 03/05, S7/S8/S9) that
 lands on a record is the entry point and seeds `entry` (on ARM and MIPS the mode
@@ -313,9 +313,15 @@ false`), nothing is seeded, and functions are named with `--addr`. `patch`
 refuses these files: it writes the loaded bytes back out, and here they are the
 decoded image, not the text.
 
+A UF2 family ID names a chip, not an instruction set, so it is reported when
+`--language` is missing, not used to pick one. UF2 has no start address. For
+ARM, give a Thumb function's address with the low bit set (`--addr
+0x10000101`); an even address decodes as ARM.
+
 ```bash
 fission_cli --language ARM:LE:32:Cortex list firmware.hex
 fission_cli --language 8051:BE:16:default decomp firmware.srec --addr 0x0100
+fission_cli --language ARM:LE:32:Cortex decomp blink.uf2 --addr 0x10000101
 ```
 
 `--base` without `--language`, `--entry` without `--base` or outside the image,

@@ -1,6 +1,6 @@
 use super::{
     DataBuffer, LoadedBinary, coff, containers, elf,
-    formats::{aout, hex, mz_ne, te},
+    formats::{aout, hex, mz_ne, te, uf2},
     macho, pe,
 };
 use crate::prelude::*;
@@ -22,6 +22,7 @@ pub enum DetectedFormat {
     Ne,
     UnixAout,
     Te,
+    Uf2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,7 +68,7 @@ pub enum LoaderRoute {
 }
 
 /// A language the caller supplies for a format whose bytes name no processor
-/// (Intel HEX, Motorola S-record). Formats that carry their own architecture
+/// (Intel HEX, Motorola S-record, UF2). Formats that carry their own architecture
 /// ignore it; relabelling those is the caller's business.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ExplicitLanguage {
@@ -127,6 +128,7 @@ impl LoaderPipeline {
             DetectedFormat::Ne => mz_ne::NeLoader::parse(data, path),
             DetectedFormat::UnixAout => aout::UnixAoutLoader::parse(data, path),
             DetectedFormat::Te => te::TeLoader::parse(data, path),
+            DetectedFormat::Uf2 => uf2::Uf2Loader::parse_with_language(data, path, language),
         }
     }
 
@@ -162,6 +164,9 @@ impl LoaderPipeline {
         }
         if looks_like_macho(bytes) {
             return Ok(LoaderRoute::Executable(DetectedFormat::MachO));
+        }
+        if uf2::Uf2Loader::looks_like(bytes) {
+            return Ok(LoaderRoute::Executable(DetectedFormat::Uf2));
         }
         if hex::IntelHexLoader::looks_like(bytes) {
             return Ok(LoaderRoute::Executable(DetectedFormat::IntelHex));
@@ -282,6 +287,15 @@ mod tests {
             LoaderPipeline::detect(b":00000001FF\n").unwrap(),
             DetectedFormat::IntelHex
         );
+    }
+
+    #[test]
+    fn detects_uf2_before_the_text_record_formats() {
+        let mut block = vec![0u8; 512];
+        block[0..4].copy_from_slice(&0x0A32_4655u32.to_le_bytes());
+        block[4..8].copy_from_slice(&0x9E5D_5157u32.to_le_bytes());
+        block[508..512].copy_from_slice(&0x0AB1_6F30u32.to_le_bytes());
+        assert_eq!(LoaderPipeline::detect(&block).unwrap(), DetectedFormat::Uf2);
     }
 
     #[test]
