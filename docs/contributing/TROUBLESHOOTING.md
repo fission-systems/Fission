@@ -15,6 +15,42 @@ codebase and its docs assume.
 | Report counters disagree | Trace the counter back to `NirBuildStats`. |
 | Loader identifies unsupported container | Extract an executable child explicitly instead of raw-loading the container. |
 | A test passes locally but CI fails | Check LFS pulls, OS-specific paths, feature flags, and reusable workflow inputs. |
+| Disk nearly full | Stale `target-*` build dirs and finished worktrees: `cargo xtask cleanup` (see below). |
+
+### Reclaiming disk: `cargo xtask cleanup`
+
+Every worktree builds its own `target/` (often 5-30 GB), and scratch
+`target-*` dirs pile up at the repo root, so a machine with many worktrees
+fills its disk. `cargo xtask cleanup` lists what is safe to remove; it changes
+nothing unless `--apply` is given.
+
+```bash
+git fetch origin                              # "merged" is judged against origin/main
+cargo xtask cleanup                           # report: candidates, size, age, reason
+cargo xtask cleanup --apply                   # prints the removal list, then removes it
+cargo xtask cleanup --min-age-hours 1         # also take output written in the last day
+cargo xtask cleanup --include-main-target     # also consider the main checkout's target/
+```
+
+Candidates:
+
+- **Build dirs**: `target` and `target-*` directly inside the main checkout,
+  any worktree of this repo (wherever it lives), and any dir under
+  `.claude/worktrees/`. Kept if a process uses it (cwd, an open file of
+  cargo/rustc/rust-analyzer/`fission_*`, or a path on any command line), if
+  anything in it was written within `--min-age-hours` (default 24), or if it
+  is the main checkout's `target/` and `--include-main-target` is absent.
+  Symlinks are never followed or deleted.
+- **Worktrees** (`git worktree list`): the newest PR for the branch is merged
+  or closed (`gh pr list`; skipped with `--no-gh` or when `gh` is missing), or
+  HEAD is already in `origin/main`. Kept if dirty or with untracked files, if
+  any commit is on no remote ref, if locked, if a process's cwd is inside it,
+  or if git touched it within `--min-age-hours`. Removal is
+  `git worktree remove` (no `--force`) then `git worktree prune`; branches
+  are left alone.
+
+`~/fission-benchmark/*` sizes are printed as hints (`--hints DIR`,
+`--no-hints`); nothing there is ever removed.
 
 ## Glossary
 

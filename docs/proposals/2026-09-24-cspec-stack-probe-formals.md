@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
 - Function: `___chkstk_ms`, called by `_pei386_runtime_relocator`
 - Address: helper `0x140002810`; reported caller `0x140001c50`
 - Corpus row or benchmark command: Real PE32+ binary; full `fission_cli decomp --project` output and Clang syntax check. This compiler-runtime helper is not a source-defined semantic benchmark row.

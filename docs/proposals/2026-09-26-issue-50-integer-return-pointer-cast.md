@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe` (SHA-256 `55c57ee4705adcd8d470029b6cc0aab2d3d99bcf599f0c43b822a0f57bf95a03`)
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe` (SHA-256 `55c57ee4705adcd8d470029b6cc0aab2d3d99bcf599f0c43b822a0f57bf95a03`)
 - Function: `main`
 - Address: `0x140001664`
 - Corpus row or benchmark command: focused real-binary repro with `/tmp/fission-50-target/release/fission_cli decomp <binary> --addr 0x140001664 --layer {nir,hir} --no-header --no-warnings`; source is `fission-benchmark/corpus/dev/source/c/advanced_patterns.c:main`.

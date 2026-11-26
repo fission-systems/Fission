@@ -59,3 +59,52 @@ pub use xref_index::{
     build_xref_index, build_xref_index_with_options, push_pcode_layer, resolve_enclosing_function,
 };
 pub use xrefs::{OPERAND_INDEX_MNEMONIC, Xref, XrefDatabase, XrefType};
+
+/// Indices into `binary.functions` of the first non-import entry at each
+/// address, in list order.
+///
+/// The loader keeps every entry that claims an address -- an ELF symbol and
+/// the `.eh_frame` FDE for the same code are two entries -- and leaves the
+/// choice between them to the canonical views. A pass whose per-function work
+/// depends only on the address (decoding the code that starts there) does that
+/// work once per address, not once per entry.
+pub(crate) fn distinct_code_entries(binary: &fission_loader::loader::LoadedBinary) -> Vec<usize> {
+    let mut seen = std::collections::HashSet::with_capacity(binary.functions.len());
+    binary
+        .functions
+        .iter()
+        .enumerate()
+        .filter(|(_, function)| !function.is_import && seen.insert(function.address))
+        .map(|(index, _)| index)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use fission_loader::loader::{DataBuffer, FunctionInfo, LoadedBinaryBuilder};
+
+    #[test]
+    fn distinct_code_entries_keeps_the_first_non_import_entry_per_address_in_order() {
+        let mut binary =
+            LoadedBinaryBuilder::new("entries.bin".to_string(), DataBuffer::Heap(vec![0; 16]))
+                .format("ELF")
+                .arch_spec("x86:LE:64:default")
+                .is_64bit(true)
+                .build()
+                .expect("binary");
+        let entry = |address, is_import| FunctionInfo {
+            address,
+            is_import,
+            ..Default::default()
+        };
+        binary.functions = vec![
+            entry(0x30, false),
+            entry(0x10, true),  // an import at 0x10 ...
+            entry(0x10, false), // ... and code at the same address
+            entry(0x30, false), // the FDE beside the symbol at 0x30
+            entry(0x20, true),  // import only: nothing to decode
+            entry(0x10, false),
+        ];
+        assert_eq!(super::distinct_code_entries(&binary), vec![0, 2]);
+    }
+}

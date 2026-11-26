@@ -14,7 +14,7 @@ nondeterminism cheaply.
 |-------|------|
 | This tool | Broad-coverage local byte-diff + determinism gate, minutes not tens-of-minutes |
 | `local_decomp_observe.py` | Deep single-function before/after investigation |
-| DecBench full-dataset sweep ([`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md)) | The measurement quality claims cite (replaces the retired `fission-benchmark` docker loop, whose GitHub repository was deleted on 2026-11-24) |
+| FreshBench full M1 run ([`docs/BENCHMARK_FRESHBENCH.md`](../../docs/BENCHMARK_FRESHBENCH.md)) | The measurement quality claims cite |
 
 ### Workflow
 
@@ -37,10 +37,10 @@ stays fast enough to run on every slice.
 
 ### Policy
 
-Same as `local_decomp_observe.py` below: not a substitute for the DecBench
-full-dataset sweep. A clean `golden_corpus_check.py check` says "this
+Same as `local_decomp_observe.py` below: not a substitute for a full
+FreshBench run. A clean `golden_corpus_check.py check` says "this
 change didn't move anything in the curated corpus," not "this change is
-correct" -- it does not replace the DecBench measurement for quality
+correct" -- it does not replace the FreshBench measurement for quality
 claims (Core Rule 10).
 
 ## `local_decomp_observe.py`
@@ -50,7 +50,7 @@ Focused **before / after** decompilation capture for one function.
 | Layer | Role |
 |-------|------|
 | This tool | Cheap local NIR/HIR text + structural metrics + unified diff |
-| DecBench full-dataset sweep ([`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md)) | The measurement quality claims cite |
+| FreshBench full M1 run ([`docs/BENCHMARK_FRESHBENCH.md`](../../docs/BENCHMARK_FRESHBENCH.md)) | The measurement quality claims cite |
 
 Artifacts (gitignored): `benchmark/artifacts/local_observe/<session>/`
 
@@ -104,21 +104,9 @@ benchmark/artifacts/local_observe/<session>/
 
 ### Policy
 
-- Local observe is **not** a substitute for the DecBench full-dataset sweep.
+- Local observe is **not** a substitute for a full FreshBench run.
 - Do not promote `local_observe` results to an official ranking.
 - Prefer invariant language in commits; keep row identity in proposal docs only.
-
-## `decbench_sample_set_gate.py`
-
-Scores DecBench's sample-set (GED against the published source CFGs, types
-against DWARF) and refuses a drop below `decbench_sample_set_baseline.json`. The
-scoring is in `decbench_scoring.py`, which calls the `decbench` package; see
-[`docs/BENCHMARK_DECBENCH.md`](../../docs/BENCHMARK_DECBENCH.md) for prerequisites
-and for how to read a score change. Its tests:
-
-```bash
-~/fission-benchmark/.venv-decbench/bin/python -m unittest scripts/quality/test_decbench_scoring.py
-```
 
 ## `wbcq/`: behavioural-quotient evaluation (RFC #1093, P3)
 
@@ -129,7 +117,7 @@ decompiler-quality gate. It contains:
 - a corpus of step-function state machines and negative cases (`corpus/`);
 - the corpus builder;
 - a native ground truth (`ground_truth.py`);
-- a DecBench step-function selector;
+- a step-function selector over the FreshBench M1 binaries (`select_step_functions.py`);
 - the driver and summarizer (`evaluate.py`).
 
 Procedure and results:

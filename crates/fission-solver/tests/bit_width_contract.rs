@@ -5,7 +5,7 @@ fn solver_registration_preserves_bit_widths() {
     let mut solver = Solver::new();
     for width_bits in [1, 8, 16, 32, 64] {
         let id = solver.register_var(format!("width_{width_bits}"), width_bits);
-        assert_eq!(solver.nodes[&id].get_bit_width(), width_bits);
+        assert_eq!(solver.nodes()[&id].get_bit_width(), width_bits);
     }
 }
 
@@ -13,7 +13,7 @@ fn solver_registration_preserves_bit_widths() {
 fn solver_max_searches_the_registered_eight_bit_domain() {
     let mut solver = Solver::new();
     let id = solver.register_var("byte".to_string(), 8);
-    let byte = solver.nodes[&id].clone();
+    let byte = solver.nodes()[&id].clone();
     assert_eq!(solver.max(&byte), Some(0xff));
 }
 
@@ -22,7 +22,7 @@ fn signed_and_unsigned_comparisons_use_the_same_width_contract() {
     for (width_bits, sign_bit) in [(1, 1), (8, 0x80), (32, 0x8000_0000), (64, 1u64 << 63)] {
         let mut signed_solver = Solver::new();
         let x_id = signed_solver.register_var("x".to_string(), width_bits);
-        let x = signed_solver.nodes[&x_id].clone();
+        let x = signed_solver.nodes()[&x_id].clone();
         signed_solver.assert(SymExpr::Eq(
             Box::new(x.clone()),
             Box::new(SymExpr::new_const(sign_bit, width_bits)),
@@ -39,7 +39,7 @@ fn signed_and_unsigned_comparisons_use_the_same_width_contract() {
 
         let mut unsigned_solver = Solver::new();
         let x_id = unsigned_solver.register_var("x".to_string(), width_bits);
-        let x = unsigned_solver.nodes[&x_id].clone();
+        let x = unsigned_solver.nodes()[&x_id].clone();
         unsigned_solver.assert(SymExpr::Eq(
             Box::new(x.clone()),
             Box::new(SymExpr::new_const(sign_bit, width_bits)),

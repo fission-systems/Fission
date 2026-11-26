@@ -99,6 +99,7 @@ fn try_load_debug_companion(path: &Path, expected_crc: Option<u32>) -> Option<Lo
         super::super::types::DataBuffer::Heap(file_bytes),
         path.to_string_lossy().to_string(),
         false,
+        None,
     )
     .ok()?;
     let has_debug_info = loaded

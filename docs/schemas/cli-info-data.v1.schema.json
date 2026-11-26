@@ -35,6 +35,10 @@
           "type": "string",
           "pattern": "^0x[0-9a-f]+$"
         },
+        "entry_declared": {
+          "type": "boolean",
+          "description": "Present and false when the file states no entry point; `entry` is then 0x0 and names no code."
+        },
         "image_base": {
           "type": "string",
           "pattern": "^0x[0-9a-f]+$"

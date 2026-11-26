@@ -133,6 +133,8 @@ pub struct WindowsDebugger {
     pub(crate) hw_breakpoints: std::collections::BTreeMap<u64, u8>,
     /// A step off a breakpoint whose single-step exception has not arrived.
     pub(crate) step_off: Option<StepOffBreakpoint>,
+    /// Why the target last stopped: the label of the last reported event.
+    pub(crate) last_stop: Option<String>,
     #[cfg(test)]
     pub(crate) test_memory: Option<std::collections::BTreeMap<u64, u8>>,
 }
@@ -152,6 +154,7 @@ impl WindowsDebugger {
             pending_continue_status: None,
             hw_breakpoints: std::collections::BTreeMap::new(),
             step_off: None,
+            last_stop: None,
             #[cfg(test)]
             test_memory: None,
         }
@@ -286,10 +289,13 @@ impl WindowsDebugger {
         &mut self,
         timeout_ms: u32,
     ) -> FissionResult<Option<crate::debug::types::DebugEvent>> {
+        // A reported event leaves the whole process frozen until it is
+        // continued, so no further event can arrive: report none rather than
+        // fail. A session drains events after every command and may already
+        // have taken the one an `event` command is waiting for; that event was
+        // returned to the caller, and the target is `Suspended` on it.
         if self.pending_continue_status.is_some() {
-            return Err(FissionError::debug(
-                "Continue the pending Windows debug event before polling again",
-            ));
+            return Ok(None);
         }
 
         let mut raw = DEBUG_EVENT::default();
@@ -297,19 +303,6 @@ impl WindowsDebugger {
             Ok(()) => {
                 let (event, status) = self.process_debug_event(&raw);
                 self.pending_continue_status = Some(status);
-
-                if self.state.status == DebugStatus::Suspended {
-                    let thread_id = self
-                        .state
-                        .last_thread_id
-                        .or(self.state.current_thread_id)
-                        .or(self.state.main_thread_id);
-                    if let Some(thread_id) = thread_id {
-                        if let Ok(registers) = self.fetch_registers(thread_id) {
-                            self.state.registers = Some(registers);
-                        }
-                    }
-                }
 
                 // The common event enum intentionally omits raw Win32 events
                 // that carry no user-visible state. They still must be
@@ -323,6 +316,17 @@ impl WindowsDebugger {
                     Some(crate::debug::types::DebugEvent::ProcessExited { .. })
                 ) {
                     self.continue_pending_debug_event()?;
+                } else if event.is_some() && self.state.status == DebugStatus::Running {
+                    // Every thread is stopped until `ContinueDebugEvent`, a DLL
+                    // load or a new thread no less than a breakpoint. Saying
+                    // `Running` here told the caller it could wait for more.
+                    self.state.status = DebugStatus::Suspended;
+                }
+
+                // The cached registers belong to the selected thread, which a
+                // reported event has just made the event thread.
+                if self.state.status == DebugStatus::Suspended {
+                    self.refresh_selected_registers();
                 }
 
                 Ok(event)
@@ -339,10 +343,10 @@ impl WindowsDebugger {
             .state
             .attached_pid
             .ok_or_else(|| FissionError::debug("Not attached"))?;
+        // The event thread, never the selected one: Windows refuses to
+        // continue an event on any other thread.
         let tid = self
-            .state
-            .last_thread_id
-            .or(self.state.main_thread_id)
+            .event_thread_id()
             .ok_or_else(|| FissionError::debug("No thread id"))?;
         let status = self.pending_continue_status.unwrap_or(DBG_CONTINUE);
 
@@ -387,8 +391,6 @@ impl WindowsDebugger {
         let (evt, status) = match code {
             CREATE_PROCESS_DEBUG_EVENT => {
                 let info = unsafe { debug_event.u.CreateProcessInfo };
-                self.state.main_thread_id = Some(thread_id);
-                self.state.current_thread_id = Some(thread_id);
                 // Register main thread
                 self.state.threads.insert(
                     thread_id,
@@ -447,10 +449,17 @@ impl WindowsDebugger {
                 )
             }
             EXIT_THREAD_DEBUG_EVENT => {
-                self.state.threads.remove(&thread_id);
-                // If the current thread exited, fall back to main
-                if self.state.current_thread_id == Some(thread_id) {
-                    self.state.current_thread_id = self.state.main_thread_id;
+                // Removing the thread and moving the selection off it is the
+                // shared rule, applied below. A step off a breakpoint the
+                // thread never finished must not leave the breakpoint lifted.
+                if let Some(step) = self.step_off.filter(|step| step.thread_id == thread_id) {
+                    self.step_off = None;
+                    let still_set = self.state.breakpoints.get(&step.address).is_some_and(|bp| {
+                        bp.enabled && bp.kind == crate::debug::types::BreakpointKind::Software
+                    });
+                    if still_set {
+                        let _ = self.write_memory(step.address, &[0xCC]);
+                    }
                 }
                 (
                     Some(crate::debug::types::DebugEvent::ThreadExited { thread_id }),
@@ -631,7 +640,30 @@ impl WindowsDebugger {
             _ => (None, DBG_CONTINUE),
         };
 
+        // A reported event selects its thread; an absorbed one moves only the
+        // thread the event must be continued on. See `DebugState`'s
+        // thread-selection contract.
+        self.state.observe_event_thread(thread_id, evt.as_ref());
+        if let Some(event) = evt.as_ref() {
+            self.last_stop = Some(crate::debug::types::stop_reason_for_event(event));
+        }
+
         (evt, status)
+    }
+
+    /// Cache the selected thread's registers in the state, or clear the cache
+    /// when they cannot be read, so it never shows another thread's.
+    fn refresh_selected_registers(&mut self) {
+        self.state.registers = self
+            .state
+            .selected_thread_id()
+            .and_then(|thread_id| self.fetch_registers(thread_id).ok());
+    }
+
+    /// The thread a debug event is pending on: `ContinueDebugEvent` must name
+    /// it, and only it can be standing on a breakpoint it just hit.
+    pub(crate) fn event_thread_id(&self) -> Option<u32> {
+        self.state.last_thread_id.or(self.state.main_thread_id)
     }
 
     /// Attach an instruction decoder for disassembly and step-over.
@@ -680,8 +712,7 @@ impl WindowsDebugger {
             .map(|r| r.pc)
             .or_else(|| {
                 self.state
-                    .current_thread_id
-                    .or(self.state.main_thread_id)
+                    .selected_thread_id()
                     .and_then(|tid| self.fetch_registers(tid).ok())
                     .map(|r| r.pc)
             })
@@ -797,17 +828,17 @@ impl WindowsDebugger {
         &self.state.modules
     }
 
-    /// Switch the active thread for register/step operations
+    /// Select the thread register reads and writes, steps and stack
+    /// operations act on, until the next reported debug event selects that
+    /// event's thread.
     pub fn set_current_thread(&mut self, thread_id: u32) -> FissionResult<()> {
-        if self.state.threads.contains_key(&thread_id) {
-            self.state.current_thread_id = Some(thread_id);
-            Ok(())
-        } else {
-            Err(FissionError::debug(format!(
-                "Thread {} not found in tracked threads",
-                thread_id
-            )))
+        self.state
+            .select_thread(thread_id)
+            .map_err(FissionError::debug)?;
+        if self.state.status != DebugStatus::Running {
+            self.refresh_selected_registers();
         }
+        Ok(())
     }
 
     /// Suspend a thread by ID. Returns the previous suspend count.
@@ -1257,6 +1288,14 @@ impl ExecutionBackend for WindowsDebugger {
     fn get_state(&self) -> crate::debug::types::DebugState {
         self.state.clone()
     }
+
+    /// The last reported event's label while the target is stopped on it.
+    fn stop_reason(&self) -> Option<String> {
+        match self.state.status {
+            DebugStatus::Running | DebugStatus::Detached => None,
+            _ => self.last_stop.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1682,9 +1721,17 @@ mod tests {
                 stopped_at_breakpoint,
                 "launch did not reach the initial breakpoint"
             );
+            // Polling must not bypass an uncontinued debug event: it reports
+            // no new event (a frozen process raises none) and leaves the
+            // target suspended on the one it has, still to be continued.
             assert!(
-                debugger.poll_event(0).is_err(),
+                matches!(debugger.poll_event(0), Ok(None)),
                 "polling must not bypass an uncontinued debug event"
+            );
+            assert_eq!(
+                debugger.get_state().status,
+                crate::debug::types::DebugStatus::Suspended,
+                "the target stays suspended on the pending event"
             );
 
             let thread_id = debugger
@@ -1737,6 +1784,312 @@ mod tests {
         assert!(
             result.is_ok(),
             "native debugger launch/step path failed: {result:?}"
+        );
+    }
+
+    /// `process_debug_event` applies the shared thread-selection contract.
+    /// No process is involved; the name puts it in the pre-merge Windows job.
+    #[test]
+    fn windows_native_backend_event_thread_selection_without_a_process() {
+        let raw = |thread_id: u32, code| {
+            let mut event = DEBUG_EVENT::default();
+            event.dwProcessId = 1234;
+            event.dwThreadId = thread_id;
+            event.dwDebugEventCode = code;
+            event
+        };
+        let mut dbg = WindowsDebugger::new();
+        dbg.state.attached_pid = Some(1234);
+        dbg.process_debug_event(&raw(1, CREATE_PROCESS_DEBUG_EVENT));
+        assert_eq!(dbg.state.main_thread_id, Some(1));
+        assert_eq!(dbg.state.selected_thread_id(), Some(1));
+        dbg.process_debug_event(&raw(7, CREATE_THREAD_DEBUG_EVENT));
+        assert_eq!(dbg.state.selected_thread_id(), Some(7));
+
+        // Main selected explicitly; then thread 7 raises a breakpoint.
+        dbg.set_current_thread(1).expect("main is tracked");
+        let (event, _) =
+            dbg.process_debug_event(&exception_event(7, EXCEPTION_BREAKPOINT_CODE, 0x401000));
+        assert!(matches!(
+            event,
+            Some(DebugEvent::BreakpointHit { thread_id: 7, .. })
+        ));
+        assert_eq!(dbg.state.selected_thread_id(), Some(7), "the new stop wins");
+        assert_eq!(dbg.state.last_thread_id, Some(7));
+        assert_eq!(dbg.last_stop.as_deref(), Some("breakpoint:0x401000"));
+        assert!(dbg.set_current_thread(99).is_err());
+        assert_eq!(dbg.state.selected_thread_id(), Some(7));
+
+        // Thread 7 exits while selected: main is selected, 7 is gone, and
+        // the exit is still continued on thread 7.
+        dbg.process_debug_event(&raw(7, EXIT_THREAD_DEBUG_EVENT));
+        assert!(!dbg.state.threads.contains_key(&7));
+        assert_eq!(dbg.state.selected_thread_id(), Some(1));
+        assert_eq!(dbg.event_thread_id(), Some(7));
+        assert_eq!(dbg.last_stop.as_deref(), Some("thread-exited"));
+    }
+
+    /// The debuggee of
+    /// `windows_native_backend_thread_selection_follows_the_newest_stop`, run
+    /// in a child copy of this test binary. A worker thread -- never the
+    /// process's main thread -- raises a breakpoint the debugger did not set,
+    /// then runs on through four `nop`s, the second of which the debugger
+    /// patches with its own breakpoint. Outside a debugger it does nothing.
+    #[test]
+    #[ignore = "debuggee; launched by windows_native_backend_thread_selection_follows_the_newest_stop"]
+    fn windows_two_thread_debuggee_entry() {
+        if !unsafe { windows::Win32::System::Diagnostics::Debug::IsDebuggerPresent() }.as_bool() {
+            return;
+        }
+        let worker = std::thread::spawn(|| unsafe {
+            std::arch::asm!("int3", "nop", "nop", "nop", "nop");
+        });
+        worker.join().expect("debuggee worker thread");
+    }
+
+    /// Wait for the next reported event and check the thread-selection
+    /// contract on it: a reported event selects its thread, an exiting thread
+    /// is never left selected, and the stop reason names the event.
+    fn next_checked_event(
+        debugger: &mut dyn ExecutionBackend,
+        deadline: std::time::Instant,
+    ) -> FissionResult<DebugEvent> {
+        while std::time::Instant::now() < deadline {
+            let Some(event) = debugger.poll_event(500)? else {
+                continue;
+            };
+            let state = debugger.get_state();
+            match &event {
+                DebugEvent::ThreadExited { thread_id } => {
+                    assert!(!state.threads.contains_key(thread_id), "{event:?}");
+                    assert_ne!(state.selected_thread_id(), Some(*thread_id), "{event:?}");
+                }
+                DebugEvent::ProcessExited { .. } => {
+                    assert_eq!(state.status, DebugStatus::Terminated);
+                }
+                _ => {
+                    assert_eq!(
+                        state.current_thread_id, state.last_thread_id,
+                        "a reported event selects its own thread: {event:?}"
+                    );
+                    if let DebugEvent::BreakpointHit { thread_id, .. }
+                    | DebugEvent::SingleStep { thread_id }
+                    | DebugEvent::ThreadCreated { thread_id } = &event
+                    {
+                        assert_eq!(state.selected_thread_id(), Some(*thread_id), "{event:?}");
+                    }
+                    assert_eq!(state.status, DebugStatus::Suspended, "{event:?}");
+                }
+            }
+            assert_eq!(
+                debugger.stop_reason(),
+                Some(crate::debug::types::stop_reason_for_event(&event)),
+                "the stop reason names the event just reported"
+            );
+            return Ok(event);
+        }
+        Err(FissionError::debug("timed out waiting for a debug event"))
+    }
+
+    /// Continue past every event until one matches; returns it, stopped.
+    fn continue_until(
+        debugger: &mut dyn ExecutionBackend,
+        what: &str,
+        mut wanted: impl FnMut(&DebugEvent, &DebugState) -> FissionResult<bool>,
+    ) -> FissionResult<DebugEvent> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        loop {
+            let event = next_checked_event(debugger, deadline)
+                .map_err(|e| FissionError::debug(format!("{what}: {e}")))?;
+            if wanted(&event, &debugger.get_state())? {
+                return Ok(event);
+            }
+            if matches!(event, DebugEvent::ProcessExited { .. }) {
+                return Err(FissionError::debug(format!(
+                    "{what}: the process exited first"
+                )));
+            }
+            debugger.continue_execution()?;
+        }
+    }
+
+    /// The thread a new stop happened on is the one registers, state and stop
+    /// reason describe; an explicit switch holds until the next stop; polling
+    /// a frozen target changes nothing; an exited thread is never selected.
+    #[test]
+    fn windows_native_backend_thread_selection_follows_the_newest_stop() {
+        let exe = std::env::current_exe().expect("test binary path");
+        let args = [
+            "windows_two_thread_debuggee_entry",
+            "--ignored",
+            "--test-threads=1",
+        ]
+        .map(String::from);
+        let mut debugger: Box<dyn ExecutionBackend> = Box::new(WindowsDebugger::new());
+
+        let result = (|| -> FissionResult<()> {
+            let debugger = debugger.as_mut();
+            debugger.launch(exe.to_str().expect("UTF-8 test binary path"), &args)?;
+
+            // 1. The loader breakpoint, on the main thread.
+            let loader = continue_until(debugger, "loader breakpoint", |event, _| {
+                Ok(matches!(event, DebugEvent::BreakpointHit { .. }))
+            })?;
+            let DebugEvent::BreakpointHit {
+                address: loader_bp,
+                thread_id: main,
+            } = loader
+            else {
+                unreachable!()
+            };
+            let state = debugger.get_state();
+            assert_eq!(
+                state.main_thread_id,
+                Some(main),
+                "the loader breaks on main"
+            );
+            assert_eq!(state.selected_thread_id(), Some(main));
+            assert_eq!(debugger.fetch_registers(main)?.pc, loader_bp + 1);
+            assert_eq!(state.registers.as_ref().map(|r| r.pc), Some(loader_bp + 1));
+
+            // Polling while frozen: nothing new, nothing changes.
+            assert!(matches!(debugger.poll_event(0), Ok(None)));
+            let after_poll = debugger.get_state();
+            assert_eq!(after_poll.status, DebugStatus::Suspended);
+            assert_eq!(after_poll.selected_thread_id(), Some(main));
+            assert_eq!(
+                debugger.stop_reason(),
+                Some(format!("breakpoint:0x{loader_bp:x}"))
+            );
+
+            // 2. The worker's own INT3: a breakpoint raised by a thread
+            // other than main and other than the one selected.
+            debugger.continue_execution()?;
+            let raised = continue_until(debugger, "worker INT3", |event, _| {
+                Ok(
+                    matches!(event, DebugEvent::BreakpointHit { thread_id, .. } if *thread_id != main),
+                )
+            })?;
+            let DebugEvent::BreakpointHit {
+                address: int3,
+                thread_id: worker,
+            } = raised
+            else {
+                unreachable!()
+            };
+            let state = debugger.get_state();
+            assert!(state.threads.contains_key(&worker));
+            assert_eq!(state.selected_thread_id(), Some(worker));
+            assert_eq!(state.last_thread_id, Some(worker));
+            let worker_regs = debugger.fetch_registers(worker)?;
+            assert_eq!(worker_regs.pc, int3 + 1, "past the INT3 it raised");
+            assert_eq!(state.registers.as_ref().map(|r| r.pc), Some(int3 + 1));
+
+            // 3. An explicit switch to main: registers and the cached state
+            // follow it; the stop and the event thread do not.
+            debugger.set_current_thread(main)?;
+            let state = debugger.get_state();
+            assert_eq!(state.selected_thread_id(), Some(main));
+            assert_eq!(state.last_thread_id, Some(worker));
+            let main_regs = debugger.fetch_registers(main)?;
+            assert_ne!(main_regs.pc, worker_regs.pc);
+            assert_eq!(state.registers.as_ref().map(|r| r.pc), Some(main_regs.pc));
+            assert_eq!(
+                debugger.stop_reason(),
+                Some(format!("breakpoint:0x{int3:x}"))
+            );
+            assert!(matches!(debugger.poll_event(0), Ok(None)));
+            assert_eq!(debugger.get_state().selected_thread_id(), Some(main));
+            assert!(debugger.set_current_thread(u32::MAX).is_err());
+            assert_eq!(debugger.get_state().selected_thread_id(), Some(main));
+
+            // A register write reaches the selected thread and no other.
+            let r15 = main_regs.get("R15").expect("x64 debuggee");
+            let mut written = main_regs.clone();
+            written.set("R15", r15 ^ 0x5a5a_5a5a);
+            debugger.set_registers(main, &written)?;
+            assert_eq!(
+                debugger.fetch_registers(main)?.get("R15"),
+                Some(r15 ^ 0x5a5a_5a5a)
+            );
+            assert_eq!(
+                debugger.fetch_registers(worker)?.get("R15"),
+                worker_regs.get("R15")
+            );
+            debugger.set_registers(main, &main_regs)?;
+            assert_eq!(debugger.fetch_registers(main)?.get("R15"), Some(r15));
+
+            // 4. Our breakpoint on the worker's path, set while main is
+            // selected: the worker's stop there selects the worker.
+            let patched = int3 + 2;
+            debugger.set_sw_breakpoint(patched)?;
+            debugger.continue_execution()?;
+            let hit = continue_until(debugger, "breakpoint on the worker", |event, _| {
+                Ok(
+                    matches!(event, DebugEvent::BreakpointHit { address, .. } if *address == patched),
+                )
+            })?;
+            assert!(
+                matches!(hit, DebugEvent::BreakpointHit { thread_id, .. } if thread_id == worker)
+            );
+            let state = debugger.get_state();
+            assert_eq!(
+                state.selected_thread_id(),
+                Some(worker),
+                "the new stop wins"
+            );
+            assert_eq!(
+                debugger.fetch_registers(worker)?.pc,
+                patched,
+                "back on the breakpoint"
+            );
+            assert_eq!(state.breakpoints[&patched].hits, 1);
+
+            // Stepping main while the worker stands on our breakpoint would
+            // run that INT3 again: refused, and nothing moves.
+            debugger.set_current_thread(main)?;
+            assert!(debugger.single_step().is_err());
+            assert_eq!(debugger.get_state().status, DebugStatus::Suspended);
+            assert!(matches!(debugger.poll_event(0), Ok(None)));
+
+            // 5. Continue with the worker selected: it steps off the
+            // breakpoint without a second hit, finishes and exits, and the
+            // selection moves off it.
+            debugger.set_current_thread(worker)?;
+            debugger.continue_execution()?;
+            continue_until(debugger, "worker exit", |event, _| {
+                if matches!(event, DebugEvent::BreakpointHit { address, .. } if *address == patched)
+                {
+                    return Err(FissionError::debug("the breakpoint was hit twice"));
+                }
+                Ok(matches!(event, DebugEvent::ThreadExited { thread_id } if *thread_id == worker))
+            })?;
+            let state = debugger.get_state();
+            let selected = state
+                .selected_thread_id()
+                .expect("a live thread is selected");
+            assert_ne!(selected, worker);
+            assert!(state.threads.contains_key(&selected));
+            debugger.fetch_registers(selected)?;
+            assert!(
+                state.breakpoints[&patched].enabled,
+                "re-armed after the step-off"
+            );
+
+            // 6. Process exit.
+            debugger.continue_execution()?;
+            continue_until(debugger, "process exit", |event, _| {
+                Ok(matches!(event, DebugEvent::ProcessExited { .. }))
+            })?;
+            assert_eq!(debugger.get_state().status, DebugStatus::Terminated);
+            assert_eq!(debugger.stop_reason(), Some("exited".to_string()));
+            Ok(())
+        })();
+
+        let _ = debugger.terminate();
+        assert!(
+            result.is_ok(),
+            "thread selection on a live target failed: {result:?}"
         );
     }
 

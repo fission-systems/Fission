@@ -915,7 +915,7 @@ impl<'a> Evaluator<'a> {
                 if a_node.is_some() || b_node.is_some() {
                     use fission_solver::SymExpr;
                     let a_expr = a_node
-                        .and_then(|id| self.solver.nodes.get(&id).cloned())
+                        .and_then(|id| self.solver.nodes().get(&id).cloned())
                         .unwrap_or_else(|| {
                             SymExpr::new_const(
                                 a,
@@ -923,7 +923,7 @@ impl<'a> Evaluator<'a> {
                             )
                         });
                     let b_expr = b_node
-                        .and_then(|id| self.solver.nodes.get(&id).cloned())
+                        .and_then(|id| self.solver.nodes().get(&id).cloned())
                         .unwrap_or_else(|| {
                             SymExpr::new_const(
                                 b,

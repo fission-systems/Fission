@@ -301,6 +301,23 @@ fission_cli --language x86:LE:64:default --base 0x400000 disasm shellcode.bin --
 fission_cli --language ARM:LE:32:v8 --base 0x8000000 --entry 0x8000101 decomp firmware.bin --addr 0x8000100
 ```
 
+Intel HEX and Motorola S-record files describe where their bytes go but not
+what processor runs them, so they load only with `--language` (no `--base`: the
+records give the addresses). Each contiguous run of records becomes one
+section; a run ending past the language's address space, or a line that is not a
+record, fails the load. A start-address record (Intel HEX 03/05, S7/S8/S9) that
+lands on a record is the entry point and seeds `entry` (on ARM and MIPS the mode
+bit is ignored for that check). Without one there is no entry point: `info`
+prints `Entry: none` (`--json`: `"entry": "0x0"` with `"entry_declared":
+false`), nothing is seeded, and functions are named with `--addr`. `patch`
+refuses these files: it writes the loaded bytes back out, and here they are the
+decoded image, not the text.
+
+```bash
+fission_cli --language ARM:LE:32:Cortex list firmware.hex
+fission_cli --language 8051:BE:16:default decomp firmware.srec --addr 0x0100
+```
+
 `--base` without `--language`, `--entry` without `--base` or outside the image,
 and a headerless file given only `--language` each fail with what to add.
 Commands that load the file their own way (`sandbox`, `verify`, `call`, `db`,
@@ -317,7 +334,11 @@ fission_cli api memcpy --32 --json
 ```
 
 `whatis` answers from the typed program-metadata snapshot (`fission-analysis-db`)
-plus the DWARF line table. `types` lists what the loader recovered from the
+plus the DWARF line table. A malformed loader row (a section or symbol whose
+range runs past the end of the address space, say) is left out of that snapshot
+together with the rows that reference it; `whatis --json` and `inventory
+program-metadata` then list each such row under `rejected_rows` with its
+reasons, and the rest of the program is answered as usual. `types` lists what the loader recovered from the
 binary's own metadata; each type names the analysis that produced it
 (`source`: `cpp_rtti`, `dwarf`, `pdb`, `go`, `rust_vtable`, `objc`, `swift`,
 `pe_header`, `elf_header`, `te_header`). Objective-C, Swift and Rust-vtable
@@ -393,6 +414,20 @@ Keep stdin open while choosing commands from prior responses. Use
 `event --timeout-ms 1000` to wait for a native stop or process-exit event. If
 detaching fails during shutdown, the final state is marked unknown and includes
 the last observed state rather than reporting the target as suspended.
+
+Every frame's `state` names one thread. `thread_id` is the selected thread, and
+`pc` and `regs`, `set-reg`, `step` and `stack-peek` act on it. `event_thread_id`
+raised the stop that `stop` describes (for example `breakpoint:0x401000`,
+`stepped`, `thread-exited`, `exited`; `null` on the Linux and macOS native
+backends, which do not report one yet). A new reported event selects the thread
+that raised it, so after a breakpoint on a worker `thread_id`, `pc` and `stop`
+describe that worker even if another thread was selected before. `switch-thread`
+selects another live thread until the next reported event. Polling a stopped
+target with `event` reports no event and changes nothing. A thread that exits
+is never left selected: the selection falls back to the main thread, else the
+lowest live thread. On Windows, `step` with a thread selected other than the
+event thread is refused while the event thread stands on one of the session's
+breakpoints; `continue` or step that thread first.
 
 The module report keeps runtime mapping ranges and file offsets separate from
 ELF analysis VAs. A resolved ELF transform includes `load_bias` and the formula
@@ -534,6 +569,39 @@ The default x86-64 Linux HLE path supplies bounded runtime guard/header storage
 before main; it does not implement full module TLS. Stack-check failure halts
 with conventional status 134 without simulating guest SIGABRT delivery. See the
 measured [crackme workflow](CRACKME_WORKFLOW.md) for a complete solve and replay.
+
+## Evidence Command
+
+Runtime observations are kept in their own file and read only when asked for.
+`decomp` and every other command ignore them (ADR 0020).
+
+```sh
+fission_cli sandbox ./app.elf --indirect-trace-out run1.json
+fission_cli sandbox ./app.elf --indirect-trace-out run2.json -- other
+fission_cli evidence import ./app.elf run1.json run2.json --store app.evidence.json
+fission_cli evidence explain ./app.elf --addr 0x10012a0 --store app.evidence.json --json
+```
+
+- `--indirect-trace-out` records each distinct indirect call and jump with the
+  bytes at both ends. Without it the compiled blocks carry no callback. It
+  cannot be combined with `--sym-explore`, which forces paths, or
+  `--restore-snapshot`. The trace holds a digest of the arguments, mocked input
+  and instruction budget, not their values; it does hold code addresses and
+  code bytes.
+- `import` refuses a trace of another image (content hash, language or compiler
+  spec) and writes nothing if any given trace is refused. Importing a trace
+  again adds nothing. An address becomes a binary address only if the observed
+  bytes equal the file's; otherwise it is reported as run-time code or
+  unattributed. A capture that did not reach the guest's exit marks every claim.
+- `explain` lists the indirect sites of the function containing `--addr`, the
+  targets the static lift connected, and the observed targets with producer,
+  run, verification status and artifact record. `target_set` is always `open`:
+  a target nobody observed remains possible.
+
+Limits of this first version: one guest process with its mappings as loaded
+(code in memory mapped at run time stays unattributed), executable sections
+only, and one JSON evidence file with no coordination between concurrent
+`import`s.
 
 ## Verify Command
 
@@ -1117,7 +1185,21 @@ apply changes. `show`, `history`, and `diff` never create or rewrite a project.
 - Writers hold `<project>.lock` throughout read/edit/save. Another cooperating
   writer fails rather than overwriting a concurrent edit. A process crash can
   leave a lock: stop or confirm the writer has exited before removing that
-  lock. External editors do not participate in this lock protocol.
+  lock. A writer whose lock was removed while it ran refuses to save and does
+  not delete the next writer's lock.
+- Every save is a compare-and-swap against the revision that was read (a
+  blake3 digest of the file plus file identity and timestamps); a stale save
+  fails with a conflict and leaves the file untouched. Between Fission
+  writers, which all honour the lock, this prevents lost updates.
+- External editors and tools do not take the lock, and the guarantee against
+  them is narrower: a change completed before Fission compares is detected,
+  but a change landing between the comparison and the rename is overwritten.
+  Atomic replacement is not atomic compare-and-replace; no portable
+  filesystem primitive provides that. Creating a project that does not exist
+  yet is the exception: it uses an exclusive hard link and never overwrites a
+  file created concurrently (on filesystems without hard links it falls back
+  to rename, with the same window). Do not edit a project file by hand while
+  a Fission writer may be running. Network filesystems are untested.
 - Saving syncs a temporary file beside the destination, then renames it over
   the project. A failed save preserves the committed project; a symlink
   destination is refused. Existing permissions are retained. This is atomic
@@ -1126,8 +1208,9 @@ apply changes. `show`, `history`, and `diff` never create or rewrite a project.
 - Undo/redo checks that touched decisions still match the recorded revision.
   A conflicting manual edit refuses the entire operation without partial
   changes. Malformed revision cursors/IDs are rejected on read and save.
-- Library callers use `ProjectLock` across read/edit/`record_edit`/write to
-  record a transaction. Low-level setters remain usable for constructing a
+- Library callers use `ProjectLock` across read/edit/`record_edit`/
+  `write_if_revision` to record a transaction, or `Project::commit_edit`
+  (read without the lock, commit under it, retry on conflict). Low-level setters remain usable for constructing a
   project; setters alone do not create revisions. Watchpoint changes are
   supported in the project journal; this milestone adds no watchpoint `db`
   subcommand.
@@ -1377,7 +1460,7 @@ fission_cli inventory function-facts app.exe \
 
 ### Benchmark-adjacent decomp workflow
 
-For quality measurement, use DecBench; see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md).
+For quality measurement, use FreshBench; see [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md).
 
 `fission_cli --benchmark` is a decomp-output timing flag. It is not the benchmark suite driver.
 

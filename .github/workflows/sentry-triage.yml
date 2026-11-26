@@ -1,0 +1,88 @@
+name: Sentry triage
+
+# Files GitHub issues for CI defects Sentry recorded (scripts/ci/sentry_triage.py,
+# "Sentry triage" in docs/ISSUE_PR_WORKFLOW.md). Every run previews read-only:
+# the would-be issues go to the job summary and an artifact. Issues are filed
+# only by the `file` job, which runs only when the repository variable
+# SENTRY_TRIAGE_ENABLED is 'true', and only on main of this repository. No
+# pull_request or fork trigger: the jobs hold the Sentry token.
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+# One run at a time, never cancelled midway: dedup reads what the last run filed.
+concurrency:
+  group: sentry-triage
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    name: Preview (dry run)
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout; compare the reported commit with main
+      issues: read # dedup markers and the daily count; label list
+      actions: read # the reported run must exist and match the commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            scripts/ci
+
+      - name: Triage (dry run)
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/sentry_triage.py --summary "$GITHUB_STEP_SUMMARY" --out sentry-triage.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: sentry-triage-preview
+          path: sentry-triage.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  file:
+    name: File issues
+    needs: [preview]
+    if: >-
+      vars.SENTRY_TRIAGE_ENABLED == 'true' &&
+      github.repository == 'fission-systems/Fission' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout; compare the reported commit with main
+      issues: write # create the issue (labels must already exist)
+      actions: read # the reported run must exist and match the commit
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github
+            scripts/ci
+
+      - name: Triage and file
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SENTRY_TRIAGE_ENABLED: ${{ vars.SENTRY_TRIAGE_ENABLED }}
+        run: python3 scripts/ci/sentry_triage.py --create --summary "$GITHUB_STEP_SUMMARY" --out sentry-triage.json
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: sentry-triage-filed
+          path: sentry-triage.json
+          if-no-files-found: ignore
+          retention-days: 30

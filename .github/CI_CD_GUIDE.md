@@ -8,7 +8,7 @@ define which jobs run.
 |---|---|---|
 | Pull request, merge group, or main push | [CI](workflows/ci.yml) | Check `Detect changes` for the event's base/head and selected lanes. Check `CI Summary` for the result of every required lane. |
 | Scheduled or manual extended validation | [CI Heavy Validation](workflows/ci-heavy.yml) | Check `Heavy Validation Summary` for platform builds and tests, feature compilation, coverage, and advisories. |
-| Scheduled or manual corpus validation | [DecBench sweep](workflows/decbench-sweep.yml) | Check shard coverage and compare with a compatible main run. Use the [DecBench guide](../docs/BENCHMARK_DECBENCH.md) to interpret artifacts. |
+| Scheduled or manual corpus validation | [FreshBench sweep](workflows/freshbench-sweep.yml) | Check shard coverage and compare with a compatible main run. Use the [FreshBench guide](../docs/BENCHMARK_FRESHBENCH.md) to interpret artifacts. |
 | Scheduled or manual diagnostic checks | [Decompiler determinism](workflows/determinism.yml) and [Fuzz](workflows/fuzz.yml) | Check the job summary and any associated `ci-red` issue on main. |
 | Release preparation | [Prepare Release PR](workflows/prepare-release.yml) | Review the `release: vX.Y.Z` PR and its drafted notes; the run summary shows the draft. |
 | Intentional release | [Release Tag (CI green)](workflows/release-tag.yml) | Follow the [release checklist](../docs/RELEASE.md). |

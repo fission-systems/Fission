@@ -61,7 +61,7 @@ midend/
 ## Anti-Patterns
 
 - Do not add alternate telemetry payloads outside `NirBuildStats`.
-- Do not fix structuring bugs only in `printer.rs`.
+- Do not fix structuring bugs only in `render/printer/`.
 - Do not skip large-sample validation when changing rejection/acceptance logic.
 - Do not prevent regressions with downstream workarounds or sample-specific heuristics (address guards, hard-coded function names, etc.). Fix the root cause at the canonical owner (builder, normalize, or structuring) using invariant-based algorithms (CFG, dominance, def-use chains, type-system rules). A builder-level fix that stops the wrong binding from being created is better than a normalize pass that tries to clean it up later.
 - Do not implement an AI-proposed rule until it has been translated into an invariant owned by an existing builder/materialize/normalize/structuring/type-data component. Prompt output is not an owner.
@@ -74,7 +74,7 @@ midend/
 
 Before adding semantic-layer production code, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](../../../../docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) and apply [`ADR 0006`](../../../../docs/adr/0006-decompiler-quality-change-gate.md). The proposal must capture the row anchor, owner proof, invariant proof, and validation matrix.
 
-Extend the existing builder/materialize/normalize/structuring/type-data owner by default. Add a new pass, helper, or metric only after proving that no current owner covers the invariant. Targeted tests are required, but success also needs the crate-level gate, focused row rerun, and DecBench regression evidence.
+Extend the existing builder/materialize/normalize/structuring/type-data owner by default. Add a new pass, helper, or metric only after proving that no current owner covers the invariant. Targeted tests are required, but success also needs the crate-level gate, focused row rerun, and FreshBench regression evidence ([`docs/BENCHMARK_FRESHBENCH.md`](../../../../docs/BENCHMARK_FRESHBENCH.md)).
 
 ## Regression Prevention
 
@@ -83,15 +83,15 @@ Every semantic fix must pass **both** the targeted unit test and the broader gat
 1. **Anchor the row:** Before fixing, record source file, binary, address, function name, current behavior status, semantic/static scores, and top missing features.
 2. **Add builder-level synthetic regression tests:** When a real binary sample reveals a bug, add the smallest invariant-based test that captures it (e.g., `loop_carried_gpr32_update_with_prior_wide_def_does_not_rebind_param`).
 3. **Gate on crate-level tests:** Run `cargo nextest run -p fission-pcode`. If a pre-existing failure blocks the gate, mark it `#[ignore]` with a ticket or maintain an allowlist so new regressions are never masked.
-4. **Re-run the motivating row:** Re-run the exact DecBench row (gate `--dump`) or real-binary decomp with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`), and diff the output and its scores.
-5. **Check for cross-sample regressions:** After a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress; report total distance next to the perfect count.
+4. **Re-run the motivating row:** Re-run the exact FreshBench row (`<build>/<project>/<binary>` and address, decompiled from the stripped copy) or real-binary decomp with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`), and diff the output and its scores.
+5. **Check for cross-sample regressions:** After a focused improvement, run `freshbench sweep run` on a slice and then the full M1 corpus, and compare with `sweep diff` (output hashes before scores). Existing perfect rows must not regress; report total or mean distance next to the perfect count.
 
 ### Pre-merge checklist
 
 - [ ] Targeted unit test passes (`cargo nextest run -p fission-pcode <filter>`)
 - [ ] Crate-level unit tests pass (pre-existing failures explicitly called out)
-- [ ] The motivating DecBench row shows the improvement with caches disabled
-- [ ] No regression on the broader DecBench measurement (total distance next to perfect count)
+- [ ] The motivating FreshBench row shows the improvement with caches disabled
+- [ ] No regression on the full FreshBench M1 run (distance next to perfect count)
 - [ ] `cargo check -p fission-pcode` and `cargo build -p fission-cli --release` are clean (modulo existing warnings)
 
 ## Validation

@@ -1572,6 +1572,7 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             None,
             false,
+            None,
         )
     }
 
@@ -1592,6 +1593,7 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             Some(&mut seed),
             true,
+            None,
         )?;
         Ok((decoded, seed))
     }
@@ -1614,7 +1616,40 @@ impl RuntimeSleighFrontend {
             initial_context_override,
             seed.as_mut(),
             false,
+            None,
         )
+    }
+
+    /// Lift as [`Self::lift_raw_pcode_function_with_context_and_memory_context`]
+    /// (capturing a [`RawDecodeSeed`] when `capture_seed`), and also return
+    /// the instructions this lift decoded itself, with the bytes each read,
+    /// for an [`InstructionReuse`].
+    pub fn lift_raw_pcode_function_recording(
+        &self,
+        bytes: &[u8],
+        entry_address: u64,
+        contract: DecodeContract,
+        memory_context: &DecodeMemoryContext,
+        initial_context_override: Option<PackedContextOverride>,
+        capture_seed: bool,
+    ) -> Result<(
+        DecodedPcodeFunction,
+        Option<RawDecodeSeed>,
+        InstructionRecords,
+    )> {
+        let mut seed = capture_seed.then(|| RawDecodeSeed::new(self, bytes, entry_address));
+        let mut records = InstructionRecords::default();
+        let decoded = self.lift_raw_pcode_function_impl(
+            bytes,
+            entry_address,
+            contract,
+            memory_context,
+            initial_context_override,
+            seed.as_mut(),
+            capture_seed,
+            Some(&mut records),
+        )?;
+        Ok((decoded, seed, records))
     }
 
     fn lift_raw_pcode_function_impl(
@@ -1626,6 +1661,7 @@ impl RuntimeSleighFrontend {
         initial_context_override: Option<PackedContextOverride>,
         mut seed: Option<&mut RawDecodeSeed>,
         capture: bool,
+        mut records: Option<&mut InstructionRecords>,
     ) -> Result<DecodedPcodeFunction> {
         if bytes.is_empty() {
             bail!("No function bytes available at 0x{:x}", entry_address);
@@ -1702,13 +1738,30 @@ impl RuntimeSleighFrontend {
             };
             let raw = match reused {
                 Some(raw) => raw,
-                None => self
-                    .decode_instruction_and_lift_with_context_override(
-                        remaining,
-                        current,
-                        context_override,
-                    )
-                    .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?,
+                None => {
+                    let reads = spine::compiled_table::LiftReads::default();
+                    let raw = self
+                        .decode_instruction_and_lift_reading(
+                            remaining,
+                            current,
+                            context_override,
+                            records.is_some().then_some(&reads),
+                        )
+                        .map_err(|err| anyhow!("decode failed at 0x{:x}: {:#}", current, err))?;
+                    if let Some(records) = records.as_deref_mut() {
+                        if let Some(prefix) =
+                            reads.reproducible_prefix(raw.0.length, remaining.len())
+                        {
+                            records.push(
+                                current,
+                                context_override,
+                                &remaining[..prefix],
+                                raw.0.clone(),
+                            );
+                        }
+                    }
+                    raw
+                }
             };
             if capture {
                 if let Some(seed) = seed.as_mut() {
@@ -2675,6 +2728,7 @@ mod raw_seed_lift_tests {
                     address.context_override,
                     Some(&mut seed),
                     false,
+                    None,
                 )
                 .unwrap();
             assert_eq!(replay, baseline, "{language}");
@@ -2822,5 +2876,74 @@ mod raw_seed_lift_tests {
                 && op.inputs[1].space_id == ea.space_id
                 && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
+    }
+
+    /// `attach variables` tables with `_` holes keep their positions: the
+    /// register a selector names is the one at that index. Dropping the holes
+    /// moved every later entry down, so `casp w2, w3, w4, w5` lifted as
+    /// `casp w2, w5, w4, w9` (fission-systems/Fission#1391).
+    #[test]
+    fn aarch64_casp_pair_registers_survive_attach_table_holes() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        for (word, wide, name) in [
+            (0x0822_7c24_u32, 4_u32, "casp w2, w3, w4, w5, [x1]"),
+            (0x4822_7c24, 8, "casp x2, x3, x4, x5, [x1]"),
+        ] {
+            let (decoded, ops, len, _) = frontend
+                .decode_instruction_and_lift_with_context_override(
+                    &word.to_le_bytes(),
+                    0x100000,
+                    None,
+                )
+                .unwrap_or_else(|error| panic!("lift {name}: {error:#}"));
+            assert_eq!(len, 4);
+            assert_eq!(
+                format!("{} {}", decoded.mnemonic, decoded.operands_text),
+                name
+            );
+            let mut registers: Vec<u64> = ops
+                .iter()
+                .flat_map(|op| op.inputs.iter().chain(op.output.as_ref()))
+                .filter(|vn| fission_pcode_ir::space::is_register_space_id(vn.space_id))
+                // x0 is at 0x4000, one 8-byte slot per register; x1 is the base.
+                .filter(|vn| vn.offset >= 0x4010 && vn.size >= wide.min(4))
+                .map(|vn| (vn.offset - 0x4000) / 8)
+                .collect();
+            registers.sort_unstable();
+            registers.dedup();
+            assert_eq!(registers, [2, 3, 4, 5], "{name}: {ops:#?}");
+        }
+    }
+
+    /// x86-32 `mov r32, crN` attaches `[ CR0 _ CR2 CR3 CR4 _ _ _ ]`: CR2 is
+    /// selector 2 and CR1 is no register, so that encoding is invalid (#1391).
+    #[test]
+    fn x86_32_control_register_holes_keep_positions_and_reject_cr1() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("x86:LE:32:default").expect("x86-32 frontend");
+        let decode = |bytes: &[u8]| {
+            frontend.decode_instruction_and_lift_with_context_override(bytes, 0x100000, None)
+        };
+        for (bytes, text) in [
+            ([0x0f, 0x20, 0xd0], "mov EAX, CR2"),
+            ([0x0f, 0x22, 0xd8], "mov CR3, EAX"),
+        ] {
+            let (decoded, _, len, _) =
+                decode(&bytes).unwrap_or_else(|error| panic!("lift {bytes:02x?}: {error:#}"));
+            assert_eq!(len, 3);
+            assert_eq!(
+                format!("{} {}", decoded.mnemonic, decoded.operands_text),
+                text
+            );
+        }
+        let error = decode(&[0x0f, 0x20, 0xc8]).expect_err("mov eax, cr1 is invalid");
+        assert!(
+            matches!(
+                error.downcast_ref::<crate::runtime::RuntimeSleighError>(),
+                Some(crate::runtime::RuntimeSleighError::DecodeNoMatch { .. })
+            ),
+            "{error:#}"
+        );
     }
 }

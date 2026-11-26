@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf`
+- Binary: `~/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf`
 - Function: `uartOpen`
 - Address: `0x800b76a`
 - Corpus row or benchmark command: first 200 functions from the ARM ELF, measured with `target/debug/fission_cli decomp ... --all --limit 200 --json --layer nir --no-db --no-warnings`
@@ -91,7 +91,7 @@ Comparable coverage:
   - Command: repeat the exact 200-function cache-free CLI measurement above and inspect `uartOpen` plus all changed ARM outputs.
   - Result: `param_5` 0 -> 3, `param_6` 0 -> 1, `param_7` remains 0. `uartOpen` changes from three visible register parameters plus two locals to six formals, with the two byte stack loads as `uchar param_5` and `uchar param_6`.
 - [x] Smoke or automation sample:
-  - Command: `target/debug/fission_cli decomp /Users/sjkim1127/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf --all --limit 200 --json --layer nir --no-db --no-warnings -o /tmp/fission-arm-final.NsyrKM/after.json`
+  - Command: `target/debug/fission_cli decomp ~/fission-benchmark/corpus/scale/binaries/O2-noinline/cleanflight/cleanflight_DALRCF405.elf --all --limit 200 --json --layer nir --no-db --no-warnings -o /tmp/fission-arm-final.NsyrKM/after.json`
   - Result: 200/200 functions emitted with zero fallbacks. Compared with the previous P0 output, only `SysTick_Config` changed: its prior `invalid scalar ssa` fallback was removed and it now emits `uint SysTick_Config(int param_1)`. Compared with the baseline, the new formal-bearing set is `__udivmoddi4`, `i2cWriteBuffer`, `i2cRead`, and `uartOpen`; all other signatures in the window stayed unchanged. The ARM window retains `param_5` 0 -> 3, `param_6` 0 -> 1, and `param_7` 0 -> 0.
 - [x] Optional related checks:
   - Command: `cargo check -p fission-pcode -p fission-decompiler` and `cargo build --release -p fission-cli`

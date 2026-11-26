@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O2.exe`
 - Function: `reverse_in_place`
 - Address: `0x140001560`
 - Corpus row or benchmark command: external DecBench local evaluation, `dev` corpus, focused on `reverse_in_place`, Fission local endpoint, `FISSION_BENCHMARK_NO_CACHE=1`; baseline artifact `results/issue104_before_62fea7840_recreated.json` with server fingerprint `c0059ccc3ab6804cdc8a7c94dd095cc9357b0db6c5b745912fba63a0c3e373c6`.

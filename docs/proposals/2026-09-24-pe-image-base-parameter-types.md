@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
 - Function: `_ValidateImageBase`, `_FindPESection`
 - Address: `0x140002410`, `0x140002440`
 - Corpus row or benchmark command: Real binary, focused `fission_cli decomp ... --layer hir` runs; these CRT helper functions are not in the source-semantic source manifest, so no per-function DecBench score or semantic case count is available.

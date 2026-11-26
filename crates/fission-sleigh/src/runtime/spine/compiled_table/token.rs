@@ -267,19 +267,51 @@ pub(super) fn read_sint(bytes: &[u8], offset: usize, size: u32) -> Result<i64> {
     }
 }
 
+/// Whether `constructor`'s operands consume sequential instruction bytes.
+///
+/// A function of the compiled spec alone, asked on every root decode, so the
+/// answer is kept on the constructor (a `DerivedOnce` field); an error is not
+/// kept.
 pub(super) fn constructor_consumes_sequential_operand_bytes(
     compiled: &CompiledFrontend,
     constructor: &CompiledExecutableConstructor,
 ) -> Result<bool> {
+    if let Some(consumes) = constructor.consumes_sequential_operand_bytes.get() {
+        return Ok(consumes);
+    }
+    let mut consumes = false;
     for handle in &constructor.constructor_template.handles {
         if operand_spec_consumes_sequential_bytes(compiled, &handle.spec, 0)? {
-            return Ok(true);
+            consumes = true;
+            break;
         }
     }
-    Ok(false)
+    constructor.consumes_sequential_operand_bytes.set(consumes);
+    Ok(consumes)
 }
 
+/// Whether decoding subtable `table_name` consumes sequential instruction
+/// bytes. From depth 0 the answer depends on the compiled spec alone and is
+/// kept on the subtable; an error is not kept.
 pub(super) fn subtable_consumes_sequential_bytes(
+    compiled: &CompiledFrontend,
+    table_name: &str,
+    depth: usize,
+) -> Result<bool> {
+    let kept = (depth == 0)
+        .then(|| compiled.subtables.get(table_name))
+        .flatten();
+    if let Some(consumes) = kept.and_then(|subtable| subtable.consumes_sequential_bytes.get()) {
+        return Ok(consumes);
+    }
+    let consumes = subtable_consumes_sequential_bytes_uncached(compiled, table_name, depth)?;
+    if let Some(subtable) = kept {
+        subtable.consumes_sequential_bytes.set(consumes);
+    }
+    Ok(consumes)
+}
+
+fn subtable_consumes_sequential_bytes_uncached(
     compiled: &CompiledFrontend,
     table_name: &str,
     depth: usize,
@@ -607,5 +639,61 @@ pub(super) fn sign_extend_bits(value: u64, bit: u32) -> u64 {
         value | (!0u64 << bit)
     } else {
         value
+    }
+}
+
+#[cfg(test)]
+mod derived_sequential_bytes_tests {
+    use super::*;
+
+    /// Every kept answer equals a fresh computation, for every constructor and
+    /// subtable of real frontends, and asking again returns the kept one.
+    #[test]
+    fn kept_sequential_byte_answers_equal_fresh_ones_across_whole_frontends() {
+        for language in ["x86-64", "ARM8m_le"] {
+            let frontend = crate::runtime::RuntimeSleighFrontend::new_for_language(language)
+                .expect("frontend");
+            let compiled = frontend.compiled_frontend().expect("compiled");
+            let mut checked = 0;
+            for (name, subtable) in &compiled.subtables {
+                let fresh = subtable_consumes_sequential_bytes_uncached(compiled, name, 0).ok();
+                let first = subtable_consumes_sequential_bytes(compiled, name, 0).ok();
+                let again = subtable_consumes_sequential_bytes(compiled, name, 0).ok();
+                assert_eq!((first, again), (fresh, fresh), "{language} subtable {name}");
+                if fresh.is_some() {
+                    assert_eq!(subtable.consumes_sequential_bytes.get(), fresh);
+                }
+                for constructor in &subtable.constructors {
+                    let fresh = constructor
+                        .constructor_template
+                        .handles
+                        .iter()
+                        .map(|h| operand_spec_consumes_sequential_bytes(compiled, &h.spec, 0))
+                        .try_fold(false, |any, r| r.map(|c| any || c))
+                        .ok();
+                    let first =
+                        constructor_consumes_sequential_operand_bytes(compiled, constructor).ok();
+                    let again =
+                        constructor_consumes_sequential_operand_bytes(compiled, constructor).ok();
+                    assert_eq!((first, again), (fresh, fresh), "{language} {name}");
+                    checked += 1;
+                }
+            }
+            assert!(checked > 100, "{language}: {checked} constructors");
+        }
+    }
+
+    /// The kept answer is not part of the compiled data: equality ignores it
+    /// and serialization drops it.
+    #[test]
+    fn a_kept_answer_changes_neither_equality_nor_serialization() {
+        let frontend = crate::runtime::RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+        let compiled = frontend.compiled_frontend().unwrap();
+        let (name, subtable) = compiled.subtables.iter().next().unwrap();
+        let untouched = subtable.clone();
+        let _ = subtable_consumes_sequential_bytes(compiled, name, 0);
+        assert_eq!(&untouched, subtable);
+        let json = serde_json::to_string(subtable).unwrap();
+        assert!(!json.contains("consumes_sequential_bytes"));
     }
 }

@@ -559,7 +559,8 @@ fn walk_function_boundaries_stops_at_tail_call_to_known_function() {
     assert!(
         sweep
             .coverage_decodes
-            .contains_key(&(0x401000, entry_bytes.as_ptr() as usize))
+            .get(0x401000, entry_bytes, None)
+            .is_some()
     );
     assert_eq!(
         walk_function_boundaries(
@@ -986,4 +987,107 @@ fn the_executable_sweep_finds_the_same_targets_at_every_rayon_pool_size() {
         one == sweep(3),
         "one and three threads found different targets"
     );
+}
+
+/// Candidate validation takes an instruction the sweep decoded from the same
+/// bytes in the same context instead of decoding it again, and only then.
+#[test]
+fn candidate_validation_reuses_a_swept_instruction_only_in_the_sweeps_context() {
+    use super::candidate_validation::validate_subroutine_candidate_in_context;
+    use super::coverage_decode::{
+        CoverageDecodes, CoverageFlow, CoverageInstruction, SweptInstruction,
+    };
+    use fission_sleigh::runtime::{DecodedFlowKind, PackedContextOverride, RuntimeSleighFrontend};
+    use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
+
+    let _guard = sleigh_runtime_discovery_lock();
+    let mut binary = pe64_executable_shell();
+    let entry = binary.entry_point;
+    // jmp far outside the image: decoded, the candidate is invalid.
+    Arc::make_mut(&mut binary.data).to_mut_vec()[..5]
+        .copy_from_slice(&[0xe9, 0x00, 0x00, 0x00, 0x40]);
+    let frontend = RuntimeSleighFrontend::new_for_load_spec(binary.load_spec().unwrap()).unwrap();
+    let window = binary.view_bytes(entry, 15).unwrap();
+    // A sentinel the sweep "decoded" there: a one-byte return.
+    let ret = frontend
+        .decode_single_no_pcode(&[0xc3], entry, None)
+        .unwrap();
+    let sentinel = SweptInstruction::from_decoded(&ret).unwrap();
+    let row = ((entry, window.as_ptr() as usize), (1, sentinel));
+    let validate = |swept: Option<&CoverageDecodes>| {
+        validate_subroutine_candidate_in_context(
+            &binary,
+            &frontend,
+            entry,
+            1,
+            4000,
+            true,
+            &HashSet::new(),
+            &mut HashMap::new(),
+            None,
+            None,
+            swept,
+        )
+        .0
+    };
+
+    assert!(!validate(None), "the jmp out of the image is invalid");
+    let same_context = CoverageDecodes::new(None, [row]);
+    assert!(validate(Some(&same_context)), "the swept return is used");
+    let other_context = CoverageDecodes::new(Some(PackedContextOverride::default()), [row]);
+    assert!(
+        !validate(Some(&other_context)),
+        "a sweep in another context is not used"
+    );
+}
+
+/// The swept record keeps only what its two readers use; both views it gives
+/// back match what they computed from the full instruction.
+#[test]
+fn a_swept_instruction_gives_validation_and_coverage_the_same_view_as_the_decode() {
+    use super::coverage_decode::{CoverageInstruction, SweptInstruction};
+    use fission_sleigh::runtime::{DecodedFlowKind, DecodedReferenceKind, RuntimeSleighFrontend};
+
+    let _guard = sleigh_runtime_discovery_lock();
+    let frontend = RuntimeSleighFrontend::new_for_language("x86-64").unwrap();
+    // call rel32; call [rip+x]; jne rel8; mov rax,[rip+x]; jmp rel8; nop; ret
+    let bytes = [
+        0xe8, 0x10, 0x00, 0x00, 0x00, 0xff, 0x15, 0x20, 0x00, 0x00, 0x00, 0x75, 0x02, 0x48, 0x8b,
+        0x05, 0x30, 0x00, 0x00, 0x00, 0xeb, 0x00, 0x90, 0xc3,
+    ];
+    let decoded = frontend
+        .decode_window_no_pcode(&bytes, 0x401000, usize::MAX)
+        .unwrap();
+    assert_eq!(decoded.len(), 7);
+    let kinds: Vec<DecodedFlowKind> = decoded.iter().map(|i| i.flow_kind).collect();
+    assert!(kinds.contains(&DecodedFlowKind::Call));
+    assert!(kinds.contains(&DecodedFlowKind::ConditionalJump));
+    for inst in &decoded {
+        let swept = SweptInstruction::from_decoded(inst).unwrap();
+        assert_eq!(
+            swept.coverage(),
+            CoverageInstruction::from_decoded(inst),
+            "{inst:?}"
+        );
+        // What candidate validation computed from the full instruction.
+        let call_target = (inst.flow_kind == DecodedFlowKind::Call)
+            .then(|| {
+                inst.direct_target.or_else(|| {
+                    inst.references.iter().find_map(|r| match r.kind {
+                        DecodedReferenceKind::CallTarget
+                        | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
+                        _ => None,
+                    })
+                })
+            })
+            .flatten();
+        assert_eq!(swept.call_target(), call_target, "{inst:?}");
+        assert_eq!(swept.length as usize, inst.length);
+        assert_eq!(swept.direct_target, inst.direct_target);
+        assert_eq!(
+            swept.mnemonic_rejected,
+            inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid"
+        );
+    }
 }

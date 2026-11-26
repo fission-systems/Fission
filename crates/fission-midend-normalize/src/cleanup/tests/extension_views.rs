@@ -275,3 +275,190 @@ fn the_normalize_pipeline_keeps_a_sign_extension_of_an_unsigned_parameter() {
          (long long)(int)param_1:\n{dump}"
     );
 }
+
+// ── cast elision must leave the extension for the view to restore ──────────
+//
+// `cast_elision_pass` runs before type refinement settles binding types (the
+// cast-elision stage itself re-runs the type fixed point after stripping). A
+// widening cast is the only place this IR records sign- versus
+// zero-extension, so stripping one before the operand's type is final leaves
+// `canonicalize_extension_binding_casts` nothing to restore: `wide = x` then
+// extends by whatever `x` ends up typed as.
+
+/// `wide = (long long)x; return wide;` with `x` bound to `x_ty`.
+fn sext_of(x_ty: NirType) -> PreHirFunction {
+    assign_wide(vec![binding("x", x_ty)], cast(ty(64, true), var("x")))
+}
+
+/// What later type recovery does: settle `x` on a 32-bit unsigned type.
+fn settle_x_as_uint(func: &mut PreHirFunction) {
+    for b in func.params.iter_mut().chain(func.locals.iter_mut()) {
+        if b.name == "x" {
+            b.ty = ty(32, false);
+        }
+    }
+}
+
+#[test]
+fn cast_elision_keeps_an_extension_of_an_unknown_typed_operand() {
+    // `x` has no scalar type yet, so nothing establishes that `wide = x`
+    // extends the way `INT_SEXT` does.
+    let mut func = sext_of(NirType::Unknown);
+    cast_elision_pass(&mut func);
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(64, true), var("x")),
+        "an extension of an operand of unknown type must stay explicit"
+    );
+
+    settle_x_as_uint(&mut func);
+    canonicalize_extension_binding_casts(&mut func);
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(64, true), cast(ty(32, true), var("x"))),
+        "once `x` settles as uint the sign extension must still print"
+    );
+}
+
+#[test]
+fn cast_elision_keeps_an_extension_whose_operand_may_still_be_retyped() {
+    // Signedness agrees *now*; the type fixed point that runs after cast
+    // elision can still settle `x` the other way.
+    let mut func = sext_of(ty(32, true));
+    cast_elision_pass(&mut func);
+    settle_x_as_uint(&mut func);
+    canonicalize_extension_binding_casts(&mut func);
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(64, true), cast(ty(32, true), var("x"))),
+        "a sign extension must survive a later retype of its operand"
+    );
+}
+
+#[test]
+fn cast_elision_keeps_an_extension_returned_directly() {
+    let mut func = PreHirFunction {
+        name: "test_return_extension".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![binding("x", NirType::Unknown)],
+        return_type: ty(64, true),
+        body: vec![PreHirStmt::Return(Some(cast(ty(64, true), var("x"))))],
+        ..Default::default()
+    };
+    cast_elision_pass(&mut func);
+    assert_eq!(
+        func.body[0],
+        PreHirStmt::Return(Some(cast(ty(64, true), var("x")))),
+        "a returned extension of an unknown-typed operand must stay explicit"
+    );
+}
+
+#[test]
+fn cast_elision_keeps_a_conversion_from_a_float_binding() {
+    // A float binding is not in the pass's scalar type table, so it reads
+    // as unknown there; the conversion must not be dropped on that account.
+    let mut func = PreHirFunction {
+        name: "test_float_conversion".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![binding("f", NirType::Float { bits: 64 })],
+        locals: vec![binding("i", ty(32, true))],
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("i".to_string()),
+                rhs: cast(ty(32, true), var("f")),
+            },
+            PreHirStmt::Return(Some(var("i"))),
+        ],
+        return_type: ty(32, true),
+        ..Default::default()
+    };
+    cast_elision_pass(&mut func);
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(32, true), var("f")),
+        "float -> int conversion must stay explicit"
+    );
+}
+
+#[test]
+fn cast_elision_still_strips_casts_that_cannot_extend() {
+    // Same width: a reinterpretation the assignment performs anyway.
+    let mut same_width = PreHirFunction {
+        name: "test_same_width".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![binding("x", ty(32, false))],
+        locals: vec![binding("y", ty(32, true))],
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".to_string()),
+                rhs: cast(ty(32, true), var("x")),
+            },
+            PreHirStmt::Return(Some(var("y"))),
+        ],
+        return_type: ty(32, true),
+        ..Default::default()
+    };
+    assert!(cast_elision_pass(&mut same_width));
+    assert_eq!(assigned_rhs(&same_width), &var("x"));
+
+    // Widen then truncate back to the operand's width: the extended bits are
+    // all discarded, whichever extension it was.
+    let mut round_trip = PreHirFunction {
+        name: "test_round_trip".to_string(),
+        int_param_offsets: Vec::new(),
+        params: vec![binding("x", ty(32, false))],
+        locals: vec![binding("y", ty(32, false))],
+        body: vec![
+            PreHirStmt::Assign {
+                lhs: PreHirLValue::Var("y".to_string()),
+                rhs: cast(ty(64, true), var("x")),
+            },
+            PreHirStmt::Return(Some(var("y"))),
+        ],
+        return_type: ty(32, false),
+        ..Default::default()
+    };
+    assert!(cast_elision_pass(&mut round_trip));
+    assert_eq!(assigned_rhs(&round_trip), &var("x"));
+}
+
+/// The orchestrator re-runs the extension canonicalization, for variable
+/// operands only, after the post-normalize copy propagation and call-site
+/// typing, which can retype a variable under a cast normalize already
+/// canonicalized. The re-run must restore the extension the IR means, leave
+/// an explicit cast pair alone, and be a no-op when nothing changed.
+#[test]
+fn late_extension_canonicalization_restores_a_retyped_variable_and_keeps_pairs() {
+    let mut func = assign_wide(
+        vec![binding("x", ty(32, false))],
+        cast(ty(64, false), var("x")),
+    );
+    assert!(!canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
+
+    // A late pass settles `x` as `int`: C would now sign-extend `(ulong)x`.
+    func.params[0].ty = ty(32, true);
+    assert!(canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
+    assert_eq!(
+        assigned_rhs(&func),
+        &cast(ty(64, false), cast(ty(32, false), var("x"))),
+        "the zero extension must print as (unsigned long long)(uint)x"
+    );
+    assert!(
+        !canonicalize_extension_binding_casts_over_variables(&mut func),
+        "a second run over a canonical tree changes nothing"
+    );
+
+    // `(int)(uchar)c` with `c: int`: by now the pair is the C spelling of a
+    // zero extension (bash's `sh_syntaxtab[(uchar)c]` index); rewriting the
+    // inner cast to `(char)` sign-extends it.
+    let pair = cast(ty(32, true), cast(ty(8, false), var("c")));
+    let mut func = assign_wide(vec![binding("c", ty(32, true))], pair.clone());
+    assert!(!canonicalize_extension_binding_casts_over_variables(
+        &mut func
+    ));
+    assert_eq!(assigned_rhs(&func), &pair);
+}

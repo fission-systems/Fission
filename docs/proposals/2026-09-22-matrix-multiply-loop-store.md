@@ -2,11 +2,11 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/memory_layouts_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/memory_layouts_gcc_O2.exe`
 - Function: `matrix_multiply`
 - Address: `0x140001570`
 - Corpus row or benchmark command:
-  `cd /Users/sjkim1127/fission-benchmark && .venv/bin/python runner/runner.py --corpus dev --function matrix_multiply --decompilers fission,ghidra --run-mode local --no-resume --output results/issue77_baseline_matrix_multiply.json`
+  `cd ~/fission-benchmark && .venv/bin/python runner/runner.py --corpus dev --function matrix_multiply --decompilers fission,ghidra --run-mode local --no-resume --output results/issue77_baseline_matrix_multiply.json`
 - Current output summary: raw p-code contains the correct indexed store and the correct XMM1 low-lane value, but NIR/HIR emits `*rbx = xmm1_da` and loses the `r9 * 4` output index.
 - Semantic cases passed / total: GCC O2 `0/5`; across the nine focused Fission rows, `6/45` cases passed. Clang O0 is the only complete row (`5/5`).
 - Failure category: GCC O2 `runtime_error` with an emitted `0/5` harness result; related variants include compile and runtime failures.

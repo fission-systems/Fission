@@ -247,3 +247,90 @@ jobs:
           cmp dist/SHA256SUMS attached/SHA256SUMS
           cmp dist/release.json attached/release.json
           gh release edit "$TAG" --draft=false
+
+  # Sentry release + commit tracking, once the GitHub Release is public.
+  # The name is what fission_cli's opt-in telemetry reports when
+  # SENTRY_RELEASE / FISSION_RELEASE are unset: `sentry::release_name!()`,
+  # i.e. `<CARGO_PKG_NAME>@<CARGO_PKG_VERSION>` of fission-cli. verify-gates
+  # (check_identity.py source) already proved the tag without its `v` equals
+  # that version. Release builds report environment `production` (the
+  # sentry crate's default without debug_assertions), so the deploy uses it.
+  # Without the SENTRY_AUTH_TOKEN secret every step after the check is
+  # skipped and the job still succeeds; it never gates or reorders the
+  # release, which `publish` has already completed.
+  sentry-release:
+    name: Sentry release and commits
+    needs: [verify-gates, publish]
+    if: >-
+      github.repository == 'fission-systems/Fission' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      TAG: ${{ needs.verify-gates.outputs.tag }}
+      SHA: ${{ needs.verify-gates.outputs.sha }}
+      SENTRY_ORG: fission-systems
+      SENTRY_PROJECT: fission
+      SENTRY_CLI_VERSION: 3.8.2
+      # GitHub's server-side digest of sentry-cli-Linux-x86_64 for 3.8.2.
+      SENTRY_CLI_SHA256: c958865f9d4000183509ea21b1f04925d5390de6d8d87386b9e69f2b305070c3
+    steps:
+      - name: Check for the Sentry token
+        id: token
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          if [[ -n "${SENTRY_AUTH_TOKEN}" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Sentry release skipped::SENTRY_AUTH_TOKEN is not set; no Sentry release recorded for ${TAG}."
+          fi
+
+      # Full history without blobs, and only one small file checked out:
+      # `set-commits --local` walks history, `--auto` reads the origin remote.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: steps.token.outputs.present == 'true'
+        with:
+          ref: ${{ needs.verify-gates.outputs.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            crates/fission-cli/Cargo.toml
+          sparse-checkout-cone-mode: false
+
+      - name: Install sentry-cli (pinned, checksum-verified)
+        if: steps.token.outputs.present == 'true'
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SHA"
+          bin="${RUNNER_TEMP}/sentry-bin"
+          mkdir -p "$bin"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output "$bin/sentry-cli" \
+            "https://github.com/getsentry/sentry-cli/releases/download/${SENTRY_CLI_VERSION}/sentry-cli-Linux-x86_64"
+          echo "${SENTRY_CLI_SHA256}  $bin/sentry-cli" | sha256sum -c -
+          chmod +x "$bin/sentry-cli"
+          echo "$bin" >> "$GITHUB_PATH"
+
+      - name: Create, link commits, finalize and deploy
+        if: steps.token.outputs.present == 'true'
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          sentry-cli --version
+          release="fission-cli@${TAG#v}"
+          echo "Sentry release: ${release} (${SHA})"
+          sentry-cli releases new "$release"
+          if ! sentry-cli releases set-commits "$release" --auto --ignore-missing; then
+            echo "::warning title=Sentry set-commits::--auto failed (integration cannot see the repo?); falling back to --local."
+            sentry-cli releases set-commits "$release" --local --ignore-missing
+          fi
+          sentry-cli releases finalize "$release"
+          sentry-cli deploys new --release "$release" --env production \
+            --name "$TAG" \
+            --url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}"

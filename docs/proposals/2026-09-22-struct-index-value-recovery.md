@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O1.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O1.exe`
 - Function: `find_pair_value`
 - Address: `0x140001596`
 - Corpus row or benchmark command:

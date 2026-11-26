@@ -2211,7 +2211,7 @@ pub(super) fn validate_scalar_ssa_with_context(
     // ones stored. The builder built `ssa` from exactly these inputs and
     // nothing outside tests mutates it, so in a release build the rebuild can
     // only reproduce what is stored; it cost 8.7% of decompile time on the
-    // full DecBench dataset and never disagreed. Debug and test builds still
+    // full benchmark dataset and never disagreed. Debug and test builds still
     // run it, which is where a non-deterministic or mutated SSA would show.
     if cfg!(debug_assertions) {
         if ssa.dynamic_guards

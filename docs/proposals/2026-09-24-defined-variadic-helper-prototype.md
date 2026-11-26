@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O1.exe`
 - Function: MinGW runtime helper `__report_error` (the benchmark source `advanced_patterns.c` does not contain this linked helper).
 - Address: `0x140001a70`
 - Reproduction: `target/release/fission_cli decomp <binary> --project --no-header --no-warnings -o /tmp/fission-issue56-baseline-project.c`

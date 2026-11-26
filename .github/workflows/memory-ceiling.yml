@@ -3,9 +3,10 @@ name: Decompiler memory ceiling
 # Memory blow-ups have reached main (switch recovery re-pushing one node until
 # OOM; a DAG printed as a tree to 61M statements) and nothing noticed: a test
 # timeout catches a hang, not growth. This decompiles the eight largest
-# DecBench binaries (one per project) under an 8 GiB ceiling on the process
-# tree's resident memory. Measured on main 9dd3bb658: peaks 0.90-2.25 GiB,
-# about four minutes in all (scripts/ci/memory_ceiling.py).
+# FreshBench M1 binaries (one per project) under an 8 GiB ceiling on the
+# process tree's resident memory. Measured on main 5bc999e6a (macOS release
+# build): peaks 0.80-4.80 GiB, under two minutes in all
+# (scripts/ci/memory_ceiling.py).
 
 on:
   schedule:
@@ -38,7 +39,7 @@ jobs:
       - name: Build release CLI
         run: cargo build --locked --release -p fission-cli
       - name: Decompile under the ceiling
-        run: python3 scripts/ci/memory_ceiling.py --data "$RUNNER_TEMP/decbench" --cli target/release/fission_cli --ceiling-gib 8
+        run: python3 scripts/ci/memory_ceiling.py --data "$RUNNER_TEMP/freshbench" --cli target/release/fission_cli --ceiling-gib 8
 
   report:
     needs: memory

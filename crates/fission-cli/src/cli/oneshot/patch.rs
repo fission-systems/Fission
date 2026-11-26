@@ -24,12 +24,28 @@ pub struct PatchRequest {
     pub force: bool,
 }
 
+/// `loaded_bytes_are_the_file` is false when the loader decoded the file into
+/// a different image (Intel HEX, S-record). A patch writes the loaded bytes
+/// out as the new file, so it would hand back a flat image in place of the
+/// text format, and the offsets it reports would not be the file's.
 pub(super) fn run_patch(
     binary: &mut LoadedBinary,
     request: &PatchRequest,
+    loaded_bytes_are_the_file: bool,
     json: bool,
 ) -> io::Result<()> {
-    let outcome = patch_binary(binary, request, json);
+    let outcome = if loaded_bytes_are_the_file {
+        patch_binary(binary, request, json)
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "patch writes the loaded bytes back as the file, and this {} input was decoded \
+                 into a different image; patching it would not keep its format",
+                binary.format
+            ),
+        ))
+    };
     // Under `--json` a caller parses stdout, and every refusal here is an
     // ordinary result -- an address in a .bss, an output that already exists.
     // Reporting those only on stderr leaves the parser with nothing to read,

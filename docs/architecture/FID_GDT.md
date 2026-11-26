@@ -125,9 +125,9 @@ fixtures pinned directly against the flag semantics stated in Ghidra's own `buil
 Net effect: on one statically-linked test binary, fixing the operand-counting bug alone took
 identifications from **1 to 113**.
 
-FID is correctly inert against DecBench-style binaries, for what it's worth — those are dynamically
-linked, so there's no statically-embedded library code to match against at all. Not an implementation
-gap, just what the corpus is.
+FID is correctly inert against dynamically linked benchmark binaries, for what it's worth — there's
+no statically-embedded library code to match against at all. Not an implementation gap, just what
+the corpus is.
 
 ## GDT
 

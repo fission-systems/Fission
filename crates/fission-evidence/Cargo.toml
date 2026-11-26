@@ -1,0 +1,17 @@
+[package]
+name = "fission-evidence"
+version = "0.4.0"
+edition = "2024"
+authors = ["Fission Dev Team"]
+description = "Image identity, code location, runtime mapping and evidence contracts shared by Fission analysis layers"
+repository = "https://github.com/fission-systems/Fission"
+license = "Apache-2.0"
+readme = "../../README.md"
+
+# A leaf: no workspace dependency, so every engine can exchange evidence without
+# depending on another engine (ADR 0020).
+[dependencies]
+blake3 = "1.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"

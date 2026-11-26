@@ -85,6 +85,7 @@ pub(super) fn scan_tail_call_targets(
                 known_functions,
                 &mut local_cache,
                 Some(global_references),
+                None,
             );
             valid.then_some(target)
         })

@@ -1,0 +1,5 @@
+{
+  "max_daily_tasks": 10,
+  "max_concurrent": 1,
+  "max_pending_draft_prs": 10
+}

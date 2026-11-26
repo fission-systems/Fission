@@ -11,11 +11,11 @@ does not erase an unsupported operation observed earlier.
 
 `crates/fission-emulator/tests/corpus_dev_sweep.rs` is the full measurement
 lane. It only executes Fission's source-built dev binaries. Do not point it at
-DecBench, evalkit, malware, or another corpus that is intended for static
+FreshBench, evalkit, malware, or another corpus that is intended for static
 analysis only.
 
 ```sh
-FISSION_SWEEP_ROOT=/Users/sjkim1127/fission-benchmark/corpus/dev/binaries \
+FISSION_SWEEP_ROOT=~/fission-benchmark/corpus/dev/binaries \
 FISSION_HLE_REPORT_PATH=/tmp/fission-hle-coverage.json \
 cargo test --release -p fission-emulator --test corpus_dev_sweep \
   -- --ignored --nocapture

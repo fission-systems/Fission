@@ -21,7 +21,8 @@ Track B). P1/P2 report: `docs/proposals/2026-11-23-csic-p1-counterfactual-runner
   candidates; internal registers/stack slots only via
   `InternalPolicy::Always` or when no input-level witness exists.
 - **Dynamic analysis only on this crate's fixtures** (`testdata/`) or on
-  `~/fission-benchmark/dir-verify/binaries`. Never on DecBench/evalkit binaries.
+  `~/fission-benchmark/dir-verify/binaries`. Never on benchmark corpus binaries
+  (FreshBench, evalkit).
 - **Correctness evidence is native execution** (`testdata/native/verify_native.py`)
   plus fresh emulator replay. Agreement between two emulator paths shares the
   SLEIGH lift (ADR 0017).

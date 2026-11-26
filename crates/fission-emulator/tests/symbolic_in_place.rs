@@ -79,7 +79,7 @@ fn branches(code: &[u8]) -> Vec<(u64, SymExpr)> {
         .filter(|e| e.pc >= start && e.pc < end)
         .filter_map(|e| {
             let node = e.condition_node?;
-            Some((e.pc, emu.solver.nodes.get(&node)?.clone()))
+            Some((e.pc, emu.solver.nodes().get(&node)?.clone()))
         })
         .collect()
 }
@@ -148,7 +148,9 @@ fn an_in_place_add_keeps_its_expression() {
     });
     let (id, expr) = var.expect("a variable");
     // A model reports the variables the solver knows by node.
-    solver.nodes.insert(id, expr);
+    solver
+        .insert_node(id, expr)
+        .expect("a fresh solver accepts the variable");
     let sat = solver
         .check_sat_with_oracle(None, std::slice::from_ref(cond))
         .expect("solve");
@@ -197,7 +199,9 @@ fn an_unmodelled_in_place_op_drops_the_stale_expression() {
             continue;
         };
         let mut solver = fission_solver::Solver::new();
-        solver.nodes.insert(id, expr.clone());
+        solver
+            .insert_node(id, expr.clone())
+            .expect("a fresh solver accepts the variable");
         let at_a = SymExpr::new_eq(expr, SymExpr::new_const(u64::from(b'A'), width));
         let sat = solver
             .check_sat_with_oracle(None, &[at_a, cond.clone()])

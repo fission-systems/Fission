@@ -180,7 +180,7 @@ pub(crate) fn build_nir_type_context(
     let program = fact_store.program();
 
     for function in program
-        .functions
+        .functions()
         .iter()
         .filter(|function| function.is_import)
     {
@@ -191,7 +191,7 @@ pub(crate) fn build_nir_type_context(
     }
 
     for symbol in program
-        .symbols
+        .symbols()
         .iter()
         .filter(|symbol| symbol.kind == SymbolKind::Import)
     {
@@ -211,7 +211,7 @@ pub(crate) fn build_nir_type_context(
         index.add(resolved_address, &fact.name, CandidateClass::Fact);
     }
 
-    for function in &program.functions {
+    for function in program.functions() {
         if function.name.is_empty() {
             continue;
         }
@@ -240,7 +240,7 @@ pub(crate) fn build_nir_type_context(
     }
 
     for symbol in program
-        .symbols
+        .symbols()
         .iter()
         .filter(|symbol| symbol.kind == SymbolKind::Data)
     {
@@ -1363,7 +1363,7 @@ static CALLEE_SUMMARY_CACHE: LazyLock<Mutex<lru::LruCache<(String, u64, u64), Ca
 /// Summaries being computed right now, so that workers needing the same
 /// summary at the same time wait for one computation instead of each running
 /// it. Decompile workers start together and share popular callees: on the
-/// full DecBench dataset 16% of `ssh-sk-helper`'s and 11% of `ssh`'s summary
+/// full benchmark dataset 16% of `ssh-sk-helper`'s and 11% of `ssh`'s summary
 /// misses were a key another worker was already computing.
 ///
 /// Only threads outside the rayon pool wait. A rayon worker blocked here can
@@ -1685,7 +1685,7 @@ fn build_preview_callee_summaries_uncached(
         // either way, and the preview is a function of the p-code alone (the
         // evidence kind only labels diagnostics): it would reproduce the
         // complete preview, whose pointees `merge_preview_pointer_evidence`
-        // already keeps. 14-59% of prefix previews on the full DecBench
+        // already keeps. 14-59% of prefix previews on the full benchmark
         // dataset were such repeats, each a raw-HIR build plus a normalize.
         && stable_prefix_pcode != *pcode
         && let Some(stable_prefix) = infer_prototype(

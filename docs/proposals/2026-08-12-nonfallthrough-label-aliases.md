@@ -139,4 +139,4 @@ Validation completed:
   0.80 with 4/5 perfect rows, GED mean 0.80 with 4/5 perfect rows. The one
   non-perfect row (`list_sum`, gcc O0) was a compile error. The artifact is
   intentionally non-publishable because it is a local/non-official run:
-  `/Users/sjkim1127/fission-benchmark/results/local_alias_cleanup_focused_e4294d1ac_dirty.json`.
+  `~/fission-benchmark/results/local_alias_cleanup_focused_e4294d1ac_dirty.json`.

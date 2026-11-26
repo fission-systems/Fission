@@ -234,6 +234,26 @@ fn render_optional_usize(value: Option<usize>) -> String {
         .unwrap_or_else(|| "null".to_string())
 }
 
+/// A `_` hole in an attach table renders as `null`.
+fn render_varnode_list_entries(
+    entries: &[Option<crate::compiler::CompiledResolvedVarnode>],
+) -> String {
+    entries
+        .iter()
+        .map(|entry| match entry {
+            Some(entry) => format!(
+                "{{\"name\": {}, \"space\": {}, \"offset\": {}, \"size\": {}}}",
+                json_string(&entry.name),
+                json_string(&entry.space.name),
+                entry.offset,
+                entry.size
+            ),
+            None => "null".to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn render_named_sources<'a>(entries: impl Iterator<Item = (&'a String, &'a String)>) -> String {
     let rows = entries
         .map(|(name, source)| {
@@ -481,19 +501,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 reloffset,
                 offsetbase,
             } => {
-                let entries = entries
-                    .iter()
-                    .map(|entry| {
-                        format!(
-                            "{{\"name\": {}, \"space\": {}, \"offset\": {}, \"size\": {}}}",
-                            json_string(&entry.name),
-                            json_string(&entry.space.name),
-                            entry.offset,
-                            entry.size
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let entries = render_varnode_list_entries(entries);
                 format!(
                     "{{\"kind\": \"sla_varnode_list\", \"big_endian\": {big_endian}, \"sign_bit\": {sign_bit}, \"bit_start\": {bit_start}, \"bit_end\": {bit_end}, \"byte_start\": {byte_start}, \"byte_end\": {byte_end}, \"shift\": {shift}, \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"entries\": [{entries}]}}"
                 )
@@ -504,19 +512,7 @@ fn render_operand_specs(specs: &[crate::compiler::CompiledOperandSpec]) -> Strin
                 reloffset,
                 offsetbase,
             } => {
-                let entries = entries
-                    .iter()
-                    .map(|entry| {
-                        format!(
-                            "{{\"name\": {}, \"space\": {}, \"offset\": {}, \"size\": {}}}",
-                            json_string(&entry.name),
-                            json_string(&entry.space.name),
-                            entry.offset,
-                            entry.size
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let entries = render_varnode_list_entries(entries);
                 format!(
                     "{{\"kind\": \"sla_varnode_list_expression\", \"reloffset\": {reloffset}, \"offsetbase\": {offsetbase}, \"expr\": {}, \"entries\": [{entries}]}}",
                     json_string(&format!("{expr:?}")),

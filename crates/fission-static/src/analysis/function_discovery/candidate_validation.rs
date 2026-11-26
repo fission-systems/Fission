@@ -1,10 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use fission_loader::LoadedBinary;
-use fission_sleigh::runtime::{
-    DecodedFlowKind, DecodedReferenceKind, PackedContextOverride, RuntimeSleighFrontend,
-};
+use fission_sleigh::runtime::{DecodedFlowKind, PackedContextOverride, RuntimeSleighFrontend};
 
+use super::coverage_decode::{CoverageDecodes, SweptInstruction};
 use super::targets::{is_target_no_return, normalize_target};
 use super::thumb::decode_context_for_address;
 
@@ -26,6 +25,7 @@ pub(super) fn validate_subroutine_candidate(
     known_functions: &HashSet<u64>,
     cache: &mut HashMap<u64, CandidateValidation>,
     global_references: Option<&HashSet<u64>>,
+    swept: Option<&CoverageDecodes>,
 ) -> (bool, CandidateValidation) {
     let decode_context = decode_context_for_address(binary, frontend, addr, None);
     validate_subroutine_candidate_in_context(
@@ -39,6 +39,7 @@ pub(super) fn validate_subroutine_candidate(
         cache,
         global_references,
         decode_context,
+        swept,
     )
 }
 
@@ -54,6 +55,7 @@ pub(super) fn validate_subroutine_candidate_in_context(
     cache: &mut HashMap<u64, CandidateValidation>,
     global_references: Option<&HashSet<u64>>,
     decode_context: Option<PackedContextOverride>,
+    swept: Option<&CoverageDecodes>,
 ) -> (bool, CandidateValidation) {
     let res = if let Some(&cached) = cache.get(&addr) {
         cached
@@ -113,13 +115,25 @@ pub(super) fn validate_subroutine_candidate_in_context(
                 // dominant cost: up to `max_instructions` decodes per
                 // candidate, across every candidate from every scanner
                 // (ghidra-patterns, tail-call recovery, dynamic prologues).
-                let Ok(inst) = frontend.decode_single_no_pcode(bytes, ip, decode_context) else {
-                    invalid = true;
-                    break;
+                // The linear sweep has usually decoded these very bytes in
+                // this context already.
+                let inst = match swept.and_then(|swept| swept.get(ip, bytes, decode_context)) {
+                    Some(swept) => *swept,
+                    None => match frontend
+                        .decode_single_no_pcode(bytes, ip, decode_context)
+                        .ok()
+                        .and_then(|inst| SweptInstruction::from_decoded(&inst))
+                    {
+                        Some(inst) => inst,
+                        None => {
+                            invalid = true;
+                            break;
+                        }
+                    },
                 };
                 let inst = &inst;
 
-                if inst.mnemonic.is_empty() || inst.mnemonic.to_lowercase() == "invalid" {
+                if inst.mnemonic_rejected {
                     invalid = true;
                     break;
                 }
@@ -127,7 +141,7 @@ pub(super) fn validate_subroutine_candidate_in_context(
                 // [G5] Offcut Reference Check
                 // Reject the candidate if any known global reference points to the *middle* of an instruction.
                 if let Some(refs) = global_references {
-                    for offset in 1..inst.length {
+                    for offset in 1..inst.length as usize {
                         if refs.contains(&(ip + offset as u64)) {
                             invalid = true;
                             break;
@@ -152,13 +166,7 @@ pub(super) fn validate_subroutine_candidate_in_context(
                 }
 
                 if inst.flow_kind == DecodedFlowKind::Call {
-                    let call_target = inst.direct_target.or_else(|| {
-                        inst.references.iter().find_map(|r| match r.kind {
-                            DecodedReferenceKind::CallTarget
-                            | DecodedReferenceKind::RipRelativeAddress => Some(r.target),
-                            _ => None,
-                        })
-                    });
+                    let call_target = inst.call_target();
                     if let Some(target) = call_target {
                         let norm_target = normalize_target(binary, target);
                         if is_target_no_return(binary, norm_target) {
@@ -201,14 +209,14 @@ pub(super) fn validate_subroutine_candidate_in_context(
                                 worklist.push(norm_target);
                             }
                         }
-                        ip += inst.length as u64;
+                        ip += u64::from(inst.length);
                     }
                     DecodedFlowKind::Interrupt | DecodedFlowKind::Syscall => {
                         did_terminate = true;
                         break;
                     }
                     _ => {
-                        ip += inst.length as u64;
+                        ip += u64::from(inst.length);
                     }
                 }
             }

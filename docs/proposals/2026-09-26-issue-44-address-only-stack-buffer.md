@@ -47,7 +47,7 @@ ISA-agnostic check ([ADR 0009](../adr/0009-isa-agnostic-semantic-rules.md)):
 Comparable coverage:
 
 - Similar shape 1: `fission-benchmark/corpus/dev/binaries/c/crypto_gcc_O0.exe`, function at `0x1400017ca`; frame-derived address escapes to `rc4_init` and `rc4_crypt`. The current candidate routes both call arguments through a single `stack_frame` object.
-- Similar shape 2: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O0.exe`, `main` at `0x140001756`; prologue RBP save and two address-taken arrays passed to calls. After the change, the arrays remain named and the RBP spill does not trigger whole-frame backing.
+- Similar shape 2: `~/fission-benchmark/corpus/dev/binaries/c/data_structures_gcc_O0.exe`, `main` at `0x140001756`; prologue RBP save and two address-taken arrays passed to calls. After the change, the arrays remain named and the RBP spill does not trigger whole-frame backing.
 - Synthetic invariant test: fixed-frame backing preserves reads/writes through a pointer and through a direct frame-relative access.
 
 ## 4. Risk And Ownership Check

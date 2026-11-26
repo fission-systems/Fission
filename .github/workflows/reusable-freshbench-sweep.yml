@@ -1,0 +1,200 @@
+name: Reusable FreshBench sweep
+
+# The nightly full sweep (freshbench-sweep.yml) and Fast Gate's one-binary smoke
+# (ci.yml, when the sweep itself changes) both run these jobs. One shard per
+# FreshBench M1 build; decompiling and scoring are `freshbench sweep run`, built
+# at the commit pinned in scripts/ci/freshbench_corpus.py
+# (docs/BENCHMARK_FRESHBENCH.md).
+
+on:
+  workflow_call:
+    inputs:
+      build:
+        description: "One M1 build to sweep instead of every build (e.g. gcc-O2)"
+        required: false
+        type: string
+        default: ""
+      only:
+        description: "With build: a substring of <build>/<project>/<binary> to narrow it"
+        required: false
+        type: string
+        default: ""
+    outputs:
+      lost:
+        description: "Rows that had output on the last passing main sweep and lost it"
+        value: ${{ jobs.report.outputs.lost }}
+      lost_build:
+        description: "The first build with such rows"
+        value: ${{ jobs.report.outputs.lost_build }}
+      baseline_commit:
+        description: "The commit that baseline sweep measured"
+        value: ${{ jobs.report.outputs.baseline_commit }}
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  RAYON_NUM_THREADS: "2"
+
+jobs:
+  build:
+    name: Build static decompiler and scorer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      builds: ${{ steps.matrix.outputs.builds }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Plan shards
+        id: matrix
+        env:
+          BUILD: ${{ inputs.build }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$BUILD" ]]; then
+            echo "builds=$(python3 -c 'import json, os; print(json.dumps([os.environ["BUILD"]]))')" >> "$GITHUB_OUTPUT"
+          else
+            echo "builds=$(python3 scripts/ci/freshbench_sweep.py --data "$RUNNER_TEMP/freshbench" builds)" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: ./.github/actions/setup-utils
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Build Fission
+        run: cargo build --locked --release -p fission-cli
+      - name: Build the pinned scorer
+        run: |
+          set -euo pipefail
+          commit="$(python3 -c 'import sys; sys.path.insert(0, "scripts/ci"); import freshbench_corpus as c; print(c.FRESHBENCH_COMMIT)')"
+          cargo install --locked --git https://github.com/fission-systems/freshbench --rev "$commit" \
+            --root "$RUNNER_TEMP/freshbench-tool" freshbench
+          mkdir -p toolchain
+          cp target/release/fission_cli "$RUNNER_TEMP/freshbench-tool/bin/freshbench" toolchain/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: freshbench-toolchain
+          path: toolchain
+          if-no-files-found: error
+          retention-days: 2
+
+  sweep:
+    name: ${{ inputs.build && 'FreshBench sweep smoke' || format('FreshBench {0}', matrix.build) }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 165
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        build: ${{ fromJSON(needs.build.outputs.builds) }}
+    env:
+      BUILD: ${{ matrix.build }}
+      ONLY: ${{ inputs.only }}
+      SMOKE: ${{ inputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-utils
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: freshbench-toolchain
+          path: toolchain
+      - name: Fetch the build's corpus files
+        run: |
+          set -euo pipefail
+          chmod +x toolchain/fission_cli toolchain/freshbench
+          only=()
+          if [[ -n "$ONLY" ]]; then only=(--only "$ONLY"); fi
+          python3 scripts/ci/freshbench_sweep.py --data "$RUNNER_TEMP/freshbench" fetch --build "$BUILD" "${only[@]}"
+      - name: Static decompile and score
+        run: |
+          set -euo pipefail
+          only=()
+          if [[ -n "$ONLY" ]]; then only=(--only "$ONLY"); fi
+          # Measurements run with error reporting off; `sweep run` refuses otherwise.
+          env -u SENTRY_DSN -u FISSION_SENTRY -u FRESHBENCH_SENTRY \
+            toolchain/freshbench sweep run "$RUNNER_TEMP/freshbench/m1" --cli toolchain/fission_cli --repo . \
+              --label "$BUILD" --builds "$BUILD" "${only[@]}" --runs runs
+          toolchain/freshbench sweep report "runs/$BUILD" >> "$GITHUB_STEP_SUMMARY"
+      - name: Require every stage to produce data
+        if: env.SMOKE != ''
+        run: python3 scripts/ci/freshbench_sweep.py smoke "runs/$BUILD" --freshbench toolchain/freshbench
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: ${{ inputs.build && 'freshbench-smoke' || format('freshbench-shard-{0}', matrix.build) }}
+          # What `sweep report` and `sweep diff` read; the per-binary
+          # checkpoints (the decompiled text) stay on the runner.
+          path: |
+            runs/*/meta.json
+            runs/*/rows.jsonl
+            runs/*/timing.jsonl
+          if-no-files-found: error
+          retention-days: 3
+
+  report:
+    name: FreshBench full coverage and regression report
+    needs: [build, sweep]
+    # A failed shard still gets a report: it names the missing shard instead of
+    # leaving the run with no summary at all.
+    if: ${{ always() && !inputs.build && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      lost: ${{ steps.report.outputs.lost }}
+      lost_build: ${{ steps.report.outputs.lost_build }}
+      baseline_commit: ${{ steps.report.outputs.baseline_commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: freshbench-toolchain
+          path: toolchain
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: freshbench-shard-*
+          path: incoming
+          merge-multiple: true
+      - name: Find previous passing main sweep
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_ids="$(gh api "repos/$REPOSITORY/actions/workflows/freshbench-sweep.yml/runs?branch=main&status=success&per_page=10" \
+            --jq '.workflow_runs[] | select(.event == "schedule" or .event == "workflow_dispatch") | .id')"
+          for run_id in $run_ids; do
+            available="$(gh api "repos/$REPOSITORY/actions/runs/$run_id/artifacts?name=freshbench-runs" \
+              --jq '[.artifacts[] | select(.name == "freshbench-runs" and .expired == false)] | length')"
+            if [[ "$available" -gt 0 ]]; then
+              gh run download "$run_id" --repo "$REPOSITORY" --name freshbench-runs --dir baseline
+              break
+            fi
+          done
+      - name: Report every shard and compare with the baseline
+        id: report
+        run: |
+          chmod +x toolchain/freshbench
+          python3 scripts/ci/freshbench_sweep.py --data "$RUNNER_TEMP/freshbench" report \
+            --freshbench toolchain/freshbench --input incoming --baseline baseline --out report
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: freshbench-full
+          path: report
+          if-no-files-found: error
+          retention-days: 35
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: freshbench-runs
+          path: incoming
+          if-no-files-found: ignore
+          retention-days: 35

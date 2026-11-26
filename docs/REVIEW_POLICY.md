@@ -9,7 +9,8 @@ or an agent given the diff and the claim, not the author's conclusion.
 ## What review is for
 
 Review approval, human or AI, is not proof of correctness
-([ADR 0018](adr/0018-decbench-is-not-a-correctness-oracle.md)). Correctness
+(ADR 0018, carried over by
+[ADR 0019](adr/0019-freshbench-is-the-benchmark.md)). Correctness
 comes from native execution, `verify`, call-site counts and tests that can
 fail. A reviewer's job is to find the case those did not cover and to check
 that the evidence offered could have failed. The reviews that found defects in

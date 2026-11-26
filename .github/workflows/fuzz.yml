@@ -131,6 +131,16 @@ jobs:
           path: ${{ matrix.crate_dir }}/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
 
+  # Report-only: each crash input as a Sentry event (reusable-sentry-defects.yml).
+  sentry-defects:
+    needs: fuzz
+    if: always() && github.repository == 'fission-systems/Fission'
+    uses: ./.github/workflows/reusable-sentry-defects.yml
+    with:
+      pattern: fuzz-crashes-*
+    secrets:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+
   report:
     needs: fuzz
     if: always()

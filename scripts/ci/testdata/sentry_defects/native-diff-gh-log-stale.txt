@@ -1,0 +1,13 @@
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5126432Z      pmovsxbw xmm0, xmm1: Fission could not execute: unhandled userop ["pmovsxbw"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5126869Z      pmovsxdq xmm0, xmm1: Fission could not execute: unhandled userop ["pmovsxdq"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5127279Z      pmovsxwd xmm0, xmm1: Fission could not execute: unhandled userop ["pmovsxwd"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5127708Z      pmovzxbd xmm0, xmm1: Fission could not execute: unhandled userop ["pmovzxbd"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5128037Z 
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5128319Z thread 'native_differential' (7294) panicked at crates/fission-emulator/tests/native_differential/main.rs:745:5:
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5128767Z native differential (x86_64) failed:
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5129273Z   baseline.txt:48: x86_64 PAUSE #1059 no longer reproduces; remove it (and close the issue if fixed)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5129742Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5130203Z      pmovzxbw xmm0, xmm1: Fission could not execute: unhandled userop ["pmovzxbw"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5130767Z      pmovzxwq xmm0, xmm1: Fission could not execute: unhandled userop ["pmovzxwq"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5131200Z      pmuldq xmm0, xmm1: Fission could not execute: unhandled userop ["pmuldq"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-23T05:37:47.5131613Z      pmulhrsw xmm0, xmm1: Fission could not execute: unhandled userop ["pmulhrsw"]

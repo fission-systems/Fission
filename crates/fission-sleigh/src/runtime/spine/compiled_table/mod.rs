@@ -99,8 +99,53 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
     u64,
     RuntimeExecutionDetails,
 )> {
+    decode_instruction_and_lift_tracked(compiled, bytes, address, context_override, None)
+}
+
+/// What one lift read from its input window.
+///
+/// The result of a lift is a function of the compiled frontend, the address,
+/// the context it starts in, and the bytes it read. `end` covers every byte the
+/// instruction context handed out, rejected candidates included; `window` is
+/// set when p-code emission decoded another instruction straight out of the
+/// window (a delay slot or a CROSSBUILD target), which `end` does not cover.
+#[derive(Debug, Default)]
+pub(crate) struct LiftReads {
+    end: std::cell::Cell<usize>,
+    window: std::cell::Cell<bool>,
+}
+
+impl LiftReads {
+    /// How many bytes from the decode address determine a successful lift of
+    /// an instruction `length` bytes long, from a window of `available`
+    /// bytes: any other window with the same bytes there lifts identically.
+    /// `None` when the lift looked outside that prefix.
+    pub(crate) fn reproducible_prefix(&self, length: usize, available: usize) -> Option<usize> {
+        if self.window.get() {
+            return None;
+        }
+        let end = self.end.get().max(length);
+        (end <= available).then_some(end)
+    }
+}
+
+/// [`decode_instruction_and_lift_with_context_override`], recording into
+/// `reads` what it read.
+pub(crate) fn decode_instruction_and_lift_tracked<'a>(
+    compiled: &CompiledFrontend,
+    bytes: &'a [u8],
+    address: u64,
+    context_override: Option<PackedContextOverride>,
+    reads: Option<&'a LiftReads>,
+) -> Result<(
+    DecodedInstruction,
+    Vec<PcodeOp>,
+    u64,
+    RuntimeExecutionDetails,
+)> {
     clear_bind_cache();
     let mut ctx = CompiledInstructionContext::parse(bytes, address)?;
+    ctx.track_reads(reads.map(|reads| &reads.end));
     ctx.context_register = compiled.default_context;
     ctx.context_known_mask = compiled.default_context_known_mask;
     if let Some(context_override) = context_override {
@@ -146,7 +191,7 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
 
         let decoded_length = checked_runtime_length_u64(decoded.length, "decoded instruction")?;
 
-        match emit_pcode_for_state_with_bytes(
+        match emit_pcode_for_state_with_bytes_tracked(
             compiled,
             address,
             bytes,
@@ -158,6 +203,7 @@ pub(crate) fn decode_instruction_and_lift_with_context_override(
                 instruction_context_known_mask: ctx.context_known_mask,
                 ..Default::default()
             },
+            reads.map(|reads| &reads.window),
         ) {
             Ok((ops, mut details)) => {
                 details.pending_context_commits = pending_context_commits;
@@ -480,6 +526,14 @@ fn typed_template_resolution_error(
     compiled: &CompiledFrontend,
     err: anyhow::Error,
 ) -> anyhow::Error {
+    // An invalid instruction found while binding operands (a `_` hole in an
+    // attach table) is not a gap in the template support.
+    if matches!(
+        err.downcast_ref::<RuntimeSleighError>(),
+        Some(RuntimeSleighError::DecodeNoMatch { .. })
+    ) {
+        return err;
+    }
     let rendered = err.to_string();
     let lower = rendered.to_ascii_lowercase();
     if lower.contains("tokenfield")

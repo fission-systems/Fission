@@ -3,7 +3,7 @@
 ## 1. Baseline Row Anchor
 
 - Issue: #110
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_Os.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_Os.exe`
 - Function: `dot_product_stride`
 - Address: `0x14000157e` (the issue's older address no longer names this
   function in the current binary)

@@ -11,23 +11,42 @@
 //! real machine. A three-way result -- `{emulator, dir_eval, hir_eval}` --
 //! catches that class of bug.
 
+use fission_emulator::pcode::page_map::PageFault;
 use fission_loader::loader::LoadedBinary;
 use fission_midend_core::ir::{HirFunction, NirBindingOrigin, NirType};
 use fission_midend_prehir::PreHirFunction;
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::call_sites::MachineFlow;
-use crate::emu_driver::{CallStub, EmulatorHarness, ObservedCall, StubbedEnd};
-use crate::eval::{
-    CallEvent, UndefinedRead, World, hir_addressed_locals, hir_free_names, hir_mentioned_names,
-    normalize, prehir_addressed_locals, run_hir, run_prehir, width_of,
+use crate::emu_driver::{
+    CallOutcome, CallStub, EmulatorHarness, EscapedFramePointer, FrameExclusionAudit,
+    FrameExclusionJustification, FrameExclusionSpec, MemoryAccessAudit, ObservedCall, StubbedEnd,
+    read_pointer,
 };
-use crate::initial_state::{InitialState, RunPlan};
+use crate::eval::{
+    CallEvent, Run as InterpRun, UndefinedRead, World, hir_addressed_locals, hir_free_names,
+    hir_mentioned_names, normalize, prehir_addressed_locals, run_hir, run_prehir, width_of,
+};
+use crate::initial_state::{
+    InitialState, InitialStateIdentity, InitialStatePolicy, RunPlan, StateAdmissibility,
+};
+use crate::product::{
+    AssumptionKind, AssuranceContractError, AssuranceReport, CallObservation, DirCounterexample,
+    EvidenceStrength, FoundationIdentity, ObservationScope, UnresolvedEffect, UnresolvedEffectKind,
+    ValidationAssumption, ValidationBudget, ValidationEvidence, ValidationVerdict,
+};
 use crate::report::{Divergence, UnsupportedReason, VerifyOutcome};
 use fission_decompiler::PrintedGlobal;
 
 /// Divergent runs a function is checked until.
 const MAX_REPORTED_DIVERGENCES: usize = 3;
+
+/// Maximum representative non-divergent witnesses retained in a [`GroundTruthReport`].
+const MAX_SAMPLE_WITNESSES: usize = 8;
+
+/// Maximum synthetic unmapped addresses sampled per interpreter run.
+const MAX_INTERP_SYNTHETIC_SAMPLES: usize = 16;
 
 /// What the comparison needs from outside the two trees and the emulator.
 #[derive(Debug, Clone, Default)]
@@ -113,6 +132,413 @@ impl Grounding {
     }
 }
 
+/// How external memory effects are compared in concrete ground-truth checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryComparisonKind {
+    /// Final written byte states agree across all addresses outside the audited
+    /// private stack frame exclusion, plus the full extent of every frame
+    /// object whose address escaped (returned, stored, passed to a callee, or
+    /// received as an input) and whose bounds are known. A frame address with
+    /// no known bounding object makes the run inconclusive instead of being
+    /// compared over a guessed window. Intermediate write order is not
+    /// enforced.
+    FinalStateOutsideExcludedFrame,
+}
+
+/// How stubbed callee invocations are compared in concrete ground-truth checks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CallComparisonKind {
+    /// Ordered call sequence, instruction sites, and argument widths/values agree.
+    OrderedTrace,
+}
+
+/// Explicit declaration of what one concrete verification run checks and what
+/// effects lie outside its oracle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteObservationScope {
+    pub return_bits: u32,
+    pub return_value_checked: bool,
+    pub exit_kind_checked: bool,
+    pub callee_saved_checked: bool,
+    pub memory_comparison: MemoryComparisonKind,
+    pub call_comparison: CallComparisonKind,
+    pub traps_and_faults_checked: bool,
+    pub unsupported_effects: Vec<String>,
+}
+
+impl ConcreteObservationScope {
+    #[must_use]
+    pub fn for_function(return_bits: u32, return_value_checked: bool) -> Self {
+        Self {
+            return_bits,
+            return_value_checked,
+            exit_kind_checked: true,
+            callee_saved_checked: true,
+            memory_comparison: MemoryComparisonKind::FinalStateOutsideExcludedFrame,
+            call_comparison: CallComparisonKind::OrderedTrace,
+            traps_and_faults_checked: true,
+            unsupported_effects: vec![
+                "floating-point and vector registers outside modeled integer ABI slots".to_string(),
+                "host syscalls, I/O, randomness, clocks, and concurrency/interleaving".to_string(),
+                "intermediate store ordering inside identically-ending non-overlapping writes"
+                    .to_string(),
+                "memory a stubbed callee reads through its pointer arguments at the time of \
+                 the call (escaped frame objects are compared by their final contents; one \
+                 bounded only by an inferred extent needs the whole private frame to agree)"
+                    .to_string(),
+            ],
+        }
+    }
+
+    #[must_use]
+    pub fn to_product_scope(&self) -> ObservationScope {
+        ObservationScope {
+            return_value: self.return_value_checked,
+            exit_kind: self.exit_kind_checked,
+            live_out_locations: Vec::new(),
+            memory_ranges: Vec::new(),
+            calls: CallObservation::TypedEffects,
+            traps: self.traps_and_faults_checked,
+        }
+    }
+}
+
+/// How one side of a concrete run ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TerminationKind {
+    Returned,
+    NoReturnCall(u64),
+    HitBudget,
+    ProcessExited,
+    LeftDecodedCode(u64),
+    Fault(String),
+    Trap(String),
+    UndefinedRead(String),
+    Unsupported(String),
+}
+
+impl TerminationKind {
+    #[must_use]
+    pub fn is_trap_or_fault(&self) -> bool {
+        matches!(
+            self,
+            Self::HitBudget | Self::ProcessExited | Self::Fault(_) | Self::Trap(_)
+        )
+    }
+}
+
+/// Role of a [`ConcreteWitness`] within [`GroundTruthReport`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WitnessKind {
+    AgreedSample,
+    Divergence,
+    Suspect,
+    Unknown,
+    AsymmetricFault,
+    SkippedHarnessError,
+    SkippedInterpreterError,
+}
+
+/// Summary of call-stub behavior active during a concrete run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StubSummary {
+    pub calls_intercepted: usize,
+    pub call_sites: Vec<u64>,
+    pub clobbers_enabled: bool,
+}
+
+/// Detailed witness for an individual concrete execution, preserving exact
+/// initial state, admissibility classification, stub summary, and audits.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConcreteWitness {
+    pub kind: WitnessKind,
+    pub initial_state: InitialStateIdentity,
+    pub args: Vec<i64>,
+    pub stub_summary: StubSummary,
+    pub frame_audit: Option<FrameExclusionAudit>,
+    pub memory_audit: Option<MemoryAccessAudit>,
+    pub machine_termination: TerminationKind,
+    pub hir_termination: TerminationKind,
+    pub prehir_termination: Option<TerminationKind>,
+    pub machine_return: Option<i64>,
+    pub hir_return: Option<i64>,
+    pub prehir_return: Option<i64>,
+    pub detail: Option<String>,
+}
+
+/// Complete denominator accounting across all planned concrete runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct GroundTruthDenominators {
+    pub planned_runs: usize,
+    pub attempted_runs: usize,
+    pub checked_runs: usize,
+    pub agreed_runs: usize,
+    pub diverged_runs: usize,
+    pub suspect_runs: usize,
+    pub native_admissible_runs: usize,
+    pub synthetic_model_runs: usize,
+    pub unknown_runs: usize,
+    pub skipped_interpreter_errors: usize,
+    pub skipped_emulator_errors: usize,
+    pub asymmetric_fault_runs: usize,
+    pub unjustified_frame_runs: usize,
+    /// Runs left unknown because the machine broke the ABI contract the tree
+    /// implies (a callee-saved register changed across the return).
+    pub abi_violation_runs: usize,
+    pub prehir_skipped_runs: usize,
+}
+
+impl GroundTruthDenominators {
+    /// Why these counts do not add up, or `None` when every attempted run
+    /// sits in exactly one terminal bucket and every checked run in exactly
+    /// one verdict bucket.
+    #[must_use]
+    pub fn consistency_error(&self) -> Option<String> {
+        let terminal = self.checked_runs
+            + self.unknown_runs
+            + self.skipped_interpreter_errors
+            + self.skipped_emulator_errors;
+        if self.attempted_runs != terminal {
+            return Some(format!(
+                "attempted {} != checked + unknown + skipped ({terminal})",
+                self.attempted_runs
+            ));
+        }
+        let verdicts =
+            self.agreed_runs + self.diverged_runs + self.suspect_runs + self.asymmetric_fault_runs;
+        if self.checked_runs != verdicts {
+            return Some(format!(
+                "checked {} != agreed + diverged + suspect + asymmetric ({verdicts})",
+                self.checked_runs
+            ));
+        }
+        if self.agreed_runs != self.native_admissible_runs + self.synthetic_model_runs {
+            return Some(format!(
+                "agreed {} != native {} + synthetic {}",
+                self.agreed_runs, self.native_admissible_runs, self.synthetic_model_runs
+            ));
+        }
+        if self.unjustified_frame_runs + self.abi_violation_runs > self.unknown_runs {
+            return Some(format!(
+                "unjustified-frame {} + abi-violation {} exceed unknown {}",
+                self.unjustified_frame_runs, self.abi_violation_runs, self.unknown_runs
+            ));
+        }
+        if self.attempted_runs > self.planned_runs {
+            return Some(format!(
+                "attempted {} > planned {}",
+                self.attempted_runs, self.planned_runs
+            ));
+        }
+        None
+    }
+}
+
+/// Explicit, non-overstated input case for native-admissible verification.
+#[derive(Debug, Clone, Copy)]
+pub struct AdmissibleCase<'a> {
+    pub args: &'a [u64],
+    pub initial_memory: &'a [(u64, u8)],
+}
+
+/// Audited concrete verification report preserving denominators, policy, scope,
+/// assumptions, unresolved effects, and native-vs-synthetic witnesses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundTruthReport {
+    pub outcome: VerifyOutcome,
+    pub policy: InitialStatePolicy,
+    pub observation_scope: ConcreteObservationScope,
+    pub denominators: GroundTruthDenominators,
+    pub assumptions: Vec<ValidationAssumption>,
+    pub unresolved_effects: Vec<UnresolvedEffect>,
+    pub witnesses: Vec<ConcreteWitness>,
+}
+
+impl GroundTruthReport {
+    #[must_use]
+    pub fn native_admissible_divergences(&self) -> Vec<&ConcreteWitness> {
+        self.witnesses
+            .iter()
+            .filter(|w| {
+                matches!(
+                    w.kind,
+                    WitnessKind::Divergence | WitnessKind::AsymmetricFault
+                ) && w.initial_state.admissibility == StateAdmissibility::NativeAdmissible
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn synthetic_divergences(&self) -> Vec<&ConcreteWitness> {
+        self.witnesses
+            .iter()
+            .filter(|w| {
+                matches!(
+                    w.kind,
+                    WitnessKind::Divergence | WitnessKind::AsymmetricFault
+                ) && w.initial_state.admissibility == StateAdmissibility::SyntheticModel
+            })
+            .collect()
+    }
+
+    #[must_use]
+    pub fn native_admissible_agreements(&self) -> usize {
+        if !matches!(self.outcome, VerifyOutcome::Equivalent { .. }) {
+            return 0;
+        }
+        self.denominators.native_admissible_runs
+    }
+
+    #[must_use]
+    pub fn synthetic_agreements(&self) -> usize {
+        if !matches!(self.outcome, VerifyOutcome::Equivalent { .. }) {
+            return 0;
+        }
+        self.denominators.synthetic_model_runs
+    }
+
+    /// Project this concrete report into the canonical DIR [`AssuranceReport`]
+    /// contract. Sampled concrete passes NEVER claim `Universal` or
+    /// `Conditional` proof; they project strictly to `EvidenceStrength::Traces`
+    /// (`AssuranceBand::TraceValidated`).
+    pub fn to_assurance_report(
+        &self,
+        foundation: FoundationIdentity,
+    ) -> Result<AssuranceReport, AssuranceContractError> {
+        let scope = self.observation_scope.to_product_scope();
+        let budget = ValidationBudget {
+            max_traces: Some(self.denominators.planned_runs as u64),
+            ..ValidationBudget::default()
+        };
+        match &self.outcome {
+            VerifyOutcome::Equivalent { checked } => {
+                let mut unresolved = self.unresolved_effects.clone();
+                unresolved.push(UnresolvedEffect {
+                    kind: UnresolvedEffectKind::PathBudget,
+                    description: format!(
+                        "concrete sampling covers {} checked trace(s) ({} native-admissible, \
+                         {} synthetic-model, {} unknown, {} skipped-interp, {} skipped-emu) \
+                         and is not a universal equivalence proof",
+                        checked,
+                        self.denominators.native_admissible_runs,
+                        self.denominators.synthetic_model_runs,
+                        self.denominators.unknown_runs,
+                        self.denominators.skipped_interpreter_errors,
+                        self.denominators.skipped_emulator_errors,
+                    ),
+                });
+                AssuranceReport::new(
+                    foundation,
+                    scope,
+                    ValidationVerdict::Equivalent,
+                    ValidationEvidence {
+                        strength: EvidenceStrength::Traces,
+                        budget,
+                        explored_paths: 0,
+                        executed_traces: *checked as u64,
+                        assumptions: self.assumptions.clone(),
+                        unresolved_effects: unresolved,
+                        counterexample: None,
+                        detail: format!(
+                            "agreed on {checked}/{} planned concrete runs ({} native-admissible, \
+                             {} synthetic-model)",
+                            self.denominators.planned_runs,
+                            self.denominators.native_admissible_runs,
+                            self.denominators.synthetic_model_runs,
+                        ),
+                    },
+                )
+            }
+            VerifyOutcome::Diverged(divergences) => {
+                let first = &divergences[0];
+                let counterexample = DirCounterexample {
+                    inputs: first
+                        .args
+                        .iter()
+                        .enumerate()
+                        .map(|(i, val)| (format!("arg_{i}"), *val as u64))
+                        .collect(),
+                    foundation_observation: format!(
+                        "emulator_ret={:?}, detail={}",
+                        first.emulator_result,
+                        first.detail.as_deref().unwrap_or("none"),
+                    ),
+                    candidate_observation: format!(
+                        "hir_ret={:?}, prehir_ret={:?}",
+                        first.hir_result, first.prehir_result,
+                    ),
+                };
+                AssuranceReport::new(
+                    foundation,
+                    scope,
+                    ValidationVerdict::Counterexample,
+                    ValidationEvidence {
+                        strength: EvidenceStrength::None,
+                        budget,
+                        explored_paths: 0,
+                        executed_traces: self.denominators.checked_runs as u64,
+                        assumptions: self.assumptions.clone(),
+                        unresolved_effects: self.unresolved_effects.clone(),
+                        counterexample: Some(counterexample),
+                        detail: first
+                            .detail
+                            .clone()
+                            .unwrap_or_else(|| "concrete divergence observed".to_string()),
+                    },
+                )
+            }
+            VerifyOutcome::Suspect(suspects) => AssuranceReport::new(
+                foundation,
+                scope,
+                ValidationVerdict::Inconclusive,
+                ValidationEvidence {
+                    strength: EvidenceStrength::None,
+                    budget,
+                    explored_paths: 0,
+                    executed_traces: self.denominators.checked_runs as u64,
+                    assumptions: self.assumptions.clone(),
+                    unresolved_effects: self.unresolved_effects.clone(),
+                    counterexample: None,
+                    detail: suspects
+                        .first()
+                        .and_then(|s| s.detail.clone())
+                        .unwrap_or_else(|| "recovered callee prototype mismatch".to_string()),
+                },
+            ),
+            VerifyOutcome::Inconclusive { reason } => AssuranceReport::new(
+                foundation,
+                scope,
+                ValidationVerdict::Inconclusive,
+                ValidationEvidence {
+                    strength: EvidenceStrength::None,
+                    budget,
+                    explored_paths: 0,
+                    executed_traces: self.denominators.checked_runs as u64,
+                    assumptions: self.assumptions.clone(),
+                    unresolved_effects: self.unresolved_effects.clone(),
+                    counterexample: None,
+                    detail: reason.clone(),
+                },
+            ),
+            VerifyOutcome::Unsupported(reason) => AssuranceReport::new(
+                foundation,
+                scope,
+                ValidationVerdict::Unsupported,
+                ValidationEvidence {
+                    strength: EvidenceStrength::None,
+                    budget,
+                    explored_paths: 0,
+                    executed_traces: self.denominators.checked_runs as u64,
+                    assumptions: self.assumptions.clone(),
+                    unresolved_effects: self.unresolved_effects.clone(),
+                    counterexample: None,
+                    detail: reason.to_string(),
+                },
+            ),
+        }
+    }
+}
+
 /// Run `prehir`, `hir` and the real machine code from the same initial
 /// states (`plan`) and compare what each returns. Calls are refused; see
 /// [`check_ground_truth_with`] for the tier that stubs them.
@@ -126,19 +552,7 @@ pub fn check_ground_truth(
     check_ground_truth_with(harness, address, prehir, hir, plan, &Grounding::default())
 }
 
-/// For each run of `plan`, run `prehir` and `hir` and the real machine code
-/// from the same initial state ([`crate::initial_state`]) with the same
-/// stubbed calls, and compare what each returns, every call each makes and
-/// every byte each stores outside the function's own frame.
-///
-/// Every byte the function can read is defined by the run -- arguments,
-/// registers, and memory anywhere a pointer leads -- and both sides read the
-/// same one, so a pointer argument needs no buffer of its own and neither
-/// side needs to know which arguments are pointers.
-///
-/// A run counts toward `checked` only when all three ran to a comparable
-/// end; one the interpreter refuses is skipped and its reason kept, so a
-/// function no run could check reports why rather than passing.
+/// Run [`check_ground_truth_report`] and return only its [`VerifyOutcome`].
 pub fn check_ground_truth_with(
     harness: &mut EmulatorHarness,
     address: u64,
@@ -147,9 +561,244 @@ pub fn check_ground_truth_with(
     plan: &RunPlan,
     grounding: &Grounding,
 ) -> VerifyOutcome {
-    // The calling convention model only covers integer registers. A floating-point
-    // return or argument passes through vector/x87 registers which are not modeled
-    // in the integer calling convention harness.
+    check_ground_truth_report(harness, address, prehir, hir, plan, grounding).outcome
+}
+
+/// Audited version of [`check_ground_truth_with`]: preserves initial-state
+/// policy, exact observation scope, full run denominators, and native-vs-
+/// synthetic witness separation.
+pub fn check_ground_truth_report(
+    harness: &mut EmulatorHarness,
+    address: u64,
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    plan: &RunPlan,
+    grounding: &Grounding,
+) -> GroundTruthReport {
+    run_ground_truth_suite(
+        harness,
+        address,
+        prehir,
+        hir,
+        grounding,
+        InitialStatePolicy::synthetic_default(),
+        RunSuiteKind::SyntheticPlan(plan),
+    )
+}
+
+/// Check one explicit [`AdmissibleCase`] under strict native memory and
+/// permission enforcement (`lazy_memory = None`, no synthetic call stubs).
+pub fn check_admissible_case(
+    harness: &mut EmulatorHarness,
+    address: u64,
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    case: &AdmissibleCase<'_>,
+    grounding: &Grounding,
+) -> GroundTruthReport {
+    run_ground_truth_suite(
+        harness,
+        address,
+        prehir,
+        hir,
+        grounding,
+        InitialStatePolicy::native_admissible(),
+        RunSuiteKind::NativeCase(case),
+    )
+}
+
+enum RunSuiteKind<'a> {
+    SyntheticPlan(&'a RunPlan),
+    NativeCase(&'a AdmissibleCase<'a>),
+}
+
+fn push_witness_bounded(
+    witnesses: &mut Vec<ConcreteWitness>,
+    non_error_samples: &mut usize,
+    witness: ConcreteWitness,
+) {
+    match witness.kind {
+        WitnessKind::Divergence | WitnessKind::Suspect | WitnessKind::AsymmetricFault => {
+            witnesses.push(witness);
+        }
+        _ => {
+            if *non_error_samples < MAX_SAMPLE_WITNESSES {
+                *non_error_samples += 1;
+                witnesses.push(witness);
+            }
+        }
+    }
+}
+
+fn is_interp_runtime_trap(msg: &str) -> bool {
+    is_interp_arithmetic_trap(msg) || msg.contains("load from unmapped address")
+}
+
+/// An integer division or remainder by zero in the tree. Natively the
+/// machine's divide instruction traps too (x86 `#DE`), but the emulator's
+/// p-code division does not raise it, so the machine side of such a run is
+/// not evidence either way.
+fn is_interp_arithmetic_trap(msg: &str) -> bool {
+    msg.contains("division by zero") || msg.contains("modulo by zero")
+}
+
+/// The interpreter's own step or call budget ran out: a resource limit, not a
+/// termination behaviour of the tree.
+fn is_interp_budget(msg: &str) -> bool {
+    msg.contains("did not finish within") || msg.contains("more than ")
+}
+
+fn classify_interp_err(err: &anyhow::Error) -> TerminationKind {
+    if let Some(undef) = err.downcast_ref::<UndefinedRead>() {
+        return TerminationKind::UndefinedRead(undef.to_string());
+    }
+    let msg = err.to_string();
+    if is_interp_budget(&msg) {
+        TerminationKind::HitBudget
+    } else if is_interp_runtime_trap(&msg) {
+        TerminationKind::Trap(msg)
+    } else {
+        TerminationKind::Unsupported(msg)
+    }
+}
+
+fn classify_machine_err(err: &anyhow::Error, strict_native: bool) -> (TerminationKind, bool) {
+    if let Some(fault) = err.downcast_ref::<PageFault>() {
+        // In strict native mode every mapping/permission fault is a genuine
+        // fault event; in synthetic mode a PageFault reflects the emulator
+        // page map's unmappable boundary (such as the top page) unless the
+        // tree also trapped.
+        return (TerminationKind::Fault(fault.to_string()), strict_native);
+    }
+    let msg = err.to_string();
+    if msg.contains("p-code budget") {
+        // A step budget is a resource limit, not a fault of the code.
+        return (TerminationKind::HitBudget, true);
+    }
+    let is_arith_or_fault =
+        msg.contains("divide") || msg.contains("division") || msg.contains("fault");
+    (
+        TerminationKind::Fault(msg),
+        strict_native || is_arith_or_fault,
+    )
+}
+
+/// Why a run whose two sides ended as `machine` and `hir` is neither agreement
+/// nor a counterexample, or `None` when the endings can be compared.
+///
+/// A step budget on either side is a resource limit, not a termination
+/// behaviour. An integer division by zero traps natively on the machine as
+/// well, but the emulator's p-code division does not raise it, so a tree trap
+/// there has no machine counterpart to compare against.
+fn unknown_termination_reason(machine: &TerminationKind, hir: &TerminationKind) -> Option<String> {
+    if machine.is_trap_or_fault() && hir.is_trap_or_fault() {
+        return Some(format!(
+            "both sides trapped/terminated abnormally: machine={machine:?}, hir={hir:?}"
+        ));
+    }
+    if *machine == TerminationKind::HitBudget {
+        return Some(format!(
+            "the machine did not finish within the emulator budget (hir={hir:?}); a budget \
+             is not a termination difference"
+        ));
+    }
+    if *hir == TerminationKind::HitBudget {
+        return Some(format!(
+            "the tree did not finish within the interpreter budget (machine={machine:?}); a \
+             budget is not a termination difference"
+        ));
+    }
+    if let TerminationKind::Trap(msg) = hir
+        && is_interp_arithmetic_trap(msg)
+    {
+        return Some(format!(
+            "hir trapped ({msg}); the emulator does not raise the machine's divide trap, so \
+             machine={machine:?} is not comparable"
+        ));
+    }
+    None
+}
+
+fn build_report_assumptions(
+    policy: &InitialStatePolicy,
+    grounding: &Grounding,
+) -> Vec<ValidationAssumption> {
+    let mut assumptions = vec![ValidationAssumption {
+        kind: AssumptionKind::CallingConvention,
+        description: "Integer argument slots and return register follow target ABI calling \
+                      convention; floating-point/vector ABI functions are refused."
+            .to_string(),
+    }];
+    if policy.lazy_memory_enabled {
+        assumptions.push(ValidationAssumption {
+            kind: AssumptionKind::Memory,
+            description: "Unmapped memory reads/writes use deterministic `InitialState` lazy \
+                          pages (`SyntheticModel` unless accesses stay strictly inside mapped \
+                          image/stack/scratch)."
+                .to_string(),
+        });
+    } else {
+        assumptions.push(ValidationAssumption {
+            kind: AssumptionKind::Memory,
+            description: "Strict `PageMap` permissions enforced (`lazy_memory = None`); only \
+                          mapped image, stack, and explicit scratch buffers are accessible."
+                .to_string(),
+        });
+    }
+    if policy.stubbed_calls_enabled
+        && grounding
+            .flow
+            .as_ref()
+            .is_some_and(|f| !f.calls.is_empty() || !f.tail_jumps.is_empty())
+    {
+        assumptions.push(ValidationAssumption {
+            kind: AssumptionKind::ExternalCall,
+            description: "Direct calls and tail jumps are intercepted by deterministic `CallStub` \
+                          models rather than executing callee machine code."
+                .to_string(),
+        });
+    }
+    assumptions
+}
+
+fn run_ground_truth_suite(
+    harness: &mut EmulatorHarness,
+    address: u64,
+    prehir: &PreHirFunction,
+    hir: &HirFunction,
+    grounding: &Grounding,
+    policy: InitialStatePolicy,
+    suite: RunSuiteKind<'_>,
+) -> GroundTruthReport {
+    let planned_runs = match suite {
+        RunSuiteKind::SyntheticPlan(plan) => plan.runs,
+        RunSuiteKind::NativeCase(_) => 1,
+    };
+    let return_bits = width_of(&hir.return_type).clamp(1, 64);
+    let declares_value = !matches!(hir.return_type, NirType::Unknown)
+        || !matches!(prehir.return_type, NirType::Unknown);
+    let observation_scope = ConcreteObservationScope::for_function(return_bits, declares_value);
+    let assumptions = build_report_assumptions(&policy, grounding);
+
+    let early_unsupported = |reason: UnsupportedReason, extra_effect: Option<UnresolvedEffect>| {
+        let mut unresolved = Vec::new();
+        if let Some(effect) = extra_effect {
+            unresolved.push(effect);
+        }
+        GroundTruthReport {
+            outcome: VerifyOutcome::Unsupported(reason),
+            policy: policy.clone(),
+            observation_scope: observation_scope.clone(),
+            denominators: GroundTruthDenominators {
+                planned_runs,
+                ..GroundTruthDenominators::default()
+            },
+            assumptions: assumptions.clone(),
+            unresolved_effects: unresolved,
+            witnesses: Vec::new(),
+        }
+    };
+
     if matches!(hir.return_type, NirType::Float { .. })
         || hir
             .params
@@ -161,31 +810,31 @@ pub fn check_ground_truth_with(
             .iter()
             .any(|p| matches!(p.ty, NirType::Float { .. }))
     {
-        return VerifyOutcome::Unsupported(UnsupportedReason::Construct(
-            "floating-point ABI in ground-truth",
-        ));
+        return early_unsupported(
+            UnsupportedReason::Construct("floating-point ABI in ground-truth"),
+            Some(UnresolvedEffect {
+                kind: UnresolvedEffectKind::UnsupportedOpcode,
+                description: "floating-point parameter or return ABI is not modeled".to_string(),
+            }),
+        );
     }
 
     if let Some(name) = hir_mentioned_names(hir)
         .into_iter()
         .find(|name| grounding.ambiguous_globals.contains(name))
     {
-        return VerifyOutcome::Unsupported(UnsupportedReason::Harness(format!(
-            "global '{name}' names several objects; the text does not say which"
-        )));
+        return early_unsupported(
+            UnsupportedReason::Harness(format!(
+                "global '{name}' names several objects; the text does not say which"
+            )),
+            Some(UnresolvedEffect {
+                kind: UnresolvedEffectKind::MemoryAlias,
+                description: format!("global '{name}' resolved ambiguously across symbols"),
+            }),
+        );
     }
-    // Registers the body reads without ever writing -- caller state the
-    // interpreter has no other way to know. Read from the machine once each
-    // run is set up, so both sides see the same values however the names
-    // overlap (`eax` inside `rax`).
+
     let mut free = hir_free_names(hir);
-    // And locals named after a register. The decompiler declares a variable
-    // for a register it reads -- `long long fs_offset;` for the stack
-    // canary's segment base, `rdx` for a register a path uses before it
-    // assigns it -- and a read before any assignment is that register's
-    // value at entry. The machine says what that is. A local the machine has
-    // no register for (`local_8`, `tmp_1a004`) is not bound here, and a read
-    // of it before an assignment is still refused.
     free.extend(
         hir.locals
             .iter()
@@ -211,18 +860,16 @@ pub fn check_ground_truth_with(
         .max()
         .map_or(0, |&s| s + 1);
 
-    // Locals the body takes the address of live in the frame, where the
-    // machine keeps them: `&x` handed to a call is the same pointer on both
-    // sides, and `*(&x + 4)` reads the bytes next to `x`.
     let hir_local_offsets = match frame_offsets(
         &hir_addressed_locals(&hir.body, &hir.locals),
         &grounding.frame_offsets,
     ) {
         Ok(offsets) => offsets,
         Err(reason) => {
-            return VerifyOutcome::Unsupported(UnsupportedReason::Interpreter(format!(
-                "hir: {reason}"
-            )));
+            return early_unsupported(
+                UnsupportedReason::Interpreter(format!("hir: {reason}")),
+                None,
+            );
         }
     };
     let prehir_local_offsets = frame_offsets(
@@ -238,58 +885,121 @@ pub fn check_ground_truth_with(
         .filter(|(_, next)| next.is_none())
         .map(|(site, _)| *site)
         .collect();
-    let return_bits = width_of(&hir.return_type).clamp(1, 64);
-    let declares_value = !matches!(hir.return_type, NirType::Unknown)
-        || !matches!(prehir.return_type, NirType::Unknown);
     let no_placed: HashMap<u64, u8> = HashMap::new();
+    let norm = |v: i64| normalize(mask_to_width(v as u64, return_bits), &hir.return_type);
+
     let mut divergences = Vec::new();
-    // Runs whose only difference is an argument at a call with a recovered
-    // prototype: reported only when no run differs outright.
     let mut suspects = Vec::new();
-    let mut checked = 0usize;
-    let mut emulator_errors = 0usize;
+    let mut denominators = GroundTruthDenominators {
+        planned_runs,
+        ..GroundTruthDenominators::default()
+    };
+    let mut unresolved_effects = Vec::new();
+    let mut witnesses = Vec::new();
+    let mut non_error_samples = 0usize;
     let mut first_interpreter_error: Option<String> = None;
-    // Runs where both sides read what nothing defined, and the first one.
-    let mut unknown_runs = 0usize;
     let mut first_unknown: Option<String> = None;
     let mut first_emulator_error: Option<String> = None;
 
-    for run in 0..plan.runs {
-        // Three differences are evidence enough; running the rest only
-        // costs time on exactly the bodies that loop to their budget.
+    let strict_native = matches!(suite, RunSuiteKind::NativeCase(_));
+
+    for run_idx in 0..planned_runs {
         if divergences.len() >= MAX_REPORTED_DIVERGENCES {
             break;
         }
-        let state = InitialState::new(plan.seed, run as u32);
-        // One word per slot up to the last one a parameter uses; a slot no
-        // parameter names still holds whatever the caller left there.
-        let raw_slots: Vec<u64> = (0..slot_count)
-            .map(|slot| match slots.iter().position(|&s| s == slot) {
-                Some(i) => state.argument_word(slot, &hir.params[i].ty, slot_bits),
-                None => state.argument_word(slot, &NirType::Unknown, slot_bits),
-            })
-            .collect();
+        denominators.attempted_runs += 1;
+
+        let (raw_slots, seed_opt, run_opt, state_opt, image_slice) = match suite {
+            RunSuiteKind::SyntheticPlan(plan) => {
+                let state = InitialState::new(plan.seed, run_idx as u32);
+                let raw: Vec<u64> = (0..slot_count)
+                    .map(|slot| match slots.iter().position(|&s| s == slot) {
+                        Some(i) => state.argument_word(slot, &hir.params[i].ty, slot_bits),
+                        None => state.argument_word(slot, &NirType::Unknown, slot_bits),
+                    })
+                    .collect();
+                (
+                    raw,
+                    Some(plan.seed),
+                    Some(run_idx as u32),
+                    Some(state),
+                    &[][..],
+                )
+            }
+            RunSuiteKind::NativeCase(case) => {
+                let mut raw = vec![0u64; slot_count.max(case.args.len())];
+                for (i, &slot) in slots.iter().enumerate() {
+                    if let Some(&arg) = case.args.get(i) {
+                        raw[slot] = arg;
+                    }
+                }
+                if case.args.len() > slots.len() {
+                    for (i, &arg) in case.args.iter().enumerate() {
+                        raw[i] = arg;
+                    }
+                }
+                (raw, None, Some(0), None, case.initial_memory)
+            }
+        };
+
         let args: Vec<i64> = slots
             .iter()
             .zip(&hir.params)
-            .map(|(&slot, p)| normalize(raw_slots[slot] as i64, &p.ty))
+            .map(|(&slot, p)| normalize(raw_slots.get(slot).copied().unwrap_or(0) as i64, &p.ty))
             .collect();
         let prehir_args: Vec<i64> = prehir_slots
             .iter()
             .zip(&prehir.params)
-            .map(|(&slot, p)| normalize(raw_slots[slot] as i64, &p.ty))
+            .map(|(&slot, p)| normalize(raw_slots.get(slot).copied().unwrap_or(0) as i64, &p.ty))
             .collect();
-        if let Err(err) = harness.begin_run(address, &raw_slots, &state) {
-            first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
-            emulator_errors += 1;
+
+        let setup_res = match &state_opt {
+            Some(state) => harness.begin_run(address, &raw_slots, state),
+            None => harness.begin_native_run(address, &raw_slots),
+        };
+        if let Err(err) = setup_res {
+            let msg = format!("call setup failed: {err}");
+            first_emulator_error.get_or_insert_with(|| msg.clone());
+            denominators.skipped_emulator_errors += 1;
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::SkippedHarnessError,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
+                    },
+                    args,
+                    stub_summary: StubSummary {
+                        calls_intercepted: 0,
+                        call_sites: Vec::new(),
+                        clobbers_enabled: false,
+                    },
+                    frame_audit: None,
+                    memory_audit: None,
+                    machine_termination: TerminationKind::Fault(msg.clone()),
+                    hir_termination: TerminationKind::Unsupported("not executed".to_string()),
+                    prehir_termination: None,
+                    machine_return: None,
+                    hir_return: None,
+                    prehir_return: None,
+                    detail: Some(msg),
+                },
+            );
             continue;
         }
+
         let bound = harness.registers(&free);
         let below_entry = match harness.frame_below_entry() {
             Ok(range) => range,
             Err(err) => {
                 first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
-                emulator_errors += 1;
+                denominators.skipped_emulator_errors += 1;
                 continue;
             }
         };
@@ -297,10 +1007,11 @@ pub fn check_ground_truth_with(
             (Ok(cfa), Ok(frame)) => (cfa, frame),
             (Err(err), _) | (_, Err(err)) => {
                 first_emulator_error.get_or_insert_with(|| format!("call setup failed: {err}"));
-                emulator_errors += 1;
+                denominators.skipped_emulator_errors += 1;
                 continue;
             }
         };
+
         let place = |offsets: &[(String, i64)]| -> HashMap<String, u64> {
             offsets
                 .iter()
@@ -309,8 +1020,6 @@ pub fn check_ground_truth_with(
         };
         let hir_locals = place(&hir_local_offsets);
         let prehir_locals = prehir_local_offsets.as_deref().map(place);
-        let call_return = |n: usize| state.call_result(n);
-        let call_clobber = |n: usize, index: usize| state.call_clobber(n, index);
         let tls = harness
             .registers(&["fs_offset".to_string()])
             .first()
@@ -327,29 +1036,80 @@ pub fn check_ground_truth_with(
                 Some((*addr, type_bytes(grounding.global_types.get(name)?)?))
             }))
             .collect();
-        let effects = CallEffects {
-            state: &state,
-            objects: &objects,
-            frame: &frame,
-            tls: tls.as_ref(),
-            grounding,
-        };
-        let call_writes = |n: usize, args: &[u64]| effects.writes(n, args);
+        // Objects of known extent a frame address can designate: the tree's
+        // addressed locals where the decompiler placed them, and the caller
+        // memory an explicit case declares. Every byte of one whose address
+        // escapes is observable; nothing else in the frame is assumed to be.
+        let mut known_objects: Vec<KnownObject> = hir_locals
+            .iter()
+            .filter_map(|(name, addr)| {
+                let ty = &hir.locals.iter().find(|l| &l.name == name)?.ty;
+                let size = type_bytes(ty).filter(|size| *size > 0)?;
+                Some(KnownObject {
+                    extent: *addr..addr.saturating_add(size),
+                    declared: false,
+                })
+            })
+            .collect();
+        known_objects.extend(
+            declared_objects(image_slice)
+                .into_iter()
+                .map(|extent| KnownObject {
+                    extent,
+                    declared: true,
+                }),
+        );
+
+        let interp_synthetic_reads = RefCell::new(Vec::<u64>::new());
+        let initial_mem_map: HashMap<u64, u8> = image_slice.iter().copied().collect();
         let (prehir_r, hir_r) = {
-            let backing = |addr: u64| Some(harness.initial_byte(&state, addr));
+            let backing = |addr: u64| -> Option<u8> {
+                if let Some(byte) = harness.baseline_byte(addr) {
+                    return Some(byte);
+                }
+                if let Some(&byte) = initial_mem_map.get(&addr) {
+                    return Some(byte);
+                }
+                if let Some(state) = &state_opt {
+                    let mut log = interp_synthetic_reads.borrow_mut();
+                    if log.len() < MAX_INTERP_SYNTHETIC_SAMPLES && !log.contains(&addr) {
+                        log.push(addr);
+                    }
+                    Some(state.memory_byte(addr))
+                } else {
+                    None
+                }
+            };
+            let call_return_fn = state_opt.as_ref().map(|s| move |n: usize| s.call_result(n));
+            let call_effects_state = state_opt.as_ref();
+            let call_effects = call_effects_state.map(|state| CallEffects {
+                state,
+                objects: &objects,
+                frame: &frame,
+                tls: tls.as_ref(),
+                grounding,
+            });
+            let call_writes_fn = call_effects
+                .as_ref()
+                .map(|eff| move |n: usize, c_args: &[u64]| eff.writes(n, c_args));
+            let call_return_ref: Option<&dyn Fn(usize) -> u64> =
+                match (&grounding.flow, &call_return_fn) {
+                    (Some(_), Some(f)) => Some(f),
+                    _ => None,
+                };
+            let call_writes_ref: Option<&dyn Fn(usize, &[u64]) -> Vec<(u64, u8)>> = call_writes_fn
+                .as_ref()
+                .map(|f| f as &dyn Fn(usize, &[u64]) -> Vec<(u64, u8)>);
             let world = World {
-                image: &[],
+                image: image_slice,
                 bound: &bound,
                 backing: Some(&backing),
                 globals: Some(&grounding.globals),
                 global_types: Some(&grounding.global_types),
-                call_return: grounding
-                    .flow
-                    .as_ref()
-                    .map(|_| &call_return as &dyn Fn(usize) -> u64),
+                call_return: call_return_ref,
                 no_return_sites: Some(&no_return_sites),
                 local_addresses: Some(&hir_locals),
-                call_writes: Some(&call_writes),
+                call_writes: call_writes_ref,
                 undefined_frame: Some(&below_entry),
             };
             let prehir_r = match &prehir_locals {
@@ -370,111 +1130,560 @@ pub fn check_ground_truth_with(
                 run_hir(&hir.body, &hir.params, &hir.locals, &args, &world),
             )
         };
-        // Stores into the frame are the function's own business on both sides.
-        let outside = |writes: &BTreeMap<u64, u8>| -> BTreeMap<u64, u8> {
-            writes
-                .iter()
-                .filter(|(addr, _)| !frame.contains(addr))
-                .map(|(addr, value)| (*addr, *value))
-                .collect()
+        let interp_used_synthetic = !interp_synthetic_reads.borrow().is_empty();
+        if hir_r.is_ok() && prehir_r.is_err() {
+            denominators.prehir_skipped_runs += 1;
+        }
+
+        let hir_term = match &hir_r {
+            Ok(run) if run.ended_in_no_return => TerminationKind::NoReturnCall(
+                run.calls.last().and_then(|c| c.site).unwrap_or_default(),
+            ),
+            Ok(_) => TerminationKind::Returned,
+            Err(err) => classify_interp_err(err),
         };
-        // The printed tree is what is being checked. PreHIR is compared when
-        // it runs, but a PreHIR the interpreter cannot run (it can name storage
-        // the printed tree resolved) does not stop the printed tree's check.
-        // A tree that read something nothing defined still has its run
-        // weighed against the machine's: see below.
+        let prehir_term = Some(match &prehir_r {
+            Ok(run) if run.ended_in_no_return => TerminationKind::NoReturnCall(
+                run.calls.last().and_then(|c| c.site).unwrap_or_default(),
+            ),
+            Ok(_) => TerminationKind::Returned,
+            Err(err) => classify_interp_err(err),
+        });
+
+        // Unsupported interpreter constructs cannot meaningfully compare against
+        // machine execution; record denominator & sample cleanly.
+        if let TerminationKind::Unsupported(msg) = &hir_term {
+            let detail_msg = format!("hir: {msg}");
+            first_interpreter_error.get_or_insert_with(|| detail_msg.clone());
+            denominators.skipped_interpreter_errors += 1;
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::SkippedInterpreterError,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![format!("hir unsupported: {msg}")],
+                    },
+                    args,
+                    stub_summary: StubSummary {
+                        calls_intercepted: 0,
+                        call_sites: Vec::new(),
+                        clobbers_enabled: false,
+                    },
+                    frame_audit: None,
+                    memory_audit: None,
+                    machine_termination: TerminationKind::Unsupported(
+                        "skipped before run".to_string(),
+                    ),
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: None,
+                    hir_return: None,
+                    prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    detail: Some(detail_msg),
+                },
+            );
+            continue;
+        }
+
+        // Prepare call stub and execute the real emulator even when HIR trapped
+        // or hit UndefinedRead so asymmetric traps/faults are caught.
+        let stub_result_state = state_opt;
+        let zero_stub = |_: usize| 0u64;
+        let state_stub_ret = |n: usize| stub_result_state.map_or(0, |s| s.call_result(n));
+        let state_stub_clobber =
+            |n: usize, index: usize| stub_result_state.map_or(0, |s| s.call_clobber(n, index));
+        let state_call_effects = state_opt.as_ref().map(|state| CallEffects {
+            state,
+            objects: &objects,
+            frame: &frame,
+            tls: tls.as_ref(),
+            grounding,
+        });
+        let stub_writes = |n: usize, c_args: &[u64]| -> Vec<(u64, u8)> {
+            state_call_effects
+                .as_ref()
+                .map_or_else(Vec::new, |eff| eff.writes(n, c_args))
+        };
+        let stub = if state_opt.is_some() {
+            CallStub {
+                result: &state_stub_ret,
+                clobber: Some(&state_stub_clobber),
+                writes: &stub_writes,
+            }
+        } else {
+            CallStub::returning(&zero_stub)
+        };
+
+        let machine = match harness.run_prepared(flow, &stub) {
+            Ok(run) => run,
+            Err(err) => {
+                let (m_term, treat_as_fault) = classify_machine_err(&err, strict_native);
+                if treat_as_fault {
+                    if let Some(msg) = unknown_termination_reason(&m_term, &hir_term) {
+                        denominators.unknown_runs += 1;
+                        first_unknown.get_or_insert_with(|| msg.clone());
+                        push_witness_bounded(
+                            &mut witnesses,
+                            &mut non_error_samples,
+                            ConcreteWitness {
+                                kind: WitnessKind::Unknown,
+                                initial_state: InitialStateIdentity {
+                                    seed: seed_opt,
+                                    run: run_opt,
+                                    pointer_bits: slot_bits,
+                                    raw_slots,
+                                    admissibility: StateAdmissibility::Unknown,
+                                    admissibility_reasons: vec![msg.clone()],
+                                },
+                                args,
+                                stub_summary: StubSummary {
+                                    calls_intercepted: 0,
+                                    call_sites: Vec::new(),
+                                    clobbers_enabled: state_opt.is_some(),
+                                },
+                                frame_audit: None,
+                                memory_audit: None,
+                                machine_termination: m_term,
+                                hir_termination: hir_term,
+                                prehir_termination: prehir_term,
+                                machine_return: None,
+                                hir_return: None,
+                                prehir_return: None,
+                                detail: Some(msg),
+                            },
+                        );
+                        continue;
+                    }
+                    denominators.checked_runs += 1;
+                    denominators.asymmetric_fault_runs += 1;
+                    let detail = format!(
+                        "asymmetric fault: machine terminated with {m_term:?} while hir \
+                         terminated with {hir_term:?}"
+                    );
+                    let hir_ret = hir_r.as_ref().ok().and_then(|r| r.ret).map(norm);
+                    let prehir_ret = prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm);
+                    divergences.push(Divergence {
+                        run: run_opt,
+                        args: args.clone(),
+                        prehir_result: prehir_ret,
+                        hir_result: hir_ret,
+                        emulator_result: None,
+                        detail: Some(detail.clone()),
+                    });
+                    witnesses.push(ConcreteWitness {
+                        kind: WitnessKind::AsymmetricFault,
+                        initial_state: InitialStateIdentity {
+                            seed: seed_opt,
+                            run: run_opt,
+                            pointer_bits: slot_bits,
+                            raw_slots,
+                            admissibility: if strict_native && !interp_used_synthetic {
+                                StateAdmissibility::NativeAdmissible
+                            } else {
+                                StateAdmissibility::SyntheticModel
+                            },
+                            admissibility_reasons: vec![detail.clone()],
+                        },
+                        args,
+                        stub_summary: StubSummary {
+                            calls_intercepted: 0,
+                            call_sites: Vec::new(),
+                            clobbers_enabled: state_opt.is_some(),
+                        },
+                        frame_audit: None,
+                        memory_audit: None,
+                        machine_termination: m_term,
+                        hir_termination: hir_term,
+                        prehir_termination: prehir_term,
+                        machine_return: None,
+                        hir_return: hir_ret,
+                        prehir_return: prehir_ret,
+                        detail: Some(detail),
+                    });
+                    continue;
+                }
+                tracing::debug!("emulator run {run_idx} failed: {err}");
+                let msg = format!("call failed: {err}");
+                first_emulator_error.get_or_insert_with(|| msg.clone());
+                denominators.skipped_emulator_errors += 1;
+                push_witness_bounded(
+                    &mut witnesses,
+                    &mut non_error_samples,
+                    ConcreteWitness {
+                        kind: WitnessKind::SkippedHarnessError,
+                        initial_state: InitialStateIdentity {
+                            seed: seed_opt,
+                            run: run_opt,
+                            pointer_bits: slot_bits,
+                            raw_slots,
+                            admissibility: StateAdmissibility::Unknown,
+                            admissibility_reasons: vec![msg.clone()],
+                        },
+                        args,
+                        stub_summary: StubSummary {
+                            calls_intercepted: 0,
+                            call_sites: Vec::new(),
+                            clobbers_enabled: state_opt.is_some(),
+                        },
+                        frame_audit: None,
+                        memory_audit: None,
+                        machine_termination: m_term,
+                        hir_termination: hir_term,
+                        prehir_termination: prehir_term,
+                        machine_return: None,
+                        hir_return: hir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                        prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                        detail: Some(msg),
+                    },
+                );
+                continue;
+            }
+        };
+
+        let stub_summary = StubSummary {
+            calls_intercepted: machine.calls.len(),
+            call_sites: machine.calls.iter().map(|c| c.site).collect(),
+            clobbers_enabled: state_opt.is_some(),
+        };
+
+        let (machine_term, machine_ret, ended_in_noreturn) = match &machine.end {
+            StubbedEnd::Returned(raw) => (TerminationKind::Returned, Some(*raw), false),
+            StubbedEnd::NoReturnCall(site) => (TerminationKind::NoReturnCall(*site), None, true),
+            StubbedEnd::LeftDecodedCode(pc) => {
+                let msg = format!("machine ran {pc:#x}, outside the decoded function");
+                first_emulator_error.get_or_insert_with(|| msg.clone());
+                denominators.skipped_emulator_errors += 1;
+                push_witness_bounded(
+                    &mut witnesses,
+                    &mut non_error_samples,
+                    ConcreteWitness {
+                        kind: WitnessKind::SkippedHarnessError,
+                        initial_state: InitialStateIdentity {
+                            seed: seed_opt,
+                            run: run_opt,
+                            pointer_bits: slot_bits,
+                            raw_slots,
+                            admissibility: StateAdmissibility::Unknown,
+                            admissibility_reasons: vec![msg.clone()],
+                        },
+                        args,
+                        stub_summary,
+                        frame_audit: Some(machine.frame_audit),
+                        memory_audit: Some(machine.memory_audit),
+                        machine_termination: TerminationKind::LeftDecodedCode(*pc),
+                        hir_termination: hir_term,
+                        prehir_termination: prehir_term,
+                        machine_return: None,
+                        hir_return: hir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                        prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                        detail: Some(msg),
+                    },
+                );
+                continue;
+            }
+            StubbedEnd::Other(CallOutcome::HitBudget) => (TerminationKind::HitBudget, None, false),
+            StubbedEnd::Other(CallOutcome::ProcessExited) => {
+                if let Some(sig) = machine.exit_signal {
+                    (TerminationKind::Fault(format!("signal {sig}")), None, false)
+                } else {
+                    (TerminationKind::ProcessExited, None, false)
+                }
+            }
+            StubbedEnd::Other(other) => (TerminationKind::Fault(format!("{other:?}")), None, false),
+        };
+
+        // Under synthetic `lazy_memory`, `SIGSEGV` (`signal 11`) occurs when a
+        // synthetic pointer lands in the emulator's unmappable boundary page
+        // (e.g. `u64::MAX`), whereas strict native mode treats every memory
+        // fault as a first-class asymmetric fault unless HIR also faulted.
+        let synthetic_segfault_skip =
+            !strict_native && machine.exit_signal == Some(11) && !hir_term.is_trap_or_fault();
+        if synthetic_segfault_skip {
+            let msg =
+                format!("synthetic unmappable page signal (SIGSEGV) during run {run_idx}; skipped");
+            first_emulator_error.get_or_insert_with(|| msg.clone());
+            denominators.skipped_emulator_errors += 1;
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::SkippedHarnessError,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: None,
+                    hir_return: hir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        // Terminations that say nothing about the tree: both sides stopped
+        // abnormally, a budget ran out, or the tree traps where the emulator
+        // does not model the machine's trap.
+        if let Some(msg) = unknown_termination_reason(&machine_term, &hir_term) {
+            denominators.unknown_runs += 1;
+            first_unknown.get_or_insert_with(|| msg.clone());
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Unknown,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: machine_ret.map(|raw| norm(raw as i64)),
+                    hir_return: hir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        // Handle non-normal machine termination (`ProcessExited`, `Fault`).
+        if machine_term.is_trap_or_fault() {
+            // Machine faulted/exited while HIR finished normally (or read
+            // undefined): explicit asymmetric termination divergence.
+            denominators.checked_runs += 1;
+            denominators.asymmetric_fault_runs += 1;
+            let hir_ret = hir_r.as_ref().ok().and_then(|r| r.ret).map(norm);
+            let prehir_ret = prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm);
+            let detail = format!(
+                "asymmetric termination: machine stopped with {machine_term:?} while hir \
+                 finished with {hir_term:?}"
+            );
+            divergences.push(Divergence {
+                run: run_opt,
+                args: args.clone(),
+                prehir_result: prehir_ret,
+                hir_result: hir_ret,
+                emulator_result: None,
+                detail: Some(detail.clone()),
+            });
+            let (admissibility, reasons) = classify_run_admissibility(
+                strict_native,
+                &machine.calls,
+                &machine.memory_audit,
+                &machine.frame_audit,
+                interp_used_synthetic,
+                false,
+            );
+            witnesses.push(ConcreteWitness {
+                kind: WitnessKind::AsymmetricFault,
+                initial_state: InitialStateIdentity {
+                    seed: seed_opt,
+                    run: run_opt,
+                    pointer_bits: slot_bits,
+                    raw_slots,
+                    admissibility,
+                    admissibility_reasons: reasons,
+                },
+                args,
+                stub_summary,
+                frame_audit: Some(machine.frame_audit),
+                memory_audit: Some(machine.memory_audit),
+                machine_termination: machine_term,
+                hir_termination: hir_term,
+                prehir_termination: prehir_term,
+                machine_return: None,
+                hir_return: hir_ret,
+                prehir_return: prehir_ret,
+                detail: Some(detail),
+            });
+            continue;
+        }
+
+        // HIR trapped while machine returned cleanly -> asymmetric trap divergence!
+        if let TerminationKind::Trap(msg) = &hir_term {
+            denominators.checked_runs += 1;
+            denominators.asymmetric_fault_runs += 1;
+            let emulator_val = machine_ret.map(|raw| norm(raw as i64));
+            let detail = format!("asymmetric trap: hir trapped ({msg}) while machine returned");
+            divergences.push(Divergence {
+                run: run_opt,
+                args: args.clone(),
+                prehir_result: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                hir_result: None,
+                emulator_result: emulator_val,
+                detail: Some(detail.clone()),
+            });
+            let (admissibility, reasons) = classify_run_admissibility(
+                strict_native,
+                &machine.calls,
+                &machine.memory_audit,
+                &machine.frame_audit,
+                interp_used_synthetic,
+                false,
+            );
+            witnesses.push(ConcreteWitness {
+                kind: WitnessKind::AsymmetricFault,
+                initial_state: InitialStateIdentity {
+                    seed: seed_opt,
+                    run: run_opt,
+                    pointer_bits: slot_bits,
+                    raw_slots,
+                    admissibility,
+                    admissibility_reasons: reasons,
+                },
+                args,
+                stub_summary,
+                frame_audit: Some(machine.frame_audit),
+                memory_audit: Some(machine.memory_audit),
+                machine_termination: machine_term,
+                hir_termination: hir_term,
+                prehir_termination: prehir_term,
+                machine_return: emulator_val,
+                hir_return: None,
+                prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                detail: Some(detail),
+            });
+            continue;
+        }
+
         let tree_undefined = hir_r
             .as_ref()
             .err()
             .and_then(|err| err.downcast_ref::<UndefinedRead>())
             .cloned();
-        if let Err(err) = &hir_r
-            && tree_undefined.is_none()
-        {
-            first_interpreter_error.get_or_insert_with(|| format!("hir: {err}"));
-            continue;
-        }
-        let prehir_run = prehir_r.as_ref().ok();
-
-        let stub = CallStub {
-            result: &call_return,
-            clobber: Some(&call_clobber),
-            writes: &call_writes,
-        };
-        let machine = match harness.run_prepared(flow, &stub) {
-            Ok(run) => run,
-            Err(err) => {
-                tracing::debug!("emulator run {run} failed: {err}");
-                first_emulator_error.get_or_insert_with(|| format!("call failed: {err}"));
-                emulator_errors += 1;
-                continue;
-            }
-        };
-        let (machine_ret, ended_in_noreturn) = match &machine.end {
-            StubbedEnd::Returned(raw) => (Some(*raw), false),
-            StubbedEnd::NoReturnCall(_) => (None, true),
-            StubbedEnd::LeftDecodedCode(pc) => {
-                first_emulator_error.get_or_insert_with(|| {
-                    format!("machine ran {pc:#x}, outside the decoded function")
-                });
-                emulator_errors += 1;
-                continue;
-            }
-            StubbedEnd::Other(other) => {
-                tracing::debug!("emulator run {run} did not return normally: {other:?}");
-                first_emulator_error.get_or_insert_with(|| format!("{other:?}"));
-                emulator_errors += 1;
-                continue;
-            }
-        };
-
-        // What C leaves undefined: a variable before any assignment, or a
-        // frame byte nothing in the run wrote. When both sides read such a
-        // thing the run says nothing (`UNKNOWN`); when only the decompiled
-        // code does, it reads what the machine never needed, which is a
-        // difference.
         match (&tree_undefined, machine.undefined_frame_read) {
             (Some(read), Some(at)) => {
-                unknown_runs += 1;
-                first_unknown.get_or_insert_with(|| {
-                    format!("hir: {read}; the machine read frame byte {at:#x}, which nothing wrote")
-                });
+                denominators.unknown_runs += 1;
+                let msg = format!(
+                    "hir: {read}; the machine read frame byte {at:#x}, which nothing wrote"
+                );
+                first_unknown.get_or_insert_with(|| msg.clone());
+                push_witness_bounded(
+                    &mut witnesses,
+                    &mut non_error_samples,
+                    ConcreteWitness {
+                        kind: WitnessKind::Unknown,
+                        initial_state: InitialStateIdentity {
+                            seed: seed_opt,
+                            run: run_opt,
+                            pointer_bits: slot_bits,
+                            raw_slots,
+                            admissibility: StateAdmissibility::Unknown,
+                            admissibility_reasons: vec![msg.clone()],
+                        },
+                        args,
+                        stub_summary,
+                        frame_audit: Some(machine.frame_audit),
+                        memory_audit: Some(machine.memory_audit),
+                        machine_termination: machine_term,
+                        hir_termination: hir_term,
+                        prehir_termination: prehir_term,
+                        machine_return: machine_ret.map(|raw| norm(raw as i64)),
+                        hir_return: None,
+                        prehir_return: prehir_r.as_ref().ok().and_then(|r| r.ret).map(norm),
+                        detail: Some(msg),
+                    },
+                );
                 continue;
             }
             (Some(read), None) => {
-                checked += 1;
+                denominators.checked_runs += 1;
+                denominators.diverged_runs += 1;
+                let emulator_val = machine_ret.map(|raw| norm(raw as i64));
+                let detail = format!("hir: {read}; the machine read only what the run defined");
                 divergences.push(Divergence {
-                    run: Some(state.run()),
-                    args: args.to_vec(),
+                    run: run_opt,
+                    args: args.clone(),
                     prehir_result: None,
                     hir_result: None,
-                    emulator_result: machine_ret
-                        .map(|raw| normalize(mask_to_width(raw, return_bits), &hir.return_type)),
-                    detail: Some(format!(
-                        "hir: {read}; the machine read only what the run defined"
-                    )),
+                    emulator_result: emulator_val,
+                    detail: Some(detail.clone()),
+                });
+                let (admissibility, reasons) = classify_run_admissibility(
+                    strict_native,
+                    &machine.calls,
+                    &machine.memory_audit,
+                    &machine.frame_audit,
+                    interp_used_synthetic,
+                    false,
+                );
+                witnesses.push(ConcreteWitness {
+                    kind: WitnessKind::Divergence,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility,
+                        admissibility_reasons: reasons,
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: emulator_val,
+                    hir_return: None,
+                    prehir_return: None,
+                    detail: Some(detail),
                 });
                 continue;
             }
             (None, _) => {}
         }
-        let hir_run = hir_r.as_ref().expect("an error was handled above");
 
-        checked += 1;
-        let norm = |v: i64| normalize(mask_to_width(v as u64, return_bits), &hir.return_type);
+        let hir_run = hir_r.as_ref().expect("handled interpreter errors above");
+        let prehir_run = prehir_r.as_ref().ok();
         let emulator_val = machine_ret.map(|raw| norm(raw as i64));
         let prehir_val = prehir_run.and_then(|run| run.ret).map(norm);
         let hir_val = hir_run.ret.map(norm);
+
         let mut detail = None;
         let mut suspect: Option<String> = None;
+        let mut frame_obs =
+            bound_escaped_frame_objects(&machine.frame_audit, &known_objects, &machine.all_writes);
+        let baseline = |a: u64| {
+            harness
+                .baseline_byte(a)
+                .or_else(|| initial_mem_map.get(&a).copied())
+                .or_else(|| state_opt.map(|s| s.memory_byte(a)))
+        };
+
         let sides = std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
         for (side, run) in sides {
             if detail.is_some() {
                 break;
             }
-            // A run that ends at a call which does not return still made
-            // every store before it: those are compared, only the return
-            // value is not.
+            let obs_tree = observable_tree_writes(&machine.frame_audit.spec, run);
             detail = compare_calls(
                 side,
                 &run.calls,
@@ -482,77 +1691,670 @@ pub fn check_ground_truth_with(
                 &grounding.declared_callees,
                 &mut suspect,
             )
-                .or_else(|| {
-                    (run.ended_in_no_return != ended_in_noreturn).then(|| {
-                        if ended_in_noreturn {
-                            format!("{side}: the machine stopped at a call that does not return; the tree went on")
-                        } else {
-                            format!("{side}: the tree stopped at a call that does not return; the machine went on")
-                        }
-                    })
+            .or_else(|| {
+                (run.ended_in_no_return != ended_in_noreturn).then(|| {
+                    if ended_in_noreturn {
+                        format!(
+                            "{side}: the machine stopped at a call that does not return; the tree went on"
+                        )
+                    } else {
+                        format!(
+                            "{side}: the tree stopped at a call that does not return; the machine went on"
+                        )
+                    }
                 })
-                .or_else(|| {
-                    compare_writes(side, &outside(&run.writes), &machine.writes, &no_placed, |a| {
-                        Some(harness.initial_byte(&state, a))
-                    })
-                });
+            })
+            .or_else(|| compare_writes(side, &obs_tree, &machine.writes, &no_placed, baseline))
+            .or_else(|| {
+                compare_escaped_objects(
+                    side,
+                    &run.writes,
+                    &machine.all_writes,
+                    &frame_obs.observable,
+                    baseline,
+                    &mut frame_obs.unbounded,
+                )
+            });
         }
-        // `Unknown` is not `void`: the printer declares it as an integer and
-        // the tree can return a value from it. Compare whenever a side
-        // produced one.
+
         let returns_value = declares_value || hir_val.is_some() || prehir_val.is_some();
         let return_differs = !ended_in_noreturn
             && returns_value
             && (hir_val != emulator_val || prehir_run.is_some() && prehir_val != emulator_val);
+
         if return_differs || detail.is_some() {
+            denominators.checked_runs += 1;
+            denominators.diverged_runs += 1;
             divergences.push(Divergence {
-                run: Some(state.run()),
-                args: args.to_vec(),
+                run: run_opt,
+                args: args.clone(),
                 prehir_result: prehir_val,
                 hir_result: hir_val,
                 emulator_result: emulator_val,
+                detail: detail.clone(),
+            });
+            let (admissibility, reasons) = classify_run_admissibility(
+                strict_native,
+                &machine.calls,
+                &machine.memory_audit,
+                &machine.frame_audit,
+                interp_used_synthetic,
+                false,
+            );
+            witnesses.push(ConcreteWitness {
+                kind: WitnessKind::Divergence,
+                initial_state: InitialStateIdentity {
+                    seed: seed_opt,
+                    run: run_opt,
+                    pointer_bits: slot_bits,
+                    raw_slots,
+                    admissibility,
+                    admissibility_reasons: reasons,
+                },
+                args,
+                stub_summary,
+                frame_audit: Some(machine.frame_audit),
+                memory_audit: Some(machine.memory_audit),
+                machine_termination: machine_term,
+                hir_termination: hir_term,
+                prehir_termination: prehir_term,
+                machine_return: emulator_val,
+                hir_return: hir_val,
+                prehir_return: prehir_val,
                 detail,
             });
-        } else if let Some(suspect) = suspect
-            && suspects.len() < MAX_REPORTED_DIVERGENCES
-        {
-            suspects.push(Divergence {
-                run: Some(state.run()),
-                args: args.to_vec(),
-                prehir_result: prehir_val,
-                hir_result: hir_val,
-                emulator_result: emulator_val,
-                detail: Some(suspect),
-            });
+            continue;
         }
+
+        if let Some(suspect_msg) = suspect {
+            denominators.checked_runs += 1;
+            denominators.suspect_runs += 1;
+            if suspects.len() < MAX_REPORTED_DIVERGENCES {
+                suspects.push(Divergence {
+                    run: run_opt,
+                    args: args.clone(),
+                    prehir_result: prehir_val,
+                    hir_result: hir_val,
+                    emulator_result: emulator_val,
+                    detail: Some(suspect_msg.clone()),
+                });
+            }
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Suspect,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::SyntheticModel,
+                        admissibility_reasons: vec![suspect_msg.clone()],
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: emulator_val,
+                    hir_return: hir_val,
+                    prehir_return: prehir_val,
+                    detail: Some(suspect_msg),
+                },
+            );
+            continue;
+        }
+
+        // Frame exclusion must be justified before counting a positive pass as
+        // agreed: an escape it cannot account for, or a frame address no
+        // object of known extent bounds, leaves the frame observable beyond
+        // what was compared.
+        let mut frame_reasons = match &machine.frame_audit.justification {
+            FrameExclusionJustification::Unjustified { reasons } => reasons.clone(),
+            _ => Vec::new(),
+        };
+        frame_reasons.extend(frame_obs.unbounded.iter().cloned());
+        // A callee escape bounded only by an extent the decompiler inferred:
+        // the extent may be too small, and the callee reaches whatever the
+        // object really is. Justify agreement by the frame range instead --
+        // every byte of the private frame must agree -- or do not agree.
+        if frame_reasons.is_empty() && !frame_obs.inferred_only.is_empty() {
+            let sides =
+                std::iter::once(("hir", hir_run)).chain(prehir_run.map(|run| ("prehir", run)));
+            for (side, run) in sides {
+                if let Some(diff) = frame_wide_difference(
+                    side,
+                    &machine.frame_audit.spec,
+                    &run.writes,
+                    &machine.all_writes,
+                    baseline,
+                ) {
+                    frame_reasons.push(format!(
+                        "{} bounded only by the decompiler's inferred extent, and the private \
+                         frame beyond what was compared differs: {diff}",
+                        frame_obs.inferred_only.join(", ")
+                    ));
+                    break;
+                }
+            }
+        }
+        if !frame_reasons.is_empty() {
+            let reasons = &frame_reasons;
+            denominators.unknown_runs += 1;
+            denominators.unjustified_frame_runs += 1;
+            let msg = format!("unjustified frame exclusion: {}", reasons.join("; "));
+            first_unknown.get_or_insert_with(|| msg.clone());
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Unknown,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: reasons.clone(),
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: emulator_val,
+                    hir_return: hir_val,
+                    prehir_return: prehir_val,
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        // The tree is a C function: it cannot leave a callee-saved register
+        // changed. A machine run that does broke the ABI the comparison
+        // assumes, so it is not agreement (and, with the callee-saved set
+        // taken from the calling-convention table rather than the binary,
+        // not a proven counterexample either).
+        if !machine.frame_audit.clobbered_callee_saved.is_empty() {
+            denominators.unknown_runs += 1;
+            denominators.abi_violation_runs += 1;
+            let msg = format!(
+                "ABI violation: callee-saved register(s) changed across the return: {}",
+                machine.frame_audit.clobbered_callee_saved.join(", ")
+            );
+            first_unknown.get_or_insert_with(|| msg.clone());
+            push_witness_bounded(
+                &mut witnesses,
+                &mut non_error_samples,
+                ConcreteWitness {
+                    kind: WitnessKind::Unknown,
+                    initial_state: InitialStateIdentity {
+                        seed: seed_opt,
+                        run: run_opt,
+                        pointer_bits: slot_bits,
+                        raw_slots,
+                        admissibility: StateAdmissibility::Unknown,
+                        admissibility_reasons: vec![msg.clone()],
+                    },
+                    args,
+                    stub_summary,
+                    frame_audit: Some(machine.frame_audit),
+                    memory_audit: Some(machine.memory_audit),
+                    machine_termination: machine_term,
+                    hir_termination: hir_term,
+                    prehir_termination: prehir_term,
+                    machine_return: emulator_val,
+                    hir_return: hir_val,
+                    prehir_return: prehir_val,
+                    detail: Some(msg),
+                },
+            );
+            continue;
+        }
+
+        let (admissibility, reasons) = classify_run_admissibility(
+            strict_native,
+            &machine.calls,
+            &machine.memory_audit,
+            &machine.frame_audit,
+            interp_used_synthetic,
+            machine.undefined_frame_read.is_some(),
+        );
+        denominators.checked_runs += 1;
+        denominators.agreed_runs += 1;
+        match admissibility {
+            StateAdmissibility::NativeAdmissible => denominators.native_admissible_runs += 1,
+            StateAdmissibility::SyntheticModel => denominators.synthetic_model_runs += 1,
+            StateAdmissibility::Unknown => {}
+        }
+        push_witness_bounded(
+            &mut witnesses,
+            &mut non_error_samples,
+            ConcreteWitness {
+                kind: WitnessKind::AgreedSample,
+                initial_state: InitialStateIdentity {
+                    seed: seed_opt,
+                    run: run_opt,
+                    pointer_bits: slot_bits,
+                    raw_slots,
+                    admissibility,
+                    admissibility_reasons: reasons,
+                },
+                args,
+                stub_summary,
+                frame_audit: Some(machine.frame_audit),
+                memory_audit: Some(machine.memory_audit),
+                machine_termination: machine_term,
+                hir_termination: hir_term,
+                prehir_termination: prehir_term,
+                machine_return: emulator_val,
+                hir_return: hir_val,
+                prehir_return: prehir_val,
+                detail: None,
+            },
+        );
     }
 
-    if !divergences.is_empty() {
-        return VerifyOutcome::Diverged(divergences);
+    if denominators.skipped_emulator_errors > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::Environment,
+            description: format!(
+                "{} of {} planned runs hit harness/mapping limits{}",
+                denominators.skipped_emulator_errors,
+                denominators.planned_runs,
+                first_emulator_error
+                    .as_deref()
+                    .map(|e| format!(" (first: {e})"))
+                    .unwrap_or_default()
+            ),
+        });
     }
-    if !suspects.is_empty() {
-        return VerifyOutcome::Suspect(suspects);
+    if denominators.skipped_interpreter_errors > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::Other,
+            description: format!(
+                "{} of {} planned runs hit unsupported interpreter constructs{}",
+                denominators.skipped_interpreter_errors,
+                denominators.planned_runs,
+                first_interpreter_error
+                    .as_deref()
+                    .map(|e| format!(" (first: {e})"))
+                    .unwrap_or_default()
+            ),
+        });
     }
-    if checked == 0 && unknown_runs > 0 {
-        return VerifyOutcome::Inconclusive {
+    if denominators.prehir_skipped_runs > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::Other,
+            description: format!(
+                "PreHIR could not evaluate {} of {} runs (HIR still checked against machine)",
+                denominators.prehir_skipped_runs, denominators.planned_runs
+            ),
+        });
+    }
+    if denominators.unjustified_frame_runs > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::MemoryAlias,
+            description: format!(
+                "{} of {} planned run(s) had unjustified private-frame exclusion (returned/stored \
+                 frame pointer, frame address with no known bounding object, SP delta, or \
+                 boundary overlap)",
+                denominators.unjustified_frame_runs, denominators.planned_runs
+            ),
+        });
+    }
+    if denominators.abi_violation_runs > 0 {
+        unresolved_effects.push(UnresolvedEffect {
+            kind: UnresolvedEffectKind::Environment,
+            description: format!(
+                "{} of {} planned run(s) changed a callee-saved register across the return",
+                denominators.abi_violation_runs, denominators.planned_runs
+            ),
+        });
+    }
+    debug_assert_eq!(
+        denominators.consistency_error(),
+        None,
+        "ground-truth denominators must partition the attempted runs"
+    );
+
+    let outcome = if !divergences.is_empty() {
+        VerifyOutcome::Diverged(divergences)
+    } else if !suspects.is_empty() {
+        VerifyOutcome::Suspect(suspects)
+    } else if denominators.checked_runs == 0 && denominators.unknown_runs > 0 {
+        VerifyOutcome::Inconclusive {
             reason: format!(
-                "both sides read state nothing defined, in all {unknown_runs} runs that \
-                 finished; first: {}",
+                "both sides read state nothing defined, or frame exclusion was unjustified, in {} runs; first: {}",
+                denominators.unknown_runs,
                 first_unknown.unwrap_or_default()
             ),
-        };
-    }
-    if checked == 0 {
-        if emulator_errors > 0 {
-            return VerifyOutcome::Unsupported(UnsupportedReason::Harness(
-                first_emulator_error.unwrap_or_default(),
-            ));
         }
-        return VerifyOutcome::Unsupported(UnsupportedReason::Interpreter(
-            first_interpreter_error.unwrap_or_else(|| "no runs".to_string()),
+    } else if denominators.checked_runs == 0 {
+        if denominators.skipped_emulator_errors > 0 {
+            VerifyOutcome::Unsupported(UnsupportedReason::Harness(
+                first_emulator_error.unwrap_or_default(),
+            ))
+        } else {
+            VerifyOutcome::Unsupported(UnsupportedReason::Interpreter(
+                first_interpreter_error.unwrap_or_else(|| "no runs".to_string()),
+            ))
+        }
+    } else {
+        VerifyOutcome::Equivalent {
+            checked: denominators.checked_runs,
+        }
+    };
+
+    GroundTruthReport {
+        outcome,
+        policy,
+        observation_scope,
+        denominators,
+        assumptions,
+        unresolved_effects,
+        witnesses,
+    }
+}
+
+fn classify_run_admissibility(
+    strict_native: bool,
+    calls: &[ObservedCall],
+    memory_audit: &MemoryAccessAudit,
+    frame_audit: &FrameExclusionAudit,
+    interp_used_synthetic: bool,
+    machine_undefined_read: bool,
+) -> (StateAdmissibility, Vec<String>) {
+    let mut synthetic_reasons = Vec::new();
+    if memory_audit.used_synthetic_memory() {
+        synthetic_reasons.push(format!(
+            "emulator accessed {} synthetic/unmapped page(s)",
+            memory_audit.total_synthetic_pages
         ));
     }
-    VerifyOutcome::Equivalent { checked }
+    if interp_used_synthetic {
+        synthetic_reasons
+            .push("interpreter read bytes from synthetic InitialState lazy memory".to_string());
+    }
+    if !calls.is_empty() {
+        synthetic_reasons.push(format!(
+            "{} call(s) intercepted via deterministic CallStub",
+            calls.len()
+        ));
+    }
+    if !frame_audit.aliased_input_addrs.is_empty() {
+        synthetic_reasons.push(format!(
+            "input pointer(s) {:#x?} designate storage below the entry stack pointer, where no \
+             live caller object can be natively",
+            frame_audit.aliased_input_addrs
+        ));
+    }
+    if machine_undefined_read {
+        synthetic_reasons.push("machine read undefined private frame bytes".to_string());
+    }
+
+    if !synthetic_reasons.is_empty() {
+        return (StateAdmissibility::SyntheticModel, synthetic_reasons);
+    }
+    let mut notes = vec![if strict_native {
+        "strict native run: mapped pages only, no lazy memory, no call stubs, balanced SP/ABI"
+            .to_string()
+    } else {
+        "run accessed mapped image/stack only with no stubbed calls or lazy unmapped pages"
+            .to_string()
+    }];
+    if let FrameExclusionJustification::RequiresObjectBounds { count } = frame_audit.justification {
+        notes.push(format!(
+            "{count} private-frame pointer escape(s), each compared over its bounding object"
+        ));
+    }
+    (StateAdmissibility::NativeAdmissible, notes)
+}
+
+/// An object whose extent is known: declared by an explicit case's caller
+/// memory, or inferred by the decompiler (an addressed local where it placed
+/// it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KnownObject {
+    extent: std::ops::Range<u64>,
+    declared: bool,
+}
+
+/// Frame storage an escaped frame address can reach, bounded by objects of
+/// known extent.
+#[derive(Debug, Default)]
+struct EscapedFrameObservation {
+    /// The full extent of every frame object an escaped address designates,
+    /// directly or through pointers stored inside such an object. Both sides'
+    /// final bytes there are compared.
+    observable: Vec<KnownObject>,
+    /// Escaped frame addresses no known object bounds. Their reach into the
+    /// frame cannot be derived, so a run with any is not agreement.
+    unbounded: Vec<String>,
+    /// Escapes to a callee (or arriving as an input) bounded only by extents
+    /// the decompiler inferred. The extent may be too small, so agreement
+    /// needs the whole private frame to agree; see
+    /// [`frame_wide_difference`].
+    inferred_only: Vec<String>,
+}
+
+/// Bound every frame address in `audit`'s escapes by the objects in
+/// `known_objects` that contain it (an interior pointer reaches the whole
+/// object, negative offsets included; a one-past-the-end pointer reaches the
+/// object it ends). Pointers the machine left inside a bounded object are
+/// followed too: whoever receives the object receives them.
+///
+/// No fixed window is assumed after an address: without a known object the
+/// address is reported unbounded instead.
+fn bound_escaped_frame_objects(
+    audit: &FrameExclusionAudit,
+    known_objects: &[KnownObject],
+    machine_all_writes: &BTreeMap<u64, u8>,
+) -> EscapedFrameObservation {
+    let spec = &audit.spec;
+    let mut out = EscapedFrameObservation::default();
+    let mut pending: Vec<(String, u64)> = audit
+        .escaped_frame_pointers
+        .iter()
+        .map(|esc| {
+            let how = match esc {
+                EscapedFramePointer::Returned(_) => "returned",
+                EscapedFramePointer::StoredExternally { .. } => "stored",
+                EscapedFramePointer::PassedToCall { .. } => "callee-argument",
+                EscapedFramePointer::AliasedInput { .. } => "input-argument",
+            };
+            (how.to_string(), esc.pointer())
+        })
+        .collect();
+    let mut seen_pointers = BTreeSet::new();
+    let mut seen_objects = BTreeSet::new();
+    while let Some((how, ptr)) = pending.pop() {
+        if !seen_pointers.insert(ptr) {
+            continue;
+        }
+        let containing: Vec<&KnownObject> = known_objects
+            .iter()
+            .filter(|object| object.extent.contains(&ptr) || object.extent.end == ptr)
+            .collect();
+        if containing.is_empty() {
+            out.unbounded.push(format!(
+                "{how} frame address {ptr:#x} lies in no frame object of known extent"
+            ));
+            continue;
+        }
+        // Returned and stored escapes never count as agreement anyway.
+        if how != "returned" && how != "stored" && !containing.iter().any(|o| o.declared) {
+            out.inferred_only
+                .push(format!("{how} frame address {ptr:#x}"));
+        }
+        for object in containing {
+            let extent = &object.extent;
+            if !seen_objects.insert((extent.start, extent.end)) {
+                continue;
+            }
+            out.observable.push(object.clone());
+            // Only pointers wholly inside the object: bytes past its end
+            // belong to something else and only make up a spurious value.
+            if extent.end - extent.start < spec.pointer_size {
+                continue;
+            }
+            let last_start = extent.end - spec.pointer_size;
+            for (&at, _) in machine_all_writes.range(extent.start..=last_start) {
+                if let Some(target) = read_pointer(
+                    machine_all_writes,
+                    at,
+                    spec.pointer_size as u8,
+                    audit.endian,
+                ) && spec.in_private_frame(target)
+                    && !extent.contains(&target)
+                {
+                    pending.push((format!("held-in-object@{at:#x}"), target));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// The first private-frame byte whose final value differs between the tree
+/// and the machine, either side's untouched bytes read from `baseline`.
+fn frame_wide_difference(
+    side: &str,
+    spec: &FrameExclusionSpec,
+    tree_writes: &BTreeMap<u64, u8>,
+    machine_all_writes: &BTreeMap<u64, u8>,
+    baseline: impl Fn(u64) -> Option<u8>,
+) -> Option<String> {
+    for region in [spec.private_below.clone(), spec.abi_home_space.clone()] {
+        for (&addr, &value) in machine_all_writes.range(region.clone()) {
+            if !spec.in_private_frame(addr) {
+                continue;
+            }
+            let tree_value = tree_writes.get(&addr).copied().or_else(|| baseline(addr));
+            if tree_value != Some(value) {
+                return Some(format!(
+                    "{side}: frame byte at {addr:#x} is {} in the tree, machine stored \
+                     {value:#04x}",
+                    tree_value.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
+        }
+        for (&addr, &value) in tree_writes.range(region) {
+            if !spec.in_private_frame(addr) || machine_all_writes.contains_key(&addr) {
+                continue;
+            }
+            let machine_value = baseline(addr);
+            if machine_value != Some(value) {
+                return Some(format!(
+                    "{side}: tree stored {value:#04x} at frame byte {addr:#x}, machine left {}",
+                    machine_value.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Contiguous runs of caller memory an explicit case declares: each is an
+/// object whose extent the case states.
+fn declared_objects(initial_memory: &[(u64, u8)]) -> Vec<std::ops::Range<u64>> {
+    let addrs: BTreeSet<u64> = initial_memory.iter().map(|(addr, _)| *addr).collect();
+    let mut out: Vec<std::ops::Range<u64>> = Vec::new();
+    for addr in addrs {
+        match out.last_mut() {
+            Some(run) if run.end == addr => run.end = addr.saturating_add(1),
+            _ => out.push(addr..addr.saturating_add(1)),
+        }
+    }
+    out
+}
+
+fn observable_tree_writes(spec: &FrameExclusionSpec, run: &InterpRun) -> BTreeMap<u64, u8> {
+    run.writes
+        .iter()
+        .filter(|(addr, _)| !spec.is_excluded(**addr))
+        .map(|(addr, val)| (*addr, *val))
+        .collect()
+}
+
+/// Compare both sides' final bytes over every escaped frame object.
+///
+/// A byte the tree stored that differs from the machine's is a divergence:
+/// the decompiled program writes its own object, whose address escaped,
+/// differently. A byte only the machine stored is a divergence when the
+/// object's extent was declared by the caller; inside an extent the
+/// decompiler inferred it may equally be machine-private state (a saved
+/// register, a spill) the inferred extent over-covers, so it is recorded in
+/// `unknown` and the run cannot count as agreement.
+fn compare_escaped_objects(
+    side: &str,
+    tree_writes: &BTreeMap<u64, u8>,
+    machine_all_writes: &BTreeMap<u64, u8>,
+    objects: &[KnownObject],
+    baseline: impl Fn(u64) -> Option<u8>,
+    unknown: &mut Vec<String>,
+) -> Option<String> {
+    let declared = |addr: u64| {
+        objects
+            .iter()
+            .any(|object| object.declared && object.extent.contains(&addr))
+    };
+    let mut reported_machine_only = false;
+    for object in objects {
+        let range = object.extent.clone();
+        for (&addr, &value) in machine_all_writes.range(range.clone()) {
+            match tree_writes.get(&addr) {
+                Some(&tree_value) if tree_value != value => {
+                    return Some(format!(
+                        "{side}: escaped frame object byte at {addr:#x} is {tree_value:#04x} in \
+                         the tree, machine stored {value:#04x}"
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    let untouched = baseline(addr);
+                    if untouched == Some(value) {
+                        continue;
+                    }
+                    let msg = format!(
+                        "{side}: escaped frame object byte at {addr:#x}: machine stored \
+                         {value:#04x}, the tree left it {}",
+                        untouched.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                    );
+                    if declared(addr) {
+                        return Some(msg);
+                    }
+                    if !reported_machine_only {
+                        reported_machine_only = true;
+                        unknown.push(format!(
+                            "{msg} (a dropped store, or machine-private state inside the \
+                             object's inferred extent)"
+                        ));
+                    }
+                }
+            }
+        }
+        for (&addr, &value) in tree_writes.range(range) {
+            if machine_all_writes.contains_key(&addr) {
+                continue;
+            }
+            let untouched = baseline(addr);
+            if untouched != Some(value) {
+                return Some(format!(
+                    "{side}: tree stored {value:#04x} in escaped frame object at {addr:#x}, \
+                     machine left {}",
+                    untouched.map_or("unmapped".to_string(), |v| format!("{v:#04x}"))
+                ));
+            }
+        }
+    }
+    None
 }
 
 /// The first way `calls` (what one tree did) differs from `machine`'s, or
@@ -815,6 +2617,255 @@ fn mask_to_width(raw: u64, bits: u32) -> i64 {
 mod tests {
     use super::*;
 
+    fn audit_with(escaped: Vec<EscapedFramePointer>) -> FrameExclusionAudit {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[]);
+        FrameExclusionAudit {
+            spec,
+            endian: fission_emulator::arch::Endianness::Little,
+            excluded_write_bytes: 0,
+            caller_stack_write_addrs: Vec::new(),
+            aliased_input_addrs: Vec::new(),
+            escaped_frame_pointers: escaped,
+            boundary_overlaps: Vec::new(),
+            sp_delta: Some(0),
+            clobbered_callee_saved: Vec::new(),
+            justification: FrameExclusionJustification::JustifiedPrivateFrame,
+        }
+    }
+
+    fn inferred(extent: std::ops::Range<u64>) -> KnownObject {
+        KnownObject {
+            extent,
+            declared: false,
+        }
+    }
+
+    #[test]
+    fn escaped_interior_pointer_reaches_the_whole_object_both_directions() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x200..entry - 0x100);
+        let audit = audit_with(vec![EscapedFramePointer::Returned(entry - 0x180)]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.observable, vec![object]);
+        assert!(obs.unbounded.is_empty());
+    }
+
+    #[test]
+    fn one_past_the_end_pointer_reaches_the_object_it_ends() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x40..entry - 0x20);
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: object.extent.end,
+        }]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.observable, vec![object]);
+    }
+
+    #[test]
+    fn overlapping_objects_are_all_observable() {
+        let entry = 0x7fff_0000u64;
+        let wide = inferred(entry - 0x100..entry - 0x80);
+        let narrow = inferred(entry - 0xc0..entry - 0xb8);
+        let audit = audit_with(vec![EscapedFramePointer::Returned(entry - 0xbc)]);
+        let obs =
+            bound_escaped_frame_objects(&audit, &[wide.clone(), narrow.clone()], &BTreeMap::new());
+        assert_eq!(obs.observable.len(), 2);
+        assert!(obs.observable.contains(&wide) && obs.observable.contains(&narrow));
+    }
+
+    #[test]
+    fn escaped_address_outside_known_objects_is_unbounded_not_windowed() {
+        let entry = 0x7fff_0000u64;
+        let audit = audit_with(vec![EscapedFramePointer::StoredExternally {
+            at: 0x60_0000,
+            target: entry - 0x300,
+        }]);
+        let obs = bound_escaped_frame_objects(
+            &audit,
+            &[inferred(entry - 0x40..entry - 0x20)],
+            &BTreeMap::new(),
+        );
+        assert!(obs.observable.is_empty());
+        assert_eq!(obs.unbounded.len(), 1);
+    }
+
+    #[test]
+    fn frame_pointer_held_in_an_escaped_object_is_followed() {
+        let entry = 0x7fff_0000u64;
+        let outer = inferred(entry - 0x40..entry - 0x20);
+        let inner = inferred(entry - 0x100..entry - 0xc0);
+        let held = entry - 0xf0;
+        let writes: BTreeMap<u64, u8> = held
+            .to_le_bytes()
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (outer.extent.start + i as u64, *b))
+            .collect();
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: outer.extent.start,
+        }]);
+        let obs = bound_escaped_frame_objects(&audit, &[outer.clone(), inner.clone()], &writes);
+        assert!(obs.observable.contains(&outer) && obs.observable.contains(&inner));
+        // An unbounded pointer held inside the object is reported, not ignored.
+        let obs = bound_escaped_frame_objects(&audit, std::slice::from_ref(&outer), &writes);
+        assert_eq!(obs.unbounded.len(), 1, "{obs:?}");
+    }
+
+    #[test]
+    fn escaped_object_differences_by_provenance() {
+        let base = 0x7fff_0000u64 - 0x40;
+        let machine: BTreeMap<u64, u8> = [(base, 0x2a)].into_iter().collect();
+        let zero = |_: u64| Some(0u8);
+        // Machine-only store in an inferred extent: unknown, not a divergence.
+        let mut unknown = Vec::new();
+        let objects = [inferred(base..base + 8)];
+        assert_eq!(
+            compare_escaped_objects(
+                "hir",
+                &BTreeMap::new(),
+                &machine,
+                &objects,
+                zero,
+                &mut unknown
+            ),
+            None
+        );
+        assert_eq!(unknown.len(), 1);
+        // Machine-only store in a declared caller object: divergence.
+        let mut unknown = Vec::new();
+        let declared = [KnownObject {
+            extent: base..base + 8,
+            declared: true,
+        }];
+        assert!(
+            compare_escaped_objects(
+                "hir",
+                &BTreeMap::new(),
+                &machine,
+                &declared,
+                zero,
+                &mut unknown
+            )
+            .is_some()
+        );
+        // Tree stored a different value: divergence even in an inferred extent.
+        let tree: BTreeMap<u64, u8> = [(base, 0x2b)].into_iter().collect();
+        assert!(
+            compare_escaped_objects("hir", &tree, &machine, &objects, zero, &mut Vec::new())
+                .is_some()
+        );
+        // Tree stored where the machine left the byte: divergence.
+        let tree: BTreeMap<u64, u8> = [(base + 4, 0x01)].into_iter().collect();
+        assert!(
+            compare_escaped_objects(
+                "hir",
+                &tree,
+                &BTreeMap::new(),
+                &objects,
+                zero,
+                &mut Vec::new()
+            )
+            .is_some()
+        );
+        // Agreement.
+        let mut unknown = Vec::new();
+        assert_eq!(
+            compare_escaped_objects("hir", &machine, &machine, &objects, zero, &mut unknown),
+            None
+        );
+        assert!(unknown.is_empty());
+    }
+
+    #[test]
+    fn frame_wide_difference_sees_bytes_past_an_inferred_extent() {
+        let spec = FrameExclusionSpec::from_abi(0x7fff_0000, 8, false, 8, 6, &[]);
+        let zero = |_: u64| Some(0u8);
+        let past = spec.entry_sp - 0x40;
+        let machine: BTreeMap<u64, u8> = [(past, 0x2a)].into_iter().collect();
+        assert!(frame_wide_difference("hir", &spec, &BTreeMap::new(), &machine, zero).is_some());
+        assert_eq!(
+            frame_wide_difference("hir", &spec, &machine, &machine, zero),
+            None
+        );
+        // Bytes above the private frame are not part of this check.
+        let caller: BTreeMap<u64, u8> = [(spec.entry_sp + 0x10, 1)].into_iter().collect();
+        assert_eq!(
+            frame_wide_difference("hir", &spec, &BTreeMap::new(), &caller, zero),
+            None
+        );
+    }
+
+    #[test]
+    fn callee_escape_bounded_only_by_inferred_extent_is_flagged() {
+        let entry = 0x7fff_0000u64;
+        let object = inferred(entry - 0x40..entry - 0x20);
+        let audit = audit_with(vec![EscapedFramePointer::PassedToCall {
+            call_index: 0,
+            site: 0x1000,
+            ptr: object.extent.start,
+        }]);
+        let obs =
+            bound_escaped_frame_objects(&audit, std::slice::from_ref(&object), &BTreeMap::new());
+        assert_eq!(obs.inferred_only.len(), 1);
+        let declared = KnownObject {
+            extent: object.extent.clone(),
+            declared: true,
+        };
+        let obs = bound_escaped_frame_objects(&audit, &[declared], &BTreeMap::new());
+        assert!(obs.inferred_only.is_empty());
+    }
+
+    #[test]
+    fn declared_case_memory_forms_contiguous_objects() {
+        let mem = [(0x10, 0u8), (0x11, 0), (0x13, 0), (0x12, 0), (0x20, 0)];
+        assert_eq!(declared_objects(&mem), vec![0x10..0x14, 0x20..0x21]);
+    }
+
+    #[test]
+    fn denominator_consistency_flags_an_uncounted_divergence() {
+        let ok = GroundTruthDenominators {
+            planned_runs: 2,
+            attempted_runs: 2,
+            checked_runs: 1,
+            diverged_runs: 1,
+            unknown_runs: 1,
+            abi_violation_runs: 1,
+            ..GroundTruthDenominators::default()
+        };
+        assert_eq!(ok.consistency_error(), None);
+        let missing = GroundTruthDenominators {
+            diverged_runs: 0,
+            ..ok
+        };
+        assert!(missing.consistency_error().is_some());
+    }
+
+    #[test]
+    fn budgets_and_unmodeled_divide_traps_are_not_comparable() {
+        use TerminationKind as T;
+        assert!(unknown_termination_reason(&T::HitBudget, &T::Returned).is_some());
+        assert!(unknown_termination_reason(&T::Returned, &T::HitBudget).is_some());
+        assert!(
+            unknown_termination_reason(&T::Returned, &T::Trap("interp: division by zero".into()))
+                .is_some()
+        );
+        assert!(
+            unknown_termination_reason(
+                &T::Returned,
+                &T::Trap("interp: load from unmapped address 0x0".into())
+            )
+            .is_none()
+        );
+        assert!(unknown_termination_reason(&T::ProcessExited, &T::Returned).is_none());
+        assert!(unknown_termination_reason(&T::Fault("x".into()), &T::Trap("y".into())).is_some());
+    }
+
     fn slots_of(params: &[(&str, Option<NirBindingOrigin>)]) -> Vec<usize> {
         param_slots(params.iter().copied())
     }
@@ -957,5 +3008,50 @@ mod tests {
             compare_writes("hir", &redundant, &machine, &HashMap::new(), baseline),
             None
         );
+    }
+
+    #[test]
+    fn ground_truth_report_projects_to_trace_validated_never_proven() {
+        let foundation = FoundationIdentity {
+            model_version: 1,
+            function_address: 0x1000,
+            block_count: 1,
+            op_count: 2,
+            digest: 0x1234,
+        };
+        let report = GroundTruthReport {
+            outcome: VerifyOutcome::Equivalent { checked: 16 },
+            policy: InitialStatePolicy::synthetic_default(),
+            observation_scope: ConcreteObservationScope::for_function(32, true),
+            denominators: GroundTruthDenominators {
+                planned_runs: 20,
+                attempted_runs: 20,
+                checked_runs: 16,
+                agreed_runs: 16,
+                synthetic_model_runs: 12,
+                native_admissible_runs: 4,
+                skipped_emulator_errors: 4,
+                ..GroundTruthDenominators::default()
+            },
+            assumptions: build_report_assumptions(
+                &InitialStatePolicy::synthetic_default(),
+                &Grounding::default(),
+            ),
+            unresolved_effects: Vec::new(),
+            witnesses: Vec::new(),
+        };
+        let assurance = report
+            .to_assurance_report(foundation)
+            .expect("assurance projection");
+        assert!(!assurance.is_proven());
+        assert!(!assurance.is_unconditionally_proven());
+        assert!(assurance.is_sampled_only());
+        assert!(assurance.is_trace_only());
+        assert_eq!(
+            assurance.band(),
+            crate::product::AssuranceBand::TraceValidated
+        );
+        assert_eq!(report.native_admissible_agreements(), 4);
+        assert_eq!(report.synthetic_agreements(), 12);
     }
 }

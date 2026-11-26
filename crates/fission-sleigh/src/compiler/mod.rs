@@ -547,7 +547,7 @@ fn discover_all_entry_specs_uncached() -> Result<Vec<EntrySpec>> {
 /// not rejected with an error but misread, and a misread length prefix aborts
 /// the process on a multi-exabyte allocation. Folding the layout into the file
 /// name means an old cache is never opened.
-const FRONTEND_CACHE_LAYOUT: u32 = 3;
+const FRONTEND_CACHE_LAYOUT: u32 = 4;
 
 pub fn compile_frontend_for_entry_spec(entry_spec: &Path) -> Result<CompiledFrontend> {
     let entry_id = entry_id_from_path(entry_spec)?;

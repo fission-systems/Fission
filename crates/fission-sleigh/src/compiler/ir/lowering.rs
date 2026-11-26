@@ -264,6 +264,7 @@ pub fn build_frontend_from_sla_native_model(
         compiled.subtables.insert(
             name.clone(),
             CompiledSubtableDefinition {
+                consumes_sequential_bytes: Default::default(),
                 name: name.clone(),
                 sla_subtable_id: sla_subtable.id,
                 constructors_by_sla_id: constructors_by_sla_id(&executable_constructors),
@@ -354,6 +355,7 @@ fn executable_constructor_from_sla_template(
     let unsupported_template_kind = sla_constructor_unsupported_reason(sla_template);
     let decode_failed = sla_template.decode_status != CompiledSlaDecodeStatus::Decoded;
     CompiledExecutableConstructor {
+        consumes_sequential_operand_bytes: Default::default(),
         constructor_id: sla_template.id,
         sla_identity: Some(CompiledSlaConstructorIdentity {
             subtable_id: sla_template.subtable_id,
@@ -812,6 +814,7 @@ impl Collector {
         });
 
         Some(CompiledExecutableConstructor {
+            consumes_sequential_operand_bytes: Default::default(),
             constructor_id: u32::MAX,
             sla_identity: None,
             sla_decode_status: CompiledSlaDecodeStatus::Unsupported,
