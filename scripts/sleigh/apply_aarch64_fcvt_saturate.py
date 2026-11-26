@@ -32,8 +32,9 @@ clones each constructor once for S and once for U, and rewrites each `trunc` sta
 It also rewrites the fixed-point forms outside the tables, which have the same defect:
 `fcvtz{s,u} Wd/Xd, Hn/Sn/Dn, #fbits` (upstream `trunc(x f* 2^fbits)`; the half-precision
 FCVTZU multiplied by the integer fbits instead of 2^fbits) and the scalar SIMD
-`fcvtzu Hd/Sd/Dd, Hn/Sn/Dn, #fbits`, whose H and D forms read the shift with the S form's
-immediate table (wrong fbits and wrong disassembly). Scaling by 2^fbits (fbits <= 64) is
+`fcvtz{s,u} Hd/Sd/Dd, Hn/Sn/Dn, #fbits` (upstream: fcvtzs was the user op NEON_fcvtzs;
+fcvtzu's H and D forms read the shift with the S form's immediate table, giving wrong fbits
+and wrong disassembly). Scaling by 2^fbits (fbits <= 64) is
 done as two exact multiplications by powers of two of at most 2^32.
 
 Usage: apply_aarch64_fcvt_saturate.py IN.sinc OUT.sinc   (IN is AARCH64neon.sinc, after
@@ -190,8 +191,9 @@ def fix_fixed_gpr(m):
     return head + "".join(f"\t{l}\n" for l in body) + "}\n"
 
 
-# fcvtzu Hd/Sd/Dd, Hn/Sn/Dn, #fbits (scalar SIMD); upstream reads every size with Imm_shr_imm32
-FIXED_FPR = re.compile(r"^:fcvtzu Rd_FPR(16|32|64), Rn_FPR\1, Imm_shr_imm(\d+)\nis [^\n]*\n\{\n(?:\t[^\n]*\n|\n)*?\}\n", re.M)
+# fcvtz{s,u} Hd/Sd/Dd, Hn/Sn/Dn, #fbits (scalar SIMD). Upstream lifts fcvtzs as the user op
+# NEON_fcvtzs, and reads every fcvtzu size with Imm_shr_imm32.
+FIXED_FPR = re.compile(r"^:fcvtz([su]) Rd_FPR(16|32|64), Rn_FPR\2, Imm_shr_imm(\d+)\nis [^\n]*\n\{\n(?:\t[^\n]*\n|\n)*?\}\n", re.M)
 ZEXT = {16: "zh", 32: "zs", 64: "zd"}
 
 
@@ -199,9 +201,9 @@ def fix_fixed_fpr(m):
     c = m.group(0)
     if MARK in c:
         return c
-    n = int(m.group(1))
-    c = c.replace(f"Imm_shr_imm{m.group(2)}", f"Imm_shr_imm{n}", 2)  # display operand and pattern
-    lines, v = fp_to_fixed(0, f"Rn_FPR{n}", n, n, False, "z", fbits=f"Imm_shr_imm{n}")
+    signed, n = m.group(1) == "s", int(m.group(2))
+    c = c.replace(f"Imm_shr_imm{m.group(3)}", f"Imm_shr_imm{n}", 2)  # display operand and pattern
+    lines, v = fp_to_fixed(0, f"Rn_FPR{n}", n, n, signed, "z", fbits=f"Imm_shr_imm{n}")
     body = [MARK] + [l.strip() for l in lines] + [f"Rd_FPR{n} = {v};", f"zext_{ZEXT[n]}(Zd); # zero the rest of Zd"]
     head = c[: c.index("{\n") + 2]
     return head + "".join(f"\t{l}\n" for l in body) + "}\n"
@@ -217,7 +219,7 @@ def main():
         assert n1 == 70, n1
     text, n2 = FIXED_GPR.subn(fix_fixed_gpr, text)
     text, n3 = FIXED_FPR.subn(fix_fixed_fpr, text)
-    assert n2 == 12 and n3 == 3, (n2, n3)
+    assert n2 == 12 and n3 == 6, (n2, n3)
     open(dst, "w").write(text)
     print("applied")
 

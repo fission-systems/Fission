@@ -10264,8 +10264,20 @@ is b_31=0 & b_30=1 & b_2329=0b1011100 & b_22=1 & b_1021=0b100001011010 & Rd_VPR1
 :fcvtzs Rd_FPR64, Rn_FPR64, Imm_shr_imm64
 is b_2331=0b010111110 & b_22=1 & b_1015=0b111111 & Imm_shr_imm64 & Rn_FPR64 & Rd_FPR64 & Zd
 {
-	local tmp1:8 = zext(Imm_shr_imm64);
-	Rd_FPR64 = NEON_fcvtzs(Rn_FPR64, tmp1);
+	# Fission: FPToFixed
+	local cx0:8 = Rn_FPR64;
+	local cs0:8 = zext(Imm_shr_imm64);
+	local ch0:8 = cs0 >> 1;
+	local cp0:8 = int2float(1:8 << ch0);
+	local cq0:8 = int2float(1:8 << (cs0 - ch0));
+	cx0 = (cx0 f* cp0) f* cq0;
+	local cr0:8 = cx0;
+	local cl0:1 = cr0 f< 0xc3e0000000000000:8;
+	local cg0:1 = cr0 f>= 0x43e0000000000000:8;
+	local ci0:1 = !(nan(cx0) || cl0 || cg0);
+	local cv0:8 = (trunc(cr0) * zext(ci0)) | (zext(cg0) * 0x7fffffffffffffff:8) | (zext(cl0) * 0x8000000000000000:8);
+	Rd_FPR64 = cv0;
+	zext_zd(Zd); # zero the rest of Zd
 }
 
 # C7.2.89 FCVTZS (vector, fixed-point) page C7-2221 line 129809 MATCH x5f00fc00/mask=xff80fc00
@@ -10277,7 +10289,20 @@ is b_2331=0b010111110 & b_22=1 & b_1015=0b111111 & Imm_shr_imm64 & Rn_FPR64 & Rd
 :fcvtzs Rd_FPR32, Rn_FPR32, Imm_shr_imm32
 is b_2331=0b010111110 & b_2122=0b01 & b_1015=0b111111 & Imm_shr_imm32 & Rn_FPR32 & Rd_FPR32 & Zd
 {
-	Rd_FPR32 = NEON_fcvtzs(Rn_FPR32, Imm_shr_imm32:4);
+	# Fission: FPToFixed
+	local cx0:4 = Rn_FPR32;
+	local cs0:8 = zext(Imm_shr_imm32);
+	local ch0:8 = cs0 >> 1;
+	local cp0:4 = int2float(1:8 << ch0);
+	local cq0:4 = int2float(1:8 << (cs0 - ch0));
+	cx0 = (cx0 f* cp0) f* cq0;
+	local cr0:4 = cx0;
+	local cl0:1 = cr0 f< 0xcf000000:4;
+	local cg0:1 = cr0 f>= 0x4f000000:4;
+	local ci0:1 = !(nan(cx0) || cl0 || cg0);
+	local cv0:4 = (trunc(cr0) * zext(ci0)) | (zext(cg0) * 0x7fffffff:4) | (zext(cl0) * 0x80000000:4);
+	Rd_FPR32 = cv0;
+	zext_zs(Zd); # zero the rest of Zd
 }
 
 # C7.2.89 FCVTZS (vector, fixed-point) page C7-2221 line 129809 MATCH x5f00fc00/mask=xff80fc00
@@ -10289,7 +10314,20 @@ is b_2331=0b010111110 & b_2122=0b01 & b_1015=0b111111 & Imm_shr_imm32 & Rn_FPR32
 :fcvtzs Rd_FPR16, Rn_FPR16, Imm_shr_imm16
 is b_2331=0b010111110 & b_2022=0b001 & b_1015=0b111111 & Imm_shr_imm16 & Rn_FPR16 & Rd_FPR16 & Zd
 {
-	Rd_FPR16 = NEON_fcvtzs(Rn_FPR16, Imm_shr_imm16);
+	# Fission: FPToFixed
+	local cx0:4 = float2float(Rn_FPR16);
+	local cs0:8 = zext(Imm_shr_imm16);
+	local ch0:8 = cs0 >> 1;
+	local cp0:4 = int2float(1:8 << ch0);
+	local cq0:4 = int2float(1:8 << (cs0 - ch0));
+	cx0 = (cx0 f* cp0) f* cq0;
+	local cr0:4 = cx0;
+	local cl0:1 = cr0 f< 0xc7000000:4;
+	local cg0:1 = cr0 f>= 0x47000000:4;
+	local ci0:1 = !(nan(cx0) || cl0 || cg0);
+	local cv0:2 = (trunc(cr0) * zext(ci0)) | (zext(cg0) * 0x7fff:2) | (zext(cl0) * 0x8000:2);
+	Rd_FPR16 = cv0;
+	zext_zh(Zd); # zero the rest of Zd
 }
 
 # C7.2.89 FCVTZS (vector, fixed-point) page C7-2221 line 129809 MATCH x0f00fc00/mask=xbf80fc00

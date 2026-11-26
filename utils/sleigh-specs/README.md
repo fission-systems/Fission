@@ -90,9 +90,10 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   `trunc(r - 2^(N-1)) ^ 2^(N-1)`. Half precision is widened to single first. The same script
   rewrites the fixed-point `fcvtz{s,u} Wd/Xd, Hn/Sn/Dn, #fbits` (scaled by 2^fbits as two
   exact power-of-two multiplications; upstream's half-precision FCVTZU multiplied by the
-  integer fbits) and the scalar SIMD `fcvtzu Hd/Sd/Dd, #fbits`, whose H and D forms read the
-  immediate through `Imm_shr_imm32` (wrong fbits and disassembly). The forms lifted as the
-  user ops `NEON_fcvtzs`/`NEON_fcvtzu` are unchanged. Evidence: an Apple M4 run natively.
+  integer fbits) and the scalar SIMD `fcvtz{s,u} Hd/Sd/Dd, #fbits` (upstream lifted `fcvtzs`
+  as the user op `NEON_fcvtzs`, and the H and D forms of `fcvtzu` read the immediate through
+  `Imm_shr_imm32`: wrong fbits and disassembly). The vector fixed-point forms, still the user
+  ops `NEON_fcvtzs`/`NEON_fcvtzu`, are unchanged. Evidence: an Apple M4 run natively.
 - `AARCH64/AARCH64neon.sinc` (and the three compiled `AARCH64*.sla`): the saturating and
   rounding NEON forms upstream lifts as plain p-code wrap and truncate. `SUQADD`, `SQNEG`,
   `SQDMULL`/`SQDMULL2`, `SQDMLAL`/`SQDMLAL2`, `SQDMLSL`/`SQDMLSL2` and the by-element
