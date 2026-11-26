@@ -120,7 +120,10 @@ def eligible(issues: list[dict], prs: list[dict]) -> tuple[int | None, list]:
 def decide(policy: dict, runs: list[dict], now: datetime.datetime, prs: list[dict], issues: list[dict]) -> Decision:
     today = now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d")
     facts = {"active_runs": sum(1 for r in runs if r.get("status") in ACTIVE),
-             "runs_today": sum(1 for r in runs if str(r.get("createdAt", "")).startswith(today)),
+             # Every label added to any issue starts free-model-draft.yml; runs for
+             # other labels are skipped at the job level and did no work.
+             "runs_today": sum(1 for r in runs if str(r.get("createdAt", "")).startswith(today)
+                               and r.get("conclusion") != "skipped"),
              "open_draft_prs": sum(1 for p in prs if DRAFT in names(p)),
              "open_free_issues": len(issues), **policy}
     if facts["active_runs"] >= policy["max_concurrent"]:
@@ -147,7 +150,7 @@ def gh(*args: str, input_text: str | None = None) -> str:
 
 def gh_runs(repo: str) -> list[dict]:
     return json.loads(gh("run", "list", "--repo", repo, "--workflow", WORKFLOW, "--limit", "100",
-                         "--json", "databaseId,status,createdAt,event"))
+                         "--json", "databaseId,status,conclusion,createdAt,event"))
 
 
 def gh_open_prs(repo: str) -> list[dict]:

@@ -110,6 +110,15 @@ class DecideTests(unittest.TestCase):
         yesterday = [run("completed", "2026-11-25T23:59:59Z") for _ in range(10)]
         self.assertEqual(self.decide(runs=yesterday).action, "start")
 
+    def test_skipped_runs_for_other_labels_do_not_count(self):
+        # Every issue label starts the workflow; runs for other labels end "skipped".
+        skipped = [dict(run("completed", "2026-11-26T01:00:00Z"), conclusion="skipped") for _ in range(10)]
+        d = self.decide(runs=skipped)
+        self.assertEqual(d.facts["runs_today"], 0)
+        self.assertEqual(d.action, "start")
+        failed = [dict(run("completed", "2026-11-26T01:00:00Z"), conclusion="failure") for _ in range(10)]
+        self.assertEqual(self.decide(runs=failed).action, "skip")
+
     def test_pending_draft_pr_limit(self):
         prs = [pr(n, labels=("agent:free-draft",)) for n in range(100, 110)]
         d = self.decide(prs=prs)
