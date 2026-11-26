@@ -301,6 +301,23 @@ fission_cli --language x86:LE:64:default --base 0x400000 disasm shellcode.bin --
 fission_cli --language ARM:LE:32:v8 --base 0x8000000 --entry 0x8000101 decomp firmware.bin --addr 0x8000100
 ```
 
+Intel HEX and Motorola S-record files describe where their bytes go but not
+what processor runs them, so they load only with `--language` (no `--base`: the
+records give the addresses). Each contiguous run of records becomes one
+section; a run ending past the language's address space, or a line that is not a
+record, fails the load. A start-address record (Intel HEX 03/05, S7/S8/S9) that
+lands on a record is the entry point and seeds `entry` (on ARM and MIPS the mode
+bit is ignored for that check). Without one there is no entry point: `info`
+prints `Entry: none` (`--json`: `"entry": "0x0"` with `"entry_declared":
+false`), nothing is seeded, and functions are named with `--addr`. `patch`
+refuses these files: it writes the loaded bytes back out, and here they are the
+decoded image, not the text.
+
+```bash
+fission_cli --language ARM:LE:32:Cortex list firmware.hex
+fission_cli --language 8051:BE:16:default decomp firmware.srec --addr 0x0100
+```
+
 `--base` without `--language`, `--entry` without `--base` or outside the image,
 and a headerless file given only `--language` each fail with what to add.
 Commands that load the file their own way (`sandbox`, `verify`, `call`, `db`,

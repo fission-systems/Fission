@@ -148,6 +148,10 @@ fn apply_language_override(binary: &mut LoadedBinary, language_id: &str) -> Resu
     Ok(())
 }
 
+/// `BinaryLoadSpec::source` of a binary whose format took `--language` while
+/// loading (Intel HEX, S-record), as opposed to one relabelled after.
+const CLI_LOAD_LANGUAGE_SOURCE: &str = "cli-language";
+
 /// Load `data` as a raw image mapped at `base`: one executable section
 /// holding the whole file, one function at `entry`. A raw image carries no
 /// header, so the language is the caller's to give.
@@ -1214,34 +1218,68 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
             cli.raw_entry,
             cli.language_override.as_deref(),
         )?,
-        None => LoadedBinary::from_bytes(
-            binary_data.clone(),
-            cli.binary.to_string_lossy().to_string(),
-        )
-        .with_context(|| {
-            if cli.language_override.is_some() {
-                format!(
-                    "failed to parse binary `{}` (to read it as a raw image, give --base <ADDR>)",
+        None => {
+            let path = cli.binary.to_string_lossy().to_string();
+            let loaded = match cli.language_override.as_deref() {
+                // Formats that name no processor (Intel HEX, S-record) take
+                // the language at load time; every other format ignores it
+                // and is relabelled below.
+                Some(language_id) => LoadedBinary::from_bytes_with_language(
+                    binary_data.clone(),
+                    path,
+                    &fission_loader::loader::pipeline::ExplicitLanguage {
+                        language_id: language_id.to_string(),
+                        architecture: language_descriptor(language_id)?,
+                        source: CLI_LOAD_LANGUAGE_SOURCE.to_string(),
+                    },
+                ),
+                None => LoadedBinary::from_bytes(binary_data.clone(), path),
+            };
+            loaded.map_err(|err| {
+                let hint = if cli.language_override.is_some() {
+                    " (to read it as a raw image, give --base <ADDR>)"
+                } else if err.to_string().contains("LoadSpecNotFound") {
+                    " (the file names no processor: give --language, \
+                     `fission_cli languages` lists the IDs)"
+                } else {
+                    ""
+                };
+                // Context, not a new message: the contract classifier finds
+                // the loader's `FissionError` in the chain.
+                anyhow::Error::from(err).context(format!(
+                    "failed to parse binary `{}`{hint}",
                     cli.binary.display()
-                )
-            } else {
-                format!("failed to parse binary `{}`", cli.binary.display())
-            }
-        })?,
+                ))
+            })?
+        }
     };
 
-    // A raw image already carries the language, with its own provenance
-    // (`cli-raw-load`); relabelling it would overwrite that.
+    // A raw image and a format that took the language at load time already
+    // carry it, with their own provenance; relabelling would overwrite that.
+    let language_taken_at_load = binary
+        .load_spec()
+        .is_some_and(|spec| spec.source == CLI_LOAD_LANGUAGE_SOURCE);
     if let Some(language_id) = cli
         .language_override
         .as_deref()
-        .filter(|_| cli.raw_base.is_none())
+        .filter(|_| cli.raw_base.is_none() && !language_taken_at_load)
     {
         apply_language_override(&mut binary, language_id)?;
         if cli.verbose {
             eprintln!("[*] Forced SLEIGH language: {language_id}");
         }
     }
+
+    // Section file offsets index the loaded data. For every container format
+    // that is the file (or the universal slice) itself; an Intel HEX or
+    // S-record file is decoded into a different image, and the commands below
+    // that read bytes by file offset must read that image, not the text.
+    let loaded_bytes_are_the_file = binary.data.as_slice() == binary_data.as_slice();
+    let binary_data = if loaded_bytes_are_the_file {
+        binary_data
+    } else {
+        binary.data.as_slice().to_vec()
+    };
 
     // The one function discovery. Every command that reads the function table
     // reads the table this builds, so `list`, `decomp --all`, `callgraph`,
@@ -1343,7 +1381,12 @@ fn execute_command(cli: &OneShotArgs) -> Result<()> {
     }
 
     if let Some(request) = &cli.patch {
-        return Ok(run_patch(&mut binary, request, cli.json)?);
+        return Ok(run_patch(
+            &mut binary,
+            request,
+            loaded_bytes_are_the_file,
+            cli.json,
+        )?);
     }
 
     if let Some(query) = &cli.search {
