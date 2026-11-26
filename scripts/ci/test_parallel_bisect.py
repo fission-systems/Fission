@@ -61,5 +61,11 @@ class BisectTests(unittest.TestCase):
             self.assertIn("was sampled", text)
 
 
+class RowKeyTests(unittest.TestCase):
+    def test_rows_of_different_functions_get_different_keys(self):
+        row = {"arch": "x86_64", "compiler": "gcc", "config": "O2", "project": "p", "binary": "b", "address": 0x10}
+        self.assertEqual(bisect_ci.row_key(row), "x86_64/gcc-O2/p/b@10")
+        self.assertNotEqual(bisect_ci.row_key(row), bisect_ci.row_key({**row, "address": 0x11}))
+
 if __name__ == "__main__":
     unittest.main()

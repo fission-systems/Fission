@@ -64,6 +64,11 @@ def first_bad(results: list[dict], probe: str, threshold: float = speed_compare.
     return None
 
 
+def row_key(row: dict) -> str:
+    """A sweep row's function: rows carry no single id field."""
+    return f"{row['arch']}/{row['compiler']}-{row['config']}/{row['project']}/{row['binary']}@{row['address']:x}"
+
+
 def probe_output(args) -> dict:
     entries = corpus.manifest(args.data)
     corpus.fetch_all(corpus.scoring_files(entries, freshbench_sweep.units_for(entries, args.build, args.only)),
@@ -76,7 +81,7 @@ def probe_output(args) -> dict:
                     "--runs", str(runs)], check=True, env=corpus.telemetry_free_env())
     report = freshbench_sweep.run_json(args.freshbench, "sweep", "report", str(runs / "probe"))
     rows = [json.loads(line) for line in (runs / "probe" / "rows.jsonl").read_text().splitlines() if line.strip()]
-    hashes = hashlib.sha256("".join(sorted(f"{r.get('key')}{r.get('code_sha256')}\n" for r in rows)).encode())
+    hashes = hashlib.sha256("".join(sorted(f"{row_key(r)} {r.get('code_sha256')}\n" for r in rows)).encode())
     no_output = sum(report["failures"].values())
     return {
         "rows": report["overall"]["rows"],
