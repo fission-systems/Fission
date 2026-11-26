@@ -250,6 +250,7 @@ fn arithmetic_sets_af_from_the_carry_out_of_bit_3() {
         ("dec eax", &[0xFF, 0xC8], 0x11, 0x00, 0, 0),
         ("xadd al, cl", &[0x0F, 0xC0, 0xC8], 0x0F, 0x01, 0, 1),
     ];
+    let mut failures: Vec<String> = Vec::new();
     for &(name, code, al, cl, cf, af) in cases {
         for (engine, mut emu) in run_one(code, |emu| {
             emu.write_register_u64("RAX", al).unwrap();
@@ -257,13 +258,143 @@ fn arithmetic_sets_af_from_the_carry_out_of_bit_3() {
             emu.write_register_u64("CF", cf).unwrap();
             emu.write_register_u64("AF", af ^ 1).unwrap();
         }) {
-            assert_eq!(
-                emu.read_register_u64("AF").unwrap() & 1,
-                af,
-                "{engine}: {name} with al={al:#x}, cl={cl:#x}, CF={cf}"
-            );
+            if emu.read_register_u64("AF").unwrap() & 1 != af {
+                failures.push(format!(
+                    "{engine}: {name} with al={al:#x}, cl={cl:#x}, CF={cf}: AF != {af}"
+                ));
+            }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The memory and LOCK forms of the arithmetic go through the same flag
+/// macros (lockable.sinc has its own constructors), and INC/DEC memory forms
+/// set AF inline. Each case starts with AF the opposite of the expected value.
+#[test]
+fn memory_and_lock_arithmetic_sets_af_from_the_carry_out_of_bit_3() {
+    /// name, bytes, [rdi] before, cl, CF in, [rdi] after, AF out
+    type MemCase = (&'static str, &'static [u8], u8, u64, u64, u8, u64);
+    let cases: &[MemCase] = &[
+        ("add byte [rdi], cl", &[0x00, 0x0F], 0x0F, 1, 0, 0x10, 1),
+        (
+            "lock add byte [rdi], cl",
+            &[0xF0, 0x00, 0x0F],
+            0x0F,
+            1,
+            0,
+            0x10,
+            1,
+        ),
+        (
+            "lock add byte [rdi], cl",
+            &[0xF0, 0x00, 0x0F],
+            0x10,
+            1,
+            0,
+            0x11,
+            0,
+        ),
+        (
+            "lock adc byte [rdi], cl",
+            &[0xF0, 0x10, 0x0F],
+            0x08,
+            7,
+            1,
+            0x10,
+            1,
+        ),
+        (
+            "lock sub byte [rdi], cl",
+            &[0xF0, 0x28, 0x0F],
+            0x10,
+            1,
+            0,
+            0x0F,
+            1,
+        ),
+        (
+            "lock sbb byte [rdi], cl",
+            &[0xF0, 0x18, 0x0F],
+            0x10,
+            0,
+            1,
+            0x0F,
+            1,
+        ),
+        ("neg byte [rdi]", &[0xF6, 0x1F], 0x01, 0, 0, 0xFF, 1),
+        (
+            "lock neg byte [rdi]",
+            &[0xF0, 0xF6, 0x1F],
+            0x10,
+            0,
+            0,
+            0xF0,
+            0,
+        ),
+        ("inc byte [rdi]", &[0xFE, 0x07], 0x0F, 0, 0, 0x10, 1),
+        ("inc byte [rdi]", &[0xFE, 0x07], 0x0E, 0, 0, 0x0F, 0),
+        (
+            "lock inc byte [rdi]",
+            &[0xF0, 0xFE, 0x07],
+            0x2F,
+            0,
+            0,
+            0x30,
+            1,
+        ),
+        ("dec byte [rdi]", &[0xFE, 0x0F], 0x10, 0, 0, 0x0F, 1),
+        (
+            "lock dec byte [rdi]",
+            &[0xF0, 0xFE, 0x0F],
+            0x11,
+            0,
+            0,
+            0x10,
+            0,
+        ),
+        ("cmp byte [rdi], cl", &[0x38, 0x0F], 0x20, 1, 0, 0x20, 1),
+        (
+            "lock xadd byte [rdi], cl",
+            &[0xF0, 0x0F, 0xC0, 0x0F],
+            0x0F,
+            1,
+            0,
+            0x10,
+            1,
+        ),
+        (
+            "lock cmpxchg byte [rdi], cl",
+            &[0xF0, 0x0F, 0xB0, 0x0F],
+            0x01,
+            5,
+            0,
+            0x01,
+            1,
+        ),
+    ];
+    let mut failures: Vec<String> = Vec::new();
+    for &(name, code, before, cl, cf, after, af) in cases {
+        for (engine, mut emu) in run_one(code, |emu| {
+            // al = 0x20 makes cmpxchg's `al - [rdi]` borrow out of bit 3.
+            emu.write_register_u64("RAX", 0x20).unwrap();
+            emu.write_register_u64("RDI", DATA).unwrap();
+            emu.write_register_u64("RCX", cl).unwrap();
+            emu.write_register_u64("CF", cf).unwrap();
+            emu.write_register_u64("AF", af ^ 1).unwrap();
+            write_u32(emu, DATA, u32::from(before));
+        }) {
+            let memory = read_u32(&mut emu, DATA);
+            let got_af = emu.read_register_u64("AF").unwrap() & 1;
+            if (memory, got_af) != (u32::from(after), af) {
+                failures.push(format!(
+                    "{engine}: {name} with [rdi]={before:#x}, cl={cl:#x}, CF={cf}: \
+                     [rdi]={memory:#x} AF={got_af}, want [rdi]={after:#x} AF={af}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 const NAN64: u64 = 0x7FF8_0000_0000_0000;
@@ -280,6 +411,7 @@ fn scalar_conversions_round_to_even_and_return_the_integer_indefinite() {
     let cvttsd2si_rax = [0xF2, 0x48, 0x0F, 0x2C, 0xC1];
     let cvtss2si_eax = [0xF3, 0x0F, 0x2D, 0xC1];
     let cvttss2si_eax = [0xF3, 0x0F, 0x2C, 0xC1];
+    let cvttss2si_rax = [0xF3, 0x48, 0x0F, 0x2C, 0xC1];
     let d = |x: f64| x.to_bits();
     let s = |x: f32| u64::from(x.to_bits());
     let cases: &[(&str, &[u8], u64, u64)] = &[
@@ -321,10 +453,27 @@ fn scalar_conversions_round_to_even_and_return_the_integer_indefinite() {
             d(2147483647.9),
             0x7FFF_FFFF,
         ),
+        // The lower bound of the double -> int32 truncation is -2^31 - 1,
+        // exclusive. -2147483648.5 is in range but truncates to -2^31, whose
+        // bits equal the indefinite, so it cannot show a wrong bound; its
+        // neighbours do (-2147483647.9 a bound that is too tight,
+        // -2147483649.0 one that is too loose).
         (
-            "cvttsd2si eax, -2147483648.9",
+            "cvttsd2si eax, -2147483647.9",
             &cvttsd2si_eax,
-            d(-2147483648.9),
+            d(-2147483647.9),
+            0x8000_0001,
+        ),
+        (
+            "cvttsd2si eax, -2147483648.5",
+            &cvttsd2si_eax,
+            d(-2147483648.5),
+            0x8000_0000,
+        ),
+        (
+            "cvttsd2si eax, -2147483649.0",
+            &cvttsd2si_eax,
+            d(-2147483649.0),
             0x8000_0000,
         ),
         (
@@ -356,7 +505,142 @@ fn scalar_conversions_round_to_even_and_return_the_integer_indefinite() {
             0x7FC0_0000,
             0x8000_0000,
         ),
+        // Signed zeroes and halves. A negative result in (-1, 0) is the
+        // integer 0, not the indefinite.
+        ("cvtsd2si eax, -0.5", &cvtsd2si_eax, d(-0.5), 0),
+        ("cvtsd2si eax, -1.5", &cvtsd2si_eax, d(-1.5), 0xFFFF_FFFE),
+        ("cvtsd2si eax, -0.0", &cvtsd2si_eax, d(-0.0), 0),
+        ("cvttsd2si eax, -0.5", &cvttsd2si_eax, d(-0.5), 0),
+        ("cvtss2si eax, -0.5", &cvtss2si_eax, s(-0.5), 0),
+        ("cvtss2si eax, -1.5", &cvtss2si_eax, s(-1.5), 0xFFFF_FFFE),
+        // The 32-bit range: 2^31 - 1 is the largest result, -2^31 the
+        // smallest, and 2^31 itself is out of range.
+        (
+            "cvtsd2si eax, 2147483647",
+            &cvtsd2si_eax,
+            d(2147483647.0),
+            0x7FFF_FFFF,
+        ),
+        (
+            "cvtsd2si eax, -2147483648",
+            &cvtsd2si_eax,
+            d(-2147483648.0),
+            0x8000_0000,
+        ),
+        (
+            "cvtsd2si eax, -2147483647.5",
+            &cvtsd2si_eax,
+            d(-2147483647.5),
+            0x8000_0000,
+        ),
+        (
+            "cvtsd2si eax, -2147483646.5",
+            &cvtsd2si_eax,
+            d(-2147483646.5),
+            0x8000_0002,
+        ),
+        (
+            "cvtsd2si eax, 2147483648",
+            &cvtsd2si_eax,
+            d(2147483648.0),
+            0x8000_0000,
+        ),
+        (
+            "cvtsd2si eax, +inf",
+            &cvtsd2si_eax,
+            d(f64::INFINITY),
+            0x8000_0000,
+        ),
+        (
+            "cvttsd2si eax, +inf",
+            &cvttsd2si_eax,
+            d(f64::INFINITY),
+            0x8000_0000,
+        ),
+        // The 64-bit range: +2^63 is out of range, -2^63 is the smallest
+        // result (the same bits as the indefinite), and the largest double
+        // below 2^63 converts.
+        (
+            "cvtsd2si rax, 2^63",
+            &cvtsd2si_rax,
+            d(9223372036854775808.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvtsd2si rax, -2^63",
+            &cvtsd2si_rax,
+            d(-9223372036854775808.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvtsd2si rax, below 2^63",
+            &cvtsd2si_rax,
+            d(9223372036854774784.0),
+            0x7FFF_FFFF_FFFF_FC00,
+        ),
+        (
+            "cvttsd2si rax, 2^63",
+            &cvttsd2si_rax,
+            d(9223372036854775808.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvttsd2si rax, above -2^63",
+            &cvttsd2si_rax,
+            d(-9223372036854774784.0),
+            0x8000_0000_0000_0400,
+        ),
+        (
+            "cvttsd2si rax, +inf",
+            &cvttsd2si_rax,
+            d(f64::INFINITY),
+            0x8000_0000_0000_0000,
+        ),
+        // CVTTSS2SI into a 64-bit register: the same bounds for a float32.
+        (
+            "cvttss2si rax, 2^63",
+            &cvttss2si_rax,
+            s(9223372036854775808.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvttss2si rax, -2^63",
+            &cvttss2si_rax,
+            s(-9223372036854775808.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvttss2si rax, below 2^63",
+            &cvttss2si_rax,
+            s(9223371487098961920.0),
+            0x7FFF_FF80_0000_0000,
+        ),
+        (
+            "cvttss2si rax, above -2^63",
+            &cvttss2si_rax,
+            s(-9223371487098961920.0),
+            0x8000_0080_0000_0000,
+        ),
+        (
+            "cvttss2si rax, -2^64",
+            &cvttss2si_rax,
+            s(-18446744073709551616.0),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvttss2si rax, +inf",
+            &cvttss2si_rax,
+            s(f32::INFINITY),
+            0x8000_0000_0000_0000,
+        ),
+        (
+            "cvttss2si rax, -7.9",
+            &cvttss2si_rax,
+            s(-7.9),
+            (-7i64) as u64,
+        ),
     ];
+    let mut failures: Vec<String> = Vec::new();
     for &(name, code, bits, expected) in cases {
         for (engine, mut emu) in run_one(code, |emu| {
             emu.write_register_u64("RAX", 0x1234_5678_9ABC_DEF0)
@@ -364,9 +648,14 @@ fn scalar_conversions_round_to_even_and_return_the_integer_indefinite() {
             emu.write_register_u64("XMM1_Qa", bits).unwrap();
         }) {
             let rax = emu.read_register_u64("RAX").unwrap();
-            assert_eq!(rax, expected, "{engine}: {name} gave {rax:#x}");
+            if rax != expected {
+                failures.push(format!(
+                    "{engine}: {name} gave {rax:#x}, want {expected:#x}"
+                ));
+            }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
 /// The packed forms: CVTPS2DQ rounds each lane to even and CVTTPS2DQ
@@ -423,13 +712,19 @@ fn packed_conversions_round_to_even_and_return_the_integer_indefinite() {
             [4 | 0x8000_0000 << 32, 0],
         ),
     ];
+    let mut failures: Vec<String> = Vec::new();
     for (name, code, setup, expected) in cases {
         for (engine, mut emu) in run_one(code, setup) {
             let got = [
                 emu.read_register_u64("XMM0_Qa").unwrap(),
                 emu.read_register_u64("XMM0_Qb").unwrap(),
             ];
-            assert_eq!(got, expected, "{engine}: {name} gave {got:x?}");
+            if got != expected {
+                failures.push(format!(
+                    "{engine}: {name} gave {got:x?}, want {expected:x?}"
+                ));
+            }
         }
     }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
