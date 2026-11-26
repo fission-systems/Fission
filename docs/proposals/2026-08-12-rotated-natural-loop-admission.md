@@ -191,4 +191,4 @@ Validation completed:
   with 4/5 perfect rows, GED mean 0.80 with 4/5 perfect rows. The existing
   `list_sum` gcc O0 row remained a compile error. The local result is
   intentionally non-publishable:
-  `/Users/sjkim1127/fission-benchmark/results/local_rotated_loop_focused_dcb544ca_dirty.json`.
+  `~/fission-benchmark/results/local_rotated_loop_focused_dcb544ca_dirty.json`.
