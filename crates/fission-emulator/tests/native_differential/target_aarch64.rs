@@ -162,6 +162,16 @@ const CURATED: &[(&str, &[u8])] = &[
     ("ldtrsb w0, [x1, #8]", &[0x20, 0x88, 0xc0, 0x38]),
     ("ld1 {v1.4h, v2.4h}, [x1]", &[0x21, 0xa4, 0x40, 0x0c]),
     ("ld1r {v3.4h}, [x1]", &[0x23, 0xc4, 0x40, 0x0d]),
+    // W-form results of CAS, CASP and LDAPR zero bits 63:32 (#1067).
+    ("casb w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x08]),
+    ("cash w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x48]),
+    ("cas w2, w3, [x1]", &[0x23, 0x7c, 0xa2, 0x88]),
+    ("casal w2, w3, [x1]", &[0x23, 0xfc, 0xe2, 0x88]),
+    ("casp w2, w3, w4, w5, [x1]", &[0x24, 0x7c, 0x22, 0x08]),
+    ("casp x2, x3, x4, x5, [x1]", &[0x24, 0x7c, 0x22, 0x48]),
+    ("ldapr w3, [x1]", &[0x23, 0xc0, 0xbf, 0xb8]),
+    ("ldaprb w3, [x1]", &[0x23, 0xc0, 0xbf, 0x38]),
+    ("ldaprh w3, [x1]", &[0x23, 0xc0, 0xbf, 0x78]),
     ("sqrdmulh v0.4h, v1.4h, v2.h[7]", &[0x20, 0xd8, 0x72, 0x0f]),
     ("srsra v0.4h, v1.4h, #1", &[0x20, 0x34, 0x1f, 0x0f]),
     ("sqdmlal v0.2d, v1.2s, v2.s[3]", &[0x20, 0x38, 0xa2, 0x0f]),
@@ -439,6 +449,28 @@ fn state(rng: &mut Rng, curated: Option<&str>) -> CpuState {
     rng.fill(&mut s.buf);
     if let Some(name) = curated {
         s.gpr[X1] = buffer_pointer(rng, 16);
+        // A compare-and-swap only stores when the comparison holds, which random
+        // registers almost never do: make them match memory half the time.
+        if name.starts_with("cas") && rng.chance(50) {
+            let off = (s.gpr[X1] - buf_addr()) as usize;
+            let word = |at: usize, n: usize| {
+                let mut b = [0u8; 8];
+                b[..n].copy_from_slice(&s.buf[off + at..off + at + n]);
+                u64::from_le_bytes(b)
+            };
+            let size = match name {
+                n if n.starts_with("casp x") => 8,
+                n if n.starts_with("casb") => 1,
+                n if n.starts_with("cash") => 2,
+                _ => 4,
+            };
+            let first = word(0, size);
+            let second = name.starts_with("casp").then(|| word(size, size));
+            s.gpr[2] = first;
+            if let Some(second) = second {
+                s.gpr[3] = second;
+            }
+        }
         // Rounding instructions get a halfway input half the time: ties are
         // where the rounding modes differ, and a random float is almost never one.
         // Saturating multiplies overflow only for INT_MIN * INT_MIN, and SQNEG

@@ -146,8 +146,11 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   in the forms upstream wrote as a bare `W` assignment, which kept the old upper half: the
   LSE atomics `LD{ADD,CLR,EOR,SET,SMAX,SMIN,UMAX,UMIN}` and `SWP` (byte, halfword and word,
   every ordering), `LDLARB`/`LDLARH`/`LDLAR`, `LDAPRB`/`LDAPRH`/`LDAPR` and `CAS`/`CASP`
-  with `W` registers. Each now assigns `zext(...)` to the `X` register. Evidence: an Apple
-  M4 run natively (the native differential, fission-systems/Fission#1067 and #1057).
+  with `W` registers. Each now assigns `zext(...)` to the `X` register. `CASP`'s pair
+  registers are still mis-indexed by Fission's runtime (a dropped `attach variables` hole,
+  fission-systems/Fission#1391), so the differential cannot confirm its `W` form yet.
+  Evidence: an Apple M4 run natively (the native differential, fission-systems/Fission#1067
+  and #1057).
   Re-apply with `scripts/sleigh/apply_aarch64_w_dest_zero_extend.py`.
   The same file compares the byte and halfword `LDSMAX`/`LDSMIN`/`LDUMAX`/`LDUMIN` at the
   element width (`Max(SInt(data), SInt(value))` over 8 or 16 bits); upstream compared the
@@ -175,7 +178,11 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   count is 0 and set it per the SDM for a count of 1 (#1051); upstream's `shrflags`/
   `shrdflags` had the two cases swapped. `PUSHF`/`PUSHFD`/`PUSHFQ` store reserved bit 1 as 1
   (#1052). Evidence: an x86-64 host run natively (the native differential) and the SDM
-  sections cited in the script. Re-apply with `scripts/sleigh/apply_x86_prefix_and_flag_fixes.py`.
+  sections cited in the script, except for `F3 90` with REX.B, where host CPUs disagree:
+  an Intel Xeon 6975P-C CI runner executes `f3 41 90` as PAUSE (RAX and R8 unchanged), while
+  an AMD EPYC 7763 runner executes it as `xchg r8d, eax`. The spec follows the `90+rd`
+  encoding (the AMD behaviour); the baseline marks that divergence `@host` (#1059).
+  Re-apply with `scripts/sleigh/apply_x86_prefix_and_flag_fixes.py`.
 - `x86/ia.sinc`, `x86/lockable.sinc` (and the compiled `x86.sla`, `x86-64.sla`): AF is set
   by every add/subtract form, as the carry or borrow out of bit 3 (SDM Vol. 1, 3.4.3.1);
   upstream never wrote it (#1048). `addflags`, `subflags`, `addCarryFlags`,
