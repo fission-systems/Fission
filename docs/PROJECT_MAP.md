@@ -14,6 +14,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 | [`crates/fission-analysis-db`](https://github.com/fission-systems/Fission/tree/main/crates/fission-analysis-db) | Immutable typed program metadata snapshots |
 | [`crates/fission-project`](https://github.com/fission-systems/Fission/tree/main/crates/fission-project) | Persistent analyst decisions, binary identity binding, and edit history for `db` |
 | [`crates/fission-evidence`](../crates/fission-evidence) | Image identity, code location, runtime mapping and evidence contracts (leaf; ADR 0020) |
+| [`crates/fission-analysis-kernel`](../crates/fission-analysis-kernel) | Thin orchestration over engine facades: runtime trace capture, evidence import and evidence-aware views (ADR 0020); only surfaces depend on it |
 | [`crates/fission-pcode-ir`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode-ir) | p-code IR, p-code optimizer, block-level CFG facts (leaf; no workspace dependencies) |
 | [`crates/fission-cspec`](https://github.com/fission-systems/Fission/tree/main/crates/fission-cspec) | cspec / ldefs / pspec parsing, register model (`RegisterNamer`), entry parameter-arity inference (ADR 0012 amendment) |
 | [`crates/fission-pcode`](https://github.com/fission-systems/Fission/tree/main/crates/fission-pcode) | NIR/HIR, structuring, CFG analysis, printer; re-exports `fission-pcode-ir` under the historical paths |

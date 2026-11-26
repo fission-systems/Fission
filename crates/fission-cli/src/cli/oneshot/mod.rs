@@ -14,6 +14,7 @@ mod debug_decomp;
 #[cfg(feature = "debugger")]
 mod debug_session;
 mod disasm;
+mod evidence;
 mod function_select;
 mod functions;
 mod hex;
@@ -362,6 +363,7 @@ fn run() -> Result<()> {
         ParsedInvocation::Languages(args) => languages::run(&args),
         ParsedInvocation::Call(args) => call::run(&args),
         ParsedInvocation::Quotient(args) => quotient::run(&args),
+        ParsedInvocation::Evidence(args) => evidence::run(&args),
         ParsedInvocation::Api(args) => lookup::run_api(&args),
         ParsedInvocation::OneShot(parsed) => run_oneshot_inner(parsed),
     }
@@ -910,6 +912,8 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         fmt => anyhow::bail!("Unsupported binary format for sandbox: {}", fmt),
     };
 
+    let trace_stdin = args.stdin_mock.clone();
+
     // Create Emulator and Run
     let mut emu = fission_emulator::core::Emulator::new(state, binary, sleigh, arch, os)?
         .with_deadline(
@@ -966,6 +970,11 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
     if args.taint {
         emu.set_shadow_mode(fission_emulator::observe::ShadowMode::Taint);
     }
+    if args.indirect_trace_out.is_some() {
+        emu.add_observer(Box::new(
+            fission_analysis_kernel::record::IndirectRecorder::default(),
+        ));
+    }
 
     tracing::info!("Starting Emulator Execution Loop at PC=0x{:X}", emu.pc);
 
@@ -986,7 +995,19 @@ fn run_sandbox(args: crate::cli::args::SandboxArgs) -> Result<()> {
         symbolic_report = Some(sym_runner.report(SYMBOLIC_REPORT_STATE_CAP));
         emu = sym_runner.emu;
     } else {
-        emu.run()?;
+        let outcome = emu.run().map(|_| ());
+        // A run that failed still observed something; the trace says it is
+        // incomplete.
+        if let Some(path) = &args.indirect_trace_out {
+            let inputs = fission_analysis_kernel::record::inputs_digest(
+                &args.args,
+                trace_stdin.as_deref().map(str::as_bytes),
+                args.max_inst,
+            );
+            let error = outcome.as_ref().err().map(|error| format!("{error:#}"));
+            evidence::write_indirect_trace(&emu, path, inputs, error.as_deref())?;
+        }
+        outcome?;
     }
 
     let mut ttd_state = None;

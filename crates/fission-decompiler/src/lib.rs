@@ -74,9 +74,10 @@ pub use orchestration::request::{DecompileRequest, DecompileResult, decompile_pr
 
 pub(crate) use pipeline::rust_sleigh::decode_rust_sleigh_pcode;
 pub use pipeline::rust_sleigh::{
-    RustSleighDecompileConfig, RustSleighDecompileResult, RustSleighPipelineEvidence,
-    decompile_with_rust_sleigh, decompile_with_rust_sleigh_with_facts,
-    select_nir_output_from_prebuilt_pcode, select_nir_output_from_prebuilt_pcode_with_facts,
+    LiftedFunction, RustSleighDecompileConfig, RustSleighDecompileResult,
+    RustSleighPipelineEvidence, decompile_with_rust_sleigh, decompile_with_rust_sleigh_with_facts,
+    lift_function_pcode, select_nir_output_from_prebuilt_pcode,
+    select_nir_output_from_prebuilt_pcode_with_facts,
 };
 
 pub type DecompileEngineMode = NirEngineMode;

@@ -11,45 +11,16 @@ use fission_loader::loader::LoadedBinary;
 use fission_static::analysis::decomp::facts::FactStore;
 use std::time::Instant;
 
-pub fn decompile_with_rust_sleigh(
+/// How many bytes and instructions to decode for the function at
+/// `entry_address`.
+fn decode_bounds(
     binary: &LoadedBinary,
-    address: u64,
-    name: &str,
+    entry_address: u64,
+    function_size: usize,
     config: &RustSleighDecompileConfig,
     max_function_size: Option<u32>,
     max_instructions: Option<u32>,
-) -> Result<RustSleighDecompileResult, String> {
-    let facts = FactStore::from_binary_without_signature_matches(binary);
-    decompile_with_rust_sleigh_with_facts(
-        binary,
-        &facts,
-        address,
-        name,
-        config,
-        max_function_size,
-        max_instructions,
-    )
-}
-
-pub fn decompile_with_rust_sleigh_with_facts(
-    binary: &LoadedBinary,
-    facts: &FactStore,
-    address: u64,
-    name: &str,
-    config: &RustSleighDecompileConfig,
-    max_function_size: Option<u32>,
-    max_instructions: Option<u32>,
-) -> Result<RustSleighDecompileResult, String> {
-    let start = Instant::now();
-    let entry_address = binary
-        .function_at(address)
-        .map(|f| f.address)
-        .unwrap_or(address);
-    let function_size = binary
-        .function_at(entry_address)
-        .map(|f| usize::try_from(f.size).unwrap_or(0))
-        .unwrap_or(0);
-
+) -> (usize, usize) {
     // Absent a caller-supplied limit the limit is the *cap*, not the default
     // size. `default_decode_bytes` answers "how much to read when the
     // function's size is unknown" (that is `fallback_default_bytes`, below);
@@ -90,6 +61,95 @@ pub fn decompile_with_rust_sleigh_with_facts(
         .unwrap_or(default_instruction_limit)
         .max(1)
         .min(config.instruction_budget_cap.max(1));
+
+    (max_bytes, instruction_limit)
+}
+
+/// A function as the decompiler lifts it, before any normalization.
+#[derive(Debug, Clone)]
+pub struct LiftedFunction {
+    pub entry_address: u64,
+    pub pcode: crate::PcodeFunction,
+    /// Decoder context at the entry; `None` is the language's default.
+    pub context_override: Option<fission_sleigh::runtime::PackedContextOverride>,
+}
+
+/// Lift the function containing `address` exactly as a default decompile would,
+/// and stop there. For read-only views that must agree with the decompiler
+/// about which instructions the function has.
+pub fn lift_function_pcode(binary: &LoadedBinary, address: u64) -> Result<LiftedFunction, String> {
+    let config = RustSleighDecompileConfig::cli_defaults();
+    let function = binary.function_at(address);
+    let entry_address = function.map(|f| f.address).unwrap_or(address);
+    let function_size = binary
+        .function_at(entry_address)
+        .map(|f| usize::try_from(f.size).unwrap_or(0))
+        .unwrap_or(0);
+    let (max_bytes, instruction_limit) =
+        decode_bounds(binary, entry_address, function_size, &config, None, None);
+    let pcode = crate::rust_sleigh::decode_rust_sleigh_pcode(
+        binary,
+        "lifted_function",
+        entry_address,
+        max_bytes,
+        instruction_limit,
+        config.continue_past_indirect_branch,
+        config.retry_on_decode_error,
+    )?;
+    Ok(LiftedFunction {
+        entry_address,
+        pcode,
+        context_override: crate::rust_sleigh::decode::entry_context_override(binary, entry_address),
+    })
+}
+
+pub fn decompile_with_rust_sleigh(
+    binary: &LoadedBinary,
+    address: u64,
+    name: &str,
+    config: &RustSleighDecompileConfig,
+    max_function_size: Option<u32>,
+    max_instructions: Option<u32>,
+) -> Result<RustSleighDecompileResult, String> {
+    let facts = FactStore::from_binary_without_signature_matches(binary);
+    decompile_with_rust_sleigh_with_facts(
+        binary,
+        &facts,
+        address,
+        name,
+        config,
+        max_function_size,
+        max_instructions,
+    )
+}
+
+pub fn decompile_with_rust_sleigh_with_facts(
+    binary: &LoadedBinary,
+    facts: &FactStore,
+    address: u64,
+    name: &str,
+    config: &RustSleighDecompileConfig,
+    max_function_size: Option<u32>,
+    max_instructions: Option<u32>,
+) -> Result<RustSleighDecompileResult, String> {
+    let start = Instant::now();
+    let entry_address = binary
+        .function_at(address)
+        .map(|f| f.address)
+        .unwrap_or(address);
+    let function_size = binary
+        .function_at(entry_address)
+        .map(|f| usize::try_from(f.size).unwrap_or(0))
+        .unwrap_or(0);
+
+    let (max_bytes, instruction_limit) = decode_bounds(
+        binary,
+        entry_address,
+        function_size,
+        config,
+        max_function_size,
+        max_instructions,
+    );
 
     let mut evidence = RustSleighPipelineEvidence::new(entry_address, max_bytes, instruction_limit);
     evidence.wrapper_probe_attempted = config.enable_wrapper_contraction_probe;

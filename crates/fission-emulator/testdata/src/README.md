@@ -110,3 +110,18 @@ also time-travels the AArch64 one. From `testdata/`:
 zig cc -target aarch64-linux-musl -O0 -static -s -o aarch64_control_flow.elf src/control_flow.c
 zig cc -target x86-windows-gnu -O0 -s -o x86_control_flow.exe src/control_flow.c
 ```
+
+## Indirect dispatch (ADR 0020)
+
+`indirect_dispatch.c` calls and tail-jumps through a two-entry function table.
+`argc` selects the entry: no argument reaches `op_increment` (exit status 39),
+one argument reaches `op_triple` (exit status 97). Symbols are kept. Build the
+checked-in guests from this directory with:
+
+```sh
+for target in x86_64:x64 aarch64:aarch64; do
+  zig cc -target ${target%%:*}-linux-musl -O1 -g0 -static -nostdlib -fno-pie -no-pie \
+    -fno-stack-protector -fno-sanitize=undefined -Wl,-e,_start -Wl,--build-id=none \
+    -o ../indirect_dispatch_${target##*:}.elf indirect_dispatch.c
+done
+```

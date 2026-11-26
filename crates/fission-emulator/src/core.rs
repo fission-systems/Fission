@@ -921,6 +921,11 @@ impl Emulator {
         taken
     }
 
+    /// The registered observers, in registration order, without removing them.
+    pub fn observers(&self) -> &[Box<dyn crate::observe::Observer>] {
+        &self.observers
+    }
+
     pub fn observe_mask(&self) -> crate::observe::ObserveMask {
         self.observe
     }
@@ -1511,6 +1516,49 @@ impl Emulator {
         self.current_insn_pc = pc;
         for o in &mut self.observers {
             o.on_insn(pc);
+        }
+    }
+
+    /// An indirect call or jump at `site` is about to go to `target`.
+    pub(crate) fn notify_indirect(
+        &mut self,
+        site: u64,
+        site_len: u32,
+        target: u64,
+        kind: crate::observe::IndirectKind,
+    ) {
+        if self.observers.is_empty() {
+            return;
+        }
+        let ram = self.state.ram_space();
+        let site_bytes = self
+            .state
+            .read_space(ram, site, site_len as usize)
+            .unwrap_or_default();
+        // The target's instruction length is unknown here, and the window may
+        // run into an unmapped page: keep the readable prefix.
+        let readable = self
+            .state
+            .page_map
+            .readable_extent(target, crate::observe::INDIRECT_TARGET_WINDOW);
+        let target_bytes = if readable == 0 {
+            Vec::new()
+        } else {
+            self.state
+                .read_space(ram, target, readable)
+                .unwrap_or_default()
+        };
+        let transfer = crate::observe::IndirectTransfer {
+            kind,
+            thread: self.current_tid,
+            site,
+            site_bytes,
+            target,
+            target_bytes,
+            decode_context: self.decode_context,
+        };
+        for o in &mut self.observers {
+            o.on_indirect_transfer(&transfer);
         }
     }
 
