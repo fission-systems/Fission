@@ -441,4 +441,8 @@ Rules:
 - [`.github/workflows/release-tag.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-tag.yml)
 - [`.github/workflows/release-e2e.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/release-e2e.yml)
 - [`.github/workflows/cd.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/cd.yml)
+- [`.github/workflows/freshbench-sweep.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/freshbench-sweep.yml)
+- [`.github/workflows/output-ledger.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/output-ledger.yml)
+- [`.github/workflows/speed.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/speed.yml)
+- [`.github/workflows/memory-ceiling.yml`](https://github.com/fission-systems/Fission/blob/main/.github/workflows/memory-ceiling.yml)
 - [`utils/MANIFEST.md`](https://github.com/fission-systems/Fission/blob/main/utils/MANIFEST.md)
