@@ -2,7 +2,7 @@
 
 ## 1. Measured anchor
 
-- Corpus: external `/Users/sjkim1127/fission-benchmark` dev corpus
+- Corpus: external `~/fission-benchmark` dev corpus
 - Source: `corpus/dev/source/c/memory_layouts.c`
 - Binary: `corpus/dev/binaries/c/memory_layouts_gcc_O0.exe`
 - Function/address: `matrix_multiply` at `0x1400015b8`
