@@ -1102,6 +1102,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-evidence"
+version = "0.4.0"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "fission-loader"
 version = "0.4.0"
 dependencies = [
