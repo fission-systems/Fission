@@ -308,6 +308,15 @@ exactly as that commit does. It uses the run only when it is clean and has
 the head run's scorer, corpus and function count. Otherwise it decompiles
 the base itself.
 
+A second job sends each entry's totals to Sentry (`scripts/ci/sentry_ledger.py`)
+as one `output-ledger` transaction. Its measurements are the sample's totals
+and `instructions`; its tags are `commit` and `cpu`. To plot them, use Explore
+or a dashboard with `transaction:output-ledger`, and group `instructions` by
+`cpu`. Only those numbers, the commit hash and the CPU model are sent: no
+function key, output hash, decompiled text or binary name. Values that fail
+their pattern are rejected, not cleaned. The job runs only for main pushes
+and dispatches, and never changes the run's result.
+
 ## Release process
 
 The maintainer reviews and merges one Release PR; the workflows do the rest.

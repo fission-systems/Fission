@@ -99,3 +99,27 @@ jobs:
           path: ledger/run
           if-no-files-found: error
           retention-days: 30
+
+  # The entry's totals to Sentry, for a dashboard across main commits
+  # (scripts/ci/sentry_ledger.py: numbers, the commit and the CPU model only).
+  # A separate job so SENTRY_DSN reaches no build or decompile step.
+  sentry:
+    name: Ledger metrics to Sentry
+    needs: record
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Report-only: the script exits 0 once its arguments parse.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: output-ledger-${{ github.sha }}
+          path: ${{ runner.temp }}/ledger
+      - name: Send the totals
+        env:
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: python3 scripts/ci/sentry_ledger.py "$RUNNER_TEMP/ledger/entry.json"
