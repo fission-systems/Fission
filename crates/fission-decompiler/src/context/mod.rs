@@ -14,7 +14,7 @@ use crate::facts::{
     build_nir_type_context, record_interprocedural_arity_facts,
     refine_nir_type_context_with_callee_effect_summaries,
 };
-use fission_analysis_db::ProgramSnapshot;
+use fission_analysis_db::{ProgramJoinError, ProgramSnapshot};
 use fission_loader::loader::LoadedBinary;
 use fission_pcode::midend::{NirFunctionHints, NirTypeContext};
 use fission_pcode::{PcodeFunction, PreHirFunction};
@@ -65,6 +65,17 @@ impl<'bin> DecompContext<'bin> {
         address: u64,
     ) -> Self {
         Self::from_facts(binary, FactStore::from_program(binary, program), address)
+    }
+
+    /// Checked constructor returning [`ProgramJoinError`] if `program` fails
+    /// canonical validation or does not match `binary`.
+    pub fn try_from_program(
+        binary: &'bin LoadedBinary,
+        program: Arc<ProgramSnapshot>,
+        address: u64,
+    ) -> Result<Self, ProgramJoinError> {
+        let facts = FactStore::try_from_program(binary, program)?;
+        Ok(Self::from_facts(binary, facts, address))
     }
 
     pub fn from_facts(binary: &'bin LoadedBinary, facts: FactStore, address: u64) -> Self {
@@ -191,5 +202,47 @@ mod tests {
         assert!(!context.hints_changed());
         let learned_facts = context.into_facts();
         assert!(learned_facts.structuring_hints(0x401000).is_some());
+    }
+
+    #[test]
+    fn context_try_from_program_rejects_cross_program_snapshot_and_allows_matching() {
+        use fission_analysis_db::{ProgramJoinError, ProgramSnapshot};
+        use fission_loader::loader::FunctionInfo;
+        use std::sync::Arc;
+
+        let bin_a =
+            LoadedBinaryBuilder::new("a.bin".to_string(), DataBuffer::Heap(vec![1, 2, 3, 4]))
+                .format("ELF")
+                .is_64bit(true)
+                .add_function(FunctionInfo {
+                    name: "alpha_fn".to_string(),
+                    address: 0x401000,
+                    size: 4,
+                    ..Default::default()
+                })
+                .build()
+                .expect("bin_a");
+        let bin_b =
+            LoadedBinaryBuilder::new("b.bin".to_string(), DataBuffer::Heap(vec![5, 6, 7, 8]))
+                .format("ELF")
+                .is_64bit(true)
+                .add_function(FunctionInfo {
+                    name: "beta_fn".to_string(),
+                    address: 0x401000,
+                    size: 4,
+                    ..Default::default()
+                })
+                .build()
+                .expect("bin_b");
+
+        let snap_a = Arc::new(ProgramSnapshot::try_from_loaded_binary(&bin_a).expect("snap_a"));
+        assert!(matches!(
+            DecompContext::try_from_program(&bin_b, Arc::clone(&snap_a), 0x401000),
+            Err(ProgramJoinError::IdentityMismatch(_))
+        ));
+
+        let ctx_ok = DecompContext::try_from_program(&bin_a, snap_a, 0x401000)
+            .expect("matching snapshot succeeds");
+        assert_eq!(ctx_ok.facts().resolved_name(0x401000), Some("alpha_fn"));
     }
 }

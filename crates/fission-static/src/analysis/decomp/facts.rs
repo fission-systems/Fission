@@ -2,8 +2,8 @@ use crate::analysis::callgraph::CallGraph;
 use crate::analysis::control_flow_facts::{decode_memory_context_for, function_max_bytes};
 use crate::analysis::xrefs::XrefDatabase;
 use fission_analysis_db::{
-    FactSource, ProgramSnapshot, RejectedRow, SnapshotIntegrityIssue, SnapshotPublication,
-    SymbolKind,
+    CheckedProgramView, FactSource, ProgramJoinError, ProgramSnapshot, RejectedRow,
+    SnapshotIntegrityIssue, SnapshotPublication, SymbolKind,
 };
 use fission_cspec::register_model_for_language;
 use fission_cspec::{RegisterNamer, infer_entry_register_param_arity};
@@ -277,6 +277,8 @@ pub struct ProgramPublicationDiagnostics {
     /// Faults of the snapshot as a whole. When non-empty no loader fact was
     /// published and the program snapshot is empty.
     pub snapshot_issues: Vec<SnapshotIntegrityIssue>,
+    /// Cross-program identity or snapshot validation failure rejected at join time.
+    pub join_error: Option<ProgramJoinError>,
 }
 
 fn snapshot_for_fact_store(
@@ -306,6 +308,7 @@ fn snapshot_for_fact_store(
         Arc::new(ProgramPublicationDiagnostics {
             rejected_rows: outcome.rejected_rows,
             snapshot_issues,
+            join_error: None,
         }),
     )
 }
@@ -313,7 +316,7 @@ fn snapshot_for_fact_store(
 impl FactStore {
     pub fn from_binary(binary: &LoadedBinary) -> Self {
         let (program, diagnostics) = snapshot_for_fact_store(binary);
-        let mut store = Self::from_program_with_signature_matching(binary, program, true);
+        let mut store = Self::from_validated_program_with_signature_matching(binary, program, true);
         store.program_publication = diagnostics;
         store
     }
@@ -324,16 +327,85 @@ impl FactStore {
     /// [`Self::from_binary`] so its global signature facts remain available.
     pub fn from_binary_without_signature_matches(binary: &LoadedBinary) -> Self {
         let (program, diagnostics) = snapshot_for_fact_store(binary);
-        let mut store = Self::from_program_with_signature_matching(binary, program, false);
+        let mut store =
+            Self::from_validated_program_with_signature_matching(binary, program, false);
         store.program_publication = diagnostics;
         store
     }
 
-    pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
-        Self::from_program_with_signature_matching(binary, program, true)
+    /// Checked constructor validating canonical snapshot integrity and exact
+    /// identity/load-mapping/spec/decision alignment before joining `binary`
+    /// with `program`.
+    pub fn try_from_program(
+        binary: &LoadedBinary,
+        program: Arc<ProgramSnapshot>,
+    ) -> Result<Self, ProgramJoinError> {
+        let view = CheckedProgramView::new(binary, program)?;
+        Ok(Self::from_checked_view(&view, true))
     }
 
-    fn from_program_with_signature_matching(
+    /// Checked constructor without global FID signature scanning.
+    pub fn try_from_program_without_signature_matches(
+        binary: &LoadedBinary,
+        program: Arc<ProgramSnapshot>,
+    ) -> Result<Self, ProgramJoinError> {
+        let view = CheckedProgramView::new(binary, program)?;
+        Ok(Self::from_checked_view(&view, false))
+    }
+
+    /// Join an already-validated [`CheckedProgramView`] with zero redundant
+    /// re-validation cost.
+    pub fn from_checked_view(
+        view: &CheckedProgramView<'_>,
+        include_signature_matches: bool,
+    ) -> Self {
+        Self::from_validated_program_with_signature_matching(
+            view.binary(),
+            view.program_arc(),
+            include_signature_matches,
+        )
+    }
+
+    /// Checked constructor requiring [`SnapshotPublication::Valid`] and
+    /// matching program identity.
+    pub fn try_from_publication(
+        binary: &LoadedBinary,
+        publication: SnapshotPublication,
+    ) -> Result<Self, ProgramJoinError> {
+        let view = CheckedProgramView::from_publication(binary, publication)?;
+        Ok(Self::from_checked_view(&view, true))
+    }
+
+    /// Join `binary` and `program` if and only if validation passes; on
+    /// mismatch or invalid snapshot, fails closed with an empty fact store and
+    /// attaches the typed [`ProgramJoinError`] diagnostic instead of silently
+    /// merging cross-program facts.
+    pub fn from_program(binary: &LoadedBinary, program: Arc<ProgramSnapshot>) -> Self {
+        match Self::try_from_program(binary, program) {
+            Ok(store) => store,
+            Err(error) => {
+                tracing::warn!(%error, "rejected mismatched/invalid FactStore::from_program join");
+                Self {
+                    program: Arc::new(ProgramSnapshot::empty()),
+                    program_publication: Arc::new(ProgramPublicationDiagnostics {
+                        rejected_rows: Vec::new(),
+                        snapshot_issues: match &error {
+                            ProgramJoinError::InvalidSnapshot(report) => report.issues.clone(),
+                            ProgramJoinError::IdentityMismatch(_) => Vec::new(),
+                        },
+                        join_error: Some(error),
+                    }),
+                    learned: LearnedFactOverlay::default(),
+                    loader_type_facts: Arc::new(Vec::new()),
+                    dwarf_functions: Arc::new(HashMap::new()),
+                    pdb_functions: Arc::new(HashMap::new()),
+                    decode_cache: DecodeCache::default(),
+                }
+            }
+        }
+    }
+
+    fn from_validated_program_with_signature_matching(
         binary: &LoadedBinary,
         program: Arc<ProgramSnapshot>,
         include_signature_matches: bool,
@@ -615,6 +687,18 @@ impl FactStore {
     /// Everything publishing the loader's facts left out or refused.
     pub fn program_publication_diagnostics(&self) -> &ProgramPublicationDiagnostics {
         &self.program_publication
+    }
+
+    /// Cross-program identity or integrity error recorded when [`Self::from_program`]
+    /// failed closed.
+    pub fn join_error(&self) -> Option<&ProgramJoinError> {
+        self.program_publication.join_error.as_ref()
+    }
+
+    /// True if no snapshot-level integrity issue or cross-program join mismatch occurred.
+    pub fn is_join_valid(&self) -> bool {
+        self.program_publication.snapshot_issues.is_empty()
+            && self.program_publication.join_error.is_none()
     }
 
     /// Run exact Ghidra-style FID matching when sufficient decoded instruction
