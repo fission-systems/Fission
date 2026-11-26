@@ -2821,4 +2821,42 @@ mod raw_seed_lift_tests {
                 && op.output.as_ref().is_some_and(|out| out.size == 8)
         }));
     }
+
+    /// `attach variables` tables with `_` holes keep their positions: the
+    /// register a selector names is the one at that index. Dropping the holes
+    /// moved every later entry down, so `casp w2, w3, w4, w5` lifted as
+    /// `casp w2, w5, w4, w9` (fission-systems/Fission#1391).
+    #[test]
+    fn aarch64_casp_pair_registers_survive_attach_table_holes() {
+        let frontend =
+            RuntimeSleighFrontend::new_for_language("AARCH64").expect("AARCH64 frontend");
+        for (word, wide, name) in [
+            (0x0822_7c24_u32, 4_u32, "casp w2, w3, w4, w5, [x1]"),
+            (0x4822_7c24, 8, "casp x2, x3, x4, x5, [x1]"),
+        ] {
+            let (decoded, ops, len, _) = frontend
+                .decode_instruction_and_lift_with_context_override(
+                    &word.to_le_bytes(),
+                    0x100000,
+                    None,
+                )
+                .unwrap_or_else(|error| panic!("lift {name}: {error:#}"));
+            assert_eq!(len, 4);
+            assert_eq!(
+                format!("{} {}", decoded.mnemonic, decoded.operands_text),
+                name
+            );
+            let mut registers: Vec<u64> = ops
+                .iter()
+                .flat_map(|op| op.inputs.iter().chain(op.output.as_ref()))
+                .filter(|vn| fission_pcode_ir::space::is_register_space_id(vn.space_id))
+                // x0 is at 0x4000, one 8-byte slot per register; x1 is the base.
+                .filter(|vn| vn.offset >= 0x4010 && vn.size >= wide.min(4))
+                .map(|vn| (vn.offset - 0x4000) / 8)
+                .collect();
+            registers.sort_unstable();
+            registers.dedup();
+            assert_eq!(registers, [2, 3, 4, 5], "{name}: {ops:#?}");
+        }
+    }
 }

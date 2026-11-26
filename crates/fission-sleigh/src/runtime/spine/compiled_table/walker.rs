@@ -1212,13 +1212,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 self.advance_cursor_past_sla_field(token_base, encoded_size)?;
                 let selector_index = checked_selector_index_u64(selector, "varnode list")?;
                 let display_index = checked_selector_display_index(selector_index, "varnode list")?;
-                let entry = entries.get(selector_index).ok_or_else(|| {
-                    anyhow!(
-                        "varnode list selector {} out of range for {} entries",
-                        selector,
-                        entries.len()
-                    )
-                })?;
+                let entry = varnode_list_entry(entries, selector_index, selector)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::NamedVarnode {
                         name: entry.name.clone(),
@@ -1241,13 +1235,7 @@ impl<'a, 'b> CompiledParserWalker<'a, 'b> {
                 )?;
                 let selector_index = checked_selector_index_i64(selector, "varnode list")?;
                 let display_index = checked_selector_display_index(selector_index, "varnode list")?;
-                let entry = entries.get(selector_index).ok_or_else(|| {
-                    anyhow!(
-                        "varnode list selector {} out of range for {} entries",
-                        selector,
-                        entries.len()
-                    )
-                })?;
+                let entry = varnode_list_entry(entries, selector_index, selector)?;
                 Ok(OperandBinding::with_fixed(
                     BoundOperand::NamedVarnode {
                         name: entry.name.clone(),
@@ -1901,6 +1889,24 @@ fn checked_usize_to_u64(value: usize, role: &str) -> Result<u64> {
 
 fn checked_u32_to_usize(value: u32, role: &str) -> Result<usize> {
     usize::try_from(value).map_err(|_| anyhow!("{role} {value} exceeds usize"))
+}
+
+/// The register a varnode-list selector names. A selector past the table, or
+/// on a `_` hole, makes the instruction invalid (Ghidra
+/// `VarnodeListSymbol.resolve` raises `UnknownInstructionException`).
+fn varnode_list_entry<'a>(
+    entries: &'a [Option<crate::compiler::CompiledResolvedVarnode>],
+    selector_index: usize,
+    selector: impl std::fmt::Display,
+) -> Result<&'a crate::compiler::CompiledResolvedVarnode> {
+    match entries.get(selector_index) {
+        Some(Some(entry)) => Ok(entry),
+        Some(None) => bail!("varnode list selector {selector} names a hole in the attach table"),
+        None => bail!(
+            "varnode list selector {selector} out of range for {} entries",
+            entries.len()
+        ),
+    }
 }
 
 fn checked_selector_index_u64(value: u64, role: &str) -> Result<usize> {

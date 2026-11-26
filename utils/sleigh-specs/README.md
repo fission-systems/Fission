@@ -103,11 +103,8 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   in the forms upstream wrote as a bare `W` assignment, which kept the old upper half: the
   LSE atomics `LD{ADD,CLR,EOR,SET,SMAX,SMIN,UMAX,UMIN}` and `SWP` (byte, halfword and word,
   every ordering), `LDLARB`/`LDLARH`/`LDLAR`, `LDAPRB`/`LDAPRH`/`LDAPR` and `CAS`/`CASP`
-  with `W` registers. Each now assigns `zext(...)` to the `X` register. `CASP`'s pair
-  registers are still mis-indexed by Fission's runtime (a dropped `attach variables` hole,
-  fission-systems/Fission#1391), so the differential cannot confirm its `W` form yet.
-  Evidence: an Apple M4 run natively (the native differential, fission-systems/Fission#1067
-  and #1057).
+  with `W` registers. Each now assigns `zext(...)` to the `X` register. Evidence: an Apple
+  M4 run natively (the native differential, fission-systems/Fission#1067 and #1057).
   Re-apply with `scripts/sleigh/apply_aarch64_w_dest_zero_extend.py`.
   The same file compares the byte and halfword `LDSMAX`/`LDSMIN`/`LDUMAX`/`LDUMIN` at the
   element width (`Max(SInt(data), SInt(value))` over 8 or 16 bits); upstream compared the
