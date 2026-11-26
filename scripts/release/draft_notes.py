@@ -30,7 +30,7 @@ What goes where:
   `## Measurement ...` / `## Measured ...` section, where many PRs put their
   numbers; verbatim and attributed. Nothing is computed, summed or compared
   across PRs.
-* The full DecBench sweep table is not in any PR, so it is a placeholder the
+* The full FreshBench sweep table is not in any PR, so it is a placeholder the
   maintainer fills. Known limitations come from open issues labelled
   `release:blocker`, or `bug` and `status:confirmed`.
 
@@ -362,8 +362,8 @@ def render(data: dict, version: str, previous: str | None = None) -> str:
             "Quoted verbatim from each PR's Benchmark, Measurement or Correctness Evidence "
             "section. "
             "Each number was measured by that PR, under its own load; nothing here is "
-            "added up or compared across PRs. DecBench scores measure similarity to the "
-            "source, not correctness (ADR 0018)."
+            "added up or compared across PRs. Benchmark scores measure similarity to the "
+            "source, not correctness (ADR 0019)."
         )
         out.append("")
         for pr, blocks in quoted:
@@ -379,18 +379,17 @@ def render(data: dict, version: str, previous: str | None = None) -> str:
                     out.append(f"({len(lines) - len(shown)} more lines in #{pr['number']})")
                 out.append("")
 
-    out.append("## Quality (full DecBench sweep)")
+    out.append("## Quality (full FreshBench sweep)")
     out.append("")
     quality = [
-        f"> **{TODO_MARKER}:** fill this from a cache-disabled full-dataset sweep of "
-        f"{prev} and this candidate (`~/fission-benchmark/decbench-full/sweep.py`, "
-        "see docs/BENCHMARK_DECBENCH.md): GED exact matches, GED total distance, "
-        "type exact matches and mean, Union, decompile CPU time and failures. No PR "
-        "carries this measurement. If no sweep was run, write \"Not measured for "
-        "this release.\"",
+        f"> **{TODO_MARKER}:** fill this from full FreshBench M1 runs of "
+        f"{prev} and this candidate (`freshbench sweep run`, then `sweep diff`; "
+        "see docs/BENCHMARK_FRESHBENCH.md): GED perfect count next to distance, "
+        "types perfect, decompile CPU time and failures. No PR carries this "
+        "measurement. If no sweep was run, write \"Not measured for this release.\"",
         "",
         "GED (structure) measures how close the output's control flow is to the "
-        "source's. It does not measure correctness (ADR 0018).",
+        "source's. It does not measure correctness (ADR 0019).",
     ]
     out.extend(block("quality", quality, kept))
     out.append("")

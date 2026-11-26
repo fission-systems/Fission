@@ -1,0 +1,253 @@
+name: Parallel bisect
+
+# Names the first main commit between a good and a bad one that regressed:
+# every commit in the range (up to 48, sampled evenly beyond that) is built and
+# measured at once, so the answer takes one round instead of log2(N). The
+# nightly FreshBench sweep calls this when rows lose their output; it can also
+# be dispatched by hand. scripts/ci/parallel_bisect.py has the probes and the
+# verdict.
+
+on:
+  workflow_dispatch:
+    inputs:
+      good:
+        description: "A commit without the regression"
+        required: true
+        type: string
+      bad:
+        description: "A later commit with it"
+        required: true
+        type: string
+      probe:
+        description: "output: rows losing output or failing tool calls on a FreshBench slice; speed: +3% instructions"
+        required: true
+        type: choice
+        options: [output, speed]
+      build:
+        description: "With probe output: the M1 build to sweep"
+        required: false
+        type: string
+        default: gcc-O2
+      only:
+        description: "With probe output: a substring of <build>/<project>/<binary> to narrow it"
+        required: false
+        type: string
+        default: ""
+  workflow_call:
+    inputs:
+      good:
+        required: true
+        type: string
+      bad:
+        required: true
+        type: string
+      probe:
+        required: true
+        type: string
+      build:
+        required: false
+        type: string
+        default: gcc-O2
+      only:
+        required: false
+        type: string
+        default: ""
+      issue_title:
+        description: "Comment the verdict on the open ci-red issue with this title"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  RAYON_NUM_THREADS: "2"
+
+jobs:
+  plan:
+    name: Plan the commits
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      commits: ${{ steps.plan.outputs.commits }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: List the range
+        id: plan
+        env:
+          GOOD: ${{ inputs.good }}
+          BAD: ${{ inputs.bad }}
+        run: |
+          set -euo pipefail
+          echo "commits=$(cd scripts/ci && python3 parallel_bisect.py plan --good "$GOOD" --bad "$BAD")" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        if: inputs.probe == 'output'
+        with:
+          toolchain: stable
+      - name: Build the pinned scorer
+        if: inputs.probe == 'output'
+        run: |
+          set -euo pipefail
+          commit="$(python3 -c 'import sys; sys.path.insert(0, "scripts/ci"); import freshbench_corpus as c; print(c.FRESHBENCH_COMMIT)')"
+          cargo install --locked --git https://github.com/fission-systems/freshbench --rev "$commit" \
+            --root "$RUNNER_TEMP/freshbench-tool" freshbench
+          mkdir -p scorer && cp "$RUNNER_TEMP/freshbench-tool/bin/freshbench" scorer/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.probe == 'output'
+        with:
+          name: bisect-scorer
+          path: scorer
+          retention-days: 1
+      # Speed: every probe measures the good commit's CLI on its own runner too.
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        if: inputs.probe == 'speed'
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: inputs.probe == 'speed'
+        with:
+          shared-key: fission-bisect
+      - name: Build the good commit's CLI
+        if: inputs.probe == 'speed'
+        env:
+          GOOD: ${{ inputs.good }}
+        run: |
+          set -euo pipefail
+          git worktree add --detach "$RUNNER_TEMP/good" "$GOOD"
+          (cd "$RUNNER_TEMP/good" && CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --release -p fission-cli)
+          mkdir -p good-cli && cp target/release/fission_cli good-cli/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.probe == 'speed'
+        with:
+          name: bisect-good-cli
+          path: good-cli
+          retention-days: 1
+
+  probe:
+    name: Probe ${{ matrix.commit.index }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 24
+      matrix:
+        commit: ${{ fromJSON(needs.plan.outputs.commits) }}
+    env:
+      COMMIT: ${{ matrix.commit.commit }}
+      INDEX: ${{ matrix.commit.index }}
+      PROBE: ${{ inputs.probe }}
+      BUILD: ${{ inputs.build }}
+      ONLY: ${{ inputs.only }}
+    steps:
+      # The driver scripts come from this workflow's commit; the decompiler,
+      # its resources and its utils/ from the commit being measured.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          path: driver
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ matrix.commit.commit }}
+          persist-credentials: false
+          path: measured
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: measured
+          shared-key: fission-bisect
+      - name: Build the measured commit
+        run: cargo build --locked --release -p fission-cli --manifest-path measured/Cargo.toml
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.probe == 'output'
+        with:
+          name: bisect-scorer
+          path: scorer
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: inputs.probe == 'speed'
+        with:
+          name: bisect-good-cli
+          path: good-cli
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: inputs.probe == 'speed'
+        with:
+          ref: ${{ inputs.good }}
+          persist-credentials: false
+          path: good
+      - name: Install valgrind
+        if: inputs.probe == 'speed'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends valgrind
+      - name: Measure
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ "$PROBE" == speed ]]; then
+            chmod +x good-cli/fission_cli
+            extra=(--good-cli "$GITHUB_WORKSPACE/good-cli/fission_cli" --good-repo good)
+          fi
+          if [[ "$PROBE" == output ]]; then
+            chmod +x scorer/freshbench
+            extra=(--freshbench "$GITHUB_WORKSPACE/scorer/freshbench" --build "$BUILD")
+            if [[ -n "$ONLY" ]]; then extra+=(--only "$ONLY"); fi
+          fi
+          env -u SENTRY_DSN -u FISSION_SENTRY -u FRESHBENCH_SENTRY \
+            python3 driver/scripts/ci/parallel_bisect.py probe "$PROBE" --data "$RUNNER_TEMP/freshbench" \
+              --cli measured/target/release/fission_cli --repo measured \
+              --commit "$COMMIT" --index "$INDEX" --out "probe/$INDEX/probe.json" "${extra[@]}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bisect-probe-${{ matrix.commit.index }}
+          path: probe
+          retention-days: 14
+
+  verdict:
+    name: Verdict
+    needs: [plan, probe]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bisect-probe-*
+          path: probes
+          merge-multiple: true
+      - name: Name the first regressing commit
+        env:
+          PROBE: ${{ inputs.probe }}
+        run: python3 scripts/ci/parallel_bisect.py verdict --probe "$PROBE" --input probes --out bisect
+      - name: Comment on the ci-red issue
+        if: inputs.issue_title != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.issue_title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          issue="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label ci-red --limit 100 --json number,title \
+            | python3 -c 'import json, os, sys; print(next((str(i["number"]) for i in json.load(sys.stdin) if i["title"] == os.environ["TITLE"]), ""))')"
+          if [[ -n "$issue" ]]; then
+            { cat bisect/bisect.md; echo; echo "Bisect run: $RUN_URL"; } > comment.md
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body-file comment.md
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: bisect
+          path: bisect
+          if-no-files-found: ignore
+          retention-days: 35

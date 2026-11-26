@@ -735,6 +735,41 @@ fn decodes_x86_varnode_list_selector_expressions() {
     );
 }
 
+/// A varnode list keeps one entry per selector value, `None` for a `_` hole:
+/// AArch64's `aa_Wss` attaches `[ w1 _ w3 _ .. w29 _ wzr _ ]` (#1391).
+#[test]
+fn aarch64_varnode_lists_keep_their_holes() {
+    let path = packaged_sla_path("AARCH64", "AARCH64.sla");
+    let library = load_construct_templates_from_sla(path).expect("decode AARCH64.sla");
+    let second_of_pair = library
+        .subtables
+        .values()
+        .flat_map(|table| &table.constructors)
+        .flat_map(|ctor| &ctor.operand_specs)
+        .find_map(|spec| match spec {
+            CompiledOperandSpec::SlaVarnodeList { entries, .. }
+                if matches!(entries.first(), Some(Some(first)) if first.name.as_ref() == "w1") =>
+            {
+                Some(entries)
+            }
+            _ => None,
+        })
+        .expect("the aa_Wss/aa_Wtt varnode list");
+    assert_eq!(second_of_pair.len(), 32);
+    for (index, entry) in second_of_pair.iter().enumerate() {
+        let expected = match index {
+            30 => Some("wzr".to_string()),
+            odd if odd % 2 == 1 => None,
+            even => Some(format!("w{}", even + 1)),
+        };
+        assert_eq!(
+            entry.as_ref().map(|entry| entry.name.to_string()),
+            expected,
+            "selector {index}"
+        );
+    }
+}
+
 #[test]
 fn decodes_real_aarch64_rm_gpr64_subtable_without_placeholders() {
     let path = packaged_sla_path("AARCH64", "AARCH64.sla");

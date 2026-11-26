@@ -89,6 +89,7 @@ pub(super) fn scan_data_code_pointers(
                 &mut local_cache,
                 global_references,
                 decode_context,
+                None,
             );
             if is_valid && res.has_call_to_valid {
                 Some(FunctionStartCandidate {

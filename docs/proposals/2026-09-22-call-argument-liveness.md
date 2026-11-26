@@ -8,7 +8,7 @@ the existing p-code call-argument recovery owner in
 
 ## Motivating row and baseline
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/control_flow_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/control_flow_gcc_O2.exe`
 - Function: `main` at `0x140002830`
 - Command: `target/release/fission_cli decomp --project --no-header --no-warnings ...`
 - Before: the project prototype declares `clamp(int value, int lo, int hi)`,

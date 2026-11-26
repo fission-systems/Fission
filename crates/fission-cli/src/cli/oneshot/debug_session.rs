@@ -190,6 +190,7 @@ fn execute(
     thread_id: u32,
     command: DebugCommand,
 ) -> Result<Value> {
+    let thread_id = active_thread(backend, thread_id);
     let value = match command {
         DebugCommand::Capabilities(_) => serde_json::to_value(backend.capabilities())?,
         DebugCommand::Bp(a) => {
@@ -347,6 +348,7 @@ fn execution_progress(
     thread_id: u32,
     action: &str,
 ) -> Result<Value> {
+    let thread_id = active_thread(backend, thread_id);
     let pc = if backend.get_state().status == DebugStatus::Running {
         Value::Null
     } else {
@@ -452,7 +454,23 @@ fn restore_saved_breakpoints(
     restored
 }
 
+/// The thread a register read or write is about, asked of the backend at the
+/// moment of the command rather than fixed when the session started.
+///
+/// A Windows launch learns its main thread only from the first debug event, so
+/// a thread id taken at start-up was the fallback -- the process id -- and every
+/// `regs` asked `OpenThread` for a thread that does not exist. `switch-thread`
+/// changes the backend's selected thread, which a fixed id never saw either.
+/// Which thread is selected after a new stop is the backend's contract
+/// (`DebugState::selected_thread_id`): the thread that raised the newest
+/// reported event, until `switch-thread` selects another. `fallback` is used
+/// only while the backend knows no thread at all.
+fn active_thread(backend: &mut dyn ExecutionBackend, fallback: u32) -> u32 {
+    backend.get_state().selected_thread_id().unwrap_or(fallback)
+}
+
 fn session_state_json(backend: &mut dyn ExecutionBackend, thread_id: u32) -> Value {
+    let thread_id = active_thread(backend, thread_id);
     let state = backend.get_state();
     let pc = if state.status == DebugStatus::Running {
         Value::Null
@@ -466,7 +484,11 @@ fn session_state_json(backend: &mut dyn ExecutionBackend, thread_id: u32) -> Val
     json!({
         "status": format!("{:?}", state.status).to_ascii_lowercase(),
         "attached_pid": state.attached_pid,
-        "thread_id": state.current_thread_id.or(state.main_thread_id),
+        // `thread_id` and `pc` are always the same thread: the selected one.
+        // `event_thread_id` raised the stop `stop` describes; the two differ
+        // only after `switch-thread`, until the next reported event.
+        "thread_id": state.selected_thread_id(),
+        "event_thread_id": state.last_thread_id,
         "pc": pc,
         "stop": backend.stop_reason(),
     })
@@ -932,5 +954,260 @@ fn run_rhai(
                 .map(|d| d.message.as_str())
                 .unwrap_or("no diagnostic")
         )),
+    }
+}
+
+#[cfg(test)]
+mod thread_selection_tests {
+    //! The session's thread choice against a scripted two-thread target that
+    //! follows the backend contract (`DebugState::observe_event_thread`), so
+    //! it runs on every host. The Windows backend's own behaviour is covered
+    //! by the `windows_native_` tests, which need Windows.
+    use super::*;
+    use fission_dynamic::debug::types::{DebugState, ThreadInfo, stop_reason_for_event};
+    use std::collections::{BTreeMap, VecDeque};
+
+    const PID: u32 = 4242;
+    const MAIN: u32 = 100;
+    const WORKER: u32 = 200;
+
+    struct ScriptedThreads {
+        state: DebugState,
+        registers: BTreeMap<u32, RegisterState>,
+        /// Raised by each `continue`, one per call: (thread, event).
+        script: VecDeque<(u32, DebugEvent, Option<u64>)>,
+        pending: VecDeque<(u32, DebugEvent)>,
+        last_stop: Option<String>,
+    }
+
+    impl ScriptedThreads {
+        /// Stopped at the loader breakpoint on the main thread, a worker alive.
+        fn at_loader_breakpoint(script: Vec<(u32, DebugEvent, Option<u64>)>) -> Self {
+            let mut backend = Self {
+                state: DebugState {
+                    attached_pid: Some(PID),
+                    status: DebugStatus::Running,
+                    ..DebugState::default()
+                },
+                registers: BTreeMap::new(),
+                script: script.into(),
+                pending: VecDeque::new(),
+                last_stop: None,
+            };
+            for (thread, pc, is_main) in [(MAIN, 0x1000, true), (WORKER, 0x2000, false)] {
+                backend.state.threads.insert(
+                    thread,
+                    ThreadInfo {
+                        thread_id: thread,
+                        start_address: pc,
+                        suspended: false,
+                        is_main,
+                    },
+                );
+                backend
+                    .registers
+                    .insert(thread, RegisterState::at(pc).with("RAX", thread as u64));
+            }
+            backend.raise(
+                MAIN,
+                DebugEvent::ProcessCreated {
+                    pid: PID,
+                    main_thread_id: MAIN,
+                },
+            );
+            backend.raise(WORKER, DebugEvent::ThreadCreated { thread_id: WORKER });
+            backend.raise(
+                MAIN,
+                DebugEvent::BreakpointHit {
+                    address: 0x1000,
+                    thread_id: MAIN,
+                },
+            );
+            backend.pending.clear();
+            backend
+        }
+
+        fn raise(&mut self, thread: u32, event: DebugEvent) {
+            self.state.observe_event_thread(thread, Some(&event));
+            self.last_stop = Some(stop_reason_for_event(&event));
+            self.state.status = match event {
+                DebugEvent::ProcessExited { .. } => DebugStatus::Terminated,
+                _ => DebugStatus::Suspended,
+            };
+            self.pending.push_back((thread, event));
+        }
+    }
+
+    impl ExecutionBackend for ScriptedThreads {
+        fn enumerate_processes() -> Vec<fission_dynamic::debug::types::ProcessInfo> {
+            Vec::new()
+        }
+        fn attach(&mut self, _pid: u32) -> fission_core::Result<()> {
+            Ok(())
+        }
+        fn detach(&mut self) -> fission_core::Result<()> {
+            self.state.status = DebugStatus::Detached;
+            Ok(())
+        }
+        fn is_attached(&self) -> bool {
+            true
+        }
+        fn attached_pid(&self) -> Option<u32> {
+            Some(PID)
+        }
+        fn continue_execution(&mut self) -> fission_core::Result<()> {
+            let (thread, event, pc) = self.script.pop_front().expect("scripted event");
+            if let Some(pc) = pc {
+                self.registers.get_mut(&thread).expect("live thread").pc = pc;
+            }
+            if let DebugEvent::ThreadExited { .. } = event {
+                self.registers.remove(&thread);
+            }
+            self.raise(thread, event);
+            Ok(())
+        }
+        fn single_step(&mut self) -> fission_core::Result<()> {
+            unreachable!("not scripted")
+        }
+        fn stop_reason(&self) -> Option<String> {
+            self.last_stop.clone()
+        }
+        fn poll_event(&mut self, _timeout_ms: u32) -> fission_core::Result<Option<DebugEvent>> {
+            // A stopped target raises nothing new; a poll returns only what
+            // the last resume produced, and never moves the selection.
+            Ok(self.pending.pop_front().map(|(_, event)| event))
+        }
+        fn set_sw_breakpoint(&mut self, _address: u64) -> fission_core::Result<()> {
+            Ok(())
+        }
+        fn remove_sw_breakpoint(&mut self, _address: u64) -> fission_core::Result<()> {
+            Ok(())
+        }
+        fn read_memory(&self, _address: u64, size: usize) -> fission_core::Result<Vec<u8>> {
+            Ok(vec![0; size])
+        }
+        fn write_memory(&mut self, _address: u64, _data: &[u8]) -> fission_core::Result<()> {
+            Ok(())
+        }
+        fn fetch_registers(&mut self, thread_id: u32) -> fission_core::Result<RegisterState> {
+            // Like `OpenThread` on a thread id that names no thread.
+            self.registers
+                .get(&thread_id)
+                .cloned()
+                .ok_or_else(|| fission_core::FissionError::debug(format!("no thread {thread_id}")))
+        }
+        fn set_registers(
+            &mut self,
+            thread_id: u32,
+            regs: &RegisterState,
+        ) -> fission_core::Result<()> {
+            *self.registers.get_mut(&thread_id).ok_or_else(|| {
+                fission_core::FissionError::debug(format!("no thread {thread_id}"))
+            })? = regs.clone();
+            Ok(())
+        }
+        fn set_current_thread(&mut self, thread_id: u32) -> fission_core::Result<()> {
+            self.state
+                .select_thread(thread_id)
+                .map_err(fission_core::FissionError::debug)
+        }
+        fn get_state(&self) -> DebugState {
+            self.state.clone()
+        }
+    }
+
+    /// One interactive command, its frame parsed back. The session's start-up
+    /// thread id is the process id, as on a Windows launch.
+    fn run(backend: &mut ScriptedThreads, line: &str) -> Value {
+        let mut out = Vec::new();
+        interactive_command(
+            backend,
+            PID,
+            0,
+            line,
+            "test",
+            &Value::Null,
+            "native",
+            &mut out,
+        )
+        .expect("frame written");
+        serde_json::from_slice(&out).expect("one JSON frame")
+    }
+
+    fn assert_state(frame: &Value, thread: u32, event_thread: u32, pc: &str, stop: &str) {
+        let state = &frame["state"];
+        assert_eq!(state["thread_id"], json!(thread), "{frame:#}");
+        assert_eq!(state["event_thread_id"], json!(event_thread), "{frame:#}");
+        assert_eq!(state["pc"], json!(pc), "{frame:#}");
+        assert_eq!(state["stop"], json!(stop), "{frame:#}");
+    }
+
+    #[test]
+    fn registers_follow_the_selected_thread_and_a_new_stop_reselects() {
+        let mut backend = ScriptedThreads::at_loader_breakpoint(vec![
+            (
+                WORKER,
+                DebugEvent::BreakpointHit {
+                    address: 0x2008,
+                    thread_id: WORKER,
+                },
+                Some(0x2008),
+            ),
+            (WORKER, DebugEvent::ThreadExited { thread_id: WORKER }, None),
+            (MAIN, DebugEvent::ProcessExited { exit_code: 0 }, None),
+        ]);
+
+        // At the loader breakpoint: the main thread, not the start-up pid.
+        let frame = run(&mut backend, "regs");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+        assert_eq!(frame["result"]["registers"]["pc"], "0x1000", "{frame:#}");
+        assert_state(&frame, MAIN, MAIN, "0x1000", "breakpoint:0x1000");
+
+        // An explicit switch moves registers and state to the worker; the
+        // stop still names the main thread's breakpoint.
+        let frame = run(&mut backend, "switch-thread 200");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+        assert_state(&frame, WORKER, MAIN, "0x2000", "breakpoint:0x1000");
+        let frame = run(&mut backend, "regs");
+        assert_eq!(frame["result"]["registers"]["pc"], "0x2000", "{frame:#}");
+
+        // A register write lands on the selected thread only.
+        let frame = run(&mut backend, "set-reg RAX 0x55");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+        assert_eq!(backend.registers[&WORKER].get("RAX"), Some(0x55));
+        assert_eq!(backend.registers[&MAIN].get("RAX"), Some(MAIN as u64));
+
+        // Polling a stopped target reports nothing and keeps the selection.
+        let frame = run(&mut backend, "event --timeout-ms 0");
+        assert_eq!(frame["result"]["event"], Value::Null, "{frame:#}");
+        assert_state(&frame, WORKER, MAIN, "0x2000", "breakpoint:0x1000");
+
+        // Select main, then the worker hits a breakpoint: the new stop wins.
+        run(&mut backend, "switch-thread 100");
+        let frame = run(&mut backend, "continue");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+        assert_eq!(frame["result"]["pc"], "0x2008", "{frame:#}");
+        assert_eq!(frame["events"][0]["thread_id"], json!(WORKER), "{frame:#}");
+        assert_state(&frame, WORKER, WORKER, "0x2008", "breakpoint:0x2008");
+
+        // The worker exits: the selection is not left on a dead thread.
+        let frame = run(&mut backend, "continue");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+        assert_state(&frame, MAIN, WORKER, "0x1000", "thread-exited");
+        let frame = run(&mut backend, "regs");
+        assert_eq!(frame["status"], "ok", "{frame:#}");
+
+        // Process exit ends the session.
+        let frame = run(&mut backend, "continue");
+        assert_eq!(frame["state"]["status"], "terminated", "{frame:#}");
+        assert_eq!(frame["state"]["stop"], "exited", "{frame:#}");
+    }
+
+    #[test]
+    fn switching_to_an_unknown_thread_fails_and_keeps_the_selection() {
+        let mut backend = ScriptedThreads::at_loader_breakpoint(Vec::new());
+        let frame = run(&mut backend, "switch-thread 999");
+        assert_eq!(frame["status"], "error", "{frame:#}");
+        assert_state(&frame, MAIN, MAIN, "0x1000", "breakpoint:0x1000");
     }
 }

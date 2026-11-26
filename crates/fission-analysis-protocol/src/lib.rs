@@ -77,6 +77,129 @@ pub struct DisasmResponse {
     pub rows: Vec<DisasmRow>,
 }
 
+pub const INDIRECT_TARGETS_SCHEMA: &str = "fission-indirect-targets-v1";
+
+/// Whether the targets listed for a site are all it can reach.
+///
+/// There is one answer: neither a static lift nor observed runs establish that
+/// no other target exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetSetCompleteness {
+    Open,
+}
+
+/// A function's indirect calls and jumps with every candidate target and where
+/// each came from (`evidence explain --json`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndirectTargetsView {
+    pub schema: String,
+    /// Content digest of the analysed image.
+    pub image: String,
+    pub function_address: u64,
+    pub function_name: Option<String>,
+    pub sites: Vec<IndirectSite>,
+    /// Claims about this function that do not apply to the image as it is.
+    pub excluded: Vec<ExcludedEvidence>,
+    /// Claims in the ledger about other images.
+    pub other_image_claims: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IndirectSiteKind {
+    Call,
+    Jump,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IndirectSite {
+    pub address: u64,
+    pub kind: IndirectSiteKind,
+    /// `false` when only evidence names this site: the default lift of the
+    /// function did not reach an indirect transfer there.
+    pub in_static_lift: bool,
+    pub target_set: TargetSetCompleteness,
+    /// Targets the lift itself connected (for example a recovered jump table).
+    pub static_candidates: Vec<StaticCandidate>,
+    pub observed_candidates: Vec<ObservedCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StaticCandidate {
+    pub address: u64,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetAttribution {
+    /// Validated code of the analysed image.
+    Image,
+    /// Code that existed only in a run: generated, or patched at run time.
+    RuntimeCode,
+    /// Code of another image.
+    OtherImage,
+    /// An address that could not be attributed to code.
+    Unattributed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedCandidate {
+    pub attribution: TargetAttribution,
+    /// For `image`, the address in the analysed image; otherwise the address as
+    /// observed in its run, which means nothing outside it.
+    pub address: u64,
+    /// Function entered at `address`, for `image` targets only.
+    pub name: Option<String>,
+    /// Why the target is not image code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    pub observations: Vec<Observation>,
+}
+
+/// One claim behind a candidate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Observation {
+    pub evidence_id: String,
+    pub source: String,
+    pub verification: String,
+    pub producer: String,
+    pub producer_version: String,
+    pub run: Option<String>,
+    pub process: Option<u32>,
+    pub thread: Option<u32>,
+    pub epoch: Option<u64>,
+    /// Artifact records the claim was read from, as `schema digest#record`.
+    pub artifacts: Vec<String>,
+    pub assumptions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExcludedEvidence {
+    pub evidence_id: String,
+    pub site_address: u64,
+    pub reason: String,
+}
+
+/// What `evidence import` did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceImport {
+    /// Claims in the evidence file afterwards.
+    pub claims: usize,
+    pub traces: Vec<EvidenceImportedTrace>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EvidenceImportedTrace {
+    pub trace: String,
+    pub run: String,
+    pub added: usize,
+    pub duplicate: usize,
+    pub unattributed_sites: usize,
+    pub complete: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

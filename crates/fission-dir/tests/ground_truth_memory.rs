@@ -55,12 +55,21 @@ fn check_in(fixture: &str, name: &str) -> VerifyOutcome {
 
 /// `int x = a * 3; bump(&x); return a + 1;` -- the call's argument is a
 /// frame address, and the stubbed call is compared argument by argument, so
-/// this agrees only when the tree's `&x` is the machine's.
+/// a tree whose `&x` is not the machine's diverges.
+///
+/// `x`'s extent is the decompiler's inference, so agreement needs the whole
+/// private frame to agree, and the machine also saves `rbx` there (bytes the
+/// tree does not model). Such runs are unknown, not agreement; what this
+/// test pins is that no run diverges.
 #[test]
 fn a_local_whose_address_a_call_receives_is_the_same_pointer_on_both_sides() {
     match check("give_local") {
-        VerifyOutcome::Equivalent { checked } => assert_eq!(checked, RUNS),
-        other => panic!("give_local: expected agreement, got {other:?}"),
+        VerifyOutcome::Equivalent { checked } => assert!(checked <= RUNS),
+        VerifyOutcome::Inconclusive { reason } => assert!(
+            reason.contains("inferred extent"),
+            "give_local: unknown for an unexpected reason: {reason}"
+        ),
+        other => panic!("give_local: expected no divergence, got {other:?}"),
     }
 }
 
@@ -100,10 +109,21 @@ fn a_local_array_and_a_literal_argument_are_checked() {
 /// stack pointer, while the frame pointer is the base the scalar slots are
 /// named from. Placing every slot with one relation for the whole function
 /// put the buffer `0x60` bytes off, and the call's argument differed.
+///
+/// The buffer's address reaches `fill`, so the object it lies in is
+/// observable. The decompiler's object for it is the whole 104-byte frame
+/// backing, which also covers the saved `rbp` and the spilled parameter --
+/// bytes only the machine stores. Those cannot be told apart from a dropped
+/// store, so such runs are not agreement (they are unknown); what this test
+/// pins is that no run diverges, i.e. the call argument is the machine's.
 #[test]
 fn a_frame_with_two_bases_places_each_slot_by_its_own() {
     match check_in("ground_truth_fixture_o0.elf", "frame_buffer") {
-        VerifyOutcome::Equivalent { checked } => assert_eq!(checked, RUNS),
-        other => panic!("frame_buffer: expected agreement, got {other:?}"),
+        VerifyOutcome::Equivalent { checked } => assert!(checked <= RUNS),
+        VerifyOutcome::Inconclusive { reason } => assert!(
+            reason.contains("escaped frame object byte"),
+            "frame_buffer: unknown for an unexpected reason: {reason}"
+        ),
+        other => panic!("frame_buffer: expected no divergence, got {other:?}"),
     }
 }

@@ -138,6 +138,10 @@ impl InitialState {
         Self { seed, run }
     }
 
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
     pub fn run(&self) -> u32 {
         self.run
     }
@@ -229,6 +233,254 @@ impl InitialState {
         };
         extended & slot_mask
     }
+}
+
+/// Whether one policy dimension reflects a genuine machine/ABI constraint or a
+/// synthetic assumption made to exercise arbitrary runs in concrete verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintKind {
+    RealMachineConstraint,
+    SyntheticAssumption,
+}
+
+impl ConstraintKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RealMachineConstraint => "real_machine_constraint",
+            Self::SyntheticAssumption => "synthetic_assumption",
+        }
+    }
+}
+
+/// Every axis of machine/program state modeled when preparing a concrete run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum InitialStateDomain {
+    Registers,
+    MemoryMappingAndPermissions,
+    UninitializedBytes,
+    PointerArguments,
+    StackAndReturnAddress,
+    AbiPreservedRegisters,
+    CallStubs,
+    NondeterministicEffects,
+}
+
+impl InitialStateDomain {
+    pub const ALL: [Self; 8] = [
+        Self::Registers,
+        Self::MemoryMappingAndPermissions,
+        Self::UninitializedBytes,
+        Self::PointerArguments,
+        Self::StackAndReturnAddress,
+        Self::AbiPreservedRegisters,
+        Self::CallStubs,
+        Self::NondeterministicEffects,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Registers => "registers",
+            Self::MemoryMappingAndPermissions => "memory_mapping_and_permissions",
+            Self::UninitializedBytes => "uninitialized_bytes",
+            Self::PointerArguments => "pointer_arguments",
+            Self::StackAndReturnAddress => "stack_and_return_address",
+            Self::AbiPreservedRegisters => "abi_preserved_registers",
+            Self::CallStubs => "call_stubs",
+            Self::NondeterministicEffects => "nondeterministic_effects",
+        }
+    }
+}
+
+/// One documented entry in the initial-state policy inventory.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InitialStatePolicyItem {
+    pub domain: InitialStateDomain,
+    pub kind: ConstraintKind,
+    pub summary: &'static str,
+}
+
+/// Explicit inventory of machine constraints vs. synthetic assumptions active
+/// for a concrete verification pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialStatePolicy {
+    pub lazy_memory_enabled: bool,
+    pub arbitrary_gp_registers: bool,
+    pub stubbed_calls_enabled: bool,
+    pub strict_mapped_permissions: bool,
+    pub items: Vec<InitialStatePolicyItem>,
+}
+
+impl InitialStatePolicy {
+    /// Policy active during broad deterministic `InitialState` concrete runs.
+    #[must_use]
+    pub fn synthetic_default() -> Self {
+        Self {
+            lazy_memory_enabled: true,
+            arbitrary_gp_registers: true,
+            stubbed_calls_enabled: true,
+            strict_mapped_permissions: false,
+            items: vec![
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::Registers,
+                    kind: ConstraintKind::SyntheticAssumption,
+                    summary: "All non-PC/SP/LR general-purpose registers are seeded from \
+                              deterministic SplitMix64 streams (`InitialState::register_word`); \
+                              argument slots follow ABI width extension rules.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::MemoryMappingAndPermissions,
+                    kind: ConstraintKind::SyntheticAssumption,
+                    summary: "Loaded image pages follow ELF/PE baseline permissions, while \
+                              unmapped pages are lazily materialized RWX via `lazy_memory` except \
+                              unmappable boundary addresses (such as the top page).",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::UninitializedBytes,
+                    kind: ConstraintKind::SyntheticAssumption,
+                    summary: "Reads from unmapped addresses return deterministic pseudo-random \
+                              memory words rather than faulting; private stack reads before write \
+                              trigger `UndefinedRead` / `undefined_frame_read` gating.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::PointerArguments,
+                    kind: ConstraintKind::SyntheticAssumption,
+                    summary: "Pointer-typed and unknown integer slots may contain arbitrary edge or \
+                              random 64-bit words, including null and unmapped pointers.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::StackAndReturnAddress,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Entry SP reserves ABI shadow/home space and stack-argument slots below \
+                              baseline SP while keeping ABI alignment and pushing/setting sentinel \
+                              return address `0x0`.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::AbiPreservedRegisters,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "ABI callee-saved registers are snapshot before entry and verified \
+                              unchanged together with SP restoration on normal return.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::CallStubs,
+                    kind: ConstraintKind::SyntheticAssumption,
+                    summary: "Direct and tail calls inside decoded flow are replaced by synthetic \
+                              deterministic stubs (`CallStub`) supplying return values, caller-saved \
+                              clobbers, and bounded memory writes outside private frame/TLS/RO image.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::NondeterministicEffects,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Concurrency, syscalls, host hardware state, and unmodeled I/O are not \
+                              modeled as deterministic oracle effects; runs remain trace samples only.",
+                },
+            ],
+        }
+    }
+
+    /// Policy active when verifying an explicit mapped initial state without lazy
+    /// unmapped memory or synthetic call stubs.
+    #[must_use]
+    pub fn native_admissible() -> Self {
+        Self {
+            lazy_memory_enabled: false,
+            arbitrary_gp_registers: false,
+            stubbed_calls_enabled: false,
+            strict_mapped_permissions: true,
+            items: vec![
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::Registers,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Baseline emulator register setup plus explicit ABI integer argument \
+                              words in caller registers/stack slots.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::MemoryMappingAndPermissions,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Strict `PageMap` enforcement (`lazy_memory = None`, `enforce_page_faults \
+                              = true`); unmapped or permission-violating accesses fault.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::UninitializedBytes,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Only baseline mapped image, stack, TLS, and explicitly installed scratch \
+                              buffers are readable; private frame reads before write are caught as \
+                              undefined reads.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::PointerArguments,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Caller supplies explicit valid pointer addresses into baseline-mapped \
+                              sections or installed scratch buffers (or deliberately invalid pointers \
+                              to test fault agreement).",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::StackAndReturnAddress,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Entry SP reserves ABI shadow/home space and stack-argument slots below \
+                              baseline SP while keeping ABI alignment and setting sentinel return \
+                              address `0x0`.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::AbiPreservedRegisters,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "ABI callee-saved registers and SP balance are verified at function return.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::CallStubs,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "No synthetic call stubs are permitted for `NativeAdmissible` runs; any \
+                              stubbed call demotes admissibility out of native admissible.",
+                },
+                InitialStatePolicyItem {
+                    domain: InitialStateDomain::NondeterministicEffects,
+                    kind: ConstraintKind::RealMachineConstraint,
+                    summary: "Runs observe only single-thread deterministic execution over mapped state \
+                              and never claim universal equivalence across unmodeled effects.",
+                },
+            ],
+        }
+    }
+}
+
+/// Classification of whether a concrete run's observed state could occur in an
+/// independent native execution of the loaded binary image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StateAdmissibility {
+    /// Every read, write, register contract, frame boundary, and termination stayed
+    /// strictly inside mapped image/stack/explicit buffers with no stubbed calls or
+    /// synthetic lazy-memory reliance.
+    NativeAdmissible,
+    /// The run agreed or diverged only under synthetic model assumptions (e.g.
+    /// `lazy_memory` backing unmapped pointers or `CallStub` interception).
+    SyntheticModel,
+    /// Admissibility or comparability could not be justified (undefined frame read,
+    /// unjustified escaped/overlapping frame exclusion, skipped error, or non-comparable
+    /// exit).
+    Unknown,
+}
+
+impl StateAdmissibility {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeAdmissible => "native_admissible",
+            Self::SyntheticModel => "synthetic_model",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Exact provenance and admissibility classification for one concrete run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InitialStateIdentity {
+    pub seed: Option<u64>,
+    pub run: Option<u32>,
+    pub pointer_bits: u32,
+    pub raw_slots: Vec<u64>,
+    pub admissibility: StateAdmissibility,
+    pub admissibility_reasons: Vec<String>,
 }
 
 #[cfg(test)]
@@ -346,5 +598,55 @@ mod tests {
                 assert_eq!(narrow >> 32, 0, "a 32-bit slot holds 32 bits");
             }
         }
+    }
+
+    #[test]
+    fn policy_inventories_cover_all_domains_and_distinguish_synthetic_assumptions() {
+        let synthetic = InitialStatePolicy::synthetic_default();
+        assert!(synthetic.lazy_memory_enabled);
+        assert!(synthetic.arbitrary_gp_registers);
+        assert!(synthetic.stubbed_calls_enabled);
+        assert!(!synthetic.strict_mapped_permissions);
+        assert_eq!(synthetic.items.len(), InitialStateDomain::ALL.len());
+        for domain in InitialStateDomain::ALL {
+            assert!(
+                synthetic.items.iter().any(|item| item.domain == domain),
+                "synthetic policy missing domain {domain:?}"
+            );
+        }
+        assert!(
+            synthetic
+                .items
+                .iter()
+                .any(|item| item.kind == ConstraintKind::SyntheticAssumption)
+        );
+        assert!(
+            synthetic
+                .items
+                .iter()
+                .any(|item| item.kind == ConstraintKind::RealMachineConstraint)
+        );
+
+        let native = InitialStatePolicy::native_admissible();
+        assert!(!native.lazy_memory_enabled);
+        assert!(!native.arbitrary_gp_registers);
+        assert!(!native.stubbed_calls_enabled);
+        assert!(native.strict_mapped_permissions);
+        assert_eq!(native.items.len(), InitialStateDomain::ALL.len());
+        assert!(
+            native
+                .items
+                .iter()
+                .all(|item| item.kind == ConstraintKind::RealMachineConstraint)
+        );
+        assert_eq!(
+            StateAdmissibility::NativeAdmissible.as_str(),
+            "native_admissible"
+        );
+        assert_eq!(
+            StateAdmissibility::SyntheticModel.as_str(),
+            "synthetic_model"
+        );
+        assert_eq!(StateAdmissibility::Unknown.as_str(), "unknown");
     }
 }

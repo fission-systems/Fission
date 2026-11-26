@@ -38,19 +38,20 @@ pub fn run(args: DbArgs) -> Result<()> {
     } else {
         Some(ProjectLock::acquire(&path)?)
     };
-    let mut project = match Project::read(&path).map_err(|e| anyhow::anyhow!("{e}"))? {
-        Some(existing) => {
-            if !existing.matches(&binary) {
-                bail!(
-                    "{} was written for a different binary; move it aside or point at the \
-                     file it describes",
-                    path.display()
-                );
+    let (mut project, persisted_revision) =
+        match Project::read_with_revision(&path).map_err(|e| anyhow::anyhow!("{e}"))? {
+            (Some(existing), revision) => {
+                if !existing.matches(&binary) {
+                    bail!(
+                        "{} was written for a different binary; move it aside or point at the \
+                         file it describes",
+                        path.display()
+                    );
+                }
+                (existing, revision)
             }
-            existing
-        }
-        None => Project::for_binary(&binary),
-    };
+            (None, revision) => (Project::for_binary(&binary), revision),
+        };
 
     let before = project.clone();
     let history_move = matches!(&args.command, DbCommand::Undo | DbCommand::Redo);
@@ -269,7 +270,7 @@ pub fn run(args: DbArgs) -> Result<()> {
     };
     lock.as_ref()
         .expect("mutating command owns its project lock")
-        .write(&project)
+        .write_if_revision(&project, &persisted_revision)
         .with_context(|| format!("failed to save {}", path.display()))?;
     // A success payload describes committed bytes, never a pending edit.
     for (mut value, text) in reports {

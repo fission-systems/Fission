@@ -72,9 +72,9 @@ class RenderTests(unittest.TestCase):
         self.assertIn(draft_notes.TODO_MARKER, section(empty, "Known limitations"))
 
     def test_the_quality_block_is_left_for_the_maintainer(self):
-        quality = section(self.notes, "Quality (full DecBench sweep)")
+        quality = section(self.notes, "Quality (full FreshBench sweep)")
         self.assertIn(draft_notes.TODO_MARKER, quality)
-        self.assertIn("ADR 0018", quality)
+        self.assertIn("ADR 0019", quality)
 
 
 class EvidenceTests(unittest.TestCase):
@@ -206,8 +206,8 @@ class RerunTests(unittest.TestCase):
             {"author": "m", "body": "", "labels": [], "number": 111, "title": "fix: one more"}
         )
         again = draft_notes.render(newer, "v1.2.0", filled)
-        self.assertIn("| GED exact | 31,982 | 32,560 |", section(again, "Quality (full DecBench sweep)"))
-        self.assertNotIn(draft_notes.TODO_MARKER, section(again, "Quality (full DecBench sweep)"))
+        self.assertIn("| GED exact | 31,982 | 32,560 |", section(again, "Quality (full FreshBench sweep)"))
+        self.assertNotIn(draft_notes.TODO_MARKER, section(again, "Quality (full FreshBench sweep)"))
         self.assertIn("- fix: one more (#111)", section(again, "Correctness Fixes"))
 
     def test_candidate_record_names_the_pinned_sha(self):

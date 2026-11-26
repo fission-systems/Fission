@@ -4,6 +4,7 @@ use super::{
     macho, pe,
 };
 use crate::prelude::*;
+use fission_core::architecture::ArchitectureDescriptor;
 use fission_core::constants::binary_format::{
     MACHO_FAT_CIGAM, MACHO_FAT_MAGIC, MACHO_MAGIC_32_BE, MACHO_MAGIC_32_LE, MACHO_MAGIC_64_BE,
     MACHO_MAGIC_64_LE,
@@ -65,6 +66,18 @@ pub enum LoaderRoute {
     KnownUnsupported(KnownUnsupportedLoaderFamily),
 }
 
+/// A language the caller supplies for a format whose bytes name no processor
+/// (Intel HEX, Motorola S-record). Formats that carry their own architecture
+/// ignore it; relabelling those is the caller's business.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExplicitLanguage {
+    /// Ghidra language ID, `processor:endian:size:variant`.
+    pub language_id: String,
+    pub architecture: ArchitectureDescriptor,
+    /// Provenance recorded in the resulting `BinaryLoadSpec::source`.
+    pub source: String,
+}
+
 /// Ghidra-style loader pipeline entrypoint.
 ///
 /// The pipeline owns detection and routing. Individual format loaders own
@@ -73,6 +86,17 @@ pub struct LoaderPipeline;
 
 impl LoaderPipeline {
     pub fn load(data: DataBuffer, path: String) -> Result<LoadedBinary> {
+        Self::load_with_language(data, path, None)
+    }
+
+    /// Like [`Self::load`], with a language for formats that cannot name
+    /// their own. Whether it was used shows in the result's `load_spec`
+    /// (`source` is `language.source`).
+    pub fn load_with_language(
+        data: DataBuffer,
+        path: String,
+        language: Option<&ExplicitLanguage>,
+    ) -> Result<LoadedBinary> {
         let format = match Self::route(data.as_slice())? {
             LoaderRoute::Executable(format) => format,
             LoaderRoute::Container(container) => {
@@ -93,8 +117,12 @@ impl LoaderPipeline {
             DetectedFormat::Coff => coff::CoffLoader::parse(data, path),
             DetectedFormat::Elf => elf::ElfLoader::parse(data, path),
             DetectedFormat::MachO => macho::MachoLoader::parse(data, path),
-            DetectedFormat::IntelHex => hex::IntelHexLoader::parse(data, path),
-            DetectedFormat::MotorolaHex => hex::MotorolaHexLoader::parse(data, path),
+            DetectedFormat::IntelHex => {
+                hex::IntelHexLoader::parse_with_language(data, path, language)
+            }
+            DetectedFormat::MotorolaHex => {
+                hex::MotorolaHexLoader::parse_with_language(data, path, language)
+            }
             DetectedFormat::Mz => mz_ne::MzLoader::parse(data, path),
             DetectedFormat::Ne => mz_ne::NeLoader::parse(data, path),
             DetectedFormat::UnixAout => aout::UnixAoutLoader::parse(data, path),

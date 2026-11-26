@@ -21,6 +21,212 @@ use std::collections::{HashMap, HashSet};
 use crate::jit::callbacks::{SymBinOpKind, SymUnOpKind};
 use crate::jit::float_ops::{FloatBinOp, FloatUnOp};
 
+/// Maximum host stack buffer size permitted for a single wide-varnode JIT
+/// helper temporary (`Copy`/`Cast`/`Load`/`Store`).
+///
+/// The widest register any shipped SLEIGH spec gives one varnode is 64 bytes
+/// (x86 ZMM), so this leaves a 64x margin for a legitimate block.
+pub const MAX_JIT_STACK_BUFFER_BYTES: u32 = 4096;
+
+/// Maximum operand count permitted for a single JIT `CallOther` argument buffer.
+pub const MAX_JIT_CALLOTHER_ARGS: usize = 64;
+
+/// Alignment of every explicit stack slot the JIT creates, as a shift.
+///
+/// Passed to Cranelift explicitly rather than left to its "at least a machine
+/// word" default, so the budget below accounts the same layout on every host:
+/// a slot starts on an 8-byte boundary and occupies its size rounded up to 8.
+pub const JIT_STACK_SLOT_ALIGN_SHIFT: u8 = 3;
+
+/// Alignment of every explicit stack slot, in bytes.
+pub const JIT_STACK_SLOT_ALIGN: u32 = 1 << JIT_STACK_SLOT_ALIGN_SHIFT;
+
+/// Default ceiling on the explicit stack slots of one translation block,
+/// summed after alignment. Checked before any Cranelift IR is built.
+pub const MAX_JIT_TB_STACK_SLOT_BYTES: u32 = 16 * 1024;
+
+/// Default ceiling on one translation block's whole compiled frame: explicit
+/// slots plus register spills, callee-saved registers, outgoing arguments and
+/// the frame-pointer/return-address pair. Checked after Cranelift lays the
+/// frame out and before the code is defined, so an over-budget block is never
+/// installed and never executed.
+///
+/// Soft chaining nests up to `MAX_CHAIN_DEPTH + 1` block frames on the host
+/// stack, so the worst case is about 33 x 32 KiB = 1.06 MiB, inside Rust's
+/// 2 MiB default for spawned threads. Inline stack probes (see
+/// [`JitCompiler::new`]) turn anything beyond that into a guard-page fault
+/// rather than a write past the stack.
+pub const MAX_JIT_TB_FRAME_BYTES: u32 = 32 * 1024;
+
+/// Size of the frame-pointer/return-address pair Cranelift's
+/// `frame_to_fp_offset` excludes. Two words on every supported 64-bit host.
+const JIT_FRAME_SETUP_AREA_BYTES: u32 = 16;
+
+/// Per-translation-block host stack limits.
+///
+/// Only ever tightened below the defaults ([`JitCompiler::tighten_stack_limits`]);
+/// a safety bound that a caller could raise would not be one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JitStackLimits {
+    /// Sum of aligned explicit stack slots in one block.
+    pub tb_slot_bytes: u32,
+    /// Whole compiled frame of one block.
+    pub tb_frame_bytes: u32,
+}
+
+impl Default for JitStackLimits {
+    fn default() -> Self {
+        Self {
+            tb_slot_bytes: MAX_JIT_TB_STACK_SLOT_BYTES,
+            tb_frame_bytes: MAX_JIT_TB_FRAME_BYTES,
+        }
+    }
+}
+
+/// True only when a register varnode at `(offset, size)` can be read or written
+/// directly inside `MachineState::host_reg_file` using exact-width host IR ops.
+///
+/// Enforces:
+/// 1. Exact power-of-two width in `{1, 2, 4, 8}` so narrow or odd-sized varnodes
+///    cannot issue an out-of-bounds wider host load/store near the tail of the
+///    buffer.
+/// 2. Checked addition (`offset + size <= HOST_REG_FILE_SIZE`) with no `u64` or
+///    `usize` overflow.
+#[must_use]
+pub fn can_direct_host_reg_access(offset: u64, size: u32) -> bool {
+    if !matches!(size, 1 | 2 | 4 | 8) {
+        return false;
+    }
+    usize::try_from(offset)
+        .ok()
+        .and_then(|off| off.checked_add(size as usize))
+        .is_some_and(|end| end <= crate::pcode::state::HOST_REG_FILE_SIZE)
+}
+
+/// Bytes one wide-varnode slot occupies in the frame: its size rounded up to
+/// the slot alignment, after the per-slot cap.
+fn checked_stack_slot_bytes(bytes: u32) -> Result<u32> {
+    anyhow::ensure!(
+        bytes > 0 && bytes <= MAX_JIT_STACK_BUFFER_BYTES,
+        "JIT wide varnode size {bytes} exceeds bounded stack buffer [1..={MAX_JIT_STACK_BUFFER_BYTES}]"
+    );
+    bytes
+        .div_ceil(JIT_STACK_SLOT_ALIGN)
+        .checked_mul(JIT_STACK_SLOT_ALIGN)
+        .ok_or_else(|| anyhow::anyhow!("JIT stack slot size overflow for {bytes} bytes"))
+}
+
+/// Bytes the `CallOther` argument array of `argc` operands occupies.
+fn checked_callother_slot_bytes(argc: usize) -> Result<u32> {
+    anyhow::ensure!(
+        argc <= MAX_JIT_CALLOTHER_ARGS,
+        "JIT CallOther argc {argc} exceeds maximum {MAX_JIT_CALLOTHER_ARGS}"
+    );
+    // argc <= 64, so this is at most 512 and already a multiple of 8.
+    Ok((argc * 8) as u32)
+}
+
+/// The explicit stack slot, if any, emission creates for `op`, in aligned
+/// bytes. Mirrors every `create_sized_stack_slot` site below and may only ever
+/// over-count (an op emission later skips still counts here), never under-count.
+fn op_stack_slot_bytes(op: &PcodeOp) -> Result<u32> {
+    match op.opcode {
+        PcodeOpcode::Copy | PcodeOpcode::Cast => {
+            if let (Some(out), Some(src)) = (op.output.as_ref(), op.inputs.first())
+                && (out.size > 8 || src.size > 8)
+            {
+                return checked_stack_slot_bytes(out.size.max(src.size));
+            }
+        }
+        PcodeOpcode::Load => {
+            if let Some(out) = op.output.as_ref()
+                && op.inputs.len() >= 2
+                && out.size > 8
+            {
+                return checked_stack_slot_bytes(out.size);
+            }
+        }
+        PcodeOpcode::Store => {
+            if let Some(val_vn) = op.inputs.get(2)
+                && val_vn.size > 8
+            {
+                return checked_stack_slot_bytes(val_vn.size);
+            }
+        }
+        PcodeOpcode::CallOther => {
+            return checked_callother_slot_bytes(op.inputs.len().saturating_sub(1));
+        }
+        _ => {}
+    }
+    Ok(0)
+}
+
+/// Check every per-slot bound and the block's aggregate explicit-slot budget
+/// before any Cranelift state is touched. Returns the planned aggregate.
+fn validate_tb_buffer_bounds(ops: &[PcodeOp], limits: JitStackLimits) -> Result<u32> {
+    let mut total: u32 = 0;
+    for op in ops {
+        let bytes = op_stack_slot_bytes(op)?;
+        total = total.checked_add(bytes).ok_or_else(|| {
+            anyhow::anyhow!("JIT translation block aggregate stack slot size overflows u32")
+        })?;
+        anyhow::ensure!(
+            total <= limits.tb_slot_bytes,
+            "JIT translation block needs more than {} bytes of aggregate stack slots \
+             (at least {total} after {}-byte alignment)",
+            limits.tb_slot_bytes,
+            JIT_STACK_SLOT_ALIGN
+        );
+    }
+    Ok(total)
+}
+
+/// Create one explicit stack slot of `bytes` (already aligned by
+/// [`checked_stack_slot_bytes`] / [`checked_callother_slot_bytes`]), charging
+/// it against the block's budget. The plan in [`validate_tb_buffer_bounds`]
+/// makes failure here unreachable; it stays a hard error so a drift between
+/// the plan and the emission sites cannot silently grow the frame.
+fn create_budgeted_stack_slot(
+    builder: &mut FunctionBuilder<'_>,
+    bytes: u32,
+    used: &mut u32,
+    budget: u32,
+) -> Result<cranelift_codegen::ir::StackSlot> {
+    debug_assert_eq!(bytes % JIT_STACK_SLOT_ALIGN, 0);
+    let next = used
+        .checked_add(bytes)
+        .filter(|&next| next <= budget)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "JIT stack slot emission exceeded the planned aggregate budget ({budget} bytes)"
+            )
+        })?;
+    *used = next;
+    Ok(builder.create_sized_stack_slot(StackSlotData::new(
+        StackSlotKind::ExplicitSlot,
+        bytes,
+        JIT_STACK_SLOT_ALIGN_SHIFT,
+    )))
+}
+
+fn emit_host_reg_load(
+    builder: &mut FunctionBuilder<'_>,
+    host_reg_base: cranelift_codegen::ir::Value,
+    offset: u64,
+    size: u32,
+) -> cranelift_codegen::ir::Value {
+    debug_assert!(can_direct_host_reg_access(offset, size));
+    let ptr = builder.ins().iadd_imm(host_reg_base, offset as i64);
+    let flags = MemFlagsData::trusted();
+    match size {
+        1 => builder.ins().uload8(types::I64, flags, ptr, 0),
+        2 => builder.ins().uload16(types::I64, flags, ptr, 0),
+        4 => builder.ins().uload32(flags, ptr, 0),
+        8 => builder.ins().load(types::I64, flags, ptr, 0),
+        _ => unreachable!("can_direct_host_reg_access only admits 1/2/4/8"),
+    }
+}
+
 /// One guest instruction already lifted to P-Code.
 #[derive(Clone, Debug)]
 pub struct GuestInsn {
@@ -64,12 +270,28 @@ pub struct JitCompiler {
     /// Append-only, like the emulator's `wide_ops`: a compiled block holds
     /// indices into it.
     pub(crate) insn_reg_writes: Vec<Vec<(u64, u32)>>,
+    /// Host stack limits every compiled block is held to.
+    stack_limits: JitStackLimits,
+    /// Whole frame size of the most recently installed block, in bytes.
+    last_frame_bytes: u32,
 }
 
 impl JitCompiler {
     pub fn new() -> Result<Self> {
         let mut flag_builder = settings::builder();
         flag_builder.set("opt_level", "speed").unwrap();
+        // Stack probes: a frame larger than the guard page is touched one page
+        // at a time on entry, so it faults on the guard page instead of
+        // stepping over it. Inline, because the outline strategy calls a
+        // `__cranelift_probestack` symbol this JIT does not provide (and
+        // AArch64 implements only inline). Cranelift emits nothing for frames
+        // under 4 KiB, which is every ordinary block.
+        flag_builder
+            .set("enable_probestack", "true")
+            .map_err(|e| anyhow::anyhow!("Cranelift enable_probestack: {e}"))?;
+        flag_builder
+            .set("probestack_strategy", "inline")
+            .map_err(|e| anyhow::anyhow!("Cranelift probestack_strategy: {e}"))?;
 
         let isa_builder = cranelift_native::builder()
             .map_err(|e| anyhow::anyhow!("Host machine is not supported by Cranelift: {}", e))?;
@@ -131,6 +353,10 @@ impl JitCompiler {
             (
                 "jit_observe_insn",
                 crate::jit::callbacks::jit_observe_insn as *const u8,
+            ),
+            (
+                "jit_observe_indirect",
+                crate::jit::callbacks::jit_observe_indirect as *const u8,
             ),
             (
                 "jit_count_pcode",
@@ -213,7 +439,30 @@ impl JitCompiler {
             shadow: crate::observe::ShadowMode::Off,
             vector_userop_ids: HashSet::new(),
             zero_vector_upper_lanes: false,
+            stack_limits: JitStackLimits::default(),
+            last_frame_bytes: 0,
         })
+    }
+
+    /// The host stack limits blocks are compiled under.
+    #[must_use]
+    pub fn stack_limits(&self) -> JitStackLimits {
+        self.stack_limits
+    }
+
+    /// Lower the per-block stack limits. Values above the current limits are
+    /// ignored: the bounds only ever get tighter.
+    pub fn tighten_stack_limits(&mut self, limits: JitStackLimits) {
+        self.stack_limits.tb_slot_bytes = self.stack_limits.tb_slot_bytes.min(limits.tb_slot_bytes);
+        self.stack_limits.tb_frame_bytes =
+            self.stack_limits.tb_frame_bytes.min(limits.tb_frame_bytes);
+    }
+
+    /// Whole host frame of the most recently installed block, in bytes
+    /// (including the frame-pointer/return-address pair).
+    #[must_use]
+    pub fn last_compiled_frame_bytes(&self) -> u32 {
+        self.last_frame_bytes
     }
 
     pub fn set_vector_userop_ids(&mut self, ids: HashSet<u32>) {
@@ -262,6 +511,14 @@ impl JitCompiler {
     ///
     /// `register_space` is the SLA register-space id used for zero-callout
     /// host register-file loads.
+    ///
+    /// A block is refused -- `Err`, with nothing installed and nothing run --
+    /// when one of its wide temporaries exceeds [`MAX_JIT_STACK_BUFFER_BYTES`],
+    /// its explicit stack slots together exceed the aggregate budget, or its
+    /// laid-out frame exceeds the frame budget ([`JitStackLimits`]). The run
+    /// loop then interprets it (`Emulator::run_block_interpreted`). A refusal
+    /// leaves the compiler and `wide_ops` exactly as they were, so the next
+    /// block compiles from clean state.
     pub fn compile_translation_block(
         &mut self,
         insns: &[GuestInsn],
@@ -270,8 +527,38 @@ impl JitCompiler {
         check_memory_faults: bool,
         wide_ops: &mut Vec<PcodeOp>,
     ) -> Result<*const u8> {
+        let wide_ops_len = wide_ops.len();
+        let reg_writes_len = self.insn_reg_writes.len();
+        let result = self.compile_translation_block_inner(
+            insns,
+            register_space,
+            unique_space,
+            check_memory_faults,
+            wide_ops,
+        );
+        if result.is_err() {
+            // A failure part-way through emission leaves `FunctionBuilderContext`
+            // holding the abandoned function's SSA state and `ctx` holding its
+            // IR; the next block would be built on top of both. Side-table
+            // entries pushed for the refused block index code that will never
+            // exist, and a block refused on every visit would grow them forever.
+            self.module.clear_context(&mut self.ctx);
+            self.builder_ctx = FunctionBuilderContext::new();
+            wide_ops.truncate(wide_ops_len);
+            self.insn_reg_writes.truncate(reg_writes_len);
+        }
+        result
+    }
+
+    fn compile_translation_block_inner(
+        &mut self,
+        insns: &[GuestInsn],
+        register_space: u64,
+        unique_space: u64,
+        check_memory_faults: bool,
+        wide_ops: &mut Vec<PcodeOp>,
+    ) -> Result<*const u8> {
         anyhow::ensure!(!insns.is_empty(), "empty translation block");
-        use crate::pcode::state::HOST_REG_FILE_SIZE;
 
         let start_pc = insns[0].pc;
         // Collected locally because `self` is borrowed by the function builder
@@ -295,6 +582,11 @@ impl JitCompiler {
                 flat.push(op);
             }
         }
+        // Validate buffer/argument bounds before mutating `self.ctx` or `self.builder_ctx`
+        // so rejected TBs leave the compiler reusable without poisoning `builder_ctx`.
+        let stack_limits = self.stack_limits;
+        let planned_slot_bytes = validate_tb_buffer_bounds(&flat, stack_limits)?;
+        let mut used_slot_bytes: u32 = 0;
 
         // A space that is neither constant, register nor unique is memory:
         // RAM, or whatever else a language names directly by varnode. Only
@@ -530,6 +822,14 @@ impl JitCompiler {
             .declare_function("jit_observe_insn", Linkage::Import, &sig_observe)
             .unwrap();
 
+        // (emu, site, site_len, target, kind)
+        let mut sig_indirect = self.module.make_signature();
+        sig_indirect.params.extend([AbiParam::new(types::I64); 5]);
+        let observe_indirect_fn = self
+            .module
+            .declare_function("jit_observe_indirect", Linkage::Import, &sig_indirect)
+            .unwrap();
+
         let mut sig_pcode = self.module.make_signature();
         sig_pcode.params.push(AbiParam::new(types::I64));
         sig_pcode.returns.push(AbiParam::new(types::I64));
@@ -686,6 +986,9 @@ impl JitCompiler {
         let observe_insn_ref = self
             .module
             .declare_func_in_func(observe_insn_fn, builder.func);
+        let observe_indirect_ref = self
+            .module
+            .declare_func_in_func(observe_indirect_fn, builder.func);
         let observe = self.observe;
         let shadow = self.shadow;
         let count_pcode_ref = self
@@ -747,6 +1050,17 @@ impl JitCompiler {
         for (i, pc, len) in &insn_starts {
             insn_starts_at[(*i).min(n_ops)].push((*pc, *len));
         }
+        // The instruction each op belongs to: the last one that starts at or
+        // before it, since a p-code-less instruction shares its start index
+        // with the instruction that owns the op there.
+        let mut owner = (start_pc, 0u32);
+        let op_owner: Vec<(u64, u32)> = insn_starts_at[..n_ops]
+            .iter()
+            .map(|starts| {
+                owner = starts.last().copied().unwrap_or(owner);
+                owner
+            })
+            .collect();
 
         macro_rules! ensure_var {
             ($space:expr, $offset:expr, $size:expr) => {{
@@ -815,23 +1129,15 @@ impl JitCompiler {
                         let c = builder.ins().iconst(types::I64, $offset as i64);
                         builder.def_var(v, c);
                     } else if $space == register_space
-                        && ($offset as usize) + ($size as usize).min(8) <= HOST_REG_FILE_SIZE
+                        && can_direct_host_reg_access($offset, ($size as u32).min(8))
                     {
-                        // Zero-callout register load from host_reg_file.
-                        let ptr = builder.ins().iadd_imm(host_reg_base, $offset as i64);
-                        let flags = MemFlagsData::trusted();
-                        let val = builder.ins().load(types::I64, flags, ptr, 0);
-                        // Mask to size if < 8
-                        let val = if ($size as u32) < 8 && ($size as u32) > 0 {
-                            let mask = if $size >= 8 {
-                                u64::MAX
-                            } else {
-                                (1u64 << ($size * 8)) - 1
-                            };
-                            builder.ins().band_imm(val, mask as i64)
-                        } else {
-                            val
-                        };
+                        // Zero-callout width-exact register load from host_reg_file.
+                        let val = emit_host_reg_load(
+                            &mut builder,
+                            host_reg_base,
+                            $offset,
+                            ($size as u32).min(8),
+                        );
                         builder.def_var(v, val);
                     } else {
                         let sp = builder.ins().iconst(types::I64, $space as i64);
@@ -1052,10 +1358,10 @@ impl JitCompiler {
                     };
                     builder.def_var(v, val);
                     // Zero-callout register store into host_reg_file (size-correct).
-                    let rsz = vn.size.min(8) as u32;
-                    if vn.space_id == register_space
-                        && (vn.offset as usize) + (rsz as usize) <= HOST_REG_FILE_SIZE
-                    {
+                    let rsz = vn.size.min(8);
+                    let direct_reg_mirror =
+                        vn.space_id == register_space && can_direct_host_reg_access(vn.offset, rsz);
+                    if direct_reg_mirror {
                         let ptr = builder.ins().iadd_imm(host_reg_base, vn.offset as i64);
                         let flags = MemFlagsData::trusted();
                         match rsz {
@@ -1068,9 +1374,10 @@ impl JitCompiler {
                             4 => {
                                 builder.ins().istore32(flags, val, ptr, 0);
                             }
-                            _ => {
+                            8 => {
                                 builder.ins().store(flags, val, ptr, 0);
                             }
+                            _ => unreachable!("can_direct_host_reg_access only admits 1/2/4/8"),
                         }
                     }
                     // Unique space is per-instruction scratch: SLEIGH scopes a
@@ -1102,13 +1409,7 @@ impl JitCompiler {
                     // which took the register loop from 41M instructions a
                     // second to 10M.
                     if vn.space_id == register_space {
-                        if (vn.offset as usize) + (rsz as usize) > HOST_REG_FILE_SIZE {
-                            // Outside the mirror, so the store above did not
-                            // happen and the value is only in `dirty`. Write it
-                            // through, or re-seeding reads a stale one. No
-                            // architecture here lands in this branch now that
-                            // the mirror covers aarch64; it is what keeps the
-                            // invariant true if one does.
+                        if !direct_reg_mirror {
                             let sp = builder.ins().iconst(types::I64, vn.space_id as i64);
                             let off = builder.ins().iconst(types::I64, vn.offset as i64);
                             let sz = builder.ins().iconst(types::I64, rsz as i64);
@@ -1116,15 +1417,17 @@ impl JitCompiler {
                                 .ins()
                                 .call(write_space_ref, &[emu_ptr, sp, off, sz, val]);
                         }
-                        let (wlo, whi) = (vn.offset, vn.offset + rsz as u64);
-                        let written = (vn.space_id, vn.offset, rsz as u64);
-                        var_map.retain(|key, _| {
-                            let (space, offset, size) = *key;
-                            *key == written
-                                || space != vn.space_id
-                                || offset >= whi
-                                || offset + size <= wlo
-                        });
+                        if let Some(whi) = vn.offset.checked_add(u64::from(rsz)) {
+                            let wlo = vn.offset;
+                            let written = (vn.space_id, vn.offset, u64::from(rsz));
+                            var_map.retain(|key, _| {
+                                let (space, offset, size) = *key;
+                                *key == written
+                                    || space != vn.space_id
+                                    || offset >= whi
+                                    || offset.saturating_add(size) <= wlo
+                            });
+                        }
                     }
 
                     // A temporary has no backing store to re-seed from, so its
@@ -1476,17 +1779,15 @@ impl JitCompiler {
                             let src = &op.inputs[0];
                             if out.size > 8 || src.size > 8 {
                                 // Bulk copy via stack buffer.
-                                let sz = out.size.max(src.size) as usize;
-                                // Whole words, zeroed first: a stack slot holds
-                                // whatever the last user left, and the
-                                // destination write below copies all `out.size`
-                                // bytes of it.
-                                let words = sz.div_ceil(8);
-                                let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                                    StackSlotKind::ExplicitSlot,
-                                    (words * 8) as u32,
-                                    0,
-                                ));
+                                let sz = out.size.max(src.size);
+                                let slot_bytes = checked_stack_slot_bytes(sz)?;
+                                let words = (slot_bytes / 8) as usize;
+                                let slot = create_budgeted_stack_slot(
+                                    &mut builder,
+                                    slot_bytes,
+                                    &mut used_slot_bytes,
+                                    planned_slot_bytes,
+                                )?;
                                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                                 let zero = builder.ins().iconst(types::I64, 0);
                                 for word in 0..words {
@@ -1559,11 +1860,13 @@ impl JitCompiler {
                             let addr = load_vn!(&op.inputs[1]);
                             if out.size > 8 {
                                 flush_unique_views!(out);
-                                let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                                    StackSlotKind::ExplicitSlot,
-                                    out.size,
-                                    0,
-                                ));
+                                let slot_bytes = checked_stack_slot_bytes(out.size)?;
+                                let slot = create_budgeted_stack_slot(
+                                    &mut builder,
+                                    slot_bytes,
+                                    &mut used_slot_bytes,
+                                    planned_slot_bytes,
+                                )?;
                                 let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                                 let sp = builder.ins().iconst(types::I64, space_id as i64);
                                 let sz = builder.ins().iconst(types::I64, out.size as i64);
@@ -1630,15 +1933,14 @@ impl JitCompiler {
                         let addr = load_vn!(&op.inputs[1]);
                         let val_vn = &op.inputs[2];
                         if val_vn.size > 8 {
-                            // Whole words, so a constant can be zero-extended
-                            // into it: the buffer is host stack, and copying
-                            // it unfilled put host memory into the guest.
-                            let words = (val_vn.size as usize).div_ceil(8);
-                            let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                                StackSlotKind::ExplicitSlot,
-                                (words * 8) as u32,
-                                0,
-                            ));
+                            let slot_bytes = checked_stack_slot_bytes(val_vn.size)?;
+                            let words = (slot_bytes / 8) as usize;
+                            let slot = create_budgeted_stack_slot(
+                                &mut builder,
+                                slot_bytes,
+                                &mut used_slot_bytes,
+                                planned_slot_bytes,
+                            )?;
                             let ptr = builder.ins().stack_addr(types::I64, slot, 0);
                             if val_vn.is_constant {
                                 let zero = builder.ins().iconst(types::I64, 0);
@@ -2508,6 +2810,18 @@ impl JitCompiler {
                 }
                 PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Return => {
                     let target = load_vn!(&op.inputs[0]);
+                    if observe.indirect && op.opcode != PcodeOpcode::Return {
+                        let (site, site_len) = op_owner[idx];
+                        let site = builder.ins().iconst(types::I64, site as i64);
+                        let site_len = builder.ins().iconst(types::I64, i64::from(site_len));
+                        let kind = builder
+                            .ins()
+                            .iconst(types::I64, i64::from(op.opcode == PcodeOpcode::BranchInd));
+                        builder.ins().call(
+                            observe_indirect_ref,
+                            &[emu_ptr, site, site_len, target, kind],
+                        );
+                    }
                     builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                     branched = true;
                 }
@@ -2531,9 +2845,7 @@ impl JitCompiler {
                             if *sp == 0 {
                                 continue;
                             }
-                            if *sp == register_space
-                                && (*off as usize) + (*sz as usize) <= HOST_REG_FILE_SIZE
-                            {
+                            if *sp == register_space && can_direct_host_reg_access(*off, *sz) {
                                 // The host register file is already current --
                                 // `store_vn!` writes it on every register
                                 // store -- and nothing caches in front of it,
@@ -2560,14 +2872,16 @@ impl JitCompiler {
                         0
                     };
                     let argc = op.inputs.len().saturating_sub(1);
+                    let args_bytes = checked_callother_slot_bytes(argc)?;
                     let args_ptr = if argc == 0 {
                         builder.ins().iconst(types::I64, 0)
                     } else {
-                        let slot = builder.create_sized_stack_slot(StackSlotData::new(
-                            StackSlotKind::ExplicitSlot,
-                            (argc * 8) as u32,
-                            0,
-                        ));
+                        let slot = create_budgeted_stack_slot(
+                            &mut builder,
+                            args_bytes,
+                            &mut used_slot_bytes,
+                            planned_slot_bytes,
+                        )?;
                         for (i, vn) in op.inputs.iter().skip(1).enumerate() {
                             let v = load_vn!(vn);
                             builder.ins().stack_store(v, slot, (i * 8) as i32);
@@ -2610,17 +2924,9 @@ impl JitCompiler {
                         .map(|(key, var)| (*key, *var))
                         .collect();
                     for ((sp, off, size), v) in cached_registers {
-                        if (off as usize) + (size as usize) <= HOST_REG_FILE_SIZE {
-                            let ptr = builder.ins().iadd_imm(host_reg_base, off as i64);
-                            let flags = MemFlagsData::trusted();
-                            let val = builder.ins().load(types::I64, flags, ptr, 0);
-                            let val = if size < 8 && size > 0 {
-                                builder
-                                    .ins()
-                                    .band_imm(val, ((1u64 << (size * 8)) - 1) as i64)
-                            } else {
-                                val
-                            };
+                        let rsz = size.min(8) as u32;
+                        if can_direct_host_reg_access(off, rsz) {
+                            let val = emit_host_reg_load(&mut builder, host_reg_base, off, rsz);
                             builder.def_var(v, val);
                             continue;
                         }
@@ -2729,7 +3035,7 @@ impl JitCompiler {
                 if sp == 0 {
                     continue;
                 }
-                if sp == register_space && (off as usize) + (sz as usize) <= HOST_REG_FILE_SIZE {
+                if sp == register_space && can_direct_host_reg_access(off, sz) {
                     // See above: registers need nothing at block exit.
                     continue;
                 }
@@ -2761,16 +3067,50 @@ impl JitCompiler {
                 self.ctx.func
             );
         }
+        // Lay the frame out before anything is installed: code that is never
+        // defined can never be finalized, published or run. Compiling here and
+        // defining the bytes (rather than `define_function`, which compiles
+        // again internally) keeps it one compile per block.
+        let compiled = self
+            .ctx
+            .compile(
+                self.module.isa(),
+                &mut cranelift_codegen::control::ControlPlane::default(),
+            )
+            .map_err(|e| anyhow::anyhow!("compile: {:?}", e.inner))?;
+        let frame_bytes = compiled
+            .buffer
+            .frame_layout()
+            .map(|layout| {
+                layout
+                    .frame_to_fp_offset
+                    .saturating_add(JIT_FRAME_SETUP_AREA_BYTES)
+            })
+            .ok_or_else(|| anyhow::anyhow!("JIT frame layout unavailable; refusing block"))?;
+        anyhow::ensure!(
+            frame_bytes <= stack_limits.tb_frame_bytes,
+            "JIT translation block frame is {frame_bytes} bytes, over the {} byte frame budget",
+            stack_limits.tb_frame_bytes
+        );
+        let alignment = u64::from(compiled.buffer.alignment);
+        let code = compiled.code_buffer().to_vec();
+        let mach_relocs = compiled.buffer.relocs().to_vec();
+
         self.compile_seq = self.compile_seq.wrapping_add(1);
         let name = format!("jit_tb_{:X}_{}", start_pc, self.compile_seq);
         let id = self
             .module
             .declare_function(&name, Linkage::Export, &self.ctx.func.signature)
             .map_err(|e| anyhow::anyhow!("declare: {e}"))?;
+        let relocs: Vec<cranelift_module::ModuleReloc> = mach_relocs
+            .iter()
+            .map(|reloc| cranelift_module::ModuleReloc::from_mach_reloc(reloc, &self.ctx.func, id))
+            .collect();
         self.module
-            .define_function(id, &mut self.ctx)
+            .define_function_bytes(id, alignment, &code, &relocs)
             .map_err(|e| anyhow::anyhow!("define: {e}"))?;
         self.module.clear_context(&mut self.ctx);
+        self.last_frame_bytes = frame_bytes;
         self.module
             .finalize_definitions()
             .map_err(|e| anyhow::anyhow!("finalize: {e}"))?;

@@ -46,7 +46,7 @@ fn assert_same(
     threads: usize,
 ) {
     let sequential = frontend.decode_window(bytes, base, usize::MAX);
-    let chunked = frontend.decode_window_chunked(bytes, base, chunk_len, threads);
+    let chunked = frontend.decode_window_chunked(bytes, base, chunk_len, threads, None);
     match (sequential, chunked) {
         (Ok(a), Ok(b)) => assert!(
             a == b,

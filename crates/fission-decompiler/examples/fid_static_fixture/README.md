@@ -1,6 +1,7 @@
 # Static x86-64 fixture for measuring FID
 
-DecBench's binaries are dynamically linked, so FID has nothing to match there.
+The benchmark binaries FID was first measured on are dynamically linked, so FID
+has nothing to match there.
 This builds a statically linked x86-64 binary against the **exact** glibc the
 `libc-x86.LE.64` pack holds (`glibc-static 2.17-292.el7`, CentOS 7.7.1908), so
 the libc objects in it are byte-identical to the ones the pack was hashed from.

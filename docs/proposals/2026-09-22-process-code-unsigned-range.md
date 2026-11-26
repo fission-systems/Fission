@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/math_gcc_O2.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/math_gcc_O2.exe`
 - Function: `process_code`
 - Address: `0x140001730`
 - Issue: [#101](https://github.com/fission-systems/Fission/issues/101)

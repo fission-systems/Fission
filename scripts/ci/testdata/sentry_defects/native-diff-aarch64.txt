@@ -1,0 +1,26 @@
+   cases 10152 | compared 7434 | both faulted 305 | undecodable 1909 | skipped 405
+   divergence [NEW] FCVTZU: 25 case(s), fields {"x0"}
+     REPRO isa=aarch64 mnemonic=FCVTZU bytes=2000799e text="fcvtzu x0, d1" seed=0x5eedf15510a00001 case="c:fcvtzu x0, d1#0" | x0=0x40 x1=0x7000006ae0 x2=0xffffffff80000000 x3=0x1f x4=0x700000528b x5=0x7064ee698ddbaeca x6=0x76cf53979b282a9 x7=0x40 x8=0x70000060a2 x9=0xffffffffffffff95 x10=0xae580b9a4c90c540 x11=0xdb x12=0x7fffffffffffffff x13=0xffffffffffffffff x14=0x100000000 x15=0x9ce21279 x16=0x4f x17=0x700000590e x18=0x0 x19=0x700000565b x20=0xf0dda451abe5a78 x21=0x70000055ef x22=0x70000056e8 x23=0x0 x24=0xffffffff80000001 x25=0x1bc14bed84f20cca x26=0xe297b148ee5fb31d x27=0x70000065df x28=0x3da329bcf5ff0f98 x29=0xcdf5725a x30=0x20 sp=0x70000051a0 NG=1 ZR=0 CY=0 OV=0 q1=ffffff39ffffff62bff8000000000000 | x0: in=0x40 native=0x0 fission=0xffffffffffffffff | rerun: FISSION_NATIVE_DIFF_SEED=0x5eedf15510a00001 FISSION_NATIVE_DIFF_CASE='c:fcvtzu x0, d1#0' cargo nextest run -p fission-emulator --test native_differential --no-capture
+--
+   divergence [NEW] FMAX: 7 case(s), fields {"q0", "q0~nan"}
+
+thread 'native_differential' (55021428) panicked at crates/fission-emulator/tests/native_differential/main.rs:775:5:
+native differential (aarch64) failed:
+  FCVTZU: new divergence in ["x0"]
+  FMAX: new divergence in ["q0"]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test native_differential ... FAILED
+
+failures:
+
+failures:
+    native_differential
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2 filtered out; finished in 9.34s
+
+        FAIL [   9.383s] (3/3) fission-emulator::native_differential native_differential
+  Cancelling due to test failure: 
+────────────
+     Summary [  16.290s] 3 tests run: 2 passed, 1 failed, 0 skipped
+        FAIL [   9.383s] (3/3) fission-emulator::native_differential native_differential
+error: test run failed

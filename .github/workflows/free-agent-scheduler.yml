@@ -1,0 +1,67 @@
+name: Free-agent scheduler
+
+# Starts at most ONE free-model draft (free-model-draft.yml) every 30 minutes,
+# within the limits of .github/free-agent-policy.json
+# (scripts/ci/free_agent_scheduler.py). A workflow `concurrency:` group cannot
+# queue tasks (GitHub keeps one pending run per group and cancels the rest), so
+# the queue is the set of open `agent:free` issues and this scheduler is its
+# only consumer.
+#
+# A tick, in order:
+# - removes `agent:deferred` from issues that have carried it for 6 hours
+#   (the label event time in the issue timeline);
+# - exits if `max_concurrent` draft runs are queued or in progress, if
+#   `max_daily_tasks` draft runs started today (UTC), or if `max_pending_draft_prs`
+#   `agent:free-draft` PRs are open (reviews are the bottleneck);
+# - otherwise starts the oldest open `agent:free` issue with no open draft PR
+#   and no `agent:blocked` or `agent:deferred` label.
+# It prints the totals it sees (runs, PRs, and today's measured usage from the
+# run metrics artifacts). `max_daily_tasks` is the only hard cap on usage.
+#
+# State lives in GitHub only: issues, labels, workflow runs, PRs, artifacts.
+# `workflow_dispatch` defaults to a dry run that changes nothing.
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print what would be started or un-deferred"
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: free-agent-scheduler
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    name: Start one task
+    if: github.repository == 'fission-systems/Fission'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+      actions: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Tick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            python3 scripts/ci/free_agent_scheduler.py tick --dry-run
+          else
+            python3 scripts/ci/free_agent_scheduler.py tick
+          fi

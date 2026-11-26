@@ -71,7 +71,7 @@ const NOT_LOCAL: [(&str, &str); 14] = [
     ("run_loader_fixtures", "pre-merge loader lane"),
     ("run_decomp_corpus", "pre-merge decompiler corpus lane"),
     ("run_package_check", "Package candidate rehearsal"),
-    ("run_sweep_smoke", "DecBench sweep smoke"),
+    ("run_sweep_smoke", "FreshBench sweep smoke"),
     ("run_sccache_fallback", "sccache outage fallback"),
 ];
 
@@ -495,6 +495,9 @@ pub fn plan(options: &Options, ci: &CiConfig, selection: &Selection, base: &str)
         checks.push(
             Check::new("nextest", "bash", &["scripts/ci/test_crates.sh", "nextest"])
                 .envs(&ci.test_env)
+                // Same nextest profile as CI: the default profile plus the
+                // JUnit report the Sentry defect reporter reads.
+                .env("NEXTEST_PROFILE", "ci")
                 .env("CRATES", &crates)
                 .env("FEATURES", "")
                 .env("RETRIES", &ci.retries)
@@ -1101,6 +1104,12 @@ mod tests {
                 .env
                 .contains(&("FISSION_REQUIRE_TEST_INPUTS".into(), "1".into()))
         );
+        assert!(
+            nextest
+                .env
+                .contains(&("NEXTEST_PROFILE".into(), "ci".into())),
+            "same nextest profile as the CI step"
+        );
         // Same inputs, same list.
         assert_eq!(checks, plan(&options(), &ci_config(), &sel, "abc"));
     }
@@ -1330,7 +1339,7 @@ mod tests {
         let fake = dir.join("cargo");
         std::fs::write(
             &fake,
-            format!("#!/bin/sh\necho \"$*\" > '{}'\n", log.display()),
+            format!("#!/bin/sh\necho \"$*\" >> '{}'\n", log.display()),
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -1357,13 +1366,19 @@ mod tests {
                 .trim()
                 .to_string()
         };
+        // Linting fission-cli also lints its opt-in `sentry` feature.
+        let sentry = format!("clippy -p fission-cli --features sentry {lints}");
         assert_eq!(
             run("fission-pcode, fission-signatures,fission-cli"),
-            format!("clippy -p fission-pcode -p fission-cli {lints}")
+            format!("clippy -p fission-pcode -p fission-cli {lints}\n{sentry}")
         );
         assert_eq!(
             run(""),
-            format!("clippy --workspace --exclude fission-signatures {lints}")
+            format!("clippy --workspace --exclude fission-signatures {lints}\n{sentry}")
+        );
+        assert_eq!(
+            run("fission-pcode"),
+            format!("clippy -p fission-pcode {lints}")
         );
         // Only excluded packages selected: nothing to lint, cargo never runs.
         assert_eq!(run("fission-signatures"), "");

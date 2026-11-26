@@ -143,12 +143,14 @@ jobs:
           set -euo pipefail
           cargo build --locked -p fission-dir --example concrete_replay
           python3 scripts/test/replay_fixture.py --runner target/debug/examples/concrete_replay
+      # The defect-evidence- prefix is what the Sentry defect reporter downloads.
       - name: Preserve a replayable mismatch
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: fixture-replay-witness
+          name: defect-evidence-replay-witness
           path: replay-witness.json
+          if-no-files-found: ignore
 
   # Step 1: Security & Lint
   security-check:
@@ -283,6 +285,7 @@ jobs:
       run_cli_alt_feature_checks: ${{ needs.changes.outputs.run_cli_alt_feature_checks == 'true' }}
       # Doctests and optional-feature suites run beside nextest, not after it.
       parallel_lanes: true
+      evidence_name: linux
 
   # Native debugger tests are feature-gated and exercise OS process control.
   # Keep them out of unrelated Rust changes, but always run them when the
@@ -297,6 +300,7 @@ jobs:
       crates: "fission-dynamic,fission-cli"
       features: "fission-dynamic/interactive_runtime,fission-cli/debugger"
       profile: debug
+      evidence_name: linux-debugger
 
   # Smoke builds its own CLI and PE fixture; no artifacts from test-linux.
   # Keep both lanes required in CI Summary, but do not serialize them.
@@ -320,6 +324,7 @@ jobs:
       os: macos-latest
       crates: "fission-midend-structuring,fission-pcode,fission-loader"
       profile: debug
+      evidence_name: macos
 
   platform-debugger:
     needs: [changes]
@@ -365,17 +370,18 @@ jobs:
       source_sha: ${{ github.sha }}
       version: v0.0.0-dryrun
 
-  # The nightly full-dataset sweep, run on one binary when its definition changes.
+  # The nightly FreshBench sweep, run on one binary when its definition changes.
   sweep-smoke:
-    name: DecBench sweep smoke
+    name: FreshBench sweep smoke
     needs: [changes]
     if: needs.changes.outputs.run_sweep_smoke == 'true'
     permissions:
       contents: read
       actions: read
-    uses: ./.github/workflows/reusable-decbench-sweep.yml
+    uses: ./.github/workflows/reusable-freshbench-sweep.yml
     with:
-      only: binaries/O0/base-passwd/update-passwd
+      build: gcc-O2
+      only: gcc-O2/Paxa__fast_excel
 
   # ADR 0016 rule 1, caches fail open, tested rather than assumed. The cache
   # service failed three required jobs on 2026-11-23/24 ("Server startup
@@ -463,9 +469,28 @@ jobs:
       && (needs.changes.outputs.run_decomp_corpus == 'true'
           || contains(github.event.pull_request.labels.*.name, 'type:performance'))
     uses: ./.github/workflows/reusable-base-head.yml
+    permissions:
+      contents: read
+      actions: read
     with:
       base_sha: ${{ github.event.pull_request.base.sha }}
       output_diff: ${{ needs.changes.outputs.run_decomp_corpus == 'true' }}
+
+  # Report-only, not part of CI Summary: flaky tests (failed, then passed on
+  # nextest's retry), aborted tests, native differential divergences and
+  # replay mismatches of main pushes and merge candidates, as Sentry events.
+  # Never runs for pull requests; see reusable-sentry-defects.yml.
+  sentry-defects:
+    needs: [replay-checks, test-linux, test-linux-debugger, test-macos, native-diff]
+    if: >-
+      always()
+      && github.repository == 'fission-systems/Fission'
+      && contains(fromJSON('["push","merge_group","workflow_dispatch"]'), github.event_name)
+    uses: ./.github/workflows/reusable-sentry-defects.yml
+    with:
+      pattern: defect-evidence-*
+    secrets:
+      SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
 
   # Final summary — lane-aware required jobs
   ci-summary:
@@ -551,7 +576,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_loader_fixtures }}" "loader-fixtures" "${{ needs.loader-fixtures.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
-          require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "DecBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "FreshBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_sccache_fallback }}" "sccache outage fallback" "${{ needs.sccache-fallback.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then

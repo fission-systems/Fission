@@ -169,11 +169,17 @@ fn an_unsupported_assumption_is_named_in_last_unknown() {
         SatResult::Unknown
     );
     match solver.last_unknown() {
+        Some(UnknownReason::InvalidExpression(errs)) => assert!(
+            errs.iter()
+                .map(ToString::to_string)
+                .any(|w| w.contains("ArrayStore")),
+            "the reason names the wide store: {errs:?}"
+        ),
         Some(UnknownReason::Unsupported(why)) => assert!(
             why.iter().any(|w| w.contains("ArrayStore")),
             "the reason names the wide store: {why:?}"
         ),
-        other => panic!("expected an Unsupported reason, got {other:?}"),
+        other => panic!("expected InvalidExpression or Unsupported reason, got {other:?}"),
     }
     assert_eq!(solver.check_sat().unwrap(), SatResult::Sat);
     assert_eq!(solver.last_unknown(), None);

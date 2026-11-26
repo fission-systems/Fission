@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/scale/binaries/O2-noinline/libbsd/libbsd.so.0.11.7`
+- Binary: `~/fission-benchmark/corpus/scale/binaries/O2-noinline/libbsd/libbsd.so.0.11.7`
 - Function: `gotdata`
 - Address: `0xed10`
 - Corpus row or benchmark command: `target/release/fission_cli decomp <binary> --addr 0xed10 --profile nir --json`

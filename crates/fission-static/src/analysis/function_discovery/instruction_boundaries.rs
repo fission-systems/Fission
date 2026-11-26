@@ -171,29 +171,26 @@ pub(super) fn walk_function_boundaries(
                 let Some(bytes) = binary.view_bytes(ip, COVERAGE_WINDOW_BYTES) else {
                     break;
                 };
-                let reused = if mode_context.is_none() {
-                    coverage_decodes
-                        .and_then(|decodes| decodes.get(&(ip, bytes.as_ptr() as usize)))
-                        .filter(|(prefix, _)| *prefix <= bytes.len())
-                        .map(|(_, instruction)| *instruction)
-                } else {
-                    None
-                };
-                let instruction = reused.or_else(|| {
-                    let decoded = frontend
-                        .decode_single_no_pcode(bytes, ip, mode_context)
-                        .ok()?;
-                    if decoded.length == 0 || decoded.length > bytes.len() {
-                        return None;
-                    }
-                    // The single decoder leaves pending commit validation to its caller.
-                    if !decoded.pending_context_commits.is_empty() {
-                        frontend
-                            .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                let swept =
+                    coverage_decodes.and_then(|decodes| decodes.get(ip, bytes, mode_context));
+                let instruction = match swept {
+                    Some(swept) => swept.coverage(),
+                    None => (|| {
+                        let decoded = frontend
+                            .decode_single_no_pcode(bytes, ip, mode_context)
                             .ok()?;
-                    }
-                    CoverageInstruction::from_decoded(&decoded)
-                });
+                        if decoded.length == 0 || decoded.length > bytes.len() {
+                            return None;
+                        }
+                        // The single decoder leaves pending commit validation to its caller.
+                        if !decoded.pending_context_commits.is_empty() {
+                            frontend
+                                .decode_window_no_pcode_in_context(bytes, ip, 1, mode_context)
+                                .ok()?;
+                        }
+                        CoverageInstruction::from_decoded(&decoded)
+                    })(),
+                };
                 let Some(instruction) = instruction else {
                     break;
                 };

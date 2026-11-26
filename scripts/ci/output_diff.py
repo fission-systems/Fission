@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
-"""Decompile a fixed DecBench sample with a PR's base and head CLIs and report
-what changed: output text first, scores second.
+"""Decompile a fixed FreshBench M1 sample with a PR's base and head CLIs and
+report what changed: output text first, scores second.
 
 A decompiler change is judged by what it prints. Scores alone have ranked a
-regression as a win, and a flat total distance has hidden real changes, so the
-report leads with how many functions' text changed and lists them, then gives
-GED and type_match before and after on those functions and over the sample.
+regression as a win, and a flat total distance has hidden real changes. So the
+report is `freshbench sweep diff`:
+- how many functions' text changed;
+- the score gained and lost on those functions only;
+- the largest moves.
 
 Report-only: it never fails on a score. It fails only if it cannot run.
+
+The sample is chosen by rule: the corpus's (build, project) units in the
+sha256 order of their targets file, until BUDGET target functions. Each side
+is a `freshbench sweep run` over those units with the scorer pinned in
+freshbench_corpus.py. The base side can come from main's output ledger
+(output_ledger.py), which runs the same sweep on main. With
+`--fetch-base-run`, the ledger run is fetched for the newest first-parent
+commit at or before the base that changed a decompiler input. The base
+decompiles exactly as that commit does. The run is used only if it is clean
+and has the head run's scorer, corpus and function count; otherwise the base
+is decompiled here.
 """
 
 from __future__ import annotations
@@ -15,130 +28,129 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quality"))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import decbench_full_sweep as sweep  # noqa: E402
-import determinism_check  # noqa: E402
+import freshbench_corpus as corpus
 
 BUDGET = 3000
-LISTED = 25
+
+# What decides a commit's decompiler output on the sample. output-ledger.yml
+# records main only when one of these changed (its `paths` filter lists the
+# same).
+DECOMPILER_INPUTS = ("crates", "utils", "Cargo.toml", "Cargo.lock", ".cargo", "fission.toml")
 
 
-def key(row: dict) -> tuple[str, str]:
-    return row["binary"], row["function"]
+def units(entries: list[dict], root: Path, budget: int = BUDGET) -> set[tuple[str, str]]:
+    """(build, project) units in the fixed order, until `budget` functions."""
+    truths = sorted((e for e in entries if e["kind"] == "ground_truth"), key=lambda e: e["sha256"])
+    chosen: set[tuple[str, str]] = set()
+    total = 0
+    for entry in truths:
+        if total >= budget:
+            break
+        targets = json.loads(corpus.fetch(entry, root).read_text())
+        total += sum(len(binary["functions"]) for binary in targets["binaries"].values())
+        chosen.add((corpus.build_of(entry), entry["project"]))
+    return chosen
 
 
-def totals(rows: list[dict]) -> dict:
-    ged = [r["ged"] for r in rows if "ged" in r]
-    types = [r["type_match"] for r in rows if "type_match" in r]
-    return {
-        "rows": len(rows),
-        "ok": sum(r["status"] == "ok" for r in rows),
-        "ged_perfect": ged.count(0),
-        "ged_total": sum(ged),
-        "type_perfect": types.count(1),
-        "type_mean": round(sum(types) / len(types), 4) if types else None,
-    }
-
-
-def compare(base: list[dict], head: list[dict]) -> dict:
-    before = {key(r): r for r in base}
-    after = {key(r): r for r in head}
-    if before.keys() != after.keys():
-        raise SystemExit("base and head scored different rows")
-    changed = sorted(
-        k for k in before
-        if before[k].get("code_sha256") != after[k].get("code_sha256")
-        or before[k]["status"] != after[k]["status"]
+def sweep(freshbench: Path, root: Path, cli: Path, repo: Path, label: str, runs: Path) -> None:
+    subprocess.run(
+        [str(freshbench), "sweep", "run", str(root / "m1"), "--cli", str(cli), "--repo", str(repo),
+         "--resource-root", str(repo / "utils"), "--label", label, "--runs", str(runs)],
+        check=True, env=corpus.telemetry_free_env(),
     )
-    status_flips = [k for k in changed if before[k]["status"] != after[k]["status"]]
-    return {
-        "sample": {"base": totals(base), "head": totals(head)},
-        "changed": len(changed),
-        "status_flips": len(status_flips),
-        "changed_rows": {
-            "base": totals([before[k] for k in changed]),
-            "head": totals([after[k] for k in changed]),
-        },
-        "listed": [
-            {"binary": b, "function": f,
-             "status": [before[(b, f)]["status"], after[(b, f)]["status"]],
-             "ged": [before[(b, f)].get("ged"), after[(b, f)].get("ged")],
-             "type_match": [before[(b, f)].get("type_match"), after[(b, f)].get("type_match")]}
-            for b, f in changed[:LISTED]
-        ],
-    }
 
 
-def markdown(report: dict) -> str:
-    s, c = report["sample"], report["changed_rows"]
-    lines = [
-        "### Decompiler output diff (fixed DecBench sample)",
-        "",
-        f"**{report['changed']}** of {s['base']['rows']} functions print differently "
-        f"({report['status_flips']} changed status).",
-        "",
-        "| | GED perfect | GED total distance | type perfect | type mean | decompiled |",
-        "|---|---|---|---|---|---|",
-    ]
-    for label, part in (("sample, base", s["base"]), ("sample, head", s["head"]),
-                        ("changed, base", c["base"]), ("changed, head", c["head"])):
-        lines.append(f"| {label} | {part['ged_perfect']} | {part['ged_total']:g} | "
-                     f"{part['type_perfect']} | {part['type_mean']} | {part['ok']} |")
-    if report["listed"]:
-        lines += ["", f"First {len(report['listed'])} changed functions:", "",
-                  "| binary | function | status | GED | type_match |", "|---|---|---|---|---|"]
-        for row in report["listed"]:
-            lines.append(f"| `{row['binary']}` | `{row['function']}` | {row['status'][0]} → {row['status'][1]} | "
-                         f"{row['ged'][0]} → {row['ged'][1]} | {row['type_match'][0]} → {row['type_match'][1]} |")
-    lines += ["", "Report only: scores here never fail the check. Open the changed functions before trusting a score."]
-    return "\n".join(lines) + "\n"
+def ledger_commit(repo: Path) -> str:
+    """The newest commit at or before `repo`'s HEAD, along first parents,
+    that changed a decompiler input. HEAD decompiles exactly as it does, and
+    on main it is the push that recorded a ledger entry."""
+    return subprocess.run(["git", "-C", str(repo), "log", "-1", "--first-parent", "--format=%H", "HEAD", "--",
+                           *DECOMPILER_INPUTS], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def fetch_ledger_run(commit: str, target: Path) -> Path | None:
+    """Download main's `output-ledger-run-<commit>` artifact. None when there
+    is none (the entry was never recorded, or expired)."""
+    name = f"output-ledger-run-{commit}"
+    try:
+        listed = json.loads(subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/artifacts?name={name}&per_page=1"],
+            check=True, capture_output=True, text=True).stdout)
+        artifacts = [a for a in listed.get("artifacts", []) if not a.get("expired")]
+        if not artifacts:
+            print(f"base: no output ledger run for {commit[:12]}", flush=True)
+            return None
+        subprocess.run(["gh", "run", "download", str(artifacts[0]["workflow_run"]["id"]), "-n", name,
+                        "-D", str(target)], check=True, capture_output=True, text=True)
+    except (subprocess.CalledProcessError, OSError, json.JSONDecodeError) as err:
+        print(f"base: could not fetch the output ledger run ({err})", flush=True)
+        return None
+    return target
+
+
+def reusable(base_run: Path | None, head_run: Path, base_commit: str) -> bool:
+    """Whether a ledger sweep can stand in for the base side: it measured
+    `base_commit`, clean, with the head run's scorer, corpus and functions."""
+    if base_run is None or not (base_run / "meta.json").exists():
+        return False
+    base, head = (json.loads((r / "meta.json").read_text()) for r in (base_run, head_run))
+    return (base["git"]["commit"] == base_commit and not base["git"].get("dirty")
+            and all(base[k] == head[k] for k in ("scorer", "corpus_id", "functions")))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
+    parser.add_argument("--freshbench", type=Path, required=True, help="freshbench built at FRESHBENCH_COMMIT")
     parser.add_argument("--base-cli", type=Path, required=True)
     parser.add_argument("--head-cli", type=Path, required=True)
+    parser.add_argument("--base-repo", type=Path, required=True, help="the base checkout (commit, utils/)")
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--budget", type=int, default=BUDGET)
-    parser.add_argument("--base-resources", type=Path, help="the base checkout's utils/ (default: this one's)")
+    parser.add_argument("--fetch-base-run", action="store_true",
+                        help="use main's output ledger for the base side when it has the run (needs gh)")
     args = parser.parse_args()
 
-    from decbench_scoring import load
+    entries = corpus.manifest(args.data)
+    chosen = units(entries, args.data, args.budget)
+    corpus.fetch_all(corpus.scoring_files(entries, chosen), args.data)
+    print(f"{len(chosen)} units: {', '.join(f'{b}/{p}' for b, p in sorted(chosen))}", flush=True)
 
-    os.environ["FISSION_BENCHMARK_NO_CACHE"] = "1"
-    os.environ["DECBENCH_NO_CACHE"] = "1"
-    api = load(sweep.REPO)
-    entries = determinism_check.sample(sweep.manifest(args.data), args.budget)
-    head_resources = sweep.RESOURCES
+    runs = Path(tempfile.mkdtemp(prefix="output-diff-runs-"))
     # Separate SLEIGH frontend caches, so head never decodes with frontends
     # the base CLI compiled (the cache is keyed by spec, not by code version).
     caches = Path(tempfile.mkdtemp(prefix="output-diff-sleigh-cache-"))
-    base_rows, head_rows = [], []
-    for entry in entries:
-        for side, cli, rows, resources in (
-            ("base", args.base_cli, base_rows, args.base_resources or head_resources),
-            ("head", args.head_cli, head_rows, head_resources),
-        ):
-            sweep.RESOURCES = resources
-            os.environ["FISSION_SLEIGH_CACHE_DIR"] = str(caches / side)
-            scored, _ = sweep.score(entry, args.data, cli.resolve(), api)
-            rows.extend(scored)
-        print(f"{entry['binary_path']}: scored", flush=True)
-    report = compare(base_rows, head_rows)
+    for label, cli, repo in (("head", args.head_cli, corpus.REPO), ("base", args.base_cli, args.base_repo)):
+        if label == "base" and args.fetch_base_run:
+            commit = ledger_commit(repo)
+            ledger = fetch_ledger_run(commit, Path(tempfile.mkdtemp(prefix="output-diff-ledger-")))
+            if reusable(ledger, runs / "head", commit):
+                shutil.copytree(ledger, runs / "base")
+                print(f"base: reusing the output ledger's sweep of {commit[:12]}", flush=True)
+                continue
+            if ledger is not None:
+                print("base: the output ledger run does not match this sample; decompiling the base", flush=True)
+        os.environ["FISSION_SLEIGH_CACHE_DIR"] = str(caches / label)
+        sweep(args.freshbench, args.data, cli.resolve(), repo.resolve(), label, runs)
+
+    diff = [str(args.freshbench), "sweep", "diff", str(runs / "base"), str(runs / "head")]
+    text = subprocess.run(diff, check=True, capture_output=True, text=True).stdout
+    data = subprocess.run([*diff, "--json"], check=True, capture_output=True, text=True).stdout
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / "output_diff.json").write_text(json.dumps(report, indent=2) + "\n")
-    text = markdown(report)
-    (args.out / "output_diff.md").write_text(text)
-    print(text)
+    (args.out / "output_diff.json").write_text(data)
+    header = (f"### Decompiler output diff (fixed FreshBench M1 sample, {len(chosen)} units)\n\n"
+              "Report only: scores here never fail the check. Open the changed functions before trusting a score.\n\n")
+    (args.out / "output_diff.md").write_text(header + text)
+    print(header + text)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as out:
-            out.write(text)
+            out.write(header + text)
     return 0
 
 

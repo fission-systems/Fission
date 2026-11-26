@@ -10,7 +10,7 @@ Nothing in the production pipeline (`fission-midend-*` -> HIR) depends on
 this crate; the CLI reaches it only through the experimental `quotient`
 command (`crates/fission-cli/src/cli/oneshot/quotient.rs`), which builds a
 boundary from flags and prints the report. It is not a decompiler output surface, and nothing it
-reports is a DecBench or readability claim.
+reports is a benchmark or readability claim.
 
 ## Module map
 
@@ -97,7 +97,7 @@ name. The build command is in each file's header; rebuild and commit the
 - an OLLVM-style obfuscator;
 - a state-machine corpus with negative cases;
 - a native ground truth;
-- a DecBench step-function sample.
+- a step-function sample selected from benchmark binaries (`select_*.py`).
 
 Results and procedure are in `docs/proposals/2026-11-23-wbcq-p3-evaluation.md`
 (P4 steps: section 10 onwards).

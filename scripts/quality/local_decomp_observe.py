@@ -12,7 +12,7 @@ full docker ranking harness:
 
 This is **local observation only**. It is not the official ranking oracle and
 must not be promoted to dashboard / Pages. Full semantic claims still need
-DecBench (see docs/BENCHMARK_DECBENCH.md).
+a FreshBench run (see docs/BENCHMARK_FRESHBENCH.md).
 
 Examples
 --------

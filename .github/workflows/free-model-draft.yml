@@ -1,0 +1,320 @@
+name: Free-model draft
+
+# An issue labelled `agent:free` gets a draft fix from an OpenCode Zen free
+# model, opened as a draft PR labelled `agent:free-draft`
+# (scripts/ci/free_model_draft.py). It is for simple issues only: typos, docs,
+# small single-purpose code changes.
+#
+# Guardrails:
+# - Input: the model sees the public checkout and the issue's title and body,
+#   nothing else. An issue with a long code block (a log, decompiled output)
+#   is refused.
+# - Tools: everything is denied except reading and editing files in the
+#   checkout. It cannot run commands or reach the network, and in a
+#   non-interactive run a permission request is rejected.
+# - Edits: kept only under docs/, in Markdown and in Rust under crates/;
+#   small; text-only; no workflow, script or build file; nothing in a
+#   proc-macro crate (cargo check would run it). An issue with the hidden
+#   `free-task-kind:comment-only` marker (the miner's Rust docs tasks) is
+#   stricter: every added or removed line in a .rs file must be a comment or
+#   blank, so the model cannot change logic. The check runs again in the
+#   job that opens the PR.
+# - Build-error repair loop (scripts/ci/free_model_draft_loop.sh): when the
+#   edits touch Rust under crates/, the workflow, not the model, runs
+#   `cargo fmt` and `cargo check --locked -p <pkg> --all-targets` on the
+#   touched packages. On a compiler error the model gets the diagnostics
+#   (first ~6,000 characters) in a new run and may fix them, at most 2 rounds
+#   per model, each followed by the edit check and cargo again. If it still
+#   fails, the next model takes over. The model still has no shell. The Rust
+#   toolchain and cache are set up only when a draft touches Rust, so a
+#   docs-only draft stays fast. The cache is restored, never saved: a
+#   model's build output must not enter a cache other runs read. The PR body
+#   says whether cargo check passed and after how many repair rounds.
+# - No API key: free models need none. No secret reaches the model's job.
+# - Models: free ones have usage limits, so the run number picks which goes
+#   first and a failing one hands over to the next (up to four), each starting
+#   from a clean checkout.
+# - Budgets (shared by model switches and repairs): at most 5 `opencode run`
+#   calls per task (MAX_INVOCATIONS_PER_TASK, counted in the loop's state dir),
+#   and no opencode or cargo call starts if its timeout would cross
+#   BUDGET_SECS: the timeout is shortened, or the call skipped.
+# - Failure classes (free_model_draft.py classify; one row per attempt in the
+#   step summary): RATE_LIMITED, PROVIDER_UNAVAILABLE and INFRA_FAILURE (cargo
+#   could not reach the registry; retried once, never shown to the model) stop
+#   the whole task with a distinct exit status (75, 76, 77; 78 when the budget
+#   is spent); MODEL_UNAVAILABLE, NO_CHANGES and POLICY_VIOLATION hand over to
+#   the next model; COMPILATION_ERROR (a rustfmt failure too) goes to the repair
+#   loop. After RATE_LIMITED or PROVIDER_UNAVAILABLE the issue gets
+#   `agent:deferred` (the scheduler removes it after 6 hours); any other failed
+#   draft gets `agent:blocked`, so the scheduler does not retry it forever.
+# - Duplicate guard: the `guard` job and the start of `open-pr` do nothing when
+#   an open `agent:free-draft` PR says `Fixes #<issue>` or a branch
+#   `agent-free/issue-<issue>-*` is open; the issue gets one comment saying so.
+# - Usage metrics: opencode runs with `--format json`; metrics.json (numbers,
+#   model ids, class names and status codes only) is uploaded as artifact
+#   `free-agent-metrics-<run_id>` for 90 days and summarised by
+#   free-agent-report.yml.
+# - Starting: free-agent-scheduler.yml dispatches one task per tick within the
+#   limits of .github/free-agent-policy.json. Do not rely on `concurrency:` to
+#   queue tasks: GitHub keeps one pending run per group and cancels the rest.
+#   Labelling an issue `agent:free` by hand still starts a run at once.
+# - Review: the PR stays a draft, so it cannot enter the merge queue, and CI
+#   does not run on it. A reviewer reads it first (an Opus review), then marks
+#   it ready, which starts CI (`ready_for_review`).
+
+on:
+  issues:
+    types: [labeled]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: "Issue number (it must carry the agent:free label)"
+        required: true
+        type: string
+      open_pr:
+        description: "Open the draft PR (off: only show the edits in the run)"
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+# One run per issue at a time. This is not a queue (see the header).
+concurrency:
+  group: free-model-draft-${{ github.event.issue.number || inputs.issue }}
+  cancel-in-progress: false
+
+env:
+  OPENCODE_VERSION: "1.19.5"
+  OPENCODE_DISABLE_AUTOUPDATE: "1"
+
+jobs:
+  guard:
+    name: Check for an open draft
+    if: >-
+      github.repository == 'fission-systems/Fission'
+      && (github.event_name == 'workflow_dispatch' || github.event.label.name == 'agent:free')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    outputs:
+      exists: ${{ steps.guard.outputs.exists }}
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Look for an open draft PR
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/free_agent_scheduler.py guard --issue "$ISSUE" --github-output "$GITHUB_OUTPUT"
+
+  draft:
+    name: Draft with a free model
+    needs: guard
+    if: needs.guard.outputs.exists != 'true'
+    runs-on: ubuntu-24.04
+    # At most 5 opencode calls (12 minutes for a draft, 8 for a repair) plus
+    # cargo; the loop starts no call that would cross 110 minutes (BUDGET_SECS).
+    timeout-minutes: 130
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      model: ${{ steps.resume.outputs.model || steps.model.outputs.model }}
+      cargo: ${{ steps.resume.outputs.cargo || steps.model.outputs.cargo }}
+      repairs: ${{ steps.resume.outputs.repairs || steps.model.outputs.repairs }}
+      stop_class: ${{ steps.resume.outputs.stop_class || steps.model.outputs.stop_class }}
+      retry_after: ${{ steps.resume.outputs.retry_after || steps.model.outputs.retry_after }}
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Read and check the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::issue must be a number"; exit 1; }
+          gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json number,title,body,labels,state \
+            > "$RUNNER_TEMP/issue.json"
+          python3 scripts/ci/free_model_draft.py prepare --issue-json "$RUNNER_TEMP/issue.json" \
+            --out "$RUNNER_TEMP/draft"
+      - name: Install OpenCode
+        run: npm install --global --no-fund --no-audit "opencode-ai@$OPENCODE_VERSION"
+      - name: Draft with free models in turn
+        id: model
+        env:
+          DRAFT: ${{ runner.temp }}/draft
+          ISSUE_JSON: ${{ runner.temp }}/issue.json
+          SEED: ${{ github.run_number }}
+          RUST_READY: "0"
+        run: bash scripts/ci/free_model_draft_loop.sh
+      # Only when the accepted edits touch Rust: the loop stopped to ask for
+      # the toolchain, and the next step resumes it at the same model.
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        if: steps.model.outputs.need_rust == 'true'
+        with:
+          toolchain: stable
+          components: rustfmt
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        if: steps.model.outputs.need_rust == 'true'
+        with:
+          shared-key: fission-output-diff-${{ runner.os }}
+          save-if: "false"
+      - name: Check the Rust, repair build errors, and finish the draft
+        id: resume
+        if: steps.model.outputs.need_rust == 'true'
+        env:
+          DRAFT: ${{ runner.temp }}/draft
+          ISSUE_JSON: ${{ runner.temp }}/issue.json
+          SEED: ${{ github.run_number }}
+          RUST_READY: "1"
+        run: bash scripts/ci/free_model_draft_loop.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: free-model-draft
+          path: ${{ runner.temp }}/draft/edits.patch
+          if-no-files-found: error
+          retention-days: 7
+      # Whatever the outcome: usage numbers only, no prompt, issue or model text.
+      - name: Write the usage metrics
+        if: always()
+        env:
+          DRAFT: ${{ runner.temp }}/draft
+        run: python3 scripts/ci/free_agent_metrics.py finish --draft "$DRAFT" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: free-agent-metrics-${{ github.run_id }}
+          path: ${{ runner.temp }}/draft/metrics/metrics.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  open-pr:
+    name: Open the draft PR
+    needs: draft
+    if: github.event_name == 'issues' || inputs.open_pr
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      MODEL: ${{ needs.draft.outputs.model }}
+      CARGO: ${{ needs.draft.outputs.cargo }}
+      REPAIRS: ${{ needs.draft.outputs.repairs }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      # Another draft may have been opened while this one ran.
+      - name: Look for an open draft PR
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/free_agent_scheduler.py guard --issue "$ISSUE" --github-output "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.guard.outputs.exists != 'true'
+        with:
+          name: free-model-draft
+          path: ${{ runner.temp }}/draft
+      - name: Apply, check again and push
+        if: steps.guard.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::issue must be a number"; exit 1; }
+          git apply --index "$RUNNER_TEMP/draft/edits.patch"
+          gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json body > "$RUNNER_TEMP/issue-body.json"
+          python3 scripts/ci/free_model_draft.py check --issue-json "$RUNNER_TEMP/issue-body.json"
+          branch="agent-free/issue-$ISSUE-$GITHUB_RUN_ID"
+          git switch -c "$branch"
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Draft fix for #$ISSUE by $MODEL (free model, unreviewed)"
+          gh auth setup-git
+          git push -q origin "$branch"
+          title="$(gh issue view "$ISSUE" --repo "$GITHUB_REPOSITORY" --json title --jq .title)"
+          {
+            echo "Fixes #$ISSUE"
+            echo
+            echo "Drafted by \`$MODEL\`, an OpenCode Zen free model ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID))."
+            echo "The model could only read and edit files. It ran nothing and tested nothing."
+            if [ "$CARGO" = passed ]; then
+              echo "The workflow ran \`cargo fmt\` and \`cargo check --locked --all-targets\` on the touched packages: **passed**, after $REPAIRS repair round(s) (at most 2). That is a compile check only; no test ran."
+            else
+              echo "The workflow did not run \`cargo check\`: the draft changes no Rust under \`crates/\`. Nothing was built or tested."
+            fi
+            echo
+            echo "**Before this leaves draft:** an Opus review of the diff. Marking it ready starts CI."
+          } > "$RUNNER_TEMP/body.md"
+          url="$(gh pr create --draft --base main --head "$branch" --label agent:free-draft \
+            --title "draft: $title" --body-file "$RUNNER_TEMP/body.md")"
+          gh issue comment "$ISSUE" --body "A free model drafted a fix: $url (draft, unreviewed)."
+
+  defer:
+    name: Defer the issue
+    needs: draft
+    if: >-
+      always() && needs.draft.result == 'failure'
+      && contains(fromJSON('["RATE_LIMITED","PROVIDER_UNAVAILABLE"]'), needs.draft.outputs.stop_class)
+      && (github.event_name == 'issues' || inputs.open_pr)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+      STOP_CLASS: ${{ needs.draft.outputs.stop_class }}
+      RETRY_AFTER: ${{ needs.draft.outputs.retry_after }}
+    steps:
+      - name: Label the issue agent:deferred and say why
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::issue must be a number"; exit 1; }
+          [[ "$STOP_CLASS" =~ ^[A-Z_]+$ ]] || { echo "::error::bad class"; exit 1; }
+          [[ "$RETRY_AFTER" =~ ^[0-9]+\ seconds$ ]] || RETRY_AFTER=""
+          now="$(date -u +'%Y-%m-%d %H:%M UTC')"
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label agent:deferred
+          msg="The free-model draft stopped at $now with \`$STOP_CLASS\` ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID))."
+          if [ -n "$RETRY_AFTER" ]; then msg="$msg The provider said to retry after $RETRY_AFTER."; fi
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+            "$msg The issue is labelled \`agent:deferred\`; the scheduler lifts that after 6 hours."
+
+  report-failure:
+    name: Say the draft failed
+    needs: [draft, open-pr]
+    if: >-
+      always() && (needs.draft.result == 'failure' || needs.open-pr.result == 'failure')
+      && !contains(fromJSON('["RATE_LIMITED","PROVIDER_UNAVAILABLE","INFRA_FAILURE"]'), needs.draft.outputs.stop_class)
+      && (github.event_name == 'issues' || inputs.open_pr)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      ISSUE: ${{ github.event.issue.number || inputs.issue }}
+    steps:
+      - name: Comment on the issue and label it agent:blocked
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$ISSUE" =~ ^[0-9]+$ ]] || { echo "::error::issue must be a number"; exit 1; }
+          # `agent:blocked` keeps the scheduler from retrying this issue forever.
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label agent:blocked
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body \
+            "The free model produced no acceptable draft ([run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)). It may need a stronger model. Labelled \`agent:blocked\`; remove the label to try again."

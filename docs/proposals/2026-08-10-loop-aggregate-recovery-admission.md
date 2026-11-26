@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O0.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/advanced_patterns_gcc_O0.exe`
 - Function: `list_sum`
 - Address: `0x140001530`
 - Corpus row or benchmark command: `target/release/fission_cli decomp <binary> --addr 0x140001530 --profile nir --json --debug-decomp`

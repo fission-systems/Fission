@@ -54,7 +54,7 @@ pub struct Xref {
 mod code;
 pub mod pointer_sweep;
 
-pub(super) use code::visit_code_flow_xrefs;
+pub(super) use code::{visit_code_flow_xrefs, visit_code_flow_xrefs_reusing};
 
 use code::{scan_executable_code, visit_instruction_xrefs};
 

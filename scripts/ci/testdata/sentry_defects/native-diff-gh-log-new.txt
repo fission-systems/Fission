@@ -1,0 +1,31 @@
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3010502Z      SHA1MSG2: 2 (r:1281: unhandled userop ["sha1msg2_sha"])
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3010917Z      SHA1NEXTE: 1 (r:2923: unhandled userop ["sha1nexte_sha"])
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3011242Z      SHA1RNDS4: 2 (r:1852: unhandled userop ["sha1rnds4_sha"])
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3011550Z      SHA256MSG2: 1 (r:1506: unhandled userop ["sha256msg2_sha"])
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3011950Z    only the CPU faulted (unsupported/privileged on this host, or undefined input):
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3012284Z      ANDNPD: 1 (r:1708: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3012525Z      ANDNPS: 1 (r:1174: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3012756Z      CLI: 8 (r:557: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3012997Z      CVTPS2DQ: 1 (r:1912: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3013199Z 
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3013466Z thread 'native_differential' (7300) panicked at crates/fission-emulator/tests/native_differential/main.rs:775:5:
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3013883Z native differential (x86_64) failed:
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3014116Z   PSUBSW: new divergence in ["XMM0", "XMM5"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3014398Z   RCPPS: new divergence in ["XMM0", "XMM5"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3014653Z   RCPSS: new divergence in ["XMM15"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3014892Z   RSQRTPS: new divergence in ["XMM0", "XMM7", "XMM8"]
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3015223Z note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3015464Z      DAS: 1 (r:2178: SIGILL at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3015615Z      ENTER: 2 (r:946: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3015764Z      INVD: 3 (r:38: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3015986Z      MOVAPS: 1 (r:686: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3016235Z      MOVMSKPS: 3 (r:2262: SIGILL at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3016503Z      MOVNTPS: 1 (r:1830: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3016741Z      MULPS: 1 (r:676: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3016975Z      PCMPEQB: 1 (r:782: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3017215Z      PMULLW: 1 (r:1735: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3017428Z      PSHUFD: 1 (r:2171: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3017579Z      PSRLD: 1 (r:975: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3017754Z      PSRLQ: 1 (r:2093: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3017910Z      PUNPCKLDQ: 1 (r:719: SIGSEGV at 0x3040000116)
+native-diff / Native differential (ubuntu-24.04)	UNKNOWN STEP	2026-11-24T11:16:40.3018126Z      PUNPCKLQDQ: 24 (c:punpcklqdq xmm0, xmmword ptr [rsi]#0: SIGSEGV at 0x3040000116)

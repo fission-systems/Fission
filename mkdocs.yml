@@ -64,7 +64,7 @@ nav:
   - CLI Guide: CLI.md
   - Architecture: architecture/ARCHITECTURE.md
   - Benchmarks:
-    - DecBench: BENCHMARK_DECBENCH.md
+    - FreshBench: BENCHMARK_FRESHBENCH.md
     - Quality metrics: QUALITY_METRICS.md
   - Evaluation: EVALUATION.md
   - Contributing: contributing.md

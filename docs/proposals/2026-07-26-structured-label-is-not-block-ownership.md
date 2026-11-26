@@ -4,7 +4,7 @@ Date: 2026-07-26
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/corpus/dev/binaries/c/memory_layouts_gcc_O0.exe`
+- Binary: `~/fission-benchmark/corpus/dev/binaries/c/memory_layouts_gcc_O0.exe`
 - Function: `matrix_multiply`
 - Address: `0x1400015b8`
 - Corpus row or benchmark command:

@@ -2,7 +2,7 @@
 
 ## 1. Baseline Row Anchor
 
-- Binary: `/Users/sjkim1127/fission-benchmark/.cache/decbench-local-eval/x86_O2/math.elf`
+- Binary: `~/fission-benchmark/.cache/decbench-local-eval/x86_O2/math.elf`
 - Function: `binary_search`
 - Address: `0x4008b0`
 - Corpus row or benchmark command: DecBench local x86 O2, caches disabled; focused `fission_cli decomp <binary> --addr 0x4008b0 --profile quality --layer both --prehir --json --debug-decomp`

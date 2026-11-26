@@ -640,17 +640,40 @@ pub fn canonicalize_extension_binding_casts(func: &mut PreHirFunction) -> bool {
         .map(|binding| (binding.name.clone(), binding.ty.clone()))
         .collect();
     rewrite_exprs_in_stmts(&mut func.body, &mut |expr| {
-        canonicalize_extension_cast(expr, &binding_types)
+        canonicalize_extension_cast(expr, &binding_types, false)
+    })
+}
+
+/// [`canonicalize_extension_binding_casts`] for after normalize, limited to
+/// a widening cast applied directly to a variable.
+///
+/// The orchestrator's post-normalize copy propagation and call-site typing
+/// change which binding sits under a cast and what type it has, so a
+/// variable operand can end up with the other signedness (`return
+/// (ulong)local_18` with `local_18: int`). They do not create cast pairs, and
+/// a pair that exists by then (`(int)(uchar)c`) is the explicit C spelling of
+/// a zero extension that later passes chose: its outer destination no longer
+/// says which extension the lowering meant, so it is left alone.
+pub fn canonicalize_extension_binding_casts_over_variables(func: &mut PreHirFunction) -> bool {
+    let binding_types: HashMap<String, NirType> = func
+        .params
+        .iter()
+        .chain(func.locals.iter())
+        .map(|binding| (binding.name.clone(), binding.ty.clone()))
+        .collect();
+    rewrite_exprs_in_stmts(&mut func.body, &mut |expr| {
+        canonicalize_extension_cast(expr, &binding_types, true)
     })
 }
 
 fn canonicalize_extension_cast(
     expr: &mut PreHirExpr,
     binding_types: &HashMap<String, NirType>,
+    variables_only: bool,
 ) -> bool {
     let mut changed = false;
     for_each_child_expr_mut(expr, &mut |child| {
-        changed |= canonicalize_extension_cast(child, binding_types);
+        changed |= canonicalize_extension_cast(child, binding_types, variables_only);
     });
     let PreHirExpr::Cast {
         ty: NirType::Int {
@@ -662,7 +685,9 @@ fn canonicalize_extension_cast(
     else {
         return changed;
     };
-    if matches!(inner.as_ref(), PreHirExpr::Const(..)) {
+    if matches!(inner.as_ref(), PreHirExpr::Const(..))
+        || (variables_only && !matches!(inner.as_ref(), PreHirExpr::Var(_)))
+    {
         return changed;
     }
     let NirType::Int {
@@ -1145,61 +1170,38 @@ fn try_strip_outer_cast(
     binding_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
 ) -> Option<PreHirExpr> {
-    let PreHirExpr::Cast {
-        ty: cast_ty,
-        expr: inner,
-    } = expr
-    else {
-        return None;
-    };
-    let inner_ty = resolved_expr_type(inner, binding_types);
-    if let (Some(inner_bits), Some(cast_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
-    {
-        if inner_bits > cast_bits {
-            return None;
-        }
-    }
-    if let (Some(inner_bits), Some(binding_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(binding_ty))
-    {
-        if inner_bits > binding_bits {
-            return None;
-        }
-    }
-    if cast_ty == binding_ty {
-        let compatible = match (&inner_ty, binding_ty) {
-            (NirType::Unknown, _) => true,
-            (a, b) if a == b => true,
-            (NirType::Bool, NirType::Int { .. }) => true,
-            (
-                NirType::Int {
-                    bits: inner_bits, ..
-                },
-                NirType::Int {
-                    bits: outer_bits, ..
-                },
-            ) => inner_bits <= outer_bits,
-            _ => false,
-        };
-        if compatible {
-            return Some((**inner).clone());
-        }
-    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(binding_ty) {
-        if let (Some(cast_bits), Some(binding_bits)) =
-            (scalar_bit_width(cast_ty), scalar_bit_width(binding_ty))
-        {
-            if cast_bits >= binding_bits {
-                return Some((**inner).clone());
-            }
-        }
-    }
-    None
+    try_strip_outer_cast_for_target(expr, binding_ty, binding_types)
 }
 
 fn try_strip_return_outer_cast(
     expr: &PreHirExpr,
     return_type: &NirType,
+    binding_types: &HashMap<String, NirType>,
+) -> Option<PreHirExpr> {
+    try_strip_outer_cast_for_target(expr, return_type, binding_types)
+}
+
+/// Strip `(cast_ty)inner` from a value stored into (or returned as)
+/// `target_ty`, where the store performs C's implicit conversion instead.
+///
+/// The two agree only when the conversion cannot depend on anything the
+/// tree does not establish:
+///
+/// - `inner` must have a known integer or boolean type. A float operand is a
+///   conversion, and an operand of unknown type (`binding_types` holds scalar
+///   bindings only, so a float, pointer or untyped binding reads as unknown)
+///   has a width and kind nothing here can vouch for.
+/// - No bit the cast extends may survive into `target_ty`. A widening cast is
+///   the only place this IR records sign- versus zero-extension (the builder
+///   lowers `INT_SEXT`/`INT_ZEXT` to a cast to the signed/unsigned wider
+///   type), and the operand's binding type is not final here: the type fixed
+///   point runs again after this pass, and C extends by that type. So the
+///   operand must already be `target_ty`'s width, which leaves the cast either
+///   a same-width reinterpretation or an extension the store truncates away.
+///   A boolean (0 or 1) extends to the same value either way.
+fn try_strip_outer_cast_for_target(
+    expr: &PreHirExpr,
+    target_ty: &NirType,
     binding_types: &HashMap<String, NirType>,
 ) -> Option<PreHirExpr> {
     let PreHirExpr::Cast {
@@ -1209,49 +1211,23 @@ fn try_strip_return_outer_cast(
     else {
         return None;
     };
-    let inner_ty = resolved_expr_type(inner, binding_types);
-    if let (Some(inner_bits), Some(cast_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(cast_ty))
-    {
-        if inner_bits > cast_bits {
-            return None;
-        }
+    if !is_scalar_non_unknown(cast_ty) || !is_scalar_non_unknown(target_ty) {
+        return None;
     }
-    if let (Some(inner_bits), Some(return_bits)) =
-        (scalar_bit_width(&inner_ty), scalar_bit_width(return_type))
-    {
-        if inner_bits > return_bits {
-            return None;
-        }
+    let cast_bits = scalar_bit_width(cast_ty)?;
+    let target_bits = scalar_bit_width(target_ty)?;
+    if cast_bits < target_bits {
+        // `(uint)x` into a `long`: the store extends the cast's result, not `x`.
+        return None;
     }
-    if cast_ty == return_type && is_scalar_non_unknown(cast_ty) {
-        let compatible = match (&inner_ty, return_type) {
-            (NirType::Unknown, _) => true,
-            (a, b) if a == b => true,
-            (NirType::Bool, NirType::Int { .. }) => true,
-            (
-                NirType::Int {
-                    bits: inner_bits, ..
-                },
-                NirType::Int {
-                    bits: outer_bits, ..
-                },
-            ) => inner_bits <= outer_bits,
-            _ => false,
-        };
-        if compatible {
-            return Some((**inner).clone());
+    let preserved = match resolved_expr_type(inner, binding_types) {
+        NirType::Bool => true,
+        NirType::Int { bits, .. } => bits == target_bits,
+        NirType::Unknown | NirType::Float { .. } | NirType::Ptr(_) | NirType::Aggregate { .. } => {
+            false
         }
-    } else if is_scalar_non_unknown(cast_ty) && is_scalar_non_unknown(return_type) {
-        if let (Some(cast_bits), Some(return_bits)) =
-            (scalar_bit_width(cast_ty), scalar_bit_width(return_type))
-        {
-            if cast_bits >= return_bits {
-                return Some((**inner).clone());
-            }
-        }
-    }
-    None
+    };
+    preserved.then(|| (**inner).clone())
 }
 
 /// ActionSetCasts / RulePushPtr / RuleStructOffset0-style cleanups at expression level.
@@ -1525,6 +1501,8 @@ mod comparison_view_tests {
             },
             expr: Box::new(PreHirExpr::Var("carrier".into())),
         };
+        // A widening cast is where the IR records zero- versus sign-extension,
+        // and `carrier`'s type may still change after cast elision: keep it.
         assert!(
             try_strip_outer_cast(
                 &widening,
@@ -1534,7 +1512,7 @@ mod comparison_view_tests {
                 },
                 &types
             )
-            .is_some()
+            .is_none()
         );
     }
 
@@ -1616,5 +1594,36 @@ mod comparison_view_tests {
             try_strip_return_outer_cast(&safe_cast, &u32_ty, &types32),
             Some(PreHirExpr::Var("val32".into()))
         );
+    }
+
+    #[test]
+    fn preserves_float_to_int_and_signedness_changing_widening_outer_casts() {
+        let int = |bits: u32, signed: bool| NirType::Int { bits, signed };
+        let f32_ty = NirType::Float { bits: 32 };
+        let i8_ty = int(8, true);
+        let i32_ty = int(32, true);
+        let u32_ty = int(32, false);
+        let u64_ty = int(64, false);
+        let types = HashMap::from_iter([
+            ("fval".to_string(), f32_ty),
+            ("s8".to_string(), i8_ty),
+            ("x32".to_string(), i32_ty.clone()),
+        ]);
+
+        // Float -> Int conversion must not be stripped even across different integer target widths.
+        let float_to_int = PreHirExpr::Cast {
+            ty: i32_ty.clone(),
+            expr: Box::new(PreHirExpr::Var("fval".into())),
+        };
+        assert!(try_strip_outer_cast(&float_to_int, &u32_ty, &types).is_none());
+        assert!(try_strip_return_outer_cast(&float_to_int, &u32_ty, &types).is_none());
+
+        // Signedness-changing widening (u64)(i8) assigned to i32 must not be stripped.
+        let sign_widen = PreHirExpr::Cast {
+            ty: u64_ty,
+            expr: Box::new(PreHirExpr::Var("s8".into())),
+        };
+        assert!(try_strip_outer_cast(&sign_widen, &i32_ty, &types).is_none());
+        assert!(try_strip_return_outer_cast(&sign_widen, &i32_ty, &types).is_none());
     }
 }

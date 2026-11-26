@@ -45,7 +45,11 @@ pub mod lower_sym;
 pub mod native;
 pub mod product;
 pub mod report;
+pub(crate) mod scalar_semantics;
 pub mod symbolic;
+
+#[cfg(test)]
+mod scalar_contract_tests;
 
 pub use call_sites::{MachineFlow, call_sites};
 pub use decompile::{DecompileError, PreHirHirPair, decompile_one};
@@ -54,14 +58,24 @@ pub use diff::{
     diff_prehir_hir, diff_prehir_hir_detailed,
 };
 pub use emu_driver::{
-    CallOutcome, CallStub, EmulatorHarness, ObservedCall, StubbedEnd, StubbedRun,
+    CallOutcome, CallStub, EmulatorHarness, EscapedFramePointer, FrameExclusionAudit,
+    FrameExclusionJustification, FrameExclusionSpec, MemoryAccessAudit, ObservedCall, StubbedEnd,
+    StubbedRun,
 };
 pub use eval::{
     hir_free_names, interpret_hir, interpret_hir_with_memory, interpret_hir_with_state,
     interpret_prehir, interpret_prehir_with_memory, interpret_prehir_with_state, prehir_free_names,
 };
-pub use ground_truth::{Grounding, check_ground_truth, check_ground_truth_with};
-pub use initial_state::{DEFAULT_RUNS, DEFAULT_SEED, InitialState, RunPlan};
+pub use ground_truth::{
+    AdmissibleCase, CallComparisonKind, ConcreteObservationScope, ConcreteWitness,
+    GroundTruthDenominators, GroundTruthReport, Grounding, MemoryComparisonKind, StubSummary,
+    TerminationKind, WitnessKind, check_admissible_case, check_ground_truth,
+    check_ground_truth_report, check_ground_truth_with,
+};
+pub use initial_state::{
+    ConstraintKind, DEFAULT_RUNS, DEFAULT_SEED, InitialState, InitialStateDomain,
+    InitialStateIdentity, InitialStatePolicy, InitialStatePolicyItem, RunPlan, StateAdmissibility,
+};
 pub use native::{PcodeNativeReconstructError, PcodeNativeReconstructor, PcodeObservationVerifier};
 pub use product::*;
 pub use report::{Divergence, UnsupportedReason, VerifyOutcome};

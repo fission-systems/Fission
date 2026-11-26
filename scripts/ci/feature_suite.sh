@@ -27,6 +27,8 @@ case "${1:-}" in
   cli_alt)
     run cargo check -p fission-cli --no-default-features --locked
     run cargo check -p fission-cli --no-default-features --features allocator-jemallocator --locked
+    # Opt-in Sentry reporting: the scrub/no-leak tests exist only with the feature.
+    run cargo nextest run --locked --no-tests=fail -p fission-cli --features sentry --lib -E 'test(/^telemetry::/)'
     ;;
   *)
     echo "usage: $0 {interactive_runtime|script_emulator|emulator_softfloat|plugin_interactive|cli_alt}" >&2

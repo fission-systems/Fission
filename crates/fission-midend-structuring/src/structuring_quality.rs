@@ -118,7 +118,7 @@ impl StructuringQuality {
     /// displace what is already there.
     /// Estimated CFG node count of this body **as Joern will parse it**.
     ///
-    /// DecBench's VJ-GED is purely topological and is dominated by
+    /// The benchmark's VJ-GED is purely topological and is dominated by
     /// `|our_nodes - src_nodes|`, so the node count Joern assigns to our
     /// emitted C is the quantity the benchmark actually scores. Fitted by
     /// least squares against Joern's own counts on 249 functions across two
@@ -339,10 +339,10 @@ fn statement_budget(baseline_statements: usize, removed_gotos: usize) -> usize {
 ///        1            13,191          2.7x          281 nodes
 /// ```
 ///
-/// Every other decompiler on DecBench sits between 1.8x and 3.4x, so 8 already
-/// reaches the band. 1 is chosen over it for the invariant rather than the
-/// last 0.6x: it is the only rate that is not a tuned number, and it still
-/// carries 30% less structural mass than 8 does.
+/// Every other decompiler on the benchmark sits between 1.8x and 3.4x, so 8
+/// already reaches the band. 1 is chosen over it for the invariant rather
+/// than the last 0.6x: it is the only rate that is not a tuned number, and it
+/// still carries 30% less structural mass than 8 does.
 ///
 /// A per-guard ceiling was tried instead and is dominated: capping one guard
 /// at 16 terms gives 1,040 jumps and 763 terms against this rate at 2 giving

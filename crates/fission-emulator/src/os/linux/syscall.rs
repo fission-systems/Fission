@@ -16,7 +16,7 @@ use crate::os::env::HleResult;
 use crate::os::linux::abi::{StatLayout, TargetStat};
 use crate::os::linux::libc::read_string;
 use crate::os::procedure::SimProcedure;
-use crate::pcode::page_map::{page_align_up, prot};
+use crate::pcode::page_map::{guest_addr_span, page_align_up, prot};
 use anyhow::Result;
 
 fn ram_write(emu: &mut Emulator, addr: u64, data: &[u8]) -> Result<()> {
@@ -95,6 +95,178 @@ pub(crate) fn write_from_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64
 
 // ── File I/O ─────────────────────────────────────────────────────────────────
 
+/// Copy up to `count` bytes from open descriptor `fd` into guest buffer `buf`.
+///
+/// Mirrors Linux regular-file `read(2)` copy-out semantics across VFS descriptors
+/// (while noting that real Linux pipes/chardevs may roll back buffered data on a
+/// partial-page `EFAULT` rather than committing the writable prefix):
+/// 1. Bad descriptor -> `-EBADF` (`-9`) before inspecting `buf` or `count`.
+/// 2. `count == 0` -> `0` without faulting on `buf` or advancing cursor/EOF.
+/// 3. `count` clamped to [`MAX_RW_COUNT`] and copied out in [`IO_CHUNK`] slices
+///    after verifying contiguous guest-width writability (`writable_len`).
+/// 4. Unwritable/unmapped/wrapping first byte (when bytes remain) -> `-EFAULT`
+///    (`-14`) with cursor, `eof`, `stdin_buffer`, RAM, and shadow memory intact.
+/// 5. Partial writable prefix before a fault page -> commits only the
+///    transferred prefix, leaves `eof` unset, returns committed byte count, and
+///    restricts symbolic stdin tracking to transferred bytes under aggregate
+///    runtime caps.
+/// 6. Host stdin (fd 0 with no mock, [`Emulator::host_stdin`] on) is read once,
+///    offered at most the writable prefix (and at most [`IO_CHUNK`]). A host
+///    failure is never end-of-file: it is `-EINTR`, `-EAGAIN` or `-EIO` per
+///    [`crate::core::HostStdinError`], with nothing committed.
+pub(crate) fn read_to_guest(emu: &mut Emulator, fd: u64, buf: u64, count: u64) -> i64 {
+    enum ReadSource {
+        Vfs(usize),
+        StdinBuffer,
+        HostStdin,
+    }
+
+    let is_64bit = emu.state.page_map.is_64bit;
+    let source = match emu.vfs.remaining(fd) {
+        Ok(vfs_rem) => {
+            if count == 0 {
+                return 0;
+            }
+            if vfs_rem > 0 {
+                ReadSource::Vfs(vfs_rem)
+            } else if fd == 0 && emu.stdin_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+                ReadSource::StdinBuffer
+            } else if fd == 0 && emu.host_stdin {
+                ReadSource::HostStdin
+            } else {
+                if guest_addr_span(buf, is_64bit) == 0 {
+                    return -EFAULT;
+                }
+                let _ = emu.vfs.commit_read(fd, 0, true);
+                return 0;
+            }
+        }
+        Err(error) => {
+            if fd == 0 && emu.stdin_buffer.as_ref().is_some_and(|b| !b.is_empty()) {
+                if count == 0 {
+                    return 0;
+                }
+                ReadSource::StdinBuffer
+            } else if fd == 0 && emu.host_stdin {
+                if count == 0 {
+                    return 0;
+                }
+                ReadSource::HostStdin
+            } else {
+                return -error.errno();
+            }
+        }
+    };
+
+    let capped = count.min(MAX_RW_COUNT) as usize;
+    let writable = emu.state.writable_len(buf, capped);
+    if writable == 0 {
+        return -EFAULT;
+    }
+
+    let ram = emu.state.ram_space();
+    let mut committed = 0usize;
+
+    match source {
+        ReadSource::Vfs(vfs_rem) => {
+            let target = vfs_rem.min(writable);
+            while committed < target {
+                let want = (target - committed).min(IO_CHUNK);
+                let Some(dst) = buf.checked_add(committed as u64) else {
+                    break;
+                };
+                if guest_addr_span(dst, is_64bit) < want as u64 {
+                    break;
+                }
+                let Ok(chunk) = emu.vfs.peek_read(fd, want) else {
+                    break;
+                };
+                if chunk.is_empty() {
+                    break;
+                }
+                let chunk_len = chunk.len();
+                if emu.state.write_space(ram, dst, chunk).is_err() {
+                    break;
+                }
+                let _ = emu.vfs.commit_read(fd, chunk_len, false);
+                if fd == 0 {
+                    if let Some(ref mut mock_buf) = emu.stdin_buffer {
+                        let drop = chunk_len.min(mock_buf.len());
+                        mock_buf.drain(..drop);
+                    }
+                }
+                committed += chunk_len;
+            }
+            if committed == 0 {
+                return -EFAULT;
+            }
+            if committed < capped && emu.vfs.remaining(fd).unwrap_or(0) == 0 {
+                let _ = emu.vfs.commit_read(fd, 0, true);
+            }
+        }
+        ReadSource::StdinBuffer => {
+            let avail = emu.stdin_buffer.as_ref().map_or(0, Vec::len);
+            let target = avail.min(writable);
+            while committed < target {
+                let want = (target - committed).min(IO_CHUNK);
+                let Some(dst) = buf.checked_add(committed as u64) else {
+                    break;
+                };
+                if guest_addr_span(dst, is_64bit) < want as u64 {
+                    break;
+                }
+                let Some(chunk) = emu
+                    .stdin_buffer
+                    .as_deref()
+                    .and_then(|b| b.get(committed..committed + want))
+                else {
+                    break;
+                };
+                if emu.state.write_space(ram, dst, chunk).is_err() {
+                    break;
+                }
+                committed += want;
+            }
+            if let Some(ref mut mock_buf) = emu.stdin_buffer {
+                let drop = committed.min(mock_buf.len());
+                mock_buf.drain(..drop);
+            }
+            if committed == 0 {
+                return -EFAULT;
+            }
+        }
+        ReadSource::HostStdin => {
+            // One host read, offered no more than the guest can receive, so
+            // nothing is taken from the host that cannot land.
+            let want = writable.min(IO_CHUNK);
+            let mut tmp = vec![0u8; want];
+            let n = match emu.read_host_stdin(&mut tmp) {
+                Ok(n) => n,
+                // Nothing was transferred, so nothing is committed: guest
+                // memory, shadow memory and the stdin mock stay as they were.
+                Err(error) => return -error.linux_errno(),
+            };
+            if n == 0 {
+                return 0;
+            }
+            if emu.state.write_space(ram, buf, &tmp[..n]).is_err() {
+                // Unreachable while `writable_len` holds, but the host has
+                // already given these bytes up: keep them for the next read
+                // rather than lose them.
+                emu.stdin_buffer = Some(tmp[..n].to_vec());
+                return -EFAULT;
+            }
+            committed = n;
+        }
+    }
+
+    if committed > 0 && fd == 0 {
+        emu.mark_symbolic_stdin_range(buf, committed);
+    }
+
+    committed as i64
+}
+
 pub struct SysRead;
 impl SimProcedure for SysRead {
     fn run(&self, emu: &mut Emulator) -> Result<HleResult> {
@@ -102,30 +274,9 @@ impl SimProcedure for SysRead {
         let buf = emu.syscall_arg(1);
         let count = emu.syscall_arg(2);
 
-        tracing::info!("sys_read({}, 0x{:X}, {})", fd, buf, count);
-
-        match emu.vfs.read(fd, count as usize) {
-            Ok(data) => {
-                let bytes_read = data.len();
-                if bytes_read > 0 {
-                    ram_write(emu, buf, &data)?;
-                }
-                if fd == 0 {
-                    for i in 0..bytes_read {
-                        let node = emu.solver.register_var(
-                            format!("stdin_{}", buf + (i as u64)),
-                            crate::bit_width_from_byte_size(1),
-                        );
-                        emu.state
-                            .set_shadow_memory(emu.state.ram_space(), buf + (i as u64), node);
-                    }
-                }
-                emu.set_syscall_return(bytes_read as u64)?;
-            }
-            Err(_) => {
-                emu.set_syscall_return((-1i64) as u64)?;
-            }
-        }
+        let result = read_to_guest(emu, fd, buf, count);
+        tracing::info!("sys_read({}, 0x{:X}, {}) -> {}", fd, buf, count, result);
+        emu.set_syscall_return(result as u64)?;
         Ok(HleResult::Continue)
     }
 }

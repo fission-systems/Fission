@@ -58,8 +58,8 @@ class ChangePlanTests(unittest.TestCase):
             self.assertFalse(plan([path], "pull_request")[1]["run_native_diff"], path)
 
     def test_sweep_changes_run_the_sweep_smoke_before_merge(self):
-        for path in (".github/workflows/decbench-sweep.yml", "scripts/quality/decbench_full_sweep.py",
-                     "scripts/quality/decbench-ci-requirements.txt"):
+        for path in (".github/workflows/freshbench-sweep.yml", "scripts/ci/freshbench_sweep.py",
+                     "scripts/ci/freshbench_corpus.py"):
             self.assertTrue(plan([path], "pull_request")[1]["run_sweep_smoke"], path)
             self.assertTrue(plan([path], "merge_group")[1]["run_sweep_smoke"], path)
             self.assertFalse(plan([path], "push")[1]["run_sweep_smoke"], path)

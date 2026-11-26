@@ -30,7 +30,8 @@ use fission_core::core::ghidra_no_return::{
 use fission_loader::loader::LoadedBinary;
 use fission_pcode_ir::{PcodeFunction, PcodeOp, PcodeOpcode, Varnode};
 use fission_sleigh::runtime::{
-    DecodeContract, DecodeMemoryContext, RawDecodeSeed, RuntimeSleighFrontend,
+    DecodeContract, DecodeMemoryContext, InstructionRecords, InstructionReuse, RawDecodeSeed,
+    RuntimeSleighFrontend,
 };
 use lru::LruCache;
 use rayon::prelude::*;
@@ -119,14 +120,18 @@ fn noreturn_cache_key(binary: &LoadedBinary) -> NoReturnCacheKey {
 /// Cached per `(binary.hash, functions_digest)` and validated against storage,
 /// mirroring `control_flow_facts_for`'s cache.
 pub fn no_return_functions_for(binary: &LoadedBinary) -> BTreeSet<u64> {
-    no_return_functions_with_seeds(binary, None)
+    no_return_functions_with_seeds(binary, None, None)
 }
 
 pub(crate) type DecodeSeeds = StdHashMap<u64, RawDecodeSeed>;
 
+/// `reuse`, when given, also collects the instructions a cold computation
+/// lifted, for the control-flow-facts sweep that follows it. A warm cache hit
+/// lifts nothing and leaves it empty.
 pub(crate) fn no_return_functions_with_seeds(
     binary: &LoadedBinary,
     seeds: Option<&mut DecodeSeeds>,
+    reuse: Option<&mut InstructionReuse>,
 ) -> BTreeSet<u64> {
     let key = noreturn_cache_key(binary);
     // Warm hits intentionally skip transient `seeds` capture (FID preparation
@@ -142,7 +147,7 @@ pub(crate) fn no_return_functions_with_seeds(
         return cached.set.clone();
     }
 
-    let set = compute_no_return_functions(binary, seeds);
+    let set = compute_no_return_functions(binary, seeds, reuse);
 
     if let Ok(mut cache) = noreturn_cache().lock() {
         cache.put(
@@ -159,6 +164,7 @@ pub(crate) fn no_return_functions_with_seeds(
 fn compute_no_return_functions(
     binary: &LoadedBinary,
     mut seeds: Option<&mut DecodeSeeds>,
+    mut reuse: Option<&mut InstructionReuse>,
 ) -> BTreeSet<u64> {
     let mut no_return: BTreeSet<u64> = BTreeSet::new();
 
@@ -196,11 +202,12 @@ fn compute_no_return_functions(
     // bounded scoped queue for both ordinary preparation and FID capture:
     // its workers decode immutable inputs and its joins cannot steal jobs.
     let capture = seeds.is_some();
-    let decode = |index: usize| {
-        let f = &binary.functions[index];
-        if f.is_import {
-            return None;
-        }
+    // Records only from a frontend that decodes as the sweep's does.
+    reuse = reuse.filter(|reuse| reuse.serves(&frontend));
+    let record = reuse.is_some();
+    let entries = crate::analysis::distinct_code_entries(binary);
+    let decode = |slot: usize| {
+        let f = &binary.functions[entries[slot]];
         let address_state = frontend.normalize_low_bit_code_address(f.address);
         let decode_address = address_state.address;
         let context_override = crate::analysis::decode_context_for_address(
@@ -213,17 +220,17 @@ fn compute_no_return_functions(
         let bytes = binary.view_bytes(decode_address, max_bytes)?;
         let memory_context = DecodeMemoryContext::default();
         let contract = DecodeContract::decomp_function(NORETURN_INSTRUCTION_LIMIT);
-        let (decoded, seed) = if capture {
-            let (decoded, seed) = frontend
-                .lift_raw_pcode_function_capturing_seed(
+        let (decoded, seed, records) = if capture || record {
+            frontend
+                .lift_raw_pcode_function_recording(
                     bytes,
                     decode_address,
                     contract,
                     &memory_context,
                     context_override,
+                    capture,
                 )
-                .ok()?;
-            (decoded, Some(seed))
+                .ok()?
         } else {
             let decoded = frontend
                 .lift_raw_pcode_function_with_context_and_memory_context(
@@ -234,28 +241,36 @@ fn compute_no_return_functions(
                     context_override,
                 )
                 .ok()?;
-            (decoded, None)
+            (decoded, None, InstructionRecords::default())
         };
         Some((
             f.address,
             NoReturnFlow::from_function(&decoded.function),
             seed,
+            records,
         ))
     };
     let workers = rayon::current_num_threads();
     let rows = if workers > 1 {
-        scoped_decode::collect_scoped(binary.functions.len(), workers, decode)
+        scoped_decode::collect_scoped(entries.len(), workers, decode)
     } else {
-        (0..binary.functions.len()).filter_map(decode).collect()
+        (0..entries.len()).filter_map(decode).collect()
     };
     let mut decoded = StdHashMap::<u64, NoReturnFlow>::new();
-    // Restore original input order before map insertion, including duplicate
-    // address last-writer behavior. Fixed-point iteration remains unchanged.
-    for (address, flow, seed) in rows {
+    // Rows arrive in input order, one per address. Fixed-point iteration
+    // remains unchanged.
+    let mut lifted = Vec::with_capacity(if record { rows.len() } else { 0 });
+    for (address, flow, seed, records) in rows {
         decoded.insert(address, flow);
         if let (Some(seeds), Some(seed)) = (seeds.as_deref_mut(), seed) {
             seeds.insert(address, seed);
         }
+        if record {
+            lifted.push(records);
+        }
+    }
+    if let Some(reuse) = reuse.as_deref_mut() {
+        reuse.absorb(lifted);
     }
 
     loop {
@@ -584,15 +599,15 @@ mod tests {
             .num_threads(4)
             .build()
             .unwrap();
-        let serial = serial_pool.install(|| compute_no_return_functions(&binary, None));
+        let serial = serial_pool.install(|| compute_no_return_functions(&binary, None, None));
         assert!(serial.contains(&abort));
         assert_eq!(
-            parallel_pool.install(|| compute_no_return_functions(&binary, None)),
+            parallel_pool.install(|| compute_no_return_functions(&binary, None, None)),
             serial
         );
         let mut seeds = DecodeSeeds::new();
         assert_eq!(
-            parallel_pool.install(|| compute_no_return_functions(&binary, Some(&mut seeds))),
+            parallel_pool.install(|| compute_no_return_functions(&binary, Some(&mut seeds), None)),
             serial
         );
         assert_eq!(seeds.len(), 16);
@@ -947,7 +962,7 @@ mod tests {
         ];
         let bin_with_funcs = make_binary(&[0xc3, 0x90], post_discovery_funcs.clone());
         let mut seeds = DecodeSeeds::new();
-        let detected = no_return_functions_with_seeds(&bin_with_funcs, Some(&mut seeds));
+        let detected = no_return_functions_with_seeds(&bin_with_funcs, Some(&mut seeds), None);
         assert!(detected.contains(&0x2000));
         assert!(!detected.contains(&0x1000));
         assert!(seeds.contains_key(&0x1000));

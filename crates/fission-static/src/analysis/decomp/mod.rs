@@ -7,4 +7,7 @@
 pub mod cache;
 pub mod facts;
 
-pub use facts::{FactProvenance, FactStore, FunctionFacts, NameFact, TypeFact, log_type_diag};
+pub use facts::{
+    FactProvenance, FactStore, FunctionFacts, NameFact, ProgramPublicationDiagnostics, TypeFact,
+    log_type_diag,
+};

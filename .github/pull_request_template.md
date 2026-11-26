@@ -40,7 +40,7 @@ when all acceptance criteria are verified. -->
 - [ ] **Verification / solver** (`crates/fission-dir/`, `crates/fission-solver/`)
 - [ ] **Emulator / dynamic / TTD** (`crates/fission-emulator/`, `crates/fission-dynamic/`, `crates/fission-ttd/`)
 - [ ] **CLI / JSON contract** (`crates/fission-cli/`)
-- [ ] **Benchmark scripts** (`benchmark/config/`, `scripts/quality/decbench_*`; see [`docs/BENCHMARK_DECBENCH.md`](../docs/BENCHMARK_DECBENCH.md))
+- [ ] **Benchmark scripts** (`benchmark/config/`, `scripts/quality/`; see [`docs/BENCHMARK_FRESHBENCH.md`](../docs/BENCHMARK_FRESHBENCH.md))
 - [ ] **Docs / process only** (no semantic code paths)
 - [ ] **CI / release plumbing** (`.github/`, `docs/RELEASE.md`)
 
@@ -51,7 +51,7 @@ when all acceptance criteria are verified. -->
 - [ ] `cargo nextest run -p <crates touched>`
 - [ ] Each new test fails with the fix disabled (positive control)
 - [ ] Correctness evidence, if this fixes wrong output (see below)
-- [ ] DecBench measurement, if decompiler output can change (see below)
+- [ ] FreshBench measurement, if decompiler output can change (see below)
 - [ ] Not run — reason:
 
 <details>
@@ -66,37 +66,37 @@ when all acceptance criteria are verified. -->
 ## Correctness Evidence
 
 <!--
-Required when this PR claims wrong output became right. DecBench measures
-similarity to the source, not correctness (docs/adr/0018). Cite what checks
+Required when this PR claims wrong output became right. A benchmark measures
+similarity to the source, not correctness (docs/adr/0018, docs/adr/0019). Cite what checks
 meaning: native replay (docs/VERIFY_REPLAY.md), `fission_cli verify --tier
 ground-truth` (divergences before -> after), the architecture manual, DWARF/PDB,
 call sites counted by instruction address, and two or three raw before/after
-hunks. If the DecBench score got worse, say what the output now prints that
+hunks. If the FreshBench score got worse, say what the output now prints that
 costs it. Use `n/a` otherwise.
 -->
 
 ## Benchmark Impact
 
 <!--
-Required when decompiler output can change. Quality claims cite the DecBench
-full-dataset sweep (`~/fission-benchmark/decbench-full/sweep.py`); the
-250-function sample-set gate is the quick pre-check. Run with caches disabled
-(`FISSION_BENCHMARK_NO_CACHE=1`) and compare output hashes before scores
-(`sweep.py diff`). Report total distance next to the perfect count: the count
-alone has ranked a regression as a win. byte_match is not run locally, so
-Union here is GED or type. Use `n/a` for changes that cannot change output.
+Required when decompiler output can change. Quality claims cite a full
+FreshBench M1 run (`freshbench sweep run`, docs/BENCHMARK_FRESHBENCH.md); a
+`--builds` / `--only` slice is the quick pre-check, not the evidence. Compare
+output hashes before scores (`freshbench sweep diff`): rows that move with
+identical text are scorer noise. Report distance next to the perfect count:
+the count alone has ranked a regression as a win. Use `n/a` for changes that
+cannot change output.
 -->
 
 ```text
-sample-set gate:    GED perfect <before> -> <after>, total distance <before> -> <after>
+slice pre-check (--builds / --only <...>):
+  GED perfect <before> -> <after>, mean distance <before> -> <after>
 
-full-dataset sweep, per config (<config>):
-  GED perfect:        <before> -> <after>
-  GED total distance: <before> -> <after>
-  Types perfect/mean: <before> -> <after>
-  Union (GED, type):  <before> -> <after>
-  failures:           <before> -> <after>
-  sweep.py diff:      <functions whose output changed>
+full M1 run (sweep report, per size band where it moved):
+  GED perfect (rows at 0): <before> -> <after>
+  GED mean distance:       <before> -> <after>
+  Types:                   <before> -> <after>
+  failures:                <before> -> <after>
+  sweep diff:              <functions whose output changed>
 ```
 
 ## Telemetry and Reporting

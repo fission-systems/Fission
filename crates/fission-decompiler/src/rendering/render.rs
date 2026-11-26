@@ -75,6 +75,7 @@ pub(crate) fn make_nir_request(
     type_context: NirTypeContext,
 ) -> NirWorkerRequest {
     NirWorkerRequest {
+        request_id: None,
         pcode_json: pcode_json.to_string(),
         address,
         name: name.to_string(),

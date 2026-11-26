@@ -8,10 +8,10 @@
 # and the first sweep against two of them said so -- eighteen missing APIs,
 # most of them ordinary C runtime, with the lifter and emulator core clean.
 #
-# Deliberately NOT the DecBench corpus. Those are real Debian binaries and are
-# static-analysis only: the dataset holds malware compiled from source. These
-# are built here from published sources instead, so what runs is something we
-# compiled from something anyone can read.
+# Deliberately NOT a benchmark corpus. Benchmark binaries are static-analysis
+# only: they are never executed. These are built here from published sources
+# instead, so what runs is something we compiled from something anyone can
+# read.
 #
 # mingw is the toolchain because it cross-compiles from macOS and because the
 # Windows HLE layer is the one with the gaps worth measuring. Programs that

@@ -8,5 +8,6 @@ for code ownership and the decompiler quality rules.
 
 - [First 30 minutes with Fission](onboarding/FIRST_30_MINUTES.md)
 - [Troubleshooting](contributing/TROUBLESHOOTING.md)
+- [Heavy work off the development machine](contributing/HEAVY_WORK.md)
 - [CI and release gates](CI_RELEASE_GATES.md)
-- [DecBench measurements](BENCHMARK_DECBENCH.md)
+- [FreshBench measurements](BENCHMARK_FRESHBENCH.md)
