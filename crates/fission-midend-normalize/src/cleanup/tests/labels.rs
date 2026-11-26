@@ -198,7 +198,7 @@ fn prune_unreachable_after_terminal_keeps_label_referenced_only_from_outer_scope
     // without `global_refs` this pass treated the label as dead code after
     // the preceding `Goto` and deleted it, leaving the other scope's `Goto`
     // dangling with no matching label anywhere in the rendered function.
-    // Reproduces the real bug traced in bin_039.elf (DecBench sample set).
+    // Reproduces the real bug traced in bin_039.elf (benchmark sample set).
     let mut global_refs = HashSet::default();
     global_refs.insert("block_8d88".to_string());
 

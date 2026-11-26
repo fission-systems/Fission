@@ -1,14 +1,15 @@
 # Quality metrics and trend artifacts
 
-## DecBench sweep reports
+## FreshBench sweep reports
 
-The [nightly DecBench sweep](CI_RELEASE_GATES.md#nightly-decbench) reports row
-coverage, status, output hashes, GED perfect count and total distance, and
-type-match coverage and scores. Link the run and its artifacts when reporting
-a regression. Cite cache-disabled before/after full sweeps on matching corpus
-and scorer revisions for quality claims. The
-[benchmark guide](BENCHMARK_DECBENCH.md) explains how to compare results and
-when a local sample-set check is useful.
+`freshbench sweep report` gives scores, failures and timing for a run, split
+by source size band: GED distance and perfect count, types, recompilation and
+call sites. `sweep diff` compares output hashes before scores. Link the run
+directory (`runs/<label>/`) when reporting a regression. Cite before/after
+full M1 runs with the same corpus id and scorer for quality claims. The
+[benchmark guide](BENCHMARK_FRESHBENCH.md) explains how to compare results and
+when a `--builds` / `--only` slice is useful. CI's scheduled sweeps are
+described in [CI and release gates](CI_RELEASE_GATES.md).
 
 ## Decompiler telemetry
 

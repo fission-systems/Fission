@@ -45,7 +45,7 @@ const MAX_INST: u64 = 10_000_000;
 /// asking "what is missing": a real program calls things our test programs
 /// never do, and the missing-API tally is only as honest as the input.
 ///
-/// Never point this at the DecBench/evalkit corpus. Those binaries include
+/// Never point this at the benchmark eval-kit corpus. Those binaries include
 /// malware compiled from source and are static-analysis-only -- this sweep
 /// *executes* what it is given.
 fn corpus() -> Option<PathBuf> {

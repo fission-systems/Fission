@@ -284,7 +284,7 @@ mod tests {
 /// `name`. 64-bit Windows does not decorate at all, which is why this is
 /// gated on the pointer width rather than applied everywhere.
 ///
-/// Measured cost of not doing it: on the DecBench dev corpus, 186 of 726
+/// Measured cost of not doing it: on the benchmark dev corpus, 186 of 726
 /// ground-truth functions failed to match on the leading underscore alone,
 /// taking 750 of 2708 ground-truth variables (27.7%) with them -- every
 /// `gcc-m32` binary scored exactly zero because all 79 of its functions were

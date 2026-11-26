@@ -1333,7 +1333,7 @@ mod tests {
         );
     }
 
-    /// Regression test for a real sample-set finding: 58/224 DecBench
+    /// Regression test for a real sample-set finding: 58/224 benchmark
     /// sample-set binaries are 32-bit ARM (not x86), and
     /// `get_preferred_fid_paths` only ever read `.first()` off
     /// `GCC_FID_FILES_X64`/`LIBC_FID_FILES_X64` -- both of which *contain*

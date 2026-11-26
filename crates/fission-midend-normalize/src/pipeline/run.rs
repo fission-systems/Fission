@@ -89,7 +89,7 @@ pub fn apply_type_signature_fixed_point(func: &mut PreHirFunction, diag: bool, p
 
         // The four passes can undo one another inside a round -- one widens a
         // binding, a later one narrows it back -- and then each reports a
-        // change although the round ends where it began. On the full DecBench
+        // change although the round ends where it began. On the full benchmark
         // dataset 90% of rounds did, so almost every fixed point ran to its
         // cap. The passes read nothing but `func`, so a round that returns to
         // its starting state would repeat itself identically: stop there.

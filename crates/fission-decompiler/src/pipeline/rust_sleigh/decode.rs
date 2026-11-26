@@ -180,7 +180,7 @@ pub(crate) fn decode_rust_sleigh_pcode(
         ));
     }
     // Thumb-only targets (Cortex-M/ARMv7-M) can NEVER execute ARM-mode
-    // instructions, but a bare even address (as DecBench's eval kit and
+    // instructions, but a bare even address (as benchmark eval kits and
     // other external callers report, having normalized away the ABI's
     // Thumb-bit marker -- see `low_bit_code_mode_override`'s doc comment)
     // is indistinguishable from a genuine ARM-mode target at this point.
@@ -525,7 +525,7 @@ fn run_indirect_branch_fixpoint(
     // decoded only as far as its dispatcher. `bzip2`'s `BZ2_decompress`
     // reached 232 of ~6,000 instructions that way and rendered as
     // straight-line C; the same shape accounts for a third of our whole
-    // distance to `kuna` on DecBench, across 769 functions.
+    // distance to `kuna` on a benchmark corpus sweep, across 769 functions.
     //
     // Only an analysis over *decoded* code can name those successors, and that
     // analysis needs the decode that needs its answer. So run them alternately:

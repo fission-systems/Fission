@@ -53,7 +53,7 @@ Read the nearest child file before editing those areas.
 | NIR structuring / canonicalization | `crates/fission-pcode/src/midend/structuring/` | Core algorithmic decompiler work lives here |
 | NIR telemetry contract | `crates/fission-midend-core/src/ir/build_stats.rs` | `NirBuildStats` is canonical |
 | Decompilation orchestration / Rust-Sleigh | `crates/fission-decompiler/` | Routing, workers, type-context assembly; consumes `fission-pcode` + `fission-static` facts |
-| DecBench (main benchmark) | `docs/BENCHMARK_DECBENCH.md`; full-dataset sweep `~/fission-benchmark/decbench-full/sweep.py`; quick gate `scripts/quality/decbench_sample_set_gate.py` (scoring in `scripts/quality/decbench_scoring.py`) | The comparative and regression measurement for output-changing work, on the **whole** dataset (96,103 functions); published source CFGs are the answer key. Neither DecBench nor Ghidra is a correctness oracle ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md), [ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)) |
+| FreshBench (the benchmark) | `docs/BENCHMARK_FRESHBENCH.md`; `freshbench sweep run / diff / report` on the M1 corpus ([fission-systems/freshbench](https://github.com/fission-systems/freshbench)) | The comparative and regression measurement for output-changing work, on the **whole** M1 corpus (285,875 rows); a `--builds`/`--only` slice is the quick pre-check. Neither a benchmark nor Ghidra is a correctness oracle ([ADR 0019](docs/adr/0019-freshbench-is-the-benchmark.md), [ADR 0017](docs/adr/0017-ghidra-is-not-an-oracle.md)) |
 | Benchmark policy / held-out pool | `benchmark/config/`, `benchmark/patch_validation_pool/` | Gate policy and the patch-validation pool |
 | CLI one-shot parsing / command ownership | `crates/fission-cli/src/cli/` | Keep subcommand UX and legacy shims separate from semantics |
 | Runtime resource paths (signatures, DiE, FID, patterns, typeinfo) | `crates/fission-core/src/core/path_config.rs`, `resource_roots.rs` | `PATHS` / `PathConfig::detect`; overrides: CLI `--resource-root`, `FISSION_RESOURCE_ROOT`; operator docs: `docs/CLI.md` § *Runtime resource bundle* |
@@ -76,7 +76,7 @@ Read the nearest child file before editing those areas.
 7. Treat `/Users/sjkim1127/Fission/vendor` as a reference corpus only: consult it often for algorithms, invariants, and expected behavior, but keep Fission-owned Rust implementations dependency-free from that tree.
 8. **ISA-agnostic semantic rules** ([`docs/adr/0009-isa-agnostic-semantic-rules.md`](docs/adr/0009-isa-agnostic-semantic-rules.md)): optimize measurement on x86/x86-64, but implement register/loop/join/return/cmov-class logic as shared CFG and ABI-*slot* invariants. Put ISA differences in cspec, register namer, calling-convention tables, and SLEIGH — not as copy-pasted control-structure cores gated on `X86_32` / mnemonic / EBP offset alone.
 9. **Program metadata ownership** ([`docs/adr/0010-typed-program-metadata-substrate.md`](docs/adr/0010-typed-program-metadata-substrate.md)): loader facts flow into the immutable `fission-analysis-db` snapshot. Do not add new parallel program-fact maps to `fission-pcode`, CLI, or UI layers.
-10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is DecBench ([`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md)), measured on the **full dataset** (`~/fission-benchmark/decbench-full/sweep.py`, every config); the 250-function sample-set gate is only the quick pre-check. Caches are disabled (`FISSION_BENCHMARK_NO_CACHE=1`). Estimates, assumed patterns, and nextest-only green are not quality evidence. **DecBench measures similarity to the source, not correctness** ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)). It is reported for every output-changing PR, but a claim that output became *correct* needs correctness evidence: native replay, `fission_cli verify --tier ground-truth`, manuals, DWARF/PDB, call sites counted by instruction address, or the raw diff. A fix that makes wrong output right may land with a worse DecBench score when the PR shows that evidence and explains the regression.
+10. **Measurement-only quality claims (hard rule):** Decompiler quality claims — semantic **or** readability/pseudocode — are valid **only** when backed by **measured** benchmark/decompilation evidence on real corpus binaries (or an explicit focused row from that corpus). Synthetic unit tests, hand-written IR fixtures, and “common O0 shape” intuition may land as **mechanical** code + regression tests, but **must not** be described as quality improvement, readability wins, or release-note quality gains without a before/after measurement. The benchmark is FreshBench ([`docs/BENCHMARK_FRESHBENCH.md`](docs/BENCHMARK_FRESHBENCH.md), [ADR 0019](docs/adr/0019-freshbench-is-the-benchmark.md)), measured on the **whole M1 corpus** (`freshbench sweep run`); a `--builds`/`--only` slice is only the quick pre-check. Estimates, assumed patterns, and nextest-only green are not quality evidence. **A benchmark measures similarity to the source, not correctness** (ADR 0019, carrying over ADR 0018). It is reported for every output-changing PR, but a claim that output became *correct* needs correctness evidence: native replay, `fission_cli verify --tier ground-truth`, manuals, DWARF/PDB, call sites counted by instruction address, or the raw diff. A fix that makes wrong output right may land with a worse score when the PR shows that evidence and explains the regression.
 
 ## Post-Audit Stabilization Workflow (Fission 1.0)
 
@@ -132,7 +132,7 @@ For each implementation task:
    fault-injection tests for lifecycle changes, and the existing benchmark
    gates when required. Performance changes require reproducible before/after
    measurements on comparable configurations. The Decompiler Quality Loop,
-   full-dataset DecBench requirement, AI Overfit Firewall and CI/release gates
+   full-corpus FreshBench requirement, AI Overfit Firewall and CI/release gates
    below remain in force.
 7. **Submit for review.** Link the issue and report the invariant, reproducer,
    implementation scope, commands and actual results, remaining limitations,
@@ -172,12 +172,10 @@ cargo nextest run -p fission-pcode
 cargo check -p fission-pcode
 cargo check -p fission-decompiler
 
-# DecBench quick pre-check: 250-function sample-set gate (see docs/BENCHMARK_DECBENCH.md)
-~/fission-benchmark/.venv-decbench/bin/python scripts/quality/decbench_sample_set_gate.py check --cli target/release/fission_cli
-
-# DecBench full-dataset sweep: what quality claims cite
-~/fission-benchmark/.venv-decbench/bin/python -I ~/fission-benchmark/decbench-full/sweep.py run \
-  --cli target/release/fission_cli --repo "$PWD" --label <name>
+# FreshBench (see docs/BENCHMARK_FRESHBENCH.md): a slice is the quick pre-check,
+# the full M1 run is what quality claims cite
+freshbench sweep run <m1> --cli target/release/fission_cli --repo "$PWD" --label <name> --builds gcc-O2
+freshbench sweep run <m1> --cli target/release/fission_cli --repo "$PWD" --label <name>
 
 # Formatting -- CI runs exactly this
 cargo fmt --all --check
@@ -203,7 +201,7 @@ submodules and rewrites files you never touched.
 - For NIR/structuring changes: targeted nextest filter → `cargo nextest run -p fission-pcode` → `cargo check -p fission-pcode`.
 - For orchestration / Rust-Sleigh glue: also `cargo check -p fission-decompiler` (and the CLI as needed).
 - For resource path / bundle resolution changes: `cargo nextest run -p fission-core` and smoke `fission_cli resources status`.
-- If benchmark/reporting changes: validate with the DecBench gate (`scripts/quality/decbench_sample_set_gate.py`) and the full-dataset sweep; sweep results live under `~/fission-benchmark/decbench-full/runs/`, not in the repository.
+- If benchmark/reporting changes: validate with a FreshBench run (a slice, then the full M1 corpus); runs live under `runs/<label>/` where `freshbench sweep run` was started, not in the repository.
 - Use `.github/workflows/ci.yml` and `ci-heavy.yml` as CI source of truth.
 - Release gate policy: [`docs/CI_RELEASE_GATES.md`](docs/CI_RELEASE_GATES.md) (L0 Fast / L1 Heavy / L2 Release E2E / L3 CD).
 - Ship Git **release tags** via `.github/workflows/release-tag.yml` (`Release Tag (CI green)`). It requires successful **ci.yml main push** and **ci-heavy scheduled or dispatched** runs on the exact candidate SHA, then runs **release-e2e** and builds and smoke-tests the archives through **cd.yml**. It publishes those verified artifacts after creating the tag. Do not auto-tag every `main` push.
@@ -219,58 +217,53 @@ Use this loop for source-semantic or pseudocode-quality work, especially when a 
 | Allowed as | Requires |
 |---|---|
 | Mechanical change (code + synthetic invariant tests) | nextest / crate checks; **no** “quality improved” language |
-| Correctness claim (output was wrong, now right) | Correctness evidence ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)): native replay, `verify --tier ground-truth`, manual, DWARF/PDB, call-site counts by instruction address, raw before/after hunks; **plus** the full-dataset sweep reported as-is. A score regression is explained, not a veto |
-| Semantic quality claim | Anchored row(s) for the motivation (a DecBench row, a `verify` divergence, or a native replay mismatch), then a **full-dataset sweep** before/after: output-hash `diff` first, GED / type deltas on the rows whose output changed, total distance next to the perfect count |
-| Readability / HIR presentation quality claim | Anchored real-binary decomp (or DecBench row) before/after; not fixture-only |
-| Official ranking / release claim | Full-dataset DecBench sweep from a tagged build, compared with the published tools on the same rows (never a local run as an official ranking) |
+| Correctness claim (output was wrong, now right) | Correctness evidence ([ADR 0019](docs/adr/0019-freshbench-is-the-benchmark.md)): native replay, `verify --tier ground-truth`, manual, DWARF/PDB, call-site counts by instruction address, raw before/after hunks; **plus** the full M1 run reported as-is. A score regression is explained, not a veto |
+| Semantic quality claim | Anchored row(s) for the motivation (a FreshBench row `<build>/<project>/<binary>` at an address, a `verify` divergence, or a native replay mismatch), then a **full M1 run** before/after: output-hash `sweep diff` first, GED / type deltas on the rows whose output changed, total or mean distance next to the perfect count |
+| Readability / HIR presentation quality claim | Anchored real-binary decomp (or FreshBench row) before/after; not fixture-only |
+| Official ranking / release claim | FreshBench's published results for a tagged build (never a local run as an official ranking) |
 
 **Order of work (always):**
 
-1. **Observe** on a real binary/row (DecBench row, gate `--dump`, or `fission_cli decomp`).
+1. **Observe** on a real binary/row (a FreshBench row, or `fission_cli decomp` on a real binary).
 2. **Record baseline** (scores, gotos, line size, fail category, snippet).
 3. **Generalize** to an invariant (no function/address special cases).
 4. **Implement** at the canonical owner.
 5. **Remeasure** the same path with caches disabled.
-6. **Report** “quality improved” only with evidence: correctness evidence for a correctness fix, a measured move for a similarity claim; otherwise “landed mechanical / tests only.” DecBench numbers are reported either way, never as the proof of correctness.
+6. **Report** “quality improved” only with evidence: correctness evidence for a correctness fix, a measured move for a similarity claim; otherwise “landed mechanical / tests only.” Benchmark numbers are reported either way, never as the proof of correctness.
 
 If there is no measured baseline, **do not start a “quality” implementation**. Optionally land a pure refactor or test harness, but label it non-quality.
 
 Applies to **NIR, HIR presentation, structuring, normalize, materialize, SLEIGH, and printer** surfaces. Printer/UI still must not be the semantic owner; measurement still applies if readability is claimed.
 
-### Mandatory DecBench measurement
+### Mandatory FreshBench measurement
 
-Quality claims are measured on the **whole** DecBench dataset (96,103
-functions, configs `unoptimized`, `optimized`, `inlined`, `large`,
-`sample-set`) against a **local** Fission build, not on the 250-function sample
-set and not with `fission_cli` one-shots or unit tests. Full procedure:
-[`docs/BENCHMARK_DECBENCH.md`](docs/BENCHMARK_DECBENCH.md).
+Quality claims are measured on the **whole** FreshBench M1 corpus (285,875
+rows: x86-64, i686, AArch64 and ARMv7, GCC and Clang, six optimization levels)
+against a **local** Fission build, not on a slice and not with `fission_cli`
+one-shots or unit tests. Full procedure:
+[`docs/BENCHMARK_FRESHBENCH.md`](docs/BENCHMARK_FRESHBENCH.md).
 
 ```bash
 cargo build -p fission-cli --release
-PY=~/fission-benchmark/.venv-decbench/bin/python
-# quick pre-check (minutes): refuses a drop on the sample set
-$PY scripts/quality/decbench_sample_set_gate.py check --cli target/release/fission_cli --dump /tmp/after.json
-# the measurement a claim cites (hours): every function of every config
-$PY -I ~/fission-benchmark/decbench-full/sweep.py run --cli target/release/fission_cli --repo "$PWD" --label after
-$PY -I ~/fission-benchmark/decbench-full/sweep.py diff ~/fission-benchmark/decbench-full/runs/before ~/fission-benchmark/decbench-full/runs/after
-$PY -I ~/fission-benchmark/decbench-full/sweep.py report ~/fission-benchmark/decbench-full/runs/after
+# quick pre-check (minutes): one or two builds
+freshbench sweep run <m1> --cli target/release/fission_cli --repo "$PWD" --label after-slice --builds gcc-O2
+# the measurement a claim cites: every row of M1
+freshbench sweep run <m1> --cli target/release/fission_cli --repo "$PWD" --label after
+freshbench sweep diff runs/before runs/after
+freshbench sweep report runs/after
 ```
 
-- The sample-set gate is the quick pre-check, not evidence: a claim cites the
-  full-dataset sweep, per config, with the published tools on the same rows.
-- Compare **output hashes before scores** (`sweep.py diff`); a score delta on a
+- A slice is the quick pre-check, not evidence: a claim cites the full M1 run.
+- Compare **output hashes before scores** (`sweep diff`); a score delta on a
   row whose text did not change is scorer noise.
-- Report **total distance next to the perfect count**; the count alone has
-  ranked a regression as a win. Report failures, and CPU time next to wall time.
+- Report **total or mean distance next to the perfect count**; the count alone
+  has ranked a regression as a win. Report failures, and CPU time next to wall
+  time.
 - Build once, then measure; do not rebuild `fission_cli` while a run is in flight.
 
-Never promote local runs to an official ranking. The docker multi-decompiler
-loop ([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) is retired, and
-the GitHub repository behind it, `fission-systems/fission-benchmark`, was
-deleted on 2026-11-24 together with its Pages dashboard. The local
-`~/fission-benchmark/` directory was kept and still holds the DecBench data and
-sweep above. The organisation's public benchmark is now
-[FreshBench](https://github.com/fission-systems/freshbench).
+Never promote local runs to an official ranking; FreshBench publishes the
+rankings. The docker multi-decompiler loop
+([`docs/BENCHMARK_DOCKER.md`](docs/BENCHMARK_DOCKER.md)) is retired.
 
 ## AI Overfit Firewall
 
@@ -314,7 +307,7 @@ counter could not see that `&&` is a branch. Nothing about that change named a
 row. See `structuring_quality`'s module docs, where every axis is there because
 some driver scored an improvement while emitting something worse.
 
-The same shape is available on structure distance. DecBench's graph edit
+The same shape is available on structure distance. Graph edit
 distance prices node count and degree and *nothing else* -- statement content
 costs zero -- so merging basic blocks, replacing every `if`/`else` with a
 ternary, or duplicating code to avoid a join all improve the score and can
@@ -353,15 +346,15 @@ functions:
 
 Before adding production code for builder, materialize, normalize, structuring, type/data recovery, **or HIR presentation readability** fixes intended as quality work, fill out [`docs/templates/DECOMPILER_CHANGE_PROPOSAL.md`](docs/templates/DECOMPILER_CHANGE_PROPOSAL.md) as required by [`docs/adr/0006-decompiler-quality-change-gate.md`](docs/adr/0006-decompiler-quality-change-gate.md). The proposal must show **measured** row anchor, owner proof, invariant proof, and validation matrix before implementation starts. **No row measurement → no quality implementation.**
 
-Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and DecBench regression checks are part of the quality claim.
+Default to extending the existing owner/pass. Add a new pass, helper, or metric only when the proposal shows that no existing owner covers the invariant. Do not claim success from a targeted test alone; crate-level tests, focused row rerun, and FreshBench regression checks are part of the quality claim.
 
 1. **Anchor the row (measured):** record the source file, binary, address, function name, current behavior status, case pass count, semantic/static scores, top missing/extra features, and a short pseudocode/goto baseline. Synthetic IR alone is not an anchor.
 2. **Find the owner:** prove whether the bug belongs to SLEIGH/raw p-code, NIR materialization, type recovery, structuring, cleanup, HIR presentation, printer, or benchmark scripts. Fix behavior at that owner (not printer-only semantic patches).
 3. **Add focused coverage:** add or update the smallest targeted Rust/Python test that captures the invariant. Synthetic tests are necessary but not sufficient for decompiler-quality claims.
 4. **Make the scoped change:** keep production changes invariant-based, not function/address/sample-specific. Do not add runtime/build dependencies on `vendor/` reference tools.
 5. **Run local checks:** run the targeted test first, then the relevant crate checks/builds from the Build/Test section. If a known unrelated test is already failing, call it out explicitly.
-6. **Run the focused benchmark / real decomp:** rerun the exact DecBench row (gate `--dump`) or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
-7. **Check regressions:** after a focused improvement, run the broader DecBench measurement on the same rows. Existing perfect rows must not regress, and total distance and type scores should not get worse without an explicit tradeoff. A correctness fix is such a tradeoff: when making the output right costs score, say what the output now prints and why the source-shaped score dropped ([ADR 0018](docs/adr/0018-decbench-is-not-a-correctness-oracle.md)).
+6. **Run the focused benchmark / real decomp:** rerun the exact FreshBench row (`fission_cli decomp` on its stripped binary at the address, or a `sweep run --only` slice) or the same PE/function decomp with no stale decompilation or behavior cache. Compare behavior status, case progress, stdout/stderr, line/byte size, static feature gaps, and readability proxies (e.g. goto count) as applicable.
+7. **Check regressions:** after a focused improvement, run the broader FreshBench measurement (the full M1 run, `sweep diff` against the baseline). Existing perfect rows must not regress, and total distance and type scores should not get worse without an explicit tradeoff. A correctness fix is such a tradeoff: when making the output right costs score, say what the output now prints and why the source-shaped score dropped ([ADR 0019](docs/adr/0019-freshbench-is-the-benchmark.md)).
 8. **Report both bars:** distinguish “mechanically changed” from “quality improved.” A merged test-only, telemetry-only, or fixture-only presentation change is **not** a quality fix unless the measured row (or agreed multi-row sample) moves.
 
 ## Regression-Prevention Workflow Prompt
@@ -415,7 +408,7 @@ Required principles:
 7. Prefer long-term maintainability and generalizable architecture over short-term output patches.
 8. Make proposals and implementations valid across multiple future quality cycles, with explicit observability and verification.
 9. Do not use estimates as evidence. Base claims on measured, reproducible data only (Core Rule 10).
-10. The final success criterion is actual improvement in DecBench measurements — never synthetic fixtures alone.
+10. The final success criterion is actual improvement in FreshBench measurements — never synthetic fixtures alone.
 11. If a change was not motivated by a measured row, do not implement it as a “quality” pass; either measure first or ship it as non-quality mechanical work without quality claims.
 11. Prefer extending shared helpers (loop-carried update, same-block forward branch, return-join live-in, unconditional-copy merge) over new end-of-pipeline passes or ISA-local cleanups.
 
@@ -429,15 +422,15 @@ Resource rules:
 
 Regression-prevention workflow:
 
-1. Start from a concrete DecBench row or small sample function.
+1. Start from a concrete FreshBench row or small sample function.
 2. Record baseline behavior, case pass count, semantic/static score, stdout/stderr, line/byte size, and top feature gaps.
 3. Diagnose the canonical owner before editing: SLEIGH/raw p-code, NIR materialization, type/data recovery, structuring, cleanup, printer, or benchmark scripts.
 4. Make the smallest invariant-based production change at that owner.
 5. Add targeted coverage for the invariant before or with the fix.
 6. Run the targeted test, relevant crate checks/tests, and release CLI build when benchmark validation needs it.
-7. Run the focused DecBench measurement with caches disabled (`FISSION_BENCHMARK_NO_CACHE=1`) for semantic changes.
+7. Run the focused FreshBench measurement (a slice containing the row) for semantic changes.
 8. Compare against the baseline and inspect candidate artifacts, not just aggregate scores.
-9. Run the broader DecBench regression check after focused improvement.
+9. Run the broader FreshBench regression check (the full M1 run) after focused improvement.
 10. Report whether quality improved, stayed unchanged, or regressed. Separate test/telemetry changes from semantic fixes.
 11. Commit and push intermittently only from `main`, and stage only intended hunks in a dirty worktree.
 ```

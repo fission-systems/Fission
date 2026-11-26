@@ -117,7 +117,7 @@ fn apply_hir_presentation_passes(func: &mut HirFunction, globals: &HashSet<Strin
         // `return c ? a : b`. The two forms are the same program, but the `if`
         // is the structure the code was written in, and the fold nests into
         // `a ? b ? x : y : z` chains that read worse than the statements they
-        // replace. Measured on DecBench with the fold removed: O0 distance
+        // replace. Measured on the benchmark with the fold removed: O0 distance
         // +0.87% -> +0.06% against the old mechanical print, O2 neutral.
         // `return x==10 ? 2 : x>10 ? DFLT : ...` → `switch (x) {..}` -- the
         // *other* real "switch lowering" shape (a binary-search-style

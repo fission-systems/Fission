@@ -39,7 +39,7 @@ Declared in root [`Cargo.toml`](https://github.com/fission-systems/Fission/blob/
 
 | Path | Purpose |
 |------|---------|
-| [`benchmark/`](https://github.com/fission-systems/Fission/tree/main/benchmark) | Corpus configs and patch-validation pool (see [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md)) |
+| [`benchmark/`](https://github.com/fission-systems/Fission/tree/main/benchmark) | Corpus configs and patch-validation pool (benchmark: see [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md)) |
 | [`docs/`](index.md) | Versioned guides: architecture, CLI, evaluation, changelog, onboarding (this tree) |
 | [`scripts/`](https://github.com/fission-systems/Fission/tree/main/scripts) | Benchmark/test helpers (`scripts/quality`, `scripts/ci`, `scripts/release`, `scripts/test`) |
 | [`utils/`](https://github.com/fission-systems/Fission/tree/main/utils) | Checked-in specs/data (see [`utils/MANIFEST.md`](https://github.com/fission-systems/Fission/blob/main/utils/MANIFEST.md)) |

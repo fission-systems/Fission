@@ -126,7 +126,7 @@ fn collect(e: &PreHirExpr, out: &mut Vec<PreHirExpr>) -> Option<()> {
 /// Evaluating the `PreHirExpr` directly looked every atom up by structural
 /// equality against the atom list on every row -- up to 4,096 rows times
 /// every leaf, each a deep comparison -- which made truth tables a fifth of
-/// structuring's time on the full DecBench dataset. Resolved, a table is a
+/// structuring's time on the full benchmark dataset. Resolved, a table is a
 /// few word operations per node.
 enum Formula {
     Const(bool),
