@@ -54,7 +54,7 @@ semantic oracle / ranking below.
 ```bash
 # 1) From fission-benchmark: bake current Fission tree into a Linux CLI bundle
 cd ~/fission-benchmark
-export FISSION_ROOT=$FISSION_ROOT
+export FISSION_ROOT=/path/to/Fission   # your Fission checkout
 ./scripts/prepare_local_fission.sh
 
 # 2) Start local Fission service (profile local + both compose files)
