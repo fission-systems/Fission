@@ -16,6 +16,9 @@ name: Free-model draft
 #   small; text-only; no workflow, script or build file. The check runs
 #   again in the job that opens the PR.
 # - No API key: free models need none. No secret reaches the model's job.
+# - Models: free ones have usage limits, so the run number picks which goes
+#   first and a failing or rate-limited one hands over to the next (up to
+#   four), each starting from a clean checkout.
 # - Review: the PR stays a draft, so it cannot enter the merge queue, and CI
 #   does not run on it. A reviewer reads it first (an Opus review), then marks
 #   it ready, which starts CI (`ready_for_review`).
@@ -52,7 +55,8 @@ jobs:
       github.repository == 'fission-systems/Fission'
       && (github.event_name == 'workflow_dispatch' || github.event.label.name == 'agent:free')
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Up to four models at 12 minutes each.
+    timeout-minutes: 60
     permissions:
       contents: read
       issues: read
@@ -76,29 +80,41 @@ jobs:
             --out "$RUNNER_TEMP/draft"
       - name: Install OpenCode
         run: npm install --global --no-fund --no-audit "opencode-ai@$OPENCODE_VERSION"
-      - name: Choose a free model
+      - name: Draft with free models in turn
         id: model
         run: |
           set -euo pipefail
           opencode models opencode > "$RUNNER_TEMP/models.txt"
-          model="$(python3 scripts/ci/free_model_draft.py pick-model --models-file "$RUNNER_TEMP/models.txt")"
-          echo "model=$model" >> "$GITHUB_OUTPUT"
-          echo "Free models listed:"; cat "$RUNNER_TEMP/models.txt"; echo "Chosen: $model"
-      - name: Draft the fix
-        env:
-          MODEL: ${{ steps.model.outputs.model }}
-        run: |
-          set -euo pipefail
+          echo "Free models listed:"; cat "$RUNNER_TEMP/models.txt"
+          # Free models have usage limits: the run number picks which one goes
+          # first, and a model that fails, is rate-limited or leaves no
+          # acceptable edits hands over to the next.
+          models=()
+          while IFS= read -r model; do models+=("$model"); done < <(python3 scripts/ci/free_model_draft.py \
+            order-models --models-file "$RUNNER_TEMP/models.txt" --seed "$GITHUB_RUN_NUMBER")
           OPENCODE_CONFIG_CONTENT="$(cat "$RUNNER_TEMP/draft/permissions.json")"
           export OPENCODE_CONFIG_CONTENT
-          # A model that gives up or times out leaves no edits; the check below says so.
-          timeout 20m opencode run --model "$MODEL" "$(cat "$RUNNER_TEMP/draft/prompt.txt")" || true
-      - name: Check the edits
-        run: |
-          set -euo pipefail
-          python3 scripts/ci/free_model_draft.py check
+          used=""
+          for model in "${models[@]}"; do
+            echo "::group::$model"
+            git reset -q --hard HEAD
+            git clean -fdq
+            timeout 12m opencode run --model "$model" "$(cat "$RUNNER_TEMP/draft/prompt.txt")" \
+              || echo "$model exited with status $?"
+            if python3 scripts/ci/free_model_draft.py check; then
+              used="$model"
+              echo "::endgroup::"
+              break
+            fi
+            echo "::endgroup::"
+          done
+          if [ -z "$used" ]; then
+            echo "::error::no free model left an acceptable draft (tried: ${models[*]})"
+            exit 1
+          fi
+          echo "model=$used" >> "$GITHUB_OUTPUT"
           git diff --cached > "$RUNNER_TEMP/draft/edits.patch"
-          { echo '### Free-model draft'; echo; echo '```diff'; cat "$RUNNER_TEMP/draft/edits.patch"; echo '```'; } \
+          { echo "### Free-model draft by \`$used\`"; echo; echo '```diff'; cat "$RUNNER_TEMP/draft/edits.patch"; echo '```'; } \
             >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

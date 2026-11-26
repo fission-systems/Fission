@@ -28,16 +28,32 @@ class IssueTests(unittest.TestCase):
 
 
 class ModelTests(unittest.TestCase):
-    def test_a_zero_retention_model_is_preferred(self):
-        listing = "opencode/big-pickle\nopencode/hy4-flash-free\nopencode/iceman-free\n"
-        self.assertEqual(fmd.pick_model(listing), "opencode/hy4-flash-free")
+    LISTING = ("opencode/big-pickle\nopencode/hy4-flash-free\nopencode/iceman-free\n"
+               "opencode/deepseek-v4.1-flash-free\nopencode/claude-paid\n")
 
-    def test_any_free_model_when_none_preferred(self):
-        self.assertEqual(fmd.pick_model("opencode/zeta-free\nopencode/alpha-free\n"), "opencode/alpha-free")
+    def test_zero_retention_models_come_first_and_paid_ones_never(self):
+        self.assertEqual(fmd.order_models(self.LISTING, seed=0),
+                         ["opencode/deepseek-v4.1-flash-free", "opencode/hy4-flash-free",
+                          "opencode/big-pickle", "opencode/iceman-free"])
+
+    def test_the_run_number_spreads_the_first_choice(self):
+        firsts = {fmd.order_models(self.LISTING, seed=n)[0] for n in range(4)}
+        self.assertEqual(firsts, {"opencode/deepseek-v4.1-flash-free", "opencode/hy4-flash-free"})
+        self.assertEqual(fmd.order_models(self.LISTING, seed=1)[:2],
+                         ["opencode/hy4-flash-free", "opencode/deepseek-v4.1-flash-free"])
+
+    def test_every_free_model_is_tried_once_up_to_the_limit(self):
+        order = fmd.order_models(self.LISTING, seed=3)
+        self.assertEqual(len(order), len(set(order)))
+        self.assertEqual(len(fmd.order_models(self.LISTING, seed=0, limit=2)), 2)
+
+    def test_other_free_models_when_none_preferred(self):
+        self.assertEqual(fmd.order_models("opencode/zeta-free\nopencode/alpha-free\n", seed=0),
+                         ["opencode/alpha-free", "opencode/zeta-free"])
 
     def test_no_free_model_is_an_error(self):
         with self.assertRaises(SystemExit):
-            fmd.pick_model("opencode/claude-paid\n")
+            fmd.order_models("opencode/claude-paid\n", seed=0)
 
 
 class PermissionTests(unittest.TestCase):
