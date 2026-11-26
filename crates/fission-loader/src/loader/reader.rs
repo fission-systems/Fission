@@ -104,11 +104,18 @@ impl<'a> ByteReader<'a> {
         String::from_utf8_lossy(&tail[..end]).to_string()
     }
 
-    pub fn ascii_lines(&self) -> impl Iterator<Item = &'a str> + 'a {
+    /// Lines without their terminators; `None` for a line that is not ASCII.
+    /// A record format must reject such a line: skipping it would load the
+    /// file with some of its data silently missing.
+    pub fn ascii_lines(&self) -> impl Iterator<Item = Option<&'a str>> + 'a {
         self.bytes
             .split(|&b| b == b'\n')
             .map(|line| line.strip_suffix(b"\r").unwrap_or(line))
-            .filter_map(|line| std::str::from_utf8(line).ok())
+            .map(|line| {
+                std::str::from_utf8(line)
+                    .ok()
+                    .filter(|text| text.is_ascii())
+            })
     }
 }
 

@@ -304,10 +304,14 @@ fission_cli --language ARM:LE:32:v8 --base 0x8000000 --entry 0x8000101 decomp fi
 Intel HEX and Motorola S-record files describe where their bytes go but not
 what processor runs them, so they load only with `--language` (no `--base`: the
 records give the addresses). Each contiguous run of records becomes one
-section, and a start-address record (Intel HEX 03/05, S7/S8/S9) that lands on a
-record seeds `entry`; without one, nothing is seeded, so name the function with
-`--addr`. `patch` refuses these files: it writes the loaded bytes back out, and
-here they are the decoded image, not the text.
+section; a run ending past the language's address space, or a line that is not a
+record, fails the load. A start-address record (Intel HEX 03/05, S7/S8/S9) that
+lands on a record is the entry point and seeds `entry` (on ARM and MIPS the mode
+bit is ignored for that check). Without one there is no entry point: `info`
+prints `Entry: none` (`--json`: `"entry": "0x0"` with `"entry_declared":
+false`), nothing is seeded, and functions are named with `--addr`. `patch`
+refuses these files: it writes the loaded bytes back out, and here they are the
+decoded image, not the text.
 
 ```bash
 fission_cli --language ARM:LE:32:Cortex list firmware.hex
