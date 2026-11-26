@@ -79,7 +79,7 @@ jobs:
         env:
           BASE_COMMIT: ${{ steps.baseline.outputs.commit }}
         run: |
-          python3 scripts/ci/speed_compare.py --data "$RUNNER_TEMP/decbench" \
+          python3 scripts/ci/speed_compare.py --data "$RUNNER_TEMP/freshbench" \
             --base-cli baseline/fission_cli --head-cli speed-cli/fission_cli \
             --title "Decompile cost, ${BASE_COMMIT:0:9} -> $(git rev-parse --short HEAD)" \
             --out speed-report --fail-on-regression

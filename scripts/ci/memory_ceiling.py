@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decompile the largest DecBench binaries under a memory ceiling.
+"""Decompile the largest FreshBench M1 binaries under a memory ceiling.
 
 Memory blow-ups have reached main more than once (switch recovery re-pushing
 the same node until OOM, a DAG printed as a tree to 61M statements, a machine
@@ -8,9 +8,10 @@ not a process that grows. This decompiles the binaries most likely to grow,
 watches the process tree's resident memory, kills it at the ceiling, and fails
 if any binary reached it.
 
-The sample is chosen by rule: per project, the manifest binary with the most
-functions; then the LARGEST projects by that count. Binaries are downloaded
-from the pinned dataset revision, hash-checked, and only decompiled (static).
+The sample is chosen by rule: per project, the largest stripped binary in the
+corpus (by size, across every build); then the LARGEST projects by that size.
+Binaries come from the pinned FreshBench revision, hash-checked
+(freshbench_corpus.py), and are only decompiled (static).
 """
 
 from __future__ import annotations
@@ -23,8 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quality"))
-import decbench_full_sweep as sweep  # noqa: E402
+import freshbench_corpus as corpus
 
 LARGEST = 8
 POLL_SECONDS = 0.25
@@ -32,12 +32,12 @@ POLL_SECONDS = 0.25
 
 def sample(entries: list[dict], count: int = LARGEST) -> list[dict]:
     best: dict[str, dict] = {}
-    for entry in entries:
+    for entry in corpus.stripped(entries):
         project = entry["project"]
-        key = (len(entry["functions"]), entry["binary_path"])
-        if project not in best or key > (len(best[project]["functions"]), best[project]["binary_path"]):
+        key = (entry["size"], entry["path"])
+        if project not in best or key > (best[project]["size"], best[project]["path"]):
             best[project] = entry
-    ranked = sorted(best.values(), key=lambda e: (-len(e["functions"]), e["binary_path"]))
+    ranked = sorted(best.values(), key=lambda e: (-e["size"], e["path"]))
     return ranked[:count]
 
 
@@ -90,7 +90,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--cli", type=Path, required=True)
-    parser.add_argument("--resources", type=Path, default=sweep.REPO / "utils")
+    parser.add_argument("--resources", type=Path, default=corpus.REPO / "utils")
     parser.add_argument("--ceiling-gib", type=float, default=8.0)
     parser.add_argument("--timeout", type=float, default=1200.0, help="seconds per binary")
     parser.add_argument("--count", type=int, default=LARGEST)
@@ -98,21 +98,19 @@ def main() -> int:
 
     ceiling = int(args.ceiling_gib * 1024 * 1024)
     rows = []
-    for entry in sample(sweep.manifest(args.data), args.count):
-        binary = sweep.fetch(entry["binary_path"], args.data)
-        if binary.stat().st_size != entry["size"] or sweep.digest(binary) != entry["sha256"]:
-            raise SystemExit(f"dataset binary hash or size differs for {entry['binary_path']}")
+    for entry in sample(corpus.manifest(args.data), args.count):
+        binary = corpus.fetch(entry, args.data)
         command = [str(args.cli), "--resource-root", str(args.resources), "--no-db", "decomp",
                    str(binary), "--all", "--json", "--no-header", "--no-warnings"]
         outcome, peak, seconds = run_under_ceiling(command, ceiling, args.timeout)
-        rows.append((entry["binary_path"], len(entry["functions"]), outcome, peak, seconds))
-        print(f"{entry['binary_path']}: {outcome}, peak {peak / 1048576:.2f} GiB, {seconds:.0f} s", flush=True)
+        rows.append((entry["path"], entry["size"], outcome, peak, seconds))
+        print(f"{entry['path']}: {outcome}, peak {peak / 1048576:.2f} GiB, {seconds:.0f} s", flush=True)
 
     over = [row for row in rows if row[2] == "ceiling"]
     # A CLI that errors or hangs on a binary never reached its peak, so that
     # binary says nothing about memory: it fails the check too.
     unmeasured = [row for row in rows if row[2] in ("error", "timeout")]
-    lines = [f"| binary | functions | outcome | peak RSS (GiB) | seconds |", "|---|---|---|---|---|"]
+    lines = [f"| binary | bytes | outcome | peak RSS (GiB) | seconds |", "|---|---|---|---|---|"]
     lines += [f"| `{b}` | {n} | {o} | {p / 1048576:.2f} | {s:.0f} |" for b, n, o, p, s in rows]
     summary = (f"Memory ceiling {args.ceiling_gib:g} GiB: {len(over)} of {len(rows)} binaries reached it; "
                f"{len(unmeasured)} did not finish (error or timeout).")

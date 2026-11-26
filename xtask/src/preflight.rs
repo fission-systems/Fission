@@ -71,7 +71,7 @@ const NOT_LOCAL: [(&str, &str); 14] = [
     ("run_loader_fixtures", "pre-merge loader lane"),
     ("run_decomp_corpus", "pre-merge decompiler corpus lane"),
     ("run_package_check", "Package candidate rehearsal"),
-    ("run_sweep_smoke", "DecBench sweep smoke"),
+    ("run_sweep_smoke", "FreshBench sweep smoke"),
     ("run_sccache_fallback", "sccache outage fallback"),
 ];
 

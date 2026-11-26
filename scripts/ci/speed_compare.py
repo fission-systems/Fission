@@ -9,8 +9,8 @@ So each binary is decompiled once to warm up and then RUNS times, and the
 minimum is kept; both CLIs run on the same runner in the same job, because
 library code can pick different instructions on different CPUs.
 
-The sample is fixed by rule: the first BINARIES manifest binaries in sha256
-order, LIMIT functions each (`decomp --all --limit`), single-threaded and
+The sample is fixed by rule: the first BINARIES stripped FreshBench M1
+binaries in sha256 order (freshbench_corpus.py), LIMIT functions each (`decomp --all --limit`), single-threaded and
 static. That bounds the cost: under valgrind one run of 40 functions took
 25-76 s, and start-up alone (load, SLEIGH frontend) is ~3.7e9 instructions,
 which stays in the count on purpose -- it is paid on every CLI call. Linux only.
@@ -26,8 +26,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quality"))
-import decbench_full_sweep as sweep  # noqa: E402
+import freshbench_corpus as corpus
 
 RUNS = 2
 BINARIES = 6
@@ -95,16 +94,14 @@ def main() -> int:
     parser.add_argument("--fail-on-regression", action="store_true")
     args = parser.parse_args()
 
-    head_resources = args.head_resources or sweep.REPO / "utils"
+    head_resources = args.head_resources or corpus.REPO / "utils"
     base_resources = args.base_resources or head_resources
     caches = Path(tempfile.mkdtemp(prefix="speed-sleigh-cache-"))
     rows = []
-    entries = sorted(sweep.manifest(args.data), key=lambda e: e["sha256"])[: args.binaries]
+    entries = sorted(corpus.stripped(corpus.manifest(args.data)), key=lambda e: e["sha256"])[: args.binaries]
     for entry in entries:
-        binary = sweep.fetch(entry["binary_path"], args.data)
-        if binary.stat().st_size != entry["size"] or sweep.digest(binary) != entry["sha256"]:
-            raise SystemExit(f"dataset binary hash or size differs for {entry['binary_path']}")
-        row = {"binary": entry["binary_path"], "functions": LIMIT,
+        binary = corpus.fetch(entry, args.data)
+        row = {"binary": entry["path"], "functions": LIMIT,
                "base": cost(args.base_cli, binary, base_resources, cache=caches / "base"),
                "head": cost(args.head_cli, binary, head_resources, cache=caches / "head")}
         rows.append(row)
