@@ -203,5 +203,15 @@
     "name": "documentation",
     "color": "0075ca",
     "description": "Improvements or additions to documentation"
+  },
+  {
+    "name": "agent:free",
+    "color": "c5def5",
+    "description": "Simple issue: an OpenCode Zen free model drafts a fix (free-model-draft.yml)"
+  },
+  {
+    "name": "agent:free-draft",
+    "color": "c5def5",
+    "description": "Draft PR from a free model; needs an Opus review before it leaves draft"
   }
 ]
