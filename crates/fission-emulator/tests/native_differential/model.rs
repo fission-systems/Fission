@@ -183,50 +183,6 @@ fn nan_payload_only(a: &[u8; 16], b: &[u8; 16], width: u32) -> bool {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::nan_payload_only;
-
-    fn lanes(low: u64) -> [u8; 16] {
-        let mut v = [0u8; 16];
-        v[..8].copy_from_slice(&low.to_le_bytes());
-        v
-    }
-
-    #[test]
-    fn a_different_f16_value_next_to_a_nan_is_not_a_nan_payload() {
-        let (a, b) = (lanes(0x7fff_3c00), lanes(0x7fff_4000)); // 1.0 and 2.0
-        assert!(!nan_payload_only(&a, &b, 2));
-    }
-
-    #[test]
-    fn a_different_f32_value_next_to_a_nan_is_not_a_nan_payload() {
-        let a = lanes(0x7fff_e000_3f80_0000); // 1.0 below a NaN
-        let b = lanes(0x7fff_e000_4000_0000); // 2.0 below the same NaN
-        assert!(!nan_payload_only(&a, &b, 4));
-    }
-
-    #[test]
-    fn two_nans_in_every_differing_lane_are_a_nan_payload() {
-        for (width, x, y) in [
-            (2, 0x3c00_7e01, 0x3c00_fe02),
-            (4, 0x3f80_0000_7fc0_0001, 0x3f80_0000_ffc0_0002),
-            (8, 0x7ff8_0000_0000_0001, 0xfff4_0000_0000_0000),
-        ] {
-            assert!(nan_payload_only(&lanes(x), &lanes(y), width), "{width}");
-        }
-    }
-
-    #[test]
-    fn an_infinity_is_not_a_nan() {
-        assert!(!nan_payload_only(
-            &lanes(0x7f80_0000),
-            &lanes(0x7fc0_0000),
-            4
-        ));
-    }
-}
-
 // ── Value generation ────────────────────────────────────────────────────────
 
 const INT_SPECIALS: &[u64] = &[
@@ -397,4 +353,48 @@ pub fn vec_value(rng: &mut Rng) -> [u8; 16] {
         _ => rng.fill(&mut out),
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::nan_payload_only;
+
+    fn lanes(low: u64) -> [u8; 16] {
+        let mut v = [0u8; 16];
+        v[..8].copy_from_slice(&low.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn a_different_f16_value_next_to_a_nan_is_not_a_nan_payload() {
+        let (a, b) = (lanes(0x7fff_3c00), lanes(0x7fff_4000)); // 1.0 and 2.0
+        assert!(!nan_payload_only(&a, &b, 2));
+    }
+
+    #[test]
+    fn a_different_f32_value_next_to_a_nan_is_not_a_nan_payload() {
+        let a = lanes(0x7fff_e000_3f80_0000); // 1.0 below a NaN
+        let b = lanes(0x7fff_e000_4000_0000); // 2.0 below the same NaN
+        assert!(!nan_payload_only(&a, &b, 4));
+    }
+
+    #[test]
+    fn two_nans_in_every_differing_lane_are_a_nan_payload() {
+        for (width, x, y) in [
+            (2, 0x3c00_7e01, 0x3c00_fe02),
+            (4, 0x3f80_0000_7fc0_0001, 0x3f80_0000_ffc0_0002),
+            (8, 0x7ff8_0000_0000_0001, 0xfff4_0000_0000_0000),
+        ] {
+            assert!(nan_payload_only(&lanes(x), &lanes(y), width), "{width}");
+        }
+    }
+
+    #[test]
+    fn an_infinity_is_not_a_nan() {
+        assert!(!nan_payload_only(
+            &lanes(0x7f80_0000),
+            &lanes(0x7fc0_0000),
+            4
+        ));
+    }
 }
