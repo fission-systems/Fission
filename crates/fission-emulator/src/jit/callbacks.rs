@@ -438,6 +438,33 @@ pub unsafe extern "C" fn jit_observe_insn(emu_ptr: *mut Emulator, pc: u64) {
     emu.notify_insn(pc);
 }
 
+/// An indirect call or jump is about to leave the instruction at `site`.
+///
+/// Emitted only when some observer asked for `indirect`. `kind` is zero for a
+/// call and one for a jump.
+///
+/// # Safety
+///
+/// See the module-level [callback contract](self#callback-contract).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn jit_observe_indirect(
+    emu_ptr: *mut Emulator,
+    site: u64,
+    site_len: u64,
+    target: u64,
+    kind: u64,
+) {
+    // SAFETY: compiled blocks pass the live emulator that entered them, and
+    // hold no other borrow of it across the call.
+    let emu = unsafe { &mut *emu_ptr };
+    let kind = if kind == 0 {
+        crate::observe::IndirectKind::Call
+    } else {
+        crate::observe::IndirectKind::Jump
+    };
+    emu.notify_indirect(site, site_len as u32, target, kind);
+}
+
 /// P-code ops a budgeted run may execute before the livelock fuse trips.
 ///
 /// Generous per guest instruction, because one instruction legitimately can be

@@ -9,7 +9,8 @@
 //! - [`runtime`]: where in a running process, and how that maps back to an
 //!   image -- or does not, for modified and anonymous code;
 //! - [`evidence`]: who claims what, within which scope, from which inputs;
-//! - [`ledger`]: the append-only collection of those claims.
+//! - [`ledger`]: the append-only collection of those claims;
+//! - [`trace`]: the artifact a run reports before anything is attributed.
 //!
 //! The crate holds contracts and their validation. It reads no binary, runs no
 //! analysis and persists nothing: producers and consumers own that.
@@ -20,6 +21,7 @@ pub mod identity;
 pub mod ledger;
 pub mod location;
 pub mod runtime;
+pub mod trace;
 
 pub use digest::{ContentDigest, DigestError};
 pub use evidence::{
@@ -34,4 +36,8 @@ pub use location::{CodeLocation, CodeVersion, DecodeContext, FunctionKey};
 pub use runtime::{
     Attribution, ImageBytes, Mapping, MappingBacking, MappingError, MappingTable, RunId,
     RuntimeCodeLocation, RuntimeCodeOrigin, RuntimeLocation, UnattributedReason, attribute,
+};
+pub use trace::{
+    Completeness, HexBytes, ObservedTransfer, RUNTIME_TRACE_SCHEMA, RuntimeTrace, TraceError,
+    TransferKind,
 };

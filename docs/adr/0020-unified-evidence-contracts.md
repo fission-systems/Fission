@@ -131,13 +131,27 @@ insertion order, and loading re-derives every id and refuses a file that does
 not match. The claim encoding is pinned by a test: changing it renames stored
 claims and needs a new ledger schema.
 
-### 5. What M1 adds on these contracts
+### 5. The M1 slice on these contracts
 
-One slice, opt-in: the emulator reports indirect transfers as plain values to
-its existing observer interface (selected at translation time, so a run that
-does not ask carries no callback); the kernel records them as a runtime trace,
-imports a trace into a ledger, and joins the ledger with the p-code the
-decompiler itself lifts. Ordinary decompilation reads no evidence.
+Opt-in from end to end:
+
+| Step | Owner | Behaviour |
+|---|---|---|
+| Observe | `fission-emulator` | `ObserveMask::indirect` selects, at translation time, a callback on `CALLIND` and `BRANCHIND` in both engines, carrying plain values and the bytes at both ends. A run that does not ask compiles without it |
+| Record | kernel `record` (`sandbox --indirect-trace-out`) | distinct transfers in first-seen order, bounded, with dropped and unfinished captures marked |
+| Interchange | `fission-evidence` `fission-runtime-trace-v1` | addresses and bytes, not conclusions. `RunId` is the digest of the whole trace, so an identical replay is the same run |
+| Import | kernel `import` (`evidence import`) | refuses another image; attributes both ends through the trace's mappings and the binary's bytes; atomic per command |
+| Persist | kernel `store` | one JSON ledger, replaced atomically; the M2 store replaces it |
+| View | kernel `view` (`evidence explain`) | joins the ledger with the p-code from `fission_decompiler::lift_function_pcode`, the lift a default decompile uses; claims of another spec, decoder context or code version, and withdrawn or refuted ones, are listed as not applied |
+
+Ordinary decompilation reads no evidence. Feeding observed targets into
+`FactStore` or the structurer (#1002) is not part of this slice: it would change
+default output and needs its own measurement.
+
+Limits of the first producer: one guest process in mapping epoch 0, with only
+the executable sections as image mappings, so code in memory mapped at run time
+stays unattributed; targets carry the default decoder context, and a site whose
+runtime context differs from the lift's (ARM/Thumb interworking) is not applied.
 
 ## Consequences
 

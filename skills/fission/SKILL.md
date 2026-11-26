@@ -179,6 +179,10 @@ fission_cli --contract v1 call ./target.bin --name check --arg 7 --json
 fission_cli --contract v1 call ./target.bin --addr 0x401230 --stub-calls 0 --json
 ```
 - `raw-pcode`, `pcode-stages` and `nir-stats` show the lift beneath a suspect line.
+- To see where an indirect call went, record a run with `sandbox
+  --indirect-trace-out run.json`, then `evidence import <bin> run.json --store
+  ev.json` and `evidence explain <bin> --addr 0x... --store ev.json --json`.
+  Observed targets are not all targets: `target_set` stays `open`.
 
 The sandbox is an emulator with a modelled Linux x86-64 runtime, not a full libc or
 loader. Anti-debugging, packing and opaque indirect checks may defeat it; say so

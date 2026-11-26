@@ -30,6 +30,23 @@ fn extract_safe_bytes_from_decode_error(err: &str, func_addr: u64) -> Option<usi
     if safe == 0 { None } else { Some(safe) }
 }
 
+/// The decoder context a lift at `entry_address` starts in.
+pub(crate) fn entry_context_override(
+    binary: &LoadedBinary,
+    entry_address: u64,
+) -> Option<fission_sleigh::runtime::PackedContextOverride> {
+    let load_spec = binary.load_spec()?;
+    let lifters = RuntimeSleighFrontend::new_candidate_frontends_for_load_spec(load_spec).ok()?;
+    let lifter = lifters.first()?;
+    let address_state = lifter.normalize_low_bit_code_address(entry_address);
+    decode_context_for_address(
+        binary,
+        lifter,
+        entry_address,
+        address_state.context_override,
+    )
+}
+
 pub(crate) fn pcode_op_count(pcode: &PcodeFunction) -> usize {
     pcode.blocks.iter().map(|b| b.ops.len()).sum()
 }

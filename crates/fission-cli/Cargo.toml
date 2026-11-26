@@ -48,6 +48,8 @@ fission-script = { path = "../fission-script" }
 fission-project = { path = "../fission-project" }
 fission-loader = { path = "../fission-loader" }
 fission-analysis-db = { path = "../fission-analysis-db" }
+fission-analysis-kernel = { path = "../fission-analysis-kernel", features = ["emulator"] }
+fission-evidence = { path = "../fission-evidence" }
 fission-static = { path = "../fission-static" }
 fission-signatures = { path = "../fission-signatures" }
 fission-decompiler = { path = "../fission-decompiler" }

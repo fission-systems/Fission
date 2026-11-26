@@ -243,6 +243,20 @@ impl Emulator {
                     idx = target;
                 }
                 StepResult::Branch(addr) => {
+                    let indirect = match op.opcode {
+                        PcodeOpcode::CallInd => Some(crate::observe::IndirectKind::Call),
+                        PcodeOpcode::BranchInd => Some(crate::observe::IndirectKind::Jump),
+                        _ => None,
+                    };
+                    if self.observe.indirect
+                        && let Some(kind) = indirect
+                    {
+                        let site = self.pc;
+                        let site_len = instruction_fallthroughs
+                            .get(&site)
+                            .map_or(0, |next| next.wrapping_sub(site) as u32);
+                        self.notify_indirect(site, site_len, addr, kind);
+                    }
                     if self.halt_requested {
                         return Ok(InterpExit::Halt);
                     }

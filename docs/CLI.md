@@ -553,6 +553,39 @@ before main; it does not implement full module TLS. Stack-check failure halts
 with conventional status 134 without simulating guest SIGABRT delivery. See the
 measured [crackme workflow](CRACKME_WORKFLOW.md) for a complete solve and replay.
 
+## Evidence Command
+
+Runtime observations are kept in their own file and read only when asked for.
+`decomp` and every other command ignore them (ADR 0020).
+
+```sh
+fission_cli sandbox ./app.elf --indirect-trace-out run1.json
+fission_cli sandbox ./app.elf --indirect-trace-out run2.json -- other
+fission_cli evidence import ./app.elf run1.json run2.json --store app.evidence.json
+fission_cli evidence explain ./app.elf --addr 0x10012a0 --store app.evidence.json --json
+```
+
+- `--indirect-trace-out` records each distinct indirect call and jump with the
+  bytes at both ends. Without it the compiled blocks carry no callback. It
+  cannot be combined with `--sym-explore`, which forces paths, or
+  `--restore-snapshot`. The trace holds a digest of the arguments, mocked input
+  and instruction budget, not their values; it does hold code addresses and
+  code bytes.
+- `import` refuses a trace of another image (content hash, language or compiler
+  spec) and writes nothing if any given trace is refused. Importing a trace
+  again adds nothing. An address becomes a binary address only if the observed
+  bytes equal the file's; otherwise it is reported as run-time code or
+  unattributed. A capture that did not reach the guest's exit marks every claim.
+- `explain` lists the indirect sites of the function containing `--addr`, the
+  targets the static lift connected, and the observed targets with producer,
+  run, verification status and artifact record. `target_set` is always `open`:
+  a target nobody observed remains possible.
+
+Limits of this first version: one guest process with its mappings as loaded
+(code in memory mapped at run time stays unattributed), executable sections
+only, and one JSON evidence file with no coordination between concurrent
+`import`s.
+
 ## Verify Command
 
 `verify` checks the printed pseudocode against the machine code it came from.

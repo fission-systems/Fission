@@ -923,6 +923,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "fission-analysis-kernel"
+version = "0.4.0"
+dependencies = [
+ "fission-analysis-db",
+ "fission-analysis-kernel",
+ "fission-analysis-protocol",
+ "fission-decompiler",
+ "fission-emulator",
+ "fission-evidence",
+ "fission-loader",
+ "fission-sleigh",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "fission-analysis-protocol"
 version = "0.4.0"
 dependencies = [
@@ -954,12 +970,14 @@ dependencies = [
  "clap",
  "ctrlc",
  "fission-analysis-db",
+ "fission-analysis-kernel",
  "fission-analysis-protocol",
  "fission-core",
  "fission-decompiler",
  "fission-dir",
  "fission-dynamic",
  "fission-emulator",
+ "fission-evidence",
  "fission-loader",
  "fission-project",
  "fission-quotient",

@@ -355,6 +355,10 @@ impl JitCompiler {
                 crate::jit::callbacks::jit_observe_insn as *const u8,
             ),
             (
+                "jit_observe_indirect",
+                crate::jit::callbacks::jit_observe_indirect as *const u8,
+            ),
+            (
                 "jit_count_pcode",
                 crate::jit::callbacks::jit_count_pcode as *const u8,
             ),
@@ -818,6 +822,14 @@ impl JitCompiler {
             .declare_function("jit_observe_insn", Linkage::Import, &sig_observe)
             .unwrap();
 
+        // (emu, site, site_len, target, kind)
+        let mut sig_indirect = self.module.make_signature();
+        sig_indirect.params.extend([AbiParam::new(types::I64); 5]);
+        let observe_indirect_fn = self
+            .module
+            .declare_function("jit_observe_indirect", Linkage::Import, &sig_indirect)
+            .unwrap();
+
         let mut sig_pcode = self.module.make_signature();
         sig_pcode.params.push(AbiParam::new(types::I64));
         sig_pcode.returns.push(AbiParam::new(types::I64));
@@ -974,6 +986,9 @@ impl JitCompiler {
         let observe_insn_ref = self
             .module
             .declare_func_in_func(observe_insn_fn, builder.func);
+        let observe_indirect_ref = self
+            .module
+            .declare_func_in_func(observe_indirect_fn, builder.func);
         let observe = self.observe;
         let shadow = self.shadow;
         let count_pcode_ref = self
@@ -1035,6 +1050,17 @@ impl JitCompiler {
         for (i, pc, len) in &insn_starts {
             insn_starts_at[(*i).min(n_ops)].push((*pc, *len));
         }
+        // The instruction each op belongs to: the last one that starts at or
+        // before it, since a p-code-less instruction shares its start index
+        // with the instruction that owns the op there.
+        let mut owner = (start_pc, 0u32);
+        let op_owner: Vec<(u64, u32)> = insn_starts_at[..n_ops]
+            .iter()
+            .map(|starts| {
+                owner = starts.last().copied().unwrap_or(owner);
+                owner
+            })
+            .collect();
 
         macro_rules! ensure_var {
             ($space:expr, $offset:expr, $size:expr) => {{
@@ -2784,6 +2810,18 @@ impl JitCompiler {
                 }
                 PcodeOpcode::CallInd | PcodeOpcode::BranchInd | PcodeOpcode::Return => {
                     let target = load_vn!(&op.inputs[0]);
+                    if observe.indirect && op.opcode != PcodeOpcode::Return {
+                        let (site, site_len) = op_owner[idx];
+                        let site = builder.ins().iconst(types::I64, site as i64);
+                        let site_len = builder.ins().iconst(types::I64, i64::from(site_len));
+                        let kind = builder
+                            .ins()
+                            .iconst(types::I64, i64::from(op.opcode == PcodeOpcode::BranchInd));
+                        builder.ins().call(
+                            observe_indirect_ref,
+                            &[emu_ptr, site, site_len, target, kind],
+                        );
+                    }
                     builder.ins().jump(exit_block, &[BlockArg::from(target)]);
                     branched = true;
                 }
