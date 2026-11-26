@@ -166,7 +166,14 @@ fn snapshot(root: &Path) -> Result<String, String> {
                 "-m",
                 "cargo xtask remote: working tree",
             ],
-            &[],
+            // A throwaway commit on a temporary branch: a fixed identity, so
+            // it works where no git identity is configured (CI, fresh hosts).
+            &[
+                ("GIT_AUTHOR_NAME", "cargo xtask remote"),
+                ("GIT_AUTHOR_EMAIL", "remote@xtask.invalid"),
+                ("GIT_COMMITTER_NAME", "cargo xtask remote"),
+                ("GIT_COMMITTER_EMAIL", "remote@xtask.invalid"),
+            ],
         )
     })();
     let _ = std::fs::remove_file(&index);
