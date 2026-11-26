@@ -110,6 +110,12 @@ each is recorded in `MANIFEST.sha256.json` (`source_path`).
   element width (`Max(SInt(data), SInt(value))` over 8 or 16 bits); upstream compared the
   loaded element with the whole 32-bit `Ws`, so the stored maximum could be the register's
   low byte (#1069). Re-apply with `scripts/sleigh/apply_aarch64_lse_minmax_width.py`.
+- `AARCH64/AARCH64base.sinc` (and the three compiled `AARCH64*.sla`): 64-bit `CASP`
+  compares and stores the pair in register order (Rs/Rt at the lower address, Rs+1/Rt+1
+  above it, in both byte orders, per the Arm ARM `CASP` pseudocode); upstream swapped them
+  for little-endian, so a matching compare failed and no store happened (found by an Apple
+  M4 run once Fission's attach-table holes were fixed, fission-systems/Fission#1391).
+  Re-apply with `scripts/sleigh/apply_aarch64_casp_pair_order.py`.
 - `AARCH64/AARCH64ldst.sinc` (and the three compiled `AARCH64*.sla`): `LD1`..`LD4` and
   `LD1R`..`LD4R` with a 64-bit arrangement (`.8B/.4H/.2S/.1D`) zero bits 127:64 (and the SVE
   upper bits) of every destination, as `V[t, 64] = rval` does; upstream left them, marked
