@@ -40,13 +40,15 @@ class MemoryCeilingTests(unittest.TestCase):
 
     def test_sample_takes_each_projects_largest_binary(self):
         entries = [
-            {"project": "a", "binary_path": "a/1", "functions": ["f"] * 5},
-            {"project": "a", "binary_path": "a/2", "functions": ["f"] * 9},
-            {"project": "b", "binary_path": "b/1", "functions": ["f"] * 7},
-            {"project": "c", "binary_path": "c/1", "functions": ["f"] * 1},
+            {"project": "a", "path": "stripped/gcc-O0/a/1", "kind": "stripped", "size": 5},
+            {"project": "a", "path": "stripped/gcc-O2/a/2", "kind": "stripped", "size": 9},
+            {"project": "a", "path": "binaries/gcc-O2/a/2", "kind": "binary", "size": 99},
+            {"project": "b", "path": "stripped/gcc-O0/b/1", "kind": "stripped", "size": 7},
+            {"project": "c", "path": "stripped/gcc-O0/c/1", "kind": "stripped", "size": 1},
         ]
-        self.assertEqual([e["binary_path"] for e in memory_ceiling.sample(entries, 2)], ["a/2", "b/1"])
-
+        # The unstripped copy is never a decompiler input, however large.
+        self.assertEqual([e["path"] for e in memory_ceiling.sample(entries, 2)],
+                         ["stripped/gcc-O2/a/2", "stripped/gcc-O0/b/1"])
 
 if __name__ == "__main__":
     unittest.main()

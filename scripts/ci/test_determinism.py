@@ -49,13 +49,13 @@ class DeterminismTests(unittest.TestCase):
         runs = [{"0x1": "x", "0x2": "y"}, {"0x1": "x", "0x2": "z"}, {"0x1": "x", "0x3": "w"}]
         self.assertEqual(determinism_check.differing(runs), ["0x2", "0x3"])
 
-    def test_sample_is_fixed_and_bounded(self):
-        entries = [{"sha256": f"{n:02x}", "functions": ["f"] * (n + 1), "binary_path": str(n)} for n in range(40)]
-        chosen = determinism_check.sample(list(reversed(entries)))
-        self.assertEqual(chosen, determinism_check.sample(entries))
-        before_last = sum(len(e["functions"]) for e in chosen[:-1])
-        self.assertLess(before_last, determinism_check.FUNCTION_BUDGET)
-
+    def test_sample_order_is_fixed_and_takes_only_stripped_binaries(self):
+        entries = [{"sha256": f"{n:02x}", "kind": kind, "path": f"{kind}/{n}"}
+                   for n in range(10) for kind in ("stripped", "binary")]
+        chosen = determinism_check.ordered(list(reversed(entries)))
+        self.assertEqual(chosen, determinism_check.ordered(entries))
+        self.assertEqual({e["kind"] for e in chosen}, {"stripped"})
+        self.assertEqual([e["sha256"] for e in chosen], sorted(e["sha256"] for e in chosen))
 
 if __name__ == "__main__":
     unittest.main()

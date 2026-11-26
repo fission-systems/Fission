@@ -4,7 +4,7 @@
 |---|---|---|
 | Fast Gate | All PR targets, GitHub merge candidates and pushes to main | Change plan from event SHAs, with affected Linux tests, CLI smoke and pre-merge lanes when selected |
 | Heavy | Nightly or workflow dispatch | Linux workspace tests, Windows and macOS coverage, MSRV, compile surface and the RustSec advisory check |
-| DecBench full sweep | Nightly or workflow dispatch | 24 shards with exact row coverage, per-function results, and comparison with a compatible passing main sweep |
+| FreshBench full sweep | Nightly or workflow dispatch | One shard per M1 build (48), per-function results, and comparison with a compatible passing main sweep |
 | Release PR | `Prepare Release PR` dispatch | Version bump, drafted notes and the pinned candidate; never tags |
 | Release E2E and packages | Intentional release dispatch or SemVer tag push | L0 and L1 on the exact SHA, which must be the merged Release PR on top of its candidate; release CLI E2E and five unpacked platform packages |
 | Publish | Successful release candidate run | SHA256 manifest and artifact provenance, complete draft release verified before publication |
@@ -20,10 +20,11 @@ Superseded updates to the same PR can still cancel older PR runs.
 Changes to CI definitions run actionlint, the CI tool tests, affected Rust tests
 and a CLI smoke run. A change to a lane's own definition also runs that lane:
 editing `reusable-premerge.yml`, its smoke script, `scripts/macos/` or the
-checked-in fixtures runs every pre-merge lane, and editing the DecBench sweep
-(workflow, script, scorer or its pinned requirements) runs the nightly workflow
-on one binary, which fails unless decompilation, GED and type scoring all
-produced data. Enabled nextest suites fail if they discover no tests. An
+checked-in fixtures runs every pre-merge lane, and editing the FreshBench sweep
+(workflow, `scripts/ci/freshbench_sweep.py` or `freshbench_corpus.py`, which
+pins the corpus and scorer) runs the nightly workflow on one binary, which fails
+unless decompilation, GED and type scoring all produced data and no tool call
+failed. Enabled nextest suites fail if they discover no tests. An
 enabled lane whose job is skipped, cancelled or failed makes `CI Summary` fail.
 
 The native debugger lane exercises Linux, Windows and macOS processes on hosted
@@ -85,17 +86,18 @@ still serves later steps; it runs when the setup or `ci.yml` changes.
 - Speed: a PR that changes the decompiler, or carries the `type:performance`
   label when pushed, counts instructions executed by its base and head CLIs
   after its Linux tests pass
-  on six fixed DecBench binaries (valgrind cachegrind; wall time on shared
+  on six fixed FreshBench M1 binaries (valgrind cachegrind; wall time on shared
   runners is too noisy) and flags +3% in its summary; nightly `speed.yml`
   compares main with the last good night and fails at +3%. Dispatch it with
   `accept_baseline` to accept a slowdown that is worth it.
 - Decompiler changes: a PR that can move output gets an output diff on a
-  fixed DecBench sample (about 3,000 functions) in its job summary: the
-  functions whose text changed first, then GED and type_match before and after.
-  Report-only; open the changed functions before trusting a score.
+  fixed FreshBench M1 sample (about 3,000 functions) in its job summary: the
+  `freshbench sweep diff` of base and head, functions whose text changed first,
+  then scores gained and lost on those. Report-only; open the changed functions
+  before trusting a score.
 - Nightly: fuzzing of six targets (ELF, PE, Mach-O, COFF, any format, SLEIGH
   decode) seeded from the loader fixtures; an 8 GiB memory ceiling on the
-  eight largest DecBench binaries; decompiler determinism. Weekly: mutation
+  eight largest FreshBench M1 binaries; decompiler determinism. Weekly: mutation
   testing of lines changed on main, four of 48 rotating slices, report-only.
   Each reports into a `ci-red` issue when it fails.
 
@@ -105,8 +107,8 @@ still serves later steps; it runs when the setup or `ci.yml` changes.
   zizmor; a high-severity zizmor finding fails Script Checks.
 - The PR fixture lane compares decompiled text across requests for 1, 4 and 4
   workers. The nightly `determinism.yml` requests 1, 4, 4 and 4 workers and
-  checks whole DecBench binaries in SHA-256 order until their manifest rows
-  reach 5,000. Both set `FISSION_RUST_DECOMP_WORKERS` and verify the CLI's
+  checks whole stripped FreshBench M1 binaries in SHA-256 order until 5,000
+  decompiled functions. Both set `FISSION_RUST_DECOMP_WORKERS` and verify the CLI's
   reported worker count, capped by the number of functions. Nightly differences
   are reported in a `ci-red` issue and are outside the release gate.
 - The PR fixture lane builds the release CLI with overflow checks and debug
@@ -114,7 +116,7 @@ still serves later steps; it runs when the setup or `ci.yml` changes.
 
 ## Scheduled runs report into issues
 
-Heavy, fuzz, determinism, the native differential and the DecBench sweep end with `reusable-report-red.yml`. While a
+Heavy, fuzz, determinism, the native differential and the FreshBench sweep end with `reusable-report-red.yml`. While a
 workflow is red on main there is one open issue titled `CI red: <workflow>`
 with the `ci-red` label; each further red run comments with its SHA and run,
 and the first green run closes it. Cancelled runs report nothing. Fuzzing runs
@@ -238,33 +240,30 @@ The PR and nightly runs share the seed, so every PR case is also a nightly case.
 A divergence only the nightly finds gets a curated case before it is added to
 the baseline, so the PR run reproduces every entry.
 
-## Nightly DecBench
+## Nightly FreshBench
 
-The source is [noelo-lab/decbench-dataset](https://huggingface.co/datasets/noelo-lab/decbench-dataset),
-revision `815eb96f130b6d2ef7fa600e04669bf20139bf27`, config `full`.
-Its manifest contains 96,103 function rows in 770 binaries across O0, O2 and
-O2-noinline. CI downloads only the manifest, binaries and published source CFGs.
-Binaries stay non-executable and only pass through static inspection, stripping
-and decompilation. The grader reads original symbols and DWARF separately.
-Runs disable decompilation and metric caches.
+The corpus is FreshBench M1 ([`sjkim1127/freshbench-v2`](https://huggingface.co/datasets/sjkim1127/freshbench-v2),
+revision `15b6f2c52c379cf9361f22edaa75886602e5e1ff`). Its manifest comes from
+[fission-systems/freshbench](https://github.com/fission-systems/freshbench)
+at the commit pinned in `scripts/ci/freshbench_corpus.py`, checked against the
+published hash. Every downloaded file is checked against the manifest. Each shard
+downloads one build: stripped and unstripped binaries, targets and the project's
+preprocessed sources. Binaries stay non-executable and are only decompiled;
+the grader reads the unstripped copies separately.
 
-The scorer is upstream DecBench at `0cba66d66e9af0f8555c9844eb2a868440c366c1`,
-the last commit before upstream #113 (2026-10-31) stopped counting inlined
-callees' variables as a function's type ground truth. The pinned dataset's
-published scores predate that change, and only the scorer that produced them can
-be compared with them: crontab O2 `usage` has one variable after #113 and 19
-before, and every published tool's score for it is a multiple of 1/19. The sweep
-refuses to run with any other installed decbench. Move the scorer pin together
-with the dataset revision, never alone.
+The scorer is `freshbench` built from the same pinned commit. `sweep run`
+records the scorer id and refuses to compare runs scored differently. Move
+`FRESHBENCH_COMMIT`, `REVISION` and `MANIFEST_SHA256` together, never alone.
 
-The report checks every expected row, records decompilation status and output
-hashes, and reports GED perfect count with total distance and type-match coverage
-and scores. It reports per-row changes against the latest passing main sweep
-when the corpus and scorer provenance match. A complete passing run establishes
-a baseline after a revision or scorer change. Build failures, process crashes,
-missing shards and previously successful rows now failing are blocking. Score
-deltas are observational and do not change the accepted baseline thresholds.
-Byte match is not run. See [the benchmark guide](BENCHMARK_DECBENCH.md).
+`scripts/ci/freshbench_sweep.py report`:
+- reports each build and the total: rows, perfect count next to distance,
+  scored rows, perfect types, failed tool calls and CPU time;
+- runs `sweep diff` against the latest passing main sweep's runs;
+- blocks on a missing shard or on a row that had output on that baseline and
+  has none now. Score deltas are observational.
+
+A complete passing run with a new scorer or corpus establishes the next
+baseline. See [the benchmark guide](BENCHMARK_FRESHBENCH.md).
 
 ## Release process
 
@@ -295,7 +294,7 @@ The maintainer reviews and merges one Release PR; the workflows do the rest.
    **close and reopen it once** (Fast Gate runs on `reopened`). Do not add a
    PAT for this.
 3. **Review.** Fill every `TODO(release)` block in the notes: the
-   full-dataset DecBench table (no PR carries it) and, if no issue is labelled
+   full-corpus FreshBench table (no PR carries it) and, if no issue is labelled
    `release:blocker` or `bug` + `status:confirmed`, the known limitations.
    Optionally add a hand-written summary for a major release. Label PRs named
    under "Needs a label" and re-run step 1 if their section matters.
@@ -359,8 +358,8 @@ and `skip-changelog` PRs are left out and recorded in a trailing comment.
 
 Numbers are quoted verbatim, with their PR, only from a PR's `Benchmark ...`,
 `Correctness Evidence` or top-level `## Measurement ...` / `## Measured ...`
-section; nothing is added up across PRs. DecBench
-measures similarity to the source, not correctness (ADR 0018), and the notes
+section; nothing is added up across PRs. A benchmark
+measures similarity to the source, not correctness (ADR 0019), and the notes
 say so.
 
 After validating the workflow, configure tag protection and the `release`

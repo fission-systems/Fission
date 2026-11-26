@@ -19,10 +19,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # A fixed, hash-ordered DecBench sample (37 binaries, 12,505 functions),
-  # four runs each at 1 and 4 threads; static decompilation only.
+  # A fixed, hash-ordered FreshBench M1 sample (stripped binaries until 5,000
+  # functions), four runs each at 1 and 4 threads; static decompilation only.
   determinism:
-    name: Decompiler determinism (DecBench sample)
+    name: Decompiler determinism (FreshBench sample)
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -39,7 +39,7 @@ jobs:
       - name: Build release CLI
         run: cargo build --locked --release -p fission-cli
       - name: Decompile the sample four times and compare
-        run: python3 scripts/ci/determinism_check.py --data "$RUNNER_TEMP/decbench" --cli target/release/fission_cli
+        run: python3 scripts/ci/determinism_check.py --data "$RUNNER_TEMP/freshbench" --cli target/release/fission_cli
 
   report:
     needs: determinism

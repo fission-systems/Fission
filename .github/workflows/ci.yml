@@ -370,17 +370,18 @@ jobs:
       source_sha: ${{ github.sha }}
       version: v0.0.0-dryrun
 
-  # The nightly full-dataset sweep, run on one binary when its definition changes.
+  # The nightly FreshBench sweep, run on one binary when its definition changes.
   sweep-smoke:
-    name: DecBench sweep smoke
+    name: FreshBench sweep smoke
     needs: [changes]
     if: needs.changes.outputs.run_sweep_smoke == 'true'
     permissions:
       contents: read
       actions: read
-    uses: ./.github/workflows/reusable-decbench-sweep.yml
+    uses: ./.github/workflows/reusable-freshbench-sweep.yml
     with:
-      only: binaries/O0/base-passwd/update-passwd
+      build: gcc-O2
+      only: gcc-O2/Paxa__fast_excel
 
   # ADR 0016 rule 1, caches fail open, tested rather than assumed. The cache
   # service failed three required jobs on 2026-11-23/24 ("Server startup
@@ -572,7 +573,7 @@ jobs:
           require_if "${{ needs.changes.outputs.run_loader_fixtures }}" "loader-fixtures" "${{ needs.loader-fixtures.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_decomp_corpus }}" "decomp-corpus" "${{ needs.decomp-corpus.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_package_check }}" "Package rehearsal" "${{ needs.package-check.result }}" || FAILED=1
-          require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "DecBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
+          require_if "${{ needs.changes.outputs.run_sweep_smoke }}" "FreshBench sweep smoke" "${{ needs.sweep-smoke.result }}" || FAILED=1
           require_if "${{ needs.changes.outputs.run_sccache_fallback }}" "sccache outage fallback" "${{ needs.sccache-fallback.result }}" || FAILED=1
 
           if [ "$FAILED" -ne 0 ]; then

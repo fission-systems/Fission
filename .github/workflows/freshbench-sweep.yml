@@ -1,4 +1,4 @@
-name: DecBench full dataset sweep
+name: FreshBench full corpus sweep
 
 on:
   schedule:
@@ -10,12 +10,12 @@ permissions:
   actions: read
 
 concurrency:
-  group: decbench-full-${{ github.ref }}
+  group: freshbench-full-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   sweep:
-    uses: ./.github/workflows/reusable-decbench-sweep.yml
+    uses: ./.github/workflows/reusable-freshbench-sweep.yml
 
   notify:
     needs: sweep
@@ -25,4 +25,4 @@ jobs:
     uses: ./.github/workflows/reusable-report-red.yml
     with:
       result: ${{ needs.sweep.result }}
-      detail: "the decbench-full artifact holds summary.json and changed.jsonl"
+      detail: "the freshbench-full artifact holds summary.md and summary.json"

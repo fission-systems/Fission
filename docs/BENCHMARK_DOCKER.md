@@ -1,5 +1,5 @@
-> **Retired.** DecBench is the main benchmark; this docker multi-decompiler loop
-> is no longer used. See [`BENCHMARK_DECBENCH.md`](BENCHMARK_DECBENCH.md). The text
+> **Retired.** FreshBench is the benchmark; this docker multi-decompiler loop
+> is no longer used. See [`BENCHMARK_FRESHBENCH.md`](BENCHMARK_FRESHBENCH.md). The text
 > below is kept for the history that older proposals link to.
 >
 > The `fission-systems/fission-benchmark` GitHub repository this loop ran from,

@@ -67,7 +67,7 @@ jobs:
           fast = fetch_runs("ci.yml")
           heavy = fetch_runs("ci-heavy.yml")
           cd = fetch_runs("release-tag.yml", limit=5)
-          decbench = fetch_runs("decbench-sweep.yml", limit=5)
+          freshbench = fetch_runs("freshbench-sweep.yml", limit=5)
 
           report = (
               "# CI/CD Weekly Health Report\n\n"
@@ -76,7 +76,7 @@ jobs:
               + "\n"
               + summarize("Heavy Validation (ci-heavy.yml) — nightly", heavy)
               + "\n"
-              + summarize("DecBench full dataset sweep", decbench)
+              + summarize("FreshBench full corpus sweep", freshbench)
               + "\n"
               + summarize("Release candidate and publish (release-tag.yml)", cd)
               + "\n---\n[View all workflow runs](https://github.com/${{ github.repository }}/actions)\n"

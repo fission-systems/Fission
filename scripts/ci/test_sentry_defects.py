@@ -187,7 +187,7 @@ class SchemaTests(unittest.TestCase):
             "fixture:../outside.elf@0x401000",
             "fixture:crates/../../etc/passwd",
             "/home/runner/work/corpus/bin@0x401000",
-            "fixture:/opt/decbench/binaries/O2/curl@0x401000",
+            "fixture:/opt/freshbench/m1/stripped/gcc-O2/p/curl@0x401000",
             "fixture:crates/x.elf@0x401000 extra",
             "fixture:crates/x.elf@401000",
             "fuzz:fuzz_coff_object/crash-48047",
@@ -485,7 +485,7 @@ class VerifyTests(unittest.TestCase):
 
     def test_external_binaries_are_rejected(self):
         line = json.dumps({"address": "0x401000", "ground_truth": {"category": "diverged", "counterexamples": []}})
-        for binary in ("/opt/decbench/binaries/O2/curl", "../Fission-other/x.elf",
+        for binary in ("/opt/freshbench/m1/stripped/gcc-O2/p/curl", "../Fission-other/x.elf",
                        "crates/fission-dir/testdata/does_not_exist.elf", ""):
             with self.subTest(binary=binary):
                 ledger = self.parse(line, binary=binary)

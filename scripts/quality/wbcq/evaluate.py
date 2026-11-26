@@ -19,12 +19,12 @@ of the evaluation report.
   python3 scripts/quality/wbcq/evaluate.py summarize --out ~/fission-benchmark/wbcq-p3/results \\
       --truth ~/fission-benchmark/wbcq-p3/ground_truth.json
 
-Real binaries (`select_decbench.py` candidates):
+Real binaries (`select_step_functions.py` candidates):
 
-  python3 scripts/quality/wbcq/evaluate.py decbench \\
-      --candidates ~/fission-benchmark/wbcq-p3/decbench_candidates.json \\
-      --out ~/fission-benchmark/wbcq-p3/decbench --eval target/release/examples/p3_eval -j 8
-  python3 scripts/quality/wbcq/evaluate.py summarize-decbench --out ~/fission-benchmark/wbcq-p3/decbench
+  python3 scripts/quality/wbcq/evaluate.py real \\
+      --candidates ~/fission-benchmark/wbcq-p3/candidates.json \\
+      --out ~/fission-benchmark/wbcq-p3/real --eval target/release/examples/p3_eval -j 8
+  python3 scripts/quality/wbcq/evaluate.py summarize-real --out ~/fission-benchmark/wbcq-p3/real
 
 Reach before and after an engine change (P4), over the same candidates:
 
@@ -123,7 +123,7 @@ def run(args) -> None:
                   flush=True)
 
 
-def run_decbench(args) -> None:
+def run_real(args) -> None:
     candidates = json.loads(args.candidates.read_text())["sample"]
     args.out.mkdir(parents=True, exist_ok=True)
     rows_path = args.out / "rows.jsonl"
@@ -290,7 +290,7 @@ def compare_reach(args) -> None:
     print(text)
 
 
-def summarize_decbench(args) -> None:
+def summarize_real(args) -> None:
     rows = [json.loads(line) for line in (args.out / "rows.jsonl").read_text().splitlines()]
     lines: list[str] = []
     emit = lines.append
@@ -299,14 +299,14 @@ def summarize_decbench(args) -> None:
         return (row.get("eval", {}).get("white_box", {}).get("status", {}).get("kind")
                 or "harness_error")
 
-    emit(f"## Real binaries: {len(rows)} step-shaped DecBench functions")
+    emit(f"## Real binaries: {len(rows)} step-shaped functions from real binaries")
     emit("")
-    configs = sorted({r["config"] for r in rows})
+    builds = sorted({r["build"] for r in rows})
     kinds = sorted({kind(r) for r in rows})
-    emit("| status | " + " | ".join(configs) + " | all |")
-    emit("|---|" + "---|" * (len(configs) + 1))
+    emit("| status | " + " | ".join(builds) + " | all |")
+    emit("|---|" + "---|" * (len(builds) + 1))
     for k in kinds:
-        cells = [sum(1 for r in rows if r["config"] == c and kind(r) == k) for c in configs]
+        cells = [sum(1 for r in rows if r["build"] == c and kind(r) == k) for c in builds]
         total = sum(cells)
         emit(f"| {k} | " + " | ".join(f"{n}" for n in cells) + f" | {total} ({pct(total, len(rows))}) |")
     emit("")
@@ -519,13 +519,13 @@ def main() -> None:
     s = sub.add_parser("summarize")
     s.add_argument("--out", type=Path, required=True)
     s.add_argument("--truth", type=Path)
-    d = sub.add_parser("decbench")
+    d = sub.add_parser("real")
     d.add_argument("--candidates", type=Path, required=True)
     d.add_argument("--out", type=Path, required=True)
     d.add_argument("--eval", required=True)
     d.add_argument("-j", "--jobs", type=int, default=4)
     d.add_argument("--timeout", type=int, default=600)
-    ds = sub.add_parser("summarize-decbench")
+    ds = sub.add_parser("summarize-real")
     ds.add_argument("--out", type=Path, required=True)
     c = sub.add_parser("compare-reach")
     c.add_argument("--before", type=Path, required=True)
@@ -540,11 +540,11 @@ def main() -> None:
     if args.command == "run":
         args.corpus = args.corpus.expanduser()
         run(args)
-    elif args.command == "decbench":
+    elif args.command == "real":
         args.candidates = args.candidates.expanduser()
-        run_decbench(args)
-    elif args.command == "summarize-decbench":
-        summarize_decbench(args)
+        run_real(args)
+    elif args.command == "summarize-real":
+        summarize_real(args)
     else:
         summarize(args)
 
