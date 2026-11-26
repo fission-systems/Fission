@@ -32,7 +32,8 @@ relocations into `RelocationsDb`, **Imp** imports/exports, **Ent** entry point,
 | Unix `ar` (`.a`, MSVC `.lib`) | `!<arch>\n` | no: `ContainerRequiresExtraction(UnixArchive)` | | | | | | | members are never enumerated |
 | ZIP, gzip, xz, 7z, RAR, CAB, OLE CFB | magics (`containers/`) | no: `ContainerRequiresExtraction(..)` | | | | | | | |
 | Ghidra families (GZF, dyld cache, PEF, SOM, OMF) | magics | no: `UnsupportedLoaderFamily(..)` | | | | | | | |
-| anything else (WebAssembly, `.class`, DEX, UF2, XBE, LE/LX, ...) | none | no: `UnsupportedFormat: unknown binary format` | | | | | | | |
+| UF2 (`formats/uf2.rs`) | three block magics in the first 512 bytes | with an explicit language; without one, `LoadSpecNotFound` naming the family IDs | one per contiguous run | | | | none (UF2 has no start address) | | added after the baseline (was "unknown"). `NOT_MAIN_FLASH` blocks skipped; file containers refused; families that disagree about an address refused |
+| anything else (WebAssembly, `.class`, DEX, XBE, LE/LX, ...) | none | no: `UnsupportedFormat: unknown binary format` | | | | | | | |
 
 An unsupported input always fails closed with a typed message
 (`UnsupportedFormat`, `ContainerRequiresExtraction(..)`,
@@ -55,13 +56,12 @@ first within a rank.
    usual delivery format for microcontroller firmware (8051, AVR, PIC, MSP430,
    Cortex-M, 68k, Z80), and every one of those has a shipped spec. The file
    carries no architecture, so the language stays the caller's (`--language`),
-   exactly as for a raw image. Fail closed without it. **Done** (this doc's
-   first PR).
+   exactly as for a raw image. Fail closed without it. **Done** (#1404).
 2. **UF2.** The flashing format of RP2040/RP2350, nRF52, SAMD, ESP32-S2/S3 and
    STM32 boards. 512-byte blocks with a target address each: the same sparse
    image as HEX, so it reuses item 1's mapping and language path. The family
    ID names the chip, not the instruction set variant, so it is reported, not
-   used to pick a language.
+   used to pick a language. **Done** (second PR).
 3. **Unix `ar` archives (`.a`, MSVC `.lib`).** Static libraries are the most
    common input Fission refuses outright. Enumerate members (GNU and BSD long
    names, the MSVC/GNU symbol-index members) and load a chosen member through

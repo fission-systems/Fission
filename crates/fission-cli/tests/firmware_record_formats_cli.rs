@@ -1,4 +1,4 @@
-//! Intel HEX and Motorola S-record files name no processor. Given
+//! Intel HEX, Motorola S-record and UF2 files name no processor. Given
 //! `--language` they load as the image their records describe; without it
 //! they are refused with the way out. Fixtures are built here, record by
 //! record, so each test says what bytes it holds.
@@ -181,4 +181,79 @@ fn patch_refuses_a_decoded_record_file() {
         !output.exists(),
         "no flat image may be written in its place"
     );
+}
+
+/// One UF2 block (512 bytes, little-endian fields) for an RP2040 flash
+/// address, with the family-ID flag set.
+fn uf2_block(target: u32, payload: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; 512];
+    let fields = [
+        0x0A32_4655u32,
+        0x9E5D_5157,
+        0x0000_2000,
+        target,
+        payload.len() as u32,
+        0,
+        1,
+        0xe48b_ff56,
+    ];
+    for (index, value) in fields.iter().enumerate() {
+        out[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    out[32..32 + payload.len()].copy_from_slice(payload);
+    out[508..].copy_from_slice(&0x0AB1_6F30u32.to_le_bytes());
+    out
+}
+
+fn write_uf2(test: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("fission-fw-{}-{test}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("fw.uf2");
+    // adds r0, r0, r1; bx lr
+    std::fs::write(&path, uf2_block(0x1000_0100, &[0x40, 0x18, 0x70, 0x47])).unwrap();
+    path
+}
+
+#[test]
+fn uf2_decompiles_under_a_language_at_a_thumb_address() {
+    let file = write_uf2("uf2_decompiles_under_a_language_at_a_thumb_address");
+    let path = file.to_str().unwrap();
+    let disasm = run(&[
+        "--language",
+        "ARM:LE:32:Cortex",
+        "disasm",
+        path,
+        "--addr",
+        "0x10000101",
+        "-n",
+        "2",
+        "--json",
+        "--no-db",
+    ]);
+    assert!(disasm.status.success(), "{disasm:?}");
+    let rows: Value = serde_json::from_slice(&disasm.stdout).expect("json");
+    assert_eq!(rows[0]["instruction"], "adds r0,r0,r1");
+
+    let decomp = run(&[
+        "--language",
+        "ARM:LE:32:Cortex",
+        "decomp",
+        path,
+        "--addr",
+        "0x10000101",
+        "--no-db",
+    ]);
+    assert!(decomp.status.success(), "{decomp:?}");
+    let code = String::from_utf8_lossy(&decomp.stdout);
+    assert!(code.contains("param_1 + param_2"), "{code}");
+}
+
+#[test]
+fn uf2_without_a_language_names_its_family() {
+    let file = write_uf2("uf2_without_a_language_names_its_family");
+    let out = run(&["info", file.to_str().unwrap(), "--no-db"]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("RP2040"), "{stderr}");
+    assert!(stderr.contains("--language"), "{stderr}");
 }

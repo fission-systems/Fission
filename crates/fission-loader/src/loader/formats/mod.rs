@@ -4,3 +4,4 @@ pub mod mz_ne;
 pub mod raw;
 pub(crate) mod sparse;
 pub mod te;
+pub mod uf2;
