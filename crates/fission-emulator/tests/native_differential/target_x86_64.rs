@@ -1011,6 +1011,7 @@ fn mask(bytes: &[u8], lifted: &Lifted, input: &CpuState) -> Mask {
                     flags: ALL_STATUS,
                     gprs: dest.map_or(0, |(i, _)| 1 << i),
                     mem: dest.is_none(),
+                    ..Mask::default()
                 }
             }
             _ => flags(AF | OF),
@@ -1032,6 +1033,7 @@ fn mask(bytes: &[u8], lifted: &Lifted, input: &CpuState) -> Mask {
                     _ => u32::MAX,
                 },
                 mem: false,
+                ..Mask::default()
             }
         }
         // SDM 2, BSWAP, Description: "When the BSWAP instruction references
