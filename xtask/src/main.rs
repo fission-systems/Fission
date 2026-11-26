@@ -8,9 +8,13 @@
 //!
 //! `cargo xtask cleanup` reports, and with `--apply` removes, stale build
 //! directories and finished worktrees of this repository.
+//!
+//! `cargo xtask remote` runs one cargo command on a hosted runner instead of
+//! this machine (see `remote`).
 
 mod cleanup;
 mod preflight;
+mod remote;
 mod workflow;
 
 use std::process::ExitCode;
@@ -19,6 +23,8 @@ const USAGE: &str = "\
 usage: cargo xtask preflight [--fast] [--full] [--debug | --release] [--base REF]
        cargo xtask cleanup [--apply] [--include-main-target] [--min-age-hours N]
                            [--base REF] [--no-gh] [--hints DIR | --no-hints]
+       cargo xtask remote [--os linux|macos|windows] [--artifact PATH]... [--keep]
+                          [--] <cargo arguments...>
 
 preflight:
 
@@ -50,7 +56,25 @@ merged or whose PR is merged/closed. Read-only unless --apply is given.
                          (default ~/fission-benchmark); --no-hints skips it
 
 Never removed: the main checkout, a worktree that is dirty, has commits on
-no remote ref, is locked, or is a process's cwd; a build dir a process uses.";
+no remote ref, is locked, or is a process's cwd; a build dir a process uses.
+
+remote:
+Runs `cargo <arguments>` on a GitHub-hosted runner (.github/workflows/remote.yml)
+instead of this machine, and prints its output and exit status. The working
+tree, uncommitted and untracked files included, is pushed as a temporary
+`remote/<sha>` branch, deleted afterwards; the branch, index and stash here are
+untouched. Needs `gh` signed in with permission to dispatch workflows.
+
+  --os NAME        linux (default, ubuntu-24.04), macos (macos-15), windows
+  --artifact PATH  also bring back PATH (relative to the checkout) into
+                   target/remote/<run>/files; repeatable
+  --keep           keep the remote/<sha> branch
+
+Options go before the cargo arguments; everything from the first argument
+that is not one of them (or after `--`) is cargo's.
+
+  cargo xtask remote nextest run -p fission-pcode
+  cargo xtask remote --os windows -- check -p fission-cli";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -64,6 +88,13 @@ fn main() -> ExitCode {
         },
         Some("cleanup") => match cleanup::Options::parse(&args[1..]) {
             Ok(options) => cleanup::run(&options),
+            Err(message) => {
+                eprintln!("error: {message}\n\n{USAGE}");
+                ExitCode::from(2)
+            }
+        },
+        Some("remote") => match remote::Options::parse(&args[1..]) {
+            Ok(options) => remote::run(&options),
             Err(message) => {
                 eprintln!("error: {message}\n\n{USAGE}");
                 ExitCode::from(2)

@@ -185,6 +185,11 @@ cargo xtask preflight
 
 # Disk nearly full: list stale target*/ dirs and merged/closed worktrees (read-only; --apply removes)
 cargo xtask cleanup
+
+# A heavy cargo command on a GitHub-hosted runner instead of this machine
+# (working tree pushed as a temporary remote/<sha> branch; output and exit status come back)
+cargo xtask remote nextest run -p fission-pcode
+cargo xtask remote --os windows -- check -p fission-cli
 ```
 
 The workspace is fully rustfmt-clean and CI enforces it across every file, so
